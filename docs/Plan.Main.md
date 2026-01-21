@@ -148,6 +148,7 @@ Scope and architecture assumptions follow the Unidirectional Data Flow + effects
   * max response size,
   * content-type filtering (fail fast with `UnsupportedContentType`). 
 * Emit `JobProgress` messages.
+* Track original URL, final URL, and redirect count in job metadata.
 
 **Tests**
 
@@ -171,7 +172,7 @@ Scope and architecture assumptions follow the Unidirectional Data Flow + effects
 * Pipeline stages:
 
   1. fetch HTML bytes
-  2. decode (charset strategy)
+  2. decode (charset strategy: Content-Type → BOM → meta charset → chardetng fallback; normalize to UTF-8)
   3. extract main content
   4. convert to Markdown
 
@@ -181,6 +182,7 @@ Scope and architecture assumptions follow the Unidirectional Data Flow + effects
 
   * markdown output from fixed HTML fixtures,
   * “stable formatting” snapshot. 
+  * Encoding corpus tests: UTF-8 (with/without BOM), ISO-8859-1, Shift-JIS, conflicting header/meta.
 
 ### Step 3.3 — Frontmatter + token counting + deterministic filename
 
@@ -218,10 +220,11 @@ Scope and architecture assumptions follow the Unidirectional Data Flow + effects
 **Deliverable**
 
 * Implement explicit policy (recommended MVP default):
-
   * stop accepting new URLs immediately,
-  * let in-flight complete, cancel queued. 
+  * jobs in `Stage::Queued` cancelled immediately,
+  * jobs in `Stage::Downloading` or later complete current stage, then check cancellation before next stage.
 * Use `CancellationToken` (or equivalent) checked between stages.
+* Define watchdog timeouts: Extract 30s, Convert 15s, Tokenize 10s. Exceeding → `FailureKind::ProcessingTimeout`.
 
 **Tests**
 
@@ -230,6 +233,7 @@ Scope and architecture assumptions follow the Unidirectional Data Flow + effects
   * enqueue multiple,
   * stop/finish,
   * assert queued are cancelled, in-flight completes (or cancelled per policy).
+  * Manifest includes failure summary grouped by `FailureKind`.
 
 ### Step 3.6 — Session finalization export (“LLM paste”)
 
