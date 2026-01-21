@@ -8,6 +8,80 @@ Scope and architecture assumptions follow the Unidirectional Data Flow + effects
 * **Encapsulation:** no “getters” that expose internal struct state broadly; expose **capabilities** (methods) and **small immutable snapshots** when needed (e.g., `JobRowView`). Prefer `pub(crate)` over `pub`. Use module facades to keep internals private. 
 * **Determinism for logic/tests:** deterministic IDs, ordering (`BTreeMap`/sorted vectors), stable file naming, stable export format.  
 
+### source code organization
+```text
+repo-root/
+  Cargo.toml                  # workspace
+  Cargo.lock
+  README.md
+  LICENSE*
+  rust-toolchain.toml         # optional: pin toolchain
+  .gitmodules                 # if using CommanDuctUI as submodule
+  .gitignore
+
+  src/
+    CommanDuctUI/             # git submodule (kept untouched)
+
+  crates/
+    harvester_app/            # binary: Win32 UI + event loop + effect runner wiring
+      Cargo.toml
+      src/
+        main.rs
+        ui/
+          mod.rs
+          layout.rs
+          constants.rs
+        platform/
+          mod.rs              # CommanDuctUI adapter: AppEvent -> Msg, Commands out
+        effects/
+          mod.rs              # async runner: Effect -> engine calls -> Msg back
+
+    harvester_core/           # pure: state machine + view model + formatting helpers
+      Cargo.toml
+      src/
+        lib.rs                # public facade only
+        state.rs              # private fields; constructors & capability methods
+        msg.rs
+        effect.rs
+        update.rs             # update(state,msg) -> (state,effects)
+        view_model.rs         # thin snapshots for rendering
+      tests/                  # optional: integration tests of reducer invariants
+
+    harvester_engine/         # IO pipeline: fetch/extract/convert/tokenize/write
+      Cargo.toml
+      src/
+        lib.rs                # public facade: EngineHandle + events
+        engine.rs             # internal task orchestration (private)
+        fetch/
+          mod.rs
+        extract/
+          mod.rs
+        convert/
+          mod.rs
+        tokenize/
+          mod.rs
+        persist/
+          mod.rs
+        types.rs              # Stage, FailureKind, engine events
+      tests/
+        fixtures/             # HTML samples, expected MD snapshots
+        wiremock/             # mock server based tests
+
+  docs/
+    ProjectConcept.md
+    Architecture.md           # UDF loop, crate boundaries, encapsulation rules
+    Testing.md                # golden tests, wiremock, determinism rules
+
+  tools/
+    justfile                  # or scripts/ for build/test/lint helpers
+    scripts/
+
+  .github/
+    workflows/
+      ci.yml
+```
+
+
 ---
 
 ## Phase 0 — Repo + scaffolding (buildable after each step)

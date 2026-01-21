@@ -1,0 +1,3 @@
+[submodule "src/CommanDuctUI"]
+	path = src/CommanDuctUI
+	url = https://github.com/larspensjo/CommanDuctUI.git
