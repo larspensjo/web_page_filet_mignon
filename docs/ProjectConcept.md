@@ -384,3 +384,92 @@ To avoid rework, decide early:
 3. **Deterministic export format** (delimiter + metadata + chunking).
 4. **Concurrency model** (async fetch + blocking CPU stages with limits).
 5. **Regression corpus** for extraction quality (fixtures + golden outputs).
+
+
+---
+
+## 10. Rust Library Map (Crate Recommendations)
+
+This section suggests Rust crates that map directly to the pipeline and the **UDF + Effects** architecture. The intent is to pick a “default stack” that is hard to regret, while keeping key components behind traits so they can be swapped later.
+
+### 10.1 Crate Map by Concern
+
+| Concern | Primary crates | Notes / guidance |
+|---|---|---|
+| Async runtime + task orchestration | `tokio` | Use async for networking and coordination. |
+| Cancellation / Stop-Finish | `tokio-util` | Use `tokio_util::sync::CancellationToken` for cooperative cancellation between stages and graceful shutdown. |
+| HTTP fetch | `reqwest` | Supports async + blocking clients, cookies, redirect policy, proxies, TLS options. |
+| URL parsing + normalization | `url` | Parse, normalize, strip fragments, etc. |
+| Deterministic URL hashing | `blake3` | Use short hash of normalized URL for stable filenames. |
+| Filename sanitization | `sanitize-filename` (simple) OR `sanitise-file-name` (Windows-safe option) | Prefer deterministic names: `{title}--{hash}.md`. For Windows reserved names, use a crate that explicitly handles them. |
+| HTML parsing + CSS selection | `scraper` (built on html5ever) | Useful both for custom cleanup rules and for tests/fixtures. |
+| Readability/article extraction | `readability-rs` OR `readability` OR a Mozilla-port crate | Evaluate on your fixture corpus; extraction quality varies. Keep behind a trait. |
+| HTML → Markdown conversion | `html2md` | Simple and common baseline. Keep behind a trait. |
+| Faster / alternative HTML→MD | `fast_html2md` or `html2md-rs` | Evaluate if throughput becomes a bottleneck or if output stability differs. |
+| YAML frontmatter serialization | **Avoid `serde_yaml`**; evaluate alternatives | `serde_yaml` is marked as no longer maintained; consider a maintained YAML crate, or generate frontmatter as a string template and only parse in tools/tests if needed. |
+| Token counting | `tiktoken-rs` (or equivalent) | Keep behind a trait; record which encoding was used (e.g., `cl100k_base`). |
+| Standard OS directories | `directories` | For config/cache/data locations (Windows-friendly). |
+| Atomic writes + temp files | `tempfile` | Write temp → rename to avoid partial/corrupt outputs. |
+| Open output folder / URLs | `open` or `opener` | Open output directory or a URL using system defaults. |
+| Cookies (future) | `reqwest_cookie_store` | Use for authenticated fetch flows / session persistence in later phases. |
+| Logging / tracing | `tracing`, `tracing-subscriber` | Structured diagnostics; add job_id/url as span fields for correlation. |
+| HTTP mocking tests | `wiremock` | Stable tests without hitting live sites; supports request matching and canned responses. |
+| Golden/snapshot tests | `insta` + `cargo-insta` | Golden master tests for Markdown outputs and manifest formats. |
+| Property tests | `proptest` | Filename sanitization, delimiter invariants, parser robustness, etc. |
+
+### 10.2 Recommended “Default Stack” (MVP)
+A concrete starting set:
+
+- **Runtime:** `tokio`, `tokio-util` (cancellation tokens)
+- **Fetch:** `reqwest`
+- **Core types:** `url`, `blake3`, plus a filename sanitizer
+- **Extraction:** one readability crate + `scraper` as helper
+- **Conversion:** `html2md`
+- **Tokens:** `tiktoken-rs` (behind `TokenCounter` trait)
+- **I/O:** `tempfile`, `directories`, `open`/`opener`
+- **Diagnostics:** `tracing`, `tracing-subscriber`
+- **Testing:** `wiremock`, `insta`/`cargo-insta`, `proptest`
+
+Rule of thumb: **Anything quality-sensitive** (readability + converter + tokenizer) goes behind a trait so you can replace it later without rewriting the pipeline.
+
+### 10.3 Suggested Trait Boundaries (Swap-Friendly Design)
+Create small “ports” (interfaces) around unstable/variable dependencies:
+
+- `trait Fetcher { async fn fetch(&self, url: Url) -> Result<FetchResult>; }`
+- `trait Extractor { fn extract(&self, html: &str, base_url: &Url) -> Result<ExtractedHtml>; }`
+- `trait Converter { fn html_to_md(&self, html: &str) -> Result<String>; }`
+- `trait TokenCounter { fn count(&self, text: &str) -> Result<u32>; fn encoding_name(&self) -> &'static str; }`
+
+This enables A/B testing on fixtures and gradual upgrades.
+
+### 10.4 Minimal Dependency Sketch (Illustrative)
+This is an indicative dependency list (versions omitted here on purpose). Adjust versions to your workspace policy.
+
+```toml
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio-util = "0.7"
+reqwest = { version = "0.13", features = ["rustls-tls", "cookies", "gzip", "brotli", "deflate"] }
+url = "2"
+blake3 = "1"
+sanitize-filename = "0.6"
+scraper = "0.25"
+html2md = "0.2"
+tiktoken-rs = "0.6"
+directories = "5"
+tempfile = "3"
+open = "5"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+wiremock = "0.6"
+insta = "1"
+proptest = "1"
+```
+
+### 10.5 Notes on Crate Risks and Evaluation
+- **Readability:** expect to trial multiple libraries on a fixed corpus; pick the one that yields the most stable, useful Markdown for your target sites.
+- **HTML→MD:** stability matters more than “perfect” Markdown for MVP. Lock output formatting early and protect it with snapshot tests.
+- **YAML:** if YAML crates remain in flux, frontmatter can be generated as a string template and treated as “write-only” at runtime, while parsing/validation happens in tooling or tests.
+- **Tokenization:** always record which encoding produced the token count to prevent future confusion when models/encodings change.
