@@ -1,148 +1,296 @@
-# Project Design: Web-to-Markdown Harvester
+# Project Design: Web-to-Markdown Harvester (Updated)
 
 ## 1. Executive Summary
-The **Web-to-Markdown Harvester** is a native Windows desktop application built in Rust. Its primary purpose is to generate high-quality text datasets for Large Language Models (LLMs) by scraping web pages, stripping non-essential content (ads, navigation, images), and converting the core information into Markdown format.
+The **Web-to-Markdown Harvester** is a native Windows desktop application that turns a list of HTTP/HTTPS URLs into a clean, LLM-friendly Markdown dataset. It prioritizes:
 
-The application emphasizes performance (parallel downloads), robustness (handling errors gracefully), and user control (real-time monitoring and intervention).
+- **Robustness:** predictable behavior under failures, cancellations, and partial runs.
+- **Quality:** good extraction/sanitization with regression protection (golden tests).
+- **Performance:** parallel fetching with backpressure and correct handling of CPU-bound work.
+- **User control:** live monitoring, safe “Stop/Finish”, and repeatable outputs.
+
+This project uses **CommanDuctUI** (command/event separation). The UI is driven by app state; the app never manipulates UI handles directly.
+
+---
 
 ## 2. User Workflow
-1.  **Input:** The user pastes a list of HTTP/HTTPS URLs into the application.
-2.  **Processing:** The user initiates the process. The application downloads pages in parallel.
-3.  **Monitoring:** A real-time dashboard shows the status of each URL (Downloading, Processing, Done, Failed), along with the estimated LLM token count per document and a running total.
-4.  **Intervention:**
-    *   The user can add more URLs to the queue while processing is active.
-    *   The user can click "Stop/Finish" to halt pending downloads and finalize the session.
-5.  **Output:** The application saves:
-    *   Individual `.md` files for each successfully processed URL.
-    *   A single concatenated text file containing all documents, formatted for immediate pasting into an LLM prompt.
+1. **Input**
+   - Paste one URL per line.
+   - Optionally add more URLs while a session is running.
 
-## 3. The UI Framework: Understanding `CommanDuctUI`
+2. **Start**
+   - User starts processing.
+   - The application downloads pages in parallel (with a configurable concurrency limit).
 
-*Note to Developers: This project utilizes `CommanDuctUI`, a specific library designed for this architecture. It is **not** a standard immediate-mode GUI (like egui) or a web-view wrapper (like Tauri).*
+3. **Monitor**
+   - A live dashboard shows per-URL stage + status.
+   - Token count per document and running totals are updated as documents complete.
 
-**Core Philosophy: Command-Event Separation**
-`CommanDuctUI` enforces a strict separation between the Application Logic (the "Brain") and the Native Windows UI (the "View"). They do not share memory directly. They communicate exclusively via message passing.
+4. **Intervention**
+   - User can add URLs during a running session.
+   - User can click **Stop/Finish** to stop accepting new work and finalize exports.
 
-### The Cycle
-1.  **The Brain (AppLogic):** Maintains the state (list of URLs, progress percentages, token counts).
-2.  **The Output (Commands):** When the state changes, the Brain sends a **Command** to the UI.
-    *   *Example:* `PlatformCommand::AddRow { id: 5, columns: ["http://google.com", "Pending"] }`
-    *   *Example:* `PlatformCommand::UpdateLabel { id: TOTAL_TOKENS, text: "5043" }`
-3.  **The Input (Events):** When the user interacts with the Window, the UI sends an **Event** to the Brain.
-    *   *Example:* `AppEvent::ButtonClicked { id: BTN_ADD_URL }`
-    *   *Example:* `AppEvent::WindowClosed`
+5. **Output**
+   - Individual `.md` files for each successfully processed URL.
+   - A concatenated “LLM paste” file containing all processed documents in a deterministic format.
+   - (Optional) A run manifest summarizing outcomes and totals.
 
-### Key constraints
-*   **Logical IDs:** You never touch a Windows Handle (`HWND`). You assign integer IDs (e.g., `const BTN_START: i32 = 100;`) to controls, and the library manages the mapping.
-*   **Thread Safety:** The UI runs on the main OS thread. The `AppLogic` receives events on that thread. Heavy lifting (scraping) **must** occur on background threads to prevent freezing the UI.
+---
+
+## 3. The UI Framework: `CommanDuctUI` Considerations
+
+### 3.1 Core Philosophy: Command–Event Separation
+- **Brain (AppLogic):** owns state, decides what should appear.
+- **UI (Platform):** renders and emits events.
+- Communication is **message passing only**.
+
+### 3.2 Practical UI Constraint (Important)
+The MVP concept mentions a **Grid/Table** with commands like `AddRow` / row updates. If a true grid control is not available in CommanDuctUI, treat this as an early blocker and choose one of:
+
+- **TreeView queue (recommended for MVP):**
+  - Each URL is an item.
+  - Item text includes stage + status + token count.
+  - Optional grouping by domain or by status.
+- **Status log panel (lowest effort):**
+  - Append-only multi-line text showing per-URL progress.
+  - Less interactive, but fast to implement.
+- **Extend CommanDuctUI with a table/list view control:**
+  - Best UX, but more engineering and test surface area.
+
+---
 
 ## 4. Architecture Overview
 
-### A. The Presentation Layer (Main Thread)
-*   **Component:** `MyAppLogic` (Implementation of `PlatformEventHandler`).
-*   **Responsibility:**
-    *   Receives `AppEvent`s from the UI.
-    *   Manages the `SessionState` (list of active downloads).
-    *   Spawns the backend engine.
-    *   Polls the backend for progress updates via a channel.
-    *   Dispatches `PlatformCommand`s to update the progress grid and status bars.
+### 4.1 Separation of Concerns
+**Presentation Layer (Main Thread)**
+- Component: `MyAppLogic` implements `PlatformEventHandler`.
+- Responsibilities:
+  - Maintain view-model state (queue, counts, current session state).
+  - Emit UI commands (create controls, update text, reflect status changes).
+  - Handle input events (Add URL, Start, Stop/Finish, Open output folder, etc.).
 
-### B. The Harvester Engine (Background Thread / Async Runtime)
-*   **Component:** `HarvesterEngine`.
-*   **Tech Stack:** `tokio` (Async Runtime), `reqwest` (HTTP Client).
-*   **Responsibility:**
-    *   Accepts URLs via an input channel (MPSC).
-    *   Manages a pool of concurrent download tasks.
-    *   Performs HTML processing and Token counting (CPU-bound tasks).
-    *   Sends status updates (`DownloadStarted`, `ConversionFinished`, `Error`) back to the UI thread via an output channel.
+**Engine Layer (Background Workers)**
+- Responsibilities:
+  - Accept URLs via a **bounded** channel (backpressure).
+  - Run a concurrency-limited pipeline (download + process + persist).
+  - Send typed progress events back to the UI thread.
+
+### 4.2 Make “Session” a First-Class State Machine
+Define explicit session states and transitions:
+
+- `Idle`
+- `Running`
+- `Finishing` (stop accepting new URLs; drain or cancel pending work per policy)
+- `Finished`
+- (Optional) `Cancelled` (if you want a hard cancel distinct from finishing)
+
+**Stop/Finish semantics (must be precise):**
+- “Stop accepting new URLs” should be immediate.
+- Decide policy for queued + in-flight work:
+  - **Policy A (safe default):** allow in-flight jobs to complete; cancel queued jobs.
+  - **Policy B (hard stop):** cancel everything ASAP.
+- Exports should run only after the engine reaches a stable end state.
+
+### 4.3 Backpressure, Cancellation, and UI Update Coalescing
+- Use bounded channels to avoid unbounded memory growth on huge paste operations.
+- Implement cancellation (e.g., `CancellationToken`) and check it between pipeline stages.
+- Coalesce UI updates:
+  - Batch progress events and render deltas on a short timer tick (e.g., 50–100ms).
+  - Avoid flooding the UI command queue for high URL counts.
+
+### 4.4 CPU-bound Work in an Async Architecture
+Readability parsing, HTML→Markdown conversion, and token counting are CPU heavy. If you use Tokio:
+
+- Run network fetch as async.
+- Run CPU-heavy stages in `spawn_blocking` (or a dedicated CPU thread pool).
+- Put explicit limits on the CPU pool if needed to avoid contention.
+
+---
 
 ## 5. Core Logic Implementation
 
-### 5.1 The Processing Pipeline (Per URL)
-Every URL goes through these distinct stages:
+### 5.1 Typed Progress Model (Recommended)
+Avoid “stringly typed” progress. Prefer:
 
-1.  **Fetch:**
-    *   Use `reqwest` to perform a GET request.
-    *   *Constraint:* Ignore Domain Rate Limiting for MVP.
-    *   *Constraint:* If the status code is not 200, or headers indicate non-text content (e.g., PDF/Image), mark as **Failed**.
-2.  **Sanitize (Readability):**
-    *   Use a library port of Mozilla's **Readability** (e.g., `readability` crate).
-    *   This parses the DOM and strips navbars, footers, and scripts, extracting only the `<article>` content.
-3.  **Convert (HTML -> Markdown):**
-    *   Convert the sanitized HTML into Markdown.
-    *   Library candidate: `html2md` or custom logic to handle headers and lists cleanly.
-4.  **Metadata Injection:**
-    *   Extract Title, Author, and Original URL.
-    *   Prepend this data as **YAML Frontmatter** to the Markdown string.
-5.  **Analysis:**
-    *   Calculate LLM Token count using `tiktoken-rs` (using `cl100k_base` encoding).
-6.  **Persistence:**
-    *   Generate a "Simplified Filename" (See 5.2).
-    *   Write content to disk.
+- `enum Stage { Queued, Downloading, Sanitizing, Converting, Tokenizing, Writing, Done }`
+- `enum FailureKind { HttpStatus(u16), Timeout, TooLarge, UnsupportedContentType, ParseError, IoError, Cancelled, Other }`
 
-### 5.2 Filename Sanitization Strategy
-We cannot trust web titles to be valid filenames.
-*   **Logic:**
-    1.  Take the Page Title.
-    2.  Replace invalid characters (`/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`) with hyphens or underscores.
-    3.  Truncate to a reasonable length (e.g., 50 chars) to avoid filesystem limits.
-    4.  Append `.md`.
-    5.  *Conflict Resolution:* If `file.md` exists, auto-rename to `file_1.md`.
-
-## 6. Data Structure Definitions (Draft)
-
+Progress event example:
 ```rust
-// Message sent from UI to Backend
-enum JobRequest {
-    AddUrl(String),
-    StopEngine,
-}
-
-// Message sent from Backend to UI
-enum JobUpdate {
-    Started { id: usize, url: String },
-    Progress { id: usize, state: String }, // e.g., "Downloading", "Converting"
-    Finished { id: usize, token_count: usize, filename: String },
-    Failed { id: usize, error_msg: String },
-}
-
-// Struct for the UI to track rows
-struct DownloadItem {
-    id: usize,
+struct JobProgress {
+    job_id: u64,
     url: String,
-    status: ProcessingStatus,
-    token_count: Option<usize>,
+    stage: Stage,
+    // Optional metrics:
+    bytes_downloaded: Option<u64>,
+    tokens: Option<u32>,
+    error: Option<FailureKind>,
 }
 ```
 
-## 7. Roadmap & Phases
+### 5.2 Per-URL Processing Pipeline
+Each URL goes through these stages:
 
-### Phase 1: MVP (The Core)
-*   **UI:** Simple URL input box, "Add" button, and a Grid/Table view for status.
-*   **Engine:** `reqwest` + `readability` implementation.
-*   **Features:**
-    *   Parallel downloads.
-    *   Real-time token counting.
-    *   Sanitized filename generation.
-    *   Single-file concatenation export.
-    *   YAML Frontmatter metadata.
-    *   Visual error marking for failed downloads (403, 404).
+1. **Fetch**
+   - `reqwest` GET
+   - Enforce:
+     - timeouts
+     - redirect limit
+     - max response size
+     - content-type filtering (text/html vs unsupported)
 
-### Phase 2: Enhanced User Experience
-*   **Manual Link Vetting:** After a page is downloaded, parse all `<a href>` tags within the content. Allow the user to right-click a row and "View Links", then select references to add to the queue. (Strictly manual selection, no auto-recursion).
-*   **Resume Capability:** Save the queue state to disk on exit so the user doesn't lose progress if the app closes.
+2. **Sanitize (Readability)**
+   - Parse DOM and extract the main article content.
+   - Remove scripts/nav/boilerplate as much as possible.
 
-### Phase 3: Advanced Access (Post-MVP)
-*   **Cookie Import:** Add a UI dialog to paste a cookie string (e.g., `Netscape` format or raw header) to bypass paywalls.
-*   **PDF Support:** Integrate `pdf-extract` to handle URLs ending in `.pdf`.
-*   **Stealth Mode:** Replace `reqwest` with `reqwest-impersonate` to handle sites that block standard generic HTTP clients (Cloudflare protection).
+3. **Convert (HTML → Markdown)**
+   - Use a known converter (`html2md`) or controlled custom conversion.
+   - Aim for stable output formatting to support golden tests.
 
-## 8. Testing Strategy
+4. **Metadata Injection**
+   - Title, author (if found), canonical/final URL, fetch timestamp.
+   - YAML frontmatter at the top of the document.
 
-1.  **Isolation:** Do *not* run unit tests against live websites (Google, Wikipedia) as they change or rate-limit.
-2.  **Mocking:** Use **`wiremock`**. Spin up a local HTTP server within the test suite that serves pre-baked HTML files.
-3.  **Pipeline Verification:**
-    *   Create a folder of sample HTML files (messy code, ads, popups).
-    *   Run the `Readability -> Markdown` conversion.
-    *   Assert that the output Markdown matches a "Golden Master" reference file.
-4.  **Sanitization Tests:** Fuzz the filename sanitizer with strings containing OS-illegal characters and Emoji to ensure no crashes or invalid paths.
+5. **Analysis**
+   - Token count using `tiktoken-rs` (record the encoding used, e.g., `cl100k_base`).
+
+6. **Persistence**
+   - Stable deterministic filename.
+   - Atomic writes where practical (write temp → rename).
+
+7. **Export Integration**
+   - Append to session “LLM paste” export using a deterministic delimiter format (see 5.4).
+
+### 5.3 Filename Strategy (Deterministic and Collision-Proof)
+Instead of relying only on title sanitization + `_1` suffix, prefer deterministic uniqueness:
+
+- Default: `"{sanitized_title}--{short_hash(url)}.md"`
+- If title is missing: `"document--{short_hash(url)}.md"`
+
+This avoids collisions between pages that share titles and makes reruns stable.
+
+### 5.4 Concatenated “LLM Paste” Export Format (Specify Early)
+Define an explicit format so it is reliable and easy to split:
+
+- Hard delimiter that will not appear naturally:
+  - `===== DOC START =====`
+  - `===== DOC END =====`
+- Minimal metadata header per doc:
+  - URL (final/canonical)
+  - title
+  - token_count
+  - timestamp
+- Optional: auto-split into multiple export files by token budget (useful for prompt limits).
+
+Example:
+```text
+===== DOC START =====
+url: https://example.com/a
+title: Example A
+tokens: 1234
+fetched_utc: 2026-01-21T10:11:12Z
+----- MARKDOWN -----
+...markdown...
+===== DOC END =====
+```
+
+---
+
+## 6. Robustness Checklist (High ROI)
+- HTTP:
+  - connect/read timeouts
+  - redirect limits
+  - decompression
+  - charset handling
+  - response size cap
+  - explicit unsupported content-type classification
+- Retry policy:
+  - retry transient failures (timeouts, 5xx) once (or configurable)
+  - do not retry permanent failures (most 4xx) unless user manually retries
+- Dedupe:
+  - normalize URLs (strip fragments, canonicalize) and avoid accidental duplicates (or mark duplicates explicitly)
+- Persistence:
+  - atomic write pattern to prevent corrupted partial files
+  - ensure output directory created and validated early
+- Telemetry to user:
+  - per-job failure kind
+  - summary counts: succeeded/failed/cancelled
+
+---
+
+## 7. Roadmap & Phases (Revised)
+
+### Phase 1: MVP (Core Value + Regression Protection)
+- **UI**
+  - URL input
+  - Start
+  - Stop/Finish with defined semantics
+  - Queue display using TreeView or status log (choose approach explicitly)
+  - Total token count + progress summary
+- **Engine**
+  - `reqwest` fetch + readability + HTML→MD + frontmatter + token count
+  - bounded queue + concurrency limit
+  - deterministic file naming with URL hash
+  - deterministic concatenated export format with delimiters
+- **Testing (must ship with MVP)**
+  - wiremock-based pipeline tests
+  - golden master tests for Markdown conversion
+
+### Phase 2: Enhanced UX + Reliability
+- Manual link vetting (strict manual selection; no auto-recursion)
+- Resume capability (persist queue + partial results + manifest)
+- Preview pane:
+  - select an item and view its generated Markdown
+- Export chunking by token budget
+
+### Phase 3: Advanced Access / Formats
+- Cookie import (for authenticated content)
+- PDF support (extract text and convert to Markdown with metadata)
+- “Stealth mode” / impersonation client (where justified and legal)
+- Quality controls:
+  - drop boilerplate-heavy pages
+  - minimum content length
+  - heuristic removal of “related links” sections
+
+---
+
+## 8. Testing Strategy (Expanded)
+
+1. **Isolation**
+   - Do not test against live sites.
+
+2. **Mocking**
+   - Use `wiremock` to serve stable fixtures.
+
+3. **Golden Tests (Per Stage)**
+   - Have fixtures and goldens for:
+     - readability output (sanitized HTML)
+     - markdown output
+     - final frontmatter-injected output
+
+4. **Concurrency/Cancellation Tests**
+   - Serve delayed endpoints and assert Stop/Finish semantics:
+     - queued items become cancelled (or remain queued) per policy
+     - in-flight items complete or cancel per policy
+
+5. **Property / Fuzz Tests**
+   - Filename sanitizer:
+     - never creates invalid Windows filenames
+     - handles emoji and illegal characters
+   - Concatenated export:
+     - contains correct document delimiter counts
+     - can be parsed deterministically
+
+6. **UI Logic Tests (Platform-Free)**
+   - Given events + state, assert emitted commands and state transitions.
+
+---
+
+## 9. Early Decisions / Potential Blockers (Call Out Explicitly)
+To avoid rework, decide early:
+
+1. **Queue visualization control** (TreeView vs log vs new grid control).
+2. **Stop/Finish policy** (in-flight complete vs hard cancel).
+3. **Deterministic export format** (delimiter + metadata + chunking).
+4. **Concurrency model** (async fetch + blocking CPU stages with limits).
+5. **Regression corpus** for extraction quality (fixtures + golden outputs).
+
