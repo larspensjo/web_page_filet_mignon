@@ -1,8 +1,12 @@
-use harvester_core::{update, AppState, Msg};
+#[cfg(target_os = "windows")]
+mod platform;
 
+#[cfg(target_os = "windows")]
+fn main() -> commanductui::PlatformResult<()> {
+    platform::run_app()
+}
+
+#[cfg(not(target_os = "windows"))]
 fn main() {
-    let state = AppState::new();
-    let (_state, _effects) = update(state, Msg::NoOp);
-
-    println!("harvester_app bootstrap placeholder");
+    eprintln!("harvester_app UI is only available on Windows.");
 }
