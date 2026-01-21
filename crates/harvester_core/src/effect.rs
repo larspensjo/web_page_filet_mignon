@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
-    /// Placeholder effect; expanded in later phases.
+    /// No side-effects in Phase 1.1; placeholder to keep the loop shape intact.
     Noop,
 }

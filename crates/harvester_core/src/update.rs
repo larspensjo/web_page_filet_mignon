@@ -1,7 +1,35 @@
-use crate::{AppState, Effect, Msg};
+use crate::{AppState, Effect, Msg, SessionState};
 
 /// Pure update function: applies a message to state and returns any effects.
-pub fn update(state: AppState, _msg: Msg) -> (AppState, Vec<Effect>) {
-    // Phase 0 keeps the reducer a no-op; later phases will add real transitions.
-    (state, Vec::new())
+pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    let effects = match msg {
+        Msg::UrlsPasted(raw) => {
+            let urls = parse_urls(&raw);
+            state.set_urls(urls);
+            Vec::new()
+        }
+        Msg::StartClicked => {
+            if state.session() == SessionState::Idle {
+                state.start_session();
+            }
+            Vec::new()
+        }
+        Msg::StopFinishClicked => {
+            if state.session() == SessionState::Running {
+                state.finish_session();
+            }
+            Vec::new()
+        }
+        Msg::Tick | Msg::NoOp => Vec::new(),
+    };
+
+    (state, effects)
+}
+
+fn parse_urls(raw: &str) -> Vec<String> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
 }

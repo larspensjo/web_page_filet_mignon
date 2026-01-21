@@ -1,5 +1,4 @@
 //! Harvester core: pure state machine and view-model helpers.
-
 mod effect;
 mod msg;
 mod state;
@@ -8,6 +7,6 @@ mod view_model;
 
 pub use effect::Effect;
 pub use msg::Msg;
-pub use state::AppState;
+pub use state::{AppState, JobId, SessionState};
 pub use update::update;
 pub use view_model::AppViewModel;
