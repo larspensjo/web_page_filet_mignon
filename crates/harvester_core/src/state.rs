@@ -1,5 +1,5 @@
 use crate::view_model::{AppViewModel, JobRowView, LastPasteStats};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 pub type JobId = u64;
 
@@ -9,6 +9,7 @@ pub struct AppState {
     jobs: BTreeMap<JobId, JobState>,
     metrics: MetricsState,
     ui: UiState,
+    seen_urls: HashSet<String>,
     last_paste_stats: Option<LastPasteStats>,
     dirty: bool,
     next_job_id: JobId,
@@ -21,6 +22,7 @@ impl Default for AppState {
             jobs: BTreeMap::new(),
             metrics: MetricsState::default(),
             ui: UiState::default(),
+            seen_urls: HashSet::new(),
             last_paste_stats: None,
             dirty: false,
             next_job_id: 1,
@@ -124,6 +126,12 @@ impl AppState {
     pub(crate) fn set_last_paste_stats(&mut self, enqueued: usize, skipped: usize) {
         self.last_paste_stats = Some(LastPasteStats { enqueued, skipped });
         self.dirty = true;
+    }
+
+    /// Check if URL has been seen before. If not, insert it and return false.
+    /// If yes, return true (indicating it should be skipped).
+    pub(crate) fn is_url_seen(&mut self, normalized_url: &str) -> bool {
+        !self.seen_urls.insert(normalized_url.to_owned())
     }
 }
 

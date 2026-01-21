@@ -90,3 +90,121 @@ fn urls_pasted_ignored_while_finishing() {
     assert!(effects.is_empty());
     assert!(!next.consume_dirty());
 }
+
+#[test]
+fn urls_pasted_while_running_stays_running() {
+    let state = AppState::new();
+    // First paste: Idle -> Running
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("https://first.example.com\n".to_string()),
+    );
+    assert_eq!(state.view().session, SessionState::Running);
+    assert_eq!(effects.len(), 2); // StartSession + EnqueueUrl
+
+    // Second paste while Running: should stay Running, no StartSession
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("https://second.example.com\n".to_string()),
+    );
+    assert_eq!(state.view().session, SessionState::Running);
+    assert_eq!(state.view().job_count, 2);
+    assert_eq!(
+        effects,
+        vec![Effect::EnqueueUrl {
+            job_id: 2,
+            url: "https://second.example.com".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn duplicate_paste_skipped() {
+    let state = AppState::new();
+    // First paste
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("https://example.com\n".to_string()),
+    );
+    assert_eq!(state.view().job_count, 1);
+    assert_eq!(effects.len(), 2); // StartSession + EnqueueUrl
+    let view = state.view();
+    assert_eq!(view.last_paste_stats.as_ref().unwrap().enqueued, 1);
+    assert_eq!(view.last_paste_stats.as_ref().unwrap().skipped, 0);
+
+    // Second paste with same URL - should be skipped
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("https://example.com\n".to_string()),
+    );
+    assert_eq!(state.view().job_count, 1); // No new job
+    assert_eq!(effects.len(), 0); // No effects
+    let view = state.view();
+    assert_eq!(view.last_paste_stats.as_ref().unwrap().enqueued, 0);
+    assert_eq!(view.last_paste_stats.as_ref().unwrap().skipped, 1);
+}
+
+#[test]
+fn url_normalization_catches_variants() {
+    let state = AppState::new();
+    // First paste with trailing slash
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("https://example.com/\n".to_string()),
+    );
+    assert_eq!(state.view().job_count, 1);
+    assert_eq!(effects.len(), 2);
+
+    // Second paste without trailing slash - should be recognized as duplicate
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("https://example.com\n".to_string()),
+    );
+    assert_eq!(state.view().job_count, 1);
+    assert_eq!(effects.len(), 0);
+    assert_eq!(state.view().last_paste_stats.as_ref().unwrap().skipped, 1);
+
+    // Third paste with different case - should be recognized as duplicate
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("HTTPS://EXAMPLE.COM\n".to_string()),
+    );
+    assert_eq!(state.view().job_count, 1);
+    assert_eq!(effects.len(), 0);
+    assert_eq!(state.view().last_paste_stats.as_ref().unwrap().skipped, 1);
+
+    // Fourth paste with extra whitespace - should be recognized as duplicate
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("  https://example.com/  \n".to_string()),
+    );
+    assert_eq!(state.view().job_count, 1);
+    assert_eq!(effects.len(), 0);
+    assert_eq!(state.view().last_paste_stats.as_ref().unwrap().skipped, 1);
+}
+
+#[test]
+fn paste_with_mixed_new_and_duplicate_urls() {
+    let state = AppState::new();
+    // First paste with two URLs
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("https://a.example.com\nhttps://b.example.com\n".to_string()),
+    );
+    assert_eq!(state.view().job_count, 2);
+    assert_eq!(effects.len(), 3); // StartSession + 2x EnqueueUrl
+    let view = state.view();
+    assert_eq!(view.last_paste_stats.as_ref().unwrap().enqueued, 2);
+    assert_eq!(view.last_paste_stats.as_ref().unwrap().skipped, 0);
+
+    // Second paste with one duplicate and one new URL
+    let (state, effects) = update(
+        state,
+        Msg::UrlsPasted("https://a.example.com\nhttps://c.example.com\n".to_string()),
+    );
+    assert_eq!(state.view().job_count, 3);
+    assert_eq!(effects.len(), 1); // Only 1 EnqueueUrl (c.example.com)
+    let view = state.view();
+    assert_eq!(view.last_paste_stats.as_ref().unwrap().enqueued, 1);
+    assert_eq!(view.last_paste_stats.as_ref().unwrap().skipped, 1);
+}

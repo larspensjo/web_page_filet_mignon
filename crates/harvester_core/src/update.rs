@@ -17,16 +17,33 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 SessionState::Idle | SessionState::Running => {}
             }
 
+            // Phase 4: deduplicate URLs before enqueuing
+            let mut unique_urls = Vec::new();
+            let mut skipped_count = 0;
+            for url in urls {
+                let normalized = normalize_url(&url);
+                if state.is_url_seen(&normalized) {
+                    skipped_count += 1;
+                } else {
+                    unique_urls.push(url);
+                }
+            }
+
+            // If all URLs were duplicates, we still update stats but don't enqueue or start
+            if unique_urls.is_empty() {
+                state.set_last_paste_stats(0, skipped_count);
+                return (state, Vec::new());
+            }
+
             let should_start = state.session() == SessionState::Idle;
             if should_start {
                 state.start_session();
             }
 
-            state.set_urls(urls);
+            state.set_urls(unique_urls);
             let enqueued = state.enqueue_jobs_from_ui();
             let enqueued_count = enqueued.len();
-            // Phase 4 will add deduplication; for now skipped is always 0
-            state.set_last_paste_stats(enqueued_count, 0);
+            state.set_last_paste_stats(enqueued_count, skipped_count);
             let mut effects = Vec::with_capacity(enqueued.len() + usize::from(should_start));
             if should_start {
                 effects.push(Effect::StartSession);
@@ -85,4 +102,11 @@ fn parse_urls(raw: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+/// Normalize URL for deduplication: trim whitespace, lowercase, strip trailing `/`.
+fn normalize_url(url: &str) -> String {
+    let trimmed = url.trim();
+    let lowercased = trimmed.to_lowercase();
+    lowercased.trim_end_matches('/').to_owned()
 }
