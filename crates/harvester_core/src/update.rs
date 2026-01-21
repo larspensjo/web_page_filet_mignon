@@ -7,8 +7,31 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             // Phase 0 invariant: when paste handling grows, keep `SessionState::Finishing`
             // as a strict block (no auto-resume, no new intake) unless gated by a feature flag.
             let urls = parse_urls(&raw);
+            if urls.is_empty() {
+                return (state, Vec::new());
+            }
+            match state.session() {
+                SessionState::Finishing | SessionState::Finished => {
+                    return (state, Vec::new());
+                }
+                SessionState::Idle | SessionState::Running => {}
+            }
+
+            let should_start = state.session() == SessionState::Idle;
+            if should_start {
+                state.start_session();
+            }
+
             state.set_urls(urls);
-            Vec::new()
+            let enqueued = state.enqueue_jobs_from_ui();
+            let mut effects = Vec::with_capacity(enqueued.len() + usize::from(should_start));
+            if should_start {
+                effects.push(Effect::StartSession);
+            }
+            for (job_id, url) in enqueued {
+                effects.push(Effect::EnqueueUrl { job_id, url });
+            }
+            effects
         }
         Msg::StartClicked => {
             if state.session() == SessionState::Idle {

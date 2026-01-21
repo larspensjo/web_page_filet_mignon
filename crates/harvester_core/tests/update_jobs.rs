@@ -8,19 +8,8 @@ fn urls_pasted_trims_and_ignores_empty() {
     let (mut next, _effects) = update(state, Msg::UrlsPasted(input.to_string()));
     let view = next.view();
 
-    assert_eq!(
-        view.queued_urls,
-        vec![
-            "https://a.example.com".to_string(),
-            "https://b.example.com".to_string(),
-        ]
-    );
-    assert!(next.consume_dirty());
-
-    // Start should enqueue jobs with deterministic IDs and clear input queue.
-    let (mut next, _effects) = update(next, Msg::StartClicked);
-    assert_eq!(next.view().job_count, 2);
-    assert!(next.view().queued_urls.is_empty());
+    assert!(view.queued_urls.is_empty());
+    assert_eq!(view.job_count, 2);
     assert!(next.consume_dirty());
 
     // Progress on job 1.
@@ -68,8 +57,7 @@ fn urls_pasted_trims_and_ignores_empty() {
 #[test]
 fn jobs_are_ordered_by_btree_key() {
     let state = AppState::new();
-    let (state, _effects) = update(state, Msg::UrlsPasted("b.com\na.com\n".into()));
-    let (mut state, _effects) = update(state, Msg::StartClicked);
+    let (mut state, _effects) = update(state, Msg::UrlsPasted("b.com\na.com\n".into()));
 
     // BTreeMap iteration should yield deterministic ascending JobId order (1,2,...)
     let ids: Vec<_> = state.view().jobs.iter().map(|j| j.job_id).collect();
