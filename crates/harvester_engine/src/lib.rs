@@ -1,13 +1,10 @@
-//! Harvester engine: IO pipeline placeholder for Phase 0.
+//! Harvester engine: IO pipeline and effect execution.
+mod engine;
+mod fetch;
+mod types;
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct EngineHandle;
-
-impl EngineHandle {
-    pub fn new() -> Self {
-        EngineHandle
-    }
-}
-
-/// Lightweight version identifier for logging/tests.
-pub const VERSION: &str = "0.0.0-phase0";
+pub use engine::EngineHandle;
+pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher};
+pub use types::{
+    EngineEvent, FetchError, FetchMetadata, FetchOutput, FailureKind, JobId, JobProgress, Stage,
+};
