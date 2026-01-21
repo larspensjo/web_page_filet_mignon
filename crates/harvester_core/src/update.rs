@@ -4,6 +4,8 @@ use crate::{AppState, Effect, Msg, SessionState, StopPolicy};
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let effects = match msg {
         Msg::UrlsPasted(raw) => {
+            // Phase 0 invariant: when paste handling grows, keep `SessionState::Finishing`
+            // as a strict block (no auto-resume, no new intake) unless gated by a feature flag.
             let urls = parse_urls(&raw);
             state.set_urls(urls);
             Vec::new()

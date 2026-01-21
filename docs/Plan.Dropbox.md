@@ -26,6 +26,7 @@ Goal: make pasted URLs immediately enqueue jobs, restart a finished/idle session
 ### Phase 0 - Decisions and invariants (no behavior change)
 - **Step 0.1: Lock policy for `Finishing`**
   - Deliverable: document choice (strict block vs. resume) in code comments and docs. Default recommendation: strict block to avoid half-finished sessions; optionally allow a feature flag for resume later.
+  - Status: documented in `crates/harvester_core/src/state.rs`, `crates/harvester_core/src/update.rs`, and `docs/Plan.Main.md` on 2026-01-21; behavior unchanged.
   - QA: `cargo test` (workspace) still passes; app builds and runs unchanged.
   - Notes: keep structs encapsulated; prefer `pub(crate)`; no new getters. Logging stays on `engine_logging` macros.
 

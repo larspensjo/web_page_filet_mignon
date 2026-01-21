@@ -7,6 +7,7 @@ Scope and architecture assumptions follow the Unidirectional Data Flow + effects
 * **UDF loop:** `PlatformEvent -> Msg -> update(state,msg) -> effects -> render(state)-> PlatformCommands`. `update()` is **pure**. 
 * **Encapsulation:** no “getters” that expose internal struct state broadly; expose **capabilities** (methods) and **small immutable snapshots** when needed (e.g., `JobRowView`). Prefer `pub(crate)` over `pub`. Use module facades to keep internals private. 
 * **Determinism for logic/tests:** deterministic IDs, ordering (`BTreeMap`/sorted vectors), stable file naming, stable export format.  
+* **Finishing intake policy (locked 2026-01-21):** `SessionState::Finishing` keeps the intake closed; drop/ignore paste or start-style messages while draining. Auto-resume from `Finishing`/`Finished` is deferred and must be feature-flagged if added later.
 
 ### source code organization
 ```text

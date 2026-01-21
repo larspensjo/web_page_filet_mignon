@@ -124,6 +124,8 @@ pub enum SessionState {
     #[default]
     Idle,
     Running,
+    /// Intake closed: ignore new URL ingestion while draining in-flight work.
+    /// Do not auto-resume from this state unless a feature flag explicitly allows it.
     Finishing,
     Finished,
 }
