@@ -1,5 +1,12 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
-    /// No side-effects in Phase 1.1; placeholder to keep the loop shape intact.
-    Noop,
+    EnqueueUrl { job_id: crate::JobId, url: String },
+    StartSession,
+    StopFinish { policy: StopPolicy },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopPolicy {
+    Finish,
+    Immediate,
 }

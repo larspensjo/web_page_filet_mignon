@@ -1,4 +1,4 @@
-use harvester_core::{update, AppState, JobResultKind, Msg, SessionState, Stage};
+use harvester_core::{update, AppState, JobResultKind, Msg, Stage};
 
 #[test]
 fn urls_pasted_trims_and_ignores_empty() {
@@ -68,7 +68,7 @@ fn urls_pasted_trims_and_ignores_empty() {
 #[test]
 fn jobs_are_ordered_by_btree_key() {
     let state = AppState::new();
-    let (mut state, _effects) = update(state, Msg::UrlsPasted("b.com\na.com\n".into()));
+    let (state, _effects) = update(state, Msg::UrlsPasted("b.com\na.com\n".into()));
     let (mut state, _effects) = update(state, Msg::StartClicked);
 
     // BTreeMap iteration should yield deterministic ascending JobId order (1,2,...)

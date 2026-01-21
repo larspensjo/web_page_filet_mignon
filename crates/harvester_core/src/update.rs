@@ -1,4 +1,4 @@
-use crate::{AppState, Effect, Msg, SessionState};
+use crate::{AppState, Effect, Msg, SessionState, StopPolicy};
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
@@ -11,15 +11,26 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::StartClicked => {
             if state.session() == SessionState::Idle {
                 state.start_session();
-                state.enqueue_jobs_from_ui();
+                let enqueued = state.enqueue_jobs_from_ui();
+                let mut effects = Vec::with_capacity(1 + enqueued.len());
+                effects.push(Effect::StartSession);
+                for (job_id, url) in enqueued {
+                    effects.push(Effect::EnqueueUrl { job_id, url });
+                }
+                effects
+            } else {
+                Vec::new()
             }
-            Vec::new()
         }
         Msg::StopFinishClicked => {
             if state.session() == SessionState::Running {
                 state.finish_session();
+                vec![Effect::StopFinish {
+                    policy: StopPolicy::Finish,
+                }]
+            } else {
+                Vec::new()
             }
-            Vec::new()
         }
         Msg::JobProgress {
             job_id,

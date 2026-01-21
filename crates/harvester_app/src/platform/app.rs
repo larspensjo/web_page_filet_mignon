@@ -10,6 +10,7 @@ use commanductui::{
 use harvester_core::{update, AppState, AppViewModel, Msg};
 
 use super::ui;
+use super::effects::EffectRunner;
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
     env_logger::init();
@@ -23,13 +24,20 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
 
     let shared_state = Arc::new(Mutex::new(SharedState::default()));
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
+    let effect_runner = EffectRunner::new(msg_tx.clone());
 
     let initial_view = shared_state.lock().unwrap().state.view();
     let mut initial_commands = ui::layout::initial_commands(window_id);
     initial_commands.extend(ui::render::render(window_id, &initial_view));
 
     let event_handler: Arc<Mutex<dyn PlatformEventHandler>> = Arc::new(Mutex::new(
-        AppEventHandler::new(window_id, shared_state.clone(), msg_rx, msg_tx.clone()),
+        AppEventHandler::new(
+            window_id,
+            shared_state.clone(),
+            msg_rx,
+            msg_tx.clone(),
+            effect_runner,
+        ),
     ));
     let ui_state_provider: Arc<Mutex<dyn UiStateProvider>> =
         Arc::new(Mutex::new(AppUiStateProvider::new(shared_state)));
@@ -56,6 +64,7 @@ struct AppEventHandler {
     commands: VecDeque<PlatformCommand>,
     msg_rx: Mutex<mpsc::Receiver<Msg>>,
     msg_tx: mpsc::Sender<Msg>,
+    effect_runner: EffectRunner,
 }
 
 impl AppEventHandler {
@@ -64,6 +73,7 @@ impl AppEventHandler {
         shared: Arc<Mutex<SharedState>>,
         msg_rx: mpsc::Receiver<Msg>,
         msg_tx: mpsc::Sender<Msg>,
+        effect_runner: EffectRunner,
     ) -> Self {
         Self {
             window_id,
@@ -71,6 +81,7 @@ impl AppEventHandler {
             commands: VecDeque::new(),
             msg_rx: Mutex::new(msg_rx),
             msg_tx,
+            effect_runner,
         }
     }
 
@@ -90,11 +101,12 @@ impl AppEventHandler {
         let maybe_view = {
             let mut guard = self.shared.lock().expect("lock shared state");
             let state = std::mem::take(&mut guard.state);
-            let (state, _effects) = update(state, msg);
+            let (state, effects) = update(state, msg);
             let view = state.view();
             let mut state = state;
             let was_dirty = state.consume_dirty();
             guard.state = state;
+            self.effect_runner.enqueue(effects);
             if was_dirty {
                 Some(view)
             } else {

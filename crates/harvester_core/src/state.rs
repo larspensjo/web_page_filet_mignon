@@ -59,7 +59,8 @@ impl AppState {
         self.dirty = true;
     }
 
-    pub(crate) fn enqueue_jobs_from_ui(&mut self) {
+    pub(crate) fn enqueue_jobs_from_ui(&mut self) -> Vec<(JobId, String)> {
+        let mut enqueued = Vec::new();
         for url in self.ui.urls.iter() {
             let job_id = self.next_job_id;
             self.next_job_id += 1;
@@ -73,9 +74,11 @@ impl AppState {
                     bytes: None,
                 },
             );
+            enqueued.push((job_id, url.clone()));
         }
         self.ui.urls.clear();
         self.dirty = true;
+        enqueued
     }
 
     pub(crate) fn apply_progress(
