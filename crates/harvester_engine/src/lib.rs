@@ -20,5 +20,6 @@ pub use filename::deterministic_filename;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 pub use token::{TokenCounter, WhitespaceTokenCounter};
 pub use types::{
-    EngineEvent, FetchError, FetchMetadata, FetchOutput, FailureKind, JobId, JobProgress, Stage,
+    EngineEvent, FetchError, FetchMetadata, FetchOutput, FailureKind, JobId, JobOutcome,
+    JobProgress, Stage,
 };

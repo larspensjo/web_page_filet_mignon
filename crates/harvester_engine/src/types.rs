@@ -18,18 +18,26 @@ pub struct JobProgress {
     pub job_id: JobId,
     pub stage: Stage,
     pub bytes: Option<u64>,
+    pub tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineEvent {
     Progress(JobProgress),
-    FetchCompleted { job_id: JobId, result: Result<FetchOutput, FetchError> },
+    JobCompleted { job_id: JobId, result: Result<JobOutcome, FailureKind> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchOutput {
     pub bytes: Vec<u8>,
     pub metadata: FetchMetadata,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobOutcome {
+    pub final_url: String,
+    pub tokens: Option<u32>,
+    pub bytes_written: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +72,9 @@ pub enum FailureKind {
     RedirectLimitExceeded,
     TooLarge { max_bytes: u64, actual: Option<u64> },
     UnsupportedContentType { content_type: String },
+    ProcessingTimeout { stage: Stage },
+    Cancelled,
+    ProcessingError,
     Network,
 }
 
@@ -80,6 +91,9 @@ impl fmt::Display for FailureKind {
             FailureKind::UnsupportedContentType { content_type } => {
                 write!(f, "unsupported content type {content_type}")
             }
+            FailureKind::ProcessingTimeout { stage } => write!(f, "processing timeout at stage {stage:?}"),
+            FailureKind::Cancelled => write!(f, "cancelled"),
+            FailureKind::ProcessingError => write!(f, "processing error"),
             FailureKind::Network => write!(f, "network error"),
         }
     }

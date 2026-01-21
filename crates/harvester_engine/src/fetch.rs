@@ -163,6 +163,7 @@ impl Fetcher for ReqwestFetcher {
             job_id,
             stage: Stage::Downloading,
             bytes: Some(0),
+            tokens: None,
         }));
 
         let mut bytes = Vec::new();
@@ -184,6 +185,7 @@ impl Fetcher for ReqwestFetcher {
                 job_id,
                 stage: Stage::Downloading,
                 bytes: Some(bytes.len() as u64),
+                tokens: None,
             }));
         }
 
