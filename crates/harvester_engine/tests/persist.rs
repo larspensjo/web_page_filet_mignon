@@ -1,5 +1,5 @@
-use std::fs;
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
+use std::fs;
 use tempfile::TempDir;
 
 #[test]

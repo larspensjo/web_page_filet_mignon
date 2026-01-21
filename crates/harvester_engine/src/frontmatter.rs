@@ -18,6 +18,10 @@ pub fn build_markdown_document(
         encoding = encoding,
         token_count = token_count,
     );
-    let doc = format!("{frontmatter}{body}", frontmatter = frontmatter, body = body_markdown);
+    let doc = format!(
+        "{frontmatter}{body}",
+        frontmatter = frontmatter,
+        body = body_markdown
+    );
     (token_count, doc)
 }

@@ -1,5 +1,5 @@
 use harvester_engine::{
-    build_markdown_document, build_concatenated_export, deterministic_filename, Converter,
+    build_concatenated_export, build_markdown_document, deterministic_filename, Converter,
     ExportOptions, Extractor, Html2MdConverter, ReadabilityLikeExtractor, TokenCounter,
     WhitespaceTokenCounter,
 };
@@ -47,8 +47,9 @@ fn frontmatter_includes_token_count() {
 
 #[test]
 fn pipeline_assemble_markdown_end_to_end() {
-    let html = r#"<html><head><title>T</title></head><body><article><p>A B</p></article></body></html>"#;
-    let extracted = ReadabilityLikeExtractor::default().extract(html);
+    let html =
+        r#"<html><head><title>T</title></head><body><article><p>A B</p></article></body></html>"#;
+    let extracted = ReadabilityLikeExtractor.extract(html);
     let md = Html2MdConverter.to_markdown(&extracted.content_html);
     let (tokens, doc) = build_markdown_document(
         "https://example.com/x",

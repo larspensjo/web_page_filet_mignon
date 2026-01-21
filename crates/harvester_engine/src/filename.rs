@@ -10,13 +10,7 @@ pub fn deterministic_filename(title: Option<&str>, url: &str) -> String {
 fn sanitize_title(input: &str) -> String {
     let mut cleaned: String = input
         .chars()
-        .map(|c| {
-            if is_forbidden(c) {
-                '_'
-            } else {
-                c
-            }
-        })
+        .map(|c| if is_forbidden(c) { '_' } else { c })
         .collect();
     cleaned = cleaned.trim_matches(&['_', ' ', '.'][..]).to_string();
     if cleaned.is_empty() {
@@ -47,7 +41,8 @@ fn sanitize_title(input: &str) -> String {
 }
 
 fn is_forbidden(c: char) -> bool {
-    matches!(c,
+    matches!(
+        c,
         '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'..='\u{1F}'
     )
 }

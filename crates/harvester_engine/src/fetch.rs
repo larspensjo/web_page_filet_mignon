@@ -7,7 +7,9 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 
-use crate::{EngineEvent, FetchError, FetchMetadata, FetchOutput, FailureKind, JobId, JobProgress, Stage};
+use crate::{
+    EngineEvent, FailureKind, FetchError, FetchMetadata, FetchOutput, JobId, JobProgress, Stage,
+};
 
 #[derive(Debug, Clone)]
 pub struct FetchSettings {
@@ -73,7 +75,10 @@ impl ReqwestFetcher {
         Self { settings }
     }
 
-    fn build_client(&self, redirect_counter: Arc<AtomicUsize>) -> Result<reqwest::Client, FetchError> {
+    fn build_client(
+        &self,
+        redirect_counter: Arc<AtomicUsize>,
+    ) -> Result<reqwest::Client, FetchError> {
         let redirect_limit = self.settings.redirect_limit;
         let policy = reqwest::redirect::Policy::custom(move |attempt| {
             let count = attempt.previous().len();
@@ -94,7 +99,11 @@ impl ReqwestFetcher {
     }
 
     fn is_content_type_allowed(&self, content_type: &str) -> bool {
-        let ct = content_type.split(';').next().unwrap_or(content_type).trim();
+        let ct = content_type
+            .split(';')
+            .next()
+            .unwrap_or(content_type)
+            .trim();
         self.settings
             .allowed_content_types
             .iter()
@@ -119,7 +128,7 @@ impl Fetcher for ReqwestFetcher {
             .get(parsed.clone())
             .send()
             .await
-            .map_err(|err| map_reqwest_error(err))?;
+            .map_err(map_reqwest_error)?;
 
         let status = response.status();
         if !status.is_success() {
@@ -169,7 +178,7 @@ impl Fetcher for ReqwestFetcher {
         let mut bytes = Vec::new();
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|err| map_reqwest_error(err))?;
+            let chunk = chunk.map_err(map_reqwest_error)?;
             let next_len = bytes.len() as u64 + chunk.len() as u64;
             if next_len > self.settings.max_bytes {
                 return Err(FetchError::new(

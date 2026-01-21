@@ -1,4 +1,6 @@
-use harvester_engine::{decode_html, Converter, Extractor, Html2MdConverter, ReadabilityLikeExtractor};
+use harvester_engine::{
+    decode_html, Converter, Extractor, Html2MdConverter, ReadabilityLikeExtractor,
+};
 use pretty_assertions::assert_eq;
 
 #[test]
@@ -28,7 +30,7 @@ fn extractor_prefers_article_then_body() {
         <article><h1>Heading</h1><p>Body text</p></article>
     </body></html>
     "#;
-    let extractor = ReadabilityLikeExtractor::default();
+    let extractor = ReadabilityLikeExtractor;
     let extracted = extractor.extract(html);
     assert_eq!(extracted.title.as_deref(), Some("Title"));
     assert!(extracted.content_html.contains("Heading"));
@@ -51,7 +53,7 @@ fn converter_turns_html_into_markdown() {
 fn pipeline_decode_extract_convert_is_deterministic() {
     let bytes = br#"<html><head><title>X</title></head><body><article><p>A</p><p>B</p></article></body></html>"#;
     let decoded = decode_html(bytes, Some("text/html; charset=utf-8")).unwrap();
-    let extractor = ReadabilityLikeExtractor::default();
+    let extractor = ReadabilityLikeExtractor;
     let extracted = extractor.extract(&decoded.html);
     let md = Html2MdConverter.to_markdown(&extracted.content_html);
     assert_eq!(md.trim(), "A\n\nB");

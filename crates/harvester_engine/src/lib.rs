@@ -1,27 +1,27 @@
 //! Harvester engine: IO pipeline and effect execution.
-mod engine;
 mod convert;
-mod extract;
 mod decode;
-mod token;
-mod frontmatter;
-mod filename;
-mod persist;
+mod engine;
 mod export;
+mod extract;
 mod fetch;
+mod filename;
+mod frontmatter;
+mod persist;
+mod token;
 mod types;
 
-pub use engine::EngineHandle;
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};
+pub use engine::EngineHandle;
+pub use export::{build_concatenated_export, ExportError, ExportOptions, ExportSummary};
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
-pub use frontmatter::build_markdown_document;
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher};
 pub use filename::deterministic_filename;
+pub use frontmatter::build_markdown_document;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
-pub use export::{build_concatenated_export, ExportError, ExportOptions, ExportSummary};
 pub use token::{TokenCounter, WhitespaceTokenCounter};
 pub use types::{
-    EngineEvent, FetchError, FetchMetadata, FetchOutput, FailureKind, JobId, JobOutcome,
+    EngineEvent, FailureKind, FetchError, FetchMetadata, FetchOutput, JobId, JobOutcome,
     JobProgress, Stage,
 };

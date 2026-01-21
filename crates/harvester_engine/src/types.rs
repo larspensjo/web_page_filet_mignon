@@ -24,7 +24,10 @@ pub struct JobProgress {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EngineEvent {
     Progress(JobProgress),
-    JobCompleted { job_id: JobId, result: Result<JobOutcome, FailureKind> },
+    JobCompleted {
+        job_id: JobId,
+        result: Result<JobOutcome, FailureKind>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +94,9 @@ impl fmt::Display for FailureKind {
             FailureKind::UnsupportedContentType { content_type } => {
                 write!(f, "unsupported content type {content_type}")
             }
-            FailureKind::ProcessingTimeout { stage } => write!(f, "processing timeout at stage {stage:?}"),
+            FailureKind::ProcessingTimeout { stage } => {
+                write!(f, "processing timeout at stage {stage:?}")
+            }
             FailureKind::Cancelled => write!(f, "cancelled"),
             FailureKind::ProcessingError => write!(f, "processing error"),
             FailureKind::Network => write!(f, "network error"),

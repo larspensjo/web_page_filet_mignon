@@ -37,8 +37,7 @@ async fn fetcher_returns_html_and_emits_progress() {
     Mock::given(method("GET"))
         .and(path("/doc"))
         .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_raw("<html>ok</html>", "text/html; charset=utf-8"),
+            ResponseTemplate::new(200).set_body_raw("<html>ok</html>", "text/html; charset=utf-8"),
         )
         .mount(&server)
         .await;
@@ -51,7 +50,11 @@ async fn fetcher_returns_html_and_emits_progress() {
     assert_eq!(output.metadata.original_url, url);
     assert_eq!(output.metadata.final_url, output.metadata.original_url);
     assert_eq!(output.metadata.redirect_count, 0);
-    assert!(output.metadata.content_type.unwrap().starts_with("text/html"));
+    assert!(output
+        .metadata
+        .content_type
+        .unwrap()
+        .starts_with("text/html"));
     assert_eq!(output.bytes, b"<html>ok</html>");
 
     let progress = sink

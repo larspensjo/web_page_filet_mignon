@@ -38,7 +38,7 @@ impl EngineConfig {
         Self {
             fetch_settings: FetchSettings::default(),
             output_dir,
-            extractor: Arc::new(crate::ReadabilityLikeExtractor::default()),
+            extractor: Arc::new(crate::ReadabilityLikeExtractor),
             converter: Arc::new(crate::Html2MdConverter),
             token_counter: Arc::new(crate::WhitespaceTokenCounter),
             fetched_utc: Arc::new(|| "1970-01-01T00:00:00Z".to_string()),
@@ -52,7 +52,7 @@ impl EngineConfig {
 
 enum EngineCommand {
     Enqueue { job_id: JobId, url: String },
-    Stop { immediate: bool },
+    Stop,
     Export,
 }
 
@@ -79,8 +79,8 @@ impl EngineHandle {
         });
     }
 
-    pub fn stop(&self, immediate: bool) {
-        let _ = self.cmd_tx.send(EngineCommand::Stop { immediate });
+    pub fn stop(&self, _immediate: bool) {
+        let _ = self.cmd_tx.send(EngineCommand::Stop);
     }
 
     pub fn request_export(&self) {
@@ -116,7 +116,7 @@ fn worker_loop(
                         });
                     }
                 }
-                EngineCommand::Stop { immediate: _ } => {
+                EngineCommand::Stop => {
                     accept_new = false;
                     cancel_token.cancel();
                     // Cancel queued (not yet started) immediately.
@@ -138,7 +138,7 @@ fn worker_loop(
             if url == "__EXPORT__" {
                 if queue.is_empty() {
                     // Only export when no active jobs; run synchronously.
-                    if let Err(err) = crate::export::build_concatenated_export(
+                    if let Err(_err) = crate::export::build_concatenated_export(
                         &config.output_dir,
                         crate::export::ExportOptions::default(),
                     ) {
@@ -166,31 +166,31 @@ fn worker_loop(
                 Ok(cmd) => {
                     // push back into the queue / handle stop.
                     match cmd {
-                EngineCommand::Enqueue { job_id, url } => {
-                    if accept_new {
-                        queue.push_back((job_id, url));
-                    } else {
-                        let _ = event_tx.send(EngineEvent::JobCompleted {
-                            job_id,
-                            result: Err(FailureKind::Cancelled),
-                        });
+                        EngineCommand::Enqueue { job_id, url } => {
+                            if accept_new {
+                                queue.push_back((job_id, url));
+                            } else {
+                                let _ = event_tx.send(EngineEvent::JobCompleted {
+                                    job_id,
+                                    result: Err(FailureKind::Cancelled),
+                                });
+                            }
+                        }
+                        EngineCommand::Stop => {
+                            accept_new = false;
+                            cancel_token.cancel();
+                            for (job_id, _) in queue.drain(..) {
+                                let _ = event_tx.send(EngineEvent::JobCompleted {
+                                    job_id,
+                                    result: Err(FailureKind::Cancelled),
+                                });
+                            }
+                        }
+                        EngineCommand::Export => {
+                            queue.push_front((0, "__EXPORT__".to_string()));
+                        }
                     }
                 }
-                EngineCommand::Stop { immediate: _ } => {
-                    accept_new = false;
-                    cancel_token.cancel();
-                    for (job_id, _) in queue.drain(..) {
-                        let _ = event_tx.send(EngineEvent::JobCompleted {
-                            job_id,
-                            result: Err(FailureKind::Cancelled),
-                        });
-                    }
-                }
-                EngineCommand::Export => {
-                    queue.push_front((0, "__EXPORT__".to_string()));
-                }
-            }
-        }
                 Err(_) => break,
             }
         }
@@ -228,10 +228,12 @@ async fn run_job(
         return;
     }
 
-    let decoded = match timeout(
-        config.extract_timeout,
-        async { decode_html(&fetch_output.bytes, fetch_output.metadata.content_type.as_deref()) },
-    )
+    let decoded = match timeout(config.extract_timeout, async {
+        decode_html(
+            &fetch_output.bytes,
+            fetch_output.metadata.content_type.as_deref(),
+        )
+    })
     .await
     {
         Ok(Ok(decoded)) => decoded,

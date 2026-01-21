@@ -9,8 +9,8 @@ use commanductui::{
 };
 use harvester_core::{update, AppState, AppViewModel, Msg};
 
-use super::ui;
 use super::effects::EffectRunner;
+use super::ui;
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
     env_logger::init();
@@ -30,15 +30,14 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     let mut initial_commands = ui::layout::initial_commands(window_id);
     initial_commands.extend(ui::render::render(window_id, &initial_view));
 
-    let event_handler: Arc<Mutex<dyn PlatformEventHandler>> = Arc::new(Mutex::new(
-        AppEventHandler::new(
+    let event_handler: Arc<Mutex<dyn PlatformEventHandler>> =
+        Arc::new(Mutex::new(AppEventHandler::new(
             window_id,
             shared_state.clone(),
             msg_rx,
             msg_tx.clone(),
             effect_runner,
-        ),
-    ));
+        )));
     let ui_state_provider: Arc<Mutex<dyn UiStateProvider>> =
         Arc::new(Mutex::new(AppUiStateProvider::new(shared_state)));
 
