@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
 use tokio::runtime::Runtime;
@@ -56,15 +56,17 @@ enum EngineCommand {
     Export,
 }
 
+#[derive(Clone)]
 pub struct EngineHandle {
     cmd_tx: mpsc::Sender<EngineCommand>,
-    event_rx: mpsc::Receiver<EngineEvent>,
+    event_rx: Arc<Mutex<mpsc::Receiver<EngineEvent>>>,
 }
 
 impl EngineHandle {
     pub fn new(config: EngineConfig) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
-        let (event_tx, event_rx) = mpsc::channel();
+        let (event_tx, event_rx_raw) = mpsc::channel();
+        let event_rx = Arc::new(Mutex::new(event_rx_raw));
         let config = Arc::new(config);
 
         thread::spawn(move || worker_loop(cmd_rx, event_tx, config));
@@ -88,7 +90,11 @@ impl EngineHandle {
     }
 
     pub fn try_recv(&self) -> Option<EngineEvent> {
-        self.event_rx.try_recv().ok()
+        if let Ok(rx) = self.event_rx.lock() {
+            rx.try_recv().ok()
+        } else {
+            None
+        }
     }
 }
 

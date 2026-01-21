@@ -1,104 +1,86 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    mpsc, Arc,
-};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
+use chrono::Utc;
 use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
+use harvester_engine::{EngineConfig, EngineEvent, EngineHandle};
 
 pub struct EffectRunner {
-    effect_tx: mpsc::Sender<Effect>,
+    engine: EngineHandle,
 }
 
 impl EffectRunner {
     pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
-        let (effect_tx, effect_rx) = mpsc::channel();
-        let engine = EngineStub::new(msg_tx);
-        thread::spawn(move || engine.run(effect_rx));
-        Self { effect_tx }
+        let output_dir = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join("output");
+
+        let mut config = EngineConfig::default_with_output(output_dir);
+        config.fetched_utc = std::sync::Arc::new(|| Utc::now().to_rfc3339());
+
+        let engine = EngineHandle::new(config);
+        let runner = Self { engine };
+        runner.spawn_event_loop(msg_tx);
+        runner
     }
 
     pub fn enqueue(&self, effects: Vec<Effect>) {
         for effect in effects {
-            let _ = self.effect_tx.send(effect);
-        }
-    }
-}
-
-struct EngineStub {
-    msg_tx: mpsc::Sender<Msg>,
-    stop_requested: Arc<AtomicBool>,
-}
-
-impl EngineStub {
-    fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
-        Self {
-            msg_tx,
-            stop_requested: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    fn run(self, effect_rx: mpsc::Receiver<Effect>) {
-        while let Ok(effect) = effect_rx.recv() {
             match effect {
+                Effect::EnqueueUrl { job_id, url } => {
+                    self.engine.enqueue(job_id, url);
+                }
                 Effect::StartSession => {
-                    self.stop_requested.store(false, Ordering::Relaxed);
+                    // no-op; engine starts on first enqueue
                 }
                 Effect::StopFinish { policy } => {
-                    if matches!(policy, StopPolicy::Immediate | StopPolicy::Finish) {
-                        self.stop_requested.store(true, Ordering::Relaxed);
-                    }
-                }
-                Effect::EnqueueUrl { job_id, url } => {
-                    let msg_tx = self.msg_tx.clone();
-                    let stop_requested = self.stop_requested.clone();
-                    thread::spawn(move || {
-                        simulate_job(job_id, url, msg_tx, stop_requested);
-                    });
+                    let immediate = matches!(policy, StopPolicy::Immediate);
+                    self.engine.stop(immediate);
                 }
             }
         }
     }
-}
 
-fn simulate_job(
-    job_id: harvester_core::JobId,
-    url: String,
-    msg_tx: mpsc::Sender<Msg>,
-    _stop_requested: Arc<AtomicBool>,
-) {
-    let bytes = (url.len() as u64).saturating_mul(128);
-    let tokens = (url.len() as u32).saturating_mul(2);
-
-    let stages = [
-        Stage::Downloading,
-        Stage::Sanitizing,
-        Stage::Converting,
-        Stage::Tokenizing,
-        Stage::Writing,
-    ];
-
-    for stage in stages {
-        thread::sleep(Duration::from_millis(120));
-        let _ = msg_tx.send(Msg::JobProgress {
-            job_id,
-            stage,
-            tokens: if stage == Stage::Tokenizing {
-                Some(tokens)
+    fn spawn_event_loop(&self, msg_tx: mpsc::Sender<Msg>) {
+        let engine = self.engine.clone();
+        thread::spawn(move || loop {
+            if let Some(event) = engine.try_recv() {
+                match event {
+                    EngineEvent::Progress(progress) => {
+                        let _ = msg_tx.send(Msg::JobProgress {
+                            job_id: progress.job_id,
+                            stage: map_stage(progress.stage),
+                            tokens: progress.tokens,
+                            bytes: progress.bytes,
+                        });
+                    }
+                    EngineEvent::JobCompleted { job_id, result } => {
+                        let msg = Msg::JobDone {
+                            job_id,
+                            result: match result {
+                                Ok(_) => JobResultKind::Success,
+                                Err(_) => JobResultKind::Failed,
+                            },
+                        };
+                        let _ = msg_tx.send(msg);
+                    }
+                }
             } else {
-                None
-            },
-            bytes: if stage == Stage::Downloading {
-                Some(bytes)
-            } else {
-                None
-            },
+                thread::sleep(Duration::from_millis(20));
+            }
         });
     }
+}
 
-    let _ = msg_tx.send(Msg::JobDone {
-        job_id,
-        result: JobResultKind::Success,
-    });
+fn map_stage(stage: harvester_engine::Stage) -> Stage {
+    match stage {
+        harvester_engine::Stage::Queued => Stage::Queued,
+        harvester_engine::Stage::Downloading => Stage::Downloading,
+        harvester_engine::Stage::Sanitizing => Stage::Sanitizing,
+        harvester_engine::Stage::Converting => Stage::Converting,
+        harvester_engine::Stage::Tokenizing => Stage::Tokenizing,
+        harvester_engine::Stage::Writing => Stage::Writing,
+        harvester_engine::Stage::Done => Stage::Done,
+    }
 }
