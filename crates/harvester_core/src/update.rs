@@ -24,6 +24,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
 
             state.set_urls(urls);
             let enqueued = state.enqueue_jobs_from_ui();
+            let enqueued_count = enqueued.len();
+            // Phase 4 will add deduplication; for now skipped is always 0
+            state.set_last_paste_stats(enqueued_count, 0);
             let mut effects = Vec::with_capacity(enqueued.len() + usize::from(should_start));
             if should_start {
                 effects.push(Effect::StartSession);

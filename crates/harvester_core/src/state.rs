@@ -1,4 +1,4 @@
-use crate::view_model::{AppViewModel, JobRowView};
+use crate::view_model::{AppViewModel, JobRowView, LastPasteStats};
 use std::collections::BTreeMap;
 
 pub type JobId = u64;
@@ -9,6 +9,7 @@ pub struct AppState {
     jobs: BTreeMap<JobId, JobState>,
     metrics: MetricsState,
     ui: UiState,
+    last_paste_stats: Option<LastPasteStats>,
     dirty: bool,
     next_job_id: JobId,
 }
@@ -20,6 +21,7 @@ impl Default for AppState {
             jobs: BTreeMap::new(),
             metrics: MetricsState::default(),
             ui: UiState::default(),
+            last_paste_stats: None,
             dirty: false,
             next_job_id: 1,
         }
@@ -38,6 +40,7 @@ impl AppState {
             queued_urls: self.ui.urls.clone(),
             job_count: self.jobs.len(),
             jobs,
+            last_paste_stats: self.last_paste_stats.clone(),
             dirty: self.dirty,
         }
     }
@@ -115,6 +118,11 @@ impl AppState {
 
     pub(crate) fn finish_session(&mut self) {
         self.session = SessionState::Finishing;
+        self.dirty = true;
+    }
+
+    pub(crate) fn set_last_paste_stats(&mut self, enqueued: usize, skipped: usize) {
+        self.last_paste_stats = Some(LastPasteStats { enqueued, skipped });
         self.dirty = true;
     }
 }

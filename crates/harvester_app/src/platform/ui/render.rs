@@ -13,11 +13,13 @@ pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> 
         SessionState::Finished => "Finished",
     };
 
-    let status_text = format!(
-        "Session: {session_label} | URLs queued: {} | Jobs: {}",
-        view.queued_urls.len(),
-        view.job_count
-    );
+    let status_text = match &view.last_paste_stats {
+        Some(stats) => format!(
+            "Session: {} | Jobs: {} | Last paste: enqueued {}, skipped {}",
+            session_label, view.job_count, stats.enqueued, stats.skipped
+        ),
+        None => format!("Session: {} | Jobs: {}", session_label, view.job_count),
+    };
 
     let mut cmds = Vec::new();
 
