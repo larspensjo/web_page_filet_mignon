@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/harvester_app",
+    "crates/harvester_core",
+    "crates/harvester_engine"
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"

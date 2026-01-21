@@ -1,0 +1,58 @@
+# clippy.toml
+# Configuration knobs for configurable Clippy lints.
+# (The config file mechanism is considered unstable by Clippy docs.) :contentReference[oaicite:1]{index=1}
+
+# --- Size / complexity guardrails (your "phase 1") ---
+
+# Flag functions/methods that are getting too long.
+# Default is 100. :contentReference[oaicite:2]{index=2}
+too-many-lines-threshold = 120
+
+# Flag functions with high cognitive complexity.
+# Default is 25. :contentReference[oaicite:3]{index=3}
+cognitive-complexity-threshold = 20
+
+# Flag blocks nested too deeply.
+# IMPORTANT: This lint only triggers if you set a non-zero threshold (default is 0 = disabled). :contentReference[oaicite:4]{index=4}
+excessive-nesting-threshold = 7
+
+# Flag functions that take “too many” arguments.
+# Default is 7. :contentReference[oaicite:5]{index=5}
+too-many-arguments-threshold = 7
+
+# Nudge you away from extremely complex types.
+# Default is 250. :contentReference[oaicite:6]{index=6}
+type-complexity-threshold = 200
+
+
+# --- Optional: tighten later if you like ---
+
+# Encourage clearer naming if you want (default is 4).
+# single-char-binding-names-threshold = 3
+
+# If you start seeing a lot of "box it" / stack size lints and want control:
+# stack-size-threshold = 512000
+# array-size-threshold = 512000
+
+
+# --- Optional: policy-enforcement (requires enabling the corresponding lints) ---
+
+# These lists do nothing unless you also enable:
+#   - clippy::disallowed_methods
+#   - clippy::disallowed_types
+#   - clippy::disallowed_macros
+#
+# Example patterns shown in Clippy docs. :contentReference[oaicite:7]{index=7}
+
+# disallowed-methods = [
+#   "std::time::Instant::now",     # determinism
+#   "rand::thread_rng",            # determinism
+# ]
+#
+# disallowed-types = [
+#   "std::collections::HashMap",   # if you want to force a deterministic map type in sim
+# ]
+#
+# disallowed-macros = [
+#   "println",                     # if you want to ban stdout debugging remnants
+# ]
