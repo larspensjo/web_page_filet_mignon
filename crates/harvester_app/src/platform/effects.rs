@@ -3,6 +3,7 @@ use std::thread;
 use std::time::Duration;
 
 use chrono::Utc;
+use engine_logging::engine_warn;
 use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
 use harvester_engine::{EngineConfig, EngineEvent, EngineHandle};
 
@@ -58,9 +59,12 @@ impl EffectRunner {
                     EngineEvent::JobCompleted { job_id, result } => {
                         let msg = Msg::JobDone {
                             job_id,
-                            result: match result {
+                            result: match &result {
                                 Ok(_) => JobResultKind::Success,
-                                Err(_) => JobResultKind::Failed,
+                                Err(failure_kind) => {
+                                    engine_warn!("Job {} failed: {}", job_id, failure_kind);
+                                    JobResultKind::Failed
+                                }
                             },
                         };
                         let _ = msg_tx.send(msg);

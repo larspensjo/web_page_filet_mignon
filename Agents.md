@@ -14,3 +14,11 @@
 
 ## General Rust design
 * mod.rs and lib.rs should be thin wrappers.
+
+## Logging
+* Use the `engine_logging` crate for all logging. Import macros: `use engine_logging::{engine_info, engine_warn, engine_error};`
+* Available macros: `engine_trace!`, `engine_debug!`, `engine_info!`, `engine_warn!`, `engine_error!`
+* Default log level is INFO (debug messages are filtered out)
+* Logs are written to both terminal and `./engine.log` in the current working directory
+* Log errors with context: include the URL, job_id, or other identifying information
+* In unit tests, call `engine_logging::initialize_for_tests();` to enable logging output

@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
+use engine_logging::{engine_debug, engine_info, engine_warn};
 use tokio::runtime::Runtime;
 use tokio::time::{timeout, Duration};
 use tokio_util::sync::CancellationToken;
@@ -211,12 +212,22 @@ async fn run_job(
     config: Arc<EngineConfig>,
     cancel_token: CancellationToken,
 ) {
+    engine_info!("Job {} starting: {}", job_id, url);
     let sink = ChannelProgressSink::new(event_tx.clone());
 
     let fetch_result = fetcher.fetch(job_id, &url, &sink).await;
     let fetch_output = match fetch_result {
-        Ok(out) => out,
+        Ok(out) => {
+            engine_debug!(
+                "Job {} fetched {} bytes from {}",
+                job_id,
+                out.metadata.byte_len,
+                out.metadata.final_url
+            );
+            out
+        }
         Err(err) => {
+            // Error already logged in fetch.rs
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
                 result: Err(err.kind),
@@ -363,6 +374,12 @@ async fn run_job(
 
     match write_result {
         Ok(Ok(Ok(_path))) => {
+            engine_info!(
+                "Job {} completed: {} tokens, {} bytes written",
+                job_id,
+                token_count,
+                doc_for_write.len()
+            );
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
                 result: Ok(JobOutcome {
@@ -373,6 +390,7 @@ async fn run_job(
             });
         }
         _ => {
+            engine_warn!("Job {} failed: write error", job_id);
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
                 result: Err(FailureKind::ProcessingError),

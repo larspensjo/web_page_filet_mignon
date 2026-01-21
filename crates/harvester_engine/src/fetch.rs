@@ -4,6 +4,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
+use engine_logging::engine_warn;
 use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 
@@ -119,19 +120,22 @@ impl Fetcher for ReqwestFetcher {
         url: &str,
         sink: &dyn ProgressSink,
     ) -> Result<FetchOutput, FetchError> {
-        let parsed = reqwest::Url::parse(url)
-            .map_err(|err| FetchError::new(FailureKind::InvalidUrl, err.to_string()))?;
+        let parsed = reqwest::Url::parse(url).map_err(|err| {
+            engine_warn!("Invalid URL '{}': {}", url, err);
+            FetchError::new(FailureKind::InvalidUrl, err.to_string())
+        })?;
         let redirect_counter = Arc::new(AtomicUsize::new(0));
         let client = self.build_client(redirect_counter.clone())?;
 
-        let response = client
-            .get(parsed.clone())
-            .send()
-            .await
-            .map_err(map_reqwest_error)?;
+        let response = client.get(parsed.clone()).send().await.map_err(|err| {
+            let fetch_err = map_reqwest_error(err);
+            engine_warn!("Fetch failed for '{}': {}", url, fetch_err.kind);
+            fetch_err
+        })?;
 
         let status = response.status();
         if !status.is_success() {
+            engine_warn!("HTTP error {} for URL '{}'", status.as_u16(), url);
             return Err(FetchError::new(
                 FailureKind::HttpStatus(status.as_u16()),
                 status.to_string(),
@@ -140,6 +144,12 @@ impl Fetcher for ReqwestFetcher {
 
         if let Some(content_len) = response.content_length() {
             if content_len > self.settings.max_bytes {
+                engine_warn!(
+                    "Response too large for '{}': {} bytes (max {})",
+                    url,
+                    content_len,
+                    self.settings.max_bytes
+                );
                 return Err(FetchError::new(
                     FailureKind::TooLarge {
                         max_bytes: self.settings.max_bytes,
@@ -159,6 +169,7 @@ impl Fetcher for ReqwestFetcher {
 
         if let Some(ct) = content_type.as_deref() {
             if !self.is_content_type_allowed(ct) {
+                engine_warn!("Unsupported content type '{}' for URL '{}'", ct, url);
                 return Err(FetchError::new(
                     FailureKind::UnsupportedContentType {
                         content_type: ct.to_string(),
@@ -178,9 +189,19 @@ impl Fetcher for ReqwestFetcher {
         let mut bytes = Vec::new();
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(map_reqwest_error)?;
+            let chunk = chunk.map_err(|err| {
+                let fetch_err = map_reqwest_error(err);
+                engine_warn!("Stream error for '{}': {}", url, fetch_err.kind);
+                fetch_err
+            })?;
             let next_len = bytes.len() as u64 + chunk.len() as u64;
             if next_len > self.settings.max_bytes {
+                engine_warn!(
+                    "Response too large (streaming) for '{}': {} bytes (max {})",
+                    url,
+                    next_len,
+                    self.settings.max_bytes
+                );
                 return Err(FetchError::new(
                     FailureKind::TooLarge {
                         max_bytes: self.settings.max_bytes,

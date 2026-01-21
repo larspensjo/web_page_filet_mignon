@@ -9,11 +9,15 @@ use commanductui::{
 };
 use harvester_core::{update, AppState, AppViewModel, Msg};
 
+use engine_logging::engine_info;
+
 use super::effects::EffectRunner;
+use super::logging::{self, LogDestination};
 use super::ui;
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
-    env_logger::init();
+    logging::initialize(LogDestination::Both);
+    engine_info!("Logger initialized. Starting harvester_app...");
 
     let platform = PlatformInterface::new("harvester_app".to_string())?;
     let window_id = platform.create_window(WindowConfig {
