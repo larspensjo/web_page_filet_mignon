@@ -11,3 +11,6 @@
 
 ## Testing
 * Consider using dependency injection and mock objects to enhance unit testing
+
+## General Rust design
+* mod.rs and lib.rs should be thin wrappers.

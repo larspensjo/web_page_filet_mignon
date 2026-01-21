@@ -3,6 +3,7 @@ use commanductui::{PlatformCommand, WindowId};
 
 use super::constants::*;
 
+#[allow(clippy::vec_init_then_push)]
 pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     let mut commands = Vec::new();
 

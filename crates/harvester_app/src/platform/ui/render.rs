@@ -3,6 +3,7 @@ use harvester_core::{AppViewModel, SessionState};
 
 use super::constants::*;
 
+#[allow(clippy::vec_init_then_push)]
 pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> {
     let session_label = match view.session {
         SessionState::Idle => "Idle",
