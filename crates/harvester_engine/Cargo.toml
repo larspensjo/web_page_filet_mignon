@@ -16,6 +16,7 @@ encoding_rs = "0.8"
 chardetng = "0.1"
 thiserror = "2"
 sha2 = "0.10"
+tempfile = "3"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
