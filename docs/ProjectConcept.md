@@ -1,4 +1,4 @@
-# Project Design: Web-to-Markdown Harvester (Updated)
+# Project Design: Web-to-Markdown Harvester
 
 ## 1. Executive Summary
 The **Web-to-Markdown Harvester** is a native Windows desktop application that turns a list of HTTP/HTTPS URLs into a clean, LLM-friendly Markdown dataset. It prioritizes:
@@ -103,6 +103,97 @@ Readability parsing, HTML→Markdown conversion, and token counting are CPU heav
 - Run network fetch as async.
 - Run CPU-heavy stages in `spawn_blocking` (or a dedicated CPU thread pool).
 - Put explicit limits on the CPU pool if needed to avoid contention.
+
+## 4.5 Architecture Pattern: Unidirectional Data Flow (Recommended)
+
+### 4.5.1 Recommendation
+Use **Unidirectional Data Flow (UDF)** with an explicit **state machine** and an **effects layer**.
+
+This aligns naturally with CommanDuctUI’s design:
+
+**PlatformEvent → AppLogic → PlatformCommand**
+
+In UDF terms:
+
+**Msg (Event) → `update(state, msg)` → (new state, effects) → render(state) → commands**
+
+MVP can also work, but for this project’s concurrency, batching, cancellation, resumability, and export finalization, MVP typically evolves into a store/reducer/effects model anyway. UDF keeps that structure explicit and testable.
+
+### 4.5.2 Core Types
+Define a small, explicit set of types that drive everything:
+
+**`AppState` (single source of truth)**
+- `session: SessionState` (Idle/Running/Finishing/Finished/Cancelled)
+- `jobs: BTreeMap<JobId, JobState>`
+- `metrics: MetricsState` (totals, succeeded/failed/cancelled)
+- `ui: UiState` (input buffer, selected item, output folder, etc.)
+
+**`Msg` (everything that can happen)**
+- UI-originated:
+  - `StartClicked`
+  - `StopFinishClicked`
+  - `UrlsPasted(String)`
+  - `AddUrl(String)`
+  - `OpenOutputFolder`
+- Engine-originated:
+  - `JobProgress { job_id, stage, bytes, tokens, .. }`
+  - `JobDone { job_id, result }`
+- System-originated:
+  - `Tick` (render throttling / coalescing)
+  - `LoadSession` / `SaveSession`
+
+**`Effect` (side effects requested by `update`)**
+- `EnqueueUrl { url }`
+- `SpawnJob { job_id, url }`
+- `CancelSession { policy }`
+- `WriteFile { path, content }`
+- `AppendExport { chunk }`
+- `WriteManifest { content }`
+- `NotifyUser { text }`
+
+A simple rule: **`update` is pure** (no I/O). I/O happens only in the effect runner.
+
+### 4.5.3 The Control Loop
+1. Platform event arrives; translate it into `Msg`.
+2. Call `update(state, msg)` → `(state', effects)`.
+3. Run `effects` asynchronously; each effect emits follow-up `Msg`s.
+4. Render the UI from `state'` by emitting PlatformCommands.
+
+### 4.5.4 Render Policy: Avoid UI Flooding
+Do not emit a PlatformCommand per micro-progress step. Instead:
+
+- Always update `AppState` immediately per `Msg`.
+- Render either:
+  - on a fixed `Tick` (e.g., 60–100 ms), or
+  - on “important transitions” (session state changes; job completion).
+
+This prevents UI command queue overload when processing many URLs.
+
+### 4.5.5 Example: Stop/Finish as State Machine + Effects
+When the user presses Stop/Finish:
+
+- `Msg::StopFinishClicked` is processed by `update`.
+- `update`:
+  - transitions `session` from `Running` → `Finishing`
+  - emits `Effect::CancelSession { policy }`
+- Engine responds with `Msg::JobDone { .. Cancelled .. }` for queued items (policy dependent).
+- When the engine reports “drained”:
+  - `update` transitions `Finishing` → `Finished`
+  - emits export finalization effects (concatenation flush, manifest write).
+
+This makes Stop/Finish behavior precise, testable, and robust.
+
+### 4.5.6 Testing Benefits
+- Unit tests target `update()`:
+  - input: state + message
+  - output: new state + list of effects
+- Integration tests target the effect runner with mocks:
+  - wiremock for HTTP
+  - temp dirs for I/O
+- UI logic tests can assert emitted PlatformCommands from `render(state)` without Win32.
+
+
+
 
 ---
 
@@ -293,4 +384,3 @@ To avoid rework, decide early:
 3. **Deterministic export format** (delimiter + metadata + chunking).
 4. **Concurrency model** (async fetch + blocking CPU stages with limits).
 5. **Regression corpus** for extraction quality (fixtures + golden outputs).
-
