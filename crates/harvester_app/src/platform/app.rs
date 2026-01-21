@@ -9,7 +9,7 @@ use commanductui::{
 };
 use harvester_core::{update, AppState, AppViewModel, Msg};
 
-use engine_logging::engine_info;
+use engine_logging::{engine_debug, engine_info};
 
 use super::effects::EffectRunner;
 use super::logging::{self, LogDestination};
@@ -102,9 +102,17 @@ impl AppEventHandler {
 
     fn dispatch_msg(&mut self, msg: Msg) {
         let maybe_view = {
+            let msg_for_log = msg.clone();
             let mut guard = self.shared.lock().expect("lock shared state");
             let state = std::mem::take(&mut guard.state);
             let (state, effects) = update(state, msg);
+            if let Msg::UrlsPasted(ref raw) = msg_for_log {
+                engine_debug!(
+                    "UrlsPasted: raw_len={}, preview=\"{}\"",
+                    raw.len(),
+                    raw.chars().take(120).collect::<String>()
+                );
+            }
             let view = state.view();
             let mut state = state;
             let was_dirty = state.consume_dirty();
@@ -147,6 +155,11 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::InputTextChanged {
                 control_id, text, ..
             } if control_id == ui::constants::INPUT_URLS => {
+                engine_info!(
+                    "InputTextChanged: {} chars, preview=\"{}\"",
+                    text.len(),
+                    text.chars().take(120).collect::<String>()
+                );
                 let _ = self.msg_tx.send(Msg::UrlsPasted(text));
             }
             AppEvent::WindowCloseRequestedByUser { .. } => {

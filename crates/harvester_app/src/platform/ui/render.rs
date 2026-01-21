@@ -52,7 +52,7 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
     view.jobs
         .iter()
         .map(|job| TreeItemDescriptor {
-            id: TreeItemId(job.job_id as u64),
+            id: TreeItemId(job.job_id),
             text: format_job_row(job),
             is_folder: false,
             state: commanductui::types::CheckState::Unchecked,
@@ -77,7 +77,12 @@ fn format_job_row(job: &JobRowView) -> String {
         _ => String::new(),
     };
     if metrics.is_empty() {
-        format!("[#{id}] {status} — {url}", id = job.job_id, status = status, url = job.url)
+        format!(
+            "[#{id}] {status} — {url}",
+            id = job.job_id,
+            status = status,
+            url = job.url
+        )
     } else {
         format!(
             "[#{id}] {status} — {url} ({metrics})",

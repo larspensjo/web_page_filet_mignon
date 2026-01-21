@@ -3,6 +3,7 @@
 ## Bugs
 * Is there a lessons learned here? A design issue? Lack of robustness? That is, I want to find similar problems and prevent future problems of the same type.
 * When fixing bugs, make sure to add a unit test that locks functionality in and prevents it from happening again.
+* Avoid hard-coded string/buffer lengths anywhere (UI, I/O, parsing); size dynamically from the data source (e.g., `GetWindowTextLengthW`/`LB_GETTEXTLEN` for Win32, length-prefixed reads elsewhere) and centralize helpers to prevent truncation.
 
 ## Structs
 * Prefer private members to enforce encapsulation.

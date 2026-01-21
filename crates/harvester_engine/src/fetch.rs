@@ -4,7 +4,7 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use engine_logging::engine_warn;
+use engine_logging::{engine_info, engine_warn};
 use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 
@@ -19,6 +19,7 @@ pub struct FetchSettings {
     pub redirect_limit: usize,
     pub max_bytes: u64,
     pub allowed_content_types: Vec<String>,
+    pub user_agent: String,
 }
 
 impl Default for FetchSettings {
@@ -31,7 +32,9 @@ impl Default for FetchSettings {
             allowed_content_types: vec![
                 "text/html".to_string(),
                 "application/xhtml+xml".to_string(),
+                "text/plain".to_string(),
             ],
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36".to_string(),
         }
     }
 }
@@ -95,6 +98,7 @@ impl ReqwestFetcher {
             .connect_timeout(self.settings.connect_timeout)
             .timeout(self.settings.request_timeout)
             .redirect(policy)
+            .user_agent(self.settings.user_agent.clone())
             .build()
             .map_err(|err| FetchError::new(FailureKind::Network, err.to_string()))
     }
@@ -185,6 +189,12 @@ impl Fetcher for ReqwestFetcher {
             bytes: Some(0),
             tokens: None,
         }));
+        engine_info!(
+            "Fetch start job_id={} url_len={} url={}",
+            job_id,
+            url.len(),
+            url
+        );
 
         let mut bytes = Vec::new();
         let mut stream = response.bytes_stream();

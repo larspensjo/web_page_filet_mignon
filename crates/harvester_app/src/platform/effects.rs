@@ -3,7 +3,7 @@ use std::thread;
 use std::time::Duration;
 
 use chrono::Utc;
-use engine_logging::engine_warn;
+use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
 use harvester_engine::{EngineConfig, EngineEvent, EngineHandle};
 
@@ -30,6 +30,12 @@ impl EffectRunner {
         for effect in effects {
             match effect {
                 Effect::EnqueueUrl { job_id, url } => {
+                    engine_info!(
+                        "EnqueueUrl job_id={} url_len={} url={}",
+                        job_id,
+                        url.len(),
+                        url
+                    );
                     self.engine.enqueue(job_id, url);
                 }
                 Effect::StartSession => {

@@ -76,7 +76,10 @@ fn create_file_logger(level: LevelFilter, config: Config) -> Option<Box<WriteLog
     match File::create(&log_path) {
         Ok(file) => Some(WriteLogger::new(level, config, file)),
         Err(err) => {
-            eprintln!("Warning: Could not create log file at {:?}: {}", log_path, err);
+            eprintln!(
+                "Warning: Could not create log file at {:?}: {}",
+                log_path, err
+            );
             None
         }
     }
