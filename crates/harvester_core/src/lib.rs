@@ -7,6 +7,6 @@ mod view_model;
 
 pub use effect::Effect;
 pub use msg::Msg;
-pub use state::{AppState, JobId, SessionState};
+pub use state::{AppState, JobId, JobResultKind, SessionState, Stage};
 pub use update::update;
 pub use view_model::AppViewModel;

@@ -1,4 +1,4 @@
-use crate::view_model::AppViewModel;
+use crate::view_model::{AppViewModel, JobRowView};
 use std::collections::BTreeMap;
 
 pub type JobId = u64;
@@ -32,10 +32,12 @@ impl AppState {
     }
 
     pub fn view(&self) -> AppViewModel {
+        let jobs: Vec<JobRowView> = self.jobs.iter().map(|(id, job)| job.to_view(*id)).collect();
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
             job_count: self.jobs.len(),
+            jobs,
             dirty: self.dirty,
         }
     }
@@ -55,6 +57,52 @@ impl AppState {
         self.ui.urls = urls;
         self.metrics.total_urls = self.ui.urls.len();
         self.dirty = true;
+    }
+
+    pub(crate) fn enqueue_jobs_from_ui(&mut self) {
+        for url in self.ui.urls.iter() {
+            let job_id = self.next_job_id;
+            self.next_job_id += 1;
+            self.jobs.insert(
+                job_id,
+                JobState {
+                    url: url.clone(),
+                    stage: Stage::Queued,
+                    outcome: None,
+                    tokens: None,
+                    bytes: None,
+                },
+            );
+        }
+        self.ui.urls.clear();
+        self.dirty = true;
+    }
+
+    pub(crate) fn apply_progress(
+        &mut self,
+        job_id: JobId,
+        stage: Stage,
+        tokens: Option<u32>,
+        bytes: Option<u64>,
+    ) {
+        if let Some(job) = self.jobs.get_mut(&job_id) {
+            job.stage = stage;
+            if let Some(t) = tokens {
+                job.tokens = Some(t);
+            }
+            if let Some(b) = bytes {
+                job.bytes = Some(b);
+            }
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn apply_done(&mut self, job_id: JobId, result: JobResultKind) {
+        if let Some(job) = self.jobs.get_mut(&job_id) {
+            job.stage = Stage::Done;
+            job.outcome = Some(result);
+            self.dirty = true;
+        }
     }
 
     pub(crate) fn start_session(&mut self) {
@@ -80,6 +128,23 @@ pub enum SessionState {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct JobState {
     url: String,
+    stage: Stage,
+    outcome: Option<JobResultKind>,
+    tokens: Option<u32>,
+    bytes: Option<u64>,
+}
+
+impl JobState {
+    fn to_view(&self, id: JobId) -> JobRowView {
+        JobRowView {
+            job_id: id,
+            url: self.url.clone(),
+            stage: self.stage,
+            outcome: self.outcome,
+            tokens: self.tokens,
+            bytes: self.bytes,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -90,4 +155,22 @@ struct MetricsState {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct UiState {
     urls: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Stage {
+    #[default]
+    Queued,
+    Downloading,
+    Sanitizing,
+    Converting,
+    Tokenizing,
+    Writing,
+    Done,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobResultKind {
+    Success,
+    Failed,
 }

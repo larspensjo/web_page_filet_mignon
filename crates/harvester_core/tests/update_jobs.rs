@@ -1,0 +1,78 @@
+use harvester_core::{update, AppState, JobResultKind, Msg, SessionState, Stage};
+
+#[test]
+fn urls_pasted_trims_and_ignores_empty() {
+    let state = AppState::new();
+    let input = "https://a.example.com \n\n  https://b.example.com\n   \n";
+
+    let (mut next, _effects) = update(state, Msg::UrlsPasted(input.to_string()));
+    let view = next.view();
+
+    assert_eq!(
+        view.queued_urls,
+        vec![
+            "https://a.example.com".to_string(),
+            "https://b.example.com".to_string(),
+        ]
+    );
+    assert!(next.consume_dirty());
+
+    // Start should enqueue jobs with deterministic IDs and clear input queue.
+    let (mut next, _effects) = update(next, Msg::StartClicked);
+    assert_eq!(next.view().job_count, 2);
+    assert!(next.view().queued_urls.is_empty());
+    assert!(next.consume_dirty());
+
+    // Progress on job 1.
+    let (mut next, _effects) = update(
+        next,
+        Msg::JobProgress {
+            job_id: 1,
+            stage: Stage::Downloading,
+            tokens: Some(10),
+            bytes: Some(1024),
+        },
+    );
+    let job1 = next
+        .view()
+        .jobs
+        .iter()
+        .find(|j| j.job_id == 1)
+        .unwrap()
+        .clone();
+    assert_eq!(job1.stage, Stage::Downloading);
+    assert_eq!(job1.tokens, Some(10));
+    assert_eq!(job1.bytes, Some(1024));
+    assert!(next.consume_dirty());
+
+    // Completion for job 1.
+    let (mut next, _effects) = update(
+        next,
+        Msg::JobDone {
+            job_id: 1,
+            result: JobResultKind::Success,
+        },
+    );
+    let job1_done = next
+        .view()
+        .jobs
+        .iter()
+        .find(|j| j.job_id == 1)
+        .unwrap()
+        .clone();
+    assert_eq!(job1_done.stage, Stage::Done);
+    assert_eq!(job1_done.outcome, Some(JobResultKind::Success));
+    assert!(next.consume_dirty());
+}
+
+#[test]
+fn jobs_are_ordered_by_btree_key() {
+    let state = AppState::new();
+    let (mut state, _effects) = update(state, Msg::UrlsPasted("b.com\na.com\n".into()));
+    let (mut state, _effects) = update(state, Msg::StartClicked);
+
+    // BTreeMap iteration should yield deterministic ascending JobId order (1,2,...)
+    let ids: Vec<_> = state.view().jobs.iter().map(|j| j.job_id).collect();
+    assert_eq!(ids, vec![1, 2]);
+    assert!(state.consume_dirty());
+}
