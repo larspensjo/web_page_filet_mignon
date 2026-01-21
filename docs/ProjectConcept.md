@@ -3,6 +3,8 @@
 ## 1. Executive Summary
 The **Web-to-Markdown Harvester** is a native Windows desktop application that turns a list of HTTP/HTTPS URLs into a clean, LLM-friendly Markdown dataset. It prioritizes:
 
+- **Scope constraint:** processes a **manually supplied list** of URLs. It does **not** crawl/trawl the web automatically.
+
 - **Robustness:** predictable behavior under failures, cancellations, and partial runs.
 - **Quality:** good extraction/sanitization with regression protection (golden tests).
 - **Performance:** parallel fetching with backpressure and correct handling of CPU-bound work.
@@ -91,6 +93,11 @@ Define explicit session states and transitions:
 - Exports should run only after the engine reaches a stable end state.
 
 ### 4.3 Backpressure, Cancellation, and UI Update Coalescing
+**Backpressure topology (recommended):**
+- **Ingestion backpressure:** bounded channel for incoming URLs (prevents unbounded memory growth from large pastes).
+- **In-flight concurrency:** semaphore-limited number of active jobs (prevents CPU/memory spikes).
+Treat these as separate controls.
+
 - Use bounded channels to avoid unbounded memory growth on huge paste operations.
 - Implement cancellation (e.g., `CancellationToken`) and check it between pipeline stages.
 - Coalesce UI updates:
@@ -160,6 +167,12 @@ A simple rule: **`update` is pure** (no I/O). I/O happens only in the effect run
 4. Render the UI from `state'` by emitting PlatformCommands.
 
 ### 4.5.4 Render Policy: Avoid UI Flooding
+**Implementation detail (recommended):**
+- Track a `dirty` flag or `render_generation` counter in `AppState`.
+- Any `Msg` that changes visible state sets `dirty = true` (or increments generation).
+- `Msg::Tick` triggers rendering only if dirty/generation changed, then clears the flag.
+This prevents unnecessary redraws and avoids “state drift” confusion when rendering is throttled.
+
 Do not emit a PlatformCommand per micro-progress step. Instead:
 
 - Always update `AppState` immediately per `Msg`.
@@ -203,7 +216,7 @@ This makes Stop/Finish behavior precise, testable, and robust.
 Avoid “stringly typed” progress. Prefer:
 
 - `enum Stage { Queued, Downloading, Sanitizing, Converting, Tokenizing, Writing, Done }`
-- `enum FailureKind { HttpStatus(u16), Timeout, TooLarge, UnsupportedContentType, ParseError, IoError, Cancelled, Other }`
+- `enum FailureKind { HttpStatus(u16), NetworkTimeout, ProcessingTimeout, TooLarge, UnsupportedContentType, DecodeError, ParseError, IoError, Cancelled, Other }`
 
 Progress event example:
 ```rust
@@ -219,6 +232,13 @@ struct JobProgress {
 ```
 
 ### 5.2 Per-URL Processing Pipeline
+**Decoding / charset strategy (define explicitly):**
+- Prefer HTTP header charset when present.
+- Honor BOM where applicable.
+- Optionally inspect `<meta charset>` / `<meta http-equiv>` when headers are missing.
+- Fall back to UTF-8 (or a configured fallback).
+- If decoding fails, classify as `DecodeError` (do not silently corrupt output).
+
 Each URL goes through these stages:
 
 1. **Fetch**
@@ -260,6 +280,11 @@ Instead of relying only on title sanitization + `_1` suffix, prefer deterministi
 This avoids collisions between pages that share titles and makes reruns stable.
 
 ### 5.4 Concatenated “LLM Paste” Export Format (Specify Early)
+**Crash consistency (recommended default):**
+- Treat per-URL `.md` files as the durable artifacts and write them atomically.
+- Generate the concatenated export **only when the session reaches `Finished`** (after Stop/Finish drain), to avoid partial or duplicated exports after crashes.
+- If early resume is required later, add an append-only journal/WAL for the concatenated export as a Phase 2/3 enhancement.
+
 Define an explicit format so it is reliable and easy to split:
 
 - Hard delimiter that will not appear naturally:
@@ -287,6 +312,15 @@ fetched_utc: 2026-01-21T10:11:12Z
 ---
 
 ## 6. Robustness Checklist (High ROI)
+Additional robustness items (from external review):
+
+- Redirect transparency:
+  - Record original URL, final URL, and optionally the redirect chain (helps debugging and dedupe correctness).
+- CPU-stage watchdog:
+  - Apply time bounds to readability/convert/tokenize; classify `ProcessingTimeout` distinctly.
+- Memory bounds:
+  - Cap response size and in-flight buffers; fail fast with `TooLarge` rather than risking runaway memory use.
+
 - HTTP:
   - connect/read timeouts
   - redirect limits
@@ -327,6 +361,7 @@ fetched_utc: 2026-01-21T10:11:12Z
   - golden master tests for Markdown conversion
 
 ### Phase 2: Enhanced UX + Reliability
+- (Optional) Per-host concurrency cap (simple, off by default) for cases where many manual URLs target one domain
 - Manual link vetting (strict manual selection; no auto-recursion)
 - Resume capability (persist queue + partial results + manifest)
 - Preview pane:
