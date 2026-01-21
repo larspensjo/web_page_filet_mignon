@@ -53,6 +53,7 @@ impl EngineConfig {
 enum EngineCommand {
     Enqueue { job_id: JobId, url: String },
     Stop { immediate: bool },
+    Export,
 }
 
 pub struct EngineHandle {
@@ -80,6 +81,10 @@ impl EngineHandle {
 
     pub fn stop(&self, immediate: bool) {
         let _ = self.cmd_tx.send(EngineCommand::Stop { immediate });
+    }
+
+    pub fn request_export(&self) {
+        let _ = self.cmd_tx.send(EngineCommand::Export);
     }
 
     pub fn try_recv(&self) -> Option<EngineEvent> {
@@ -122,10 +127,32 @@ fn worker_loop(
                         });
                     }
                 }
+                EngineCommand::Export => {
+                    // Export happens when queue is empty / idle; stash command for later processing.
+                    queue.push_front((0, "__EXPORT__".to_string()));
+                }
             }
         }
 
         if let Some((job_id, url)) = queue.pop_front() {
+            if url == "__EXPORT__" {
+                if queue.is_empty() {
+                    // Only export when no active jobs; run synchronously.
+                    if let Err(err) = crate::export::build_concatenated_export(
+                        &config.output_dir,
+                        crate::export::ExportOptions::default(),
+                    ) {
+                        let _ = event_tx.send(EngineEvent::JobCompleted {
+                            job_id: 0,
+                            result: Err(FailureKind::ProcessingError),
+                        });
+                    }
+                } else {
+                    // Re-enqueue to try later.
+                    queue.push_back((job_id, url));
+                }
+                continue;
+            }
             let fetcher = fetcher.clone();
             let event_tx = event_tx.clone();
             let config = config.clone();
@@ -139,28 +166,31 @@ fn worker_loop(
                 Ok(cmd) => {
                     // push back into the queue / handle stop.
                     match cmd {
-                        EngineCommand::Enqueue { job_id, url } => {
-                            if accept_new {
-                                queue.push_back((job_id, url));
-                            } else {
-                                let _ = event_tx.send(EngineEvent::JobCompleted {
-                                    job_id,
-                                    result: Err(FailureKind::Cancelled),
-                                });
-                            }
-                        }
-                        EngineCommand::Stop { immediate: _ } => {
-                            accept_new = false;
-                            cancel_token.cancel();
-                            for (job_id, _) in queue.drain(..) {
-                                let _ = event_tx.send(EngineEvent::JobCompleted {
-                                    job_id,
-                                    result: Err(FailureKind::Cancelled),
-                                });
-                            }
-                        }
+                EngineCommand::Enqueue { job_id, url } => {
+                    if accept_new {
+                        queue.push_back((job_id, url));
+                    } else {
+                        let _ = event_tx.send(EngineEvent::JobCompleted {
+                            job_id,
+                            result: Err(FailureKind::Cancelled),
+                        });
                     }
                 }
+                EngineCommand::Stop { immediate: _ } => {
+                    accept_new = false;
+                    cancel_token.cancel();
+                    for (job_id, _) in queue.drain(..) {
+                        let _ = event_tx.send(EngineEvent::JobCompleted {
+                            job_id,
+                            result: Err(FailureKind::Cancelled),
+                        });
+                    }
+                }
+                EngineCommand::Export => {
+                    queue.push_front((0, "__EXPORT__".to_string()));
+                }
+            }
+        }
                 Err(_) => break,
             }
         }

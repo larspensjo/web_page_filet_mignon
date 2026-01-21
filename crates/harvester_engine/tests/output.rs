@@ -1,6 +1,7 @@
 use harvester_engine::{
-    build_markdown_document, deterministic_filename, Converter, Extractor, Html2MdConverter,
-    ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter,
+    build_markdown_document, build_concatenated_export, deterministic_filename, Converter,
+    ExportOptions, Extractor, Html2MdConverter, ReadabilityLikeExtractor, TokenCounter,
+    WhitespaceTokenCounter,
 };
 use pretty_assertions::assert_eq;
 
@@ -60,4 +61,28 @@ fn pipeline_assemble_markdown_end_to_end() {
     assert_eq!(tokens, 2);
     assert!(doc.contains("title: T"));
     assert!(doc.contains("A B"));
+}
+
+#[test]
+fn concatenated_export_builds_delimited_output_and_manifest() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md1 = "---\nurl: https://a\ntitle: A\ntoken_count: 2\nfetched_utc: 2024-01-01T00:00:00Z\nencoding: UTF-8\n---\n\nBody A\n";
+    let md2 = "---\nurl: https://b\ntitle: B\ntoken_count: 3\nfetched_utc: 2024-01-02T00:00:00Z\nencoding: UTF-8\n---\n\nBody B\n";
+    std::fs::write(dir.join("a.md"), md1).unwrap();
+    std::fs::write(dir.join("b.md"), md2).unwrap();
+
+    let summary = build_concatenated_export(dir, ExportOptions::default()).unwrap();
+    let export = std::fs::read_to_string(summary.output_path).unwrap();
+
+    assert!(export.contains("===== DOC START ====="));
+    assert!(export.contains("url: https://a"));
+    assert!(export.contains("url: https://b"));
+    assert!(export.contains("===== DOC END ====="));
+    assert_eq!(summary.doc_count, 2);
+    assert_eq!(summary.total_tokens, 5);
+
+    let manifest = std::fs::read_to_string(summary.manifest_path.unwrap()).unwrap();
+    assert!(manifest.contains("\"doc_count\":2"));
+    assert!(manifest.contains("\"total_tokens\":5"));
 }

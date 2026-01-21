@@ -7,6 +7,7 @@ mod token;
 mod frontmatter;
 mod filename;
 mod persist;
+mod export;
 mod fetch;
 mod types;
 
@@ -18,6 +19,7 @@ pub use frontmatter::build_markdown_document;
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher};
 pub use filename::deterministic_filename;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
+pub use export::{build_concatenated_export, ExportError, ExportOptions, ExportSummary};
 pub use token::{TokenCounter, WhitespaceTokenCounter};
 pub use types::{
     EngineEvent, FetchError, FetchMetadata, FetchOutput, FailureKind, JobId, JobOutcome,
