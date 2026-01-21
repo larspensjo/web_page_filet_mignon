@@ -3,6 +3,9 @@ mod engine;
 mod convert;
 mod extract;
 mod decode;
+mod token;
+mod frontmatter;
+mod filename;
 mod fetch;
 mod types;
 
@@ -10,7 +13,10 @@ pub use engine::EngineHandle;
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
+pub use frontmatter::build_markdown_document;
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher};
+pub use filename::deterministic_filename;
+pub use token::{TokenCounter, WhitespaceTokenCounter};
 pub use types::{
     EngineEvent, FetchError, FetchMetadata, FetchOutput, FailureKind, JobId, JobProgress, Stage,
 };
