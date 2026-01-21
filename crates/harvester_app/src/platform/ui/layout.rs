@@ -13,6 +13,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: PANEL_BOTTOM,
     });
 
+    commands.push(PlatformCommand::CreateTreeView {
+        window_id,
+        parent_control_id: None,
+        control_id: TREE_JOBS,
+    });
+
     commands.push(PlatformCommand::CreateInput {
         window_id,
         parent_control_id: None,
@@ -52,6 +58,14 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 order: 0,
                 fixed_size: Some(64),
                 margin: (6, 6, 6, 6),
+            },
+            LayoutRule {
+                control_id: TREE_JOBS,
+                parent_control_id: None,
+                dock_style: DockStyle::Right,
+                order: 5,
+                fixed_size: Some(320),
+                margin: (6, 6, 70, 6),
             },
             LayoutRule {
                 control_id: INPUT_URLS,
