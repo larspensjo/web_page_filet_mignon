@@ -40,6 +40,13 @@ impl AppState {
         }
     }
 
+    /// Returns the current dirty flag and clears it in one step.
+    pub fn consume_dirty(&mut self) -> bool {
+        let was_dirty = self.dirty;
+        self.dirty = false;
+        was_dirty
+    }
+
     pub(crate) fn session(&self) -> SessionState {
         self.session
     }

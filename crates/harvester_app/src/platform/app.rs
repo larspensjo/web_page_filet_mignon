@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 use commanductui::{
     AppEvent, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
@@ -20,16 +22,25 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     })?;
 
     let shared_state = Arc::new(Mutex::new(SharedState::default()));
+    let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
 
     let initial_view = shared_state.lock().unwrap().state.view();
     let mut initial_commands = ui::layout::initial_commands(window_id);
     initial_commands.extend(ui::render::render(window_id, &initial_view));
 
     let event_handler: Arc<Mutex<dyn PlatformEventHandler>> = Arc::new(Mutex::new(
-        AppEventHandler::new(window_id, shared_state.clone()),
+        AppEventHandler::new(window_id, shared_state.clone(), msg_rx, msg_tx.clone()),
     ));
     let ui_state_provider: Arc<Mutex<dyn UiStateProvider>> =
         Arc::new(Mutex::new(AppUiStateProvider::new(shared_state)));
+
+    // Background tick to throttle rendering and UI updates.
+    thread::spawn(move || {
+        let interval = Duration::from_millis(75);
+        while msg_tx.send(Msg::Tick).is_ok() {
+            thread::sleep(interval);
+        }
+    });
 
     platform.main_event_loop(event_handler, ui_state_provider, initial_commands)
 }
@@ -43,28 +54,57 @@ struct AppEventHandler {
     window_id: WindowId,
     shared: Arc<Mutex<SharedState>>,
     commands: VecDeque<PlatformCommand>,
+    msg_rx: Mutex<mpsc::Receiver<Msg>>,
+    msg_tx: mpsc::Sender<Msg>,
 }
 
 impl AppEventHandler {
-    fn new(window_id: WindowId, shared: Arc<Mutex<SharedState>>) -> Self {
+    fn new(
+        window_id: WindowId,
+        shared: Arc<Mutex<SharedState>>,
+        msg_rx: mpsc::Receiver<Msg>,
+        msg_tx: mpsc::Sender<Msg>,
+    ) -> Self {
         Self {
             window_id,
             shared,
             commands: VecDeque::new(),
+            msg_rx: Mutex::new(msg_rx),
+            msg_tx,
+        }
+    }
+
+    fn process_pending_messages(&mut self) {
+        let mut inbox = Vec::new();
+        if let Ok(rx) = self.msg_rx.lock() {
+            while let Ok(msg) = rx.try_recv() {
+                inbox.push(msg);
+            }
+        }
+        for msg in inbox {
+            self.dispatch_msg(msg);
         }
     }
 
     fn dispatch_msg(&mut self, msg: Msg) {
-        let view = {
+        let maybe_view = {
             let mut guard = self.shared.lock().expect("lock shared state");
             let state = std::mem::take(&mut guard.state);
             let (state, _effects) = update(state, msg);
             let view = state.view();
+            let mut state = state;
+            let was_dirty = state.consume_dirty();
             guard.state = state;
-            view
+            if was_dirty {
+                Some(view)
+            } else {
+                None
+            }
         };
 
-        self.enqueue_render(&view);
+        if let Some(view) = maybe_view {
+            self.enqueue_render(&view);
+        }
     }
 
     fn enqueue_render(&mut self, view: &AppViewModel) {
@@ -77,23 +117,22 @@ impl PlatformEventHandler for AppEventHandler {
     fn handle_event(&mut self, event: AppEvent) {
         match event {
             AppEvent::MainWindowUISetupComplete { .. } => {
-                let view = self.shared.lock().unwrap().state.view();
-                self.enqueue_render(&view);
+                let _ = self.msg_tx.send(Msg::Tick);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_START =>
             {
-                self.dispatch_msg(Msg::StartClicked);
+                let _ = self.msg_tx.send(Msg::StartClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_STOP =>
             {
-                self.dispatch_msg(Msg::StopFinishClicked);
+                let _ = self.msg_tx.send(Msg::StopFinishClicked);
             }
             AppEvent::InputTextChanged {
                 control_id, text, ..
             } if control_id == ui::constants::INPUT_URLS => {
-                self.dispatch_msg(Msg::UrlsPasted(text));
+                let _ = self.msg_tx.send(Msg::UrlsPasted(text));
             }
             AppEvent::WindowCloseRequestedByUser { .. } => {
                 self.commands.push_back(PlatformCommand::QuitApplication);
@@ -103,6 +142,7 @@ impl PlatformEventHandler for AppEventHandler {
     }
 
     fn try_dequeue_command(&mut self) -> Option<PlatformCommand> {
+        self.process_pending_messages();
         self.commands.pop_front()
     }
 }
