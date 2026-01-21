@@ -7,7 +7,7 @@ use commanductui::{
     AppEvent, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
     WindowConfig, WindowId,
 };
-use harvester_core::{update, AppState, AppViewModel, Msg};
+use harvester_core::{update, AppState, AppViewModel, Effect, Msg};
 
 use engine_logging::{engine_debug, engine_info};
 
@@ -101,7 +101,7 @@ impl AppEventHandler {
     }
 
     fn dispatch_msg(&mut self, msg: Msg) {
-        let maybe_view = {
+        let (maybe_view, clear_input) = {
             let msg_for_log = msg.clone();
             let mut guard = self.shared.lock().expect("lock shared state");
             let state = std::mem::take(&mut guard.state);
@@ -113,17 +113,28 @@ impl AppEventHandler {
                     raw.chars().take(120).collect::<String>()
                 );
             }
+            let clear_input = effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::EnqueueUrl { .. }));
             let view = state.view();
             let mut state = state;
             let was_dirty = state.consume_dirty();
             guard.state = state;
             self.effect_runner.enqueue(effects);
             if was_dirty {
-                Some(view)
+                (Some(view), clear_input)
             } else {
-                None
+                (None, clear_input)
             }
         };
+
+        if clear_input {
+            self.commands.push_back(PlatformCommand::SetInputText {
+                window_id: self.window_id,
+                control_id: ui::constants::INPUT_URLS,
+                text: String::new(),
+            });
+        }
 
         if let Some(view) = maybe_view {
             self.enqueue_render(&view);

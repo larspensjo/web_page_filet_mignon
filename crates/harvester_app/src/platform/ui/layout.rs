@@ -13,15 +13,29 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: PANEL_BOTTOM,
     });
 
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: None,
+        control_id: PANEL_INPUT,
+    });
+
     commands.push(PlatformCommand::CreateTreeView {
         window_id,
         parent_control_id: None,
         control_id: TREE_JOBS,
     });
 
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_INPUT),
+        control_id: LABEL_INPUT_HINT,
+        initial_text: "Paste URL(s) here. Jobs are created immediately.".to_string(),
+        class: LabelClass::Default,
+    });
+
     commands.push(PlatformCommand::CreateInput {
         window_id,
-        parent_control_id: None,
+        parent_control_id: Some(PANEL_INPUT),
         control_id: INPUT_URLS,
         initial_text: String::new(),
         read_only: false,
@@ -88,14 +102,31 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 fixed_size: Some(320),
                 margin: (6, 6, 6, 100),
             },
-            // URL input fills remaining space
             LayoutRule {
-                control_id: INPUT_URLS,
+                control_id: PANEL_INPUT,
                 parent_control_id: None,
                 dock_style: DockStyle::Fill,
                 order: 10,
                 fixed_size: None,
                 margin: (6, 6, 6, 100),
+            },
+            // Input hint label above the text box
+            LayoutRule {
+                control_id: LABEL_INPUT_HINT,
+                parent_control_id: Some(PANEL_INPUT),
+                dock_style: DockStyle::Top,
+                order: 0,
+                fixed_size: Some(28),
+                margin: (0, 0, 4, 0),
+            },
+            // URL input fills remaining space
+            LayoutRule {
+                control_id: INPUT_URLS,
+                parent_control_id: Some(PANEL_INPUT),
+                dock_style: DockStyle::Fill,
+                order: 1,
+                fixed_size: None,
+                margin: (0, 0, 0, 0),
             },
             // Status label fills the panel
             LayoutRule {
