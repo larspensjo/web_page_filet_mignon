@@ -158,6 +158,11 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::StopFinishClicked);
             }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_ARCHIVE =>
+            {
+                let _ = self.msg_tx.send(Msg::ArchiveClicked);
+            }
             AppEvent::InputTextChanged {
                 control_id, text, ..
             } if control_id == ui::constants::INPUT_URLS => {

@@ -2,6 +2,7 @@ use commanductui::types::ControlId;
 
 pub const INPUT_URLS: ControlId = ControlId::new(1001);
 pub const BUTTON_STOP: ControlId = ControlId::new(1003);
+pub const BUTTON_ARCHIVE: ControlId = ControlId::new(1004);
 pub const TREE_JOBS: ControlId = ControlId::new(1501);
 pub const PANEL_BOTTOM: ControlId = ControlId::new(2001);
 pub const PANEL_INPUT: ControlId = ControlId::new(2002);

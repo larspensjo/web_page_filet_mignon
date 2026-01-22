@@ -69,6 +69,12 @@ pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> 
         enabled: matches!(view.session, SessionState::Running),
     });
 
+    cmds.push(PlatformCommand::SetControlEnabled {
+        window_id,
+        control_id: BUTTON_ARCHIVE,
+        enabled: view.job_count > 0,
+    });
+
     cmds.push(PlatformCommand::PopulateTreeView {
         window_id,
         control_id: TREE_JOBS,

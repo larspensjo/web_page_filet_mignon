@@ -63,6 +63,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Vec::new()
             }
         }
+        Msg::ArchiveClicked => vec![Effect::ArchiveRequested],
         Msg::JobProgress {
             job_id,
             stage,

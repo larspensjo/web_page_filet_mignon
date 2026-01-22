@@ -200,3 +200,15 @@ fn paste_with_mixed_new_and_duplicate_urls() {
     assert_eq!(view.last_paste_stats.as_ref().unwrap().enqueued, 1);
     assert_eq!(view.last_paste_stats.as_ref().unwrap().skipped, 1);
 }
+
+#[test]
+fn archive_click_emits_effect_without_state_change() {
+    init_logging();
+    let state = AppState::new();
+    let before = state.view();
+
+    let (next, effects) = update(state, Msg::ArchiveClicked);
+
+    assert_eq!(next.view(), before);
+    assert_eq!(effects, vec![Effect::ArchiveRequested]);
+}

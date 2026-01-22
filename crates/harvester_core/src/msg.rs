@@ -4,6 +4,8 @@ pub enum Msg {
     UrlsPasted(String),
     /// User clicked Stop/Finish.
     StopFinishClicked,
+    /// User clicked Archive.
+    ArchiveClicked,
     /// UI/render tick to coalesce rendering.
     Tick,
     /// Engine progress for a job.

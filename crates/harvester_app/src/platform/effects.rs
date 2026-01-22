@@ -45,6 +45,10 @@ impl EffectRunner {
                     let immediate = matches!(policy, StopPolicy::Immediate);
                     self.engine.stop(immediate);
                 }
+                Effect::ArchiveRequested => {
+                    engine_info!("Archive requested: enqueue export job");
+                    self.engine.request_export();
+                }
             }
         }
     }
