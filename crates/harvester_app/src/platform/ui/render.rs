@@ -21,6 +21,22 @@ pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> 
         None => format!("Session: {} | Jobs: {}", session_label, view.job_count),
     };
 
+    let raw_limit = view.token_limit;
+    let effective_limit = raw_limit.max(1);
+    let bar_max = effective_limit.min(u32::MAX as u64);
+    let clamped_tokens = view.total_tokens.min(bar_max);
+    let percent = if raw_limit > 0 {
+        (view.total_tokens.min(raw_limit) as f64 / raw_limit as f64) * 100.0
+    } else {
+        0.0
+    };
+    let progress_text = format!(
+        "Tokens: {} / {} ({:.1}%)",
+        format_with_commas(view.total_tokens),
+        format_with_commas(view.token_limit),
+        percent
+    );
+
     let mut cmds = Vec::new();
 
     cmds.push(PlatformCommand::UpdateLabelText {
@@ -28,6 +44,23 @@ pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> 
         control_id: LABEL_STATUS,
         text: status_text,
         severity: MessageSeverity::Information,
+    });
+
+    cmds.push(PlatformCommand::SetProgressBarRange {
+        window_id,
+        control_id: PROGRESS_TOKENS,
+        min: 0,
+        max: bar_max as u32,
+    });
+    cmds.push(PlatformCommand::SetProgressBarPosition {
+        window_id,
+        control_id: PROGRESS_TOKENS,
+        position: clamped_tokens as u32,
+    });
+    cmds.push(PlatformCommand::SetControlText {
+        window_id,
+        control_id: LABEL_TOKEN_PROGRESS,
+        text: progress_text,
     });
 
     cmds.push(PlatformCommand::SetControlEnabled {
@@ -106,4 +139,15 @@ fn stage_label(stage: Stage) -> &'static str {
         Stage::Writing => "Writing",
         Stage::Done => "Done",
     }
+}
+
+fn format_with_commas(value: u64) -> String {
+    let mut out = String::new();
+    for (i, ch) in value.to_string().chars().rev().enumerate() {
+        if i != 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
 }

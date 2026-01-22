@@ -1,4 +1,4 @@
-use crate::view_model::{AppViewModel, JobRowView, LastPasteStats};
+use crate::view_model::{AppViewModel, JobRowView, LastPasteStats, TOKEN_LIMIT};
 use std::collections::{BTreeMap, HashSet};
 
 pub type JobId = u64;
@@ -44,6 +44,8 @@ impl AppState {
             jobs,
             last_paste_stats: self.last_paste_stats.clone(),
             dirty: self.dirty,
+            total_tokens: self.metrics.total_tokens,
+            token_limit: TOKEN_LIMIT,
         }
     }
 
@@ -96,7 +98,15 @@ impl AppState {
         if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = stage;
             if let Some(t) = tokens {
-                job.tokens = Some(t);
+                if job.tokens != Some(t) {
+                    let previous = job.tokens.unwrap_or(0) as u64;
+                    self.metrics.total_tokens = self
+                        .metrics
+                        .total_tokens
+                        .saturating_sub(previous)
+                        .saturating_add(t as u64);
+                    job.tokens = Some(t);
+                }
             }
             if let Some(b) = bytes {
                 job.bytes = Some(b);
@@ -171,6 +181,7 @@ impl JobState {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct MetricsState {
     total_urls: usize,
+    total_tokens: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
