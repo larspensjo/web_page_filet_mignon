@@ -1,0 +1,23 @@
+# Application description
+
+## Typical workflow
+A typical workflow would to look like this:
+* I am using a news aggregating site in a regular web browser.
+* Every time I find an interesting news entry, I will copy the URL, one at a time, to web_page_filet_mignon. Sometimes, more than one.
+* After every added URL, I want web_page_filet_mignon to immediately update the jobs.
+* If web_page_filet_mignon was in a finished state when I add more URLs, I want it to go back to active state again.
+* When done adding URLs, I press the Archive button that exports everything.
+
+## Display
+
+The application shall consist of the following main components, from top to bottom:
+* A rate limiting progress bar.
+* A URL drop box left of a window with a treeview of URLs being downloaded or completed.
+* An Archive button
+
+### Progress bar
+I want a progress bar at the top of the window.
+
+It should show the number of tokens total, as related to a max limit. The max limit shall be 200000.
+
+That way, while you continue to add more URLs, the progress bar increase.
