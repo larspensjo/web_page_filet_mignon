@@ -67,12 +67,6 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: None,
-        control_id: BUTTON_START,
-        text: "Start".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: None,
         control_id: BUTTON_STOP,
         text: "Stop / Finish".to_string(),
     });
@@ -124,14 +118,6 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 margin: (0, 0, 0, 0),
             },
             // Buttons above the status bar
-            LayoutRule {
-                control_id: BUTTON_START,
-                parent_control_id: None,
-                dock_style: DockStyle::Bottom,
-                order: 110,
-                fixed_size: Some(40),
-                margin: (6, 6, 6, 6),
-            },
             LayoutRule {
                 control_id: BUTTON_STOP,
                 parent_control_id: None,

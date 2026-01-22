@@ -6,3 +6,5 @@ publish = false
 
 [dependencies]
 
+[dev-dependencies]
+engine_logging = { path = "../engine_logging" }

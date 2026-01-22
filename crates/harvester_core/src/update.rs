@@ -53,20 +53,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             effects
         }
-        Msg::StartClicked => {
-            if state.session() == SessionState::Idle {
-                state.start_session();
-                let enqueued = state.enqueue_jobs_from_ui();
-                let mut effects = Vec::with_capacity(1 + enqueued.len());
-                effects.push(Effect::StartSession);
-                for (job_id, url) in enqueued {
-                    effects.push(Effect::EnqueueUrl { job_id, url });
-                }
-                effects
-            } else {
-                Vec::new()
-            }
-        }
         Msg::StopFinishClicked => {
             if state.session() == SessionState::Running {
                 state.finish_session();

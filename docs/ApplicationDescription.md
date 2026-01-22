@@ -13,7 +13,7 @@ A typical workflow would to look like this:
 The application shall consist of the following main components, from top to bottom:
 * A rate limiting progress bar.
 * A URL drop box left of a window with a treeview of URLs being downloaded or completed.
-* An Archive button
+* A Stop / Finish button
 
 ### Progress bar
 I want a progress bar at the top of the window.

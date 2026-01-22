@@ -65,11 +65,6 @@ pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> 
 
     cmds.push(PlatformCommand::SetControlEnabled {
         window_id,
-        control_id: BUTTON_START,
-        enabled: matches!(view.session, SessionState::Idle),
-    });
-    cmds.push(PlatformCommand::SetControlEnabled {
-        window_id,
         control_id: BUTTON_STOP,
         enabled: matches!(view.session, SessionState::Running),
     });

@@ -1,7 +1,15 @@
+use std::sync::Once;
+
 use harvester_core::{update, AppState, Effect, Msg, SessionState, StopPolicy};
+
+fn init_logging() {
+    static INIT: Once = Once::new();
+    INIT.call_once(engine_logging::initialize_for_tests);
+}
 
 #[test]
 fn urls_pasted_trims_and_ignores_empty() {
+    init_logging();
     let state = AppState::new();
     let input = "https://a.example.com \n\n  https://b.example.com\n   \n";
 
@@ -33,18 +41,13 @@ fn urls_pasted_trims_and_ignores_empty() {
 }
 
 #[test]
-fn start_moves_idle_to_running() {
-    let state = AppState::new();
-    let (next, _effects) = update(state, Msg::StartClicked);
-
-    assert_eq!(next.view().session, SessionState::Running);
-    assert!(next.view().dirty);
-}
-
-#[test]
 fn stop_finish_moves_running_to_finishing() {
+    init_logging();
     let state = AppState::new();
-    let (state, _effects) = update(state, Msg::StartClicked);
+    let (state, _effects) = update(
+        state,
+        Msg::UrlsPasted("https://example.com\n".to_string()),
+    );
     let (state, _effects) = update(state, Msg::StopFinishClicked);
 
     assert_eq!(state.view().session, SessionState::Finishing);
@@ -52,17 +55,13 @@ fn stop_finish_moves_running_to_finishing() {
 }
 
 #[test]
-fn start_emits_start_and_enqueue_effects() {
-    let state = AppState::new();
-    let (_next, effects) = update(state, Msg::StartClicked);
-
-    assert_eq!(effects, vec![Effect::StartSession]);
-}
-
-#[test]
 fn stop_finish_emits_effect() {
+    init_logging();
     let state = AppState::new();
-    let (state, _effects) = update(state, Msg::StartClicked);
+    let (state, _effects) = update(
+        state,
+        Msg::UrlsPasted("https://example.com\n".to_string()),
+    );
     let (_state, effects) = update(state, Msg::StopFinishClicked);
 
     assert_eq!(
@@ -75,8 +74,12 @@ fn stop_finish_emits_effect() {
 
 #[test]
 fn urls_pasted_ignored_while_finishing() {
+    init_logging();
     let state = AppState::new();
-    let (state, _effects) = update(state, Msg::StartClicked);
+    let (state, _effects) = update(
+        state,
+        Msg::UrlsPasted("https://example.com\n".to_string()),
+    );
     let (mut state, _effects) = update(state, Msg::StopFinishClicked);
     assert!(state.consume_dirty());
 
@@ -86,13 +89,14 @@ fn urls_pasted_ignored_while_finishing() {
     );
 
     assert_eq!(next.view().session, SessionState::Finishing);
-    assert_eq!(next.view().job_count, 0);
+    assert_eq!(next.view().job_count, 1);
     assert!(effects.is_empty());
     assert!(!next.consume_dirty());
 }
 
 #[test]
 fn urls_pasted_while_running_stays_running() {
+    init_logging();
     let state = AppState::new();
     // First paste: Idle -> Running
     let (state, effects) = update(
@@ -120,6 +124,7 @@ fn urls_pasted_while_running_stays_running() {
 
 #[test]
 fn duplicate_paste_skipped() {
+    init_logging();
     let state = AppState::new();
     // First paste
     let (state, effects) = update(state, Msg::UrlsPasted("https://example.com\n".to_string()));
@@ -140,6 +145,7 @@ fn duplicate_paste_skipped() {
 
 #[test]
 fn url_normalization_catches_variants() {
+    init_logging();
     let state = AppState::new();
     // First paste with trailing slash
     let (state, effects) = update(state, Msg::UrlsPasted("https://example.com/\n".to_string()));
@@ -170,6 +176,7 @@ fn url_normalization_catches_variants() {
 
 #[test]
 fn paste_with_mixed_new_and_duplicate_urls() {
+    init_logging();
     let state = AppState::new();
     // First paste with two URLs
     let (state, effects) = update(

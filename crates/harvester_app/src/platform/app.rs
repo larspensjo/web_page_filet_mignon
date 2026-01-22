@@ -154,11 +154,6 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::Tick);
             }
             AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_START =>
-            {
-                let _ = self.msg_tx.send(Msg::StartClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_STOP =>
             {
                 let _ = self.msg_tx.send(Msg::StopFinishClicked);
