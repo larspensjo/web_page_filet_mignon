@@ -87,3 +87,19 @@ fn concatenated_export_builds_delimited_output_and_manifest() {
     assert!(manifest.contains("\"doc_count\":2"));
     assert!(manifest.contains("\"total_tokens\":5"));
 }
+
+#[test]
+fn concatenated_export_creates_missing_output_dir() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let missing_dir = temp.path().join("missing_output");
+
+    let summary = build_concatenated_export(&missing_dir, ExportOptions::default()).unwrap();
+
+    assert!(summary.output_path.exists());
+    let export = std::fs::read_to_string(summary.output_path).unwrap();
+    assert!(export.is_empty());
+
+    let manifest = std::fs::read_to_string(summary.manifest_path.unwrap()).unwrap();
+    assert!(manifest.contains("\"doc_count\":0"));
+    assert!(manifest.contains("\"total_tokens\":0"));
+}

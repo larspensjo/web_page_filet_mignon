@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
-use crate::persist::{AtomicFileWriter, PersistError};
+use crate::persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 
 #[derive(Debug, Clone)]
 pub struct ExportOptions {
@@ -56,6 +56,7 @@ pub fn build_concatenated_export(
     output_dir: &Path,
     options: ExportOptions,
 ) -> Result<ExportSummary, ExportError> {
+    ensure_output_dir(output_dir)?;
     let mut entries: Vec<_> = fs::read_dir(output_dir)?
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
