@@ -11,10 +11,10 @@ use harvester_core::{update, AppState, AppViewModel, Effect, JobResultKind, Msg}
 
 use engine_logging::{engine_debug, engine_info};
 
-use super::{effects, persistence};
 use super::effects::EffectRunner;
 use super::logging::{self, LogDestination};
 use super::ui;
+use super::{effects, persistence};
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
     logging::initialize(LogDestination::Both);

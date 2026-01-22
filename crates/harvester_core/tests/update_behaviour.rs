@@ -44,10 +44,7 @@ fn urls_pasted_trims_and_ignores_empty() {
 fn stop_finish_moves_running_to_finishing() {
     init_logging();
     let state = AppState::new();
-    let (state, _effects) = update(
-        state,
-        Msg::UrlsPasted("https://example.com\n".to_string()),
-    );
+    let (state, _effects) = update(state, Msg::UrlsPasted("https://example.com\n".to_string()));
     let (state, _effects) = update(state, Msg::StopFinishClicked);
 
     assert_eq!(state.view().session, SessionState::Finishing);
@@ -58,10 +55,7 @@ fn stop_finish_moves_running_to_finishing() {
 fn stop_finish_emits_effect() {
     init_logging();
     let state = AppState::new();
-    let (state, _effects) = update(
-        state,
-        Msg::UrlsPasted("https://example.com\n".to_string()),
-    );
+    let (state, _effects) = update(state, Msg::UrlsPasted("https://example.com\n".to_string()));
     let (_state, effects) = update(state, Msg::StopFinishClicked);
 
     assert_eq!(
@@ -76,10 +70,7 @@ fn stop_finish_emits_effect() {
 fn urls_pasted_ignored_while_finishing() {
     init_logging();
     let state = AppState::new();
-    let (state, _effects) = update(
-        state,
-        Msg::UrlsPasted("https://example.com\n".to_string()),
-    );
+    let (state, _effects) = update(state, Msg::UrlsPasted("https://example.com\n".to_string()));
     let (mut state, _effects) = update(state, Msg::StopFinishClicked);
     assert!(state.consume_dirty());
 

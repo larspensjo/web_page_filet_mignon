@@ -28,11 +28,7 @@ pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot
             return Vec::new();
         }
         Err(err) => {
-            engine_warn!(
-                "Failed to read persisted state from {:?}: {}",
-                path,
-                err
-            );
+            engine_warn!("Failed to read persisted state from {:?}: {}", path, err);
             return Vec::new();
         }
     };
