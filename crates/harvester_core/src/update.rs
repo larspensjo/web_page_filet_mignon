@@ -1,4 +1,4 @@
-use crate::{AppState, Effect, Msg, SessionState, StopPolicy};
+use crate::{normalize_url_for_dedupe, AppState, Effect, Msg, SessionState, StopPolicy};
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
@@ -21,7 +21,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let mut unique_urls = Vec::new();
             let mut skipped_count = 0;
             for url in urls {
-                let normalized = normalize_url(&url);
+                let normalized = normalize_url_for_dedupe(&url);
                 if state.is_url_seen(&normalized) {
                     skipped_count += 1;
                 } else {
@@ -89,11 +89,4 @@ fn parse_urls(raw: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
         .collect()
-}
-
-/// Normalize URL for deduplication: trim whitespace, lowercase, strip trailing `/`.
-fn normalize_url(url: &str) -> String {
-    let trimmed = url.trim();
-    let lowercased = trimmed.to_lowercase();
-    lowercased.trim_end_matches('/').to_owned()
 }

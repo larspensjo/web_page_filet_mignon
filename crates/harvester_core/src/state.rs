@@ -4,6 +4,13 @@ use std::collections::{BTreeMap, HashSet};
 pub type JobId = u64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedJobSnapshot {
+    pub url: String,
+    pub tokens: Option<u32>,
+    pub bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppState {
     session: SessionState,
     jobs: BTreeMap<JobId, JobState>,
@@ -54,6 +61,55 @@ impl AppState {
         let was_dirty = self.dirty;
         self.dirty = false;
         was_dirty
+    }
+
+    pub fn completed_jobs_snapshot(&self) -> Vec<CompletedJobSnapshot> {
+        self.jobs
+            .values()
+            .filter(|job| job.outcome == Some(JobResultKind::Success))
+            .map(|job| CompletedJobSnapshot {
+                url: job.url.clone(),
+                tokens: job.tokens,
+                bytes: job.bytes,
+            })
+            .collect()
+    }
+
+    pub fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {
+        if entries.is_empty() {
+            return;
+        }
+
+        self.jobs.clear();
+        self.seen_urls.clear();
+        self.metrics = MetricsState::default();
+        self.ui.urls.clear();
+        self.last_paste_stats = None;
+        self.next_job_id = 1;
+
+        for entry in entries {
+            let job_id = self.next_job_id;
+            self.next_job_id += 1;
+            self.jobs.insert(
+                job_id,
+                JobState {
+                    url: entry.url.clone(),
+                    stage: Stage::Done,
+                    outcome: Some(JobResultKind::Success),
+                    tokens: entry.tokens,
+                    bytes: entry.bytes,
+                },
+            );
+            let normalized = normalize_url_for_dedupe(&entry.url);
+            self.seen_urls.insert(normalized);
+            if let Some(tokens) = entry.tokens {
+                self.metrics.total_tokens = self.metrics.total_tokens.saturating_add(tokens as u64);
+            }
+        }
+
+        self.metrics.total_urls = self.jobs.len();
+        self.session = SessionState::Idle;
+        self.dirty = true;
     }
 
     pub(crate) fn session(&self) -> SessionState {
@@ -143,6 +199,13 @@ impl AppState {
     pub(crate) fn is_url_seen(&mut self, normalized_url: &str) -> bool {
         !self.seen_urls.insert(normalized_url.to_owned())
     }
+}
+
+/// Normalize URL for deduplication: trim whitespace, lowercase, strip trailing `/`.
+pub fn normalize_url_for_dedupe(url: &str) -> String {
+    let trimmed = url.trim();
+    let lowercased = trimmed.to_lowercase();
+    lowercased.trim_end_matches('/').to_owned()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

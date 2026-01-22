@@ -7,15 +7,19 @@ use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
 use harvester_engine::{EngineConfig, EngineEvent, EngineHandle};
 
+pub(crate) fn default_output_dir() -> std::path::PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join("output")
+}
+
 pub struct EffectRunner {
     engine: EngineHandle,
 }
 
 impl EffectRunner {
     pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
-        let output_dir = std::env::current_dir()
-            .unwrap_or_else(|_| std::path::PathBuf::from("."))
-            .join("output");
+        let output_dir = default_output_dir();
 
         let mut config = EngineConfig::default_with_output(output_dir);
         config.fetched_utc = std::sync::Arc::new(|| Utc::now().to_rfc3339());

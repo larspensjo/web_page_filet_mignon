@@ -12,3 +12,5 @@ commanductui = { path = "../../src/CommanDuctUI" }
 log.workspace = true
 simplelog.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
+ron = "0.8"
+serde = { version = "1", features = ["derive"] }

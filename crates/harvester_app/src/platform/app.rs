@@ -7,10 +7,11 @@ use commanductui::{
     AppEvent, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
     WindowConfig, WindowId,
 };
-use harvester_core::{update, AppState, AppViewModel, Effect, Msg};
+use harvester_core::{update, AppState, AppViewModel, Effect, JobResultKind, Msg};
 
 use engine_logging::{engine_debug, engine_info};
 
+use super::{effects, persistence};
 use super::effects::EffectRunner;
 use super::logging::{self, LogDestination};
 use super::ui;
@@ -27,6 +28,14 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     })?;
 
     let shared_state = Arc::new(Mutex::new(SharedState::default()));
+    let output_dir = effects::default_output_dir();
+    {
+        let completed = persistence::load_completed_jobs(&output_dir);
+        if !completed.is_empty() {
+            let mut guard = shared_state.lock().unwrap();
+            guard.state.restore_completed_jobs(completed);
+        }
+    }
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let effect_runner = EffectRunner::new(msg_tx.clone());
 
@@ -41,6 +50,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             msg_rx,
             msg_tx.clone(),
             effect_runner,
+            output_dir,
         )));
     let ui_state_provider: Arc<Mutex<dyn UiStateProvider>> =
         Arc::new(Mutex::new(AppUiStateProvider::new(shared_state)));
@@ -68,6 +78,7 @@ struct AppEventHandler {
     msg_rx: Mutex<mpsc::Receiver<Msg>>,
     msg_tx: mpsc::Sender<Msg>,
     effect_runner: EffectRunner,
+    output_dir: std::path::PathBuf,
 }
 
 impl AppEventHandler {
@@ -77,6 +88,7 @@ impl AppEventHandler {
         msg_rx: mpsc::Receiver<Msg>,
         msg_tx: mpsc::Sender<Msg>,
         effect_runner: EffectRunner,
+        output_dir: std::path::PathBuf,
     ) -> Self {
         Self {
             window_id,
@@ -85,6 +97,7 @@ impl AppEventHandler {
             msg_rx: Mutex::new(msg_rx),
             msg_tx,
             effect_runner,
+            output_dir,
         }
     }
 
@@ -106,6 +119,13 @@ impl AppEventHandler {
             let mut guard = self.shared.lock().expect("lock shared state");
             let state = std::mem::take(&mut guard.state);
             let (state, effects) = update(state, msg);
+            let should_persist = matches!(
+                msg_for_log,
+                Msg::JobDone {
+                    result: JobResultKind::Success,
+                    ..
+                }
+            );
             if let Msg::UrlsPasted(ref raw) = msg_for_log {
                 engine_debug!(
                     "UrlsPasted: raw_len={}, preview=\"{}\"",
@@ -118,9 +138,17 @@ impl AppEventHandler {
                 .any(|effect| matches!(effect, Effect::EnqueueUrl { .. }));
             let view = state.view();
             let mut state = state;
+            let completed_snapshot = if should_persist {
+                Some(state.completed_jobs_snapshot())
+            } else {
+                None
+            };
             let was_dirty = state.consume_dirty();
             guard.state = state;
             self.effect_runner.enqueue(effects);
+            if let Some(snapshot) = completed_snapshot {
+                persistence::save_completed_jobs(&self.output_dir, &snapshot);
+            }
             if was_dirty {
                 (Some(view), clear_input)
             } else {
