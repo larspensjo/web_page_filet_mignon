@@ -13,9 +13,10 @@ A typical workflow would to look like this:
 
 The application shall consist of the following main components, from top to bottom:
 * A rate limiting progress bar.
-* A URL drop box left of a window with a treeview of URLs being downloaded or completed.
+* A URL drop box left of a window with a treeview of URLs being downloaded or completed. The drop box shall have a fixed width, but the treeview should expand horisontally with the main window.
 * A Stop / Finish button
 * An Archive button. The button shall be disabled if no web sites are downloaded. It shall be disabled after the archive was generated, but enabled as soon as another web site has been downloaded.
+* The button shall be placed horisontally after each other. They shall have fixed width.
 
 ### Progress bar
 I want a progress bar at the top of the window.

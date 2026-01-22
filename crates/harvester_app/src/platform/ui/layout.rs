@@ -23,6 +23,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: None,
+        control_id: PANEL_BUTTONS,
+    });
+
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: None,
         control_id: PANEL_INPUT,
     });
 
@@ -66,14 +72,14 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
 
     commands.push(PlatformCommand::CreateButton {
         window_id,
-        parent_control_id: None,
+        parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_STOP,
         text: "Stop / Finish".to_string(),
     });
 
     commands.push(PlatformCommand::CreateButton {
         window_id,
-        parent_control_id: None,
+        parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_ARCHIVE,
         text: "Archive".to_string(),
     });
@@ -124,34 +130,27 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 fixed_size: Some(32),
                 margin: (0, 0, 0, 0),
             },
-            // Buttons above the status bar
+            // Buttons panel above the status bar
             LayoutRule {
-                control_id: BUTTON_ARCHIVE,
+                control_id: PANEL_BUTTONS,
                 parent_control_id: None,
                 dock_style: DockStyle::Bottom,
                 order: 110,
-                fixed_size: Some(40),
-                margin: (6, 6, 6, 6),
+                fixed_size: Some(44),
+                margin: (0, 0, 0, 0),
             },
+            // URL drop box on the left (fixed width)
             LayoutRule {
-                control_id: BUTTON_STOP,
+                control_id: PANEL_INPUT,
                 parent_control_id: None,
-                dock_style: DockStyle::Bottom,
-                order: 120,
-                fixed_size: Some(40),
-                margin: (6, 6, 6, 6),
-            },
-            // Jobs tree on the right
-            LayoutRule {
-                control_id: TREE_JOBS,
-                parent_control_id: None,
-                dock_style: DockStyle::Right,
+                dock_style: DockStyle::Left,
                 order: 200,
                 fixed_size: Some(320),
                 margin: (6, 6, 6, 100),
             },
+            // Jobs tree fills remaining space
             LayoutRule {
-                control_id: PANEL_INPUT,
+                control_id: TREE_JOBS,
                 parent_control_id: None,
                 dock_style: DockStyle::Fill,
                 order: 300,
@@ -184,6 +183,23 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 order: 0,
                 fixed_size: None,
                 margin: (6, 6, 6, 6),
+            },
+            // Buttons placed horizontally with fixed width
+            LayoutRule {
+                control_id: BUTTON_ARCHIVE,
+                parent_control_id: Some(PANEL_BUTTONS),
+                dock_style: DockStyle::Left,
+                order: 0,
+                fixed_size: Some(160),
+                margin: (6, 6, 6, 6),
+            },
+            LayoutRule {
+                control_id: BUTTON_STOP,
+                parent_control_id: Some(PANEL_BUTTONS),
+                dock_style: DockStyle::Left,
+                order: 1,
+                fixed_size: Some(160),
+                margin: (6, 6, 6, 0),
             },
         ],
     });
