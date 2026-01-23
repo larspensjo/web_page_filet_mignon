@@ -1280,6 +1280,8 @@ commands.push(PlatformCommand::SetTheme {
 });
 ```
 
+Suggestion: When a MainWindowBackground style is redefined at runtime we could explicitly InvalidateRect/RedrawWindow the main window and call WM_ERASEBKGND to ensure the new brush is used before WM_PAINT runs—this avoids waiting for the next native repaint and keeps the transition smooth.
+
 ### 4. Custom TreeView Checkboxes
 
 **Goal**: Replace system checkboxes with styled dark theme checkboxes.
