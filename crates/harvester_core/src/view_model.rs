@@ -9,6 +9,15 @@ pub struct LastPasteStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewHeaderView {
+    pub domain: String,
+    pub tokens: Option<u32>,
+    pub bytes: Option<u64>,
+    pub stage: Stage,
+    pub outcome: Option<JobResultKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppViewModel {
     pub session: SessionState,
     pub queued_urls: Vec<String>,
@@ -18,6 +27,8 @@ pub struct AppViewModel {
     pub dirty: bool,
     pub total_tokens: u64,
     pub token_limit: u64,
+    pub preview_text: Option<String>,
+    pub preview_header: Option<PreviewHeaderView>,
 }
 
 impl Default for AppViewModel {
@@ -31,6 +42,8 @@ impl Default for AppViewModel {
             dirty: false,
             total_tokens: 0,
             token_limit: TOKEN_LIMIT,
+            preview_text: None,
+            preview_header: None,
         }
     }
 }

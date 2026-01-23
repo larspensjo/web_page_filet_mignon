@@ -21,6 +21,8 @@ pub enum Msg {
         result: crate::JobResultKind,
         content_preview: Option<String>,
     },
+    /// User selected a job from the tree view.
+    JobSelected { job_id: crate::JobId },
     /// Fallback for placeholder wiring.
     NoOp,
 }

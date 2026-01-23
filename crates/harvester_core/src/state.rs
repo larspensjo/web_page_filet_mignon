@@ -1,4 +1,4 @@
-use crate::view_model::{AppViewModel, JobRowView, LastPasteStats, TOKEN_LIMIT};
+use crate::view_model::{AppViewModel, JobRowView, LastPasteStats, PreviewHeaderView, TOKEN_LIMIT};
 use std::collections::{BTreeMap, HashSet};
 
 pub type JobId = u64;
@@ -44,6 +44,18 @@ impl AppState {
 
     pub fn view(&self) -> AppViewModel {
         let jobs: Vec<JobRowView> = self.jobs.iter().map(|(id, job)| job.to_view(*id)).collect();
+        let preview_text = self.ui.preview_content().map(ToOwned::to_owned);
+        let preview_header = self
+            .ui
+            .selected_job_id()
+            .and_then(|job_id| self.jobs.get(&job_id))
+            .map(|job| PreviewHeaderView {
+                domain: domain_from_url(&job.url),
+                tokens: job.tokens,
+                bytes: job.bytes,
+                stage: job.stage,
+                outcome: job.outcome,
+            });
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -53,6 +65,8 @@ impl AppState {
             dirty: self.dirty,
             total_tokens: self.metrics.total_tokens,
             token_limit: TOKEN_LIMIT,
+            preview_text,
+            preview_header,
         }
     }
 
@@ -84,6 +98,7 @@ impl AppState {
         self.seen_urls.clear();
         self.metrics = MetricsState::default();
         self.ui.urls.clear();
+        self.ui.clear_preview();
         self.last_paste_stats = None;
         self.next_job_id = 1;
 
@@ -111,6 +126,14 @@ impl AppState {
         self.metrics.total_urls = self.jobs.len();
         self.session = SessionState::Idle;
         self.dirty = true;
+    }
+
+    pub(crate) fn select_job(&mut self, job_id: JobId) {
+        if let Some(job) = self.jobs.get(&job_id) {
+            if self.ui.select_job(job_id, job.content_preview.as_deref()) {
+                self.dirty = true;
+            }
+        }
     }
 
     pub(crate) fn session(&self) -> SessionState {
@@ -179,7 +202,7 @@ impl AppState {
         result: JobResultKind,
         content_preview: Option<String>,
     ) {
-        if let Some(job) = self.jobs.get_mut(&job_id) {
+        let job_updated = if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = Stage::Done;
             job.outcome = Some(result);
             job.content_preview = if matches!(result, JobResultKind::Success) {
@@ -187,6 +210,18 @@ impl AppState {
             } else {
                 None
             };
+            true
+        } else {
+            false
+        };
+        if job_updated && self.ui.selected_job_id() == Some(job_id) {
+            let preview_content = self
+                .jobs
+                .get(&job_id)
+                .and_then(|job| job.content_preview.as_deref());
+            self.ui.select_job(job_id, preview_content);
+        }
+        if job_updated {
             self.dirty = true;
         }
     }
@@ -218,6 +253,24 @@ pub fn normalize_url_for_dedupe(url: &str) -> String {
     let trimmed = url.trim();
     let lowercased = trimmed.to_lowercase();
     lowercased.trim_end_matches('/').to_owned()
+}
+
+fn domain_from_url(url: &str) -> String {
+    let trimmed = url.trim();
+    let without_scheme = trimmed
+        .find("://")
+        .map(|pos| &trimmed[pos + 3..])
+        .unwrap_or(trimmed);
+    let host = without_scheme
+        .split(|c: char| matches!(c, '/' | '?' | '#'))
+        .next()
+        .unwrap_or(without_scheme)
+        .trim_end_matches('/');
+    if host.is_empty() {
+        trimmed.to_string()
+    } else {
+        host.to_string()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -265,9 +318,78 @@ struct MetricsState {
     total_tokens: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PreviewState {
+    Empty,
+    Available { job_id: JobId, content: String },
+    InProgress { job_id: JobId, content: String },
+    Unavailable { job_id: JobId },
+}
+
+impl Default for PreviewState {
+    fn default() -> Self {
+        PreviewState::Empty
+    }
+}
+
+impl PreviewState {
+    fn job_id(&self) -> Option<JobId> {
+        match self {
+            PreviewState::Empty => None,
+            PreviewState::Available { job_id, .. }
+            | PreviewState::InProgress { job_id, .. }
+            | PreviewState::Unavailable { job_id } => Some(*job_id),
+        }
+    }
+
+    fn content(&self) -> Option<&str> {
+        match self {
+            PreviewState::Available { content, .. } | PreviewState::InProgress { content, .. } => {
+                Some(content.as_str())
+            }
+            PreviewState::Empty | PreviewState::Unavailable { .. } => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct UiState {
     urls: Vec<String>,
+    preview: PreviewState,
+}
+
+impl UiState {
+    fn preview_content(&self) -> Option<&str> {
+        self.preview.content()
+    }
+
+    fn selected_job_id(&self) -> Option<JobId> {
+        self.preview.job_id()
+    }
+
+    fn select_job(&mut self, job_id: JobId, content: Option<&str>) -> bool {
+        let next_state = match content {
+            Some(text) => PreviewState::Available {
+                job_id,
+                content: text.to_owned(),
+            },
+            None => PreviewState::Unavailable { job_id },
+        };
+        self.set_preview_state(next_state)
+    }
+
+    fn clear_preview(&mut self) -> bool {
+        self.set_preview_state(PreviewState::Empty)
+    }
+
+    fn set_preview_state(&mut self, next: PreviewState) -> bool {
+        if self.preview == next {
+            false
+        } else {
+            self.preview = next;
+            true
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -291,6 +413,7 @@ pub enum JobResultKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{update, Msg};
 
     #[test]
     fn job_done_success_stores_preview() {
@@ -327,5 +450,70 @@ mod tests {
         state.apply_done(2, JobResultKind::Failed, Some("ignored".to_string()));
         let job = state.jobs.get(&2).expect("job exists");
         assert_eq!(job.content_preview(), None);
+    }
+
+    #[test]
+    fn selecting_job_with_preview_updates_view_model() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            3,
+            JobState {
+                url: "https://example.com/path".to_string(),
+                stage: Stage::Done,
+                content_preview: Some("preview content".to_string()),
+                ..Default::default()
+            },
+        );
+        let (state, _) = update(state, Msg::JobSelected { job_id: 3 });
+        let view = state.view();
+        assert_eq!(view.preview_text, Some("preview content".to_string()));
+        assert_eq!(view.preview_header.as_ref().unwrap().domain, "example.com");
+    }
+
+    #[test]
+    fn selecting_job_without_preview_only_sets_header() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            4,
+            JobState {
+                url: "http://sub.example.net/a".to_string(),
+                stage: Stage::Downloading,
+                ..Default::default()
+            },
+        );
+        let (state, _) = update(state, Msg::JobSelected { job_id: 4 });
+        let view = state.view();
+        assert_eq!(view.preview_text, None);
+        let header = view.preview_header.expect("header should exist");
+        assert_eq!(header.domain, "sub.example.net");
+        assert_eq!(header.stage, Stage::Downloading);
+    }
+
+    #[test]
+    fn selecting_same_job_twice_only_sets_dirty_once() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            5,
+            JobState {
+                url: "https://repeat.example".to_string(),
+                stage: Stage::Done,
+                content_preview: Some("d".to_string()),
+                ..Default::default()
+            },
+        );
+        let (state, _) = update(state, Msg::JobSelected { job_id: 5 });
+        let mut state = state;
+        assert!(state.consume_dirty());
+        let (state, _) = update(state, Msg::JobSelected { job_id: 5 });
+        let mut state = state;
+        assert!(!state.consume_dirty());
+    }
+
+    #[test]
+    fn domain_from_url_handles_various_inputs() {
+        assert_eq!(domain_from_url("https://example.com/"), "example.com");
+        assert_eq!(domain_from_url("http://foo.bar/baz?qux"), "foo.bar");
+        assert_eq!(domain_from_url("example.org/path"), "example.org");
+        assert_eq!(domain_from_url(""), "");
     }
 }

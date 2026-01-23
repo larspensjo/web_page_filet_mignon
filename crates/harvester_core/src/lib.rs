@@ -12,4 +12,4 @@ pub use state::{
     Stage,
 };
 pub use update::update;
-pub use view_model::{AppViewModel, JobRowView, TOKEN_LIMIT};
+pub use view_model::{AppViewModel, JobRowView, PreviewHeaderView, TOKEN_LIMIT};

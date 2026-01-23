@@ -81,6 +81,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.apply_done(job_id, result, content_preview);
             Vec::new()
         }
+        Msg::JobSelected { job_id } => {
+            state.select_job(job_id);
+            Vec::new()
+        }
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 

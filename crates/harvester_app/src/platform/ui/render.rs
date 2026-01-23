@@ -1,6 +1,8 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{MessageSeverity, PlatformCommand, WindowId};
-use harvester_core::{AppViewModel, JobResultKind, JobRowView, SessionState, Stage};
+use harvester_core::{
+    AppViewModel, JobResultKind, JobRowView, PreviewHeaderView, SessionState, Stage,
+};
 
 use super::constants::*;
 
@@ -81,6 +83,24 @@ pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> 
         items: build_job_tree(view),
     });
 
+    let preview_text = view.preview_text.clone().unwrap_or_default();
+    cmds.push(PlatformCommand::SetViewerContent {
+        window_id,
+        control_id: VIEWER_PREVIEW,
+        text: preview_text,
+    });
+
+    let header_text = view
+        .preview_header
+        .as_ref()
+        .map(format_preview_header)
+        .unwrap_or_else(|| "(no selection)".to_string());
+    cmds.push(PlatformCommand::SetControlText {
+        window_id,
+        control_id: LABEL_PREVIEW_HEADER,
+        text: header_text,
+    });
+
     cmds
 }
 
@@ -151,4 +171,24 @@ fn format_with_commas(value: u64) -> String {
         out.push(ch);
     }
     out.chars().rev().collect()
+}
+
+fn format_preview_header(header: &PreviewHeaderView) -> String {
+    let mut parts = Vec::new();
+    if !header.domain.is_empty() {
+        parts.push(header.domain.clone());
+    }
+    if let Some(tokens) = header.tokens {
+        parts.push(format!("{tokens} tok"));
+    }
+    if let Some(bytes) = header.bytes {
+        parts.push(format!("{bytes} B"));
+    }
+    let stage_desc = match header.outcome {
+        Some(JobResultKind::Failed) => "Failed".to_string(),
+        Some(JobResultKind::Success) => "Done".to_string(),
+        None => stage_label(header.stage).to_string(),
+    };
+    parts.push(stage_desc);
+    parts.join(" | ")
 }
