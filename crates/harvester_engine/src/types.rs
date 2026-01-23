@@ -19,6 +19,7 @@ pub struct JobProgress {
     pub stage: Stage,
     pub bytes: Option<u64>,
     pub tokens: Option<u32>,
+    pub content_preview: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -68,6 +68,7 @@ impl EffectRunner {
                             stage: map_stage(progress.stage),
                             tokens: progress.tokens,
                             bytes: progress.bytes,
+                            content_preview: progress.content_preview.clone(),
                         });
                     }
                     EngineEvent::JobCompleted { job_id, result } => {

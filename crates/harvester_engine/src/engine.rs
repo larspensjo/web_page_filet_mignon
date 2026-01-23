@@ -317,6 +317,14 @@ async fn run_job(
 
     let preview_content = prepare_preview_content(&markdown);
 
+    let _ = event_tx.send(EngineEvent::Progress(JobProgress {
+        job_id,
+        stage: Stage::Converting,
+        bytes: None,
+        tokens: None,
+        content_preview: Some(preview_content.clone()),
+    }));
+
     if cancel_token.is_cancelled() {
         let _ = event_tx.send(EngineEvent::JobCompleted {
             job_id,
@@ -347,6 +355,7 @@ async fn run_job(
         stage: Stage::Tokenizing,
         bytes: None,
         tokens: Some(tokens),
+        content_preview: None,
     }));
 
     if cancel_token.is_cancelled() {

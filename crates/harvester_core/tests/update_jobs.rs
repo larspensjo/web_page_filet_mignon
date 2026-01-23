@@ -20,6 +20,7 @@ fn urls_pasted_trims_and_ignores_empty() {
             stage: Stage::Downloading,
             tokens: Some(10),
             bytes: Some(1024),
+            content_preview: None,
         },
     );
     let job1 = next
@@ -78,6 +79,7 @@ fn token_totals_accumulate_and_replace_previous_values() {
             stage: Stage::Tokenizing,
             tokens: Some(120),
             bytes: None,
+            content_preview: None,
         },
     );
     let view_after_first = state.view();
@@ -92,6 +94,7 @@ fn token_totals_accumulate_and_replace_previous_values() {
             stage: Stage::Tokenizing,
             tokens: Some(150),
             bytes: None,
+            content_preview: None,
         },
     );
     assert_eq!(state.view().total_tokens, 150);
@@ -104,6 +107,7 @@ fn token_totals_accumulate_and_replace_previous_values() {
             stage: Stage::Tokenizing,
             tokens: Some(50),
             bytes: None,
+            content_preview: None,
         },
     );
     assert_eq!(state.view().total_tokens, 200);

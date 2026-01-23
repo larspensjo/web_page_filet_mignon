@@ -26,6 +26,7 @@ fn completed_jobs_can_be_restored_for_resume() {
             stage: Stage::Tokenizing,
             tokens: Some(42),
             bytes: Some(1234),
+            content_preview: None,
         },
     );
     let (state, _) = update(

@@ -14,6 +14,7 @@ pub enum Msg {
         stage: crate::Stage,
         tokens: Option<u32>,
         bytes: Option<u64>,
+        content_preview: Option<String>,
     },
     /// Engine completion for a job.
     JobDone {

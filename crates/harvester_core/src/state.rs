@@ -175,6 +175,7 @@ impl AppState {
         stage: Stage,
         tokens: Option<u32>,
         bytes: Option<u64>,
+        content_preview: Option<String>,
     ) {
         if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = stage;
@@ -191,6 +192,13 @@ impl AppState {
             }
             if let Some(b) = bytes {
                 job.bytes = Some(b);
+            }
+            if let Some(content) = content_preview {
+                job.content_preview = Some(content.clone());
+                if self.ui.selected_job_id() == Some(job_id) {
+                    self.ui
+                        .set_preview_state(PreviewState::InProgress { job_id, content });
+                }
             }
             self.dirty = true;
         }
@@ -515,5 +523,64 @@ mod tests {
         assert_eq!(domain_from_url("http://foo.bar/baz?qux"), "foo.bar");
         assert_eq!(domain_from_url("example.org/path"), "example.org");
         assert_eq!(domain_from_url(""), "");
+    }
+
+    #[test]
+    fn job_progress_with_preview_updates_selected_preview() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            6,
+            JobState {
+                url: "https://partial.example".to_string(),
+                stage: Stage::Downloading,
+                ..Default::default()
+            },
+        );
+
+        let (state, _) = update(state, Msg::JobSelected { job_id: 6 });
+        let (state, _) = update(
+            state,
+            Msg::JobProgress {
+                job_id: 6,
+                stage: Stage::Converting,
+                tokens: None,
+                bytes: None,
+                content_preview: Some("live content".to_string()),
+            },
+        );
+
+        let view = state.view();
+        assert_eq!(view.preview_text, Some("live content".to_string()));
+        let job = state.jobs.get(&6).expect("job exists");
+        assert_eq!(job.content_preview(), Some("live content"));
+    }
+
+    #[test]
+    fn job_progress_with_preview_stores_content_when_not_selected() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            7,
+            JobState {
+                url: "https://unselected.example".to_string(),
+                stage: Stage::Downloading,
+                ..Default::default()
+            },
+        );
+
+        let (state, _) = update(
+            state,
+            Msg::JobProgress {
+                job_id: 7,
+                stage: Stage::Converting,
+                tokens: None,
+                bytes: None,
+                content_preview: Some("background content".to_string()),
+            },
+        );
+
+        let view = state.view();
+        assert_eq!(view.preview_text, None);
+        let job = state.jobs.get(&7).expect("job exists");
+        assert_eq!(job.content_preview(), Some("background content"));
     }
 }
