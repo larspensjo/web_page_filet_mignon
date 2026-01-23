@@ -1,7 +1,11 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
-    /// User pasted URLs into the input box.
-    UrlsPasted(String),
+    /// User edited the URL input box (debounced text).
+    InputChanged(String),
+    /// User submitted the current URL input for ingestion.
+    UrlsSubmitted,
+    /// Restore previously completed jobs from persisted state.
+    RestoreCompletedJobs(Vec<crate::CompletedJobSnapshot>),
     /// User clicked Stop/Finish.
     StopFinishClicked,
     /// User clicked Archive.

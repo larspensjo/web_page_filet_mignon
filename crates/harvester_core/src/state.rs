@@ -95,7 +95,7 @@ impl AppState {
             .collect()
     }
 
-    pub fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {
+    pub(crate) fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {
         if entries.is_empty() {
             return;
         }
@@ -105,6 +105,7 @@ impl AppState {
         self.metrics = MetricsState::default();
         self.ui.urls.clear();
         self.ui.clear_preview();
+        self.ui.clear_input_buffer();
         self.last_paste_stats = None;
         self.next_job_id = 1;
 
@@ -151,6 +152,18 @@ impl AppState {
         self.ui.urls = urls;
         self.metrics.total_urls = self.ui.urls.len();
         self.dirty = true;
+    }
+
+    pub(crate) fn set_input_buffer(&mut self, text: String) {
+        self.ui.set_input_buffer(text);
+    }
+
+    pub(crate) fn input_buffer(&self) -> &str {
+        self.ui.input_buffer()
+    }
+
+    pub(crate) fn clear_input_buffer(&mut self) {
+        self.ui.clear_input_buffer();
     }
 
     pub(crate) fn enqueue_jobs_from_ui(&mut self) -> Vec<(JobId, String)> {
@@ -429,6 +442,7 @@ impl PreviewState {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct UiState {
     urls: Vec<String>,
+    input_buffer: String,
     preview: PreviewState,
 }
 
@@ -463,6 +477,18 @@ impl UiState {
             self.preview = next;
             true
         }
+    }
+
+    fn set_input_buffer(&mut self, text: String) {
+        self.input_buffer = text;
+    }
+
+    fn input_buffer(&self) -> &str {
+        &self.input_buffer
+    }
+
+    fn clear_input_buffer(&mut self) {
+        self.input_buffer.clear();
     }
 }
 

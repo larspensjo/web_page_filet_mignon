@@ -9,7 +9,7 @@ use commanductui::{
 };
 use harvester_core::{update, AppState, AppViewModel, Effect, JobResultKind, Msg};
 
-use engine_logging::{engine_debug, engine_info};
+use engine_logging::engine_info;
 
 use super::effects::EffectRunner;
 use super::logging::{self, LogDestination};
@@ -29,15 +29,20 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
 
     let shared_state = Arc::new(Mutex::new(SharedState::default()));
     let output_dir = effects::default_output_dir();
+    let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
+    let effect_runner = EffectRunner::new(msg_tx.clone());
     {
         let completed = persistence::load_completed_jobs(&output_dir);
         if !completed.is_empty() {
             let mut guard = shared_state.lock().unwrap();
-            guard.state.restore_completed_jobs(completed);
+            let state = std::mem::take(&mut guard.state);
+            let (state, effects) = update(state, Msg::RestoreCompletedJobs(completed));
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+            guard.state = state;
         }
     }
-    let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
-    let effect_runner = EffectRunner::new(msg_tx.clone());
 
     let initial_view = shared_state.lock().unwrap().state.view();
     let mut initial_commands = ui::layout::initial_commands(window_id);
@@ -126,13 +131,6 @@ impl AppEventHandler {
                     ..
                 }
             );
-            if let Msg::UrlsPasted(ref raw) = msg_for_log {
-                engine_debug!(
-                    "UrlsPasted: raw_len={}, preview=\"{}\"",
-                    raw.len(),
-                    raw.chars().take(120).collect::<String>()
-                );
-            }
             let clear_input = effects
                 .iter()
                 .any(|effect| matches!(effect, Effect::EnqueueUrl { .. }));
@@ -199,7 +197,8 @@ impl PlatformEventHandler for AppEventHandler {
                     text.len(),
                     text.chars().take(120).collect::<String>()
                 );
-                let _ = self.msg_tx.send(Msg::UrlsPasted(text));
+                let _ = self.msg_tx.send(Msg::InputChanged(text));
+                let _ = self.msg_tx.send(Msg::UrlsSubmitted);
             }
             AppEvent::TreeViewItemSelectionChanged { window_id, item_id }
                 if window_id == self.window_id =>

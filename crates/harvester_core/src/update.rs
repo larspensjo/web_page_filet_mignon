@@ -3,7 +3,12 @@ use crate::{normalize_url_for_dedupe, AppState, Effect, Msg, SessionState, StopP
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let effects = match msg {
-        Msg::UrlsPasted(raw) => {
+        Msg::InputChanged(text) => {
+            state.set_input_buffer(text);
+            Vec::new()
+        }
+        Msg::UrlsSubmitted => {
+            let raw = state.input_buffer().to_owned();
             // Phase 0 invariant: when paste handling grows, keep `SessionState::Finishing`
             // as a strict block (no auto-resume, no new intake) unless gated by a feature flag.
             let urls = parse_urls(&raw);
@@ -44,6 +49,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let enqueued = state.enqueue_jobs_from_ui();
             let enqueued_count = enqueued.len();
             state.set_last_paste_stats(enqueued_count, skipped_count);
+            if enqueued_count > 0 {
+                state.clear_input_buffer();
+            }
             let mut effects = Vec::with_capacity(enqueued.len() + usize::from(should_start));
             if should_start {
                 effects.push(Effect::StartSession);
@@ -84,6 +92,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::JobSelected { job_id } => {
             state.select_job(job_id);
+            Vec::new()
+        }
+        Msg::RestoreCompletedJobs(entries) => {
+            state.restore_completed_jobs(entries);
             Vec::new()
         }
         Msg::Tick | Msg::NoOp => Vec::new(),

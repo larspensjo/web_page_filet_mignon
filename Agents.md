@@ -56,3 +56,9 @@ First and foremost, adhere to the Unidirectional Data Flow Architecture.
 * Log errors with context: include the URL, job_id, or other identifying information
 * In unit tests, call `engine_logging::initialize_for_tests();` to enable logging output
 * Logs should have a category inside '[' and ']' to make it easy to filter.
+
+## Git submodules
+It is fine to update these, if changes are required. If a change is done:
+* Increase the version number in the submodule Cargo.toml
+* Update CHANGELOG documents, if they exist.
+* If the changes are breaking, make that clear.

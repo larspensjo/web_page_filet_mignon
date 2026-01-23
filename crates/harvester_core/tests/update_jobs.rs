@@ -1,11 +1,16 @@
-use harvester_core::{update, AppState, JobResultKind, Msg, Stage, TOKEN_LIMIT};
+use harvester_core::{update, AppState, Effect, JobResultKind, Msg, Stage, TOKEN_LIMIT};
+
+fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
+    let (state, _) = update(state, Msg::InputChanged(input.to_string()));
+    update(state, Msg::UrlsSubmitted)
+}
 
 #[test]
 fn urls_pasted_trims_and_ignores_empty() {
     let state = AppState::new();
     let input = "https://a.example.com \n\n  https://b.example.com\n   \n";
 
-    let (mut next, _effects) = update(state, Msg::UrlsPasted(input.to_string()));
+    let (mut next, _effects) = submit_urls(state, input);
     let view = next.view();
 
     assert!(view.queued_urls.is_empty());
@@ -59,7 +64,7 @@ fn urls_pasted_trims_and_ignores_empty() {
 #[test]
 fn jobs_are_ordered_by_btree_key() {
     let state = AppState::new();
-    let (mut state, _effects) = update(state, Msg::UrlsPasted("b.com\na.com\n".into()));
+    let (mut state, _effects) = submit_urls(state, "b.com\na.com\n");
 
     // BTreeMap iteration should yield deterministic ascending JobId order (1,2,...)
     let ids: Vec<_> = state.view().jobs.iter().map(|j| j.job_id).collect();
@@ -70,7 +75,7 @@ fn jobs_are_ordered_by_btree_key() {
 #[test]
 fn token_totals_accumulate_and_replace_previous_values() {
     let state = AppState::new();
-    let (state, _effects) = update(state, Msg::UrlsPasted("a.com\nb.com\n".into()));
+    let (state, _effects) = submit_urls(state, "a.com\nb.com\n");
 
     let (mut state, _effects) = update(
         state,
