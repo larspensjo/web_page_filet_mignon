@@ -8,16 +8,19 @@ pub struct LastPasteStats {
     pub skipped: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PreviewHeaderView {
     pub domain: String,
     pub tokens: Option<u32>,
     pub bytes: Option<u64>,
     pub stage: Stage,
     pub outcome: Option<JobResultKind>,
+    pub heading_count: usize,
+    pub link_density: f64,
+    pub nav_heavy: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AppViewModel {
     pub session: SessionState,
     pub queued_urls: Vec<String>,

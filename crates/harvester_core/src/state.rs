@@ -10,7 +10,7 @@ pub struct CompletedJobSnapshot {
     pub bytes: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
     session: SessionState,
     jobs: BTreeMap<JobId, JobState>,
@@ -49,12 +49,18 @@ impl AppState {
             .ui
             .selected_job_id()
             .and_then(|job_id| self.jobs.get(&job_id))
-            .map(|job| PreviewHeaderView {
-                domain: domain_from_url(&job.url),
-                tokens: job.tokens,
-                bytes: job.bytes,
-                stage: job.stage,
-                outcome: job.outcome,
+            .map(|job| {
+                let quality = job.preview_quality.unwrap_or_default();
+                PreviewHeaderView {
+                    domain: domain_from_url(&job.url),
+                    tokens: job.tokens,
+                    bytes: job.bytes,
+                    stage: job.stage,
+                    outcome: job.outcome,
+                    heading_count: quality.heading_count,
+                    link_density: quality.link_density,
+                    nav_heavy: quality.nav_heavy(),
+                }
             });
         AppViewModel {
             session: self.session,
@@ -114,6 +120,7 @@ impl AppState {
                     tokens: entry.tokens,
                     bytes: entry.bytes,
                     content_preview: None,
+                    preview_quality: None,
                 },
             );
             let normalized = normalize_url_for_dedupe(&entry.url);
@@ -160,6 +167,7 @@ impl AppState {
                     tokens: None,
                     bytes: None,
                     content_preview: None,
+                    preview_quality: None,
                 },
             );
             enqueued.push((job_id, url.clone()));
@@ -194,7 +202,7 @@ impl AppState {
                 job.bytes = Some(b);
             }
             if let Some(content) = content_preview {
-                job.content_preview = Some(content.clone());
+                job.set_preview_content(content.clone());
                 if self.ui.selected_job_id() == Some(job_id) {
                     self.ui
                         .set_preview_state(PreviewState::InProgress { job_id, content });
@@ -213,11 +221,13 @@ impl AppState {
         let job_updated = if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = Stage::Done;
             job.outcome = Some(result);
-            job.content_preview = if matches!(result, JobResultKind::Success) {
-                content_preview
+            if matches!(result, JobResultKind::Success) {
+                if let Some(content) = content_preview {
+                    job.set_preview_content(content);
+                }
             } else {
-                None
-            };
+                job.clear_preview_content();
+            }
             true
         } else {
             false
@@ -292,7 +302,7 @@ pub enum SessionState {
     Finished,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 struct JobState {
     url: String,
     stage: Stage,
@@ -300,6 +310,7 @@ struct JobState {
     tokens: Option<u32>,
     bytes: Option<u64>,
     content_preview: Option<String>,
+    preview_quality: Option<PreviewQuality>,
 }
 
 impl JobState {
@@ -317,6 +328,61 @@ impl JobState {
     #[allow(dead_code)]
     pub(crate) fn content_preview(&self) -> Option<&str> {
         self.content_preview.as_deref()
+    }
+
+    fn set_preview_content(&mut self, content: String) {
+        self.preview_quality = Some(PreviewQuality::from_markdown(&content));
+        self.content_preview = Some(content);
+    }
+
+    fn clear_preview_content(&mut self) {
+        self.preview_quality = None;
+        self.content_preview = None;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PreviewQuality {
+    heading_count: usize,
+    link_density: f64,
+}
+
+impl Default for PreviewQuality {
+    fn default() -> Self {
+        Self {
+            heading_count: 0,
+            link_density: 0.0,
+        }
+    }
+}
+
+impl PreviewQuality {
+    const NAV_HEAVY_THRESHOLD: f64 = 0.3;
+
+    fn from_markdown(content: &str) -> Self {
+        let heading_count = content
+            .lines()
+            .filter(|line| line.trim_start().starts_with('#'))
+            .count();
+        let link_count = content
+            .split('[')
+            .skip(1)
+            .filter(|segment| segment.contains("]("))
+            .count();
+        let word_count = content.split_whitespace().count();
+        let link_density = if word_count > 0 {
+            link_count as f64 / word_count as f64
+        } else {
+            0.0
+        };
+        Self {
+            heading_count,
+            link_density,
+        }
+    }
+
+    fn nav_heavy(&self) -> bool {
+        self.link_density > Self::NAV_HEAVY_THRESHOLD
     }
 }
 
@@ -582,5 +648,21 @@ mod tests {
         assert_eq!(view.preview_text, None);
         let job = state.jobs.get(&7).expect("job exists");
         assert_eq!(job.content_preview(), Some("background content"));
+    }
+
+    #[test]
+    fn preview_quality_counts_headings_and_skips_nav_indicator_when_low_density() {
+        let content =
+            "# Title\n## Section\nBody text with a [link](http://example.com).\nMore words here.";
+        let quality = PreviewQuality::from_markdown(content);
+        assert_eq!(quality.heading_count, 2);
+        assert!(!quality.nav_heavy());
+    }
+
+    #[test]
+    fn preview_quality_marks_nav_heavy_when_link_density_high() {
+        let content = "[a](x) [b](x) [c](x) [d](x) [e](x)";
+        let quality = PreviewQuality::from_markdown(content);
+        assert!(quality.nav_heavy());
     }
 }

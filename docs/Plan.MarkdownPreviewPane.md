@@ -391,16 +391,6 @@ The UI currently creates an input box and a TreeView, but no dedicated read-only
 - Header shows meaningful at-a-glance metadata.
 - Quality signals help decide keep/skip without reading full content.
 
-### Step4.2_AddKeyboardShortcutsV1
-**Change**
-- Add shortcuts (MVP):
-  - `Enter` / `K` keep (no-op, advance to next)
-  - `D` discard (future: mark discarded)
-  - `↑`/`↓` navigate jobs with preview updating
-
-**Blocker**
-- If CommanDuctUI does not expose key events in a usable way, this waits.
-
 ---
 
 ## Quality gates

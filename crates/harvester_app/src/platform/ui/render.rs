@@ -179,16 +179,62 @@ fn format_preview_header(header: &PreviewHeaderView) -> String {
         parts.push(header.domain.clone());
     }
     if let Some(tokens) = header.tokens {
-        parts.push(format!("{tokens} tok"));
+        parts.push(format!("{} tokens", format_with_commas(tokens as u64)));
     }
     if let Some(bytes) = header.bytes {
         parts.push(format!("{bytes} B"));
     }
+    parts.push(format!("{count} headings", count = header.heading_count));
     let stage_desc = match header.outcome {
         Some(JobResultKind::Failed) => "Failed".to_string(),
         Some(JobResultKind::Success) => "Done".to_string(),
         None => stage_label(header.stage).to_string(),
     };
     parts.push(stage_desc);
+    if header.nav_heavy {
+        parts.push("[nav-heavy]".to_string());
+    }
     parts.join(" | ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harvester_core::Stage;
+
+    #[test]
+    fn preview_header_includes_headings_and_tokens() {
+        let header = PreviewHeaderView {
+            domain: "example.com".to_string(),
+            tokens: Some(1234),
+            bytes: Some(2048),
+            stage: Stage::Done,
+            outcome: Some(JobResultKind::Success),
+            heading_count: 8,
+            link_density: 0.0,
+            nav_heavy: false,
+        };
+        assert_eq!(
+            format_preview_header(&header),
+            "example.com | 1,234 tokens | 2048 B | 8 headings | Done"
+        );
+    }
+
+    #[test]
+    fn preview_header_appends_nav_heavy_indicator() {
+        let header = PreviewHeaderView {
+            domain: "dense.example".to_string(),
+            tokens: None,
+            bytes: None,
+            stage: Stage::Converting,
+            outcome: None,
+            heading_count: 0,
+            link_density: 1.0,
+            nav_heavy: true,
+        };
+        assert_eq!(
+            format_preview_header(&header),
+            "dense.example | 0 headings | Converting | [nav-heavy]"
+        );
+    }
 }
