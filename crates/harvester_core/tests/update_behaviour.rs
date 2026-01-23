@@ -163,8 +163,7 @@ fn paste_with_mixed_new_and_duplicate_urls() {
     init_logging();
     let state = AppState::new();
     // First paste with two URLs
-    let (state, effects) =
-        submit_urls(state, "https://a.example.com\nhttps://b.example.com\n");
+    let (state, effects) = submit_urls(state, "https://a.example.com\nhttps://b.example.com\n");
     assert_eq!(state.view().job_count, 2);
     assert_eq!(effects.len(), 3); // StartSession + 2x EnqueueUrl
     let view = state.view();
@@ -172,8 +171,7 @@ fn paste_with_mixed_new_and_duplicate_urls() {
     assert_eq!(view.last_paste_stats.as_ref().unwrap().skipped, 0);
 
     // Second paste with one duplicate and one new URL
-    let (state, effects) =
-        submit_urls(state, "https://a.example.com\nhttps://c.example.com\n");
+    let (state, effects) = submit_urls(state, "https://a.example.com\nhttps://c.example.com\n");
     assert_eq!(state.view().job_count, 3);
     assert_eq!(effects.len(), 1); // Only 1 EnqueueUrl (c.example.com)
     let view = state.view();

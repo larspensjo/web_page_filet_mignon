@@ -16,16 +16,16 @@ pub fn prepare_preview_content(markdown: &str) -> String {
 }
 
 fn strip_frontmatter(markdown: &str) -> &str {
-    let rest = if markdown.starts_with("---\r\n") {
-        &markdown["---\r\n".len()..]
-    } else if markdown.starts_with("---\n") {
-        &markdown["---\n".len()..]
+    let rest = if let Some(stripped) = markdown.strip_prefix("---\r\n") {
+        stripped
+    } else if let Some(stripped) = markdown.strip_prefix("---\n") {
+        stripped
     } else {
         return markdown;
     };
     if let Some(idx) = rest.find("\n---") {
         let after = &rest[idx + "\n---".len()..];
-        return after.trim_start_matches(|c| c == '\n' || c == '\r');
+        return after.trim_start_matches(['\n', '\r']);
     }
     markdown
 }

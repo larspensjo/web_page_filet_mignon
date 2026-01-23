@@ -293,7 +293,7 @@ fn domain_from_url(url: &str) -> String {
         .map(|pos| &trimmed[pos + 3..])
         .unwrap_or(trimmed);
     let host = without_scheme
-        .split(|c: char| matches!(c, '/' | '?' | '#'))
+        .split(['/', '?', '#'])
         .next()
         .unwrap_or(without_scheme)
         .trim_end_matches('/');
@@ -405,18 +405,21 @@ struct MetricsState {
     total_tokens: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 enum PreviewState {
+    #[default]
     Empty,
-    Available { job_id: JobId, content: String },
-    InProgress { job_id: JobId, content: String },
-    Unavailable { job_id: JobId },
-}
-
-impl Default for PreviewState {
-    fn default() -> Self {
-        PreviewState::Empty
-    }
+    Available {
+        job_id: JobId,
+        content: String,
+    },
+    InProgress {
+        job_id: JobId,
+        content: String,
+    },
+    Unavailable {
+        job_id: JobId,
+    },
 }
 
 impl PreviewState {
