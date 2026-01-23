@@ -326,6 +326,7 @@ unsafe extern "system" fn forwarding_panel_proc(
 - **Primary mechanism**: The parent's `WM_CTLCOLORSTATIC` handler already recognizes panels by control_id and returns their background brush. This handles the panel's own surface painting for STATIC controls.
 - Forwarding `WM_ERASEBKGND` is added as a supplementary measure for cases where the STATIC control doesn't fully repaint via CTLCOLORSTATIC (e.g., exposed regions after resize).
 - The existing `WM_CTLCOLORSTATIC` forwarding already handles child control coloring inside panels.
+- **Correctness-by-construction**: Panel window styles are constructed through `PanelWindowStyle::base()` which always sets `WS_CLIPCHILDREN | WS_CHILD | WS_VISIBLE`. This makes it impossible to create a panel without clipping its children, preventing background erases from overpainting the URL drop box or tree view.
 
 ### Approach Priority (try in order)
 
@@ -345,6 +346,7 @@ cargo clippy --workspace
 **QA Testing**:
 1. Run the application
 2. Should look identical (no panel styles defined yet)
+3. Verify URL drop box and tree view remain visible when resizing (WS_CLIPCHILDREN enforced by `PanelWindowStyle`)
 
 **Manual Style Test** (optional):
 Add to `layout.rs`:
