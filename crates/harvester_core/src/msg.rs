@@ -19,6 +19,7 @@ pub enum Msg {
     JobDone {
         job_id: crate::JobId,
         result: crate::JobResultKind,
+        content_preview: Option<String>,
     },
     /// Fallback for placeholder wiring.
     NoOp,

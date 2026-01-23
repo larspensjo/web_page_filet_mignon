@@ -8,6 +8,7 @@ mod fetch;
 mod filename;
 mod frontmatter;
 mod persist;
+mod preview;
 mod token;
 mod types;
 

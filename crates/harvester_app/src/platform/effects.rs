@@ -71,15 +71,20 @@ impl EffectRunner {
                         });
                     }
                     EngineEvent::JobCompleted { job_id, result } => {
-                        let msg = Msg::JobDone {
-                            job_id,
-                            result: match &result {
-                                Ok(_) => JobResultKind::Success,
-                                Err(failure_kind) => {
-                                    engine_warn!("Job {} failed: {}", job_id, failure_kind);
-                                    JobResultKind::Failed
-                                }
+                        let msg = match result {
+                            Ok(outcome) => Msg::JobDone {
+                                job_id,
+                                result: JobResultKind::Success,
+                                content_preview: outcome.content_preview,
                             },
+                            Err(failure_kind) => {
+                                engine_warn!("Job {} failed: {}", job_id, failure_kind);
+                                Msg::JobDone {
+                                    job_id,
+                                    result: JobResultKind::Failed,
+                                    content_preview: None,
+                                }
+                            }
                         };
                         let _ = msg_tx.send(msg);
                     }

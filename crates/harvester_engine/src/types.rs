@@ -41,6 +41,7 @@ pub struct JobOutcome {
     pub final_url: String,
     pub tokens: Option<u32>,
     pub bytes_written: Option<u64>,
+    pub content_preview: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

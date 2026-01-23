@@ -14,6 +14,7 @@ use crate::extract::Extractor;
 use crate::fetch::{ChannelProgressSink, FetchSettings, Fetcher, ReqwestFetcher};
 use crate::frontmatter::build_markdown_document;
 use crate::persist::AtomicFileWriter;
+use crate::preview::prepare_preview_content;
 use crate::token::TokenCounter;
 use crate::{
     deterministic_filename, EngineEvent, FailureKind, JobId, JobOutcome, JobProgress, Stage,
@@ -314,6 +315,8 @@ async fn run_job(
         }
     };
 
+    let preview_content = prepare_preview_content(&markdown);
+
     if cancel_token.is_cancelled() {
         let _ = event_tx.send(EngineEvent::JobCompleted {
             job_id,
@@ -386,6 +389,7 @@ async fn run_job(
                     final_url: fetch_output.metadata.final_url,
                     tokens: Some(token_count),
                     bytes_written: Some(doc_for_write.len() as u64),
+                    content_preview: Some(preview_content),
                 }),
             });
         }

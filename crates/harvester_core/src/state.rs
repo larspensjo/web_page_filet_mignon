@@ -98,6 +98,7 @@ impl AppState {
                     outcome: Some(JobResultKind::Success),
                     tokens: entry.tokens,
                     bytes: entry.bytes,
+                    content_preview: None,
                 },
             );
             let normalized = normalize_url_for_dedupe(&entry.url);
@@ -135,6 +136,7 @@ impl AppState {
                     outcome: None,
                     tokens: None,
                     bytes: None,
+                    content_preview: None,
                 },
             );
             enqueued.push((job_id, url.clone()));
@@ -171,10 +173,20 @@ impl AppState {
         }
     }
 
-    pub(crate) fn apply_done(&mut self, job_id: JobId, result: JobResultKind) {
+    pub(crate) fn apply_done(
+        &mut self,
+        job_id: JobId,
+        result: JobResultKind,
+        content_preview: Option<String>,
+    ) {
         if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = Stage::Done;
             job.outcome = Some(result);
+            job.content_preview = if matches!(result, JobResultKind::Success) {
+                content_preview
+            } else {
+                None
+            };
             self.dirty = true;
         }
     }
@@ -226,6 +238,7 @@ struct JobState {
     outcome: Option<JobResultKind>,
     tokens: Option<u32>,
     bytes: Option<u64>,
+    content_preview: Option<String>,
 }
 
 impl JobState {
@@ -238,6 +251,11 @@ impl JobState {
             tokens: self.tokens,
             bytes: self.bytes,
         }
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn content_preview(&self) -> Option<&str> {
+        self.content_preview.as_deref()
     }
 }
 
@@ -268,4 +286,46 @@ pub enum Stage {
 pub enum JobResultKind {
     Success,
     Failed,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_done_success_stores_preview() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            1,
+            JobState {
+                url: "https://example.com".to_string(),
+                stage: Stage::Queued,
+                ..Default::default()
+            },
+        );
+        state.apply_done(
+            1,
+            JobResultKind::Success,
+            Some("preview content".to_string()),
+        );
+        let job = state.jobs.get(&1).expect("job exists");
+        assert_eq!(job.content_preview(), Some("preview content"));
+    }
+
+    #[test]
+    fn job_done_failure_clears_preview() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            2,
+            JobState {
+                url: "https://example.com".to_string(),
+                stage: Stage::Queued,
+                content_preview: Some("old preview".to_string()),
+                ..Default::default()
+            },
+        );
+        state.apply_done(2, JobResultKind::Failed, Some("ignored".to_string()));
+        let job = state.jobs.get(&2).expect("job exists");
+        assert_eq!(job.content_preview(), None);
+    }
 }

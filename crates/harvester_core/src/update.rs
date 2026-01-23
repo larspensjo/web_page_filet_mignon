@@ -73,8 +73,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.apply_progress(job_id, stage, tokens, bytes);
             Vec::new()
         }
-        Msg::JobDone { job_id, result } => {
-            state.apply_done(job_id, result);
+        Msg::JobDone {
+            job_id,
+            result,
+            content_preview,
+        } => {
+            state.apply_done(job_id, result, content_preview);
             Vec::new()
         }
         Msg::Tick | Msg::NoOp => Vec::new(),

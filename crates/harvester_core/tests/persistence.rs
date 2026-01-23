@@ -33,6 +33,7 @@ fn completed_jobs_can_be_restored_for_resume() {
         Msg::JobDone {
             job_id,
             result: JobResultKind::Success,
+            content_preview: None,
         },
     );
 

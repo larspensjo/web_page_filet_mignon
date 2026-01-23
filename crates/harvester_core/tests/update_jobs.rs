@@ -40,6 +40,7 @@ fn urls_pasted_trims_and_ignores_empty() {
         Msg::JobDone {
             job_id: 1,
             result: JobResultKind::Success,
+            content_preview: None,
         },
     );
     let job1_done = next
