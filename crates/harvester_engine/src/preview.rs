@@ -1,4 +1,4 @@
-const TRUNCATED_MARKER: &str = "\n.[truncated]";
+const TRUNCATED_MARKER: &str = "\n…[truncated]";
 pub const MAX_PREVIEW_CONTENT: usize = 40_960;
 
 pub fn prepare_preview_content(markdown: &str) -> String {
@@ -16,15 +16,16 @@ pub fn prepare_preview_content(markdown: &str) -> String {
 }
 
 fn strip_frontmatter(markdown: &str) -> &str {
-    let prefix = "---\n";
-    if let Some(rest) = markdown.strip_prefix(prefix) {
-        if let Some(idx) = rest.find("\n---") {
-            let mut after = &rest[idx + "\n---".len()..];
-            if after.starts_with('\n') {
-                after = &after[1..];
-            }
-            return after.trim_start_matches('\n');
-        }
+    let rest = if markdown.starts_with("---\r\n") {
+        &markdown["---\r\n".len()..]
+    } else if markdown.starts_with("---\n") {
+        &markdown["---\n".len()..]
+    } else {
+        return markdown;
+    };
+    if let Some(idx) = rest.find("\n---") {
+        let after = &rest[idx + "\n---".len()..];
+        return after.trim_start_matches(|c| c == '\n' || c == '\r');
     }
     markdown
 }
@@ -43,9 +44,16 @@ mod tests {
     fn truncated_content_appends_marker() {
         let content: String = "a".repeat(MAX_PREVIEW_CONTENT + 128);
         let preview = prepare_preview_content(&content);
-        assert!(preview.ends_with("\n.[truncated]"));
-        assert_eq!(preview.len(), MAX_PREVIEW_CONTENT + "\n.[truncated]".len());
-        assert!(preview.len() <= MAX_PREVIEW_CONTENT + "\n.[truncated]".len());
+        assert!(preview.ends_with("\n…[truncated]"));
+        assert_eq!(preview.len(), MAX_PREVIEW_CONTENT + "\n…[truncated]".len());
+        assert!(preview.len() <= MAX_PREVIEW_CONTENT + "\n…[truncated]".len());
+    }
+
+    #[test]
+    fn exact_max_content_is_unmodified() {
+        let content = "x".repeat(MAX_PREVIEW_CONTENT);
+        let preview = prepare_preview_content(&content);
+        assert_eq!(preview, content);
     }
 
     #[test]
@@ -58,5 +66,11 @@ mod tests {
     fn malformed_frontmatter_is_ignored() {
         let markdown = "---\nkey: value\nbody\n";
         assert_eq!(strip_frontmatter(markdown), markdown);
+    }
+
+    #[test]
+    fn strips_frontmatter_with_crlf() {
+        let markdown = "---\r\nkey: value\r\n---\r\n\r\nbody\r\n";
+        assert_eq!(strip_frontmatter(markdown), "body\r\n");
     }
 }

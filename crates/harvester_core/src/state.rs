@@ -202,11 +202,14 @@ impl AppState {
                 job.bytes = Some(b);
             }
             if let Some(content) = content_preview {
-                job.set_preview_content(content.clone());
-                if self.ui.selected_job_id() == Some(job_id) {
-                    self.ui
-                        .set_preview_state(PreviewState::InProgress { job_id, content });
+                let selected = self.ui.selected_job_id() == Some(job_id);
+                if selected {
+                    self.ui.set_preview_state(PreviewState::InProgress {
+                        job_id,
+                        content: content.clone(),
+                    });
                 }
+                job.set_preview_content(content);
             }
             self.dirty = true;
         }
@@ -233,10 +236,7 @@ impl AppState {
             false
         };
         if job_updated && self.ui.selected_job_id() == Some(job_id) {
-            let preview_content = self
-                .jobs
-                .get(&job_id)
-                .and_then(|job| job.content_preview.as_deref());
+            let preview_content = self.jobs.get(&job_id).and_then(|job| job.content_preview());
             self.ui.select_job(job_id, preview_content);
         }
         if job_updated {
@@ -648,6 +648,44 @@ mod tests {
         assert_eq!(view.preview_text, None);
         let job = state.jobs.get(&7).expect("job exists");
         assert_eq!(job.content_preview(), Some("background content"));
+    }
+
+    #[test]
+    fn job_done_after_inprogress_promotes_preview_to_available() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            8,
+            JobState {
+                url: "https://final.example".to_string(),
+                stage: Stage::Downloading,
+                ..Default::default()
+            },
+        );
+
+        let (state, _) = update(state, Msg::JobSelected { job_id: 8 });
+        let (state, _) = update(
+            state,
+            Msg::JobProgress {
+                job_id: 8,
+                stage: Stage::Converting,
+                tokens: None,
+                bytes: None,
+                content_preview: Some("partial".to_string()),
+            },
+        );
+        let (state, _) = update(
+            state,
+            Msg::JobDone {
+                job_id: 8,
+                result: JobResultKind::Success,
+                content_preview: Some("final".to_string()),
+            },
+        );
+
+        let view = state.view();
+        assert_eq!(view.preview_text, Some("final".to_string()));
+        let header = view.preview_header.expect("header present");
+        assert_eq!(header.stage, Stage::Done);
     }
 
     #[test]
