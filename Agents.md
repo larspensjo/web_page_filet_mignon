@@ -47,6 +47,7 @@ First and foremost, adhere to the Unidirectional Data Flow Architecture.
 
 ## General Rust design
 * mod.rs, lib.rs and main.rs should be thin wrappers.
+* Follow the principle of **Correctness-by-construction**: Prefer designs and language features that prevent bugs by construction—make illegal states unrepresentable and incorrect usage hard or impossible.
 
 ## Logging
 * Use the `engine_logging` crate for all logging. Import macros: `use engine_logging::{engine_info, engine_warn, engine_error};`
