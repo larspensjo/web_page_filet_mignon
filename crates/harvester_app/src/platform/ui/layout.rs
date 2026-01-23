@@ -32,10 +32,10 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: PANEL_INPUT,
     });
 
-    commands.push(PlatformCommand::CreateTreeView {
+    commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: None,
-        control_id: TREE_JOBS,
+        control_id: PANEL_JOBS,
     });
 
     commands.push(PlatformCommand::CreatePanel {
@@ -60,6 +60,20 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         read_only: true,
         multiline: true,
         vertical_scroll: true,
+    });
+
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_JOBS),
+        control_id: LABEL_JOBS_HEADER,
+        initial_text: "Job List".to_string(),
+        class: LabelClass::Default,
+    });
+
+    commands.push(PlatformCommand::CreateTreeView {
+        window_id,
+        parent_control_id: Some(PANEL_JOBS),
+        control_id: TREE_JOBS,
     });
 
     commands.push(PlatformCommand::CreateLabel {
@@ -170,16 +184,34 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 dock_style: DockStyle::Left,
                 order: 200,
                 fixed_size: Some(320),
-                margin: (6, 6, 6, 100),
+                margin: (6, 6, 6, 6),
             },
-            // Jobs tree fills the new left column
+            // Jobs panel fills the new left column
             LayoutRule {
-                control_id: TREE_JOBS,
+                control_id: PANEL_JOBS,
                 parent_control_id: None,
                 dock_style: DockStyle::Left,
                 order: 300,
                 fixed_size: Some(280),
-                margin: (6, 6, 6, 100),
+                margin: (6, 6, 6, 6),
+            },
+            // Jobs header label
+            LayoutRule {
+                control_id: LABEL_JOBS_HEADER,
+                parent_control_id: Some(PANEL_JOBS),
+                dock_style: DockStyle::Top,
+                order: 0,
+                fixed_size: Some(28),
+                margin: (0, 0, 4, 0),
+            },
+            // Jobs tree fills remaining space in panel
+            LayoutRule {
+                control_id: TREE_JOBS,
+                parent_control_id: Some(PANEL_JOBS),
+                dock_style: DockStyle::Fill,
+                order: 1,
+                fixed_size: None,
+                margin: (0, 0, 0, 0),
             },
             LayoutRule {
                 control_id: PANEL_PREVIEW,
@@ -187,7 +219,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 dock_style: DockStyle::Fill,
                 order: 310,
                 fixed_size: None,
-                margin: (6, 6, 6, 100),
+                margin: (6, 6, 6, 6),
             },
             LayoutRule {
                 control_id: LABEL_PREVIEW_HEADER,
