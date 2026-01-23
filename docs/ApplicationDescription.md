@@ -1,13 +1,22 @@
 # Application description
 
+The main idea of the application is to extract relevant topics from web pages. That is, I am looking for business information about AI companies.
+
 ## Typical workflow
-A typical workflow would to look like this:
+
+### Adding and downloading web pages
 * I am using a news aggregating site in a regular web browser.
 * Every time I find an interesting news entry, I will copy the URL, one at a time, to web_page_filet_mignon. Sometimes, more than one.
 * After every added URL, I want web_page_filet_mignon to immediately update the jobs.
 * If web_page_filet_mignon was in a finished state when I add more URLs, I want it to go back to active state again.
 * When done adding URLs, I press the Archive button that exports everything.
 * The user will sometimes shut down the application, restart it, and continue where they left off.
+
+### Previewing
+The main goal with the preview isn't to make a good presentation looking like the original. It will be used in a couple of ways.
+* During development to assess how effective the download is to extract the text information I am interested in.
+* Assess whether a downloaded web page is interesting, or if I want to skip it (remove it from the download list).
+* For slow downloads, I want to assess if I have enough or should wait for more.
 
 ## Display
 
@@ -17,6 +26,7 @@ The application shall consist of the following main components, from top to bott
 * A Stop / Finish button
 * An Archive button. The button shall be disabled if no web sites are downloaded. It shall be disabled after the archive was generated, but enabled as soon as another web site has been downloaded.
 * The button shall be placed horisontally after each other. They shall have fixed width.
+* The preview pane should be shown to the right of the treeview.
 
 ### Progress bar
 I want a progress bar at the top of the window.
