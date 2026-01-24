@@ -847,252 +847,24 @@ commands.push(PlatformCommand::ApplyStyleToControl {
 
 ## Phase 8: Harvester App Integration (Full Dark Theme)
 
-**Goal**: Define and apply all styles in the Harvester app to achieve the complete dark theme.
+**Goal**: Define and apply every dark-theme style in the Harvester layout so that the CommanDuctUI controls render with the new palette.
 
 ### Files to Modify
 
 #### **`crates/harvester_app/src/platform/ui/layout.rs`**
 
-**Change: Add style definitions and applications** (add at the beginning of `initial_commands()`, before control creation):
-
-```rust
-pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
-    let mut commands = Vec::new();
-
-    // ============================================================================
-    // DARK THEME STYLE DEFINITIONS
-    // ============================================================================
-
-    // Main window background
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::MainWindowBackground,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x2E, g: 0x32, b: 0x39 }),
-            ..Default::default()
-        },
-    });
-
-    // Panel backgrounds (slightly darker than window)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::PanelBackground,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x26, g: 0x2A, b: 0x2E }),
-            text_color: Some(Color { r: 0xE0, g: 0xE5, b: 0xEC }),
-            ..Default::default()
-        },
-    });
-
-    // Status bar (same as window bg, muted text)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::StatusBarBackground,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x2E, g: 0x32, b: 0x39 }),
-            text_color: Some(Color { r: 0x80, g: 0x90, b: 0xA0 }),
-            ..Default::default()
-        },
-    });
-
-    // Standard text labels
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::DefaultText,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x2E, g: 0x32, b: 0x39 }),
-            text_color: Some(Color { r: 0xE0, g: 0xE5, b: 0xEC }),
-            ..Default::default()
-        },
-    });
-
-    // Header labels (amber text)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::HeaderLabel,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x26, g: 0x2A, b: 0x2E }),
-            text_color: Some(Color { r: 0xFF, g: 0xB3, b: 0x47 }),
-            ..Default::default()
-        },
-    });
-
-    // Input fields (very dark, light text)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::DefaultInput,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x1A, g: 0x1D, b: 0x22 }),
-            text_color: Some(Color { r: 0xE0, g: 0xE5, b: 0xEC }),
-            ..Default::default()
-        },
-    });
-
-    // Buttons
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::DefaultButton,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x2E, g: 0x32, b: 0x39 }),
-            text_color: Some(Color { r: 0xE0, g: 0xE5, b: 0xEC }),
-            ..Default::default()
-        },
-    });
-
-    // TreeView (job list)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::TreeView,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x26, g: 0x2A, b: 0x2E }),
-            text_color: Some(Color { r: 0xE0, g: 0xE5, b: 0xEC }),
-            ..Default::default()
-        },
-    });
-
-    // Preview viewer (monospace font, cyan text)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::ViewerMonospace,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x1A, g: 0x1D, b: 0x22 }),
-            text_color: Some(Color { r: 0x00, g: 0xC9, b: 0xFF }),
-            font: Some(FontDescription {
-                name: Some("Cascadia Code".to_string()),
-                size: Some(10),
-                weight: Some(FontWeight::Normal),
-            }),
-        },
-    });
-
-    // Progress bar (dark track, cyan fill)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::ProgressBar,
-        style: ControlStyle {
-            background_color: Some(Color { r: 0x1A, g: 0x1D, b: 0x22 }),
-            text_color: Some(Color { r: 0x00, g: 0xC9, b: 0xFF }),
-            ..Default::default()
-        },
-    });
-
-    // ============================================================================
-    // CONTROL CREATION (existing code)
-    // ============================================================================
-
-    commands.push(PlatformCommand::CreatePanel {
-        window_id,
-        parent_control_id: None,
-        control_id: PANEL_PROGRESS,
-    });
-
-    // ... (all existing CreatePanel/CreateLabel/CreateInput/etc. commands) ...
-
-    // ============================================================================
-    // STYLE APPLICATION (add after control creation, before DefineLayout)
-    // ============================================================================
-
-    // Apply styles to panels
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: PANEL_PROGRESS, style_id: StyleId::PanelBackground,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: PANEL_BOTTOM, style_id: StyleId::StatusBarBackground,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: PANEL_BUTTONS, style_id: StyleId::PanelBackground,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: PANEL_INPUT, style_id: StyleId::PanelBackground,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: PANEL_JOBS, style_id: StyleId::PanelBackground,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: PANEL_PREVIEW, style_id: StyleId::PanelBackground,
-    });
-
-    // Apply styles to labels
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: LABEL_PREVIEW_HEADER, style_id: StyleId::HeaderLabel,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: LABEL_JOBS_HEADER, style_id: StyleId::HeaderLabel,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: LABEL_TOKEN_PROGRESS, style_id: StyleId::DefaultText,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: LABEL_INPUT_HINT, style_id: StyleId::DefaultText,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: LABEL_STATUS, style_id: StyleId::StatusBarBackground,
-    });
-
-    // Apply styles to inputs and viewer
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: INPUT_URLS, style_id: StyleId::DefaultInput,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: VIEWER_PREVIEW, style_id: StyleId::ViewerMonospace,
-    });
-
-    // Apply styles to buttons
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: BUTTON_STOP, style_id: StyleId::DefaultButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: BUTTON_ARCHIVE, style_id: StyleId::DefaultButton,
-    });
-
-    // Apply styles to tree view
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: TREE_JOBS, style_id: StyleId::TreeView,
-    });
-
-    // Apply style to progress bar
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id, control_id: PROGRESS_TOKENS, style_id: StyleId::ProgressBar,
-    });
-
-    // ============================================================================
-    // LAYOUT DEFINITION (existing code)
-    // ============================================================================
-
-    commands.push(PlatformCommand::DefineLayout {
-        window_id,
-        rules: vec![
-            // ... (all existing layout rules) ...
-        ],
-    });
-
-    commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
-    commands.push(PlatformCommand::ShowWindow { window_id });
-
-    commands
-}
-```
-
-**Don't forget to add required imports** at the top of `layout.rs`:
-
-```rust
-use commanductui::styling_primitives::{Color, ControlStyle, FontDescription, FontWeight, StyleId};
-```
+**Change: Encapsulate theme definitions and application**  
+- Add `define_dark_theme_styles()` and `apply_dark_theme()` helpers: the first fires before control creation and registers every `StyleId` (window, panel, labels, inputs, buttons, tree view, viewer, progress bar); the second runs immediately after control creation so every HWND is styled before the layout equations run.  
+- `define_dark_theme_styles()` now requires the `FontDescription`/`FontWeight` imports because the viewer preview uses Cascadia Code with cyan text.  
+- `initial_commands()` simply calls the helpers, then proceeds with the existing `Create*` commands, and finally defines the layout + shows the window.  
+- `define_dark_theme_styles()` uses the color values from the plan: `MainWindowBackground` (#2E3239), `PanelBackground` (#262A2E with light text), `StatusBarBackground` (#2E3239 with muted text), `HeaderLabel` (#FFB347), `DefaultInput` (#1A1D22), `DefaultButton`, `TreeView`, `ViewerMonospace` (with the font), and `ProgressBar` (#1A1D22 track + #00C9FF fill).
+- `apply_dark_theme()` plugs each control into the correct style: panels use `PanelBackground`, the bottom panel and status label use `StatusBarBackground`, headers use `HeaderLabel`, inputs/viewer/button/tree/progress use their respective styles.
 
 ### Implementation Notes
 
-- All style definitions are added at the very beginning
-- All style applications happen after control creation but before layout definition
-- This ordering ensures controls exist before styles are applied
-- The styles follow the color scheme from DarkTheme.md
-
-**Code organization improvement**: Extract theme logic into helper functions to prevent `layout.rs` from becoming a monolith:
-
-```rust
-/// Define all dark theme styles (call before control creation)
-fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
-    commands.push(PlatformCommand::DefineStyle { ... });
-    // ... all DefineStyle commands ...
-}
-
-/// Apply dark theme to all controls (call after control creation)
-fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
-    commands.push(PlatformCommand::ApplyStyleToControl { ... });
-    // ... all ApplyStyleToControl commands ...
-}
-```
-
-This keeps `initial_commands()` readable and makes it easy to swap themes in the future.
+- Styles are always defined before any `Create*` commands, keeping the definition order predictable even if more variants are added later.
+- The layout dance remains untouched: all controls are created, the dark theme is applied, and then the `DefineLayout`/`SignalMainWindowUISetupComplete`/`ShowWindow` sequence runs.
+- Helpers keep `initial_commands()` readable and make future theme swaps trivial (just change the helpers instead of editing the command waterfall).
 
 ### Build & Test
 
@@ -1112,7 +884,7 @@ cargo fmt --workspace
    - [ ] All panels are slightly darker gray (#262A2E)
 
 2. **Labels**
-   - [ ] Header labels (Preview, Job List) are amber (#FFB347)
+    - [ ] Header labels (Preview, Job List, Input hint) are amber (#FFB347)
    - [ ] Status labels are light gray (#E0E5EC)
    - [ ] All text is readable against dark backgrounds
    - [ ] Token progress label updates correctly

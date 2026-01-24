@@ -1,5 +1,7 @@
 use commanductui::types::{DockStyle, LabelClass, LayoutRule};
-use commanductui::{Color, ControlStyle, PlatformCommand, StyleId, WindowId};
+use commanductui::{
+    Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
+};
 use harvester_core::TOKEN_LIMIT;
 
 use super::constants::*;
@@ -7,6 +9,7 @@ use super::constants::*;
 #[allow(clippy::vec_init_then_push)]
 pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     let mut commands = Vec::new();
+    define_dark_theme_styles(&mut commands);
 
     commands.push(PlatformCommand::CreatePanel {
         window_id,
@@ -130,184 +133,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         class: LabelClass::StatusBar,
     });
 
-    // Define main window background style
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::MainWindowBackground,
-        style: ControlStyle {
-            background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
-            }),
-            ..Default::default()
-        },
-    });
-
-    // Define panel background style
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::PanelBackground,
-        style: ControlStyle {
-            background_color: Some(Color {
-                r: 0x26,
-                g: 0x2A,
-                b: 0x2E,
-            }),
-            text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
-            }),
-            ..Default::default()
-        },
-    });
-
-    // Apply panel background style to panels
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: PANEL_PROGRESS,
-        style_id: StyleId::PanelBackground,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: PANEL_INPUT,
-        style_id: StyleId::PanelBackground,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: PANEL_JOBS,
-        style_id: StyleId::PanelBackground,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: PANEL_PREVIEW,
-        style_id: StyleId::PanelBackground,
-    });
-
-    // Define default label style (for status bar, headers, etc.)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::DefaultText,
-        style: ControlStyle {
-            background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
-            }),
-            text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
-            }),
-            ..Default::default()
-        },
-    });
-
-    // Define default input style (for the URL text area)
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::DefaultInput,
-        style: ControlStyle {
-            background_color: Some(Color {
-                r: 0x1A,
-                g: 0x1D,
-                b: 0x22,
-            }),
-            text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
-            }),
-            ..Default::default()
-        },
-    });
-
-    // Define TreeView style
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::TreeView,
-        style: ControlStyle {
-            background_color: Some(Color {
-                r: 0x26,
-                g: 0x2A,
-                b: 0x2E,
-            }),
-            text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
-            }),
-            ..Default::default()
-        },
-    });
-
-    // Define button style
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::DefaultButton,
-        style: ControlStyle {
-            background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
-            }),
-            text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
-            }),
-            ..Default::default()
-        },
-    });
-
-    // Define progress bar style
-    commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::ProgressBar,
-        style: ControlStyle {
-            background_color: Some(Color {
-                r: 0x1A,
-                g: 0x1D,
-                b: 0x22,
-            }), // Track
-            text_color: Some(Color {
-                r: 0x00,
-                g: 0xC9,
-                b: 0xFF,
-            }), // Bar fill
-            ..Default::default()
-        },
-    });
-
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: LABEL_STATUS,
-        style_id: StyleId::DefaultText,
-    });
-
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: INPUT_URLS,
-        style_id: StyleId::DefaultInput,
-    });
-
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: TREE_JOBS,
-        style_id: StyleId::TreeView,
-    });
-
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_ARCHIVE,
-        style_id: StyleId::DefaultButton,
-    });
-
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_STOP,
-        style_id: StyleId::DefaultButton,
-    });
-
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: PROGRESS_TOKENS,
-        style_id: StyleId::ProgressBar,
-    });
+    apply_dark_theme(window_id, &mut commands);
 
     commands.push(PlatformCommand::DefineLayout {
         window_id,
@@ -467,4 +293,257 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::ShowWindow { window_id });
 
     commands
+}
+
+fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::MainWindowBackground,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::PanelBackground,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x26,
+                g: 0x2A,
+                b: 0x2E,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::StatusBarBackground,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            text_color: Some(Color {
+                r: 0x80,
+                g: 0x90,
+                b: 0xA0,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::DefaultText,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::HeaderLabel,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x26,
+                g: 0x2A,
+                b: 0x2E,
+            }),
+            text_color: Some(Color {
+                r: 0xFF,
+                g: 0xB3,
+                b: 0x47,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::DefaultInput,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1A,
+                g: 0x1D,
+                b: 0x22,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::DefaultButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::TreeView,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x26,
+                g: 0x2A,
+                b: 0x2E,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ViewerMonospace,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1A,
+                g: 0x1D,
+                b: 0x22,
+            }),
+            text_color: Some(Color {
+                r: 0x00,
+                g: 0xC9,
+                b: 0xFF,
+            }),
+            font: Some(FontDescription {
+                name: Some("Cascadia Code".to_string()),
+                size: Some(10),
+                weight: Some(FontWeight::Normal),
+            }),
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ProgressBar,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1A,
+                g: 0x1D,
+                b: 0x22,
+            }),
+            text_color: Some(Color {
+                r: 0x00,
+                g: 0xC9,
+                b: 0xFF,
+            }),
+            ..Default::default()
+        },
+    });
+}
+
+fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
+    for control_id in [
+        PANEL_PROGRESS,
+        PANEL_BUTTONS,
+        PANEL_INPUT,
+        PANEL_JOBS,
+        PANEL_PREVIEW,
+    ] {
+        commands.push(PlatformCommand::ApplyStyleToControl {
+            window_id,
+            control_id,
+            style_id: StyleId::PanelBackground,
+        });
+    }
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PANEL_BOTTOM,
+        style_id: StyleId::StatusBarBackground,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_PREVIEW_HEADER,
+        style_id: StyleId::HeaderLabel,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_JOBS_HEADER,
+        style_id: StyleId::HeaderLabel,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_TOKEN_PROGRESS,
+        style_id: StyleId::HeaderLabel,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_INPUT_HINT,
+        style_id: StyleId::HeaderLabel,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_STATUS,
+        style_id: StyleId::StatusBarBackground,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: INPUT_URLS,
+        style_id: StyleId::DefaultInput,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: VIEWER_PREVIEW,
+        style_id: StyleId::ViewerMonospace,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_STOP,
+        style_id: StyleId::DefaultButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_ARCHIVE,
+        style_id: StyleId::DefaultButton,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: TREE_JOBS,
+        style_id: StyleId::TreeView,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PROGRESS_TOKENS,
+        style_id: StyleId::ProgressBar,
+    });
 }
