@@ -219,6 +219,24 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         },
     });
 
+    // Define TreeView style
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::TreeView,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x26,
+                g: 0x2A,
+                b: 0x2E,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_STATUS,
@@ -229,6 +247,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: INPUT_URLS,
         style_id: StyleId::DefaultInput,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: TREE_JOBS,
+        style_id: StyleId::TreeView,
     });
 
     commands.push(PlatformCommand::DefineLayout {
