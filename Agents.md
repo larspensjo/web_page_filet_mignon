@@ -44,6 +44,7 @@ First and foremost, adhere to the Unidirectional Data Flow Architecture.
 ## Testing
 * Consider using dependency injection and mock objects to enhance unit testing
 * It is very important that all feaures have unit tests to lock-in functionality.
+* Don't build the release version.
 
 ## General Rust design
 * mod.rs, lib.rs and main.rs should be thin wrappers.

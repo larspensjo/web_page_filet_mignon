@@ -255,6 +255,24 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         },
     });
 
+    // Define progress bar style
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ProgressBar,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1A,
+                g: 0x1D,
+                b: 0x22,
+            }), // Track
+            text_color: Some(Color {
+                r: 0x00,
+                g: 0xC9,
+                b: 0xFF,
+            }), // Bar fill
+            ..Default::default()
+        },
+    });
+
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_STATUS,
@@ -283,6 +301,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: BUTTON_STOP,
         style_id: StyleId::DefaultButton,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PROGRESS_TOKENS,
+        style_id: StyleId::ProgressBar,
     });
 
     commands.push(PlatformCommand::DefineLayout {
