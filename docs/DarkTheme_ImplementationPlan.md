@@ -372,7 +372,7 @@ commands.push(PlatformCommand::ApplyStyleToControl {
 
 ---
 
-## Phase 4: Labels & Inputs (Already Implemented)
+## Phase 4: Labels & Inputs
 
 **Goal**: Verify existing label/input styling works with dark colors.
 
@@ -383,17 +383,16 @@ commands.push(PlatformCommand::ApplyStyleToControl {
 
 ### Implementation Notes
 
-**No code changes needed.** The existing custom draw handlers already:
-- Look up applied styles via `window_data.get_style_for_control(control_id)`
-- Apply `text_color` via `SetTextColor(hdc, color)`
-- Apply `background_color` via `SetBkColor(hdc, color)` and return brush
+Update the layout commands to define/apply `DefaultText` and `DefaultInput` styles so the existing label/input handlers can render dark colors. The custom draw handlers already:
+ - Look up applied styles via `window_data.get_style_for_control(control_id)`
+ - Apply `text_color` via `SetTextColor(hdc, color)`
+ - Apply `background_color` via `SetBkColor(hdc, color)` and return brush
 
 ### Build & Test
 
 **QA Testing**:
-1. Add style definitions for `DefaultText` and `DefaultInput` in `layout.rs`
-2. Apply them to `LABEL_STATUS` and `INPUT_URLS`
-3. Run the application
+1. Confirm `layout.rs` defines `DefaultText` and `DefaultInput` styles (r/g/b: 0x2E/0x32/0x39 and 0x1A/0x1D/0x22 with light text) and applies them to `LABEL_STATUS` and `INPUT_URLS`.
+2. Run the application
 
 **Expected Result**:
 - Labels render with styled text color on styled background

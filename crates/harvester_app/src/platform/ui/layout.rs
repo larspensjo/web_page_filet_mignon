@@ -183,6 +183,54 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         style_id: StyleId::PanelBackground,
     });
 
+    // Define default label style (for status bar, headers, etc.)
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::DefaultText,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    // Define default input style (for the URL text area)
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::DefaultInput,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1A,
+                g: 0x1D,
+                b: 0x22,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_STATUS,
+        style_id: StyleId::DefaultText,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: INPUT_URLS,
+        style_id: StyleId::DefaultInput,
+    });
+
     commands.push(PlatformCommand::DefineLayout {
         window_id,
         rules: vec![
