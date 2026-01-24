@@ -144,7 +144,11 @@ pub fn render(
     let job_items = build_job_tree(view);
     append_tree_commands(window_id, job_items, tree_state, &mut cmds);
 
-    let preview_text = view.preview_text.clone().unwrap_or_default();
+    let preview_text = view
+        .preview_text
+        .as_deref()
+        .map(normalize_windows_newlines)
+        .unwrap_or_default();
     cmds.push(PlatformCommand::SetViewerContent {
         window_id,
         control_id: VIEWER_PREVIEW,
@@ -315,6 +319,24 @@ fn format_preview_header(header: &PreviewHeaderView) -> String {
     parts.join(" | ")
 }
 
+fn normalize_windows_newlines(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if matches!(chars.peek(), Some('\n')) {
+                    chars.next();
+                }
+                normalized.push_str("\r\n");
+            }
+            '\n' => normalized.push_str("\r\n"),
+            other => normalized.push(other),
+        }
+    }
+    normalized
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -462,5 +484,44 @@ mod tests {
         assert!(commands_added
             .iter()
             .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })));
+    }
+
+    #[test]
+    fn normalize_windows_newlines_handles_various_sequences() {
+        assert_eq!(
+            normalize_windows_newlines("line1\nline2"),
+            "line1\r\nline2"
+        );
+        assert_eq!(
+            normalize_windows_newlines("line1\rline2"),
+            "line1\r\nline2"
+        );
+        assert_eq!(
+            normalize_windows_newlines("line1\r\nline2"),
+            "line1\r\nline2"
+        );
+        assert_eq!(
+            normalize_windows_newlines("line1\r\nline2\nline3\rline4"),
+            "line1\r\nline2\r\nline3\r\nline4"
+        );
+    }
+
+    #[test]
+    fn preview_text_newlines_are_normalized_before_set_viewer_content() {
+        init_logging();
+        let window_id = WindowId::new(3);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = AppViewModel::default();
+        view.preview_text = Some("first\nsecond\r\nthird\rfourth".to_string());
+
+        let commands = render(window_id, &view, &mut tree_state);
+        let viewer_text = commands
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::SetViewerContent { text, .. } => Some(text),
+                _ => None,
+            })
+            .expect("SetViewerContent emitted");
+        assert_eq!(viewer_text, "first\r\nsecond\r\nthird\r\nfourth");
     }
 }
