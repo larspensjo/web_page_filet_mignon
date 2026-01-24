@@ -237,6 +237,24 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         },
     });
 
+    // Define button style
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::DefaultButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_STATUS,
@@ -253,6 +271,18 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: TREE_JOBS,
         style_id: StyleId::TreeView,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_ARCHIVE,
+        style_id: StyleId::DefaultButton,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_STOP,
+        style_id: StyleId::DefaultButton,
     });
 
     commands.push(PlatformCommand::DefineLayout {
