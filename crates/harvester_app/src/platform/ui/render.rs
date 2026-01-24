@@ -1,13 +1,77 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
-use commanductui::{MessageSeverity, PlatformCommand, WindowId};
+use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
 use harvester_core::{
     AppViewModel, JobResultKind, JobRowView, PreviewHeaderView, SessionState, Stage,
 };
 
 use super::constants::*;
+use std::collections::HashMap;
+
+#[derive(Debug, Default)]
+pub struct TreeRenderState {
+    initialized: bool,
+    structure: Vec<TreeStructureItem>,
+    text_by_id: HashMap<TreeItemId, String>,
+    check_state_by_id: HashMap<TreeItemId, CheckState>,
+}
+
+impl TreeRenderState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TreeStructureItem {
+    id: TreeItemId,
+    parent_id: Option<TreeItemId>,
+    is_folder: bool,
+    child_count: usize,
+    style_override: Option<StyleId>,
+}
+
+#[derive(Debug)]
+struct TreeSnapshot {
+    structure: Vec<TreeStructureItem>,
+    text_by_id: HashMap<TreeItemId, String>,
+    check_state_by_id: HashMap<TreeItemId, CheckState>,
+}
+
+impl TreeSnapshot {
+    fn from_items(items: &[TreeItemDescriptor]) -> Self {
+        let mut snapshot = Self {
+            structure: Vec::new(),
+            text_by_id: HashMap::new(),
+            check_state_by_id: HashMap::new(),
+        };
+        snapshot.push_items(items, None);
+        snapshot
+    }
+
+    fn push_items(&mut self, items: &[TreeItemDescriptor], parent_id: Option<TreeItemId>) {
+        for item in items {
+            self.structure.push(TreeStructureItem {
+                id: item.id,
+                parent_id,
+                is_folder: item.is_folder,
+                child_count: item.children.len(),
+                style_override: item.style_override,
+            });
+            self.text_by_id.insert(item.id, item.text.clone());
+            self.check_state_by_id.insert(item.id, item.state);
+            if !item.children.is_empty() {
+                self.push_items(&item.children, Some(item.id));
+            }
+        }
+    }
+}
 
 #[allow(clippy::vec_init_then_push)]
-pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> {
+pub fn render(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+) -> Vec<PlatformCommand> {
     let session_label = match view.session {
         SessionState::Idle => "Idle",
         SessionState::Running => "Running",
@@ -77,11 +141,8 @@ pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> 
         enabled: view.job_count > 0,
     });
 
-    cmds.push(PlatformCommand::PopulateTreeView {
-        window_id,
-        control_id: TREE_JOBS,
-        items: build_job_tree(view),
-    });
+    let job_items = build_job_tree(view);
+    append_tree_commands(window_id, job_items, tree_state, &mut cmds);
 
     let preview_text = view.preview_text.clone().unwrap_or_default();
     cmds.push(PlatformCommand::SetViewerContent {
@@ -102,6 +163,63 @@ pub fn render(window_id: WindowId, view: &AppViewModel) -> Vec<PlatformCommand> 
     });
 
     cmds
+}
+
+fn append_tree_commands(
+    window_id: WindowId,
+    items: Vec<TreeItemDescriptor>,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    let snapshot = TreeSnapshot::from_items(&items);
+    if !tree_state.initialized || tree_state.structure != snapshot.structure {
+        cmds.push(PlatformCommand::PopulateTreeView {
+            window_id,
+            control_id: TREE_JOBS,
+            items,
+        });
+        tree_state.initialized = true;
+        tree_state.structure = snapshot.structure;
+        tree_state.text_by_id = snapshot.text_by_id;
+        tree_state.check_state_by_id = snapshot.check_state_by_id;
+        return;
+    }
+
+    for item in &snapshot.structure {
+        if let Some(new_text) = snapshot.text_by_id.get(&item.id) {
+            if tree_state
+                .text_by_id
+                .get(&item.id)
+                .map_or(true, |old| old != new_text)
+            {
+                cmds.push(PlatformCommand::UpdateTreeItemText {
+                    window_id,
+                    control_id: TREE_JOBS,
+                    item_id: item.id,
+                    text: new_text.clone(),
+                });
+            }
+        }
+
+        if let Some(new_state) = snapshot.check_state_by_id.get(&item.id) {
+            if tree_state
+                .check_state_by_id
+                .get(&item.id)
+                .map_or(true, |old| old != new_state)
+            {
+                cmds.push(PlatformCommand::UpdateTreeItemVisualState {
+                    window_id,
+                    control_id: TREE_JOBS,
+                    item_id: item.id,
+                    new_state: *new_state,
+                });
+            }
+        }
+    }
+
+    tree_state.structure = snapshot.structure;
+    tree_state.text_by_id = snapshot.text_by_id;
+    tree_state.check_state_by_id = snapshot.check_state_by_id;
 }
 
 fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
@@ -201,9 +319,42 @@ fn format_preview_header(header: &PreviewHeaderView) -> String {
 mod tests {
     use super::*;
     use harvester_core::Stage;
+    use std::sync::Once;
+
+    fn init_logging() {
+        static INIT: Once = Once::new();
+        INIT.call_once(engine_logging::initialize_for_tests);
+    }
+
+    fn make_job(
+        job_id: u64,
+        url: &str,
+        stage: Stage,
+        outcome: Option<JobResultKind>,
+        tokens: Option<u32>,
+        bytes: Option<u64>,
+    ) -> JobRowView {
+        JobRowView {
+            job_id,
+            url: url.to_string(),
+            stage,
+            outcome,
+            tokens,
+            bytes,
+        }
+    }
+
+    fn make_view(jobs: Vec<JobRowView>) -> AppViewModel {
+        AppViewModel {
+            job_count: jobs.len(),
+            jobs,
+            ..AppViewModel::default()
+        }
+    }
 
     #[test]
     fn preview_header_includes_headings_and_tokens() {
+        init_logging();
         let header = PreviewHeaderView {
             domain: "example.com".to_string(),
             tokens: Some(1234),
@@ -222,6 +373,7 @@ mod tests {
 
     #[test]
     fn preview_header_appends_nav_heavy_indicator() {
+        init_logging();
         let header = PreviewHeaderView {
             domain: "dense.example".to_string(),
             tokens: None,
@@ -236,5 +388,79 @@ mod tests {
             format_preview_header(&header),
             "dense.example | 0 headings | Converting | [nav-heavy]"
         );
+    }
+
+    #[test]
+    fn tree_updates_text_without_repopulate_on_progress_change() {
+        init_logging();
+        let window_id = WindowId::new(1);
+        let mut tree_state = TreeRenderState::new();
+
+        let view_initial = make_view(vec![make_job(
+            1,
+            "https://example.com",
+            Stage::Queued,
+            None,
+            None,
+            None,
+        )]);
+        let commands_initial = render(window_id, &view_initial, &mut tree_state);
+        assert!(commands_initial
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })));
+
+        let view_updated = make_view(vec![make_job(
+            1,
+            "https://example.com",
+            Stage::Downloading,
+            None,
+            Some(100),
+            Some(2048),
+        )]);
+        let commands_updated = render(window_id, &view_updated, &mut tree_state);
+
+        assert!(!commands_updated
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })));
+
+        let mut text_updates = commands_updated
+            .iter()
+            .filter_map(|cmd| match cmd {
+                PlatformCommand::UpdateTreeItemText { item_id, text, .. } => {
+                    Some((item_id, text))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(text_updates.len(), 1);
+        let (item_id, text) = text_updates.pop().expect("update exists");
+        assert_eq!(*item_id, TreeItemId(1));
+        assert_eq!(text, &format_job_row(&view_updated.jobs[0]));
+    }
+
+    #[test]
+    fn tree_repopulates_when_structure_changes() {
+        init_logging();
+        let window_id = WindowId::new(2);
+        let mut tree_state = TreeRenderState::new();
+
+        let view_initial = make_view(vec![make_job(
+            1,
+            "https://example.com",
+            Stage::Queued,
+            None,
+            None,
+            None,
+        )]);
+        let _ = render(window_id, &view_initial, &mut tree_state);
+
+        let view_added = make_view(vec![
+            make_job(1, "https://example.com", Stage::Queued, None, None, None),
+            make_job(2, "https://two.example", Stage::Queued, None, None, None),
+        ]);
+        let commands_added = render(window_id, &view_added, &mut tree_state);
+        assert!(commands_added
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })));
     }
 }

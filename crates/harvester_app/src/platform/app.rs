@@ -45,8 +45,13 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     }
 
     let initial_view = shared_state.lock().unwrap().state.view();
+    let mut tree_render_state = ui::render::TreeRenderState::new();
     let mut initial_commands = ui::layout::initial_commands(window_id);
-    initial_commands.extend(ui::render::render(window_id, &initial_view));
+    initial_commands.extend(ui::render::render(
+        window_id,
+        &initial_view,
+        &mut tree_render_state,
+    ));
 
     let event_handler: Arc<Mutex<dyn PlatformEventHandler>> =
         Arc::new(Mutex::new(AppEventHandler::new(
@@ -55,6 +60,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             msg_rx,
             msg_tx.clone(),
             effect_runner,
+            tree_render_state,
             output_dir,
         )));
     let ui_state_provider: Arc<Mutex<dyn UiStateProvider>> =
@@ -83,6 +89,7 @@ struct AppEventHandler {
     msg_rx: Mutex<mpsc::Receiver<Msg>>,
     msg_tx: mpsc::Sender<Msg>,
     effect_runner: EffectRunner,
+    tree_render_state: ui::render::TreeRenderState,
     output_dir: std::path::PathBuf,
 }
 
@@ -93,6 +100,7 @@ impl AppEventHandler {
         msg_rx: mpsc::Receiver<Msg>,
         msg_tx: mpsc::Sender<Msg>,
         effect_runner: EffectRunner,
+        tree_render_state: ui::render::TreeRenderState,
         output_dir: std::path::PathBuf,
     ) -> Self {
         Self {
@@ -102,6 +110,7 @@ impl AppEventHandler {
             msg_rx: Mutex::new(msg_rx),
             msg_tx,
             effect_runner,
+            tree_render_state,
             output_dir,
         }
     }
@@ -169,7 +178,11 @@ impl AppEventHandler {
 
     fn enqueue_render(&mut self, view: &AppViewModel) {
         self.commands
-            .extend(ui::render::render(self.window_id, view));
+            .extend(ui::render::render(
+                self.window_id,
+                view,
+                &mut self.tree_render_state,
+            ));
     }
 }
 
