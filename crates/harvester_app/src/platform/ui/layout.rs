@@ -1,5 +1,5 @@
 use commanductui::types::{DockStyle, LabelClass, LayoutRule};
-use commanductui::{PlatformCommand, WindowId};
+use commanductui::{Color, ControlStyle, PlatformCommand, StyleId, WindowId};
 use harvester_core::TOKEN_LIMIT;
 
 use super::constants::*;
@@ -128,6 +128,59 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: LABEL_STATUS,
         initial_text: "Ready".to_string(),
         class: LabelClass::StatusBar,
+    });
+
+    // Define main window background style
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::MainWindowBackground,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            ..Default::default()
+        },
+    });
+
+    // Define panel background style
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::PanelBackground,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x26,
+                g: 0x2A,
+                b: 0x2E,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    // Apply panel background style to panels
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PANEL_PROGRESS,
+        style_id: StyleId::PanelBackground,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PANEL_INPUT,
+        style_id: StyleId::PanelBackground,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PANEL_JOBS,
+        style_id: StyleId::PanelBackground,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PANEL_PREVIEW,
+        style_id: StyleId::PanelBackground,
     });
 
     commands.push(PlatformCommand::DefineLayout {
