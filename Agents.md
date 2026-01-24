@@ -1,4 +1,5 @@
 # Instructions to consider
+Some instructions here doesn't hold for the CommanDuctUI submodule.
 
 ## Bugs
 * Is there a lessons learned here? A design issue? Lack of robustness? That is, I want to find similar problems and prevent future problems of the same type.
