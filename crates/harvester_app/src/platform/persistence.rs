@@ -94,3 +94,53 @@ pub(crate) fn save_completed_jobs(output_dir: &Path, completed: &[CompletedJobSn
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn write_state(dir: &Path, content: &str) {
+        let path = dir.join(STATE_FILENAME);
+        fs::write(&path, content).expect("write state");
+    }
+
+    #[test]
+    fn load_state_without_links_still_parses_snapshot() {
+        let temp = tempdir().expect("tempdir");
+        let content = r#"
+(
+  completed: [
+    (
+      url: "https://example.com",
+      tokens: Some(42u32),
+      bytes: Some(1024u64),
+    ),
+  ],
+)
+"#;
+
+        write_state(temp.path(), content);
+
+        let snapshot = load_completed_jobs(temp.path());
+        assert_eq!(snapshot.len(), 1);
+        assert!(snapshot[0].links.is_empty());
+    }
+
+    #[test]
+    fn save_and_load_roundtrips_links() {
+        let temp = tempdir().expect("tempdir");
+        let snapshot = vec![CompletedJobSnapshot {
+            url: "https://example.com".to_string(),
+            tokens: Some(10),
+            bytes: Some(512),
+            links: vec!["https://a".to_string(), "https://b".to_string()],
+        }];
+
+        save_completed_jobs(temp.path(), &snapshot);
+        let loaded = load_completed_jobs(temp.path());
+
+        assert_eq!(loaded, snapshot);
+    }
+}

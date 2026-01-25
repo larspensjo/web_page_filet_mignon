@@ -595,6 +595,7 @@ dependencies = [
  "ron",
  "serde",
  "simplelog",
+ "tempfile",
 ]
 
 [[package]]
