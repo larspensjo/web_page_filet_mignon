@@ -25,6 +25,7 @@ pub enum Msg {
         job_id: crate::JobId,
         result: crate::JobResultKind,
         content_preview: Option<String>,
+        extracted_links: Vec<String>,
     },
     /// User selected a job from the tree view.
     JobSelected { job_id: crate::JobId },

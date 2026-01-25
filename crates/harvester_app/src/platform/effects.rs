@@ -73,17 +73,26 @@ impl EffectRunner {
                     }
                     EngineEvent::JobCompleted { job_id, result } => {
                         let msg = match result {
-                            Ok(outcome) => Msg::JobDone {
-                                job_id,
-                                result: JobResultKind::Success,
-                                content_preview: outcome.content_preview,
-                            },
+                            Ok(outcome) => {
+                                let extracted_links = outcome
+                                    .extracted_links
+                                    .into_iter()
+                                    .map(|link| link.url)
+                                    .collect();
+                                Msg::JobDone {
+                                    job_id,
+                                    result: JobResultKind::Success,
+                                    content_preview: outcome.content_preview,
+                                    extracted_links,
+                                }
+                            }
                             Err(failure_kind) => {
                                 engine_warn!("Job {} failed: {}", job_id, failure_kind);
                                 Msg::JobDone {
                                     job_id,
                                     result: JobResultKind::Failed,
                                     content_preview: None,
+                                    extracted_links: Vec::new(),
                                 }
                             }
                         };

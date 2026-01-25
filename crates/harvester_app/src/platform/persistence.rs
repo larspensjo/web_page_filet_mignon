@@ -13,6 +13,8 @@ struct PersistedJob {
     url: String,
     tokens: Option<u32>,
     bytes: Option<u64>,
+    #[serde(default)]
+    links: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -48,6 +50,7 @@ pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot
             url: job.url,
             tokens: job.tokens,
             bytes: job.bytes,
+            links: job.links,
         })
         .collect();
 
@@ -63,13 +66,14 @@ pub(crate) fn save_completed_jobs(output_dir: &Path, completed: &[CompletedJobSn
 
     let state = PersistedState {
         completed: completed
-            .iter()
-            .map(|job| PersistedJob {
-                url: job.url.clone(),
-                tokens: job.tokens,
-                bytes: job.bytes,
-            })
-            .collect(),
+                .iter()
+                .map(|job| PersistedJob {
+                    url: job.url.clone(),
+                    tokens: job.tokens,
+                    bytes: job.bytes,
+                    links: job.links.clone(),
+                })
+                .collect(),
     };
 
     let pretty = ron::ser::PrettyConfig::new();

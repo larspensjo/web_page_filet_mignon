@@ -47,6 +47,7 @@ fn urls_pasted_trims_and_ignores_empty() {
             job_id: 1,
             result: JobResultKind::Success,
             content_preview: None,
+            extracted_links: Vec::new(),
         },
     );
     let job1_done = next

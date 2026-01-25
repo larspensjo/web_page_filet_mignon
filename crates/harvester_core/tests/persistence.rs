@@ -37,6 +37,7 @@ fn completed_jobs_can_be_restored_for_resume() {
             job_id,
             result: JobResultKind::Success,
             content_preview: None,
+            extracted_links: Vec::new(),
         },
     );
 
@@ -63,6 +64,7 @@ fn restored_jobs_are_deduped_on_paste() {
             url: "https://example.com".to_string(),
             tokens: None,
             bytes: None,
+            links: Vec::new(),
         }]),
     );
 

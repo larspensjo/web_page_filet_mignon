@@ -602,6 +602,7 @@ name = "harvester_core"
 version = "0.1.0"
 dependencies = [
  "engine_logging",
+ "url",
 ]
 
 [[package]]

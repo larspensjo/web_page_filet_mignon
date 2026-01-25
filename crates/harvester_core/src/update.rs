@@ -86,8 +86,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             job_id,
             result,
             content_preview,
+            extracted_links,
         } => {
-            state.apply_done(job_id, result, content_preview);
+            state.apply_done(job_id, result, content_preview, extracted_links);
             Vec::new()
         }
         Msg::JobSelected { job_id } => {

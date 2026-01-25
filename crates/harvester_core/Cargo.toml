@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+url = "2"
 
 [dev-dependencies]
 engine_logging = { path = "../engine_logging" }

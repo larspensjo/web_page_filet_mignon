@@ -1,13 +1,17 @@
 use crate::view_model::{AppViewModel, JobRowView, LastPasteStats, PreviewHeaderView, TOKEN_LIMIT};
 use std::collections::{BTreeMap, HashSet};
+use url::Url;
 
 pub type JobId = u64;
+
+const MAX_EXTRACTED_LINKS: usize = 5_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompletedJobSnapshot {
     pub url: String,
     pub tokens: Option<u32>,
     pub bytes: Option<u64>,
+    pub links: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -91,6 +95,7 @@ impl AppState {
                 url: job.url.clone(),
                 tokens: job.tokens,
                 bytes: job.bytes,
+                links: job.extracted_links().to_vec(),
             })
             .collect()
     }
@@ -122,6 +127,7 @@ impl AppState {
                     bytes: entry.bytes,
                     content_preview: None,
                     preview_quality: None,
+                    extracted_links: entry.links.clone(),
                 },
             );
             let normalized = normalize_url_for_dedupe(&entry.url);
@@ -181,6 +187,7 @@ impl AppState {
                     bytes: None,
                     content_preview: None,
                     preview_quality: None,
+                    extracted_links: Vec::new(),
                 },
             );
             enqueued.push((job_id, url.clone()));
@@ -233,6 +240,7 @@ impl AppState {
         job_id: JobId,
         result: JobResultKind,
         content_preview: Option<String>,
+        extracted_links: Vec<String>,
     ) {
         let job_updated = if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = Stage::Done;
@@ -241,8 +249,10 @@ impl AppState {
                 if let Some(content) = content_preview {
                     job.set_preview_content(content);
                 }
+                job.set_extracted_links(extracted_links);
             } else {
                 job.clear_preview_content();
+                job.set_extracted_links(Vec::new());
             }
             true
         } else {
@@ -286,6 +296,42 @@ pub fn normalize_url_for_dedupe(url: &str) -> String {
     lowercased.trim_end_matches('/').to_owned()
 }
 
+fn dedupe_extracted_links(links: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut deduped = Vec::new();
+    for link in links.into_iter() {
+        if deduped.len() >= MAX_EXTRACTED_LINKS {
+            break;
+        }
+        let normalized = normalize_extracted_link(&link);
+        if seen.insert(normalized.clone()) {
+            deduped.push(normalized);
+        }
+    }
+    deduped
+}
+
+fn normalize_extracted_link(link: &str) -> String {
+    let trimmed = link.trim();
+    if trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+        if let Ok(mut parsed) = Url::parse(trimmed) {
+            parsed.set_fragment(None);
+            if let Some(port) = parsed.port() {
+                let normalized_port = match parsed.scheme() {
+                    "http" if port == 80 => None,
+                    "https" if port == 443 => None,
+                    _ => Some(port),
+                };
+                let _ = parsed.set_port(normalized_port);
+            }
+            parsed.into()
+        } else {
+            trimmed.to_string()
+        }
+}
+
 fn domain_from_url(url: &str) -> String {
     let trimmed = url.trim();
     let without_scheme = trimmed
@@ -324,6 +370,7 @@ struct JobState {
     bytes: Option<u64>,
     content_preview: Option<String>,
     preview_quality: Option<PreviewQuality>,
+    extracted_links: Vec<String>,
 }
 
 impl JobState {
@@ -351,6 +398,14 @@ impl JobState {
     fn clear_preview_content(&mut self) {
         self.preview_quality = None;
         self.content_preview = None;
+    }
+
+    fn set_extracted_links(&mut self, links: Vec<String>) {
+        self.extracted_links = dedupe_extracted_links(links);
+    }
+
+    fn extracted_links(&self) -> &[String] {
+        &self.extracted_links
     }
 }
 
@@ -533,6 +588,7 @@ mod tests {
             1,
             JobResultKind::Success,
             Some("preview content".to_string()),
+            Vec::new(),
         );
         let job = state.jobs.get(&1).expect("job exists");
         assert_eq!(job.content_preview(), Some("preview content"));
@@ -550,7 +606,12 @@ mod tests {
                 ..Default::default()
             },
         );
-        state.apply_done(2, JobResultKind::Failed, Some("ignored".to_string()));
+        state.apply_done(
+            2,
+            JobResultKind::Failed,
+            Some("ignored".to_string()),
+            Vec::new(),
+        );
         let job = state.jobs.get(&2).expect("job exists");
         assert_eq!(job.content_preview(), None);
     }
@@ -708,6 +769,7 @@ mod tests {
                 job_id: 8,
                 result: JobResultKind::Success,
                 content_preview: Some("final".to_string()),
+                extracted_links: Vec::new(),
             },
         );
 
@@ -731,5 +793,42 @@ mod tests {
         let content = "[a](x) [b](x) [c](x) [d](x) [e](x)";
         let quality = PreviewQuality::from_markdown(content);
         assert!(quality.nav_heavy());
+    }
+
+    #[test]
+    fn job_done_success_stores_normalized_links() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            9,
+            JobState {
+                url: "https://link.example".to_string(),
+                stage: Stage::Downloading,
+                ..Default::default()
+            },
+        );
+
+        let links = vec![
+            "HTTP://EXAMPLE.com".to_string(),
+            "http://example.com/".to_string(),
+            "https://other.example:443/path".to_string(),
+        ];
+        let (state, _) = update(
+            state,
+            Msg::JobDone {
+                job_id: 9,
+                result: JobResultKind::Success,
+                content_preview: None,
+                extracted_links: links,
+            },
+        );
+
+        let job = state.jobs.get(&9).expect("job exists");
+        assert_eq!(
+            job.extracted_links(),
+            &[
+                "http://example.com/".to_string(),
+                "https://other.example/path".to_string()
+            ]
+        );
     }
 }
