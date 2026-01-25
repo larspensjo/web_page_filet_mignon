@@ -316,20 +316,20 @@ fn normalize_extracted_link(link: &str) -> String {
     if trimmed.is_empty() {
         return trimmed.to_string();
     }
-        if let Ok(mut parsed) = Url::parse(trimmed) {
-            parsed.set_fragment(None);
-            if let Some(port) = parsed.port() {
-                let normalized_port = match parsed.scheme() {
-                    "http" if port == 80 => None,
-                    "https" if port == 443 => None,
-                    _ => Some(port),
-                };
-                let _ = parsed.set_port(normalized_port);
-            }
-            parsed.into()
-        } else {
-            trimmed.to_string()
+    if let Ok(mut parsed) = Url::parse(trimmed) {
+        parsed.set_fragment(None);
+        if let Some(port) = parsed.port() {
+            let normalized_port = match parsed.scheme() {
+                "http" if port == 80 => None,
+                "https" if port == 443 => None,
+                _ => Some(port),
+            };
+            let _ = parsed.set_port(normalized_port);
         }
+        parsed.into()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn domain_from_url(url: &str) -> String {

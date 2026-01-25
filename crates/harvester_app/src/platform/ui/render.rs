@@ -191,11 +191,7 @@ fn append_tree_commands(
 
     for item in &snapshot.structure {
         if let Some(new_text) = snapshot.text_by_id.get(&item.id) {
-            if tree_state
-                .text_by_id
-                .get(&item.id)
-                .map_or(true, |old| old != new_text)
-            {
+            if tree_state.text_by_id.get(&item.id) != Some(new_text) {
                 cmds.push(PlatformCommand::UpdateTreeItemText {
                     window_id,
                     control_id: TREE_JOBS,
@@ -206,11 +202,7 @@ fn append_tree_commands(
         }
 
         if let Some(new_state) = snapshot.check_state_by_id.get(&item.id) {
-            if tree_state
-                .check_state_by_id
-                .get(&item.id)
-                .map_or(true, |old| old != new_state)
-            {
+            if tree_state.check_state_by_id.get(&item.id) != Some(new_state) {
                 cmds.push(PlatformCommand::UpdateTreeItemVisualState {
                     window_id,
                     control_id: TREE_JOBS,
@@ -448,9 +440,7 @@ mod tests {
         let mut text_updates = commands_updated
             .iter()
             .filter_map(|cmd| match cmd {
-                PlatformCommand::UpdateTreeItemText { item_id, text, .. } => {
-                    Some((item_id, text))
-                }
+                PlatformCommand::UpdateTreeItemText { item_id, text, .. } => Some((item_id, text)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -488,14 +478,8 @@ mod tests {
 
     #[test]
     fn normalize_windows_newlines_handles_various_sequences() {
-        assert_eq!(
-            normalize_windows_newlines("line1\nline2"),
-            "line1\r\nline2"
-        );
-        assert_eq!(
-            normalize_windows_newlines("line1\rline2"),
-            "line1\r\nline2"
-        );
+        assert_eq!(normalize_windows_newlines("line1\nline2"), "line1\r\nline2");
+        assert_eq!(normalize_windows_newlines("line1\rline2"), "line1\r\nline2");
         assert_eq!(
             normalize_windows_newlines("line1\r\nline2"),
             "line1\r\nline2"
@@ -511,8 +495,10 @@ mod tests {
         init_logging();
         let window_id = WindowId::new(3);
         let mut tree_state = TreeRenderState::new();
-        let mut view = AppViewModel::default();
-        view.preview_text = Some("first\nsecond\r\nthird\rfourth".to_string());
+        let view = AppViewModel {
+            preview_text: Some("first\nsecond\r\nthird\rfourth".to_string()),
+            ..Default::default()
+        };
 
         let commands = render(window_id, &view, &mut tree_state);
         let viewer_text = commands

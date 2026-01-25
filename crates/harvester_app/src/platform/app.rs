@@ -177,12 +177,11 @@ impl AppEventHandler {
     }
 
     fn enqueue_render(&mut self, view: &AppViewModel) {
-        self.commands
-            .extend(ui::render::render(
-                self.window_id,
-                view,
-                &mut self.tree_render_state,
-            ));
+        self.commands.extend(ui::render::render(
+            self.window_id,
+            view,
+            &mut self.tree_render_state,
+        ));
     }
 }
 
