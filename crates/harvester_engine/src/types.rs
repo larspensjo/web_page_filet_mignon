@@ -1,3 +1,4 @@
+use crate::links::ExtractedLink;
 use std::fmt;
 
 pub type JobId = u64;
@@ -43,6 +44,7 @@ pub struct JobOutcome {
     pub tokens: Option<u32>,
     pub bytes_written: Option<u64>,
     pub content_preview: Option<String>,
+    pub extracted_links: Vec<ExtractedLink>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

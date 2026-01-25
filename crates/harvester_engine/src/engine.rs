@@ -403,6 +403,7 @@ async fn run_job(
                     tokens: Some(token_count),
                     bytes_written: Some(doc_for_write.len() as u64),
                     content_preview: Some(preview_content),
+                    extracted_links: conversion.links,
                 }),
             });
         }
