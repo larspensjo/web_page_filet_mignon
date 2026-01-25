@@ -7,6 +7,7 @@ mod extract;
 mod fetch;
 mod filename;
 mod frontmatter;
+mod links;
 mod persist;
 mod preview;
 mod token;
@@ -20,6 +21,7 @@ pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher};
 pub use filename::deterministic_filename;
 pub use frontmatter::build_markdown_document;
+pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKind};
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 pub use token::{TokenCounter, WhitespaceTokenCounter};
 pub use types::{

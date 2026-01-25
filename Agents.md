@@ -1,6 +1,11 @@
 # Instructions to consider
 Some instructions here doesn't hold for the CommanDuctUI submodule.
 
+## Workflow
+* Build with "cargo build".
+* At the end of complete plan implementation, test with "cargo clippy --all-targets -- -D warnings". Don't do that for itermediary steps as there will be warnings from unused entities. 
+*
+
 ## Bugs
 * Is there a lessons learned here? A design issue? Lack of robustness? That is, I want to find similar problems and prevent future problems of the same type.
 * When fixing bugs, make sure to add a unit test that locks functionality in and prevents it from happening again.

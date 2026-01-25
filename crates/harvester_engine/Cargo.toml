@@ -15,6 +15,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 tokio-util = "0.7"
 html2md = "0.2"
 scraper = "0.25.0"
+url = "2"
+ego-tree = "0.10"
 encoding_rs = "0.8"
 chardetng = "0.1"
 thiserror.workspace = true

@@ -50,13 +50,13 @@ fn pipeline_assemble_markdown_end_to_end() {
     let html =
         r#"<html><head><title>T</title></head><body><article><p>A B</p></article></body></html>"#;
     let extracted = ReadabilityLikeExtractor.extract(html);
-    let md = Html2MdConverter.to_markdown(&extracted.content_html);
+    let md = Html2MdConverter.to_markdown(&extracted.content_html, None);
     let (tokens, doc) = build_markdown_document(
         "https://example.com/x",
         extracted.title.as_deref(),
         "UTF-8",
         "2024-01-01T00:00:00Z",
-        &md,
+        &md.markdown,
         &WhitespaceTokenCounter,
     );
     assert_eq!(tokens, 2);

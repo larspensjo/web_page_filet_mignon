@@ -298,12 +298,15 @@ async fn run_job(
         }
     };
 
-    let markdown = match timeout(config.convert_timeout, async {
-        config.converter.to_markdown(&extracted.content_html)
+    let conversion = match timeout(config.convert_timeout, async {
+        config.converter.to_markdown(
+            &extracted.content_html,
+            Some(fetch_output.metadata.final_url.as_str()),
+        )
     })
     .await
     {
-        Ok(md) => md,
+        Ok(output) => output,
         Err(_) => {
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
@@ -315,6 +318,7 @@ async fn run_job(
         }
     };
 
+    let markdown = conversion.markdown;
     let preview_content = prepare_preview_content(&markdown);
 
     let _ = event_tx.send(EngineEvent::Progress(JobProgress {

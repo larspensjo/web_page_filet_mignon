@@ -40,8 +40,8 @@ fn extractor_prefers_article_then_body() {
 #[test]
 fn converter_turns_html_into_markdown() {
     let html = r#"<h1>Hello</h1><p>world</p>"#;
-    let md = Html2MdConverter.to_markdown(html);
-    let trimmed = md.trim();
+    let md = Html2MdConverter.to_markdown(html, None);
+    let trimmed = md.markdown.trim();
     assert!(
         trimmed.starts_with("# Hello") || trimmed.starts_with("Hello\n=="),
         "unexpected markdown output: {md:?}"
@@ -55,6 +55,6 @@ fn pipeline_decode_extract_convert_is_deterministic() {
     let decoded = decode_html(bytes, Some("text/html; charset=utf-8")).unwrap();
     let extractor = ReadabilityLikeExtractor;
     let extracted = extractor.extract(&decoded.html);
-    let md = Html2MdConverter.to_markdown(&extracted.content_html);
-    assert_eq!(md.trim(), "A\n\nB");
+    let md = Html2MdConverter.to_markdown(&extracted.content_html, None);
+    assert_eq!(md.markdown.trim(), "A\n\nB");
 }

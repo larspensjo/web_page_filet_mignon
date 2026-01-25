@@ -611,6 +611,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chardetng",
+ "ego-tree",
  "encoding_rs",
  "engine_logging",
  "futures-util",
@@ -625,6 +626,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "url",
  "wiremock",
 ]
 
