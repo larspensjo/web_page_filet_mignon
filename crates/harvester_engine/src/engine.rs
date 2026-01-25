@@ -41,7 +41,7 @@ impl EngineConfig {
             fetch_settings: FetchSettings::default(),
             output_dir,
             extractor: Arc::new(crate::ReadabilityLikeExtractor),
-            converter: Arc::new(crate::Html2MdConverter),
+            converter: Arc::new(crate::LinkExtractingConverter::new()),
             token_counter: Arc::new(crate::WhitespaceTokenCounter),
             fetched_utc: Arc::new(|| "1970-01-01T00:00:00Z".to_string()),
             extract_timeout: Duration::from_secs(30),
