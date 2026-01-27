@@ -1,9 +1,35 @@
-use harvester_core::{update, AppState, Effect, JobResultKind, Msg, Stage, TOKEN_LIMIT};
+use std::path::PathBuf;
+
+use harvester_core::{
+    update, AppState, Effect, JobResultKind, LinkDownloadState, Msg, Stage, TOKEN_LIMIT,
+};
 use harvester_engine::{ExtractedLink, LinkKind};
 
 fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
     let (state, _) = update(state, Msg::InputChanged(input.to_string()));
     update(state, Msg::UrlsSubmitted)
+}
+
+fn state_with_single_link() -> AppState {
+    let (state, _) = submit_urls(AppState::new(), "https://links.example\n");
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: JobResultKind::Success,
+            content_preview: None,
+            extracted_links: vec![ExtractedLink {
+                url: "http://example.com/".to_string(),
+                text: Some("Example".to_string()),
+                kind: LinkKind::Hyperlink,
+            }],
+        },
+    );
+    state
+}
+
+fn init_logging() {
+    engine_logging::initialize_for_tests();
 }
 
 #[test]
@@ -169,4 +195,129 @@ fn job_done_attaches_link_records_and_dedupes() {
     assert_eq!(links[2].index, 3);
     assert_eq!(links[2].url, "https://example.com/guide".to_string());
     assert!(links[2].anchor_text.is_none());
+}
+
+#[test]
+fn link_toggle_requested_emits_download_effect() {
+    init_logging();
+    let state = state_with_single_link();
+    let (state, effects) = update(
+        state,
+        Msg::LinkToggleRequested {
+            job_id: 1,
+            link_index: 0,
+            checked: true,
+        },
+    );
+    let link = state.job_links(1).unwrap().first().unwrap();
+    assert!(matches!(
+        link.download_state,
+        LinkDownloadState::Downloading
+    ));
+    assert_eq!(
+        effects,
+        vec![Effect::DownloadLinkedPage {
+            job_id: 1,
+            link_index: 0,
+            url: "http://example.com/".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn link_download_completed_updates_state() {
+    init_logging();
+    let path = PathBuf::from("linked/example.md");
+    let (state, _) = update(
+        state_with_single_link(),
+        Msg::LinkDownloadCompleted {
+            job_id: 1,
+            link_index: 0,
+            path: path.clone(),
+        },
+    );
+    let link = state.job_links(1).unwrap().first().unwrap();
+    match &link.download_state {
+        LinkDownloadState::Downloaded { path: stored } => assert_eq!(stored, &path),
+        other => panic!("expected downloaded state, got {:?}", other),
+    }
+}
+
+#[test]
+fn link_toggle_unchecked_emits_delete_effect_when_downloaded() {
+    init_logging();
+    let (state, _) = update(
+        state_with_single_link(),
+        Msg::LinkDownloadCompleted {
+            job_id: 1,
+            link_index: 0,
+            path: PathBuf::from("linked/example.md"),
+        },
+    );
+    let (state, effects) = update(
+        state,
+        Msg::LinkToggleRequested {
+            job_id: 1,
+            link_index: 0,
+            checked: false,
+        },
+    );
+    let link = state.job_links(1).unwrap().first().unwrap();
+    assert!(matches!(
+        link.download_state,
+        LinkDownloadState::NotDownloaded
+    ));
+    assert_eq!(
+        effects,
+        vec![Effect::DeleteLinkedPage {
+            job_id: 1,
+            link_index: 0,
+            path: PathBuf::from("linked/example.md"),
+        }]
+    );
+}
+
+#[test]
+fn link_toggle_unchecked_without_download_generates_no_effect() {
+    init_logging();
+    let (state, effects) = update(
+        state_with_single_link(),
+        Msg::LinkToggleRequested {
+            job_id: 1,
+            link_index: 0,
+            checked: false,
+        },
+    );
+    assert!(effects.is_empty());
+    let link = state.job_links(1).unwrap().first().unwrap();
+    assert!(matches!(
+        link.download_state,
+        LinkDownloadState::NotDownloaded
+    ));
+}
+
+#[test]
+fn link_download_failed_sets_failed_state() {
+    init_logging();
+    let (state, _) = update(
+        state_with_single_link(),
+        Msg::LinkToggleRequested {
+            job_id: 1,
+            link_index: 0,
+            checked: true,
+        },
+    );
+    let (state, _) = update(
+        state,
+        Msg::LinkDownloadFailed {
+            job_id: 1,
+            link_index: 0,
+            error: "boom".to_string(),
+        },
+    );
+    let link = state.job_links(1).unwrap().first().unwrap();
+    assert!(matches!(
+        link.download_state,
+        LinkDownloadState::Failed { ref error } if error == "boom"
+    ));
 }

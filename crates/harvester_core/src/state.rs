@@ -247,6 +247,77 @@ impl AppState {
         }
     }
 
+    pub(crate) fn link_metadata(
+        &self,
+        job_id: JobId,
+        link_index: u32,
+    ) -> Option<(String, Option<PathBuf>)> {
+        self.jobs.get(&job_id).and_then(|job| {
+            job.links
+                .iter()
+                .find(|record| record.index == link_index)
+                .map(|record| {
+                    (
+                        record.url.clone(),
+                        match &record.download_state {
+                            LinkDownloadState::Downloaded { path } => Some(path.clone()),
+                            _ => None,
+                        },
+                    )
+                })
+        })
+    }
+
+    pub(crate) fn mark_link_download_requested(&mut self, job_id: JobId, link_index: u32) -> bool {
+        if let Some(job) = self.jobs.get_mut(&job_id) {
+            job.mark_link_download_requested(link_index);
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn mark_link_download_completed(
+        &mut self,
+        job_id: JobId,
+        link_index: u32,
+        path: PathBuf,
+    ) -> bool {
+        if let Some(job) = self.jobs.get_mut(&job_id) {
+            job.mark_link_download_completed(link_index, path);
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn mark_link_download_failed(
+        &mut self,
+        job_id: JobId,
+        link_index: u32,
+        error: String,
+    ) -> bool {
+        if let Some(job) = self.jobs.get_mut(&job_id) {
+            job.mark_link_download_failed(link_index, error);
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn mark_link_deleted(&mut self, job_id: JobId, link_index: u32) -> bool {
+        if let Some(job) = self.jobs.get_mut(&job_id) {
+            job.mark_link_deleted(link_index);
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn session(&self) -> SessionState {
         self.session
     }

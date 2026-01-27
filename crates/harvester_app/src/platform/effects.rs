@@ -15,6 +15,7 @@ pub(crate) fn default_output_dir() -> std::path::PathBuf {
 
 pub struct EffectRunner {
     engine: EngineHandle,
+    msg_tx: mpsc::Sender<Msg>,
 }
 
 impl EffectRunner {
@@ -25,7 +26,10 @@ impl EffectRunner {
         config.fetched_utc = std::sync::Arc::new(|| Utc::now().to_rfc3339());
 
         let engine = EngineHandle::new(config);
-        let runner = Self { engine };
+        let runner = Self {
+            engine,
+            msg_tx: msg_tx.clone(),
+        };
         runner.spawn_event_loop(msg_tx);
         runner
     }
@@ -52,6 +56,46 @@ impl EffectRunner {
                 Effect::ArchiveRequested => {
                     engine_info!("Archive requested: enqueue export job");
                     self.engine.request_export();
+                }
+                Effect::DownloadLinkedPage {
+                    job_id,
+                    link_index,
+                    url,
+                } => {
+                    engine_info!(
+                        "Download linked page job_id={} link_index={} url_len={}",
+                        job_id,
+                        link_index,
+                        url.len()
+                    );
+                    let msg_tx = self.msg_tx.clone();
+                    thread::spawn(move || {
+                        let _ = msg_tx.send(Msg::LinkDownloadStarted { job_id, link_index });
+                        let error =
+                            format!("Linked page downloads are not implemented yet: {}", url);
+                        engine_warn!("{}", error);
+                        let _ = msg_tx.send(Msg::LinkDownloadFailed {
+                            job_id,
+                            link_index,
+                            error,
+                        });
+                    });
+                }
+                Effect::DeleteLinkedPage {
+                    job_id,
+                    link_index,
+                    path,
+                } => {
+                    engine_info!(
+                        "Delete linked page job_id={} link_index={} path={}",
+                        job_id,
+                        link_index,
+                        path.display()
+                    );
+                    let msg_tx = self.msg_tx.clone();
+                    thread::spawn(move || {
+                        let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
+                    });
                 }
             }
         }

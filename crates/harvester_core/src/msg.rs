@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use harvester_engine::ExtractedLink;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +30,29 @@ pub enum Msg {
         result: crate::JobResultKind,
         content_preview: Option<String>,
         extracted_links: Vec<ExtractedLink>,
+    },
+    LinkToggleRequested {
+        job_id: crate::JobId,
+        link_index: u32,
+        checked: bool,
+    },
+    LinkDownloadStarted {
+        job_id: crate::JobId,
+        link_index: u32,
+    },
+    LinkDownloadCompleted {
+        job_id: crate::JobId,
+        link_index: u32,
+        path: PathBuf,
+    },
+    LinkDownloadFailed {
+        job_id: crate::JobId,
+        link_index: u32,
+        error: String,
+    },
+    LinkDeleted {
+        job_id: crate::JobId,
+        link_index: u32,
     },
     /// User selected a job from the tree view.
     JobSelected { job_id: crate::JobId },
