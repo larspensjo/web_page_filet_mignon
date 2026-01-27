@@ -5,6 +5,7 @@ use harvester_core::{
 };
 
 use super::constants::*;
+use super::tree_item_ids::job_tree_item_id;
 use std::collections::HashMap;
 
 #[derive(Debug, Default)]
@@ -222,7 +223,7 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
     view.jobs
         .iter()
         .map(|job| TreeItemDescriptor {
-            id: TreeItemId(job.job_id),
+            id: job_tree_item_id(job.job_id),
             text: format_job_row(job),
             is_folder: false,
             state: commanductui::types::CheckState::Unchecked,
@@ -355,6 +356,9 @@ mod tests {
             outcome,
             tokens,
             bytes,
+            link_count: 0,
+            downloaded_link_count: 0,
+            links: Vec::new(),
         }
     }
 

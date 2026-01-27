@@ -1,4 +1,7 @@
-use harvester_core::{update, AppState, CompletedJobSnapshot, Effect, JobResultKind, Msg, Stage};
+use harvester_core::{
+    update, AppState, CompletedJobSnapshot, Effect, JobResultKind, LinkDownloadState,
+    LinkSnapshotRecord, Msg, Stage,
+};
 
 fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
     let (state, _) = update(state, Msg::InputChanged(input.to_string()));
@@ -71,4 +74,26 @@ fn restored_jobs_are_deduped_on_paste() {
     let (next, effects) = submit_urls(state, "https://example.com\n");
     assert_eq!(next.view().job_count, 1);
     assert!(effects.is_empty());
+}
+
+#[test]
+fn restore_completed_job_records_downloaded_link_paths() {
+    init_logging();
+    let snapshot = vec![CompletedJobSnapshot {
+        url: "https://example.com".to_string(),
+        tokens: None,
+        bytes: None,
+        links: vec![LinkSnapshotRecord {
+            url: "https://downloaded.example".to_string(),
+            downloaded_path: Some("linked/123.md".to_string()),
+        }],
+    }];
+
+    let (state, _) = update(AppState::new(), Msg::RestoreCompletedJobs(snapshot));
+    let links = state.job_links(1).expect("job links available");
+    assert_eq!(links.len(), 1);
+    assert!(matches!(
+        links[0].download_state,
+        LinkDownloadState::Downloaded { ref path } if path.ends_with("linked/123.md")
+    ));
 }

@@ -1,4 +1,5 @@
 use harvester_core::{update, AppState, Effect, JobResultKind, Msg, Stage, TOKEN_LIMIT};
+use harvester_engine::{ExtractedLink, LinkKind};
 
 fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
     let (state, _) = update(state, Msg::InputChanged(input.to_string()));
@@ -118,4 +119,54 @@ fn token_totals_accumulate_and_replace_previous_values() {
     );
     assert_eq!(state.view().total_tokens, 200);
     assert!(state.consume_dirty());
+}
+
+#[test]
+fn job_done_attaches_link_records_and_dedupes() {
+    let state = AppState::new();
+    let (state, _effects) = submit_urls(state, "https://links.example\n");
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: 1,
+            result: JobResultKind::Success,
+            content_preview: None,
+            extracted_links: vec![
+                ExtractedLink {
+                    url: "HTTP://EXAMPLE.com".to_string(),
+                    text: Some("Primary".to_string()),
+                    kind: LinkKind::Hyperlink,
+                },
+                ExtractedLink {
+                    url: "http://example.com/".to_string(),
+                    text: Some("Duplicate".to_string()),
+                    kind: LinkKind::Hyperlink,
+                },
+                ExtractedLink {
+                    url: "https://example.com/image.png".to_string(),
+                    text: Some("Image".to_string()),
+                    kind: LinkKind::Image,
+                },
+                ExtractedLink {
+                    url: "https://example.com/guide".to_string(),
+                    text: None,
+                    kind: LinkKind::Hyperlink,
+                },
+            ],
+        },
+    );
+    let links = state.job_links(1).expect("job links available");
+    assert_eq!(links.len(), 3);
+    assert_eq!(links[0].index, 0);
+    assert_eq!(links[0].url, "http://example.com/".to_string());
+    assert_eq!(links[0].anchor_text.as_deref(), Some("Primary"));
+    assert_eq!(links[0].kind, LinkKind::Hyperlink);
+
+    assert_eq!(links[1].index, 2);
+    assert_eq!(links[1].kind, LinkKind::Image);
+    assert_eq!(links[1].anchor_text.as_deref(), Some("Image"));
+
+    assert_eq!(links[2].index, 3);
+    assert_eq!(links[2].url, "https://example.com/guide".to_string());
+    assert!(links[2].anchor_text.is_none());
 }

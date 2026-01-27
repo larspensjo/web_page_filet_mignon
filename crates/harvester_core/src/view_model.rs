@@ -1,4 +1,6 @@
+use crate::state::LinkDownloadState;
 use crate::{JobId, JobResultKind, SessionState, Stage};
+use harvester_engine::LinkKind;
 
 pub const TOKEN_LIMIT: u64 = 200_000;
 
@@ -59,4 +61,17 @@ pub struct JobRowView {
     pub outcome: Option<JobResultKind>,
     pub tokens: Option<u32>,
     pub bytes: Option<u64>,
+    pub link_count: usize,
+    pub downloaded_link_count: usize,
+    pub links: Vec<LinkRowView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkRowView {
+    pub index: u32,
+    pub url: String,
+    pub label: String,
+    pub kind: LinkKind,
+    pub download_state: LinkDownloadState,
+    pub age_suspect: bool,
 }

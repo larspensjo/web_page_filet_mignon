@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::CompletedJobSnapshot;
+use harvester_core::{CompletedJobSnapshot, LinkSnapshotRecord};
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,13 @@ struct PersistedJob {
     tokens: Option<u32>,
     bytes: Option<u64>,
     #[serde(default)]
-    links: Vec<String>,
+    links: Vec<PersistedLink>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedLink {
+    url: String,
+    downloaded_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -50,7 +56,14 @@ pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot
             url: job.url,
             tokens: job.tokens,
             bytes: job.bytes,
-            links: job.links,
+            links: job
+                .links
+                .into_iter()
+                .map(|link| LinkSnapshotRecord {
+                    url: link.url,
+                    downloaded_path: link.downloaded_path,
+                })
+                .collect(),
         })
         .collect();
 
@@ -71,7 +84,14 @@ pub(crate) fn save_completed_jobs(output_dir: &Path, completed: &[CompletedJobSn
                 url: job.url.clone(),
                 tokens: job.tokens,
                 bytes: job.bytes,
-                links: job.links.clone(),
+                links: job
+                    .links
+                    .iter()
+                    .map(|link| PersistedLink {
+                        url: link.url.clone(),
+                        downloaded_path: link.downloaded_path.clone(),
+                    })
+                    .collect(),
             })
             .collect(),
     };
@@ -135,7 +155,16 @@ mod tests {
             url: "https://example.com".to_string(),
             tokens: Some(10),
             bytes: Some(512),
-            links: vec!["https://a".to_string(), "https://b".to_string()],
+            links: vec![
+                LinkSnapshotRecord {
+                    url: "https://a".to_string(),
+                    downloaded_path: None,
+                },
+                LinkSnapshotRecord {
+                    url: "https://b".to_string(),
+                    downloaded_path: Some("linked/alpha.md".to_string()),
+                },
+            ],
         }];
 
         save_completed_jobs(temp.path(), &snapshot);

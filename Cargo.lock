@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "commanductui"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "log",
  "windows",
@@ -602,7 +602,9 @@ dependencies = [
 name = "harvester_core"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "engine_logging",
+ "harvester_engine",
  "url",
 ]
 

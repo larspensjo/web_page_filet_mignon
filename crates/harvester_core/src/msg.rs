@@ -1,3 +1,5 @@
+use harvester_engine::ExtractedLink;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
     /// User edited the URL input box (debounced text).
@@ -25,7 +27,7 @@ pub enum Msg {
         job_id: crate::JobId,
         result: crate::JobResultKind,
         content_preview: Option<String>,
-        extracted_links: Vec<String>,
+        extracted_links: Vec<ExtractedLink>,
     },
     /// User selected a job from the tree view.
     JobSelected { job_id: crate::JobId },

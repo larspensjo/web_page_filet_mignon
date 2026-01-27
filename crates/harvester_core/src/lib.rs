@@ -8,8 +8,8 @@ mod view_model;
 pub use effect::{Effect, StopPolicy};
 pub use msg::Msg;
 pub use state::{
-    normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind, SessionState,
-    Stage,
+    normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind,
+    LinkDownloadState, LinkSnapshotRecord, SessionState, Stage,
 };
 pub use update::update;
 pub use view_model::{AppViewModel, JobRowView, PreviewHeaderView, TOKEN_LIMIT};
