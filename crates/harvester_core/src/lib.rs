@@ -12,4 +12,4 @@ pub use state::{
     LinkDownloadState, LinkSnapshotRecord, SessionState, Stage,
 };
 pub use update::update;
-pub use view_model::{AppViewModel, JobRowView, PreviewHeaderView, TOKEN_LIMIT};
+pub use view_model::{AppViewModel, JobRowView, LinkRowView, PreviewHeaderView, TOKEN_LIMIT};
