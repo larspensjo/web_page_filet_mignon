@@ -18,6 +18,10 @@ The main goal with the preview isn't to make a good presentation looking like th
 * Assess whether a downloaded web page is interesting, or if I want to skip it (remove it from the download list).
 * For slow downloads, I want to assess if I have enough or should wait for more.
 
+## Filtering
+The downloaded page should be filtered, so as to show only interesting informaition.
+* Links and pictures shall be removed, keep only text.
+
 ## Display
 
 The application shall consist of the following main components, from top to bottom:
@@ -27,6 +31,7 @@ The application shall consist of the following main components, from top to bott
 * An Archive button. The button shall be disabled if no web sites are downloaded. It shall be disabled after the archive was generated, but enabled as soon as another web site has been downloaded.
 * The button shall be placed horisontally after each other. They shall have fixed width.
 * The preview pane should be shown to the right of the treeview.
+* The treeview shall be possible to expand. When done so, it shall show all links.
 
 ### Progress bar
 I want a progress bar at the top of the window.
