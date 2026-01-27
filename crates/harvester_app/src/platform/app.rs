@@ -4,8 +4,8 @@ use std::thread;
 use std::time::Duration;
 
 use commanductui::{
-    AppEvent, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
-    WindowConfig, WindowId,
+    AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface,
+    UiStateProvider, WindowConfig, WindowId,
 };
 use harvester_core::{update, AppState, AppViewModel, Effect, JobResultKind, Msg};
 
@@ -14,6 +14,7 @@ use engine_logging::engine_info;
 use super::effects::EffectRunner;
 use super::logging::{self, LogDestination};
 use super::ui;
+use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::{effects, persistence};
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
@@ -91,6 +92,15 @@ struct AppEventHandler {
     effect_runner: EffectRunner,
     tree_render_state: ui::render::TreeRenderState,
     output_dir: std::path::PathBuf,
+}
+
+fn job_id_for_item(item_id: commanductui::TreeItemId) -> Option<harvester_core::JobId> {
+    match decode_tree_item_id(item_id) {
+        TreeItemKind::Job { job_id } => Some(job_id),
+        TreeItemKind::LinksFolder { job_id }
+        | TreeItemKind::LinksShowMore { job_id }
+        | TreeItemKind::Link { job_id, .. } => Some(job_id),
+    }
 }
 
 impl AppEventHandler {
@@ -215,7 +225,23 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::TreeViewItemSelectionChanged { window_id, item_id }
                 if window_id == self.window_id =>
             {
-                let _ = self.msg_tx.send(Msg::JobSelected { job_id: item_id.0 });
+                if let Some(job_id) = job_id_for_item(item_id) {
+                    let _ = self.msg_tx.send(Msg::JobSelected { job_id });
+                }
+            }
+            AppEvent::TreeViewItemToggledByUser {
+                window_id,
+                item_id,
+                new_state,
+            } if window_id == self.window_id => {
+                if let TreeItemKind::Link { job_id, link_index } = decode_tree_item_id(item_id) {
+                    let checked = matches!(new_state, CheckState::Checked);
+                    let _ = self.msg_tx.send(Msg::LinkToggleRequested {
+                        job_id,
+                        link_index,
+                        checked,
+                    });
+                }
             }
             AppEvent::WindowCloseRequestedByUser { .. } => {
                 self.commands.push_back(PlatformCommand::QuitApplication);
