@@ -268,6 +268,35 @@ impl AppState {
         })
     }
 
+    pub fn link_state(&self, job_id: JobId, link_index: u32) -> Option<(LinkDownloadState, bool)> {
+        self.jobs.get(&job_id).and_then(|job| {
+            job.links
+                .iter()
+                .find(|record| record.index == link_index)
+                .map(|record| (record.download_state.clone(), record.age_estimate.is_some()))
+        })
+    }
+
+    pub fn set_link_age_estimate(
+        &mut self,
+        job_id: JobId,
+        link_index: u32,
+        estimate: Option<AgeEstimate>,
+    ) -> bool {
+        if let Some(job) = self.jobs.get_mut(&job_id) {
+            if let Some(record) = job
+                .links
+                .iter_mut()
+                .find(|record| record.index == link_index)
+            {
+                record.age_estimate = estimate;
+                self.dirty = true;
+                return true;
+            }
+        }
+        false
+    }
+
     pub(crate) fn mark_link_download_requested(&mut self, job_id: JobId, link_index: u32) -> bool {
         if let Some(job) = self.jobs.get_mut(&job_id) {
             job.mark_link_download_requested(link_index);

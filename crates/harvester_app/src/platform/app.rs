@@ -3,11 +3,14 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use commanductui::types::TreeItemMarkerKind;
 use commanductui::{
     AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface,
     UiStateProvider, WindowConfig, WindowId,
 };
-use harvester_core::{update, AppState, AppViewModel, Effect, JobResultKind, Msg};
+use harvester_core::{
+    update, AppState, AppViewModel, Effect, JobResultKind, LinkDownloadState, Msg,
+};
 
 use engine_logging::engine_info;
 
@@ -257,18 +260,142 @@ impl PlatformEventHandler for AppEventHandler {
 }
 
 struct AppUiStateProvider {
-    _shared: Arc<Mutex<SharedState>>,
+    shared: Arc<Mutex<SharedState>>,
 }
 
 impl AppUiStateProvider {
     fn new(shared: Arc<Mutex<SharedState>>) -> Self {
-        Self { _shared: shared }
+        Self { shared }
     }
 }
 
 impl UiStateProvider for AppUiStateProvider {
     fn is_tree_item_new(&self, _window_id: WindowId, _item_id: commanductui::TreeItemId) -> bool {
-        // No tree view yet; always false.
         false
+    }
+
+    fn tree_item_marker(
+        &self,
+        _window_id: WindowId,
+        item_id: commanductui::TreeItemId,
+    ) -> TreeItemMarkerKind {
+        if let TreeItemKind::Link { job_id, link_index } = decode_tree_item_id(item_id) {
+            let guard = self.shared.lock().unwrap();
+            if let Some((download_state, age_suspect)) = guard.state.link_state(job_id, link_index)
+            {
+                return match download_state {
+                    LinkDownloadState::Downloaded { .. } => TreeItemMarkerKind::Green,
+                    LinkDownloadState::Downloading => TreeItemMarkerKind::Purple,
+                    LinkDownloadState::Failed { .. } => TreeItemMarkerKind::Red,
+                    LinkDownloadState::NotDownloaded if age_suspect => TreeItemMarkerKind::Yellow,
+                    _ => TreeItemMarkerKind::None,
+                };
+            }
+        }
+
+        TreeItemMarkerKind::None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ui::tree_item_ids::link_tree_item_id;
+    use super::*;
+    use commanductui::types::TreeItemMarkerKind;
+    use commanductui::WindowId;
+    use harvester_core::{AppState, JobResultKind};
+    use harvester_engine::{ExtractedLink, LinkKind};
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    fn shared_state_with_single_link() -> Arc<Mutex<SharedState>> {
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::InputChanged("https://example.com".to_string()));
+        let (state, _) = update(state, Msg::UrlsSubmitted);
+        let (state, _) = update(
+            state,
+            Msg::JobDone {
+                job_id: 1,
+                result: JobResultKind::Success,
+                content_preview: None,
+                extracted_links: vec![ExtractedLink {
+                    url: "http://example.com/".to_string(),
+                    text: Some("Example".to_string()),
+                    kind: LinkKind::Hyperlink,
+                }],
+            },
+        );
+        let mut shared = SharedState::default();
+        shared.state = state;
+        Arc::new(Mutex::new(shared))
+    }
+
+    fn apply_msg(shared: &Arc<Mutex<SharedState>>, msg: Msg) {
+        let mut guard = shared.lock().unwrap();
+        let (state, _) = update(std::mem::take(&mut guard.state), msg);
+        guard.state = state;
+    }
+
+    #[test]
+    fn tree_item_marker_updates_with_link_state() {
+        let shared = shared_state_with_single_link();
+        let provider = AppUiStateProvider::new(shared.clone());
+        let item_id = link_tree_item_id(1, 0);
+
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::None
+        );
+
+        apply_msg(
+            &shared,
+            Msg::LinkToggleRequested {
+                job_id: 1,
+                link_index: 0,
+                checked: true,
+            },
+        );
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::Purple
+        );
+
+        apply_msg(
+            &shared,
+            Msg::LinkDownloadCompleted {
+                job_id: 1,
+                link_index: 0,
+                path: PathBuf::from("linked/example.md"),
+            },
+        );
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::Green
+        );
+
+        apply_msg(
+            &shared,
+            Msg::LinkDownloadFailed {
+                job_id: 1,
+                link_index: 0,
+                error: "boom".to_string(),
+            },
+        );
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::Red
+        );
+
+        apply_msg(
+            &shared,
+            Msg::LinkDeleted {
+                job_id: 1,
+                link_index: 0,
+            },
+        );
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::None
+        );
     }
 }
