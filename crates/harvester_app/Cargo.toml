@@ -14,6 +14,7 @@ simplelog.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
 ron = "0.12.0"
 serde = { version = "1", features = ["derive"] }
+reqwest = { version = "0.13.1", default-features = false, features = ["rustls", "blocking"] }
 
 [dev-dependencies]
 tempfile = "3"

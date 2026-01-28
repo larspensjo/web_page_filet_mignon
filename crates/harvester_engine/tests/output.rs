@@ -103,3 +103,35 @@ fn concatenated_export_creates_missing_output_dir() {
     assert!(manifest.contains("\"doc_count\":0"));
     assert!(manifest.contains("\"total_tokens\":0"));
 }
+
+#[test]
+fn concatenated_export_includes_linked_pages_and_dedupes_urls() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let linked_dir = dir.join("linked");
+    std::fs::create_dir_all(&linked_dir).unwrap();
+
+    let root_md = "---\nurl: https://root\ntitle: Root\ntoken_count: 1\nfetched_utc: 2024-01-01T00:00:00Z\n---\n\nroot\n";
+    let link_md = "---\nurl: https://link\ntitle: Link\ntoken_count: 2\nfetched_utc: 2024-01-02T00:00:00Z\n---\n\nlink\n";
+    let duplicate_md = "---\nurl: https://link/\ntitle: Link Dup\ntoken_count: 3\nfetched_utc: 2024-01-03T00:00:00Z\n---\n\ndup\n";
+
+    std::fs::write(dir.join("root.md"), root_md).unwrap();
+    std::fs::write(linked_dir.join("link.md"), link_md).unwrap();
+    std::fs::write(dir.join("duplicate.md"), duplicate_md).unwrap();
+
+    let summary = build_concatenated_export(dir, ExportOptions::default()).unwrap();
+    assert_eq!(summary.doc_count, 2);
+    let export = std::fs::read_to_string(summary.output_path).unwrap();
+    assert!(export.contains("url: https://root"));
+    assert!(export.contains("url: https://link"));
+    assert!(!export.contains("link Dup"));
+
+    let manifest = std::fs::read_to_string(summary.manifest_path.unwrap()).unwrap();
+    assert!(
+        manifest.contains("\"url\":\"https://link\"")
+            || manifest.contains("\"url\":\"https://link/\""),
+        "linked url missing: {}",
+        manifest
+    );
+    assert!(manifest.contains("\"url\":\"https://root\""));
+}

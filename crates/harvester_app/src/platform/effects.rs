@@ -1,3 +1,5 @@
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -5,7 +7,13 @@ use std::time::Duration;
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
-use harvester_engine::{EngineConfig, EngineEvent, EngineHandle};
+use harvester_engine::{
+    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
+    AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor,
+    LinkExtractingConverter, ReadabilityLikeExtractor, WhitespaceTokenCounter,
+};
+use reqwest::blocking::Client;
+use reqwest::header::CONTENT_TYPE;
 
 pub(crate) fn default_output_dir() -> std::path::PathBuf {
     std::env::current_dir()
@@ -13,22 +21,28 @@ pub(crate) fn default_output_dir() -> std::path::PathBuf {
         .join("output")
 }
 
+const LINKED_ALLOWED_CONTENT_TYPES: [&str; 3] =
+    ["text/html", "application/xhtml+xml", "text/plain"];
+const LINK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub struct EffectRunner {
     engine: EngineHandle,
     msg_tx: mpsc::Sender<Msg>,
+    output_dir: PathBuf,
 }
 
 impl EffectRunner {
     pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
         let output_dir = default_output_dir();
 
-        let mut config = EngineConfig::default_with_output(output_dir);
+        let mut config = EngineConfig::default_with_output(output_dir.clone());
         config.fetched_utc = std::sync::Arc::new(|| Utc::now().to_rfc3339());
 
         let engine = EngineHandle::new(config);
         let runner = Self {
             engine,
             msg_tx: msg_tx.clone(),
+            output_dir,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -69,16 +83,30 @@ impl EffectRunner {
                         url.len()
                     );
                     let msg_tx = self.msg_tx.clone();
+                    let output_dir = self.output_dir.clone();
                     thread::spawn(move || {
                         let _ = msg_tx.send(Msg::LinkDownloadStarted { job_id, link_index });
-                        let error =
-                            format!("Linked page downloads are not implemented yet: {}", url);
-                        engine_warn!("{}", error);
-                        let _ = msg_tx.send(Msg::LinkDownloadFailed {
-                            job_id,
-                            link_index,
-                            error,
-                        });
+                        match download_link_page(&url, &output_dir) {
+                            Ok(absolute_path) => {
+                                let relative_path = absolute_path
+                                    .strip_prefix(&output_dir)
+                                    .map(|p| p.to_path_buf())
+                                    .unwrap_or_else(|_| absolute_path.clone());
+                                let _ = msg_tx.send(Msg::LinkDownloadCompleted {
+                                    job_id,
+                                    link_index,
+                                    path: relative_path,
+                                });
+                            }
+                            Err(error) => {
+                                engine_warn!("Linked page download failed: {}", error);
+                                let _ = msg_tx.send(Msg::LinkDownloadFailed {
+                                    job_id,
+                                    link_index,
+                                    error,
+                                });
+                            }
+                        }
                     });
                 }
                 Effect::DeleteLinkedPage {
@@ -93,7 +121,9 @@ impl EffectRunner {
                         path.display()
                     );
                     let msg_tx = self.msg_tx.clone();
+                    let absolute_path = self.output_dir.join(&path);
                     thread::spawn(move || {
+                        let _ = fs::remove_file(&absolute_path);
                         let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
                     });
                 }
@@ -141,6 +171,67 @@ impl EffectRunner {
             }
         });
     }
+}
+
+fn download_link_page(url: &str, output_dir: &Path) -> Result<PathBuf, String> {
+    let linked_dir = output_dir.join("linked");
+    ensure_output_dir(&linked_dir).map_err(|err| format!("linked output dir error: {}", err))?;
+
+    let client = Client::builder()
+        .timeout(LINK_DOWNLOAD_TIMEOUT)
+        .build()
+        .map_err(|err| err.to_string())?;
+    let response = client.get(url).send().map_err(|err| err.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "HTTP error {} for linked page {}",
+            response.status(),
+            url
+        ));
+    }
+
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_string());
+    if let Some(ref content_type) = content_type {
+        let ct = content_type
+            .split(';')
+            .next()
+            .unwrap_or(content_type)
+            .trim();
+        if !LINKED_ALLOWED_CONTENT_TYPES
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(ct))
+        {
+            return Err(format!("unsupported content type '{}'", ct));
+        }
+    }
+
+    let final_url = response.url().to_string();
+    let bytes = response.bytes().map_err(|err| err.to_string())?;
+    let decoded =
+        decode_html(&bytes, content_type.as_deref()).map_err(|err: DecodeError| err.to_string())?;
+
+    let extractor = ReadabilityLikeExtractor;
+    let extracted = extractor.extract(&decoded.html);
+    let converter = LinkExtractingConverter::new();
+    let conversion = converter.to_markdown(&extracted.content_html, Some(final_url.as_str()));
+    let token_counter = WhitespaceTokenCounter;
+    let fetched_utc = Utc::now().to_rfc3339();
+    let (_tokens, doc) = build_markdown_document(
+        &final_url,
+        extracted.title.as_deref(),
+        &decoded.encoding_label,
+        &fetched_utc,
+        &conversion.markdown,
+        &token_counter,
+    );
+
+    let filename = deterministic_filename(extracted.title.as_deref(), &final_url);
+    let writer = AtomicFileWriter::new(linked_dir);
+    writer.write(&filename, &doc).map_err(|err| err.to_string())
 }
 
 fn map_stage(stage: harvester_engine::Stage) -> Stage {

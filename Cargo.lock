@@ -592,6 +592,7 @@ dependencies = [
  "harvester_core",
  "harvester_engine",
  "log",
+ "reqwest",
  "ron",
  "serde",
  "simplelog",
@@ -1505,6 +1506,7 @@ checksum = "04e9018c9d814e5f30cc16a0f03271aeab3571e609612d9fe78c1aa8d11c2f62"
 dependencies = [
  "base64",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
