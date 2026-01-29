@@ -77,6 +77,8 @@ impl AppState {
             token_limit: TOKEN_LIMIT,
             preview_text,
             preview_header,
+            left_panel_width: self.ui.left_panel_width(),
+            window_width: self.ui.window_width(),
         }
     }
 
@@ -85,6 +87,11 @@ impl AppState {
         let was_dirty = self.dirty;
         self.dirty = false;
         was_dirty
+    }
+
+    /// Marks the state as dirty, signaling that a re-render is needed.
+    pub(crate) fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 
     pub fn completed_jobs_snapshot(&self) -> Vec<CompletedJobSnapshot> {
@@ -286,6 +293,26 @@ impl AppState {
     /// If yes, return true (indicating it should be skipped).
     pub(crate) fn is_url_seen(&mut self, normalized_url: &str) -> bool {
         !self.seen_urls.insert(normalized_url.to_owned())
+    }
+
+    /// Returns the current left panel width (PANEL_INPUT + PANEL_JOBS combined).
+    pub(crate) fn left_panel_width(&self) -> i32 {
+        self.ui.left_panel_width()
+    }
+
+    /// Sets the left panel width.
+    pub(crate) fn set_left_panel_width(&mut self, width: i32) {
+        self.ui.set_left_panel_width(width);
+    }
+
+    /// Returns the current window width.
+    pub(crate) fn window_width(&self) -> i32 {
+        self.ui.window_width()
+    }
+
+    /// Sets the window width.
+    pub(crate) fn set_window_width(&mut self, width: i32) {
+        self.ui.set_window_width(width);
     }
 }
 
@@ -497,11 +524,30 @@ impl PreviewState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+// Default left panel width (PANEL_INPUT + PANEL_JOBS = 320 + 280)
+const DEFAULT_LEFT_PANEL_WIDTH: i32 = 600;
+// Default window width
+const DEFAULT_WINDOW_WIDTH: i32 = 960;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct UiState {
     urls: Vec<String>,
     input_buffer: String,
     preview: PreviewState,
+    left_panel_width: i32,
+    window_width: i32,
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            urls: Vec::new(),
+            input_buffer: String::new(),
+            preview: PreviewState::default(),
+            left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
+            window_width: DEFAULT_WINDOW_WIDTH,
+        }
+    }
 }
 
 impl UiState {
@@ -547,6 +593,22 @@ impl UiState {
 
     fn clear_input_buffer(&mut self) {
         self.input_buffer.clear();
+    }
+
+    fn left_panel_width(&self) -> i32 {
+        self.left_panel_width
+    }
+
+    fn set_left_panel_width(&mut self, width: i32) {
+        self.left_panel_width = width;
+    }
+
+    fn window_width(&self) -> i32 {
+        self.window_width
+    }
+
+    fn set_window_width(&mut self, width: i32) {
+        self.window_width = width;
     }
 }
 

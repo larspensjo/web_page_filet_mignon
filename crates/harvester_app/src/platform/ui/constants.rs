@@ -17,3 +17,4 @@ pub const LABEL_PREVIEW_HEADER: ControlId = ControlId::new(3004);
 pub const LABEL_JOBS_HEADER: ControlId = ControlId::new(3005);
 pub const PROGRESS_TOKENS: ControlId = ControlId::new(4001);
 pub const VIEWER_PREVIEW: ControlId = ControlId::new(5001);
+pub const SPLITTER_MAIN: ControlId = ControlId::new(6001);

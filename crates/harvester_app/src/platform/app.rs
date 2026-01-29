@@ -220,6 +220,25 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::WindowCloseRequestedByUser { .. } => {
                 self.commands.push_back(PlatformCommand::QuitApplication);
             }
+            AppEvent::SplitterDragging {
+                desired_left_width_px,
+                ..
+            }
+            | AppEvent::SplitterDragEnded {
+                desired_left_width_px,
+                ..
+            } => {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::SplitterMoved { desired_left_width_px });
+            }
+            AppEvent::WindowResized {
+                window_id, width, ..
+            } if window_id == self.window_id => {
+                let _ = self.msg_tx.send(Msg::WindowResized {
+                    window_width: width,
+                });
+            }
             _ => {}
         }
     }

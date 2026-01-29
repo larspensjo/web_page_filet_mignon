@@ -20,6 +20,11 @@ pub struct PreviewHeaderView {
     pub nav_heavy: bool,
 }
 
+// Default left panel width (PANEL_INPUT + PANEL_JOBS = 320 + 280)
+pub const DEFAULT_LEFT_PANEL_WIDTH: i32 = 600;
+// Default window width
+pub const DEFAULT_WINDOW_WIDTH: i32 = 960;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppViewModel {
     pub session: SessionState,
@@ -32,6 +37,10 @@ pub struct AppViewModel {
     pub token_limit: u64,
     pub preview_text: Option<String>,
     pub preview_header: Option<PreviewHeaderView>,
+    /// Width of the left panels region (PANEL_INPUT + PANEL_JOBS).
+    pub left_panel_width: i32,
+    /// Current window width.
+    pub window_width: i32,
 }
 
 impl Default for AppViewModel {
@@ -47,6 +56,8 @@ impl Default for AppViewModel {
             token_limit: TOKEN_LIMIT,
             preview_text: None,
             preview_header: None,
+            left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
+            window_width: DEFAULT_WINDOW_WIDTH,
         }
     }
 }

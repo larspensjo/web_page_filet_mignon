@@ -1,4 +1,11 @@
-use crate::{normalize_url_for_dedupe, AppState, Effect, Msg, SessionState, StopPolicy};
+use crate::{calc_left_width, normalize_url_for_dedupe, AppState, Effect, Msg, SessionState, StopPolicy};
+
+// Minimum width for the left panels (PANEL_INPUT + PANEL_JOBS)
+const MIN_LEFT_WIDTH: i32 = 200;
+// Minimum width for the preview panel
+const MIN_PREVIEW_WIDTH: i32 = 200;
+// Total width occupied by splitter (width + margins)
+const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
@@ -97,6 +104,32 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
+            Vec::new()
+        }
+        Msg::SplitterMoved { desired_left_width_px } => {
+            let clamped = calc_left_width(
+                desired_left_width_px,
+                state.window_width(),
+                MIN_LEFT_WIDTH,
+                MIN_PREVIEW_WIDTH,
+                SPLITTER_TOTAL_WIDTH,
+            );
+            state.set_left_panel_width(clamped);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::WindowResized { window_width } => {
+            state.set_window_width(window_width);
+            // Re-clamp the left panel width based on new window width
+            let clamped = calc_left_width(
+                state.left_panel_width(),
+                window_width,
+                MIN_LEFT_WIDTH,
+                MIN_PREVIEW_WIDTH,
+                SPLITTER_TOTAL_WIDTH,
+            );
+            state.set_left_panel_width(clamped);
+            state.mark_dirty();
             Vec::new()
         }
         Msg::Tick | Msg::NoOp => Vec::new(),

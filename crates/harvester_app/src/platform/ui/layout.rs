@@ -1,4 +1,4 @@
-use commanductui::types::{DockStyle, LabelClass, LayoutRule};
+use commanductui::types::{DockStyle, LabelClass, LayoutRule, SplitterOrientation};
 use commanductui::{
     Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
 };
@@ -45,6 +45,14 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: None,
         control_id: PANEL_PREVIEW,
+    });
+
+    // Create the vertical splitter between left panels and preview
+    commands.push(PlatformCommand::CreateSplitter {
+        window_id,
+        parent_control_id: None,
+        control_id: SPLITTER_MAIN,
+        orientation: SplitterOrientation::Vertical,
     });
 
     commands.push(PlatformCommand::CreateLabel {
@@ -235,6 +243,15 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 order: 1,
                 fixed_size: None,
                 margin: (0, 0, 0, 0),
+            },
+            // Splitter between left panels and preview
+            LayoutRule {
+                control_id: SPLITTER_MAIN,
+                parent_control_id: None,
+                dock_style: DockStyle::Left,
+                order: 305,
+                fixed_size: Some(4), // 4px wide splitter bar
+                margin: (6, 0, 6, 0),
             },
             LayoutRule {
                 control_id: PANEL_PREVIEW,
@@ -482,6 +499,19 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
             ..Default::default()
         },
     });
+
+    // Splitter control style: neutral gray matching the theme
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::Splitter,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x40,
+                g: 0x44,
+                b: 0x4B,
+            }),
+            ..Default::default()
+        },
+    });
 }
 
 fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
@@ -563,5 +593,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         window_id,
         control_id: PROGRESS_TOKENS,
         style_id: StyleId::ProgressBar,
+    });
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: SPLITTER_MAIN,
+        style_id: StyleId::Splitter,
     });
 }

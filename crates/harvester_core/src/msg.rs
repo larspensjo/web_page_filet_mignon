@@ -29,6 +29,10 @@ pub enum Msg {
     },
     /// User selected a job from the tree view.
     JobSelected { job_id: crate::JobId },
+    /// User dragged the splitter to resize the left panels.
+    SplitterMoved { desired_left_width_px: i32 },
+    /// Window was resized.
+    WindowResized { window_width: i32 },
     /// Fallback for placeholder wiring.
     NoOp,
 }
