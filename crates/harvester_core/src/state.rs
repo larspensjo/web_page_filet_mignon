@@ -1,7 +1,7 @@
+use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TOKEN_LIMIT,
 };
-use chrono::NaiveDate;
 use harvester_engine::{ExtractedLink, LinkKind};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
@@ -13,33 +13,6 @@ const MAX_EXTRACTED_LINKS: usize = 5_000;
 const LINK_ROW_LIMIT: usize = 200;
 const LINK_LABEL_MAX: usize = 80;
 const LINK_LABEL_TRUNCATE_MARKER: &str = "…";
-
-/// How confident we are in a heuristic age estimate for a link.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgeEstimateConfidence {
-    Low,
-    Medium,
-    High,
-}
-
-/// Source that produced an age estimate for a link.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgeEstimateSource {
-    UrlPattern,
-    AnchorText,
-    DownloadedMetadata,
-}
-
-/// A heuristic estimate of when a link was published or last updated.
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AgeEstimate {
-    pub date: NaiveDate,
-    pub confidence: AgeEstimateConfidence,
-    pub source: AgeEstimateSource,
-}
 
 /// Represents the download status for a specific link.
 #[allow(dead_code)]
@@ -616,11 +589,11 @@ impl JobState {
             }
             self.links.push(LinkRecord {
                 index: idx as u32,
-                url: canonical,
+                url: canonical.clone(),
                 anchor_text: link.text,
                 kind: link.kind,
                 download_state: LinkDownloadState::NotDownloaded,
-                age_estimate: None,
+                age_estimate: guess_age_from_url(&canonical),
             });
         }
     }

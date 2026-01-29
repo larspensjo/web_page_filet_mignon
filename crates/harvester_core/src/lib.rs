@@ -3,6 +3,7 @@ mod effect;
 mod msg;
 mod state;
 mod update;
+mod url_age;
 mod view_model;
 
 pub use effect::{Effect, StopPolicy};

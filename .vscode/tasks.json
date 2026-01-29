@@ -26,7 +26,7 @@
     {
       "label": "Test workspace",
       "type": "shell",
-      "command": "cargo test --workspace",
+      "command": "cargo nextest run",
       "group": "test",
       "problemMatcher": [
         "$rustc"
