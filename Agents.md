@@ -3,7 +3,7 @@ Some instructions here doesn't hold for the CommanDuctUI submodule.
 
 ## Workflow
 * Build with "cargo build".
-* At the end of complete plan implementation, test with "cargo clippy --all-targets -- -D warnings". Don't do that for itermediary steps as there will be warnings from unused entities. 
+* At the end of complete plan implementation, test with "cargo clippy --all-targets -- -D warnings". Don't do that for itermediary steps as there will be warnings from unused entities.
 *
 
 ## Bugs
@@ -55,6 +55,7 @@ First and foremost, adhere to the Unidirectional Data Flow Architecture.
 ## General Rust design
 * mod.rs, lib.rs and main.rs should be thin wrappers.
 * Follow the principle of **Correctness-by-construction**: Prefer designs and language features that prevent bugs by construction—make illegal states unrepresentable and incorrect usage hard or impossible.
+* Instead of liberally use of comments, try to use names on things (functions, variables, etc) that makes the intent clear. But still, comments may be needed eventually.
 
 ## Logging
 * Use the `engine_logging` crate for all logging. Import macros: `use engine_logging::{engine_info, engine_warn, engine_error};`

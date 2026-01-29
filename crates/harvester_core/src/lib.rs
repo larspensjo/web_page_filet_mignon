@@ -2,6 +2,7 @@
 mod effect;
 mod msg;
 mod state;
+mod ui_geometry;
 mod update;
 mod view_model;
 
@@ -11,5 +12,6 @@ pub use state::{
     normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind, SessionState,
     Stage,
 };
+pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{AppViewModel, JobRowView, PreviewHeaderView, TOKEN_LIMIT};

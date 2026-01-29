@@ -182,6 +182,24 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 fixed_size: Some(44),
                 margin: (0, 0, 0, 0),
             },
+            // --- Left Panel Proportional Resizing Strategy ---
+            // PANEL_INPUT and PANEL_JOBS together form the "left panels" region.
+            // Their widths are derived proportionally from a single source of truth:
+            // `left_panel_width` (default 600 = 320 + 280).
+            //
+            // Current fixed sizes represent the default proportions:
+            //   - PANEL_INPUT: ~53.3% (320/600)
+            //   - PANEL_JOBS:  ~46.7% (280/600)
+            //
+            // When a draggable splitter is added, these fixed_size values will be
+            // replaced with computed values based on left_panel_width, maintaining
+            // these proportions. The splitter will adjust the total left_panel_width,
+            // and both panels will resize proportionally each layout pass.
+            //
+            // Single source of truth: only `left_panel_width` is persisted and updated.
+            // Individual panel widths are always derived, never stored separately.
+            // --- End Proportional Resizing Strategy ---
+
             // URL drop box on the left (fixed width)
             LayoutRule {
                 control_id: PANEL_INPUT,
