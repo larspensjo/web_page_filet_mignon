@@ -223,11 +223,21 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::SplitterDragging {
                 desired_left_width_px,
                 ..
+            } => {
+                // Continuous dragging - update layout in real-time
+                let _ = self
+                    .msg_tx
+                    .send(Msg::SplitterMoved { desired_left_width_px });
             }
-            | AppEvent::SplitterDragEnded {
+            AppEvent::SplitterDragEnded {
                 desired_left_width_px,
                 ..
             } => {
+                // Log boundary event: drag completed
+                engine_info!(
+                    "Splitter drag ended: left_panel_width={}",
+                    desired_left_width_px
+                );
                 let _ = self
                     .msg_tx
                     .send(Msg::SplitterMoved { desired_left_width_px });

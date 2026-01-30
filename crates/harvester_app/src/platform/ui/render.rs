@@ -4,6 +4,7 @@ use harvester_core::{
     AppViewModel, JobResultKind, JobRowView, PreviewHeaderView, SessionState, Stage,
     DEFAULT_LEFT_PANEL_WIDTH,
 };
+use engine_logging::engine_debug;
 
 use super::constants::*;
 use std::collections::HashMap;
@@ -20,6 +21,14 @@ pub struct TreeRenderState {
     check_state_by_id: HashMap<TreeItemId, CheckState>,
     /// Tracks the previous left_panel_width to detect changes
     prev_left_panel_width: i32,
+    prev_status_text: Option<String>,
+    prev_progress_text: Option<String>,
+    prev_preview_text: Option<String>,
+    prev_header_text: Option<String>,
+    prev_stop_enabled: Option<bool>,
+    prev_archive_enabled: Option<bool>,
+    prev_progress_range: Option<(u32, u32)>,
+    prev_progress_pos: Option<u32>,
 }
 
 impl Default for TreeRenderState {
@@ -30,6 +39,14 @@ impl Default for TreeRenderState {
             text_by_id: HashMap::new(),
             check_state_by_id: HashMap::new(),
             prev_left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
+            prev_status_text: None,
+            prev_progress_text: None,
+            prev_preview_text: None,
+            prev_header_text: None,
+            prev_stop_enabled: None,
+            prev_archive_enabled: None,
+            prev_progress_range: None,
+            prev_progress_pos: None,
         }
     }
 }
@@ -126,45 +143,80 @@ pub fn render(
 
     // Check if left_panel_width changed and emit updated layout
     if view.left_panel_width != tree_state.prev_left_panel_width {
+        engine_debug!(
+            "[Render] Layout update: left_panel_width {} -> {}",
+            tree_state.prev_left_panel_width,
+            view.left_panel_width
+        );
         cmds.push(build_layout_command(window_id, view.left_panel_width));
         tree_state.prev_left_panel_width = view.left_panel_width;
     }
 
-    cmds.push(PlatformCommand::UpdateLabelText {
-        window_id,
-        control_id: LABEL_STATUS,
-        text: status_text,
-        severity: MessageSeverity::Information,
-    });
+    let status_changed = match tree_state.prev_status_text.as_deref() {
+        Some(prev) => prev != status_text,
+        None => true,
+    };
+    if status_changed {
+        cmds.push(PlatformCommand::UpdateLabelText {
+            window_id,
+            control_id: LABEL_STATUS,
+            text: status_text.to_string(),
+            severity: MessageSeverity::Information,
+        });
+        tree_state.prev_status_text = Some(status_text.to_string());
+    }
 
-    cmds.push(PlatformCommand::SetProgressBarRange {
-        window_id,
-        control_id: PROGRESS_TOKENS,
-        min: 0,
-        max: bar_max as u32,
-    });
-    cmds.push(PlatformCommand::SetProgressBarPosition {
-        window_id,
-        control_id: PROGRESS_TOKENS,
-        position: clamped_tokens as u32,
-    });
-    cmds.push(PlatformCommand::SetControlText {
-        window_id,
-        control_id: LABEL_TOKEN_PROGRESS,
-        text: progress_text,
-    });
+    let range = (0, bar_max as u32);
+    if tree_state.prev_progress_range != Some(range) {
+        cmds.push(PlatformCommand::SetProgressBarRange {
+            window_id,
+            control_id: PROGRESS_TOKENS,
+            min: range.0,
+            max: range.1,
+        });
+        tree_state.prev_progress_range = Some(range);
+    }
+    let pos = clamped_tokens as u32;
+    if tree_state.prev_progress_pos != Some(pos) {
+        cmds.push(PlatformCommand::SetProgressBarPosition {
+            window_id,
+            control_id: PROGRESS_TOKENS,
+            position: pos,
+        });
+        tree_state.prev_progress_pos = Some(pos);
+    }
+    let progress_text_changed = match tree_state.prev_progress_text.as_deref() {
+        Some(prev) => prev != progress_text,
+        None => true,
+    };
+    if progress_text_changed {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_TOKEN_PROGRESS,
+            text: progress_text.to_string(),
+        });
+        tree_state.prev_progress_text = Some(progress_text.to_string());
+    }
 
-    cmds.push(PlatformCommand::SetControlEnabled {
-        window_id,
-        control_id: BUTTON_STOP,
-        enabled: matches!(view.session, SessionState::Running),
-    });
+    let stop_enabled = matches!(view.session, SessionState::Running);
+    if tree_state.prev_stop_enabled != Some(stop_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_STOP,
+            enabled: stop_enabled,
+        });
+        tree_state.prev_stop_enabled = Some(stop_enabled);
+    }
 
-    cmds.push(PlatformCommand::SetControlEnabled {
-        window_id,
-        control_id: BUTTON_ARCHIVE,
-        enabled: view.job_count > 0,
-    });
+    let archive_enabled = view.job_count > 0;
+    if tree_state.prev_archive_enabled != Some(archive_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_ARCHIVE,
+            enabled: archive_enabled,
+        });
+        tree_state.prev_archive_enabled = Some(archive_enabled);
+    }
 
     let job_items = build_job_tree(view);
     append_tree_commands(window_id, job_items, tree_state, &mut cmds);
@@ -174,22 +226,36 @@ pub fn render(
         .as_deref()
         .map(normalize_windows_newlines)
         .unwrap_or_default();
-    cmds.push(PlatformCommand::SetViewerContent {
-        window_id,
-        control_id: VIEWER_PREVIEW,
-        text: preview_text,
-    });
+    let preview_text_changed = match tree_state.prev_preview_text.as_deref() {
+        Some(prev) => prev != preview_text,
+        None => true,
+    };
+    if preview_text_changed {
+        cmds.push(PlatformCommand::SetViewerContent {
+            window_id,
+            control_id: VIEWER_PREVIEW,
+            text: preview_text.to_string(),
+        });
+        tree_state.prev_preview_text = Some(preview_text.to_string());
+    }
 
     let header_text = view
         .preview_header
         .as_ref()
         .map(format_preview_header)
         .unwrap_or_else(|| "(no selection)".to_string());
-    cmds.push(PlatformCommand::SetControlText {
-        window_id,
-        control_id: LABEL_PREVIEW_HEADER,
-        text: header_text,
-    });
+    let header_text_changed = match tree_state.prev_header_text.as_deref() {
+        Some(prev) => prev != header_text,
+        None => true,
+    };
+    if header_text_changed {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_PREVIEW_HEADER,
+            text: header_text.to_string(),
+        });
+        tree_state.prev_header_text = Some(header_text.to_string());
+    }
 
     cmds
 }
