@@ -1,12 +1,16 @@
 use commanductui::types::{DockStyle, LayoutRule, TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
-use harvester_core::{
-    AppViewModel, JobResultKind, JobRowView, PreviewHeaderView, SessionState, Stage,
-    DEFAULT_LEFT_PANEL_WIDTH,
-};
 use engine_logging::engine_debug;
+use harvester_core::{
+    AppViewModel, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView, SessionState,
+    Stage, DEFAULT_LEFT_PANEL_WIDTH,
+};
+use harvester_engine::LinkKind;
 
 use super::constants::*;
+use super::tree_item_ids::{
+    job_tree_item_id, link_tree_item_id, links_folder_tree_item_id, links_show_more_tree_item_id,
+};
 use std::collections::HashMap;
 
 // Proportions for left panel subdivision (PANEL_INPUT and PANEL_JOBS)
@@ -312,15 +316,61 @@ fn append_tree_commands(
 fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
     view.jobs
         .iter()
-        .map(|job| TreeItemDescriptor {
-            id: TreeItemId(job.job_id),
-            text: format_job_row(job),
+        .map(|job| {
+            let mut children = Vec::new();
+            if job.link_count > 0 {
+                children.push(TreeItemDescriptor {
+                    id: links_folder_tree_item_id(job.job_id),
+                    text: format!("Links ({})", job.link_count),
+                    is_folder: true,
+                    state: CheckState::Unchecked,
+                    children: build_link_children(job),
+                    style_override: None,
+                });
+            }
+            TreeItemDescriptor {
+                id: job_tree_item_id(job.job_id),
+                text: format_job_row(job),
+                is_folder: true,
+                state: CheckState::Unchecked,
+                children,
+                style_override: None,
+            }
+        })
+        .collect()
+}
+
+fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
+    let mut children: Vec<_> = job
+        .links
+        .iter()
+        .filter(|link| link.kind == LinkKind::Hyperlink)
+        .map(|link| TreeItemDescriptor {
+            id: link_tree_item_id(job.job_id, link.index),
+            text: link.label.clone(),
             is_folder: false,
-            state: commanductui::types::CheckState::Unchecked,
+            state: match link.download_state {
+                LinkDownloadState::Downloaded { .. } => CheckState::Checked,
+                _ => CheckState::Unchecked,
+            },
             children: Vec::new(),
             style_override: None,
         })
-        .collect()
+        .collect();
+
+    let remaining = job.link_count.saturating_sub(job.links.len());
+    if remaining > 0 {
+        children.push(TreeItemDescriptor {
+            id: links_show_more_tree_item_id(job.job_id),
+            text: format!("(show more… {} remaining)", remaining),
+            is_folder: false,
+            state: CheckState::Unchecked,
+            children: Vec::new(),
+            style_override: None,
+        });
+    }
+
+    children
 }
 
 fn format_job_row(job: &JobRowView) -> String {
@@ -594,7 +644,9 @@ fn build_layout_command(window_id: WindowId, left_panel_width: i32) -> PlatformC
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harvester_core::LinkRowView;
     use harvester_core::Stage;
+    use std::path::PathBuf;
     use std::sync::Once;
 
     fn init_logging() {
@@ -617,6 +669,20 @@ mod tests {
             outcome,
             tokens,
             bytes,
+            link_count: 0,
+            downloaded_link_count: 0,
+            links: Vec::new(),
+        }
+    }
+
+    fn make_link_row(index: u32, label: &str, download_state: LinkDownloadState) -> LinkRowView {
+        LinkRowView {
+            index,
+            url: format!("https://links.example/{index}"),
+            label: label.to_string(),
+            kind: LinkKind::Hyperlink,
+            download_state,
+            age_suspect: false,
         }
     }
 
@@ -736,6 +802,50 @@ mod tests {
         assert!(commands_added
             .iter()
             .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })));
+    }
+
+    #[test]
+    fn links_folder_and_show_more_children_rendered() {
+        init_logging();
+        let window_id = WindowId::new(4);
+        let mut tree_state = TreeRenderState::new();
+        let link = make_link_row(
+            0,
+            "Example",
+            LinkDownloadState::Downloaded {
+                path: PathBuf::from("linked/example.md"),
+            },
+        );
+        let job = JobRowView {
+            job_id: 42,
+            url: "https://example.com".to_string(),
+            stage: Stage::Done,
+            outcome: Some(JobResultKind::Success),
+            tokens: None,
+            bytes: None,
+            link_count: 4,
+            downloaded_link_count: 1,
+            links: vec![link],
+        };
+        let view = make_view(vec![job]);
+        let commands = render(window_id, &view, &mut tree_state);
+        let items = commands
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+                _ => None,
+            })
+            .expect("populate emitted");
+        let job_item = &items[0];
+        assert_eq!(job_item.children.len(), 1);
+        let folder = &job_item.children[0];
+        assert_eq!(folder.text, "Links (4)");
+        assert_eq!(folder.children.len(), 2);
+        assert_eq!(folder.children[0].id, link_tree_item_id(42, 0));
+        assert_eq!(folder.children[0].state, CheckState::Checked);
+        let show_more = &folder.children[1];
+        assert_eq!(show_more.id, links_show_more_tree_item_id(42));
+        assert_eq!(show_more.text, "(show more… 3 remaining)");
     }
 
     #[test]

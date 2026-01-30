@@ -1,9 +1,11 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
 use crate::persist::{ensure_output_dir, AtomicFileWriter, PersistError};
+use url::Url;
 
 #[derive(Debug, Clone)]
 pub struct ExportOptions {
@@ -57,19 +59,27 @@ pub fn build_concatenated_export(
     options: ExportOptions,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
-    let mut entries: Vec<_> = fs::read_dir(output_dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
-        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("md"))
-        .collect();
-    entries.sort_by_key(|e| e.file_name());
+    let mut entries = collect_md_files(output_dir)?;
+    let linked_dir = output_dir.join("linked");
+    if linked_dir.exists() {
+        entries.extend(collect_md_files(&linked_dir)?);
+    }
+    entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
 
     let mut docs = Vec::new();
-    for entry in entries {
-        let path = entry.path();
+    let mut seen = HashSet::new();
+    for path in entries {
+        let relative = path
+            .strip_prefix(output_dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
         let content = fs::read_to_string(&path)?;
-        let meta = parse_doc(&content, entry.file_name().to_string_lossy().as_ref())?;
-        docs.push(meta);
+        let meta = parse_doc(&content, &relative)?;
+        let normalized = normalize_url(&meta.url);
+        if seen.insert(normalized) {
+            docs.push(meta);
+        }
     }
 
     let mut buffer = String::new();
@@ -124,6 +134,40 @@ pub fn build_concatenated_export(
         output_path,
         manifest_path,
     })
+}
+
+fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
+    let mut entries = Vec::new();
+    if dir.exists() {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
+                && entry.path().extension().and_then(|s| s.to_str()) == Some("md")
+            {
+                entries.push(entry.path());
+            }
+        }
+    }
+    Ok(entries)
+}
+
+fn normalize_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+    if let Ok(mut parsed) = Url::parse(trimmed) {
+        parsed.set_fragment(None);
+        if let Some(port) = parsed.port() {
+            let normalized_port = match (parsed.scheme(), port) {
+                ("http", 80) | ("https", 443) => None,
+                _ => Some(port),
+            };
+            let _ = parsed.set_port(normalized_port);
+        }
+        return parsed.into();
+    }
+    trimmed.to_lowercase()
 }
 
 fn parse_doc(content: &str, filename: &str) -> Result<DocMeta, ExportError> {

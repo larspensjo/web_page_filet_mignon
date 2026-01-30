@@ -98,6 +98,55 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.apply_done(job_id, result, content_preview, extracted_links);
             Vec::new()
         }
+        Msg::LinkToggleRequested {
+            job_id,
+            link_index,
+            checked,
+        } => {
+            let mut effects = Vec::new();
+            if let Some((url, downloaded_path)) = state.link_metadata(job_id, link_index) {
+                if checked && state.mark_link_download_requested(job_id, link_index) {
+                    effects.push(Effect::DownloadLinkedPage {
+                        job_id,
+                        link_index,
+                        url,
+                    });
+                } else if !checked && state.mark_link_deleted(job_id, link_index) {
+                    if let Some(path) = downloaded_path {
+                        effects.push(Effect::DeleteLinkedPage {
+                            job_id,
+                            link_index,
+                            path,
+                        });
+                    }
+                }
+            }
+            effects
+        }
+        Msg::LinkDownloadStarted { job_id, link_index } => {
+            state.mark_link_download_requested(job_id, link_index);
+            Vec::new()
+        }
+        Msg::LinkDownloadCompleted {
+            job_id,
+            link_index,
+            path,
+        } => {
+            state.mark_link_download_completed(job_id, link_index, path);
+            Vec::new()
+        }
+        Msg::LinkDownloadFailed {
+            job_id,
+            link_index,
+            error,
+        } => {
+            state.mark_link_download_failed(job_id, link_index, error);
+            Vec::new()
+        }
+        Msg::LinkDeleted { job_id, link_index } => {
+            state.mark_link_deleted(job_id, link_index);
+            Vec::new()
+        }
         Msg::JobSelected { job_id } => {
             state.select_job(job_id);
             Vec::new()
