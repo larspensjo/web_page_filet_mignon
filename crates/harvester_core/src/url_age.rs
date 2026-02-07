@@ -48,7 +48,10 @@ fn find_date_in_url(url: &str) -> Option<NaiveDate> {
 
 fn strip_query_and_fragment(url: &str) -> &str {
     let without_fragment = url.split('#').next().unwrap_or(url);
-    without_fragment.split('?').next().unwrap_or(without_fragment)
+    without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment)
 }
 
 fn find_date_in_slash_segments(input: &str) -> Option<NaiveDate> {
@@ -165,7 +168,9 @@ fn parse_digits(bytes: &[u8]) -> Option<u32> {
         if !is_digit(*byte) {
             return None;
         }
-        value = value.saturating_mul(10).saturating_add((byte - b'0') as u32);
+        value = value
+            .saturating_mul(10)
+            .saturating_add((byte - b'0') as u32);
     }
     Some(value)
 }

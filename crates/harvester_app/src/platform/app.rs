@@ -254,9 +254,9 @@ impl PlatformEventHandler for AppEventHandler {
                 ..
             } => {
                 // Continuous dragging - update layout in real-time
-                let _ = self
-                    .msg_tx
-                    .send(Msg::SplitterMoved { desired_left_width_px });
+                let _ = self.msg_tx.send(Msg::SplitterMoved {
+                    desired_left_width_px,
+                });
             }
             AppEvent::SplitterDragEnded {
                 desired_left_width_px,
@@ -267,9 +267,9 @@ impl PlatformEventHandler for AppEventHandler {
                     "Splitter drag ended: left_panel_width={}",
                     desired_left_width_px
                 );
-                let _ = self
-                    .msg_tx
-                    .send(Msg::SplitterMoved { desired_left_width_px });
+                let _ = self.msg_tx.send(Msg::SplitterMoved {
+                    desired_left_width_px,
+                });
             }
             AppEvent::WindowResized {
                 window_id, width, ..
@@ -354,8 +354,7 @@ mod tests {
                 }],
             },
         );
-        let mut shared = SharedState::default();
-        shared.state = state;
+        let shared = SharedState { state };
         Arc::new(Mutex::new(shared))
     }
 

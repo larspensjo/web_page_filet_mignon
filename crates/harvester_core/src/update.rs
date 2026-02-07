@@ -1,4 +1,6 @@
-use crate::{calc_left_width, normalize_url_for_dedupe, AppState, Effect, Msg, SessionState, StopPolicy};
+use crate::{
+    calc_left_width, normalize_url_for_dedupe, AppState, Effect, Msg, SessionState, StopPolicy,
+};
 
 // Minimum width for the left panels (PANEL_INPUT + PANEL_JOBS)
 const MIN_LEFT_WIDTH: i32 = 200;
@@ -155,7 +157,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.restore_completed_jobs(entries);
             Vec::new()
         }
-        Msg::SplitterMoved { desired_left_width_px } => {
+        Msg::SplitterMoved {
+            desired_left_width_px,
+        } => {
             let clamped = calc_left_width(
                 desired_left_width_px,
                 state.window_width(),
