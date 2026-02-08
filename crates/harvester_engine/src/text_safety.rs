@@ -3,12 +3,10 @@ pub fn truncate_to_char_boundary(s: &str, max_chars: usize) -> &str {
     if max_chars == 0 {
         return "";
     }
-    let mut char_count = 0;
-    for (index, _) in s.char_indices() {
+    for (char_count, (index, _)) in s.char_indices().enumerate() {
         if char_count == max_chars {
             return &s[..index];
         }
-        char_count += 1;
     }
     s
 }

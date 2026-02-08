@@ -71,8 +71,10 @@ fn dns_resolution_of_localhost_is_blocked() {
 
 #[test]
 fn allows_private_when_disabled() {
-    let mut policy = UrlPolicy::default();
-    policy.block_private_ips = false;
+    let policy = UrlPolicy {
+        block_private_ips: false,
+        ..Default::default()
+    };
     assert!(policy
         .check(&Url::parse("http://127.0.0.1").unwrap())
         .is_ok());
@@ -80,8 +82,10 @@ fn allows_private_when_disabled() {
 
 #[test]
 fn enforces_allowed_hosts() {
-    let mut policy = UrlPolicy::default();
-    policy.allowed_hosts = Some(vec!["example.com".to_string()]);
+    let policy = UrlPolicy {
+        allowed_hosts: Some(vec!["example.com".to_string()]),
+        ..Default::default()
+    };
     assert!(policy
         .check(&Url::parse("http://example.com").unwrap())
         .is_ok());
@@ -94,8 +98,10 @@ fn enforces_allowed_hosts() {
 
 #[test]
 fn honors_blocked_hosts_list() {
-    let mut policy = UrlPolicy::default();
-    policy.blocked_hosts = vec!["evil.com".to_string()];
+    let policy = UrlPolicy {
+        blocked_hosts: vec!["evil.com".to_string()],
+        ..Default::default()
+    };
     let violation = expect_violation(
         "http://evil.com/",
         policy.check(&Url::parse("http://evil.com/").unwrap()),

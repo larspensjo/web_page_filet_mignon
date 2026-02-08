@@ -1,7 +1,10 @@
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, mpsc};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    mpsc, Arc,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -9,9 +12,10 @@ use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
 use harvester_engine::{
-    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir, is_confined_to,
-    AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor,
-    FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy, WhitespaceTokenCounter,
+    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
+    is_confined_to, AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent,
+    EngineHandle, Extractor, FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor,
+    UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
@@ -239,13 +243,15 @@ impl EffectRunner {
                     content_preview: None,
                     extracted_links: Vec::new(),
                 }) {
-                    engine_warn!("Failed to notify job failure for job_id={}: {}", job_id, err);
+                    engine_warn!(
+                        "Failed to notify job failure for job_id={}: {}",
+                        job_id,
+                        err
+                    );
                 }
             }
             Effect::DownloadLinkedPage {
-                job_id,
-                link_index,
-                ..
+                job_id, link_index, ..
             } => {
                 engine_warn!(
                     "DownloadLinkedPage rejected job_id={} link_index={} reason={}",
@@ -278,9 +284,7 @@ impl EffectRunner {
                     path.display(),
                     reason
                 );
-                let _ = self
-                    .msg_tx
-                    .send(Msg::LinkDeleted { job_id, link_index });
+                let _ = self.msg_tx.send(Msg::LinkDeleted { job_id, link_index });
             }
             other => {
                 engine_warn!("Effect rejected but no handler for {:?}: {}", other, reason);
@@ -329,7 +333,10 @@ fn download_link_page(
         .user_agent(fetch_settings.user_agent.clone())
         .build()
         .map_err(|err| err.to_string())?;
-    let mut response = client.get(parsed.clone()).send().map_err(|err| err.to_string())?;
+    let mut response = client
+        .get(parsed.clone())
+        .send()
+        .map_err(|err| err.to_string())?;
     if !response.status().is_success() {
         return Err(format!(
             "HTTP error {} for linked page {}",
@@ -362,9 +369,7 @@ fn download_link_page(
     let mut bytes = Vec::new();
     let mut buffer = [0u8; 8192];
     loop {
-        let read = response
-            .read(&mut buffer)
-            .map_err(|err| err.to_string())?;
+        let read = response.read(&mut buffer).map_err(|err| err.to_string())?;
         if read == 0 {
             break;
         }
@@ -416,22 +421,17 @@ fn map_stage(stage: harvester_engine::Stage) -> Stage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::sync::mpsc;
     use std::time::Duration;
+    use tempfile::tempdir;
 
     #[test]
     fn download_link_page_rejects_disallowed_scheme_before_request() {
         let temp = tempdir().expect("tempdir");
         let fetch_settings = FetchSettings::default();
         let policy = UrlPolicy::default();
-        let err = download_link_page(
-            "file:///etc/passwd",
-            temp.path(),
-            &policy,
-            &fetch_settings,
-        )
-        .unwrap_err();
+        let err = download_link_page("file:///etc/passwd", temp.path(), &policy, &fetch_settings)
+            .unwrap_err();
 
         assert!(
             err.contains("url policy violation"),

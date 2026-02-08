@@ -104,8 +104,7 @@ impl ReqwestFetcher {
                     if let Err(violation) = url_policy.check(&target_url) {
                         attempt.error(UrlPolicyRedirectError::new(format!(
                             "redirect target {} violated policy: {}",
-                            target_url,
-                            violation
+                            target_url, violation
                         )))
                     } else {
                         attempt.follow()

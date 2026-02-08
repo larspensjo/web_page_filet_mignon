@@ -439,7 +439,7 @@ async fn run_job(
                     extracted_links: conversion.links,
                 }),
             });
-            return Ok((doc_for_write.len() as u64, token_count));
+            Ok((doc_for_write.len() as u64, token_count))
         }
         _ => {
             let failure = FailureKind::ProcessingError;
@@ -448,7 +448,7 @@ async fn run_job(
                 job_id,
                 result: Err(failure.clone()),
             });
-            return Err(failure);
+            Err(failure)
         }
     }
 }

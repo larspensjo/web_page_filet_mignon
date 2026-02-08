@@ -1,8 +1,8 @@
 use std::{fs, path::PathBuf};
 
 use harvester_engine::{
-    build_markdown_document, Converter, EngineEvent, FailureKind, FetchSettings, Html2MdConverter,
-    Extractor, Fetcher, ProgressSink, ReadabilityLikeExtractor, ReqwestFetcher, UrlPolicy,
+    build_markdown_document, Converter, EngineEvent, Extractor, FailureKind, FetchSettings,
+    Fetcher, Html2MdConverter, ProgressSink, ReadabilityLikeExtractor, ReqwestFetcher, UrlPolicy,
     WhitespaceTokenCounter,
 };
 use reqwest::Url;
@@ -51,7 +51,8 @@ fn frontmatter_injection_is_defanged() {
     let delimiter_count = doc.lines().filter(|line| line.trim() == "---").count();
     assert_eq!(delimiter_count, 2, "expected a single frontmatter block");
     assert!(
-        !doc.lines().any(|line| line.trim_start().starts_with("injected:")),
+        !doc.lines()
+            .any(|line| line.trim_start().starts_with("injected:")),
         "no injected fields should appear in the frontmatter"
     );
 }
@@ -89,9 +90,11 @@ async fn url_policy_allows_wiremock_host_when_allowed() {
         .host_str()
         .expect("host present")
         .to_string();
-    let mut policy = UrlPolicy::default();
-    policy.block_private_ips = false;
-    policy.allowed_hosts = Some(vec![host]);
+    let policy = UrlPolicy {
+        block_private_ips: false,
+        allowed_hosts: Some(vec![host]),
+        ..Default::default()
+    };
     let fetcher = ReqwestFetcher::new(FetchSettings::default(), policy);
     let sink = NoopSink;
     let url = format!("{}/doc", server.uri());
@@ -118,16 +121,15 @@ async fn url_policy_redirect_to_private_is_blocked() {
         .host_str()
         .expect("host present")
         .to_string();
-    let mut policy = UrlPolicy::default();
-    policy.block_private_ips = false;
-    policy.allowed_hosts = Some(vec![host]);
-    policy.blocked_hosts.push("10.255.255.1".to_string());
+    let policy = UrlPolicy {
+        block_private_ips: false,
+        allowed_hosts: Some(vec![host]),
+        blocked_hosts: vec!["10.255.255.1".to_string()],
+        ..Default::default()
+    };
     let fetcher = ReqwestFetcher::new(FetchSettings::default(), policy);
     let sink = NoopSink;
     let url = format!("{}/redirect", server.uri());
     let err = fetcher.fetch(2, &url, &sink).await.unwrap_err();
-    assert!(matches!(
-        err.kind,
-        FailureKind::UrlPolicyViolation { .. }
-    ));
+    assert!(matches!(err.kind, FailureKind::UrlPolicyViolation { .. }));
 }

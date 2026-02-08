@@ -32,9 +32,10 @@ impl ProgressSink for TestSink {
 }
 
 fn allow_local_policy() -> UrlPolicy {
-    let mut policy = UrlPolicy::default();
-    policy.block_private_ips = false;
-    policy
+    UrlPolicy {
+        block_private_ips: false,
+        ..Default::default()
+    }
 }
 
 #[tokio::test]
