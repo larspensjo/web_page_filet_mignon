@@ -10,7 +10,7 @@ use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to, AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent,
-    EngineHandle, Extractor, LinkExtractingConverter, ReadabilityLikeExtractor,
+    EngineHandle, Extractor, LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy,
     WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
@@ -30,6 +30,7 @@ pub struct EffectRunner {
     engine: EngineHandle,
     msg_tx: mpsc::Sender<Msg>,
     output_dir: PathBuf,
+    url_policy: UrlPolicy,
 }
 
 impl EffectRunner {
@@ -38,12 +39,14 @@ impl EffectRunner {
 
         let mut config = EngineConfig::default_with_output(output_dir.clone());
         config.fetched_utc = std::sync::Arc::new(|| Utc::now().to_rfc3339());
+        let url_policy = config.url_policy.clone();
 
         let engine = EngineHandle::new(config);
         let runner = Self {
             engine,
             msg_tx: msg_tx.clone(),
             output_dir,
+            url_policy,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -85,9 +88,10 @@ impl EffectRunner {
                     );
                     let msg_tx = self.msg_tx.clone();
                     let output_dir = self.output_dir.clone();
+                    let url_policy = self.url_policy.clone();
                     thread::spawn(move || {
                         let _ = msg_tx.send(Msg::LinkDownloadStarted { job_id, link_index });
-                        match download_link_page(&url, &output_dir) {
+                        match download_link_page(&url, &output_dir, &url_policy) {
                             Ok(absolute_path) => {
                                 let relative_path = absolute_path
                                     .strip_prefix(&output_dir)
@@ -184,15 +188,28 @@ impl EffectRunner {
     }
 }
 
-fn download_link_page(url: &str, output_dir: &Path) -> Result<PathBuf, String> {
+fn download_link_page(
+    url: &str,
+    output_dir: &Path,
+    url_policy: &UrlPolicy,
+) -> Result<PathBuf, String> {
     let linked_dir = output_dir.join("linked");
     ensure_output_dir(&linked_dir).map_err(|err| format!("linked output dir error: {}", err))?;
+
+    let parsed = reqwest::Url::parse(url)
+        .map_err(|err| format!("url parsing failed for {}: {}", url, err))?;
+    if let Err(violation) = url_policy.check(&parsed) {
+        return Err(format!(
+            "url policy violation for linked page: {}",
+            violation
+        ));
+    }
 
     let client = Client::builder()
         .timeout(LINK_DOWNLOAD_TIMEOUT)
         .build()
         .map_err(|err| err.to_string())?;
-    let response = client.get(url).send().map_err(|err| err.to_string())?;
+    let response = client.get(parsed).send().map_err(|err| err.to_string())?;
     if !response.status().is_success() {
         return Err(format!(
             "HTTP error {} for linked page {}",

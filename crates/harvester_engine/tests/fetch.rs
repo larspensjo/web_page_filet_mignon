@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use harvester_engine::{
     EngineEvent, FailureKind, FetchSettings, Fetcher, JobProgress, ProgressSink, ReqwestFetcher,
-    Stage,
+    Stage, UrlPolicy,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -31,6 +31,12 @@ impl ProgressSink for TestSink {
     }
 }
 
+fn allow_local_policy() -> UrlPolicy {
+    let mut policy = UrlPolicy::default();
+    policy.block_private_ips = false;
+    policy
+}
+
 #[tokio::test]
 async fn fetcher_returns_html_and_emits_progress() {
     let server = MockServer::start().await;
@@ -42,7 +48,7 @@ async fn fetcher_returns_html_and_emits_progress() {
         .mount(&server)
         .await;
 
-    let fetcher = ReqwestFetcher::new(FetchSettings::default());
+    let fetcher = ReqwestFetcher::new(FetchSettings::default(), allow_local_policy());
     let sink = TestSink::new();
     let url = format!("{}/doc", server.uri());
 
@@ -77,7 +83,7 @@ async fn fetcher_fails_on_http_status() {
         .mount(&server)
         .await;
 
-    let fetcher = ReqwestFetcher::new(FetchSettings::default());
+    let fetcher = ReqwestFetcher::new(FetchSettings::default(), allow_local_policy());
     let sink = TestSink::new();
     let url = format!("{}/missing", server.uri());
 
@@ -102,7 +108,7 @@ async fn fetcher_times_out_on_slow_response() {
         request_timeout: Duration::from_millis(50),
         ..FetchSettings::default()
     };
-    let fetcher = ReqwestFetcher::new(settings);
+    let fetcher = ReqwestFetcher::new(settings, allow_local_policy());
     let sink = TestSink::new();
     let url = format!("{}/slow", server.uri());
 
@@ -128,7 +134,7 @@ async fn fetcher_rejects_too_large_response() {
         max_bytes: 10,
         ..FetchSettings::default()
     };
-    let fetcher = ReqwestFetcher::new(settings);
+    let fetcher = ReqwestFetcher::new(settings, allow_local_policy());
     let sink = TestSink::new();
     let url = format!("{}/large", server.uri());
 
@@ -140,4 +146,18 @@ async fn fetcher_rejects_too_large_response() {
             actual: Some(11)
         }
     );
+}
+
+#[tokio::test]
+async fn fetcher_rejects_private_ip_addresses() {
+    let fetcher = ReqwestFetcher::new(FetchSettings::default(), UrlPolicy::default());
+    let sink = TestSink::new();
+    let err = fetcher
+        .fetch(9, "http://127.0.0.1/", &sink)
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err.kind,
+        FailureKind::UrlPolicyViolation { description: _ }
+    ));
 }

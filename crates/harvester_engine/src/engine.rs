@@ -16,6 +16,7 @@ use crate::frontmatter::build_markdown_document;
 use crate::persist::AtomicFileWriter;
 use crate::preview::prepare_preview_content;
 use crate::token::TokenCounter;
+use crate::url_policy::UrlPolicy;
 use crate::{
     deterministic_filename, EngineEvent, FailureKind, JobId, JobOutcome, JobProgress, Stage,
 };
@@ -23,6 +24,7 @@ use crate::{
 #[derive(Clone)]
 pub struct EngineConfig {
     pub fetch_settings: FetchSettings,
+    pub url_policy: UrlPolicy,
     pub output_dir: PathBuf,
     pub extractor: Arc<dyn Extractor>,
     pub converter: Arc<dyn Converter>,
@@ -39,6 +41,7 @@ impl EngineConfig {
     pub fn default_with_output(output_dir: PathBuf) -> Self {
         Self {
             fetch_settings: FetchSettings::default(),
+            url_policy: UrlPolicy::default(),
             output_dir,
             extractor: Arc::new(crate::ReadabilityLikeExtractor),
             converter: Arc::new(crate::LinkExtractingConverter::new()),
@@ -106,7 +109,10 @@ fn worker_loop(
     config: Arc<EngineConfig>,
 ) {
     let runtime = Runtime::new().expect("tokio runtime");
-    let fetcher = Arc::new(ReqwestFetcher::new(config.fetch_settings.clone()));
+    let fetcher = Arc::new(ReqwestFetcher::new(
+        config.fetch_settings.clone(),
+        config.url_policy.clone(),
+    ));
     let mut queue: VecDeque<(JobId, String)> = VecDeque::new();
     let mut accept_new = true;
     let cancel_token = CancellationToken::new();

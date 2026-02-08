@@ -83,6 +83,7 @@ pub enum FailureKind {
     Cancelled,
     ProcessingError,
     Network,
+    UrlPolicyViolation { description: String },
 }
 
 impl fmt::Display for FailureKind {
@@ -104,6 +105,9 @@ impl fmt::Display for FailureKind {
             FailureKind::Cancelled => write!(f, "cancelled"),
             FailureKind::ProcessingError => write!(f, "processing error"),
             FailureKind::Network => write!(f, "network error"),
+            FailureKind::UrlPolicyViolation { description } => {
+                write!(f, "url policy violation: {description}")
+            }
         }
     }
 }

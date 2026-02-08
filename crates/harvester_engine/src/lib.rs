@@ -14,6 +14,7 @@ mod preview;
 mod text_safety;
 mod token;
 mod types;
+mod url_policy;
 
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};
@@ -32,3 +33,4 @@ pub use types::{
     EngineEvent, FailureKind, FetchError, FetchMetadata, FetchOutput, JobId, JobOutcome,
     JobProgress, Stage,
 };
+pub use url_policy::{UrlPolicy, UrlPolicyViolation};

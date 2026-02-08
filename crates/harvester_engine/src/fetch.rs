@@ -10,6 +10,7 @@ use reqwest::header::CONTENT_TYPE;
 
 use crate::{
     EngineEvent, FailureKind, FetchError, FetchMetadata, FetchOutput, JobId, JobProgress, Stage,
+    UrlPolicy,
 };
 
 #[derive(Debug, Clone)]
@@ -72,11 +73,15 @@ pub trait Fetcher: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct ReqwestFetcher {
     settings: FetchSettings,
+    url_policy: UrlPolicy,
 }
 
 impl ReqwestFetcher {
-    pub fn new(settings: FetchSettings) -> Self {
-        Self { settings }
+    pub fn new(settings: FetchSettings, url_policy: UrlPolicy) -> Self {
+        Self {
+            settings,
+            url_policy,
+        }
     }
 
     fn build_client(
@@ -128,6 +133,16 @@ impl Fetcher for ReqwestFetcher {
             engine_warn!("Invalid URL '{}': {}", url, err);
             FetchError::new(FailureKind::InvalidUrl, err.to_string())
         })?;
+        if let Err(violation) = self.url_policy.check(&parsed) {
+            let reason = violation.to_string();
+            engine_warn!("URL policy violation for '{}': {}", url, reason);
+            return Err(FetchError::new(
+                FailureKind::UrlPolicyViolation {
+                    description: reason.clone(),
+                },
+                reason,
+            ));
+        }
         let redirect_counter = Arc::new(AtomicUsize::new(0));
         let client = self.build_client(redirect_counter.clone())?;
 
