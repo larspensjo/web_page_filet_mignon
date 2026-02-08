@@ -95,7 +95,7 @@ impl AppState {
                     tokens: job.tokens,
                     bytes: job.bytes,
                     stage: job.stage,
-                    outcome: job.outcome,
+                    outcome: job.outcome.clone(),
                     heading_count: quality.heading_count,
                     link_density: quality.link_density,
                     nav_heavy: quality.nav_heavy(),
@@ -422,7 +422,7 @@ impl AppState {
         let job_updated = if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = Stage::Done;
             job.outcome = Some(result);
-            if matches!(result, JobResultKind::Success) {
+            if matches!(job.outcome.as_ref(), Some(JobResultKind::Success)) {
                 if let Some(content) = content_preview {
                     job.set_preview_content(content);
                 }
@@ -567,7 +567,7 @@ impl JobState {
             job_id: id,
             url: self.url.clone(),
             stage: self.stage,
-            outcome: self.outcome,
+            outcome: self.outcome.clone(),
             tokens: self.tokens,
             bytes: self.bytes,
             link_count: self.links.len(),
@@ -905,10 +905,10 @@ pub enum Stage {
     Done,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobResultKind {
     Success,
-    Failed,
+    Failed { reason: String },
 }
 
 #[cfg(test)]
@@ -952,7 +952,9 @@ mod tests {
         );
         state.apply_done(
             2,
-            JobResultKind::Failed,
+            JobResultKind::Failed {
+                reason: "ignored".to_string(),
+            },
             Some("ignored".to_string()),
             Vec::new(),
         );

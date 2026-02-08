@@ -84,6 +84,8 @@ pub enum FailureKind {
     ProcessingError,
     Network,
     UrlPolicyViolation { description: String },
+    QuotaExceeded { description: String },
+    PathPolicyViolation { path: String },
 }
 
 impl fmt::Display for FailureKind {
@@ -107,6 +109,12 @@ impl fmt::Display for FailureKind {
             FailureKind::Network => write!(f, "network error"),
             FailureKind::UrlPolicyViolation { description } => {
                 write!(f, "url policy violation: {description}")
+            }
+            FailureKind::QuotaExceeded { description } => {
+                write!(f, "quota exceeded: {description}")
+            }
+            FailureKind::PathPolicyViolation { path } => {
+                write!(f, "path policy violation for {path}")
             }
         }
     }

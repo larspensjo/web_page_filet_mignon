@@ -169,10 +169,11 @@ impl EffectRunner {
                                 extracted_links: outcome.extracted_links,
                             },
                             Err(failure_kind) => {
-                                engine_warn!("Job {} failed: {}", job_id, failure_kind);
+                                let reason = failure_kind.to_string();
+                                engine_warn!("Job {} failed: {}", job_id, reason);
                                 Msg::JobDone {
                                     job_id,
-                                    result: JobResultKind::Failed,
+                                    result: JobResultKind::Failed { reason },
                                     content_preview: None,
                                     extracted_links: Vec::new(),
                                 }

@@ -374,10 +374,10 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
 }
 
 fn format_job_row(job: &JobRowView) -> String {
-    let status = match job.outcome {
-        Some(JobResultKind::Success) => "OK",
-        Some(JobResultKind::Failed) => "ERR",
-        None => stage_label(job.stage),
+    let status = match &job.outcome {
+        Some(JobResultKind::Success) => "OK".to_string(),
+        Some(JobResultKind::Failed { reason }) => format!("ERR ({})", reason),
+        None => stage_label(job.stage).to_string(),
     };
     let tokens = job.tokens.map(|t| format!("{t} tok"));
     let bytes = job.bytes.map(|b| format!("{b} B"));
@@ -440,8 +440,8 @@ fn format_preview_header(header: &PreviewHeaderView) -> String {
         parts.push(format!("{bytes} B"));
     }
     parts.push(format!("{count} headings", count = header.heading_count));
-    let stage_desc = match header.outcome {
-        Some(JobResultKind::Failed) => "Failed".to_string(),
+    let stage_desc = match &header.outcome {
+        Some(JobResultKind::Failed { reason }) => format!("Failed ({})", reason),
         Some(JobResultKind::Success) => "Done".to_string(),
         None => stage_label(header.stage).to_string(),
     };
