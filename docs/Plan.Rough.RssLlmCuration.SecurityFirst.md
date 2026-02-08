@@ -240,6 +240,16 @@ we must add a sandbox and explicit approvals to avoid “confused deputy”.
 ### Expected product impact
 More automation, but higher complexity and security requirements.
 
+## Cross-cutting future work (not phase-specific)
+
+These items were identified during Phase 0 implementation and are relevant across multiple phases. They should be considered when planning future work:
+
+- **Unified download path**: Route linked-page downloads through the engine as tagged jobs rather than the current separate path. Reduces code duplication and ensures all downloads benefit from the same policy/quota enforcement.
+- **Policy-as-configuration**: Load `UrlPolicy`, `SessionQuotas`, and `LlmQuotas` from a config file (RON or TOML) rather than compile-time defaults. Enables per-deployment tuning without recompilation.
+- **Audit log**: Structured log entries for all policy decisions (URL rejections, quota enforcement, path confinement checks). Useful for debugging and compliance.
+- **Typed trust wrappers for paths**: `SafePath` newtype constructed only via `is_confined_to()`. Makes path confinement a compile-time guarantee rather than a runtime check at each call site.
+- **Input debounce**: Review auto-submission behavior on `InputTextChanged` to prevent rapid-fire URL enqueuing from paste events.
+
 ## Notes for planning and estimation
 - Phases 0–2 are enabling work that reduces long-term iteration cost and risk.
 - Phases 3–4 are the first user-visible wins (briefing + prioritization).
