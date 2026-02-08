@@ -12,6 +12,7 @@ pub enum PromptId {
 
 pub type PromptVersion = u32;
 
+#[derive(Clone)]
 pub struct PromptTemplate {
     pub id: PromptId,
     pub version: PromptVersion,
@@ -57,6 +58,7 @@ pub fn content_nonce(content: &str) -> String {
     hex::encode(&digest)[..12].to_string()
 }
 
+#[derive(Clone)]
 pub struct PromptRegistry {
     templates: HashMap<PromptId, HashMap<PromptVersion, PromptTemplate>>,
     active_versions: HashMap<PromptId, PromptVersion>,

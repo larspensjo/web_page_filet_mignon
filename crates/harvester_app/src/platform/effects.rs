@@ -10,12 +10,14 @@ use std::time::Duration;
 
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
+use harvester_core::{Effect, JobResultKind, LlmResultKind, Msg, Stage, StopPolicy};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
-    is_confined_to, AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent,
-    EngineHandle, Extractor, FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor,
-    UrlPolicy, WhitespaceTokenCounter,
+    is_confined_to,
+    llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle},
+    AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor,
+    FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy,
+    WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
@@ -33,10 +35,29 @@ pub struct EffectRunner {
     output_dir: PathBuf,
     url_policy: UrlPolicy,
     fetch_settings: FetchSettings,
+    llm_handle: Option<LlmHandle>,
+    llm_max_input_chars: Option<usize>,
 }
 
 impl EffectRunner {
     pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
+        Self::with_optional_llm(msg_tx, None, None)
+    }
+
+    #[allow(dead_code)]
+    pub fn new_with_llm(
+        msg_tx: mpsc::Sender<Msg>,
+        llm_handle: LlmHandle,
+        llm_max_input_chars: usize,
+    ) -> Self {
+        Self::with_optional_llm(msg_tx, Some(llm_handle), Some(llm_max_input_chars))
+    }
+
+    fn with_optional_llm(
+        msg_tx: mpsc::Sender<Msg>,
+        llm_handle: Option<LlmHandle>,
+        llm_max_input_chars: Option<usize>,
+    ) -> Self {
         let output_dir = default_output_dir();
 
         let mut config = EngineConfig::default_with_output(output_dir.clone());
@@ -51,6 +72,8 @@ impl EffectRunner {
             output_dir,
             url_policy,
             fetch_settings,
+            llm_handle,
+            llm_max_input_chars,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -156,22 +179,64 @@ impl EffectRunner {
                     let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
                 });
             }
-            Effect::RequestLlmCompletion { request_id, .. } => {
-                engine_warn!(
-                    "LLM completion requested while integration pending: request_id={}",
-                    request_id
-                );
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                prompt_version,
+                input_content,
+                context,
+            } => {
+                if let Some(handle) = &self.llm_handle {
+                    let cmd = LlmCommand::Complete {
+                        request_id,
+                        prompt_id,
+                        prompt_version,
+                        input_content,
+                        context,
+                    };
+                    if let Err(err) = handle.send(cmd) {
+                        engine_warn!(
+                            "LLM completion request failed to dispatch: request_id={} error={:?}",
+                            request_id,
+                            err
+                        );
+                        let _ = self.msg_tx.send(Msg::LlmCompleted {
+                            request_id,
+                            result: LlmResultKind::Failed {
+                                reason: "LLM worker unavailable".to_string(),
+                            },
+                        });
+                    } else {
+                        engine_info!(
+                            "[llm-dispatch] request_id={} prompt_id={:?}",
+                            request_id,
+                            prompt_id
+                        );
+                    }
+                } else {
+                    engine_warn!(
+                        "LLM completion requested without handle: request_id={}",
+                        request_id
+                    );
+                    let _ = self.msg_tx.send(Msg::LlmCompleted {
+                        request_id,
+                        result: LlmResultKind::Failed {
+                            reason: "LLM not configured".to_string(),
+                        },
+                    });
+                }
             }
         }
     }
 
     fn spawn_event_loop(&self, msg_tx: mpsc::Sender<Msg>) {
         let engine = self.engine.clone();
+        let engine_tx = msg_tx.clone();
         thread::spawn(move || loop {
             if let Some(event) = engine.try_recv() {
                 match event {
                     EngineEvent::Progress(progress) => {
-                        let _ = msg_tx.send(Msg::JobProgress {
+                        let _ = engine_tx.send(Msg::JobProgress {
                             job_id: progress.job_id,
                             stage: map_stage(progress.stage),
                             tokens: progress.tokens,
@@ -198,13 +263,33 @@ impl EffectRunner {
                                 }
                             }
                         };
-                        let _ = msg_tx.send(msg);
+                        let _ = engine_tx.send(msg);
                     }
                 }
             } else {
                 thread::sleep(Duration::from_millis(20));
             }
         });
+
+        if let Some(handle) = self.llm_handle.clone() {
+            let llm_tx = msg_tx.clone();
+            let receiver = handle.event_receiver();
+            thread::spawn(move || loop {
+                let event = {
+                    let guard = receiver.lock().expect("LLM event receiver lock");
+                    guard.recv()
+                };
+                match event {
+                    Ok(llm_event) => {
+                        let msg = map_llm_event(llm_event);
+                        if llm_tx.send(msg).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            });
+        }
     }
 }
 
@@ -232,6 +317,18 @@ impl EffectRunner {
                         path.display()
                     ))
                 }
+            }
+            Effect::RequestLlmCompletion { input_content, .. } => {
+                if let Some(limit) = self.llm_max_input_chars {
+                    if input_content.len() > limit {
+                        return Err(format!(
+                            "LLM input too large ({} > {} characters)",
+                            input_content.len(),
+                            limit
+                        ));
+                    }
+                }
+                Ok(())
             }
             _ => Ok(()),
         }
@@ -296,6 +393,51 @@ impl EffectRunner {
                 engine_warn!("Effect rejected but no handler for {:?}: {}", other, reason);
             }
         }
+    }
+}
+
+fn map_llm_event(event: LlmEvent) -> Msg {
+    match event {
+        LlmEvent::Completed { request_id, result } => {
+            let result_kind = match result {
+                Ok(outcome) => LlmResultKind::Success {
+                    output_json: outcome.output_json,
+                    input_tokens: outcome.usage.input_tokens,
+                    output_tokens: outcome.usage.output_tokens,
+                },
+                Err(LlmCompletionError::ValidationFailed {
+                    reason,
+                    raw_response,
+                }) => LlmResultKind::ValidationFailed {
+                    reason,
+                    raw_response,
+                },
+                Err(error) => LlmResultKind::Failed {
+                    reason: llm_error_reason(error),
+                },
+            };
+            Msg::LlmCompleted {
+                request_id,
+                result: result_kind,
+            }
+        }
+    }
+}
+
+fn llm_error_reason(error: LlmCompletionError) -> String {
+    match error {
+        LlmCompletionError::ProviderError(err) => err.to_string(),
+        LlmCompletionError::QuotaExhausted { description } => description,
+        LlmCompletionError::PromptNotFound { prompt_id } => {
+            format!("prompt {:?} not found", prompt_id)
+        }
+        LlmCompletionError::PersistenceFailed { detail } => {
+            format!("replay persistence failed: {}", detail)
+        }
+        LlmCompletionError::InputTooLarge { size, limit } => {
+            format!("input too large ({} > {})", size, limit)
+        }
+        LlmCompletionError::ValidationFailed { .. } => unreachable!(),
     }
 }
 
