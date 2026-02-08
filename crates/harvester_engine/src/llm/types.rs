@@ -232,6 +232,9 @@ pub enum LlmError {
     #[error("quota exhausted: {description}")]
     QuotaExhausted { description: String },
 
+    #[error("configuration error: {detail}")]
+    Configuration { detail: String },
+
     #[error("content filtered by provider policy")]
     ContentFiltered,
 }
