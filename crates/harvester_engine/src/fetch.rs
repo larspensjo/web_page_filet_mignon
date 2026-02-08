@@ -1,3 +1,5 @@
+use std::error::Error as StdError;
+use std::fmt;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -89,13 +91,26 @@ impl ReqwestFetcher {
         redirect_counter: Arc<AtomicUsize>,
     ) -> Result<reqwest::Client, FetchError> {
         let redirect_limit = self.settings.redirect_limit;
-        let policy = reqwest::redirect::Policy::custom(move |attempt| {
-            let count = attempt.previous().len();
-            redirect_counter.store(count, Ordering::Relaxed);
-            if count >= redirect_limit {
-                attempt.error("redirect limit exceeded")
-            } else {
-                attempt.follow()
+        let url_policy = self.url_policy.clone();
+        let policy = reqwest::redirect::Policy::custom({
+            let counter = redirect_counter.clone();
+            move |attempt| {
+                let count = attempt.previous().len();
+                counter.store(count, Ordering::Relaxed);
+                if count >= redirect_limit {
+                    attempt.error("redirect limit exceeded")
+                } else {
+                    let target_url = attempt.url().clone();
+                    if let Err(violation) = url_policy.check(&target_url) {
+                        attempt.error(UrlPolicyRedirectError::new(format!(
+                            "redirect target {} violated policy: {}",
+                            target_url,
+                            violation
+                        )))
+                    } else {
+                        attempt.follow()
+                    }
+                }
             }
         });
 
@@ -258,12 +273,42 @@ impl Fetcher for ReqwestFetcher {
     }
 }
 
+#[derive(Debug)]
+struct UrlPolicyRedirectError(String);
+
+impl UrlPolicyRedirectError {
+    fn new(message: String) -> Self {
+        Self(message)
+    }
+}
+
+impl fmt::Display for UrlPolicyRedirectError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl StdError for UrlPolicyRedirectError {}
+
 fn map_reqwest_error(err: reqwest::Error) -> FetchError {
     if err.is_timeout() {
         return FetchError::new(FailureKind::Timeout, err.to_string());
     }
+    if let Some(source) = err
+        .source()
+        .and_then(|source| source.downcast_ref::<UrlPolicyRedirectError>())
+    {
+        let reason = source.0.clone();
+        return FetchError::new(
+            FailureKind::UrlPolicyViolation {
+                description: reason.clone(),
+            },
+            reason,
+        );
+    }
     if err.is_redirect() {
         return FetchError::new(FailureKind::RedirectLimitExceeded, err.to_string());
     }
+
     FetchError::new(FailureKind::Network, err.to_string())
 }

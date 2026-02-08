@@ -51,22 +51,25 @@ impl UrlPolicy {
             .any(|blocked| blocked.eq_ignore_ascii_case(&normalized_host))
         {
             return Err(UrlPolicyViolation::BlockedHost {
-                host: normalized_host,
+                host: normalized_host.clone(),
             });
         }
 
+        let mut allowed_by_list = false;
         if let Some(ref allowed_hosts) = self.allowed_hosts {
-            if !allowed_hosts
+            if allowed_hosts
                 .iter()
                 .any(|allowed| allowed.eq_ignore_ascii_case(&normalized_host))
             {
+                allowed_by_list = true;
+            } else {
                 return Err(UrlPolicyViolation::BlockedHost {
-                    host: normalized_host,
+                    host: normalized_host.clone(),
                 });
             }
         }
 
-        if self.block_private_ips {
+        if self.block_private_ips && !allowed_by_list {
             let port = url.port_or_known_default().unwrap_or(80);
             let mut resolved_any = false;
             let addrs = (normalized_host.as_str(), port)
