@@ -13,14 +13,16 @@ pub fn build_markdown_document(
 ) -> (u32, String) {
     let token_count = token_counter.count(body_markdown);
     let title_val = title.unwrap_or("untitled");
-    let truncated_url = truncate_to_char_boundary(url, FRONTMATTER_VALUE_MAX);
-    let truncated_title = truncate_to_char_boundary(title_val, FRONTMATTER_VALUE_MAX);
+    let sanitized_url = sanitize_yaml_value(url);
+    let sanitized_title = sanitize_yaml_value(title_val);
+    let sanitized_encoding = sanitize_yaml_value(encoding);
+    let sanitized_fetched = sanitize_yaml_value(fetched_utc);
     let frontmatter = format!(
         "---\nurl: {url}\ntitle: {title}\nfetched_utc: {fetched_utc}\nencoding: {encoding}\ntoken_count: {token_count}\n---\n\n",
-        url = truncated_url,
-        title = truncated_title,
-        fetched_utc = fetched_utc,
-        encoding = encoding,
+        url = sanitized_url,
+        title = sanitized_title,
+        fetched_utc = sanitized_fetched,
+        encoding = sanitized_encoding,
         token_count = token_count,
     );
     let doc = format!(
@@ -29,4 +31,11 @@ pub fn build_markdown_document(
         body = body_markdown
     );
     (token_count, doc)
+}
+
+fn sanitize_yaml_value(value: &str) -> String {
+    let single_line = value.replace(&['\n', '\r'][..], " ");
+    let truncated = truncate_to_char_boundary(&single_line, FRONTMATTER_VALUE_MAX);
+    let escaped = truncated.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }

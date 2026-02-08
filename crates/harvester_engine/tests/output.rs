@@ -39,8 +39,8 @@ fn frontmatter_includes_token_count() {
         &token_counter,
     );
 
-    assert!(doc.contains("url: https://example.com"));
-    assert!(doc.contains("title: Example"));
+    assert!(doc.contains("url: \"https://example.com\""));
+    assert!(doc.contains("title: \"Example\""));
     assert!(doc.contains("token_count: 2"));
     assert!(doc.contains("---\n\nhello world"));
 }
@@ -60,7 +60,7 @@ fn pipeline_assemble_markdown_end_to_end() {
         &WhitespaceTokenCounter,
     );
     assert_eq!(tokens, 2);
-    assert!(doc.contains("title: T"));
+    assert!(doc.contains("title: \"T\""));
     assert!(doc.contains("A B"));
 }
 
@@ -68,8 +68,8 @@ fn pipeline_assemble_markdown_end_to_end() {
 fn concatenated_export_builds_delimited_output_and_manifest() {
     let temp = tempfile::TempDir::new().unwrap();
     let dir = temp.path();
-    let md1 = "---\nurl: https://a\ntitle: A\ntoken_count: 2\nfetched_utc: 2024-01-01T00:00:00Z\nencoding: UTF-8\n---\n\nBody A\n";
-    let md2 = "---\nurl: https://b\ntitle: B\ntoken_count: 3\nfetched_utc: 2024-01-02T00:00:00Z\nencoding: UTF-8\n---\n\nBody B\n";
+    let md1 = "---\nurl: \"https://a\"\ntitle: \"A\"\ntoken_count: 2\nfetched_utc: \"2024-01-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nBody A\n";
+    let md2 = "---\nurl: \"https://b\"\ntitle: \"B\"\ntoken_count: 3\nfetched_utc: \"2024-01-02T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nBody B\n";
     std::fs::write(dir.join("a.md"), md1).unwrap();
     std::fs::write(dir.join("b.md"), md2).unwrap();
 
@@ -111,9 +111,9 @@ fn concatenated_export_includes_linked_pages_and_dedupes_urls() {
     let linked_dir = dir.join("linked");
     std::fs::create_dir_all(&linked_dir).unwrap();
 
-    let root_md = "---\nurl: https://root\ntitle: Root\ntoken_count: 1\nfetched_utc: 2024-01-01T00:00:00Z\n---\n\nroot\n";
-    let link_md = "---\nurl: https://link\ntitle: Link\ntoken_count: 2\nfetched_utc: 2024-01-02T00:00:00Z\n---\n\nlink\n";
-    let duplicate_md = "---\nurl: https://link/\ntitle: Link Dup\ntoken_count: 3\nfetched_utc: 2024-01-03T00:00:00Z\n---\n\ndup\n";
+    let root_md = "---\nurl: \"https://root\"\ntitle: \"Root\"\ntoken_count: 1\nfetched_utc: \"2024-01-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nroot\n";
+    let link_md = "---\nurl: \"https://link\"\ntitle: \"Link\"\ntoken_count: 2\nfetched_utc: \"2024-01-02T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nlink\n";
+    let duplicate_md = "---\nurl: \"https://link/\"\ntitle: \"Link Dup\"\ntoken_count: 3\nfetched_utc: \"2024-01-03T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\ndup\n";
 
     std::fs::write(dir.join("root.md"), root_md).unwrap();
     std::fs::write(linked_dir.join("link.md"), link_md).unwrap();

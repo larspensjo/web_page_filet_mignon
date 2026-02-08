@@ -187,9 +187,9 @@ fn parse_doc(content: &str, filename: &str) -> Result<DocMeta, ExportError> {
             let key = k.trim();
             let val = v.trim();
             match key {
-                "url" => meta.url = val.to_string(),
-                "title" => meta.title = val.to_string(),
-                "fetched_utc" => meta.fetched_utc = val.to_string(),
+                "url" => meta.url = unescape_quoted(val),
+                "title" => meta.title = unescape_quoted(val),
+                "fetched_utc" => meta.fetched_utc = unescape_quoted(val),
                 "token_count" => meta.token_count = val.parse::<u32>().ok(),
                 _ => {}
             }
@@ -201,4 +201,33 @@ fn parse_doc(content: &str, filename: &str) -> Result<DocMeta, ExportError> {
         return Err(ExportError::MissingFrontmatter(filename.to_string()));
     }
     Ok(meta)
+}
+
+fn unescape_quoted(value: &str) -> String {
+    let trimmed = value.trim();
+    if let Some(inner) = trimmed.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+        let mut result = String::with_capacity(inner.len());
+        let mut chars = inner.chars();
+        while let Some(ch) = chars.next() {
+            if ch == '\\' {
+                if let Some(next) = chars.next() {
+                    match next {
+                        '\\' => result.push('\\'),
+                        '"' => result.push('"'),
+                        other => {
+                            result.push('\\');
+                            result.push(other);
+                        }
+                    }
+                } else {
+                    result.push('\\');
+                }
+            } else {
+                result.push(ch);
+            }
+        }
+        result
+    } else {
+        trimmed.to_string()
+    }
 }
