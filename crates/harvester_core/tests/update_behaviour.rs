@@ -1,6 +1,9 @@
 use std::sync::Once;
 
-use harvester_core::{update, AppState, Effect, Msg, SessionState, StopPolicy};
+use harvester_core::{
+    update, AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
+};
+use harvester_engine::llm::prompt::PromptId;
 
 fn init_logging() {
     static INIT: Once = Once::new();
@@ -189,4 +192,92 @@ fn archive_click_emits_effect_without_state_change() {
 
     assert_eq!(next.view(), before);
     assert_eq!(effects, vec![Effect::ArchiveRequested]);
+}
+
+fn send_llm_request_with_context(state: AppState) -> (AppState, Vec<Effect>) {
+    update(
+        state,
+        Msg::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            input_content: "llm input".to_string(),
+            context: vec![("key".to_string(), "value".to_string())],
+        },
+    )
+}
+
+fn extract_request_id(effect: &Effect) -> u64 {
+    if let Effect::RequestLlmCompletion { request_id, .. } = effect {
+        *request_id
+    } else {
+        panic!("expected RequestLlmCompletion effect")
+    }
+}
+
+#[test]
+fn request_llm_completion_emits_effect_and_tracks_pending() {
+    init_logging();
+    let (state, effects) = send_llm_request_with_context(AppState::new());
+    assert_eq!(effects.len(), 1);
+    let request_id = extract_request_id(&effects[0]);
+    assert_eq!(
+        state.llm_request_state(request_id),
+        Some(&LlmRequestState::Pending {
+            prompt_id: PromptId::ArticleTriage
+        })
+    );
+}
+
+#[test]
+fn llm_completed_success_updates_state() {
+    init_logging();
+    let (state, effects) = send_llm_request_with_context(AppState::new());
+    let request_id = extract_request_id(&effects[0]);
+    let json = "{\"ok\":true}".to_string();
+    let (state, effects) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::Success {
+                output_json: json.clone(),
+                input_tokens: 5,
+                output_tokens: 10,
+            },
+        },
+    );
+    assert!(effects.is_empty());
+    assert_eq!(
+        state.llm_request_state(request_id),
+        Some(&LlmRequestState::Completed {
+            output_json: json,
+            input_tokens: 5,
+            output_tokens: 10,
+        })
+    );
+}
+
+#[test]
+fn llm_completed_unknown_request_is_ignored() {
+    init_logging();
+    let (state, effects) = update(
+        AppState::new(),
+        Msg::LlmCompleted {
+            request_id: 42,
+            result: LlmResultKind::Failed {
+                reason: "not found".to_string(),
+            },
+        },
+    );
+    assert!(effects.is_empty());
+    assert!(state.llm_request_state(42).is_none());
+}
+
+#[test]
+fn request_ids_monotonically_increase() {
+    init_logging();
+    let (state, effects_a) = send_llm_request_with_context(AppState::new());
+    let request_id_a = extract_request_id(&effects_a[0]);
+    let (_state, effects_b) = send_llm_request_with_context(state);
+    let request_id_b = extract_request_id(&effects_b[0]);
+    assert!(request_id_b > request_id_a);
 }

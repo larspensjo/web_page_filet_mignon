@@ -1,5 +1,8 @@
+use engine_logging::engine_warn;
+
 use crate::{
-    calc_left_width, normalize_url_for_dedupe, AppState, Effect, Msg, SessionState, StopPolicy,
+    calc_left_width, normalize_url_for_dedupe, AppState, Effect, LlmRequestState, LlmResultKind,
+    Msg, SessionState, StopPolicy,
 };
 
 // Minimum width for the left panels (PANEL_INPUT + PANEL_JOBS)
@@ -183,6 +186,48 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_left_panel_width(clamped);
             state.mark_dirty();
+            Vec::new()
+        }
+        Msg::RequestLlmCompletion {
+            prompt_id,
+            prompt_version,
+            input_content,
+            context,
+        } => {
+            let request_id = state.allocate_next_llm_request_id();
+            state.record_pending_llm_request(request_id, prompt_id);
+            vec![Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                prompt_version,
+                input_content,
+                context,
+            }]
+        }
+        Msg::LlmCompleted { request_id, result } => {
+            let new_state = match result {
+                LlmResultKind::Success {
+                    output_json,
+                    input_tokens,
+                    output_tokens,
+                } => LlmRequestState::Completed {
+                    output_json,
+                    input_tokens,
+                    output_tokens,
+                },
+                LlmResultKind::ValidationFailed {
+                    reason,
+                    raw_response,
+                } => LlmRequestState::Failed {
+                    reason: format!("validation failed: {reason}; response: {raw_response}"),
+                },
+                LlmResultKind::Failed { reason } => LlmRequestState::Failed { reason },
+            };
+            if state.llm_request_state(request_id).is_some() {
+                state.record_llm_result(request_id, new_state);
+            } else {
+                engine_warn!("LLM completion for unknown request_id {request_id}");
+            }
             Vec::new()
         }
         Msg::Tick | Msg::NoOp => Vec::new(),

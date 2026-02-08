@@ -8,10 +8,10 @@ mod url_age;
 mod view_model;
 
 pub use effect::{Effect, StopPolicy};
-pub use msg::Msg;
+pub use msg::{LlmResultKind, Msg};
 pub use state::{
     normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind,
-    LinkDownloadState, LinkSnapshotRecord, SessionState, Stage,
+    LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex, SessionState, Stage,
 };
 pub use ui_geometry::calc_left_width;
 pub use update::update;

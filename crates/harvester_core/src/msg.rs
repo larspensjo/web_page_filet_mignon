@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::ExtractedLink;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,4 +63,33 @@ pub enum Msg {
     WindowResized { window_width: i32 },
     /// Fallback for placeholder wiring.
     NoOp,
+    /// User requested an LLM completion.
+    RequestLlmCompletion {
+        prompt_id: PromptId,
+        prompt_version: Option<PromptVersion>,
+        input_content: String,
+        context: Vec<(String, String)>,
+    },
+    /// A completion result came back from the worker.
+    LlmCompleted {
+        request_id: u64,
+        result: LlmResultKind,
+    },
+}
+
+/// Result payload returned by the LLM worker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LlmResultKind {
+    Success {
+        output_json: String,
+        input_tokens: u32,
+        output_tokens: u32,
+    },
+    ValidationFailed {
+        reason: String,
+        raw_response: String,
+    },
+    Failed {
+        reason: String,
+    },
 }

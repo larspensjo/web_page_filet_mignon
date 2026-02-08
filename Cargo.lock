@@ -606,6 +606,7 @@ dependencies = [
  "chrono",
  "engine_logging",
  "harvester_engine",
+ "log",
  "url",
 ]
 

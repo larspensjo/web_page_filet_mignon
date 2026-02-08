@@ -156,6 +156,12 @@ impl EffectRunner {
                     let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
                 });
             }
+            Effect::RequestLlmCompletion { request_id, .. } => {
+                engine_warn!(
+                    "LLM completion requested while integration pending: request_id={}",
+                    request_id
+                );
+            }
         }
     }
 

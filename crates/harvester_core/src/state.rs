@@ -2,6 +2,7 @@ use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TOKEN_LIMIT,
 };
+use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
@@ -59,6 +60,8 @@ pub struct AppState {
     last_paste_stats: Option<LastPasteStats>,
     dirty: bool,
     next_job_id: JobId,
+    next_llm_request_id: u64,
+    llm_requests: LlmResultIndex,
 }
 
 impl Default for AppState {
@@ -72,6 +75,8 @@ impl Default for AppState {
             last_paste_stats: None,
             dirty: false,
             next_job_id: 1,
+            next_llm_request_id: 1,
+            llm_requests: LlmResultIndex::new(),
         }
     }
 }
@@ -115,6 +120,30 @@ impl AppState {
             left_panel_width: self.ui.left_panel_width(),
             window_width: self.ui.window_width(),
         }
+    }
+
+    pub fn llm_request_state(&self, request_id: u64) -> Option<&LlmRequestState> {
+        self.llm_requests.get(&request_id)
+    }
+
+    pub fn allocate_next_llm_request_id(&mut self) -> u64 {
+        let id = self.next_llm_request_id;
+        self.next_llm_request_id = self.next_llm_request_id.saturating_add(1);
+        id
+    }
+
+    pub fn record_pending_llm_request(&mut self, request_id: u64, prompt_id: PromptId) {
+        self.llm_requests
+            .insert(request_id, LlmRequestState::Pending { prompt_id });
+    }
+
+    pub fn record_llm_result(&mut self, request_id: u64, state: LlmRequestState) {
+        self.llm_requests.insert(request_id, state);
+    }
+
+    pub fn reset_llm_requests(&mut self) {
+        self.llm_requests.clear();
+        self.next_llm_request_id = 1;
     }
 
     /// Returns the current dirty flag and clears it in one step.
@@ -172,6 +201,7 @@ impl AppState {
         self.ui.clear_input_buffer();
         self.last_paste_stats = None;
         self.next_job_id = 1;
+        self.reset_llm_requests();
 
         for entry in entries {
             let CompletedJobSnapshot {
@@ -541,6 +571,23 @@ pub enum SessionState {
     /// Do not auto-resume from this state unless a feature flag explicitly allows it.
     Finishing,
     Finished,
+}
+
+pub type LlmResultIndex = BTreeMap<u64, LlmRequestState>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LlmRequestState {
+    Pending {
+        prompt_id: PromptId,
+    },
+    Completed {
+        output_json: String,
+        input_tokens: u32,
+        output_tokens: u32,
+    },
+    Failed {
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]

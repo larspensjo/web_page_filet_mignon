@@ -1,10 +1,19 @@
 use std::path::PathBuf;
 
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     EnqueueUrl {
         job_id: crate::JobId,
         url: String,
+    },
+    RequestLlmCompletion {
+        request_id: u64,
+        prompt_id: PromptId,
+        prompt_version: Option<PromptVersion>,
+        input_content: String,
+        context: Vec<(String, String)>,
     },
     StartSession,
     StopFinish {

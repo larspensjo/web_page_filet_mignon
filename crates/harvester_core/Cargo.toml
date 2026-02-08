@@ -8,6 +8,5 @@ publish = false
 url = "2"
 harvester_engine = { path = "../harvester_engine" }
 chrono = "0.4"
-
-[dev-dependencies]
 engine_logging = { path = "../engine_logging" }
+log.workspace = true
