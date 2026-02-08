@@ -60,7 +60,7 @@ fn unlimited_quota_never_blocks() {
 fn totals_saturate() {
     let quotas = LlmQuotas::default();
     let mut tracker = LlmQuotaTracker::new(quotas);
-    tracker.record_call(u64::MAX as u64, u64::MAX as u64, u64::MAX);
+    tracker.record_call(u64::MAX, u64::MAX, u64::MAX);
     let totals = tracker.totals();
     assert_eq!(totals.input_tokens, u64::MAX);
     assert_eq!(totals.output_tokens, u64::MAX);

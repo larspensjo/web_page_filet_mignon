@@ -47,7 +47,7 @@ pub fn persist_replay_record(
 ) -> Result<PathBuf, PersistError> {
     ensure_output_dir(output_dir)?;
     let serialized = serde_json::to_string_pretty(record)
-        .map_err(|err| PersistError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+        .map_err(|err| PersistError::Io(io::Error::other(err)))?;
 
     let writer = AtomicFileWriter::new(output_dir.to_path_buf());
     let base_name = record_filename_base(record);
@@ -94,6 +94,10 @@ impl ReplayProvider {
         }
     }
 
+    pub fn from_records(records: HashMap<String, ReplayRecord>) -> Self {
+        Self { records }
+    }
+
     /// Load every JSON file in `dir`.
     pub fn load_from_dir(dir: &Path) -> Result<Self, String> {
         let mut provider = Self::new();
@@ -133,6 +137,12 @@ impl ReplayProvider {
     ) -> Option<&ReplayRecord> {
         let key = lookup_key(input_hash, prompt_id, prompt_version);
         self.records.get(&key)
+    }
+}
+
+impl Default for ReplayProvider {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

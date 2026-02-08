@@ -131,49 +131,47 @@ fn worker_loop(
     let runtime = Runtime::new().expect("failed to build tokio runtime for LLM worker");
     let mut quota_tracker = LlmQuotaTracker::new(config.quotas.clone());
 
+    let mut ctx = HandleContext {
+        config: &config,
+        runtime: &runtime,
+        quota_tracker: &mut quota_tracker,
+        event_tx: &event_tx,
+    };
+
     for cmd in cmd_rx {
-        match cmd {
-            LlmCommand::Stop => break,
-            LlmCommand::Complete {
-                request_id,
-                prompt_id,
-                prompt_version,
-                input_content,
-                context,
-            } => {
-                handle_completion(
-                    request_id,
-                    prompt_id,
-                    prompt_version,
-                    input_content,
-                    context,
-                    &config,
-                    &runtime,
-                    &mut quota_tracker,
-                    &event_tx,
-                );
-            }
+        if let LlmCommand::Stop = cmd {
+            break;
         }
+        handle_completion(cmd, &mut ctx);
     }
 }
 
-fn handle_completion(
-    request_id: u64,
-    prompt_id: PromptId,
-    prompt_version: Option<PromptVersion>,
-    input_content: String,
-    context: Vec<(String, String)>,
-    config: &LlmConfig,
-    runtime: &Runtime,
-    quota_tracker: &mut LlmQuotaTracker,
-    event_tx: &mpsc::Sender<LlmEvent>,
-) {
-    if input_content.len() > config.max_input_chars {
+struct HandleContext<'a> {
+    config: &'a LlmConfig,
+    runtime: &'a Runtime,
+    quota_tracker: &'a mut LlmQuotaTracker,
+    event_tx: &'a mpsc::Sender<LlmEvent>,
+}
+
+fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
+    let LlmCommand::Complete {
+        request_id,
+        prompt_id,
+        prompt_version,
+        input_content,
+        context,
+    } = command
+    else {
+        return;
+    };
+
+    let input_len = input_content.len();
+    if input_len > ctx.config.max_input_chars {
         let err = LlmCompletionError::InputTooLarge {
-            size: input_content.len(),
-            limit: config.max_input_chars,
+            size: input_len,
+            limit: ctx.config.max_input_chars,
         };
-        let _ = event_tx.send(LlmEvent::Completed {
+        let _ = ctx.event_tx.send(LlmEvent::Completed {
             request_id,
             result: Err(err),
         });
@@ -184,14 +182,14 @@ fn handle_completion(
         "[llm-dispatch] request_id={} prompt_id={:?} chars={}",
         request_id,
         prompt_id,
-        input_content.len()
+        input_len
     );
 
-    let model = resolve_model(prompt_id, config);
-    let (template, version) = match fetch_prompt_template(config, prompt_id, prompt_version) {
+    let model = resolve_model(prompt_id, ctx.config);
+    let (template, version) = match fetch_prompt_template(ctx.config, prompt_id, prompt_version) {
         Some(pair) => pair,
         None => {
-            let _ = event_tx.send(LlmEvent::Completed {
+            let _ = ctx.event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Err(LlmCompletionError::PromptNotFound { prompt_id }),
             });
@@ -229,7 +227,7 @@ fn handle_completion(
     );
 
     let start_at = Instant::now();
-    let run_result = runtime.block_on(config.provider.complete(&request));
+    let run_result = ctx.runtime.block_on(ctx.config.provider.complete(&request));
     let duration_ms = start_at.elapsed().as_millis();
 
     if let Err(err) = run_result {
@@ -238,7 +236,7 @@ fn handle_completion(
             request_id,
             err
         );
-        let _ = event_tx.send(LlmEvent::Completed {
+        let _ = ctx.event_tx.send(LlmEvent::Completed {
             request_id,
             result: Err(LlmCompletionError::ProviderError(err)),
         });
@@ -254,14 +252,16 @@ fn handle_completion(
     );
 
     let usage = response.usage();
-    let cost = config
+    let cost = ctx
+        .config
         .pricing
         .cost_microdollars(response.model_id().model_name(), &usage);
 
     if let Err(failure) =
-        quota_tracker.check_call(usage.input_tokens as u64, usage.output_tokens as u64, cost)
+        ctx.quota_tracker
+            .check_call(usage.input_tokens as u64, usage.output_tokens as u64, cost)
     {
-        let _ = event_tx.send(LlmEvent::Completed {
+        let _ = ctx.event_tx.send(LlmEvent::Completed {
             request_id,
             result: Err(LlmCompletionError::QuotaExhausted {
                 description: failure.to_string(),
@@ -270,9 +270,10 @@ fn handle_completion(
         return;
     }
 
-    quota_tracker.record_call(usage.input_tokens as u64, usage.output_tokens as u64, cost);
+    ctx.quota_tracker
+        .record_call(usage.input_tokens as u64, usage.output_tokens as u64, cost);
 
-    let totals = quota_tracker.totals();
+    let totals = ctx.quota_tracker.totals();
     engine_info!(
         "[llm-quota] request_id={} calls={} input={} output={} cost={}",
         request_id,
@@ -286,12 +287,12 @@ fn handle_completion(
     let validation_result = validate_response(prompt_id, &raw_response);
 
     let record = ReplayRecord {
-        request_id: format!("{}-{request_id}", config.session_id),
+        request_id: format!("{}-{request_id}", ctx.config.session_id),
         input_content_hash: content_hash(&input_content),
         prompt_id,
         prompt_version: version,
         model_id: format_model_identifier(response.model_id()),
-        timestamp_utc: (config.timestamp_utc)(),
+        timestamp_utc: (ctx.config.timestamp_utc)(),
         rendered_system_message: system_message.clone(),
         rendered_user_message: user_message.clone(),
         raw_response: raw_response.clone(),
@@ -315,18 +316,18 @@ fn handle_completion(
             }
         };
 
-        let record = ReplayRecord {
+        let success_record = ReplayRecord {
             validated_output,
             ..record
         };
 
-        if let Err(err) = persist_replay_record(&config.replay_output_dir(), &record) {
+        if let Err(err) = persist_replay_record(&ctx.config.replay_output_dir(), &success_record) {
             engine_error!(
                 "[llm-replay] request_id={} persist failed: {}",
                 request_id,
                 err
             );
-            let _ = event_tx.send(LlmEvent::Completed {
+            let _ = ctx.event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Err(LlmCompletionError::PersistenceFailed {
                     detail: err.to_string(),
@@ -343,7 +344,7 @@ fn handle_completion(
             prompt_version: version,
         };
 
-        let _ = event_tx.send(LlmEvent::Completed {
+        let _ = ctx.event_tx.send(LlmEvent::Completed {
             request_id,
             result: Ok(result),
         });
@@ -358,18 +359,18 @@ fn handle_completion(
         reason
     );
 
-    let record = ReplayRecord {
+    let failure_record = ReplayRecord {
         validation_error: Some(reason.clone()),
         ..record
     };
 
-    if let Err(err) = persist_replay_record(&config.replay_output_dir(), &record) {
+    if let Err(err) = persist_replay_record(&ctx.config.replay_output_dir(), &failure_record) {
         engine_error!(
             "[llm-replay] request_id={} persist failed: {}",
             request_id,
             err
         );
-        let _ = event_tx.send(LlmEvent::Completed {
+        let _ = ctx.event_tx.send(LlmEvent::Completed {
             request_id,
             result: Err(LlmCompletionError::PersistenceFailed {
                 detail: err.to_string(),
@@ -378,7 +379,7 @@ fn handle_completion(
         return;
     }
 
-    let _ = event_tx.send(LlmEvent::Completed {
+    let _ = ctx.event_tx.send(LlmEvent::Completed {
         request_id,
         result: Err(LlmCompletionError::ValidationFailed {
             reason,
@@ -407,11 +408,11 @@ fn resolve_model(prompt_id: PromptId, config: &LlmConfig) -> ModelId {
     }
 }
 
-fn fetch_prompt_template<'a>(
-    config: &'a LlmConfig,
+fn fetch_prompt_template(
+    config: &LlmConfig,
     prompt_id: PromptId,
     prompt_version: Option<PromptVersion>,
-) -> Option<(&'a PromptTemplate, PromptVersion)> {
+) -> Option<(&PromptTemplate, PromptVersion)> {
     if let Some(version) = prompt_version {
         config
             .registry

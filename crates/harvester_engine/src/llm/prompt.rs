@@ -55,7 +55,13 @@ pub fn content_nonce(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content);
     let digest = hasher.finalize();
-    hex::encode(&digest)[..12].to_string()
+    hex::encode(digest)[..12].to_string()
+}
+
+impl Default for TemplateVars {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[derive(Clone)]
@@ -73,10 +79,7 @@ impl PromptRegistry {
     }
 
     pub fn register(&mut self, template: PromptTemplate) {
-        let versions = self
-            .templates
-            .entry(template.id)
-            .or_insert_with(HashMap::new);
+        let versions = self.templates.entry(template.id).or_default();
         let version = template.version;
         let id = template.id;
         versions.insert(version, template);
@@ -112,5 +115,11 @@ impl PromptRegistry {
         let mut registry = Self::new();
         crate::llm::prompts::register_defaults(&mut registry);
         registry
+    }
+}
+
+impl Default for PromptRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }

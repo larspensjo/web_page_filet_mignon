@@ -73,3 +73,9 @@ impl PricingRegistry {
             .unwrap_or(0)
     }
 }
+
+impl Default for PricingRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}

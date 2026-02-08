@@ -84,7 +84,7 @@ impl OpenAiProvider {
 
         let choice = parsed
             .choices
-            .get(0)
+            .first()
             .ok_or_else(|| LlmError::InvalidResponse {
                 detail: "response missing choices".to_string(),
             })?;
@@ -140,7 +140,7 @@ impl LlmProvider for OpenAiProvider {
 
         let response = self
             .client
-            .post(&self.endpoint())
+            .post(self.endpoint())
             .header(header::AUTHORIZATION, format!("Bearer {}", self.api_key))
             .header(header::CONTENT_TYPE, "application/json")
             .body(body)
