@@ -86,6 +86,8 @@ pub enum FailureKind {
     UrlPolicyViolation { description: String },
     QuotaExceeded { description: String },
     PathPolicyViolation { path: String },
+    LlmError { description: String },
+    LlmValidationFailed { description: String },
 }
 
 impl fmt::Display for FailureKind {
@@ -115,6 +117,10 @@ impl fmt::Display for FailureKind {
             }
             FailureKind::PathPolicyViolation { path } => {
                 write!(f, "path policy violation for {path}")
+            }
+            FailureKind::LlmError { description } => write!(f, "LLM error: {description}"),
+            FailureKind::LlmValidationFailed { description } => {
+                write!(f, "LLM validation failed: {description}")
             }
         }
     }
