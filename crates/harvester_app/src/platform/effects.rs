@@ -9,8 +9,9 @@ use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
-    AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor,
-    LinkExtractingConverter, ReadabilityLikeExtractor, WhitespaceTokenCounter,
+    is_confined_to, AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent,
+    EngineHandle, Extractor, LinkExtractingConverter, ReadabilityLikeExtractor,
+    WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
@@ -121,9 +122,19 @@ impl EffectRunner {
                         path.display()
                     );
                     let msg_tx = self.msg_tx.clone();
-                    let absolute_path = self.output_dir.join(&path);
+                    let output_dir = self.output_dir.clone();
                     thread::spawn(move || {
-                        let _ = fs::remove_file(&absolute_path);
+                        if is_confined_to(&path, &output_dir) {
+                            let absolute_path = output_dir.join(&path);
+                            let _ = fs::remove_file(&absolute_path);
+                        } else {
+                            engine_warn!(
+                                "DeleteLinkedPage rejected unsafe path job_id={} link_index={} path={}",
+                                job_id,
+                                link_index,
+                                path.display()
+                            );
+                        }
                         let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
                     });
                 }

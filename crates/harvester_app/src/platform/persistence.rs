@@ -61,7 +61,7 @@ pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot
                 .into_iter()
                 .map(|link| LinkSnapshotRecord {
                     url: link.url,
-                    downloaded_path: link.downloaded_path,
+                    downloaded_path: sanitize_downloaded_path(link.downloaded_path),
                 })
                 .collect(),
         })
@@ -69,6 +69,33 @@ pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot
 
     engine_info!("Loaded persisted completed jobs from {:?}", path);
     completed
+}
+
+fn sanitize_downloaded_path(path: Option<String>) -> Option<String> {
+    match path {
+        Some(value) if is_safe_downloaded_path(&value) => Some(value),
+        Some(value) => {
+            engine_warn!("Discarding unsafe persisted downloaded_path: {}", value);
+            None
+        }
+        None => None,
+    }
+}
+
+fn is_safe_downloaded_path(value: &str) -> bool {
+    if value.contains("..") {
+        return false;
+    }
+    if value.starts_with('/') || value.starts_with('\\') {
+        return false;
+    }
+    let mut chars = value.chars();
+    if let (Some(first), Some(second)) = (chars.next(), chars.next()) {
+        if first.is_ascii_alphabetic() && second == ':' {
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) fn save_completed_jobs(output_dir: &Path, completed: &[CompletedJobSnapshot]) {
@@ -171,5 +198,34 @@ mod tests {
         let loaded = load_completed_jobs(temp.path());
 
         assert_eq!(loaded, snapshot);
+    }
+
+    #[test]
+    fn load_state_discards_poisoned_downloaded_path() {
+        let temp = tempdir().expect("tempdir");
+        let content = r#"
+(
+  completed: [
+    (
+      url: "https://example.com",
+      tokens: Some(42u32),
+      bytes: Some(1024u64),
+      links: [
+        (
+          url: "https://attacker.com",
+          downloaded_path: Some("../../etc/passwd"),
+        ),
+      ],
+    ),
+  ],
+)
+"#;
+
+        write_state(temp.path(), content);
+
+        let snapshot = load_completed_jobs(temp.path());
+        assert_eq!(snapshot.len(), 1);
+        assert!(snapshot[0].links.len() == 1);
+        assert!(snapshot[0].links[0].downloaded_path.is_none());
     }
 }
