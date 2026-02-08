@@ -179,3 +179,20 @@ async fn integration_round_trip_with_wiremock() {
     assert_eq!(response.usage().input_tokens, 2);
     assert_eq!(response.usage().output_tokens, 1);
 }
+
+#[tokio::test]
+#[ignore]
+async fn live_openai_completion() {
+    // This test is ignored by default since it requires a real API key and makes a network request.
+    let _key =
+        std::env::var("OPENAI_API_KEY").expect("set OPENAI_API_KEY to run live OpenAI check");
+    let provider =
+        OpenAiProvider::from_env().expect("provider should initialize when key is present");
+    let response = provider
+        .complete(&sample_request().with_max_output_tokens(16))
+        .await
+        .expect("live completion must succeed");
+
+    assert!(!response.content().trim().is_empty());
+    assert!(matches!(response.finish_reason(), FinishReason::Stop));
+}
