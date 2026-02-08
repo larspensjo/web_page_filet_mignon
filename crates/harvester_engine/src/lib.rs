@@ -8,6 +8,7 @@ mod fetch;
 mod filename;
 mod frontmatter;
 mod links;
+pub mod llm;
 mod path_policy;
 mod persist;
 mod preview;

@@ -625,6 +625,7 @@ dependencies = [
  "pretty_assertions",
  "reqwest",
  "scraper",
+ "serde",
  "serde_json",
  "sha2",
  "tempfile",
