@@ -1,3 +1,4 @@
+use crate::text_safety::truncate_to_char_boundary;
 use sha2::{Digest, Sha256};
 
 /// Windows-safe, deterministic filename: `{sanitized_title}--{short_hash(url)}.md`
@@ -30,10 +31,8 @@ fn sanitize_title(input: &str) -> String {
             prev_underscore = false;
         }
     }
-    let mut final_name = compacted;
-    if final_name.len() > 80 {
-        final_name.truncate(80);
-    }
+    let truncated = truncate_to_char_boundary(&compacted, 80);
+    let mut final_name = truncated.to_string();
     if is_reserved_windows_name(&final_name) {
         final_name.push('_');
     }

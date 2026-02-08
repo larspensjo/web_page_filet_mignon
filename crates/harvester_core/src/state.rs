@@ -2,7 +2,7 @@ use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TOKEN_LIMIT,
 };
-use harvester_engine::{ExtractedLink, LinkKind};
+use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use url::Url;
@@ -706,14 +706,14 @@ fn link_label_for_record(record: &LinkRecord) -> String {
 }
 
 fn truncate_link_url(url: &str) -> String {
-    if url.len() <= LINK_LABEL_MAX {
+    if url.chars().count() <= LINK_LABEL_MAX {
         url.to_string()
     } else {
         let max_chars = LINK_LABEL_MAX
             .saturating_sub(LINK_LABEL_TRUNCATE_MARKER.len())
             .max(1);
-        let trimmed = &url[..max_chars.min(url.len())];
-        format!("{trimmed}{LINK_LABEL_TRUNCATE_MARKER}")
+        let truncated = truncate_to_char_boundary(url, max_chars);
+        format!("{truncated}{LINK_LABEL_TRUNCATE_MARKER}")
     }
 }
 
