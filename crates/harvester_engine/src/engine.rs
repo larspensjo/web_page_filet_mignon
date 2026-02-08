@@ -15,6 +15,7 @@ use crate::fetch::{ChannelProgressSink, FetchSettings, Fetcher, ReqwestFetcher};
 use crate::frontmatter::build_markdown_document;
 use crate::persist::AtomicFileWriter;
 use crate::preview::prepare_preview_content;
+use crate::quota::{QuotaTracker, SessionQuotas};
 use crate::token::TokenCounter;
 use crate::url_policy::UrlPolicy;
 use crate::{
@@ -25,6 +26,7 @@ use crate::{
 pub struct EngineConfig {
     pub fetch_settings: FetchSettings,
     pub url_policy: UrlPolicy,
+    pub session_quotas: SessionQuotas,
     pub output_dir: PathBuf,
     pub extractor: Arc<dyn Extractor>,
     pub converter: Arc<dyn Converter>,
@@ -42,6 +44,7 @@ impl EngineConfig {
         Self {
             fetch_settings: FetchSettings::default(),
             url_policy: UrlPolicy::default(),
+            session_quotas: SessionQuotas::default(),
             output_dir,
             extractor: Arc::new(crate::ReadabilityLikeExtractor),
             converter: Arc::new(crate::LinkExtractingConverter::new()),
@@ -116,6 +119,7 @@ fn worker_loop(
     let mut queue: VecDeque<(JobId, String)> = VecDeque::new();
     let mut accept_new = true;
     let cancel_token = CancellationToken::new();
+    let mut quota_tracker = QuotaTracker::new(config.session_quotas.clone());
 
     loop {
         while let Ok(cmd) = cmd_rx.try_recv() {
@@ -167,13 +171,26 @@ fn worker_loop(
                 }
                 continue;
             }
+            if let Err(failure) = quota_tracker.check_url() {
+                let _ = event_tx.send(EngineEvent::JobCompleted {
+                    job_id,
+                    result: Err(failure),
+                });
+                continue;
+            }
             let fetcher = fetcher.clone();
             let event_tx = event_tx.clone();
             let config = config.clone();
             let child_token = cancel_token.child_token();
-            runtime.block_on(async move {
-                run_job(job_id, url, fetcher.as_ref(), event_tx, config, child_token).await;
+            let job_result = runtime.block_on(async move {
+                run_job(job_id, url, fetcher.as_ref(), event_tx, config, child_token).await
             });
+            match job_result {
+                Ok((bytes_written, tokens)) => {
+                    quota_tracker.record_job(bytes_written, tokens as u64)
+                }
+                Err(_) => quota_tracker.record_job(0, 0),
+            };
         } else {
             // Block until next command arrives.
             match cmd_rx.recv() {
@@ -218,7 +235,7 @@ async fn run_job(
     event_tx: mpsc::Sender<EngineEvent>,
     config: Arc<EngineConfig>,
     cancel_token: CancellationToken,
-) {
+) -> Result<(u64, u32), FailureKind> {
     engine_info!("Job {} starting: {}", job_id, url);
     let sink = ChannelProgressSink::new(event_tx.clone());
 
@@ -235,21 +252,23 @@ async fn run_job(
         }
         Err(err) => {
             // Error already logged in fetch.rs
+            let failure = err.kind.clone();
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
-                result: Err(err.kind),
+                result: Err(failure.clone()),
             });
-            return;
+            return Err(failure);
         }
     };
 
     // Check cancellation after fetching stage boundary.
     if cancel_token.is_cancelled() {
+        let failure = FailureKind::Cancelled;
         let _ = event_tx.send(EngineEvent::JobCompleted {
             job_id,
-            result: Err(FailureKind::Cancelled),
+            result: Err(failure.clone()),
         });
-        return;
+        return Err(failure);
     }
 
     let decoded = match timeout(config.extract_timeout, async {
@@ -262,29 +281,32 @@ async fn run_job(
     {
         Ok(Ok(decoded)) => decoded,
         Ok(Err(_)) => {
+            let failure = FailureKind::ProcessingError;
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
-                result: Err(FailureKind::ProcessingError),
+                result: Err(failure.clone()),
             });
-            return;
+            return Err(failure);
         }
         Err(_) => {
+            let failure = FailureKind::ProcessingTimeout {
+                stage: Stage::Sanitizing,
+            };
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
-                result: Err(FailureKind::ProcessingTimeout {
-                    stage: Stage::Sanitizing,
-                }),
+                result: Err(failure.clone()),
             });
-            return;
+            return Err(failure);
         }
     };
 
     if cancel_token.is_cancelled() {
+        let failure = FailureKind::Cancelled;
         let _ = event_tx.send(EngineEvent::JobCompleted {
             job_id,
-            result: Err(FailureKind::Cancelled),
+            result: Err(failure.clone()),
         });
-        return;
+        return Err(failure);
     }
 
     let extracted = match timeout(config.extract_timeout, async {
@@ -294,13 +316,14 @@ async fn run_job(
     {
         Ok(content) => content,
         Err(_) => {
+            let failure = FailureKind::ProcessingTimeout {
+                stage: Stage::Converting,
+            };
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
-                result: Err(FailureKind::ProcessingTimeout {
-                    stage: Stage::Converting,
-                }),
+                result: Err(failure.clone()),
             });
-            return;
+            return Err(failure);
         }
     };
 
@@ -314,13 +337,14 @@ async fn run_job(
     {
         Ok(output) => output,
         Err(_) => {
+            let failure = FailureKind::ProcessingTimeout {
+                stage: Stage::Converting,
+            };
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
-                result: Err(FailureKind::ProcessingTimeout {
-                    stage: Stage::Converting,
-                }),
+                result: Err(failure.clone()),
             });
-            return;
+            return Err(failure);
         }
     };
 
@@ -336,11 +360,12 @@ async fn run_job(
     }));
 
     if cancel_token.is_cancelled() {
+        let failure = FailureKind::Cancelled;
         let _ = event_tx.send(EngineEvent::JobCompleted {
             job_id,
-            result: Err(FailureKind::Cancelled),
+            result: Err(failure.clone()),
         });
-        return;
+        return Err(failure);
     }
 
     let tokens = match timeout(config.tokenize_timeout, async {
@@ -350,13 +375,14 @@ async fn run_job(
     {
         Ok(t) => t,
         Err(_) => {
+            let failure = FailureKind::ProcessingTimeout {
+                stage: Stage::Tokenizing,
+            };
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
-                result: Err(FailureKind::ProcessingTimeout {
-                    stage: Stage::Tokenizing,
-                }),
+                result: Err(failure.clone()),
             });
-            return;
+            return Err(failure);
         }
     };
 
@@ -369,11 +395,12 @@ async fn run_job(
     }));
 
     if cancel_token.is_cancelled() {
+        let failure = FailureKind::Cancelled;
         let _ = event_tx.send(EngineEvent::JobCompleted {
             job_id,
-            result: Err(FailureKind::Cancelled),
+            result: Err(failure.clone()),
         });
-        return;
+        return Err(failure);
     }
 
     let (token_count, doc) = build_markdown_document(
@@ -412,13 +439,16 @@ async fn run_job(
                     extracted_links: conversion.links,
                 }),
             });
+            return Ok((doc_for_write.len() as u64, token_count));
         }
         _ => {
+            let failure = FailureKind::ProcessingError;
             engine_warn!("Job {} failed: write error", job_id);
             let _ = event_tx.send(EngineEvent::JobCompleted {
                 job_id,
-                result: Err(FailureKind::ProcessingError),
+                result: Err(failure.clone()),
             });
+            return Err(failure);
         }
     }
 }

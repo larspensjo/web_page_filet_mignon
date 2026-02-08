@@ -11,6 +11,7 @@ mod links;
 mod path_policy;
 mod persist;
 mod preview;
+mod quota;
 mod text_safety;
 mod token;
 mod types;
@@ -27,6 +28,7 @@ pub use frontmatter::build_markdown_document;
 pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKind};
 pub use path_policy::is_confined_to;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
+pub use quota::{QuotaTracker, SessionQuotas};
 pub use text_safety::truncate_to_char_boundary;
 pub use token::{TokenCounter, WhitespaceTokenCounter};
 pub use types::{
