@@ -58,6 +58,20 @@ Every LLM call originates from an explicit intent message (`Msg::RequestLlmCompl
 
 Input size limits for LLM effects are derived from `LlmConfig` (which carries model capabilities and policy settings), not hard-coded literals. This follows `Agents.md` rule: "Avoid hard-coded string/buffer lengths anywhere; size dynamically from the data source and centralize helpers."
 
+### 8. Model selection is configuration-driven, with task-specific overrides
+
+Phase 1 keeps UX simple (no model picker UI), but model choice must not be hard-coded in code paths. `LlmConfig` carries a default model plus optional overrides per workload class (triage/filtering vs summary/briefing). This enables fast model iteration as provider offerings change, without code edits.
+
+Proposed Phase 1 shape:
+- `default_model: ModelId`
+- `triage_model: Option<ModelId>` (high-volume/low-cost path)
+- `summary_model: Option<ModelId>` (higher-quality synthesis path)
+- `briefing_model: Option<ModelId>`
+
+Resolution policy:
+- choose explicit override for the request kind when present
+- otherwise fall back to `default_model`
+
 ---
 
 ## Prerequisites (Phase 0.5)
@@ -421,6 +435,9 @@ llm_requests: BTreeMap<u64, LlmRequestState>,
 pub struct LlmConfig {
     pub provider: Arc<dyn LlmProvider>,
     pub default_model: ModelId,
+    pub triage_model: Option<ModelId>,
+    pub summary_model: Option<ModelId>,
+    pub briefing_model: Option<ModelId>,
     pub registry: PromptRegistry,
     pub quotas: LlmQuotas,
     pub output_dir: PathBuf,
@@ -451,6 +468,11 @@ pub enum LlmEvent {
     Completed { request_id: u64, result: Result<LlmCompletionResult, LlmCompletionError> },
 }
 ```
+
+Model resolution in worker:
+- `PromptId::ArticleTriage` → `triage_model.unwrap_or(default_model.clone())`
+- `PromptId::ArticleSummary` → `summary_model.unwrap_or(default_model.clone())`
+- `PromptId::AggregateBriefing` → `briefing_model.unwrap_or(default_model.clone())`
 
 Worker loop: recv command → check quota → resolve prompt → render messages (with nonce-based document delimiting) → build LlmRequest → call provider.complete() → validate response into DTO → record usage → persist replay record → send event.
 
@@ -571,6 +593,7 @@ ThreatModel additions: LLM API keys as asset, LLM responses as untrusted trust b
 - Reject oversized LLM input using configuration-driven limit (not a magic constant).
 - Missing `LlmHandle` returns deterministic `Msg::LlmCompleted::Failed`.
 - Dispatch logs include `[llm-dispatch]` category with request ID and prompt ID.
+- Model resolution uses override when configured and falls back to `default_model` otherwise.
 
 ### LLM engine tests (`harvester_engine`)
 - Quota checks: call/input/output/cost thresholds.
@@ -602,6 +625,8 @@ ThreatModel additions: LLM API keys as asset, LLM responses as untrusted trust b
 - **Newtype trust wrappers**: `ValidatedLlmOutput<T>` for compile-time safety that validation was performed. Also `UntrustedContent(String)` / `CleanMarkdown(String)` (most valuable once Phase 2 content preparation begins).
 - **API key management**: Currently environment variables. Future: encrypted config, rotation.
 - **A/B testing UI**: Compare results from different prompt versions side-by-side (Phase 4+).
+- **Model selection UX**: Add app-level controls to choose/filter model profiles (cheap triage vs deep summary) and switch active profile without restart.
+- **Evaluation UX**: Add replay-backed scoring views (precision/recall for filtering, summary quality rubric, cost and latency metrics per model/prompt version).
 - **Content fingerprinting for dedup**: The replay harness uses SHA-256 content hashing per-call. Extending this to deduplicate across sessions (same article, skip re-processing) is a natural follow-up.
 - **Retry budget + backoff policy**: Transient provider failures (rate limiting, 5xx) could benefit from exponential backoff with jitter. Separate from quota.
 - **Privacy controls for replay artifacts**: Optional redaction of raw LLM responses in replay records.

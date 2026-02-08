@@ -102,6 +102,10 @@ We need a stable, swappable LLM layer before we can productize summaries:
 ### Deliverables
 - Provider abstraction (OpenAI, Gemini and Claude) executed via the existing effect system.
 - Prompt registry with identifiers and versioning.
+- Configuration-driven model selection policy:
+  - default model for all tasks,
+  - optional task-specific overrides (triage/filtering, summary, briefing),
+  - no hard-coded model choice in business logic.
 - Typed DTO outputs for:
   - triage/ranking,
   - per-article summary,
@@ -112,6 +116,13 @@ We need a stable, swappable LLM layer before we can productize summaries:
 
 ### Expected product impact
 Still mostly internal, but unlocks safe iteration on prompts/models.
+
+### Model strategy note
+- Initial releases may use one configured default model to keep scope small.
+- The architecture should still support frequent model swaps through configuration, not code edits.
+- Cost-sensitive routing is expected:
+  - cheaper model for high-volume triage/filtering,
+  - higher-quality model for deeper summaries/briefings when needed.
 
 ## Phase 2 — Content preparation pipeline for safe summarization inputs
 ### Purpose
@@ -143,6 +154,9 @@ First visible value with minimal scope expansion:
 - UI action(s) to generate:
   - per-article short summaries,
   - aggregate executive briefing across the set.
+- Optional profile selection before generation:
+  - "cheap triage profile" vs "deep summary profile",
+  - explicit display of active model/profile in run metadata.
 - Store results with provenance:
   - model id, prompt id/version, timestamp, input hash.
 - Resilient failure handling:
@@ -150,6 +164,12 @@ First visible value with minimal scope expansion:
 
 ### Expected product impact
 Users can immediately save time by reading briefings instead of raw articles.
+
+### Evaluation expectation
+- Replay artifacts from earlier phases should be usable to compare:
+  - prompt versions,
+  - model choices,
+  - quality/cost/latency trade-offs.
 
 ## Phase 4 — AI ranking and filtering presented as a deterministic UI list
 ### Purpose
