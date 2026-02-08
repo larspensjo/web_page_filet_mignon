@@ -1,6 +1,7 @@
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{atomic::{AtomicUsize, Ordering}, Arc, mpsc};
 use std::thread;
 use std::time::Duration;
 
@@ -8,13 +9,13 @@ use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, Msg, Stage, StopPolicy};
 use harvester_engine::{
-    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
-    is_confined_to, AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent,
-    EngineHandle, Extractor, LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy,
-    WhitespaceTokenCounter,
+    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir, is_confined_to,
+    AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor,
+    FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
+use reqwest::redirect::Policy;
 
 pub(crate) fn default_output_dir() -> std::path::PathBuf {
     std::env::current_dir()
@@ -22,15 +23,12 @@ pub(crate) fn default_output_dir() -> std::path::PathBuf {
         .join("output")
 }
 
-const LINKED_ALLOWED_CONTENT_TYPES: [&str; 3] =
-    ["text/html", "application/xhtml+xml", "text/plain"];
-const LINK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
-
 pub struct EffectRunner {
     engine: EngineHandle,
     msg_tx: mpsc::Sender<Msg>,
     output_dir: PathBuf,
     url_policy: UrlPolicy,
+    fetch_settings: FetchSettings,
 }
 
 impl EffectRunner {
@@ -40,6 +38,7 @@ impl EffectRunner {
         let mut config = EngineConfig::default_with_output(output_dir.clone());
         config.fetched_utc = std::sync::Arc::new(|| Utc::now().to_rfc3339());
         let url_policy = config.url_policy.clone();
+        let fetch_settings = config.fetch_settings.clone();
 
         let engine = EngineHandle::new(config);
         let runner = Self {
@@ -47,6 +46,7 @@ impl EffectRunner {
             msg_tx: msg_tx.clone(),
             output_dir,
             url_policy,
+            fetch_settings,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -89,9 +89,10 @@ impl EffectRunner {
                     let msg_tx = self.msg_tx.clone();
                     let output_dir = self.output_dir.clone();
                     let url_policy = self.url_policy.clone();
+                    let fetch_settings = self.fetch_settings.clone();
                     thread::spawn(move || {
                         let _ = msg_tx.send(Msg::LinkDownloadStarted { job_id, link_index });
-                        match download_link_page(&url, &output_dir, &url_policy) {
+                        match download_link_page(&url, &output_dir, &url_policy, &fetch_settings) {
                             Ok(absolute_path) => {
                                 let relative_path = absolute_path
                                     .strip_prefix(&output_dir)
@@ -193,6 +194,7 @@ fn download_link_page(
     url: &str,
     output_dir: &Path,
     url_policy: &UrlPolicy,
+    fetch_settings: &FetchSettings,
 ) -> Result<PathBuf, String> {
     let linked_dir = output_dir.join("linked");
     ensure_output_dir(&linked_dir).map_err(|err| format!("linked output dir error: {}", err))?;
@@ -206,11 +208,29 @@ fn download_link_page(
         ));
     }
 
+    let redirect_limit = fetch_settings.redirect_limit;
+    let redirect_counter = Arc::new(AtomicUsize::new(0));
+    let policy = Policy::custom({
+        let counter = redirect_counter.clone();
+        move |attempt| {
+            let count = attempt.previous().len();
+            counter.store(count, Ordering::Relaxed);
+            if count >= redirect_limit {
+                attempt.error("redirect limit exceeded")
+            } else {
+                attempt.follow()
+            }
+        }
+    });
+
     let client = Client::builder()
-        .timeout(LINK_DOWNLOAD_TIMEOUT)
+        .connect_timeout(fetch_settings.connect_timeout)
+        .timeout(fetch_settings.request_timeout)
+        .redirect(policy)
+        .user_agent(fetch_settings.user_agent.clone())
         .build()
         .map_err(|err| err.to_string())?;
-    let response = client.get(parsed).send().map_err(|err| err.to_string())?;
+    let mut response = client.get(parsed.clone()).send().map_err(|err| err.to_string())?;
     if !response.status().is_success() {
         return Err(format!(
             "HTTP error {} for linked page {}",
@@ -230,7 +250,8 @@ fn download_link_page(
             .next()
             .unwrap_or(content_type)
             .trim();
-        if !LINKED_ALLOWED_CONTENT_TYPES
+        if !fetch_settings
+            .allowed_content_types
             .iter()
             .any(|allowed| allowed.eq_ignore_ascii_case(ct))
         {
@@ -239,7 +260,25 @@ fn download_link_page(
     }
 
     let final_url = response.url().to_string();
-    let bytes = response.bytes().map_err(|err| err.to_string())?;
+    let mut bytes = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let read = response
+            .read(&mut buffer)
+            .map_err(|err| err.to_string())?;
+        if read == 0 {
+            break;
+        }
+        let next_len = bytes.len() + read;
+        if next_len as u64 > fetch_settings.max_bytes {
+            return Err(format!(
+                "response too large for linked page {} (limit {} bytes)",
+                url, fetch_settings.max_bytes
+            ));
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+
     let decoded =
         decode_html(&bytes, content_type.as_deref()).map_err(|err: DecodeError| err.to_string())?;
 
@@ -272,5 +311,31 @@ fn map_stage(stage: harvester_engine::Stage) -> Stage {
         harvester_engine::Stage::Tokenizing => Stage::Tokenizing,
         harvester_engine::Stage::Writing => Stage::Writing,
         harvester_engine::Stage::Done => Stage::Done,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn download_link_page_rejects_disallowed_scheme_before_request() {
+        let temp = tempdir().expect("tempdir");
+        let fetch_settings = FetchSettings::default();
+        let policy = UrlPolicy::default();
+        let err = download_link_page(
+            "file:///etc/passwd",
+            temp.path(),
+            &policy,
+            &fetch_settings,
+        )
+        .unwrap_err();
+
+        assert!(
+            err.contains("url policy violation"),
+            "expected url policy error, got '{}'",
+            err
+        );
     }
 }
