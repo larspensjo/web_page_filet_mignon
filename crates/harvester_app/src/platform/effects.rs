@@ -54,95 +54,103 @@ impl EffectRunner {
 
     pub fn enqueue(&self, effects: Vec<Effect>) {
         for effect in effects {
-            match effect {
-                Effect::EnqueueUrl { job_id, url } => {
-                    engine_info!(
-                        "EnqueueUrl job_id={} url_len={} url={}",
-                        job_id,
-                        url.len(),
-                        url
-                    );
-                    self.engine.enqueue(job_id, url);
-                }
-                Effect::StartSession => {
-                    // no-op; engine starts on first enqueue
-                }
-                Effect::StopFinish { policy } => {
-                    let immediate = matches!(policy, StopPolicy::Immediate);
-                    self.engine.stop(immediate);
-                }
-                Effect::ArchiveRequested => {
-                    engine_info!("Archive requested: enqueue export job");
-                    self.engine.request_export();
-                }
-                Effect::DownloadLinkedPage {
+            if let Err(reason) = self.validate_effect(&effect) {
+                self.reject_effect(effect, reason);
+                continue;
+            }
+            self.execute_effect(effect);
+        }
+    }
+
+    fn execute_effect(&self, effect: Effect) {
+        match effect {
+            Effect::EnqueueUrl { job_id, url } => {
+                engine_info!(
+                    "EnqueueUrl job_id={} url_len={} url={}",
+                    job_id,
+                    url.len(),
+                    url
+                );
+                self.engine.enqueue(job_id, url);
+            }
+            Effect::StartSession => {
+                // no-op; engine starts on first enqueue
+            }
+            Effect::StopFinish { policy } => {
+                let immediate = matches!(policy, StopPolicy::Immediate);
+                self.engine.stop(immediate);
+            }
+            Effect::ArchiveRequested => {
+                engine_info!("Archive requested: enqueue export job");
+                self.engine.request_export();
+            }
+            Effect::DownloadLinkedPage {
+                job_id,
+                link_index,
+                url,
+            } => {
+                engine_info!(
+                    "Download linked page job_id={} link_index={} url_len={}",
                     job_id,
                     link_index,
-                    url,
-                } => {
-                    engine_info!(
-                        "Download linked page job_id={} link_index={} url_len={}",
-                        job_id,
-                        link_index,
-                        url.len()
-                    );
-                    let msg_tx = self.msg_tx.clone();
-                    let output_dir = self.output_dir.clone();
-                    let url_policy = self.url_policy.clone();
-                    let fetch_settings = self.fetch_settings.clone();
-                    thread::spawn(move || {
-                        let _ = msg_tx.send(Msg::LinkDownloadStarted { job_id, link_index });
-                        match download_link_page(&url, &output_dir, &url_policy, &fetch_settings) {
-                            Ok(absolute_path) => {
-                                let relative_path = absolute_path
-                                    .strip_prefix(&output_dir)
-                                    .map(|p| p.to_path_buf())
-                                    .unwrap_or_else(|_| absolute_path.clone());
-                                let _ = msg_tx.send(Msg::LinkDownloadCompleted {
-                                    job_id,
-                                    link_index,
-                                    path: relative_path,
-                                });
-                            }
-                            Err(error) => {
-                                engine_warn!("Linked page download failed: {}", error);
-                                let _ = msg_tx.send(Msg::LinkDownloadFailed {
-                                    job_id,
-                                    link_index,
-                                    error,
-                                });
-                            }
-                        }
-                    });
-                }
-                Effect::DeleteLinkedPage {
-                    job_id,
-                    link_index,
-                    path,
-                } => {
-                    engine_info!(
-                        "Delete linked page job_id={} link_index={} path={}",
-                        job_id,
-                        link_index,
-                        path.display()
-                    );
-                    let msg_tx = self.msg_tx.clone();
-                    let output_dir = self.output_dir.clone();
-                    thread::spawn(move || {
-                        if is_confined_to(&path, &output_dir) {
-                            let absolute_path = output_dir.join(&path);
-                            let _ = fs::remove_file(&absolute_path);
-                        } else {
-                            engine_warn!(
-                                "DeleteLinkedPage rejected unsafe path job_id={} link_index={} path={}",
+                    url.len()
+                );
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.output_dir.clone();
+                let url_policy = self.url_policy.clone();
+                let fetch_settings = self.fetch_settings.clone();
+                thread::spawn(move || {
+                    let _ = msg_tx.send(Msg::LinkDownloadStarted { job_id, link_index });
+                    match download_link_page(&url, &output_dir, &url_policy, &fetch_settings) {
+                        Ok(absolute_path) => {
+                            let relative_path = absolute_path
+                                .strip_prefix(&output_dir)
+                                .map(|p| p.to_path_buf())
+                                .unwrap_or_else(|_| absolute_path.clone());
+                            let _ = msg_tx.send(Msg::LinkDownloadCompleted {
                                 job_id,
                                 link_index,
-                                path.display()
-                            );
+                                path: relative_path,
+                            });
                         }
-                        let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
-                    });
-                }
+                        Err(error) => {
+                            engine_warn!("Linked page download failed: {}", error);
+                            let _ = msg_tx.send(Msg::LinkDownloadFailed {
+                                job_id,
+                                link_index,
+                                error,
+                            });
+                        }
+                    }
+                });
+            }
+            Effect::DeleteLinkedPage {
+                job_id,
+                link_index,
+                path,
+            } => {
+                engine_info!(
+                    "Delete linked page job_id={} link_index={} path={}",
+                    job_id,
+                    link_index,
+                    path.display()
+                );
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.output_dir.clone();
+                thread::spawn(move || {
+                    if is_confined_to(&path, &output_dir) {
+                        let absolute_path = output_dir.join(&path);
+                        let _ = fs::remove_file(&absolute_path);
+                    } else {
+                        engine_warn!(
+                            "DeleteLinkedPage rejected unsafe path job_id={} link_index={} path={}",
+                            job_id,
+                            link_index,
+                            path.display()
+                        );
+                    }
+                    let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
+                });
             }
         }
     }
@@ -187,6 +195,97 @@ impl EffectRunner {
                 thread::sleep(Duration::from_millis(20));
             }
         });
+    }
+}
+
+impl EffectRunner {
+    fn validate_effect(&self, effect: &Effect) -> Result<(), String> {
+        match effect {
+            Effect::EnqueueUrl { url, .. } | Effect::DownloadLinkedPage { url, .. } => {
+                let parsed = reqwest::Url::parse(url)
+                    .map_err(|err| format!("url parsing failed for {}: {}", url, err))?;
+                if let Err(violation) = self.url_policy.check(&parsed) {
+                    Err(format!(
+                        "url policy violation for url '{}': {}",
+                        url, violation
+                    ))
+                } else {
+                    Ok(())
+                }
+            }
+            Effect::DeleteLinkedPage { path, .. } => {
+                if is_confined_to(path, &self.output_dir) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "path policy violation for linked delete path '{}'",
+                        path.display()
+                    ))
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn reject_effect(&self, effect: Effect, reason: String) {
+        match effect {
+            Effect::EnqueueUrl { job_id, .. } => {
+                engine_warn!("EnqueueUrl rejected job_id={} reason={}", job_id, reason);
+                if let Err(err) = self.msg_tx.send(Msg::JobDone {
+                    job_id,
+                    result: JobResultKind::Failed {
+                        reason: reason.clone(),
+                    },
+                    content_preview: None,
+                    extracted_links: Vec::new(),
+                }) {
+                    engine_warn!("Failed to notify job failure for job_id={}: {}", job_id, err);
+                }
+            }
+            Effect::DownloadLinkedPage {
+                job_id,
+                link_index,
+                ..
+            } => {
+                engine_warn!(
+                    "DownloadLinkedPage rejected job_id={} link_index={} reason={}",
+                    job_id,
+                    link_index,
+                    reason
+                );
+                if let Err(err) = self.msg_tx.send(Msg::LinkDownloadFailed {
+                    job_id,
+                    link_index,
+                    error: reason,
+                }) {
+                    engine_warn!(
+                        "Failed to report download failure for job_id={} link_index={}: {}",
+                        job_id,
+                        link_index,
+                        err
+                    );
+                }
+            }
+            Effect::DeleteLinkedPage {
+                job_id,
+                link_index,
+                path,
+            } => {
+                engine_warn!(
+                    "DeleteLinkedPage rejected job_id={} link_index={} path={} reason={}",
+                    job_id,
+                    link_index,
+                    path.display(),
+                    reason
+                );
+                let _ = self
+                    .msg_tx
+                    .send(Msg::LinkDeleted { job_id, link_index });
+            }
+            other => {
+                engine_warn!("Effect rejected but no handler for {:?}: {}", other, reason);
+            }
+        }
     }
 }
 
@@ -318,6 +417,8 @@ fn map_stage(stage: harvester_engine::Stage) -> Stage {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     #[test]
     fn download_link_page_rejects_disallowed_scheme_before_request() {
@@ -337,5 +438,92 @@ mod tests {
             "expected url policy error, got '{}'",
             err
         );
+    }
+
+    fn runner_with_receiver() -> (EffectRunner, mpsc::Receiver<Msg>) {
+        let (tx, rx) = mpsc::channel();
+        (EffectRunner::new(tx), rx)
+    }
+
+    #[test]
+    fn enqueue_url_effect_is_rejected_by_url_policy() {
+        let (runner, rx) = runner_with_receiver();
+        let job_id = 42;
+        runner.enqueue(vec![Effect::EnqueueUrl {
+            job_id,
+            url: "file:///etc/passwd".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected job done msg");
+
+        match msg {
+            Msg::JobDone {
+                job_id: received,
+                result: JobResultKind::Failed { reason },
+                ..
+            } => {
+                assert_eq!(received, job_id);
+                assert!(reason.contains("url policy"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn download_link_page_effect_is_rejected_by_authorization() {
+        let (runner, rx) = runner_with_receiver();
+        let job_id = 7;
+        let link_index = 1;
+        runner.enqueue(vec![Effect::DownloadLinkedPage {
+            job_id,
+            link_index,
+            url: "file:///tmp/secret".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected link download failed msg");
+
+        match msg {
+            Msg::LinkDownloadFailed {
+                job_id: received,
+                link_index: received_index,
+                error,
+            } => {
+                assert_eq!(received, job_id);
+                assert_eq!(received_index, link_index);
+                assert!(error.contains("url policy"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn delete_linked_page_effect_is_rejected_on_unsafe_path() {
+        let (runner, rx) = runner_with_receiver();
+        let job_id = 11;
+        let link_index = 3;
+        runner.enqueue(vec![Effect::DeleteLinkedPage {
+            job_id,
+            link_index,
+            path: PathBuf::from("../outside.md"),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected link deleted msg");
+
+        match msg {
+            Msg::LinkDeleted {
+                job_id: received,
+                link_index: received_index,
+            } => {
+                assert_eq!(received, job_id);
+                assert_eq!(received_index, link_index);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
     }
 }
