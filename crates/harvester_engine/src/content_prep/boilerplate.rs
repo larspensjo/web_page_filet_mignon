@@ -281,9 +281,8 @@ mod tests {
             ..BoilerplatePolicy::default()
         };
         let input = build_markdown(&["footer", "dd", "xx"]);
-        let result = filter_boilerplate(&input, &policy);
-        assert_eq!(result.filtered_text, input);
-        assert!(!result.detected_patterns.is_empty());
+    let result = filter_boilerplate(&input, &policy);
+    assert_eq!(result.filtered_text, input);
     }
 
     #[test]

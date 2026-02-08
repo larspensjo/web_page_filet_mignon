@@ -1,3 +1,5 @@
+use crate::frontmatter::strip_frontmatter;
+
 const TRUNCATED_MARKER: &str = "\n…[truncated]";
 pub const MAX_PREVIEW_CONTENT: usize = 40_960;
 
@@ -15,24 +17,10 @@ pub fn prepare_preview_content(markdown: &str) -> String {
     }
 }
 
-fn strip_frontmatter(markdown: &str) -> &str {
-    let rest = if let Some(stripped) = markdown.strip_prefix("---\r\n") {
-        stripped
-    } else if let Some(stripped) = markdown.strip_prefix("---\n") {
-        stripped
-    } else {
-        return markdown;
-    };
-    if let Some(idx) = rest.find("\n---") {
-        let after = &rest[idx + "\n---".len()..];
-        return after.trim_start_matches(['\n', '\r']);
-    }
-    markdown
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{prepare_preview_content, strip_frontmatter, MAX_PREVIEW_CONTENT};
+    use super::{prepare_preview_content, MAX_PREVIEW_CONTENT};
+    use crate::frontmatter::strip_frontmatter;
 
     #[test]
     fn short_content_kept_as_is() {

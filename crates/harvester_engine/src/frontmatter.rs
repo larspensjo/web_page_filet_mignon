@@ -33,6 +33,21 @@ pub fn build_markdown_document(
     (token_count, doc)
 }
 
+pub(crate) fn strip_frontmatter(markdown: &str) -> &str {
+    let rest = if let Some(stripped) = markdown.strip_prefix("---\r\n") {
+        stripped
+    } else if let Some(stripped) = markdown.strip_prefix("---\n") {
+        stripped
+    } else {
+        return markdown;
+    };
+    if let Some(idx) = rest.find("\n---") {
+        let after = &rest[idx + "\n---".len()..];
+        return after.trim_start_matches(['\n', '\r']);
+    }
+    markdown
+}
+
 fn sanitize_yaml_value(value: &str) -> String {
     let single_line = value.replace(&['\n', '\r'][..], " ");
     let truncated = truncate_to_char_boundary(&single_line, FRONTMATTER_VALUE_MAX);
