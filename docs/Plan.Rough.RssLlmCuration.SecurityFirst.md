@@ -73,7 +73,7 @@ Each phase adds value and reduces project risk:
 - mid phases add user-visible wins (summaries, ranking),
 - late phases add automation (RSS, scheduling).
 
-## Phase 0 — Security posture, trust boundaries, “no confused deputy”
+## Phase 0 — Security posture, trust boundaries, "no confused deputy" [COMPLETE]
 ### Purpose (why this phase exists)
 Without explicit boundaries and policies, connecting untrusted web content to an LLM risks:
 - integrity issues (misleading rankings/summaries),
@@ -93,7 +93,7 @@ Without explicit boundaries and policies, connecting untrusted web content to an
 ### Expected product impact
 Mostly internal; may add UI indicators and diagnostics, but no major workflow change.
 
-## Phase 1 — LLM foundation (provider abstraction, prompt registry, typed results, replay)
+## Phase 1 — LLM foundation (provider abstraction, prompt registry, typed results, replay) [COMPLETE]
 ### Purpose
 We need a stable, swappable LLM layer before we can productize summaries:
 - model choice will change over time (cost/performance),
@@ -124,6 +124,9 @@ Still mostly internal, but unlocks safe iteration on prompts/models.
   - cheaper model for high-volume triage/filtering,
   - higher-quality model for deeper summaries/briefings when needed.
 
+### Implementation note
+Implemented as 11 parts (provider trait, mock provider, OpenAI adapter, cost tracking, LLM quota tracker, prompt registry, typed DTOs, replay harness, effect/message integration, LLM worker, FailureKind extensions). Only the OpenAI provider was built; Anthropic and Google follow the same pattern.
+
 ## Phase 2 — Content preparation pipeline for safe summarization inputs
 ### Purpose
 LLMs are sensitive to noisy and unbounded input. We need deterministic preparation:
@@ -142,6 +145,9 @@ LLMs are sensitive to noisy and unbounded input. We need deterministic preparati
 
 ### Expected product impact
 Improves overall quality and predictability of summaries; also reduces costs.
+
+### Detailed plan
+See `Plan.Phase2.ContentPreparation.md` for the 7-part implementation plan.
 
 ## Phase 3 — Executive summary for existing downloaded pages (manual trigger)
 ### Purpose
@@ -171,6 +177,11 @@ Users can immediately save time by reading briefings instead of raw articles.
   - model choices,
   - quality/cost/latency trade-offs.
 
+### Implementation considerations (identified during Phase 1)
+- **Batch/concurrent LLM requests**: The current `LlmHandle` processes one request at a time. Phase 3 will need batch mode with rate limiting to process multiple articles efficiently.
+- **Output caching**: Skip LLM call entirely when input hash + prompt version match a previous successful result (extends `ReplayProvider`). Keyed by full input hash + prompt version + model ID.
+- **Model selection UX**: Add app-level controls to choose/filter model profiles (cheap triage vs deep summary) and switch active profile without restart.
+
 ## Phase 4 — AI ranking and filtering presented as a deterministic UI list
 ### Purpose
 Summaries help reading; ranking helps deciding what to read first.
@@ -188,7 +199,11 @@ We add AI-assisted prioritization without making the system autonomous.
   - heuristic/auditor flags shown as UI signals (not blockers).
 
 ### Expected product impact
-Users get a “most important first” view and can focus on high-value items.
+Users get a "most important first" view and can focus on high-value items.
+
+### Implementation considerations (identified during Phase 1)
+- **A/B testing UI**: Compare results from different prompt versions side-by-side. The prompt registry and replay harness already support multiple versions per prompt ID.
+- **Evaluation UX**: Replay-backed scoring views (precision/recall for filtering, summary quality rubric, cost and latency metrics per model/prompt version).
 
 ## Phase 5 — Automated URL input sources (non-RSS first)
 ### Purpose
@@ -262,13 +277,21 @@ More automation, but higher complexity and security requirements.
 
 ## Cross-cutting future work (not phase-specific)
 
-These items were identified during Phase 0 implementation and are relevant across multiple phases. They should be considered when planning future work:
+These items were identified during Phase 0 and Phase 1 implementation and are relevant across multiple phases. They should be considered when planning future work:
 
 - **Unified download path**: Route linked-page downloads through the engine as tagged jobs rather than the current separate path. Reduces code duplication and ensures all downloads benefit from the same policy/quota enforcement.
 - **Policy-as-configuration**: Load `UrlPolicy`, `SessionQuotas`, and `LlmQuotas` from a config file (RON or TOML) rather than compile-time defaults. Enables per-deployment tuning without recompilation.
 - **Audit log**: Structured log entries for all policy decisions (URL rejections, quota enforcement, path confinement checks). Useful for debugging and compliance.
-- **Typed trust wrappers for paths**: `SafePath` newtype constructed only via `is_confined_to()`. Makes path confinement a compile-time guarantee rather than a runtime check at each call site.
+- **Typed trust wrappers**: `SafePath` newtype for path confinement, `ValidatedLlmOutput<T>` for compile-time safety that LLM output validation was performed, `UntrustedContent(String)` for raw downloaded text that can only be unwrapped through the content preparation pipeline. Makes security guarantees compile-time rather than runtime.
 - **Input debounce**: Review auto-submission behavior on `InputTextChanged` to prevent rapid-fire URL enqueuing from paste events.
+- **Additional LLM providers** (Anthropic, Google): Follow the same pattern as the OpenAI adapter. ~100 lines each, structurally identical.
+- **Streaming LLM responses**: Add `stream()` method to `LlmProvider` trait returning `Pin<Box<dyn Stream>>`. Not needed for batch processing, but useful for interactive UX.
+- **Retry budget + backoff policy**: Transient provider failures (rate limiting, 5xx) could benefit from exponential backoff with jitter. Separate from quota enforcement.
+- **API key management**: Currently environment variables. Future: encrypted config, key rotation.
+- **Content fingerprinting for dedup**: Extend SHA-256 content hashing to deduplicate across sessions (same article, different download time — skip re-processing).
+- **Privacy controls for replay artifacts**: Optional redaction of raw LLM responses in replay records.
+- **Offline re-validation**: Deterministic "rejudge" command that re-validates saved raw LLM outputs against updated DTO schemas without re-calling the API.
+- **Replay record retention policy**: Count/size/age-based cleanup of old replay records to prevent unbounded disk usage.
 
 ## Notes for planning and estimation
 - Phases 0–2 are enabling work that reduces long-term iteration cost and risk.
