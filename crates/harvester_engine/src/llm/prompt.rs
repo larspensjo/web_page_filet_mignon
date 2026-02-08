@@ -1,9 +1,9 @@
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
-use sha2::{Digest, Sha256};
-
 /// Identifier for built-in prompts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PromptId {
     ArticleTriage,
     ArticleSummary,
