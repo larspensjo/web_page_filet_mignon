@@ -5,7 +5,8 @@ use harvester_engine::llm::{PromptId, PromptRegistry};
 fn registry_with_defaults_has_restart_scope() {
     let registry = PromptRegistry::with_defaults();
     assert!(registry.active(PromptId::ArticleTriage).is_some());
-    assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 1);
+    assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 2);
+    assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 2);
 }
 
 #[test]

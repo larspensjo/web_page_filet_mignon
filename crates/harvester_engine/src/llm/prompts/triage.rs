@@ -1,4 +1,4 @@
-use super::{PromptId, PromptTemplate};
+use crate::llm::{PromptId, PromptTemplate};
 
 pub const TRIAGE_PROMPT: PromptTemplate = PromptTemplate {
     id: PromptId::ArticleTriage,

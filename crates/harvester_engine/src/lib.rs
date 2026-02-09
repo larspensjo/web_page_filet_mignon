@@ -27,10 +27,7 @@ pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher};
 pub use filename::deterministic_filename;
 pub use frontmatter::{
-    build_markdown_document,
-    FrontmatterFields,
-    parse_frontmatter,
-    unescape_yaml_value,
+    build_markdown_document, parse_frontmatter, unescape_yaml_value, FrontmatterFields,
 };
 pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKind};
 pub use path_policy::is_confined_to;
