@@ -201,7 +201,7 @@ pub fn load_and_prepare_articles(
     let selected_packages: Vec<_> = packages.into_iter().take(selected_count).collect();
     let prepared_inputs: Vec<_> = selected_packages
         .into_iter()
-        .zip(allocations.into_iter())
+        .zip(allocations)
         .map(|(package, budget)| PreparedInput::from_clean_text(package.clean_text, budget))
         .collect();
     let collection_text = PreparedCollection::from_inputs(prepared_inputs)

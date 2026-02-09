@@ -37,6 +37,7 @@ pub struct EffectRunner {
     fetch_settings: FetchSettings,
     llm_handle: Option<LlmHandle>,
     llm_max_input_chars: Option<usize>,
+    #[allow(dead_code)]
     prompt_registry: PromptRegistry,
 }
 

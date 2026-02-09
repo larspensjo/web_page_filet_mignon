@@ -285,13 +285,13 @@ impl BriefingSession {
         };
         let mut buffer = String::new();
         writeln!(&mut buffer, "=== Executive Briefing ===").ok();
-        writeln!(&mut buffer, "").ok();
+        buffer.push('\n');
         writeln!(&mut buffer, "{}", result.executive_summary).ok();
-        writeln!(&mut buffer, "").ok();
+        buffer.push('\n');
         if !result.themes.is_empty() {
             writeln!(&mut buffer, "=== Themes ===").ok();
             writeln!(&mut buffer, "{}", result.theme_summary()).ok();
-            writeln!(&mut buffer, "").ok();
+            buffer.push('\n');
         }
         writeln!(&mut buffer, "=== Session Info ===").ok();
         writeln!(
