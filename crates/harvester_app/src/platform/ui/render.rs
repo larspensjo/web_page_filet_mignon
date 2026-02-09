@@ -31,6 +31,8 @@ pub struct TreeRenderState {
     prev_header_text: Option<String>,
     prev_stop_enabled: Option<bool>,
     prev_archive_enabled: Option<bool>,
+    prev_briefing_enabled: Option<bool>,
+    prev_briefing_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
     prev_progress_pos: Option<u32>,
 }
@@ -49,6 +51,8 @@ impl Default for TreeRenderState {
             prev_header_text: None,
             prev_stop_enabled: None,
             prev_archive_enabled: None,
+            prev_briefing_enabled: None,
+            prev_briefing_progress: None,
             prev_progress_range: None,
             prev_progress_pos: None,
         }
@@ -119,7 +123,7 @@ pub fn render(
         SessionState::Finished => "Finished",
     };
 
-    let status_text = match &view.last_paste_stats {
+    let status_base_text = match &view.last_paste_stats {
         Some(stats) => format!(
             "Session: {} | Jobs: {} | Last paste: enqueued {}, skipped {}",
             session_label, view.job_count, stats.enqueued, stats.skipped
@@ -156,19 +160,28 @@ pub fn render(
         tree_state.prev_left_panel_width = view.left_panel_width;
     }
 
+    let briefing_progress = view.briefing_progress.as_deref();
+    let status_text = if let Some(progress) = briefing_progress {
+        format!("{} | {}", status_base_text, progress)
+    } else {
+        status_base_text.clone()
+    };
+
     let status_changed = match tree_state.prev_status_text.as_deref() {
-        Some(prev) => prev != status_text,
+        Some(prev) => prev != status_text.as_str(),
         None => true,
     };
     if status_changed {
+        let updated_text = status_text.clone();
         cmds.push(PlatformCommand::UpdateLabelText {
             window_id,
             control_id: LABEL_STATUS,
-            text: status_text.to_string(),
+            text: updated_text.clone(),
             severity: MessageSeverity::Information,
         });
-        tree_state.prev_status_text = Some(status_text.to_string());
+        tree_state.prev_status_text = Some(updated_text);
     }
+    tree_state.prev_briefing_progress = view.briefing_progress.clone();
 
     let range = (0, bar_max as u32);
     if tree_state.prev_progress_range != Some(range) {
@@ -220,6 +233,16 @@ pub fn render(
             enabled: archive_enabled,
         });
         tree_state.prev_archive_enabled = Some(archive_enabled);
+    }
+
+    let briefing_enabled = view.briefing_can_start;
+    if tree_state.prev_briefing_enabled != Some(briefing_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_BRIEFING,
+            enabled: briefing_enabled,
+        });
+        tree_state.prev_briefing_enabled = Some(briefing_enabled);
     }
 
     let job_items = build_job_tree(view);

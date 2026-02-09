@@ -133,6 +133,13 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         text: "Archive".to_string(),
     });
 
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_BUTTONS),
+        control_id: BUTTON_BRIEFING,
+        text: "Generate Briefing".to_string(),
+    });
+
     commands.push(PlatformCommand::CreateLabel {
         window_id,
         parent_control_id: Some(PANEL_BOTTOM),
@@ -318,6 +325,14 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 parent_control_id: Some(PANEL_BUTTONS),
                 dock_style: DockStyle::Left,
                 order: 1,
+                fixed_size: Some(160),
+                margin: (6, 6, 6, 0),
+            },
+            LayoutRule {
+                control_id: BUTTON_BRIEFING,
+                parent_control_id: Some(PANEL_BUTTONS),
+                dock_style: DockStyle::Left,
+                order: 2,
                 fixed_size: Some(160),
                 margin: (6, 6, 6, 0),
             },

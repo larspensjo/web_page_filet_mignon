@@ -246,6 +246,11 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::ArchiveClicked);
             }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_BRIEFING =>
+            {
+                let _ = self.msg_tx.send(Msg::GenerateBriefingClicked);
+            }
             AppEvent::InputTextChanged {
                 control_id, text, ..
             } if control_id == ui::constants::INPUT_URLS => {

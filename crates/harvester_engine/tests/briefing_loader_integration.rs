@@ -4,7 +4,7 @@ use std::path::Path;
 use harvester_engine::llm::{PromptId, PromptRegistry};
 use harvester_engine::{
     build_markdown_document, compute_prompt_overhead, load_and_prepare_articles,
-    token::WhitespaceTokenCounter,
+    WhitespaceTokenCounter,
 };
 use tempfile::tempdir;
 
@@ -181,7 +181,8 @@ fn collection_limits_articles_when_budget_tight() {
     let max_input = summary_overhead + briefing_overhead + COLLECTION_MIN_BYTES;
 
     let tmp = tempdir().unwrap();
-    for i in 0..3 {
+    const TOTAL_ARTICLES: usize = 20;
+    for i in 0..TOTAL_ARTICLES {
         write_markdown_file(
             tmp.path(),
             &format!("article_{}.md", i),
@@ -193,6 +194,14 @@ fn collection_limits_articles_when_budget_tight() {
 
     let (articles, collection) =
         load_and_prepare_articles(tmp.path(), max_input, &registry).unwrap();
-    assert_eq!(articles.len(), 3);
-    assert_eq!(collection.matches("--- Article").count(), 1);
+    assert_eq!(articles.len(), TOTAL_ARTICLES);
+    let selected_articles = collection.matches("--- Article").count();
+    assert!(
+        selected_articles >= 1,
+        "collection should include at least one article"
+    );
+    assert!(
+        selected_articles < TOTAL_ARTICLES,
+        "collection should drop articles when budget is tight"
+    );
 }

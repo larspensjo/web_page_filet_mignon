@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use serde_json::json;
 use tempfile::tempdir;
 
+use harvester_engine::llm::provider::LlmProvider;
 use harvester_engine::llm::{
     content_hash, LlmCommand, LlmConfig, LlmEvent, LlmHandle, LlmQuotas, MockLlmProvider, ModelId,
     PricingRegistry, PromptId, PromptRegistry, ProviderKind, ReplayProvider, ReplayRecord,
@@ -12,6 +13,7 @@ use harvester_engine::llm::{
 #[test]
 fn llm_handle_dispatches_completion_event() {
     let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
     provider.queue_json_success(
         r#"{"category":"news","priority":3,"tags":["alpha","beta"],"rationale":"ok"}"#,
     );
@@ -20,7 +22,7 @@ fn llm_handle_dispatches_completion_event() {
     let dir = tempdir().unwrap();
 
     let config = LlmConfig {
-        provider,
+        provider: provider_trait,
         default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
         triage_model: None,
         summary_model: None,
@@ -71,6 +73,7 @@ fn llm_handle_dispatches_completion_event() {
 #[test]
 fn llm_handle_skips_provider_when_cache_hit() {
     let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
     let registry = PromptRegistry::with_defaults();
     let dir = tempdir().unwrap();
 
@@ -94,7 +97,7 @@ fn llm_handle_skips_provider_when_cache_hit() {
     let replay_cache = Arc::new(RwLock::new(replay_provider));
 
     let config = LlmConfig {
-        provider,
+        provider: provider_trait,
         default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
         triage_model: None,
         summary_model: None,
@@ -146,13 +149,14 @@ fn llm_handle_skips_provider_when_cache_hit() {
 #[test]
 fn llm_handle_inserts_cache_after_successful_response() {
     let provider = Arc::new(MockLlmProvider::new());
-    provider.queue_json_success(r#"{"title":"fresh"}"#);
+    provider.queue_json_success(r#"{"title":"fresh","summary":"short","key_points":["one"]}"#);
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
     let registry = PromptRegistry::with_defaults();
     let dir = tempdir().unwrap();
     let replay_cache = Arc::new(RwLock::new(ReplayProvider::new()));
 
     let config = LlmConfig {
-        provider: Arc::clone(&provider),
+        provider: provider_trait,
         default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
         triage_model: None,
         summary_model: None,
