@@ -9,6 +9,27 @@ This document describes the overall system shape, centered on a unidirectional d
 3. Effects perform all I/O and return results as new messages.
 4. Views render read-only snapshots of state.
 
+### Briefing runtime diagram
+```mermaid
+flowchart LR
+    UI[UI Button: Generate Briefing]
+    U[Core Update/Reducer]
+    E[Effect Runner]
+    L[Engine Loader: load_and_prepare_articles]
+    W[LLM Worker]
+    S[Core BriefingSession State]
+    R[UI Render]
+
+    UI -->|Msg GenerateBriefingClicked| U
+    U -->|Effect LoadArticlesForBriefing| E
+    E --> L
+    L -->|Msg ArticlesLoaded or ArticlesLoadFailed| U
+    U -->|Effect RequestLlmCompletion summary+briefing| E
+    E --> W
+    W -->|Msg LlmCompleted| U
+    U --> S --> R
+```
+
 Key rules:
 - The update step is deterministic and free of side effects.
 - Effects are isolated and the only place where I/O happens.

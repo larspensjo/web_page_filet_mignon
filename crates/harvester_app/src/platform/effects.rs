@@ -10,11 +10,12 @@ use std::time::Duration;
 
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{Effect, JobResultKind, LlmResultKind, Msg, Stage, StopPolicy};
+use harvester_core::{Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, Stage, StopPolicy};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
+    load_and_prepare_articles,
     AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor,
     FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy,
     WhitespaceTokenCounter,
@@ -37,7 +38,6 @@ pub struct EffectRunner {
     fetch_settings: FetchSettings,
     llm_handle: Option<LlmHandle>,
     llm_max_input_chars: Option<usize>,
-    #[allow(dead_code)]
     prompt_registry: PromptRegistry,
 }
 
@@ -237,9 +237,36 @@ impl EffectRunner {
                 }
             }
             Effect::LoadArticlesForBriefing => {
-                engine_warn!("[briefing-loader] briefing loader not implemented");
-                let _ = self.msg_tx.send(Msg::ArticlesLoadFailed {
-                    reason: "briefing loader not implemented".to_string(),
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.output_dir.clone();
+                let max_input_bytes = self.llm_max_input_chars.unwrap_or(100_000);
+                let registry = self.prompt_registry.clone();
+                thread::spawn(move || {
+                    match load_and_prepare_articles(&output_dir, max_input_bytes, &registry) {
+                        Ok((articles, collection_text)) => {
+                            let loaded_articles: Vec<LoadedArticle> = articles
+                                .into_iter()
+                                .map(|article| LoadedArticle {
+                                    url: article.url,
+                                    source_title: article.source_title,
+                                    prepared_text: article.prepared_text,
+                                    content_hash: article.content_hash,
+                                })
+                                .collect();
+                            engine_info!(
+                                "[briefing-loader] prepared {} article(s)",
+                                loaded_articles.len()
+                            );
+                            let _ = msg_tx.send(Msg::ArticlesLoaded {
+                                articles: loaded_articles,
+                                collection_text,
+                            });
+                        }
+                        Err(reason) => {
+                            engine_warn!("[briefing-loader] load failed: {}", reason);
+                            let _ = msg_tx.send(Msg::ArticlesLoadFailed { reason });
+                        }
+                    }
                 });
             }
         }
