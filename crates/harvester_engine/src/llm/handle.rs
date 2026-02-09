@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     path::PathBuf,
     sync::{mpsc, Arc, Mutex},
     thread,
@@ -11,7 +10,9 @@ use tokio::runtime::Runtime;
 
 use crate::llm::{
     pricing::PricingRegistry,
-    prompt::{PromptId, PromptRegistry, PromptTemplate, PromptVersion, TemplateVars},
+    prompt::{
+        render_template, PromptId, PromptRegistry, PromptTemplate, PromptVersion, TemplateVars,
+    },
     quota::{LlmQuotaTracker, LlmQuotas},
     replay::{content_hash, persist_replay_record, ReplayRecord},
     types::{ChatMessage, ChatRole, LlmError, LlmRequest, ModelId, ProviderKind, TokenUsage},
@@ -424,15 +425,6 @@ fn fetch_prompt_template(
             .active(prompt_id)
             .map(|template| (template, template.version))
     }
-}
-
-fn render_template(template: &str, vars: &HashMap<String, String>) -> String {
-    let mut text = template.to_string();
-    for (key, value) in vars {
-        let placeholder = format!("{{{{{}}}}}", key);
-        text = text.replace(&placeholder, value);
-    }
-    text
 }
 
 fn validate_response(prompt_id: PromptId, content: &str) -> Result<(), ValidationError> {

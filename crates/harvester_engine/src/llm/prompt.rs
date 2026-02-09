@@ -123,3 +123,12 @@ impl Default for PromptRegistry {
         Self::new()
     }
 }
+
+pub(crate) fn render_template(template: &str, vars: &HashMap<String, String>) -> String {
+    let mut text = template.to_string();
+    for (key, value) in vars {
+        let placeholder = format!("{{{{{}}}}}", key);
+        text = text.replace(&placeholder, value);
+    }
+    text
+}
