@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::ExtractedLink;
 
+use crate::briefing::LoadedArticle;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
     /// User edited the URL input box (debounced text).
@@ -75,6 +77,15 @@ pub enum Msg {
         request_id: u64,
         result: LlmResultKind,
     },
+    /// User requested generation of a briefing.
+    GenerateBriefingClicked,
+    /// Articles prepared by the loader.
+    ArticlesLoaded {
+        articles: Vec<LoadedArticle>,
+        collection_text: String,
+    },
+    /// Loader failed.
+    ArticlesLoadFailed { reason: String },
 }
 
 /// Result payload returned by the LLM worker.
@@ -88,6 +99,9 @@ pub enum LlmResultKind {
     ValidationFailed {
         reason: String,
         raw_response: String,
+    },
+    QuotaExhausted {
+        reason: String,
     },
     Failed {
         reason: String,

@@ -221,6 +221,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 } => LlmRequestState::Failed {
                     reason: format!("validation failed: {reason}; response: {raw_response}"),
                 },
+                LlmResultKind::QuotaExhausted { reason } => LlmRequestState::Failed { reason },
                 LlmResultKind::Failed { reason } => LlmRequestState::Failed { reason },
             };
             if state.llm_request_state(request_id).is_some() {
@@ -230,6 +231,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             Vec::new()
         }
+        Msg::GenerateBriefingClicked
+        | Msg::ArticlesLoaded { .. }
+        | Msg::ArticlesLoadFailed { .. } => Vec::new(),
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 

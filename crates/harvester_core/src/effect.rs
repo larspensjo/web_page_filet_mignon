@@ -8,6 +8,7 @@ pub enum Effect {
         job_id: crate::JobId,
         url: String,
     },
+    LoadArticlesForBriefing,
     RequestLlmCompletion {
         request_id: u64,
         prompt_id: PromptId,

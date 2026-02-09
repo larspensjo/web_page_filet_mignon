@@ -421,6 +421,11 @@ fn map_llm_event(event: LlmEvent) -> Msg {
                     reason,
                     raw_response,
                 },
+                Err(LlmCompletionError::QuotaExhausted { description }) => {
+                    LlmResultKind::QuotaExhausted {
+                        reason: description,
+                    }
+                }
                 Err(error) => LlmResultKind::Failed {
                     reason: llm_error_reason(error),
                 },
