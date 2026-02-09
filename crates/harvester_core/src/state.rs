@@ -1,3 +1,4 @@
+use crate::briefing::BriefingSession;
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TOKEN_LIMIT,
@@ -62,6 +63,7 @@ pub struct AppState {
     next_job_id: JobId,
     next_llm_request_id: u64,
     llm_requests: LlmResultIndex,
+    briefing: BriefingSession,
 }
 
 impl Default for AppState {
@@ -77,6 +79,7 @@ impl Default for AppState {
             next_job_id: 1,
             next_llm_request_id: 1,
             llm_requests: LlmResultIndex::new(),
+            briefing: BriefingSession::default(),
         }
     }
 }
@@ -88,7 +91,10 @@ impl AppState {
 
     pub fn view(&self) -> AppViewModel {
         let jobs: Vec<JobRowView> = self.jobs.iter().map(|(id, job)| job.to_view(*id)).collect();
-        let preview_text = self.ui.preview_content().map(ToOwned::to_owned);
+        let briefing_preview = self.briefing.format_preview();
+        let preview_text = briefing_preview
+            .clone()
+            .or_else(|| self.ui.preview_content().map(ToOwned::to_owned));
         let preview_header = self
             .ui
             .selected_job_id()
@@ -117,6 +123,9 @@ impl AppState {
             token_limit: TOKEN_LIMIT,
             preview_text,
             preview_header,
+            briefing_can_start: self.briefing.can_start(),
+            briefing_progress: self.briefing.progress_text(),
+            briefing_preview,
             left_panel_width: self.ui.left_panel_width(),
             window_width: self.ui.window_width(),
         }
@@ -144,6 +153,19 @@ impl AppState {
     pub fn reset_llm_requests(&mut self) {
         self.llm_requests.clear();
         self.next_llm_request_id = 1;
+    }
+
+    pub(crate) fn briefing(&self) -> &BriefingSession {
+        &self.briefing
+    }
+
+    pub(crate) fn briefing_mut(&mut self) -> &mut BriefingSession {
+        &mut self.briefing
+    }
+
+    pub(crate) fn set_briefing(&mut self, briefing: BriefingSession) {
+        self.briefing = briefing;
+        self.dirty = true;
     }
 
     /// Returns the current dirty flag and clears it in one step.

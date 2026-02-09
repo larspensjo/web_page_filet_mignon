@@ -1,9 +1,12 @@
-use engine_logging::engine_warn;
+use engine_logging::{engine_info, engine_warn};
 
 use crate::{
+    briefing::{ArticleSummaryResult, BriefingResult, BriefingSession, BriefingThemeResult},
     calc_left_width, normalize_url_for_dedupe, AppState, Effect, LlmRequestState, LlmResultKind,
     Msg, SessionState, StopPolicy,
 };
+use harvester_engine::llm::prompt::PromptId;
+use harvester_engine::llm::{validate_briefing, validate_summary};
 
 // Minimum width for the left panels (PANEL_INPUT + PANEL_JOBS)
 const MIN_LEFT_WIDTH: i32 = 200;
@@ -205,15 +208,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }]
         }
         Msg::LlmCompleted { request_id, result } => {
-            let new_state = match result {
+            let new_state = match &result {
                 LlmResultKind::Success {
                     output_json,
                     input_tokens,
                     output_tokens,
                 } => LlmRequestState::Completed {
-                    output_json,
-                    input_tokens,
-                    output_tokens,
+                    output_json: output_json.clone(),
+                    input_tokens: *input_tokens,
+                    output_tokens: *output_tokens,
                 },
                 LlmResultKind::ValidationFailed {
                     reason,
@@ -221,19 +224,127 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 } => LlmRequestState::Failed {
                     reason: format!("validation failed: {reason}; response: {raw_response}"),
                 },
-                LlmResultKind::QuotaExhausted { reason } => LlmRequestState::Failed { reason },
-                LlmResultKind::Failed { reason } => LlmRequestState::Failed { reason },
+                LlmResultKind::QuotaExhausted { reason } => LlmRequestState::Failed {
+                    reason: reason.clone(),
+                },
+                LlmResultKind::Failed { reason } => LlmRequestState::Failed {
+                    reason: reason.clone(),
+                },
             };
             if state.llm_request_state(request_id).is_some() {
                 state.record_llm_result(request_id, new_state);
             } else {
                 engine_warn!("LLM completion for unknown request_id {request_id}");
             }
+            let mut effects = Vec::new();
+            if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
+                match &result {
+                    LlmResultKind::Success {
+                        output_json,
+                        input_tokens,
+                        output_tokens,
+                    } => match validate_summary(output_json) {
+                        Ok(summary) => {
+                            state.briefing_mut().complete_article(
+                                article_idx,
+                                ArticleSummaryResult {
+                                    title: summary.title,
+                                    summary: summary.summary,
+                                    key_points: summary.key_points,
+                                    input_tokens: *input_tokens,
+                                    output_tokens: *output_tokens,
+                                },
+                            );
+                        }
+                        Err(err) => {
+                            state
+                                .briefing_mut()
+                                .fail_article(article_idx, format!("validation failed: {err}"));
+                        }
+                    },
+                    LlmResultKind::QuotaExhausted { reason } => {
+                        engine_info!("[briefing] quota exhausted during summaries: {reason}");
+                        state
+                            .briefing_mut()
+                            .fail_article(article_idx, reason.clone());
+                        state.briefing_mut().fail_all_pending("quota exhausted");
+                    }
+                    LlmResultKind::ValidationFailed { reason, .. }
+                    | LlmResultKind::Failed { reason } => {
+                        state
+                            .briefing_mut()
+                            .fail_article(article_idx, reason.clone());
+                    }
+                }
+                dispatch_next_briefing_step(&mut state, &mut effects);
+            } else if state.briefing().is_briefing_request(request_id) {
+                match &result {
+                    LlmResultKind::Success {
+                        output_json,
+                        input_tokens,
+                        output_tokens,
+                    } => match validate_briefing(output_json) {
+                        Ok(briefing) => {
+                            let themes = briefing
+                                .themes
+                                .into_iter()
+                                .map(|theme| BriefingThemeResult {
+                                    name: theme.name,
+                                    description: theme.description,
+                                })
+                                .collect();
+                            state.briefing_mut().complete_briefing(BriefingResult {
+                                executive_summary: briefing.executive_summary,
+                                themes,
+                                article_count: briefing.article_count,
+                                input_tokens: *input_tokens,
+                                output_tokens: *output_tokens,
+                            });
+                        }
+                        Err(err) => {
+                            engine_warn!("[briefing] briefing validation failed: {err}");
+                            state.briefing_mut().complete_without_briefing();
+                        }
+                    },
+                    _ => {
+                        state.briefing_mut().complete_without_briefing();
+                    }
+                }
+                state.mark_dirty();
+            }
+            effects
+        }
+        Msg::GenerateBriefingClicked => {
+            if !state.briefing().can_start() {
+                return (state, Vec::new());
+            }
+            state.set_briefing(BriefingSession::new_loading(None));
+            engine_info!("[briefing] briefing requested");
+            vec![Effect::LoadArticlesForBriefing]
+        }
+        Msg::ArticlesLoaded {
+            articles,
+            collection_text,
+        } => {
+            if articles.is_empty() {
+                state
+                    .briefing_mut()
+                    .fail("no completed articles found".to_string());
+                state.mark_dirty();
+                return (state, Vec::new());
+            }
+            state.briefing_mut().set_articles(articles, collection_text);
+            state.briefing_mut().transition_to_summarizing();
+            state.mark_dirty();
+            let mut effects = Vec::new();
+            dispatch_next_briefing_step(&mut state, &mut effects);
+            effects
+        }
+        Msg::ArticlesLoadFailed { reason } => {
+            state.briefing_mut().fail(reason);
+            state.mark_dirty();
             Vec::new()
         }
-        Msg::GenerateBriefingClicked
-        | Msg::ArticlesLoaded { .. }
-        | Msg::ArticlesLoadFailed { .. } => Vec::new(),
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 
@@ -246,4 +357,215 @@ fn parse_urls(raw: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
+    if let Some(next_idx) = state.briefing().next_pending_index() {
+        let prepared_text = state.briefing().articles()[next_idx].prepared_text.clone();
+        let request_id = state.allocate_next_llm_request_id();
+        state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
+        state.briefing_mut().start_article(next_idx, request_id);
+        effects.push(Effect::RequestLlmCompletion {
+            request_id,
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: None,
+            input_content: prepared_text,
+            context: Vec::new(),
+        });
+        state.mark_dirty();
+        return;
+    }
+
+    if state.briefing().completed_summary_count() == 0 {
+        state
+            .briefing_mut()
+            .fail("all article summaries failed".to_string());
+        state.mark_dirty();
+        return;
+    }
+
+    let collection_text = match state.briefing().collection_text() {
+        Some(text) => text.to_string(),
+        None => {
+            state
+                .briefing_mut()
+                .fail("missing briefing collection".to_string());
+            state.mark_dirty();
+            return;
+        }
+    };
+    let request_id = state.allocate_next_llm_request_id();
+    state.record_pending_llm_request(request_id, PromptId::AggregateBriefing);
+    state.briefing_mut().set_briefing_request_id(request_id);
+    effects.push(Effect::RequestLlmCompletion {
+        request_id,
+        prompt_id: PromptId::AggregateBriefing,
+        prompt_version: None,
+        input_content: collection_text,
+        context: Vec::new(),
+    });
+    state.mark_dirty();
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Once;
+
+    use super::*;
+    use crate::briefing::{ArticleSummaryState, BriefingPhase, LoadedArticle};
+
+    fn init_logging() {
+        static INIT: Once = Once::new();
+        INIT.call_once(engine_logging::initialize_for_tests);
+    }
+
+    fn loaded_articles() -> (Vec<LoadedArticle>, String) {
+        let articles = vec![
+            LoadedArticle {
+                url: "https://example.com/a".to_string(),
+                source_title: Some("Article A".to_string()),
+                prepared_text: "Article A text".to_string(),
+                content_hash: "hash-a".to_string(),
+            },
+            LoadedArticle {
+                url: "https://example.com/b".to_string(),
+                source_title: Some("Article B".to_string()),
+                prepared_text: "Article B text".to_string(),
+                content_hash: "hash-b".to_string(),
+            },
+        ];
+        (articles, "Collection text".to_string())
+    }
+
+    fn summary_json(title: &str) -> String {
+        format!("{{\"title\":\"{title}\",\"summary\":\"Summary\",\"key_points\":[\"p1\"]}}")
+    }
+
+    fn briefing_json(article_count: u32) -> String {
+        format!(
+            "{{\"executive_summary\":\"Exec\",\"themes\":[{{\"name\":\"Theme\",\"description\":\"Desc\"}}],\"article_count\":{article_count}}}"
+        )
+    }
+
+    #[test]
+    fn generate_briefing_emits_load_effect() {
+        init_logging();
+        let state = AppState::new();
+        let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+
+        assert_eq!(effects, vec![Effect::LoadArticlesForBriefing]);
+        assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
+    }
+
+    #[test]
+    fn articles_loaded_dispatches_first_summary() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _effects) = update(state, Msg::GenerateBriefingClicked);
+        let (articles, collection_text) = loaded_articles();
+
+        let (state, effects) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+
+        assert_eq!(
+            effects,
+            vec![Effect::RequestLlmCompletion {
+                request_id: 1,
+                prompt_id: PromptId::ArticleSummary,
+                prompt_version: None,
+                input_content: "Article A text".to_string(),
+                context: Vec::new(),
+            }]
+        );
+        assert!(matches!(
+            state.briefing().phase(),
+            BriefingPhase::Summarizing { .. }
+        ));
+        assert!(matches!(
+            state.briefing().articles()[0].summary_state,
+            ArticleSummaryState::InProgress { request_id: 1 }
+        ));
+    }
+
+    #[test]
+    fn summary_completion_advances_and_generates_briefing() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _effects) = update(state, Msg::GenerateBriefingClicked);
+        let (articles, collection_text) = loaded_articles();
+        let (state, _effects) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 1,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article A"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                },
+            },
+        );
+
+        assert_eq!(
+            effects,
+            vec![Effect::RequestLlmCompletion {
+                request_id: 2,
+                prompt_id: PromptId::ArticleSummary,
+                prompt_version: None,
+                input_content: "Article B text".to_string(),
+                context: Vec::new(),
+            }]
+        );
+
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 2,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article B"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                },
+            },
+        );
+
+        assert_eq!(
+            effects,
+            vec![Effect::RequestLlmCompletion {
+                request_id: 3,
+                prompt_id: PromptId::AggregateBriefing,
+                prompt_version: None,
+                input_content: "Collection text".to_string(),
+                context: Vec::new(),
+            }]
+        );
+
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 3,
+                result: LlmResultKind::Success {
+                    output_json: briefing_json(2),
+                    input_tokens: 20,
+                    output_tokens: 8,
+                },
+            },
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
+        assert!(state.briefing().briefing_result().is_some());
+    }
 }

@@ -235,6 +235,12 @@ impl EffectRunner {
                     });
                 }
             }
+            Effect::LoadArticlesForBriefing => {
+                engine_warn!("[briefing-loader] briefing loader not implemented");
+                let _ = self.msg_tx.send(Msg::ArticlesLoadFailed {
+                    reason: "briefing loader not implemented".to_string(),
+                });
+            }
         }
     }
 

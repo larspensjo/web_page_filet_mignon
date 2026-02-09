@@ -39,6 +39,9 @@ pub struct AppViewModel {
     pub token_limit: u64,
     pub preview_text: Option<String>,
     pub preview_header: Option<PreviewHeaderView>,
+    pub briefing_can_start: bool,
+    pub briefing_progress: Option<String>,
+    pub briefing_preview: Option<String>,
     /// Width of the left panels region (PANEL_INPUT + PANEL_JOBS).
     pub left_panel_width: i32,
     /// Current window width.
@@ -58,6 +61,9 @@ impl Default for AppViewModel {
             token_limit: TOKEN_LIMIT,
             preview_text: None,
             preview_header: None,
+            briefing_can_start: true,
+            briefing_progress: None,
+            briefing_preview: None,
             left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
             window_width: DEFAULT_WINDOW_WIDTH,
         }
