@@ -1,4 +1,5 @@
 //! Harvester engine: IO pipeline and effect execution.
+pub mod content_prep;
 mod convert;
 mod decode;
 mod engine;
@@ -37,3 +38,10 @@ pub use types::{
     JobProgress, Stage,
 };
 pub use url_policy::{UrlPolicy, UrlPolicyViolation};
+
+pub use content_prep::{
+    compute_prompt_overhead, derive_clean_text, truncate_to_budget, BoilerplatePolicy,
+    BoilerplateResult, CleanText, CleanTextReport, ContentBudget, ContentPrepConfig,
+    NormalizationPolicy, PreparedCollection, PreparedInput, TruncationBoundary,
+    NONCE_OVERHEAD_BYTES, TRUNCATION_MARKER,
+};

@@ -11,9 +11,24 @@ pub fn truncate_to_char_boundary(s: &str, max_chars: usize) -> &str {
     s
 }
 
+/// Truncate a string to at most `max_bytes` bytes, never cutting a UTF-8 boundary.
+pub fn truncate_to_byte_boundary(s: &str, max_bytes: usize) -> &str {
+    if max_bytes == 0 {
+        return "";
+    }
+    if max_bytes >= s.len() {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::truncate_to_char_boundary;
+    use super::{truncate_to_byte_boundary, truncate_to_char_boundary};
 
     #[test]
     fn ascii_string_truncates_normally() {
@@ -36,5 +51,25 @@ mod tests {
     fn shorter_than_limit_returns_original() {
         let value = "short";
         assert_eq!(truncate_to_char_boundary(value, 10), "short");
+    }
+
+    #[test]
+    fn byte_truncation_respects_utf8_boundaries() {
+        let value = "Emoji ❤️ emoji";
+        let truncated = truncate_to_byte_boundary(value, 10);
+        assert!(truncated.is_char_boundary(truncated.len()));
+        assert!(truncated.len() <= 10);
+    }
+
+    #[test]
+    fn byte_truncation_handles_zero_limit() {
+        let value = "text";
+        assert_eq!(truncate_to_byte_boundary(value, 0), "");
+    }
+
+    #[test]
+    fn byte_truncation_returns_full_string_when_under_limit() {
+        let value = "abc";
+        assert_eq!(truncate_to_byte_boundary(value, 10), "abc");
     }
 }

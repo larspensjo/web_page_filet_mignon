@@ -23,6 +23,8 @@ impl Default for BoilerplatePolicy {
                 "all rights reserved".into(),
                 "terms of service".into(),
                 "copyright".into(),
+                "cookies".into(),
+                "cookie".into(),
             ],
         }
     }
@@ -244,6 +246,9 @@ mod tests {
             "[contact](#)",
             "",
             "Article begins",
+            "Body line 1",
+            "Body line 2",
+            "Body line 3",
         ]);
         let result = filter_boilerplate(&input, &policy);
         assert!(!result.filtered_text.contains("home"));
@@ -270,19 +275,26 @@ mod tests {
         ]);
         let result = filter_boilerplate(&input, &policy);
         assert!(!result.filtered_text.contains("cookies"));
-        assert!(result.detected_patterns.contains(&"cookie policy".to_string()) ||
-            result.detected_patterns.contains(&"accept cookies".to_string()));
+        assert!(
+            result
+                .detected_patterns
+                .contains(&"cookie policy".to_string())
+                || result
+                    .detected_patterns
+                    .contains(&"accept cookies".to_string())
+        );
     }
 
     #[test]
     fn rejects_over_removal() {
         let policy = BoilerplatePolicy {
             boundary_scan_lines: 2,
+            max_removal_ratio: 0.1,
             ..BoilerplatePolicy::default()
         };
         let input = build_markdown(&["footer", "dd", "xx"]);
-    let result = filter_boilerplate(&input, &policy);
-    assert_eq!(result.filtered_text, input);
+        let result = filter_boilerplate(&input, &policy);
+        assert_eq!(result.filtered_text, input);
     }
 
     #[test]

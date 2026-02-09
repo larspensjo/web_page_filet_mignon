@@ -110,12 +110,11 @@ fn trim_trailing_whitespace(text: &str) -> String {
     for segment in text.split_inclusive('\n') {
         if segment.ends_with('\n') {
             let (content, _) = segment.split_at(segment.len() - 1);
-            let trimmed = content.trim_end_matches(|c: char| matches!(c, ' ' | '\t' | '\r'));
+            let trimmed = content.trim_end_matches(|c: char| [' ', '\t', '\r'].contains(&c));
             result.push_str(trimmed);
             result.push('\n');
         } else {
-            let trimmed =
-                segment.trim_end_matches(|c: char| matches!(c, ' ' | '\t' | '\r'));
+            let trimmed = segment.trim_end_matches(|c: char| [' ', '\t', '\r'].contains(&c));
             result.push_str(trimmed);
         }
     }

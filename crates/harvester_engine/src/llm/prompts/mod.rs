@@ -4,6 +4,10 @@ pub mod triage;
 
 use super::{PromptId, PromptTemplate};
 
+pub use briefing::BRIEFING_PROMPT;
+pub use summary::SUMMARY_PROMPT;
+pub use triage::TRIAGE_PROMPT;
+
 pub fn register_defaults(registry: &mut super::PromptRegistry) {
     registry.register(triage::TRIAGE_PROMPT);
     registry.register(summary::SUMMARY_PROMPT);

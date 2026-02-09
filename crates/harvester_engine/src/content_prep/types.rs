@@ -13,7 +13,7 @@ pub struct CleanTextReport {
     pub content_hash: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TruncationBoundary {
     Paragraph,
     Sentence,

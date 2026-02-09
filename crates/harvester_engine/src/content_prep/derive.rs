@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 use engine_logging::engine_info;
 
@@ -13,7 +13,7 @@ use crate::{
     token::TokenCounter,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ContentPrepConfig {
     pub normalization: NormalizationPolicy,
     pub boilerplate: BoilerplatePolicy,
@@ -63,6 +63,16 @@ pub fn derive_clean_text(
     CleanText::new(filtered_text, hash, report)
 }
 
+impl fmt::Debug for ContentPrepConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ContentPrepConfig")
+            .field("normalization", &self.normalization)
+            .field("boilerplate", &self.boilerplate)
+            .field("token_counter", &"<token_counter>")
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,7 +84,7 @@ mod tests {
     const SOURCE_TITLE: &str = "Test Article";
 
     fn init_logging() {
-        let _ = engine_logging::initialize_for_tests();
+        engine_logging::initialize_for_tests();
     }
 
     fn test_config(counter: Arc<dyn TokenCounter>) -> ContentPrepConfig {
@@ -100,7 +110,7 @@ mod tests {
         let config = ContentPrepConfig {
             normalization: NormalizationPolicy::default(),
             boilerplate: BoilerplatePolicy::default(),
-            token_counter: Arc::new(WhitespaceTokenCounter::default()),
+            token_counter: Arc::new(WhitespaceTokenCounter),
         };
         let markdown = "---\nmeta: value\n---\n\nLine 1\n\n<!-- comment -->Line 2\n";
         let clean = derive_clean_text(markdown, SOURCE_URL, Some(SOURCE_TITLE), &config);
@@ -114,7 +124,7 @@ mod tests {
     #[test]
     fn deterministic_report_and_hash() {
         init_logging();
-        let config = test_config(Arc::new(WhitespaceTokenCounter::default()));
+        let config = test_config(Arc::new(WhitespaceTokenCounter));
         let markdown = "Stable content\n\nSome more text.";
         let first = derive_clean_text(markdown, SOURCE_URL, None, &config);
         let second = derive_clean_text(markdown, SOURCE_URL, None, &config);
@@ -126,7 +136,7 @@ mod tests {
     #[test]
     fn hash_matches_replay_content_hash() {
         init_logging();
-        let config = test_config(Arc::new(WhitespaceTokenCounter::default()));
+        let config = test_config(Arc::new(WhitespaceTokenCounter));
         let markdown = "Paragraph.\nAnother line.";
         let clean = derive_clean_text(markdown, SOURCE_URL, None, &config);
         assert_eq!(
@@ -139,7 +149,7 @@ mod tests {
     fn token_counter_swap_does_not_change_hash() {
         init_logging();
         let markdown = "Shared content for different counters.";
-        let config_whitespace = test_config(Arc::new(WhitespaceTokenCounter::default()));
+        let config_whitespace = test_config(Arc::new(WhitespaceTokenCounter));
         let config_constant = test_config(Arc::new(ConstantTokenCounter));
 
         let clean1 = derive_clean_text(markdown, SOURCE_URL, None, &config_whitespace);

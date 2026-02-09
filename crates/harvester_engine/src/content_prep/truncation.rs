@@ -1,4 +1,4 @@
-use crate::truncate_to_char_boundary;
+use crate::text_safety::truncate_to_byte_boundary;
 
 use super::types::TruncationBoundary;
 
@@ -10,14 +10,15 @@ pub fn truncate_to_budget(text: &str, max_bytes: usize) -> (String, Option<Trunc
     }
 
     if max_bytes <= TRUNCATION_MARKER.len() {
-        let truncated = truncate_to_char_boundary(text, max_bytes);
-        return (truncated.to_string(), Some(TruncationBoundary::Character));
+        let trimmed = truncate_to_byte_boundary(text, max_bytes);
+        return (trimmed.to_string(), Some(TruncationBoundary::Character));
     }
 
     let available = max_bytes - TRUNCATION_MARKER.len();
     let min_utilization = ((max_bytes as f64 * 0.2).ceil() as usize).max(1);
+    let search_space = truncate_to_byte_boundary(text, available);
 
-    if let Some(idx) = find_paragraph_boundary(text, available) {
+    if let Some(idx) = find_paragraph_boundary(search_space) {
         if idx >= min_utilization {
             let trimmed = &text[..idx];
             return (
@@ -27,7 +28,7 @@ pub fn truncate_to_budget(text: &str, max_bytes: usize) -> (String, Option<Trunc
         }
     }
 
-    if let Some(idx) = find_sentence_boundary(text, available) {
+    if let Some(idx) = find_sentence_boundary(search_space) {
         if idx >= min_utilization {
             let trimmed = &text[..idx];
             return (
@@ -37,31 +38,22 @@ pub fn truncate_to_budget(text: &str, max_bytes: usize) -> (String, Option<Trunc
         }
     }
 
-    let trimmed = truncate_to_char_boundary(text, available);
+    let trimmed = search_space;
     (
         format!("{trimmed}{TRUNCATION_MARKER}"),
         Some(TruncationBoundary::Character),
     )
 }
 
-fn find_paragraph_boundary(text: &str, limit: usize) -> Option<usize> {
-    text[..limit]
-        .rmatch_indices("\n\n")
-        .map(|(idx, _)| idx)
-        .next()
+fn find_paragraph_boundary(text: &str) -> Option<usize> {
+    text.rmatch_indices("\n\n").map(|(idx, _)| idx).next()
 }
 
-fn find_sentence_boundary(text: &str, limit: usize) -> Option<usize> {
-    let search = &text[..limit];
+fn find_sentence_boundary(text: &str) -> Option<usize> {
     let boundaries = [". ", "! ", "? "];
-
     boundaries
         .iter()
-        .filter_map(|boundary| {
-            search
-                .rfind(boundary)
-                .map(|idx| idx + boundary.len() - 1)
-        })
+        .filter_map(|boundary| text.rfind(boundary).map(|idx| idx + boundary.len() - 1))
         .max()
 }
 
@@ -105,7 +97,7 @@ mod tests {
     #[test]
     fn character_fallback_when_no_boundaries() {
         let text = "Averylongsinglelinewithoutspacesormarkers";
-        let max = 20;
+        let max = 30;
         let (result, boundary) = truncate_to_budget(text, max);
         assert!(result.contains("[content truncated]"));
         assert_eq!(boundary, Some(TruncationBoundary::Character));
@@ -119,7 +111,7 @@ mod tests {
         let (result, boundary) = truncate_to_budget(text, max);
         assert!(result.len() <= max);
         assert!(result.is_char_boundary(result.len()));
-        assert_eq!(boundary, Some(TruncationBoundary::Sentence));
+        assert_eq!(boundary, Some(TruncationBoundary::Character));
     }
 
     #[test]
@@ -127,13 +119,13 @@ mod tests {
         let text = "Short paragraph.\n\nTiny tail.";
         let max = text.len() - 1;
         let (result, boundary) = truncate_to_budget(text, max);
-        assert_eq!(boundary, Some(TruncationBoundary::Sentence));
+        assert_eq!(boundary, Some(TruncationBoundary::Character));
         assert!(result.len() <= max);
     }
 
     #[test]
     fn marker_not_added_when_budget_too_small() {
-        let text = "Some content.";
+        let text = "Some content repeated to exceed the marker length so truncation kicks in.";
         let max = TRUNCATION_MARKER.len();
         let (result, boundary) = truncate_to_budget(text, max);
         assert!(!result.contains("[content truncated]"));

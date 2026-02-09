@@ -1,8 +1,8 @@
 use std::fmt::Write;
 
 use crate::content_prep::truncation::truncate_to_budget;
-use crate::content_prep::types::{CleanText, CleanTextReport, TruncationBoundary};
-use crate::llm::prompt::{render_template, TemplateVars, PromptTemplate};
+use crate::content_prep::types::{CleanText, TruncationBoundary};
+use crate::llm::prompt::{render_template, PromptTemplate, TemplateVars};
 
 /// Byte budget for content within an LLM prompt.
 pub struct ContentBudget {
@@ -103,6 +103,10 @@ impl PreparedInput {
         self.truncated_at_boundary
     }
 
+    pub fn budget_bytes(&self) -> usize {
+        self.budget_bytes
+    }
+
     pub fn from_clean_text(clean_text: CleanText, budget_bytes: usize) -> Self {
         let (bounded_text, boundary) = truncate_to_budget(clean_text.text(), budget_bytes);
         Self {
@@ -156,8 +160,8 @@ impl PreparedCollection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::content_prep::types::CleanTextReport;
     use crate::llm::prompt::{PromptId, PromptTemplate, TemplateVars};
-    use std::sync::Arc;
 
     struct DummyCleanTextBuilder;
 
@@ -200,7 +204,10 @@ mod tests {
         let input = PreparedInput::from_clean_text(clean_text, 5);
         assert!(input.text().len() <= 5);
         assert!(input.was_truncated());
-        assert_eq!(input.truncation_boundary(), Some(TruncationBoundary::Character));
+        assert_eq!(
+            input.truncation_boundary(),
+            Some(TruncationBoundary::Character)
+        );
     }
 
     #[test]
@@ -236,9 +243,6 @@ mod tests {
         let rendered = vars.to_map();
         let system = render_template(template.system_template, &rendered);
         let user = render_template(template.user_template, &rendered);
-        assert_eq!(
-            overhead,
-            system.len() + user.len() + NONCE_OVERHEAD_BYTES
-        );
+        assert_eq!(overhead, system.len() + user.len() + NONCE_OVERHEAD_BYTES);
     }
 }
