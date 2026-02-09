@@ -3,6 +3,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+use chrono::Utc;
+
 use commanductui::types::TreeItemMarkerKind;
 use commanductui::{
     AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface,
@@ -12,7 +14,13 @@ use harvester_core::{
     update, AppState, AppViewModel, Effect, JobResultKind, LinkDownloadState, Msg,
 };
 
-use engine_logging::engine_info;
+use engine_logging::{engine_info, engine_warn};
+
+use harvester_engine::llm::prompts::register_defaults;
+use harvester_engine::llm::{
+    LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
+    ProviderKind,
+};
 
 use super::effects::EffectRunner;
 use super::logging::{self, LogDestination};
@@ -34,7 +42,30 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     let shared_state = Arc::new(Mutex::new(SharedState::default()));
     let output_dir = effects::default_output_dir();
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
-    let effect_runner = EffectRunner::new(msg_tx.clone());
+    let effect_runner = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
+        let provider = Arc::new(OpenAiProvider::new(api_key));
+        let mut registry = PromptRegistry::new();
+        register_defaults(&mut registry);
+        let config = LlmConfig {
+            provider,
+            default_model: ModelId::new(ProviderKind::OpenAi, "gpt-4o-mini"),
+            triage_model: None,
+            summary_model: None,
+            briefing_model: None,
+            registry: registry.clone(),
+            quotas: LlmQuotas::default(),
+            output_dir: output_dir.clone(),
+            pricing: PricingRegistry::default(),
+            max_input_chars: 100_000,
+            timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
+            session_id: format!("session-{}", Utc::now().format("%Y%m%d-%H%M%S")),
+        };
+        let handle = LlmHandle::new(config);
+        EffectRunner::new_with_llm(msg_tx.clone(), handle, 100_000, registry)
+    } else {
+        engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
+        EffectRunner::new(msg_tx.clone())
+    };
     {
         let completed = persistence::load_completed_jobs(&output_dir);
         if !completed.is_empty() {

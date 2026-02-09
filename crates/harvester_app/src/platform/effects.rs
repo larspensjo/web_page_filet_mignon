@@ -14,7 +14,7 @@ use harvester_core::{Effect, JobResultKind, LlmResultKind, Msg, Stage, StopPolic
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
-    llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle},
+    llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
     AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor,
     FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy,
     WhitespaceTokenCounter,
@@ -37,26 +37,34 @@ pub struct EffectRunner {
     fetch_settings: FetchSettings,
     llm_handle: Option<LlmHandle>,
     llm_max_input_chars: Option<usize>,
+    prompt_registry: PromptRegistry,
 }
 
 impl EffectRunner {
     pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
-        Self::with_optional_llm(msg_tx, None, None)
+        let registry = PromptRegistry::with_defaults();
+        Self::with_optional_llm(msg_tx, None, None, registry)
     }
 
-    #[allow(dead_code)]
     pub fn new_with_llm(
         msg_tx: mpsc::Sender<Msg>,
         llm_handle: LlmHandle,
         llm_max_input_chars: usize,
+        prompt_registry: PromptRegistry,
     ) -> Self {
-        Self::with_optional_llm(msg_tx, Some(llm_handle), Some(llm_max_input_chars))
+        Self::with_optional_llm(
+            msg_tx,
+            Some(llm_handle),
+            Some(llm_max_input_chars),
+            prompt_registry,
+        )
     }
 
     fn with_optional_llm(
         msg_tx: mpsc::Sender<Msg>,
         llm_handle: Option<LlmHandle>,
         llm_max_input_chars: Option<usize>,
+        prompt_registry: PromptRegistry,
     ) -> Self {
         let output_dir = default_output_dir();
 
@@ -74,6 +82,7 @@ impl EffectRunner {
             fetch_settings,
             llm_handle,
             llm_max_input_chars,
+            prompt_registry,
         };
         runner.spawn_event_loop(msg_tx);
         runner

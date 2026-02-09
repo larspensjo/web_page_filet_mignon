@@ -8,11 +8,9 @@ fn expect_violation(url: &str, check: Result<(), UrlPolicyViolation>) -> UrlPoli
 #[test]
 fn allows_http_and_https_by_default() {
     let policy = UrlPolicy::default();
+    assert!(policy.check(&Url::parse("http://1.1.1.1").unwrap()).is_ok());
     assert!(policy
-        .check(&Url::parse("http://example.com").unwrap())
-        .is_ok());
-    assert!(policy
-        .check(&Url::parse("https://example.com").unwrap())
+        .check(&Url::parse("https://1.1.1.1").unwrap())
         .is_ok());
 }
 
