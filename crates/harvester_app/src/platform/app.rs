@@ -59,6 +59,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             max_input_chars: 100_000,
             timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
             session_id: format!("session-{}", Utc::now().format("%Y%m%d-%H%M%S")),
+            replay_cache: None,
         };
         let handle = LlmHandle::new(config);
         EffectRunner::new_with_llm(msg_tx.clone(), handle, 100_000, registry)

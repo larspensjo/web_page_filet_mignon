@@ -138,6 +138,15 @@ impl ReplayProvider {
         let key = lookup_key(input_hash, prompt_id, prompt_version);
         self.records.get(&key)
     }
+
+    pub fn insert(&mut self, record: ReplayRecord) {
+        let key = lookup_key(
+            &record.input_content_hash,
+            record.prompt_id,
+            record.prompt_version,
+        );
+        self.records.insert(key, record);
+    }
 }
 
 impl Default for ReplayProvider {

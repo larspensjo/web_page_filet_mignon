@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{mpsc, Arc, Mutex},
+    sync::{mpsc, Arc, Mutex, RwLock},
     thread,
     time::Instant,
 };
@@ -14,7 +14,7 @@ use crate::llm::{
         render_template, PromptId, PromptRegistry, PromptTemplate, PromptVersion, TemplateVars,
     },
     quota::{LlmQuotaTracker, LlmQuotas},
-    replay::{content_hash, persist_replay_record, ReplayRecord},
+    replay::{content_hash, persist_replay_record, ReplayProvider, ReplayRecord},
     types::{ChatMessage, ChatRole, LlmError, LlmRequest, ModelId, ProviderKind, TokenUsage},
     validation::{validate_briefing, validate_summary, validate_triage, ValidationError},
 };
@@ -33,6 +33,7 @@ pub struct LlmConfig {
     pub max_input_chars: usize,
     pub timestamp_utc: Arc<dyn Fn() -> String + Send + Sync>,
     pub session_id: String,
+    pub replay_cache: Option<Arc<RwLock<ReplayProvider>>>,
 }
 
 impl LlmConfig {
@@ -211,6 +212,32 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
     let rendered = vars.to_map();
     let system_message = render_template(template.system_template, &rendered);
     let user_message = render_template(template.user_template, &rendered);
+    let input_hash = content_hash(&input_content);
+
+    if let Some(ref cache) = ctx.config.replay_cache {
+        let guard = cache.read().unwrap();
+        if let Some(record) = guard.lookup(&input_hash, prompt_id, version) {
+            if record.validated_output.is_some() {
+                engine_info!(
+                    "[llm-replay] cache hit request_id={} hash={}",
+                    request_id,
+                    &input_hash[..8]
+                );
+                let result = LlmCompletionResult {
+                    output_json: record.raw_response.clone(),
+                    usage: record.usage,
+                    model_id: model.clone(),
+                    prompt_id,
+                    prompt_version: version,
+                };
+                let _ = ctx.event_tx.send(LlmEvent::Completed {
+                    request_id,
+                    result: Ok(result),
+                });
+                return;
+            }
+        }
+    }
 
     let request = LlmRequest::new(
         model.clone(),
@@ -289,7 +316,7 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
 
     let record = ReplayRecord {
         request_id: format!("{}-{request_id}", ctx.config.session_id),
-        input_content_hash: content_hash(&input_content),
+        input_content_hash: input_hash.clone(),
         prompt_id,
         prompt_version: version,
         model_id: format_model_identifier(response.model_id()),
@@ -335,6 +362,11 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
                 }),
             });
             return;
+        }
+
+        if let Some(ref cache) = ctx.config.replay_cache {
+            let mut guard = cache.write().unwrap();
+            guard.insert(success_record.clone());
         }
 
         let result = LlmCompletionResult {
