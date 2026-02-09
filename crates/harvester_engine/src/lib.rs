@@ -26,7 +26,12 @@ pub use export::{build_concatenated_export, ExportError, ExportOptions, ExportSu
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher};
 pub use filename::deterministic_filename;
-pub use frontmatter::build_markdown_document;
+pub use frontmatter::{
+    build_markdown_document,
+    FrontmatterFields,
+    parse_frontmatter,
+    unescape_yaml_value,
+};
 pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKind};
 pub use path_policy::is_confined_to;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};

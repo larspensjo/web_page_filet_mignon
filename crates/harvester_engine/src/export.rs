@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
+use crate::frontmatter::{parse_frontmatter, strip_frontmatter};
 use crate::persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 use url::Url;
 
@@ -171,63 +172,21 @@ fn normalize_url(url: &str) -> String {
 }
 
 fn parse_doc(content: &str, filename: &str) -> Result<DocMeta, ExportError> {
-    let mut lines = content.lines();
-    if lines.next() != Some("---") {
+    let fields = parse_frontmatter(content)
+        .ok_or_else(|| ExportError::MissingFrontmatter(filename.to_string()))?;
+    let url = fields.url.clone().unwrap_or_default();
+    let title = fields.title.clone().unwrap_or_default();
+    let fetched = fields.fetched_utc.clone().unwrap_or_default();
+    if url.is_empty() || title.is_empty() || fetched.is_empty() {
         return Err(ExportError::MissingFrontmatter(filename.to_string()));
     }
-    let mut meta = DocMeta {
+    let body = strip_frontmatter(content).to_string();
+    Ok(DocMeta {
+        url,
+        title,
+        fetched_utc: fetched,
+        token_count: fields.token_count,
+        body,
         filename: filename.to_string(),
-        ..Default::default()
-    };
-    for line in &mut lines {
-        if line.trim() == "---" {
-            break;
-        }
-        if let Some((k, v)) = line.split_once(':') {
-            let key = k.trim();
-            let val = v.trim();
-            match key {
-                "url" => meta.url = unescape_quoted(val),
-                "title" => meta.title = unescape_quoted(val),
-                "fetched_utc" => meta.fetched_utc = unescape_quoted(val),
-                "token_count" => meta.token_count = val.parse::<u32>().ok(),
-                _ => {}
-            }
-        }
-    }
-    let body: String = lines.collect::<Vec<_>>().join("\n");
-    meta.body = body;
-    if meta.url.is_empty() || meta.title.is_empty() || meta.fetched_utc.is_empty() {
-        return Err(ExportError::MissingFrontmatter(filename.to_string()));
-    }
-    Ok(meta)
-}
-
-fn unescape_quoted(value: &str) -> String {
-    let trimmed = value.trim();
-    if let Some(inner) = trimmed.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-        let mut result = String::with_capacity(inner.len());
-        let mut chars = inner.chars();
-        while let Some(ch) = chars.next() {
-            if ch == '\\' {
-                if let Some(next) = chars.next() {
-                    match next {
-                        '\\' => result.push('\\'),
-                        '"' => result.push('"'),
-                        other => {
-                            result.push('\\');
-                            result.push(other);
-                        }
-                    }
-                } else {
-                    result.push('\\');
-                }
-            } else {
-                result.push(ch);
-            }
-        }
-        result
-    } else {
-        trimmed.to_string()
-    }
+    })
 }
