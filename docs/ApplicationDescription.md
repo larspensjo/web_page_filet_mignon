@@ -1,49 +1,28 @@
 # Application description
 
-The main idea of the application is to extract relevant topics from web pages. That is, I am looking for business information about AI companies.
+The goal of the application is to autonomously collect and prioritize web content about AI companies, then produce a concise, high-quality morning briefing.
+
+## Core goals
+1. Load URLs from RSS feeds and other automated sources.
+2. Fetch and extract clean text from the discovered pages.
+3. Use AI with a configured prompt to filter and rank which pages are interesting.
+4. Produce a top list (for example the top 10 pages) and an AI-generated executive summary.
+5. Run unattended so results are ready in the morning.
 
 ## Typical workflow
+1. The app starts on a schedule or at system startup.
+2. It collects new links from RSS feeds.
+3. It downloads pages, extracts text, and normalizes content.
+4. The AI filter selects and ranks the most relevant pages.
+5. The app generates an executive summary across the selected pages.
+6. The output is available for review when the user starts the day.
 
-### Adding and downloading web pages
-* I am using a news aggregating site in a regular web browser.
-* Every time I find an interesting news entry, I will copy the URL, one at a time, to web_page_filet_mignon. Sometimes, more than one.
-* After every added URL, I want web_page_filet_mignon to immediately update the jobs.
-* If web_page_filet_mignon was in a finished state when I add more URLs, I want it to go back to active state again.
-* When done adding URLs, I press the Archive button that exports everything.
-* The user will sometimes shut down the application, restart it, and continue where they left off.
+## Output
+- A ranked list of selected pages (top N).
+- An executive summary derived from the selected pages.
+- Optional previews for spot-checking extraction and ranking quality.
 
-### Previewing
-The main goal with the preview isn't to make a good presentation looking like the original. It will be used in a couple of ways.
-* During development to assess how effective the download is to extract the text information I am interested in.
-* Assess whether a downloaded web page is interesting, or if I want to skip it (remove it from the download list).
-* For slow downloads, I want to assess if I have enough or should wait for more.
-
-## Filtering
-The downloaded page should be filtered, so as to show only interesting informaition.
-* Links and pictures shall be removed, keep only text.
-
-## Display
-
-The application shall consist of the following main components, from top to bottom:
-* A rate limiting progress bar.
-* A URL drop box left of a window with a treeview of URLs being downloaded or completed. The drop box shall have a fixed width, but the treeview should expand horisontally with the main window.
-* A Stop / Finish button
-* An Archive button. The button shall be disabled if no web sites are downloaded. It shall be disabled after the archive was generated, but enabled as soon as another web site has been downloaded.
-* The button shall be placed horisontally after each other. They shall have fixed width.
-* The preview pane should be shown to the right of the treeview.
-* The treeview shall be possible to expand. When done so, it shall show all links.
-
-### Progress bar
-I want a progress bar at the top of the window.
-
-It should show the number of tokens total, as related to a max limit. The max limit shall be 200000.
-
-That way, while you continue to add more URLs, the progress bar increase.
-
-## Artifacts
-### Archive
-The archive is a single text file with all downloaded markdown files. Every file shall be prefixed by a header that makes it easy to detect.
-
-### Persistence
-* If the application is shut down and restarted, it shall recover the list of web sites that were completely downloaded.
-* Web sites that were partially downloaded will restart from scratch, so we don't need to save partially downloaded web sites (just the URL).
+## Design principles
+- Fully automated by default, with manual review as a secondary option.
+- Deterministic processing and clear provenance for reproducible results.
+- Strong security boundaries for untrusted web content and AI output.

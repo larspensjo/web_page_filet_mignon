@@ -1,2 +1,7 @@
 # web_page_filet_mignon
-Serve your LLM the premium cut. A native Rust Windows app that harvests URLs in parallel, strips the fat (ads, scripts, images), and converts core text into clean Markdown. Includes real-time token counting and dataset concatenation for instant AI context preparation. Bon appétit!
+Serve your LLM the premium cut. A native Rust Windows app for collecting web pages, extracting clean text, and preparing reliable context for analysis. It emphasizes deterministic processing, security boundaries for untrusted content, and a clear, message-driven workflow. The experience focuses on previewing extracted content, tracking progress and budgets, and generating briefings from completed pages.
+
+## Documentation
+- [docs/ApplicationDescription.md](docs/ApplicationDescription.md)
+- [docs/Architecture.md](docs/Architecture.md)
+- [docs/ThreatModel.md](docs/ThreatModel.md)
