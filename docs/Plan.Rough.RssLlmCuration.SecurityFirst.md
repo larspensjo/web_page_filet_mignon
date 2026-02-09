@@ -127,7 +127,7 @@ Still mostly internal, but unlocks safe iteration on prompts/models.
 ### Implementation note
 Implemented as 11 parts (provider trait, mock provider, OpenAI adapter, cost tracking, LLM quota tracker, prompt registry, typed DTOs, replay harness, effect/message integration, LLM worker, FailureKind extensions). Only the OpenAI provider was built; Anthropic and Google follow the same pattern.
 
-## Phase 2 — Content preparation pipeline for safe summarization inputs
+## Phase 2 — Content preparation pipeline for safe summarization inputs [COMPLETE]
 ### Purpose
 LLMs are sensitive to noisy and unbounded input. We need deterministic preparation:
 - stable clean text,
@@ -146,8 +146,8 @@ LLMs are sensitive to noisy and unbounded input. We need deterministic preparati
 ### Expected product impact
 Improves overall quality and predictability of summaries; also reduces costs.
 
-### Detailed plan
-See `Plan.Phase2.ContentPreparation.md` for the 7-part implementation plan.
+### Implementation note
+Implemented as 7 parts (CleanText type with provenance, CleanText derivation pipeline, smart truncation, ContentBudget and PreparedInput, module integration and re-exports). See `Plan.Phase3.ExecutiveBriefing.md` for the next phase that builds on this pipeline.
 
 ## Phase 3 — Executive summary for existing downloaded pages (manual trigger)
 ### Purpose
@@ -277,7 +277,7 @@ More automation, but higher complexity and security requirements.
 
 ## Cross-cutting future work (not phase-specific)
 
-These items were identified during Phase 0 and Phase 1 implementation and are relevant across multiple phases. They should be considered when planning future work:
+These items were identified during Phase 0, Phase 1, and Phase 2 implementation and are relevant across multiple phases. They should be considered when planning future work:
 
 - **Unified download path**: Route linked-page downloads through the engine as tagged jobs rather than the current separate path. Reduces code duplication and ensures all downloads benefit from the same policy/quota enforcement.
 - **Policy-as-configuration**: Load `UrlPolicy`, `SessionQuotas`, and `LlmQuotas` from a config file (RON or TOML) rather than compile-time defaults. Enables per-deployment tuning without recompilation.
@@ -292,6 +292,15 @@ These items were identified during Phase 0 and Phase 1 implementation and are re
 - **Privacy controls for replay artifacts**: Optional redaction of raw LLM responses in replay records.
 - **Offline re-validation**: Deterministic "rejudge" command that re-validates saved raw LLM outputs against updated DTO schemas without re-calling the API.
 - **Replay record retention policy**: Count/size/age-based cleanup of old replay records to prevent unbounded disk usage.
+- **Tiktoken-accurate token counting**: Replace `WhitespaceTokenCounter` with BPE-based estimator for accurate budget calculation. The `TokenCounter` trait already supports injection.
+- **Priority-weighted budget allocation**: Allocate more tokens to higher-priority articles (after Phase 4 provides triage scores).
+- **Normalization versioning**: Include normalization policy version hash in replay lookup key for cache-safe policy evolution.
+- **Disk caching of CleanText**: Optional persistence of derived clean text alongside markdown for large corpora. Feature-gated.
+- **Chunking for very long articles**: Split into overlapping chunks instead of truncation. Requires merge strategy for DTO outputs.
+- **Configurable boilerplate rule sets**: Load boilerplate detection patterns from config file instead of compile-time defaults.
+- **Retry with smaller excerpt**: If LLM returns MaxTokens finish reason, automatically retry with a smaller content budget.
+- **Near-duplicate detection**: Stable fingerprint of normalized clean text to skip redundant LLM calls before expensive processing.
+- **Strict content mode**: Refuse to process if prepared input cannot satisfy a minimum retained-content threshold after truncation.
 
 ## Notes for planning and estimation
 - Phases 0–2 are enabling work that reduces long-term iteration cost and risk.
