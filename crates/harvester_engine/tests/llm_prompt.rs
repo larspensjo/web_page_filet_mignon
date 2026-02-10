@@ -28,7 +28,9 @@ fn triage_prompt_v2_user_template_accepts_document_vars() {
     let payload = "Important article content.";
     vars.set_document("content", payload);
     let rendered_content = vars.to_map().get("content").unwrap().clone();
-    let rendered = template.user_template.replace("{{content}}", &rendered_content);
+    let rendered = template
+        .user_template
+        .replace("{{content}}", &rendered_content);
     assert!(rendered.contains("Document:"));
     assert!(rendered.contains("</document-"));
     assert!(rendered.contains("Analyze this article and return your triage assessment as JSON."));

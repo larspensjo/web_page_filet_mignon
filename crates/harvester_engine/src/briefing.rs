@@ -40,43 +40,18 @@ fn article_header_length(idx: usize, article: &ArticlePackage) -> usize {
     format!("--- Article {}: {} ---", idx + 1, article.title()).len()
 }
 
-pub fn load_and_prepare_articles(
-    output_dir: &Path,
-    max_input_bytes: usize,
-    registry: &PromptRegistry,
-) -> Result<(Vec<LoadedArticle>, String), String> {
-    let summary_template = registry
-        .active(PromptId::ArticleSummary)
-        .ok_or_else(|| "summary prompt not registered".to_string())?;
-    let briefing_template = registry
-        .active(PromptId::AggregateBriefing)
-        .ok_or_else(|| "aggregate briefing prompt not registered".to_string())?;
-
-    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
-    let summary_budget = max_input_bytes
-        .checked_sub(summary_overhead)
-        .ok_or_else(|| {
-            format!(
-                "summary prompt overhead ({}) exceeds max input budget ({})",
-                summary_overhead, max_input_bytes
-            )
-        })?;
-
-    let briefing_overhead = compute_prompt_overhead(briefing_template, "collection", &[]);
-    let collection_budget = max_input_bytes
-        .checked_sub(briefing_overhead)
-        .ok_or_else(|| {
-            format!(
-                "briefing prompt overhead ({}) exceeds max input budget ({})",
-                briefing_overhead, max_input_bytes
-            )
-        })?;
-
-    let config = ContentPrepConfig {
+fn build_content_prep_config() -> ContentPrepConfig {
+    ContentPrepConfig {
         normalization: NormalizationPolicy::default(),
         boilerplate: BoilerplatePolicy::default(),
         token_counter: Arc::new(WhitespaceTokenCounter),
-    };
+    }
+}
+
+/// Scan `output_dir` for markdown files, parse frontmatter, and derive clean text.
+/// Packages are ordered by filename so callers can rely on deterministic order.
+fn scan_and_prepare_articles(output_dir: &Path) -> Result<Vec<ArticlePackage>, String> {
+    let config = build_content_prep_config();
 
     let mut markdown_files = Vec::new();
     for entry in fs::read_dir(output_dir).map_err(|err| {
@@ -105,7 +80,7 @@ pub fn load_and_prepare_articles(
 
     markdown_files.sort();
 
-    let mut packages = Vec::new();
+    let mut packages = Vec::with_capacity(markdown_files.len());
     for path in markdown_files {
         let markdown = fs::read_to_string(&path)
             .map_err(|err| format!("failed to read {}: {}", path.display(), err))?;
@@ -142,6 +117,43 @@ pub fn load_and_prepare_articles(
             clean_text,
         });
     }
+
+    Ok(packages)
+}
+
+pub fn load_and_prepare_articles(
+    output_dir: &Path,
+    max_input_bytes: usize,
+    registry: &PromptRegistry,
+) -> Result<(Vec<LoadedArticle>, String), String> {
+    let summary_template = registry
+        .active(PromptId::ArticleSummary)
+        .ok_or_else(|| "summary prompt not registered".to_string())?;
+    let briefing_template = registry
+        .active(PromptId::AggregateBriefing)
+        .ok_or_else(|| "aggregate briefing prompt not registered".to_string())?;
+
+    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
+    let summary_budget = max_input_bytes
+        .checked_sub(summary_overhead)
+        .ok_or_else(|| {
+            format!(
+                "summary prompt overhead ({}) exceeds max input budget ({})",
+                summary_overhead, max_input_bytes
+            )
+        })?;
+
+    let briefing_overhead = compute_prompt_overhead(briefing_template, "collection", &[]);
+    let collection_budget = max_input_bytes
+        .checked_sub(briefing_overhead)
+        .ok_or_else(|| {
+            format!(
+                "briefing prompt overhead ({}) exceeds max input budget ({})",
+                briefing_overhead, max_input_bytes
+            )
+        })?;
+
+    let packages = scan_and_prepare_articles(output_dir)?;
 
     if packages.is_empty() {
         return Ok((Vec::new(), String::new()));
@@ -209,4 +221,42 @@ pub fn load_and_prepare_articles(
         .to_string();
 
     Ok((loaded_articles, collection_text))
+}
+
+pub fn load_and_prepare_articles_for_triage(
+    output_dir: &Path,
+    max_input_bytes: usize,
+    registry: &PromptRegistry,
+) -> Result<Vec<LoadedArticle>, String> {
+    let triage_template = registry
+        .active(PromptId::ArticleTriage)
+        .ok_or_else(|| "triage prompt not registered".to_string())?;
+    let triage_overhead = compute_prompt_overhead(triage_template, "content", &[]);
+    let triage_budget = max_input_bytes
+        .checked_sub(triage_overhead)
+        .ok_or_else(|| {
+            format!(
+                "triage prompt overhead ({}) exceeds max input budget ({})",
+                triage_overhead, max_input_bytes
+            )
+        })?;
+
+    let packages = scan_and_prepare_articles(output_dir)?;
+
+    if packages.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut loaded_articles = Vec::with_capacity(packages.len());
+    for package in packages.iter() {
+        let (bounded_text, _) = truncate_to_budget(package.clean_text.text(), triage_budget);
+        loaded_articles.push(LoadedArticle {
+            url: package.url.clone(),
+            source_title: package.source_title.clone(),
+            prepared_text: bounded_text,
+            content_hash: package.clean_text.content_hash().to_string(),
+        });
+    }
+
+    Ok(loaded_articles)
 }

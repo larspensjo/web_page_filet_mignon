@@ -20,7 +20,9 @@ mod token;
 mod types;
 mod url_policy;
 
-pub use briefing::{load_and_prepare_articles, LoadedArticle};
+pub use briefing::{
+    load_and_prepare_articles, load_and_prepare_articles_for_triage, LoadedArticle,
+};
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};
 pub use engine::{EngineConfig, EngineHandle};
