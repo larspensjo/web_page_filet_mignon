@@ -16,6 +16,8 @@ target
 /.claude/
 /output/
 /lcov.info
+/incoming_urls.txt
+/sources.ron
 
 # Coverage analysis outputs
 /tests/coverage_reports/*.json
