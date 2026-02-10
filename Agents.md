@@ -56,6 +56,7 @@ First and foremost, adhere to the Unidirectional Data Flow Architecture.
 * mod.rs, lib.rs and main.rs should be thin wrappers.
 * Follow the principle of **Correctness-by-construction**: Prefer designs and language features that prevent bugs by construction—make illegal states unrepresentable and incorrect usage hard or impossible.
 * Instead of liberally use of comments, try to use names on things (functions, variables, etc) that makes the intent clear. But still, comments may be needed eventually.
+* When building long prompt strings (system/user templates or `expected_format` literals), prefer `concat!` to split the text into readable pieces while preserving the literal content; do not rely on a single massive inline string with escaped newlines.
 
 ## Logging
 * Use the `engine_logging` crate for all logging. Import macros: `use engine_logging::{engine_info, engine_warn, engine_error};`

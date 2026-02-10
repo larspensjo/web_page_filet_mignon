@@ -4,9 +4,34 @@ use harvester_engine::llm::{PromptId, PromptRegistry};
 #[test]
 fn registry_with_defaults_has_restart_scope() {
     let registry = PromptRegistry::with_defaults();
-    assert!(registry.active(PromptId::ArticleTriage).is_some());
+    assert_eq!(registry.active(PromptId::ArticleTriage).unwrap().version, 2);
     assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 2);
     assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 2);
+}
+
+#[test]
+fn triage_prompt_v1_still_accessible_by_version() {
+    let registry = PromptRegistry::with_defaults();
+    let template = registry
+        .get(PromptId::ArticleTriage, 1)
+        .expect("v1 prompt should remain registered");
+    assert_eq!(template.version, 1);
+}
+
+#[test]
+fn triage_prompt_v2_user_template_accepts_document_vars() {
+    let registry = PromptRegistry::with_defaults();
+    let template = registry
+        .active(PromptId::ArticleTriage)
+        .expect("v2 should be active");
+    let mut vars = TemplateVars::new();
+    let payload = "Important article content.";
+    vars.set_document("content", payload);
+    let rendered_content = vars.to_map().get("content").unwrap().clone();
+    let rendered = template.user_template.replace("{{content}}", &rendered_content);
+    assert!(rendered.contains("Document:"));
+    assert!(rendered.contains("</document-"));
+    assert!(rendered.contains("Analyze this article and return your triage assessment as JSON."));
 }
 
 #[test]
