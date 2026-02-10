@@ -313,6 +313,17 @@ These items were identified during Phase 0–3 implementation and are relevant a
 - **Cancel active session**: Button that stops dispatching new LLM requests for briefing or triage and transitions to Complete with partial results.
 - **DTO boundary discipline**: Preserve clear DTO boundaries at crate seams with explicit mapping helpers rather than implicit type reuse. Prevents accidental coupling between engine and core types.
 - **Session lifecycle invariant**: Any `AppState` lifecycle transition that invalidates the job set must also reset all derived session state (briefing, triage, future sessions). Enforce via tests.
+- **Triage-informed briefing**: Filter briefing article set by triage priority (e.g., "brief only P4+ articles"). Orchestration ready: run triage first, briefing reads triage results for filtering.
+- **Injection indicator**: Heuristic flags (e.g., "rationale mentions following instructions") shown as UI signals for analysis of triage/summary output quality. Non-blocking indicators, not validation failures.
+- **Category/tag filtering**: UI controls to filter job tree by category or minimum priority threshold. Enable focusing on specific topics (e.g., show only "security" articles).
+- **Tag cloud aggregation**: Aggregate tag counts across all triaged articles, display in panel for overview of content distribution.
+- **Color-coded priority**: Use tree item style overrides to color job rows by priority (red=P5, orange=P4, etc.). Requires CommanDuctUI per-item style support.
+- **Export triage/briefing results**: Write `triage_results.json` and `briefing.md` with provenance metadata alongside replay records for external analysis and archival.
+- **Batch triage+briefing**: Single button that runs triage first, then auto-starts briefing for P3+ articles. Reduces manual orchestration steps.
+- **Content-hash result cache**: Skip re-triage/re-summarization when `(content_hash, prompt_id, prompt_version, model)` matches prior success. Complements existing replay cache by avoiding redundant LLM calls.
+- **Operator controls for sessions**: Pause/resume LLM processing, skip failed articles, retry with adjusted budgets. Advanced session management for long-running briefings.
+- **Replay quality diagnostics**: Distribution of priorities, tag cardinality, validation failure rates, cost/latency percentiles across runs. Structured evaluation metrics for prompt/model tuning.
+- **A/B prompt comparison UI**: Run same articles through multiple prompt versions, display side-by-side results. Prompt registry + replay already support this pattern.
 
 ## Notes for planning and estimation
 - Phases 0–2 are enabling work that reduces long-term iteration cost and risk.
