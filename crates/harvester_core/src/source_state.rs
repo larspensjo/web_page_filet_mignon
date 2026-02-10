@@ -2,36 +2,17 @@ use chrono::{DateTime, Utc};
 use harvester_engine::SourceId;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SourceInstanceState {
     pub last_polled: Option<DateTime<Utc>>,
     pub last_url_count: usize,
     pub last_error: Option<String>,
 }
 
-impl Default for SourceInstanceState {
-    fn default() -> Self {
-        Self {
-            last_polled: None,
-            last_url_count: 0,
-            last_error: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SourceStateIndex {
     states: BTreeMap<SourceId, SourceInstanceState>,
     poll_in_progress: bool,
-}
-
-impl Default for SourceStateIndex {
-    fn default() -> Self {
-        Self {
-            states: BTreeMap::new(),
-            poll_in_progress: false,
-        }
-    }
 }
 
 impl SourceStateIndex {
