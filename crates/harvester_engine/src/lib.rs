@@ -15,6 +15,7 @@ mod path_policy;
 mod persist;
 mod preview;
 mod quota;
+mod source_config;
 mod text_safety;
 mod token;
 mod types;
@@ -37,6 +38,10 @@ pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKi
 pub use path_policy::is_confined_to;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 pub use quota::{QuotaTracker, SessionQuotas};
+pub use source_config::{
+    SourceConfig, SourceId, SourceIdError, SourceRegistry, SourceRegistryValidationError,
+    SourceType,
+};
 pub use text_safety::truncate_to_char_boundary;
 pub use token::{TokenCounter, WhitespaceTokenCounter};
 pub use types::{

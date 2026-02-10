@@ -11,6 +11,7 @@ engine_logging = { path = "../engine_logging" }
 commanductui = { path = "../../src/CommanDuctUI" }
 log.workspace = true
 simplelog.workspace = true
+thiserror.workspace = true
 chrono = { version = "0.4", features = ["clock"] }
 ron = "0.12.0"
 serde = { version = "1", features = ["derive"] }
