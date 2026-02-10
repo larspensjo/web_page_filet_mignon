@@ -7,8 +7,8 @@ use chrono::Utc;
 
 use commanductui::types::{MenuActionId, TreeItemMarkerKind};
 use commanductui::{
-    AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
-    WindowConfig, WindowId,
+    AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface,
+    UiStateProvider, WindowConfig, WindowId,
 };
 use harvester_core::{
     update, AppState, AppViewModel, Effect, JobResultKind, LinkDownloadState, Msg,
@@ -252,6 +252,11 @@ impl PlatformEventHandler for AppEventHandler {
                 if control_id == ui::constants::BUTTON_BRIEFING =>
             {
                 let _ = self.msg_tx.send(Msg::GenerateBriefingClicked);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_TRIAGE =>
+            {
+                let _ = self.msg_tx.send(Msg::TriageClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_ADD_URL =>

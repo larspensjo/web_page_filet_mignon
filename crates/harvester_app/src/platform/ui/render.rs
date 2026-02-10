@@ -30,7 +30,9 @@ pub struct TreeRenderState {
     prev_stop_enabled: Option<bool>,
     prev_archive_enabled: Option<bool>,
     prev_briefing_enabled: Option<bool>,
+    prev_triage_enabled: Option<bool>,
     prev_briefing_progress: Option<String>,
+    prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
     prev_progress_pos: Option<u32>,
 }
@@ -51,7 +53,9 @@ impl Default for TreeRenderState {
             prev_stop_enabled: None,
             prev_archive_enabled: None,
             prev_briefing_enabled: None,
+            prev_triage_enabled: None,
             prev_briefing_progress: None,
+            prev_triage_progress: None,
             prev_progress_range: None,
             prev_progress_pos: None,
         }
@@ -168,12 +172,14 @@ pub fn render(
         tree_state.prev_input_panel_visible = view.input_panel_visible;
     }
 
-    let briefing_progress = view.briefing_progress.as_deref();
-    let status_text = if let Some(progress) = briefing_progress {
-        format!("{} | {}", status_base_text, progress)
-    } else {
-        status_base_text.clone()
-    };
+    let mut status_parts = vec![status_base_text.clone()];
+    if let Some(progress) = view.briefing_progress.as_deref() {
+        status_parts.push(progress.to_string());
+    }
+    if let Some(progress) = view.triage_progress.as_deref() {
+        status_parts.push(progress.to_string());
+    }
+    let status_text = status_parts.join(" | ");
 
     let status_changed = match tree_state.prev_status_text.as_deref() {
         Some(prev) => prev != status_text.as_str(),
@@ -190,6 +196,7 @@ pub fn render(
         tree_state.prev_status_text = Some(updated_text);
     }
     tree_state.prev_briefing_progress = view.briefing_progress.clone();
+    tree_state.prev_triage_progress = view.triage_progress.clone();
 
     let range = (0, bar_max as u32);
     if tree_state.prev_progress_range != Some(range) {
@@ -251,6 +258,16 @@ pub fn render(
             enabled: briefing_enabled,
         });
         tree_state.prev_briefing_enabled = Some(briefing_enabled);
+    }
+
+    let triage_enabled = view.triage_can_start;
+    if tree_state.prev_triage_enabled != Some(triage_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_TRIAGE,
+            enabled: triage_enabled,
+        });
+        tree_state.prev_triage_enabled = Some(triage_enabled);
     }
 
     let job_items = build_job_tree(view);
@@ -418,19 +435,33 @@ fn format_job_row(job: &JobRowView) -> String {
         (None, Some(b)) => b,
         _ => String::new(),
     };
+    let annotation = job.triage_annotation.as_ref().map(|annotation| {
+        let mut prefix = format!("P{} [{}]", annotation.priority, annotation.category);
+        if !annotation.tags.is_empty() {
+            let tags = annotation.tags.join(", ");
+            prefix.push_str(&format!(" ({tags})"));
+        }
+        prefix.push_str(" — ");
+        prefix
+    });
+    let annotated_url = if let Some(prefix) = annotation {
+        format!("{prefix}{}", job.url)
+    } else {
+        job.url.clone()
+    };
     if metrics.is_empty() {
         format!(
-            "[#{id}] {status} — {url}",
+            "[#{id}] {status} — {annotated_url}",
             id = job.job_id,
             status = status,
-            url = job.url
+            annotated_url = annotated_url
         )
     } else {
         format!(
-            "[#{id}] {status} — {url} ({metrics})",
+            "[#{id}] {status} — {annotated_url} ({metrics})",
             id = job.job_id,
             status = status,
-            url = job.url,
+            annotated_url = annotated_url,
             metrics = metrics
         )
     }

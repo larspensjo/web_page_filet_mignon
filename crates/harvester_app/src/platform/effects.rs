@@ -289,10 +289,7 @@ impl EffectRunner {
                                     content_hash: article.content_hash,
                                 })
                                 .collect();
-                            engine_info!(
-                                "[triage-loader] prepared {} article(s)",
-                                articles.len()
-                            );
+                            engine_info!("[triage-loader] prepared {} article(s)", articles.len());
                             let _ = msg_tx.send(Msg::TriageArticlesLoaded { articles });
                         }
                         Err(reason) => {
@@ -363,10 +360,10 @@ impl EffectRunner {
                         }
                     }
                     Err(_) => break,
-                    }
-                });
-            }
+                }
+            });
         }
+    }
 }
 
 impl EffectRunner {
