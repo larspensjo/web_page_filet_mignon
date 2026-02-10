@@ -2,7 +2,7 @@ use engine_logging::{engine_info, engine_warn};
 
 use crate::{
     briefing::{ArticleSummaryResult, BriefingResult, BriefingSession, BriefingThemeResult},
-    calc_left_width, normalize_url_for_dedupe,
+    calc_left_width,
     triage::{ArticleTriageResult, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
@@ -27,57 +27,23 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::UrlsSubmitted => {
             let raw = state.input_buffer().to_owned();
-            // Phase 0 invariant: when paste handling grows, keep `SessionState::Finishing`
-            // as a strict block (no auto-resume, no new intake) unless gated by a feature flag.
             let urls = parse_urls(&raw);
             if urls.is_empty() {
                 return (state, Vec::new());
             }
-            match state.session() {
-                SessionState::Finishing | SessionState::Finished => {
-                    return (state, Vec::new());
-                }
-                SessionState::Idle | SessionState::Running => {}
-            }
-
-            // Phase 4: deduplicate URLs before enqueuing
-            let mut unique_urls = Vec::new();
-            let mut skipped_count = 0;
-            for url in urls {
-                let normalized = normalize_url_for_dedupe(&url);
-                if state.is_url_seen(&normalized) {
-                    skipped_count += 1;
-                } else {
-                    unique_urls.push(url);
-                }
-            }
-
-            // If all URLs were duplicates, we still update stats but don't enqueue or start
-            if unique_urls.is_empty() {
-                state.set_last_paste_stats(0, skipped_count);
+            if matches!(
+                state.session(),
+                SessionState::Finishing | SessionState::Finished
+            ) {
                 return (state, Vec::new());
             }
 
-            let should_start = state.session() == SessionState::Idle;
-            if should_start {
-                state.start_session();
-            }
-
-            state.set_urls(unique_urls);
-            let enqueued = state.enqueue_jobs_from_ui();
-            let enqueued_count = enqueued.len();
-            state.set_last_paste_stats(enqueued_count, skipped_count);
-            if enqueued_count > 0 {
+            let ingest = state.ingest_urls(urls);
+            state.set_last_paste_stats(ingest.enqueued, ingest.skipped);
+            if ingest.enqueued > 0 {
                 state.clear_input_buffer();
             }
-            let mut effects = Vec::with_capacity(enqueued.len() + usize::from(should_start));
-            if should_start {
-                effects.push(Effect::StartSession);
-            }
-            for (job_id, url) in enqueued {
-                effects.push(Effect::EnqueueUrl { job_id, url });
-            }
-            effects
+            ingest.effects
         }
         Msg::StopFinishClicked => {
             if state.session() == SessionState::Running {

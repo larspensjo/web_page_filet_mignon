@@ -6,6 +6,7 @@ use crate::view_model::{
     AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TriageAnnotationView,
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
+use crate::Effect;
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind, SourceId};
 use std::collections::{BTreeMap, HashSet};
@@ -69,6 +70,12 @@ pub struct AppState {
     briefing: BriefingSession,
     triage: TriageSession,
     source_states: SourceStateIndex,
+}
+
+pub struct IngestResult {
+    pub effects: Vec<Effect>,
+    pub enqueued: usize,
+    pub skipped: usize,
 }
 
 impl Default for AppState {
@@ -521,6 +528,49 @@ impl AppState {
         self.ui.urls.clear();
         self.dirty = true;
         enqueued
+    }
+
+    pub(crate) fn ingest_urls(&mut self, urls: Vec<String>) -> IngestResult {
+        let mut unique = Vec::new();
+        let mut skipped = 0;
+        for url in urls {
+            let normalized = normalize_url_for_dedupe(&url);
+            if self.is_url_seen(&normalized) {
+                skipped += 1;
+            } else {
+                unique.push(url);
+            }
+        }
+
+        if unique.is_empty() {
+            return IngestResult {
+                effects: Vec::new(),
+                enqueued: 0,
+                skipped,
+            };
+        }
+
+        let should_start = self.session() == SessionState::Idle;
+        if should_start {
+            self.start_session();
+        }
+
+        self.set_urls(unique);
+        let enqueued = self.enqueue_jobs_from_ui();
+        let enqueued_count = enqueued.len();
+        let mut effects = Vec::with_capacity(enqueued.len() + usize::from(should_start));
+        if should_start {
+            effects.push(Effect::StartSession);
+        }
+        for (job_id, url) in enqueued {
+            effects.push(Effect::EnqueueUrl { job_id, url });
+        }
+
+        IngestResult {
+            effects,
+            enqueued: enqueued_count,
+            skipped,
+        }
     }
 
     pub(crate) fn apply_progress(
