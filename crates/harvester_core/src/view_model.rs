@@ -3,6 +3,8 @@ use crate::{JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::LinkKind;
 
 pub const TOKEN_LIMIT: u64 = 200_000;
+pub const INPUT_PANEL_FIXED_WIDTH: i32 = 160;
+pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LastPasteStats {
@@ -22,7 +24,7 @@ pub struct PreviewHeaderView {
     pub nav_heavy: bool,
 }
 
-// Default left panel width (PANEL_INPUT + PANEL_JOBS = 320 + 280)
+// Default left panel width (PANEL_INPUT + PANEL_JOBS = 160 + 440)
 pub const DEFAULT_LEFT_PANEL_WIDTH: i32 = 600;
 // Default window width
 pub const DEFAULT_WINDOW_WIDTH: i32 = 960;

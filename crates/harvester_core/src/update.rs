@@ -3,13 +3,14 @@ use engine_logging::{engine_info, engine_warn};
 use crate::{
     briefing::{ArticleSummaryResult, BriefingResult, BriefingSession, BriefingThemeResult},
     calc_left_width, normalize_url_for_dedupe, AppState, Effect, LlmRequestState, LlmResultKind,
-    Msg, SessionState, StopPolicy,
+    Msg, SessionState, StopPolicy, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{validate_briefing, validate_summary};
 
-// Minimum width for the left panels (PANEL_INPUT + PANEL_JOBS)
-const MIN_LEFT_WIDTH: i32 = 200;
+// Left side is split into a fixed-width input panel plus a resizable jobs panel.
+// Minimum width for the left region (PANEL_INPUT + PANEL_JOBS).
+const MIN_LEFT_WIDTH: i32 = INPUT_PANEL_FIXED_WIDTH + MIN_JOBS_PANEL_WIDTH;
 // Minimum width for the preview panel
 const MIN_PREVIEW_WIDTH: i32 = 200;
 // Total width occupied by splitter (width + margins)
@@ -567,5 +568,21 @@ mod tests {
         assert!(effects.is_empty());
         assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
         assert!(state.briefing().briefing_result().is_some());
+    }
+
+    #[test]
+    fn splitter_move_preserves_minimum_jobs_width_with_fixed_input_panel() {
+        init_logging();
+        let state = AppState::new();
+
+        let (state, effects) = update(
+            state,
+            Msg::SplitterMoved {
+                desired_left_width_px: 300,
+            },
+        );
+
+        assert!(effects.is_empty());
+        assert_eq!(state.left_panel_width(), 360);
     }
 }

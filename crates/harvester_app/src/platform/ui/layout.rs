@@ -2,7 +2,7 @@ use commanductui::types::{DockStyle, LabelClass, LayoutRule, SplitterOrientation
 use commanductui::{
     Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
 };
-use harvester_core::TOKEN_LIMIT;
+use harvester_core::{DEFAULT_LEFT_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH, TOKEN_LIMIT};
 
 use super::constants::*;
 
@@ -10,6 +10,7 @@ use super::constants::*;
 pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     let mut commands = Vec::new();
     define_dark_theme_styles(&mut commands);
+    let jobs_panel_initial_width = DEFAULT_LEFT_PANEL_WIDTH - INPUT_PANEL_FIXED_WIDTH;
 
     commands.push(PlatformCommand::CreatePanel {
         window_id,
@@ -197,40 +198,22 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 fixed_size: Some(44),
                 margin: (0, 0, 0, 0),
             },
-            // --- Left Panel Proportional Resizing Strategy ---
-            // PANEL_INPUT and PANEL_JOBS together form the "left panels" region.
-            // Their widths are derived proportionally from a single source of truth:
-            // `left_panel_width` (default 600 = 320 + 280).
-            //
-            // Current fixed sizes represent the default proportions:
-            //   - PANEL_INPUT: ~53.3% (320/600)
-            //   - PANEL_JOBS:  ~46.7% (280/600)
-            //
-            // When a draggable splitter is added, these fixed_size values will be
-            // replaced with computed values based on left_panel_width, maintaining
-            // these proportions. The splitter will adjust the total left_panel_width,
-            // and both panels will resize proportionally each layout pass.
-            //
-            // Single source of truth: only `left_panel_width` is persisted and updated.
-            // Individual panel widths are always derived, never stored separately.
-            // --- End Proportional Resizing Strategy ---
-
             // URL drop box on the left (fixed width)
             LayoutRule {
                 control_id: PANEL_INPUT,
                 parent_control_id: None,
                 dock_style: DockStyle::Left,
                 order: 200,
-                fixed_size: Some(320),
+                fixed_size: Some(INPUT_PANEL_FIXED_WIDTH),
                 margin: (6, 6, 6, 6),
             },
-            // Jobs panel fills the new left column
+            // Jobs panel consumes the remaining width in the left region
             LayoutRule {
                 control_id: PANEL_JOBS,
                 parent_control_id: None,
                 dock_style: DockStyle::Left,
                 order: 300,
-                fixed_size: Some(280),
+                fixed_size: Some(jobs_panel_initial_width),
                 margin: (6, 6, 6, 6),
             },
             // Jobs header label

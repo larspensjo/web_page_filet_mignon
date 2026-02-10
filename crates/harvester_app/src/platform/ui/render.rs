@@ -3,7 +3,7 @@ use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, Window
 use engine_logging::engine_debug;
 use harvester_core::{
     AppViewModel, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView, SessionState,
-    Stage, DEFAULT_LEFT_PANEL_WIDTH,
+    Stage, DEFAULT_LEFT_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH,
 };
 use harvester_engine::LinkKind;
 
@@ -12,10 +12,6 @@ use super::tree_item_ids::{
     job_tree_item_id, link_tree_item_id, links_folder_tree_item_id, links_show_more_tree_item_id,
 };
 use std::collections::HashMap;
-
-// Proportions for left panel subdivision (PANEL_INPUT and PANEL_JOBS)
-// PANEL_INPUT: ~53.3% (320/600), PANEL_JOBS: ~46.7% (280/600)
-const INPUT_PROPORTION: f64 = 320.0 / 600.0;
 
 #[derive(Debug)]
 pub struct TreeRenderState {
@@ -494,11 +490,10 @@ fn normalize_windows_newlines(text: &str) -> String {
 }
 
 /// Builds a DefineLayout command with updated panel widths based on left_panel_width.
-/// PANEL_INPUT and PANEL_JOBS are sized proportionally (53.3% and 46.7% respectively).
+/// PANEL_INPUT keeps a fixed width, while PANEL_JOBS consumes the remaining left-region width.
 fn build_layout_command(window_id: WindowId, left_panel_width: i32) -> PlatformCommand {
-    // Calculate proportional widths for PANEL_INPUT and PANEL_JOBS
-    let input_width = (left_panel_width as f64 * INPUT_PROPORTION).round() as i32;
-    let jobs_width = left_panel_width - input_width;
+    let input_width = INPUT_PANEL_FIXED_WIDTH;
+    let jobs_width = (left_panel_width - input_width).max(0);
 
     PlatformCommand::DefineLayout {
         window_id,
@@ -547,7 +542,7 @@ fn build_layout_command(window_id: WindowId, left_panel_width: i32) -> PlatformC
                 fixed_size: Some(44),
                 margin: (0, 0, 0, 0),
             },
-            // URL drop box on the left (proportional width from left_panel_width)
+            // URL drop box on the left (fixed width)
             LayoutRule {
                 control_id: PANEL_INPUT,
                 parent_control_id: None,
@@ -556,7 +551,7 @@ fn build_layout_command(window_id: WindowId, left_panel_width: i32) -> PlatformC
                 fixed_size: Some(input_width),
                 margin: (6, 6, 6, 6),
             },
-            // Jobs panel (proportional width from left_panel_width)
+            // Jobs panel consumes the remaining width in the left region
             LayoutRule {
                 control_id: PANEL_JOBS,
                 parent_control_id: None,
@@ -904,5 +899,39 @@ mod tests {
             })
             .expect("SetViewerContent emitted");
         assert_eq!(viewer_text, "first\r\nsecond\r\nthird\r\nfourth");
+    }
+
+    #[test]
+    fn splitter_resize_keeps_input_panel_fixed() {
+        init_logging();
+        let window_id = WindowId::new(5);
+        let mut tree_state = TreeRenderState::new();
+        let view = AppViewModel {
+            left_panel_width: 760,
+            ..Default::default()
+        };
+
+        let commands = render(window_id, &view, &mut tree_state);
+        let rules = commands
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::DefineLayout { rules, .. } => Some(rules),
+                _ => None,
+            })
+            .expect("DefineLayout emitted");
+
+        let input_width = rules
+            .iter()
+            .find(|rule| rule.control_id == PANEL_INPUT)
+            .and_then(|rule| rule.fixed_size)
+            .expect("PANEL_INPUT fixed size");
+        let jobs_width = rules
+            .iter()
+            .find(|rule| rule.control_id == PANEL_JOBS)
+            .and_then(|rule| rule.fixed_size)
+            .expect("PANEL_JOBS fixed size");
+
+        assert_eq!(input_width, 160);
+        assert_eq!(jobs_width, 760 - 160);
     }
 }
