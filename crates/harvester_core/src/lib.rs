@@ -2,6 +2,7 @@
 mod briefing;
 mod effect;
 mod msg;
+mod source_state;
 mod state;
 mod triage;
 mod ui_geometry;
@@ -15,6 +16,7 @@ pub use briefing::{
 };
 pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
+pub use source_state::{SourceInstanceState, SourceStateIndex};
 pub use state::{
     normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind,
     LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex, SessionState, Stage,

@@ -1,4 +1,5 @@
 use crate::briefing::BriefingSession;
+use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::triage::TriageSession;
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
@@ -6,7 +7,7 @@ use crate::view_model::{
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind};
+use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind, SourceId};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use url::Url;
@@ -67,6 +68,7 @@ pub struct AppState {
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
     triage: TriageSession,
+    source_states: SourceStateIndex,
 }
 
 impl Default for AppState {
@@ -84,6 +86,7 @@ impl Default for AppState {
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
             triage: TriageSession::default(),
+            source_states: SourceStateIndex::default(),
         }
     }
 }
@@ -211,6 +214,48 @@ impl AppState {
         self.dirty = true;
     }
 
+    #[allow(dead_code)]
+    pub(crate) fn source_states(&self) -> &SourceStateIndex {
+        &self.source_states
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn source_state(&self, id: &SourceId) -> Option<&SourceInstanceState> {
+        self.source_states.source_state(id)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn record_source_poll(&mut self, id: &SourceId, url_count: usize) {
+        self.source_states.record_source_poll(id, url_count);
+        self.dirty = true;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn record_source_error(&mut self, id: &SourceId, error: String) {
+        self.source_states.record_source_error(id, error);
+        self.dirty = true;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn start_poll(&mut self) -> bool {
+        let started = self.source_states.start_poll();
+        if started {
+            self.dirty = true;
+        }
+        started
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn end_poll(&mut self) {
+        self.source_states.end_poll();
+        self.dirty = true;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn is_poll_in_progress(&self) -> bool {
+        self.source_states.is_poll_in_progress()
+    }
+
     fn has_completed_jobs(&self) -> bool {
         self.jobs
             .values()
@@ -320,6 +365,7 @@ impl AppState {
         self.dirty = true;
         self.briefing = BriefingSession::default();
         self.triage = TriageSession::default();
+        self.source_states = SourceStateIndex::default();
     }
 
     pub(crate) fn select_job(&mut self, job_id: JobId) {
