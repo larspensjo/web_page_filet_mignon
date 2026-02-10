@@ -3,6 +3,7 @@ mod briefing;
 mod effect;
 mod msg;
 mod state;
+mod triage;
 mod ui_geometry;
 mod update;
 mod url_age;
@@ -11,6 +12,10 @@ mod view_model;
 pub use briefing::{
     ArticleSummaryResult, BriefingArticle, BriefingArticleId, BriefingPhase, BriefingResult,
     BriefingSession, BriefingThemeResult, LoadedArticle,
+};
+pub use triage::{
+    ArticleTriageResult, ArticleTriageState, TriageArticle, TriageArticleId, TriagePhase,
+    TriageSession,
 };
 pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
