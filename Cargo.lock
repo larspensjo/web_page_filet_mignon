@@ -617,7 +617,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "chardetng",
- "ego-tree",
  "encoding_rs",
  "engine_logging",
  "futures-util",

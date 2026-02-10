@@ -1,4 +1,3 @@
-use ego_tree::NodeRef;
 use scraper::node::Node;
 use scraper::{ElementRef, Html};
 use url::Url;
@@ -44,28 +43,20 @@ impl LinkExtractingConverter {
         let mut ctx = ConversionContext::new(base_url, self.max_links_per_job);
 
         for child in document.root_element().children() {
-            self.visit_node(child, &mut ctx);
+            match child.value() {
+                Node::Text(text) => ctx.append_text(text),
+                Node::Element(_) => {
+                    if let Some(element) = ElementRef::wrap(child) {
+                        self.visit_element(element, &mut ctx);
+                    }
+                }
+                _ => {}
+            }
         }
 
         let (markdown, links) = ctx.into_output();
 
         ConversionOutput { markdown, links }
-    }
-
-    fn visit_node<'a>(&self, node: NodeRef<'a, Node>, ctx: &mut ConversionContext) {
-        match node.value() {
-            Node::Text(text) => ctx.append_text(text),
-            Node::Element(_) => {
-                if let Some(element) = ElementRef::wrap(node) {
-                    self.visit_element(element, ctx);
-                }
-            }
-            _ => {
-                for child in node.children() {
-                    self.visit_node(child, ctx);
-                }
-            }
-        }
     }
 
     fn visit_element(&self, element: ElementRef, ctx: &mut ConversionContext) {
@@ -141,7 +132,15 @@ impl LinkExtractingConverter {
 
     fn visit_children(&self, element: ElementRef, ctx: &mut ConversionContext) {
         for child in element.children() {
-            self.visit_node(child, ctx);
+            match child.value() {
+                Node::Text(text) => ctx.append_text(text),
+                Node::Element(_) => {
+                    if let Some(child_element) = ElementRef::wrap(child) {
+                        self.visit_element(child_element, ctx);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
