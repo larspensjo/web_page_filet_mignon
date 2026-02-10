@@ -1,13 +1,14 @@
-use commanductui::types::{DockStyle, LayoutRule, TreeItemDescriptor, TreeItemId};
+use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
 use engine_logging::engine_debug;
 use harvester_core::{
     AppViewModel, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView, SessionState,
-    Stage, DEFAULT_LEFT_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH,
+    Stage, DEFAULT_LEFT_PANEL_WIDTH,
 };
 use harvester_engine::LinkKind;
 
 use super::constants::*;
+use super::layout::build_layout_command;
 use super::tree_item_ids::{
     job_tree_item_id, link_tree_item_id, links_folder_tree_item_id, links_show_more_tree_item_id,
 };
@@ -487,176 +488,6 @@ fn normalize_windows_newlines(text: &str) -> String {
         }
     }
     normalized
-}
-
-/// Builds a DefineLayout command with updated panel widths based on left_panel_width.
-/// PANEL_INPUT keeps a fixed width, while PANEL_JOBS consumes the remaining left-region width.
-fn build_layout_command(window_id: WindowId, left_panel_width: i32) -> PlatformCommand {
-    let input_width = INPUT_PANEL_FIXED_WIDTH;
-    let jobs_width = (left_panel_width - input_width).max(0);
-
-    PlatformCommand::DefineLayout {
-        window_id,
-        rules: vec![
-            // Progress panel at the top
-            LayoutRule {
-                control_id: PANEL_PROGRESS,
-                parent_control_id: None,
-                dock_style: DockStyle::Top,
-                order: 0,
-                fixed_size: Some(64),
-                margin: (0, 0, 0, 0),
-            },
-            // Progress label and bar inside the panel
-            LayoutRule {
-                control_id: LABEL_TOKEN_PROGRESS,
-                parent_control_id: Some(PANEL_PROGRESS),
-                dock_style: DockStyle::Top,
-                order: 0,
-                fixed_size: Some(22),
-                margin: (8, 8, 4, 8),
-            },
-            LayoutRule {
-                control_id: PROGRESS_TOKENS,
-                parent_control_id: Some(PANEL_PROGRESS),
-                dock_style: DockStyle::Fill,
-                order: 1,
-                fixed_size: None,
-                margin: (0, 8, 8, 8),
-            },
-            // Status bar panel at the very bottom
-            LayoutRule {
-                control_id: PANEL_BOTTOM,
-                parent_control_id: None,
-                dock_style: DockStyle::Bottom,
-                order: 100,
-                fixed_size: Some(32),
-                margin: (0, 0, 0, 0),
-            },
-            // Buttons panel above the status bar
-            LayoutRule {
-                control_id: PANEL_BUTTONS,
-                parent_control_id: None,
-                dock_style: DockStyle::Bottom,
-                order: 110,
-                fixed_size: Some(44),
-                margin: (0, 0, 0, 0),
-            },
-            // URL drop box on the left (fixed width)
-            LayoutRule {
-                control_id: PANEL_INPUT,
-                parent_control_id: None,
-                dock_style: DockStyle::Left,
-                order: 200,
-                fixed_size: Some(input_width),
-                margin: (6, 6, 6, 6),
-            },
-            // Jobs panel consumes the remaining width in the left region
-            LayoutRule {
-                control_id: PANEL_JOBS,
-                parent_control_id: None,
-                dock_style: DockStyle::Left,
-                order: 300,
-                fixed_size: Some(jobs_width),
-                margin: (6, 6, 6, 6),
-            },
-            // Jobs header label
-            LayoutRule {
-                control_id: LABEL_JOBS_HEADER,
-                parent_control_id: Some(PANEL_JOBS),
-                dock_style: DockStyle::Top,
-                order: 0,
-                fixed_size: Some(28),
-                margin: (0, 0, 4, 0),
-            },
-            // Jobs tree fills remaining space in panel
-            LayoutRule {
-                control_id: TREE_JOBS,
-                parent_control_id: Some(PANEL_JOBS),
-                dock_style: DockStyle::Fill,
-                order: 1,
-                fixed_size: None,
-                margin: (0, 0, 0, 0),
-            },
-            // Splitter between left panels and preview
-            LayoutRule {
-                control_id: SPLITTER_MAIN,
-                parent_control_id: None,
-                dock_style: DockStyle::Left,
-                order: 305,
-                fixed_size: Some(4),
-                margin: (6, 0, 6, 0),
-            },
-            LayoutRule {
-                control_id: PANEL_PREVIEW,
-                parent_control_id: None,
-                dock_style: DockStyle::Fill,
-                order: 310,
-                fixed_size: None,
-                margin: (6, 6, 6, 6),
-            },
-            LayoutRule {
-                control_id: LABEL_PREVIEW_HEADER,
-                parent_control_id: Some(PANEL_PREVIEW),
-                dock_style: DockStyle::Top,
-                order: 0,
-                fixed_size: Some(28),
-                margin: (6, 6, 4, 0),
-            },
-            LayoutRule {
-                control_id: VIEWER_PREVIEW,
-                parent_control_id: Some(PANEL_PREVIEW),
-                dock_style: DockStyle::Fill,
-                order: 1,
-                fixed_size: None,
-                margin: (0, 0, 0, 0),
-            },
-            // Input hint label above the text box
-            LayoutRule {
-                control_id: LABEL_INPUT_HINT,
-                parent_control_id: Some(PANEL_INPUT),
-                dock_style: DockStyle::Top,
-                order: 0,
-                fixed_size: Some(28),
-                margin: (0, 0, 4, 0),
-            },
-            // URL input fills remaining space
-            LayoutRule {
-                control_id: INPUT_URLS,
-                parent_control_id: Some(PANEL_INPUT),
-                dock_style: DockStyle::Fill,
-                order: 1,
-                fixed_size: None,
-                margin: (0, 0, 0, 0),
-            },
-            // Status label fills the panel
-            LayoutRule {
-                control_id: LABEL_STATUS,
-                parent_control_id: Some(PANEL_BOTTOM),
-                dock_style: DockStyle::Fill,
-                order: 0,
-                fixed_size: None,
-                margin: (6, 6, 6, 6),
-            },
-            // Buttons placed horizontally with fixed width
-            LayoutRule {
-                control_id: BUTTON_ARCHIVE,
-                parent_control_id: Some(PANEL_BUTTONS),
-                dock_style: DockStyle::Left,
-                order: 0,
-                fixed_size: Some(160),
-                margin: (6, 6, 6, 6),
-            },
-            LayoutRule {
-                control_id: BUTTON_STOP,
-                parent_control_id: Some(PANEL_BUTTONS),
-                dock_style: DockStyle::Left,
-                order: 1,
-                fixed_size: Some(160),
-                margin: (6, 6, 6, 0),
-            },
-        ],
-    }
 }
 
 #[cfg(test)]
