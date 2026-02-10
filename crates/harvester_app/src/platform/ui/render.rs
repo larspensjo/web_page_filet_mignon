@@ -31,6 +31,7 @@ pub struct TreeRenderState {
     prev_archive_enabled: Option<bool>,
     prev_briefing_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
+    prev_poll_enabled: Option<bool>,
     prev_briefing_progress: Option<String>,
     prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
@@ -54,6 +55,7 @@ impl Default for TreeRenderState {
             prev_archive_enabled: None,
             prev_briefing_enabled: None,
             prev_triage_enabled: None,
+            prev_poll_enabled: None,
             prev_briefing_progress: None,
             prev_triage_progress: None,
             prev_progress_range: None,
@@ -268,6 +270,16 @@ pub fn render(
             enabled: triage_enabled,
         });
         tree_state.prev_triage_enabled = Some(triage_enabled);
+    }
+
+    let poll_enabled = view.poll_sources_enabled;
+    if tree_state.prev_poll_enabled != Some(poll_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_POLL_SOURCES,
+            enabled: poll_enabled,
+        });
+        tree_state.prev_poll_enabled = Some(poll_enabled);
     }
 
     let job_items = build_job_tree(view);

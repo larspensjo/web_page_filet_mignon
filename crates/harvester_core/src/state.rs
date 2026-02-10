@@ -165,6 +165,10 @@ impl AppState {
             briefing_preview,
             triage_can_start: self.triage.can_start() && self.has_completed_jobs(),
             triage_progress: self.triage.progress_text(),
+            poll_sources_enabled: matches!(
+                self.session,
+                SessionState::Idle | SessionState::Running
+            ) && !self.source_states.is_poll_in_progress(),
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),

@@ -171,6 +171,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BUTTON_TRIAGE,
         text: "Triage Articles".to_string(),
     });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_BUTTONS),
+        control_id: BUTTON_POLL_SOURCES,
+        text: "Poll Sources".to_string(),
+    });
 
     commands.push(PlatformCommand::CreateLabel {
         window_id,
@@ -562,6 +568,14 @@ fn build_layout_rules(left_panel_width: i32, input_panel_visible: bool) -> Vec<L
             fixed_size: Some(160),
             margin: (6, 6, 6, 0),
         },
+        LayoutRule {
+            control_id: BUTTON_POLL_SOURCES,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 5,
+            fixed_size: Some(160),
+            margin: (6, 6, 6, 0),
+        },
     ]
 }
 
@@ -646,6 +660,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_TRIAGE,
+        style_id: StyleId::DefaultButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_POLL_SOURCES,
         style_id: StyleId::DefaultButton,
     });
 

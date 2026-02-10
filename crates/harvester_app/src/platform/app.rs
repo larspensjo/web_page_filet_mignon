@@ -259,6 +259,11 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::TriageClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_POLL_SOURCES =>
+            {
+                let _ = self.msg_tx.send(Msg::PollSourcesClicked);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_ADD_URL =>
             {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);

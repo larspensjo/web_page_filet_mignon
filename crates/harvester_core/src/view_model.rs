@@ -47,6 +47,7 @@ pub struct AppViewModel {
     pub briefing_preview: Option<String>,
     pub triage_can_start: bool,
     pub triage_progress: Option<String>,
+    pub poll_sources_enabled: bool,
     /// Width of the left panels region (PANEL_INPUT + PANEL_JOBS).
     pub left_panel_width: i32,
     /// Whether the dropbox/input panel is currently visible.
@@ -73,6 +74,7 @@ impl Default for AppViewModel {
             briefing_preview: None,
             triage_can_start: false,
             triage_progress: None,
+            poll_sources_enabled: false,
             left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
             input_panel_visible: false,
             window_width: DEFAULT_WINDOW_WIDTH,
