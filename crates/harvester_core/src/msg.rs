@@ -91,9 +91,7 @@ pub enum Msg {
     /// Loader failed.
     ArticlesLoadFailed { reason: String },
     /// Triage-specific articles prepared by the loader.
-    TriageArticlesLoaded {
-        articles: Vec<LoadedArticle>,
-    },
+    TriageArticlesLoaded { articles: Vec<LoadedArticle> },
     /// Loader failed for triage.
     TriageArticlesLoadFailed { reason: String },
 }

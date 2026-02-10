@@ -76,7 +76,10 @@ impl TriageSession {
     }
 
     pub fn is_active(&self) -> bool {
-        matches!(self.phase, TriagePhase::LoadingArticles | TriagePhase::Triaging { .. })
+        matches!(
+            self.phase,
+            TriagePhase::LoadingArticles | TriagePhase::Triaging { .. }
+        )
     }
 
     pub fn articles(&self) -> &[TriageArticle] {
@@ -155,10 +158,12 @@ impl TriageSession {
     }
 
     pub fn find_article_by_request_id(&self, request_id: u64) -> Option<TriageArticleId> {
-        self.articles.iter().position(|article| match &article.triage_state {
-            ArticleTriageState::InProgress { request_id: id } => *id == request_id,
-            _ => false,
-        })
+        self.articles
+            .iter()
+            .position(|article| match &article.triage_state {
+                ArticleTriageState::InProgress { request_id: id } => *id == request_id,
+                _ => false,
+            })
     }
 
     pub fn fail_all_pending(&mut self, reason: &str) {
@@ -192,10 +197,12 @@ impl TriageSession {
     }
 
     pub fn result_for_url(&self, url: &str) -> Option<&ArticleTriageResult> {
-        self.articles.iter().find_map(|article| match &article.triage_state {
-            ArticleTriageState::Completed { result } if article.url == url => Some(result),
-            _ => None,
-        })
+        self.articles
+            .iter()
+            .find_map(|article| match &article.triage_state {
+                ArticleTriageState::Completed { result } if article.url == url => Some(result),
+                _ => None,
+            })
     }
 
     pub fn sorted_results(&self) -> Vec<&ArticleTriageResult> {
@@ -256,7 +263,9 @@ mod tests {
         session.transition_to_triaging();
         session.start_article(0, 123);
         if let TriagePhase::Triaging {
-            current_index, total, ..
+            current_index,
+            total,
+            ..
         } = session.phase()
         {
             assert_eq!(*current_index, 1);

@@ -1,8 +1,9 @@
 use crate::briefing::BriefingSession;
+use crate::triage::TriageSession;
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
-    AppViewModel, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, JobRowView, LastPasteStats,
-    LinkRowView, PreviewHeaderView, TOKEN_LIMIT,
+    AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TriageAnnotationView,
+    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind};
@@ -65,6 +66,7 @@ pub struct AppState {
     next_llm_request_id: u64,
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
+    triage: TriageSession,
 }
 
 impl Default for AppState {
@@ -81,6 +83,7 @@ impl Default for AppState {
             next_llm_request_id: 1,
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
+            triage: TriageSession::default(),
         }
     }
 }
@@ -91,7 +94,30 @@ impl AppState {
     }
 
     pub fn view(&self) -> AppViewModel {
-        let jobs: Vec<JobRowView> = self.jobs.iter().map(|(id, job)| job.to_view(*id)).collect();
+        let mut jobs: Vec<JobRowView> =
+            self.jobs.iter().map(|(id, job)| job.to_view(*id)).collect();
+        for job_view in &mut jobs {
+            if let Some(result) = self.triage.result_for_url(&job_view.url) {
+                job_view.triage_annotation = Some(TriageAnnotationView {
+                    priority: result.priority,
+                    category: result.category.clone(),
+                    tags: result.tags.clone(),
+                });
+            }
+        }
+        jobs.sort_by(|a, b| {
+            let p_a = a
+                .triage_annotation
+                .as_ref()
+                .map(|t| t.priority)
+                .unwrap_or(0);
+            let p_b = b
+                .triage_annotation
+                .as_ref()
+                .map(|t| t.priority)
+                .unwrap_or(0);
+            p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
+        });
         let briefing_preview = self.briefing.format_preview();
         let preview_text = briefing_preview
             .clone()
@@ -127,8 +153,8 @@ impl AppState {
             briefing_can_start: self.briefing.can_start(),
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
-            triage_can_start: false,
-            triage_progress: None,
+            triage_can_start: self.triage.can_start() && self.has_completed_jobs(),
+            triage_progress: self.triage.progress_text(),
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),
@@ -170,6 +196,25 @@ impl AppState {
     pub(crate) fn set_briefing(&mut self, briefing: BriefingSession) {
         self.briefing = briefing;
         self.dirty = true;
+    }
+
+    pub(crate) fn triage(&self) -> &TriageSession {
+        &self.triage
+    }
+
+    pub(crate) fn triage_mut(&mut self) -> &mut TriageSession {
+        &mut self.triage
+    }
+
+    pub(crate) fn set_triage(&mut self, triage: TriageSession) {
+        self.triage = triage;
+        self.dirty = true;
+    }
+
+    fn has_completed_jobs(&self) -> bool {
+        self.jobs
+            .values()
+            .any(|job| matches!(job.stage, Stage::Done))
     }
 
     /// Returns the current dirty flag and clears it in one step.
@@ -273,6 +318,8 @@ impl AppState {
         self.metrics.total_urls = self.jobs.len();
         self.session = SessionState::Idle;
         self.dirty = true;
+        self.briefing = BriefingSession::default();
+        self.triage = TriageSession::default();
     }
 
     pub(crate) fn select_job(&mut self, job_id: JobId) {

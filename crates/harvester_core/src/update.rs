@@ -2,11 +2,13 @@ use engine_logging::{engine_info, engine_warn};
 
 use crate::{
     briefing::{ArticleSummaryResult, BriefingResult, BriefingSession, BriefingThemeResult},
-    calc_left_width, normalize_url_for_dedupe, AppState, Effect, LlmRequestState, LlmResultKind,
-    Msg, SessionState, StopPolicy, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
+    calc_left_width, normalize_url_for_dedupe,
+    triage::{ArticleTriageResult, TriageSession},
+    AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
+    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::{validate_briefing, validate_summary};
+use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage};
 
 // Left side is split into a fixed-width input panel plus a resizable jobs panel.
 // Minimum width for the left region (PANEL_INPUT + PANEL_JOBS).
@@ -312,6 +314,43 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     }
                 }
                 dispatch_next_briefing_step(&mut state, &mut effects);
+            } else if let Some(article_idx) = state.triage().find_article_by_request_id(request_id)
+            {
+                match &result {
+                    LlmResultKind::Success {
+                        output_json,
+                        input_tokens,
+                        output_tokens,
+                    } => match validate_triage(output_json) {
+                        Ok(triage) => {
+                            state.triage_mut().complete_article(
+                                article_idx,
+                                ArticleTriageResult {
+                                    category: triage.category,
+                                    priority: triage.priority.value(),
+                                    tags: triage.tags,
+                                    rationale: triage.rationale,
+                                    input_tokens: *input_tokens,
+                                    output_tokens: *output_tokens,
+                                },
+                            );
+                        }
+                        Err(err) => {
+                            state
+                                .triage_mut()
+                                .fail_article(article_idx, format!("validation: {err}"));
+                        }
+                    },
+                    LlmResultKind::QuotaExhausted { reason } => {
+                        state.triage_mut().fail_article(article_idx, reason.clone());
+                        state.triage_mut().fail_all_pending("quota exhausted");
+                    }
+                    LlmResultKind::ValidationFailed { reason, .. }
+                    | LlmResultKind::Failed { reason } => {
+                        state.triage_mut().fail_article(article_idx, reason.clone());
+                    }
+                }
+                dispatch_next_triage_step(&mut state, &mut effects);
             } else if state.briefing().is_briefing_request(request_id) {
                 match &result {
                     LlmResultKind::Success {
@@ -380,9 +419,34 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
-        Msg::TriageClicked => Vec::new(),
-        Msg::TriageArticlesLoaded { .. } => Vec::new(),
-        Msg::TriageArticlesLoadFailed { .. } => Vec::new(),
+        Msg::TriageClicked => {
+            if !state.triage().can_start() {
+                return (state, Vec::new());
+            }
+            state.set_triage(TriageSession::new_loading(None));
+            engine_info!("[triage] triage requested");
+            vec![Effect::LoadArticlesForTriage]
+        }
+        Msg::TriageArticlesLoaded { articles } => {
+            if articles.is_empty() {
+                state
+                    .triage_mut()
+                    .fail("no completed articles found".to_string());
+                state.mark_dirty();
+                return (state, Vec::new());
+            }
+            state.triage_mut().set_articles(articles);
+            state.triage_mut().transition_to_triaging();
+            state.mark_dirty();
+            let mut effects = Vec::new();
+            dispatch_next_triage_step(&mut state, &mut effects);
+            effects
+        }
+        Msg::TriageArticlesLoadFailed { reason } => {
+            state.triage_mut().fail(reason);
+            state.mark_dirty();
+            Vec::new()
+        }
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 
@@ -395,6 +459,32 @@ fn parse_urls(raw: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
+    if let Some(next_idx) = state.triage().next_pending_index() {
+        let prepared_text = state.triage().articles()[next_idx].prepared_text.clone();
+        let request_id = state.allocate_next_llm_request_id();
+        state.record_pending_llm_request(request_id, PromptId::ArticleTriage);
+        state.triage_mut().start_article(next_idx, request_id);
+        effects.push(Effect::RequestLlmCompletion {
+            request_id,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: None,
+            input_content: prepared_text,
+            context: Vec::new(),
+        });
+        state.mark_dirty();
+        return;
+    }
+    if state.triage().completed_count() == 0 {
+        state
+            .triage_mut()
+            .fail("all triage attempts failed".to_string());
+    } else {
+        state.triage_mut().complete();
+    }
+    state.mark_dirty();
 }
 
 fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
