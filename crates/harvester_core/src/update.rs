@@ -403,12 +403,36 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
-        Msg::Tick
-        | Msg::NoOp
-        | Msg::PollSourcesClicked
-        | Msg::SourcePollCompleted { .. }
-        | Msg::SourcePollFailed { .. }
-        | Msg::AllSourcesPollEnded => Vec::new(),
+        Msg::PollSourcesClicked => {
+            if matches!(
+                state.session(),
+                SessionState::Finishing | SessionState::Finished
+            ) || state.is_poll_in_progress()
+            {
+                Vec::new()
+            } else if state.start_poll() {
+                engine_info!("[source-poll] polling requested");
+                vec![Effect::PollAllSources]
+            } else {
+                Vec::new()
+            }
+        }
+        Msg::SourcePollCompleted { source_id, urls } => {
+            engine_info!("[source-poll] {} returned {} urls", source_id, urls.len());
+            state.record_source_poll(&source_id, urls.len());
+            let ingest = state.ingest_urls(urls);
+            ingest.effects
+        }
+        Msg::SourcePollFailed { source_id, error } => {
+            engine_warn!("[source-poll] {} failed: {}", source_id, error);
+            state.record_source_error(&source_id, error);
+            Vec::new()
+        }
+        Msg::AllSourcesPollEnded => {
+            state.end_poll();
+            Vec::new()
+        }
+        Msg::Tick | Msg::NoOp => Vec::new(),
     };
 
     (state, effects)

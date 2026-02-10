@@ -1,3 +1,4 @@
+use super::source_loader;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -15,9 +16,10 @@ use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
-    load_and_prepare_articles, load_and_prepare_articles_for_triage, AtomicFileWriter, Converter,
-    DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor, FetchSettings,
-    LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy, WhitespaceTokenCounter,
+    load_and_prepare_articles, load_and_prepare_articles_for_triage, poll_curated_source,
+    poll_file_source, AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent,
+    EngineHandle, Extractor, FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor,
+    SourceType, UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
@@ -300,7 +302,66 @@ impl EffectRunner {
                 });
             }
             Effect::PollAllSources => {
-                engine_warn!("PollAllSources effect not yet implemented");
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.output_dir.clone();
+                thread::spawn(move || {
+                    let config_path = source_loader::default_source_config_path();
+                    engine_info!("[source-config] loading {}", config_path.display());
+                    let registry = source_loader::load_source_registry(&config_path);
+                    let config_dir = config_path
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .to_path_buf();
+                    let allowed_dirs = vec![config_dir.clone(), output_dir.clone()];
+                    for config in registry.sources.into_iter().filter(|s| s.enabled) {
+                        let source_id = config.id.clone();
+                        match config.source_type {
+                            SourceType::File { path } => match poll_file_source(
+                                source_id.clone(),
+                                &path,
+                                &config_dir,
+                                &allowed_dirs,
+                                config.max_urls_per_poll,
+                            ) {
+                                Ok(result) => {
+                                    let _ = msg_tx.send(Msg::SourcePollCompleted {
+                                        source_id: source_id.clone(),
+                                        urls: result.urls,
+                                    });
+                                }
+                                Err(err) => {
+                                    engine_warn!("[source-poll] {} failed: {}", source_id, err);
+                                    let _ = msg_tx.send(Msg::SourcePollFailed {
+                                        source_id: source_id.clone(),
+                                        error: err.to_string(),
+                                    });
+                                }
+                            },
+                            SourceType::CuratedList { urls } => {
+                                let result = poll_curated_source(
+                                    source_id.clone(),
+                                    &urls,
+                                    config.max_urls_per_poll,
+                                );
+                                let _ = msg_tx.send(Msg::SourcePollCompleted {
+                                    source_id: source_id.clone(),
+                                    urls: result.urls,
+                                });
+                            }
+                            SourceType::Script { .. } => {
+                                engine_warn!(
+                                    "[source-poll] scripts not supported yet for {}",
+                                    source_id
+                                );
+                                let _ = msg_tx.send(Msg::SourcePollFailed {
+                                    source_id: source_id.clone(),
+                                    error: "script sources not implemented".to_string(),
+                                });
+                            }
+                        }
+                    }
+                    let _ = msg_tx.send(Msg::AllSourcesPollEnded);
+                });
             }
         }
     }
