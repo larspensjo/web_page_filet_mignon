@@ -193,15 +193,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::SplitterMoved {
             desired_left_width_px,
         } => {
-            let min_left = if state.input_panel_visible() {
-                MIN_LEFT_WIDTH
-            } else {
-                MIN_JOBS_PANEL_WIDTH
-            };
             let clamped = calc_left_width(
                 desired_left_width_px,
                 state.window_width(),
-                min_left,
+                MIN_LEFT_WIDTH,
                 MIN_PREVIEW_WIDTH,
                 SPLITTER_TOTAL_WIDTH,
             );
@@ -212,15 +207,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::WindowResized { window_width } => {
             state.set_window_width(window_width);
             // Re-clamp the left panel width based on new window width
-            let min_left = if state.input_panel_visible() {
-                MIN_LEFT_WIDTH
-            } else {
-                MIN_JOBS_PANEL_WIDTH
-            };
             let clamped = calc_left_width(
                 state.left_panel_width(),
                 window_width,
-                min_left,
+                MIN_LEFT_WIDTH,
                 MIN_PREVIEW_WIDTH,
                 SPLITTER_TOTAL_WIDTH,
             );

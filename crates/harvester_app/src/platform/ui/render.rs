@@ -783,6 +783,7 @@ mod tests {
         let mut tree_state = TreeRenderState::new();
         let view = AppViewModel {
             left_panel_width: 760,
+            input_panel_visible: true,
             ..Default::default()
         };
 
