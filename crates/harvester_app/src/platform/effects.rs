@@ -299,6 +299,9 @@ impl EffectRunner {
                     }
                 });
             }
+            Effect::PollAllSources => {
+                engine_warn!("PollAllSources effect not yet implemented");
+            }
         }
     }
 

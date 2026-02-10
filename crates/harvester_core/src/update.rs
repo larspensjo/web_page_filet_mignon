@@ -403,7 +403,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
-        Msg::Tick | Msg::NoOp => Vec::new(),
+        Msg::Tick
+        | Msg::NoOp
+        | Msg::PollSourcesClicked
+        | Msg::SourcePollCompleted { .. }
+        | Msg::SourcePollFailed { .. }
+        | Msg::AllSourcesPollEnded => Vec::new(),
     };
 
     (state, effects)

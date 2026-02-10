@@ -83,6 +83,20 @@ pub enum Msg {
     GenerateBriefingClicked,
     /// User requested triage.
     TriageClicked,
+    /// User requested polling all configured sources.
+    PollSourcesClicked,
+    /// Polling completed for a source.
+    SourcePollCompleted {
+        source_id: harvester_engine::SourceId,
+        urls: Vec<String>,
+    },
+    /// Polling failed for a source.
+    SourcePollFailed {
+        source_id: harvester_engine::SourceId,
+        error: String,
+    },
+    /// All configured sources finished polling.
+    AllSourcesPollEnded,
     /// Articles prepared by the loader.
     ArticlesLoaded {
         articles: Vec<LoadedArticle>,
