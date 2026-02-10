@@ -15,9 +15,9 @@ use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
-    load_and_prepare_articles, AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent,
-    EngineHandle, Extractor, FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor,
-    UrlPolicy, WhitespaceTokenCounter,
+    load_and_prepare_articles, load_and_prepare_articles_for_triage, AtomicFileWriter, Converter,
+    DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor, FetchSettings,
+    LinkExtractingConverter, ReadabilityLikeExtractor, UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::CONTENT_TYPE;
@@ -269,7 +269,38 @@ impl EffectRunner {
                 });
             }
             Effect::LoadArticlesForTriage => {
-                engine_warn!("[triage-loader] TODO: effect not implemented yet");
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.output_dir.clone();
+                let max_input_bytes = self.llm_max_input_chars.unwrap_or(100_000);
+                let registry = self.prompt_registry.clone();
+                thread::spawn(move || {
+                    match load_and_prepare_articles_for_triage(
+                        &output_dir,
+                        max_input_bytes,
+                        &registry,
+                    ) {
+                        Ok(engine_articles) => {
+                            let articles: Vec<LoadedArticle> = engine_articles
+                                .into_iter()
+                                .map(|article| LoadedArticle {
+                                    url: article.url,
+                                    source_title: article.source_title,
+                                    prepared_text: article.prepared_text,
+                                    content_hash: article.content_hash,
+                                })
+                                .collect();
+                            engine_info!(
+                                "[triage-loader] prepared {} article(s)",
+                                articles.len()
+                            );
+                            let _ = msg_tx.send(Msg::TriageArticlesLoaded { articles });
+                        }
+                        Err(reason) => {
+                            engine_warn!("[triage-loader] failed: {}", reason);
+                            let _ = msg_tx.send(Msg::TriageArticlesLoadFailed { reason });
+                        }
+                    }
+                });
             }
         }
     }
@@ -332,10 +363,10 @@ impl EffectRunner {
                         }
                     }
                     Err(_) => break,
-                }
-            });
+                    }
+                });
+            }
         }
-    }
 }
 
 impl EffectRunner {
