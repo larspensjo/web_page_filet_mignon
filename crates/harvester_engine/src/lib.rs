@@ -16,6 +16,7 @@ mod persist;
 mod preview;
 mod quota;
 mod source_config;
+mod source_poll;
 mod text_safety;
 mod token;
 mod types;
@@ -41,6 +42,10 @@ pub use quota::{QuotaTracker, SessionQuotas};
 pub use source_config::{
     SourceConfig, SourceId, SourceIdError, SourceRegistry, SourceRegistryValidationError,
     SourceType,
+};
+pub use source_poll::{
+    poll_curated_source, poll_file_source, validate_source_file_path, SourcePollError,
+    SourcePollResult,
 };
 pub use text_safety::truncate_to_char_boundary;
 pub use token::{TokenCounter, WhitespaceTokenCounter};

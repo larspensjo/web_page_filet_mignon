@@ -185,7 +185,7 @@ Users can immediately save time by reading briefings instead of raw articles.
 ### Implementation note
 Implemented as 10 parts (LLM bootstrap wiring, frontmatter parsing, improved prompt templates, BriefingSession state machine, Msg/Effect extensions, reducer orchestration, article loading pipeline, replay cache with same-process updates, UI integration, integration testing). See `Plan.Phase4.TriageRanking.md` for the next phase.
 
-## Phase 4 — AI ranking and filtering presented as a deterministic UI list
+## Phase 4 — AI ranking and filtering presented as a deterministic UI list [COMPLETE]
 ### Purpose
 Summaries help reading; ranking helps deciding what to read first.
 We add AI-assisted prioritization without making the system autonomous.
