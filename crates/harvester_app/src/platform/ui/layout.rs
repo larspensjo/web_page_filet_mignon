@@ -1,15 +1,33 @@
-use commanductui::types::{DockStyle, LabelClass, LayoutRule, SplitterOrientation};
+use commanductui::types::{
+    DockStyle, LabelClass, LayoutRule, MenuActionId, MenuItemConfig, SplitterOrientation,
+};
 use commanductui::{
     Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
 };
-use harvester_core::{DEFAULT_LEFT_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH, TOKEN_LIMIT};
+use harvester_core::{DEFAULT_JOBS_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH, TOKEN_LIMIT};
 
 use super::constants::*;
+
+const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
 
 #[allow(clippy::vec_init_then_push)]
 pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     let mut commands = Vec::new();
     define_dark_theme_styles(&mut commands);
+    let initial_left_width = DEFAULT_JOBS_PANEL_WIDTH;
+
+    commands.push(PlatformCommand::CreateMainMenu {
+        window_id,
+        menu_items: vec![MenuItemConfig {
+            action: None,
+            text: "File".to_string(),
+            children: vec![MenuItemConfig {
+                action: Some(MENU_ACTION_ADD_URL),
+                text: "Add URL\tCtrl+L".to_string(),
+                children: Vec::new(),
+            }],
+        }],
+    });
 
     commands.push(PlatformCommand::CreatePanel {
         window_id,
@@ -136,6 +154,13 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_BUTTONS),
+        control_id: BUTTON_ADD_URL,
+        text: "Add URL".to_string(),
+    });
+
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_BRIEFING,
         text: "Generate Briefing".to_string(),
     });
@@ -150,177 +175,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
 
     apply_dark_theme(window_id, &mut commands);
 
-    commands.push(build_layout_command(window_id, DEFAULT_LEFT_PANEL_WIDTH));
+    commands.push(build_layout_command(window_id, initial_left_width, false));
 
     commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
     commands.push(PlatformCommand::ShowWindow { window_id });
 
     commands
-}
-
-pub(crate) fn build_layout_command(window_id: WindowId, left_panel_width: i32) -> PlatformCommand {
-    PlatformCommand::DefineLayout {
-        window_id,
-        rules: build_layout_rules(left_panel_width),
-    }
-}
-
-fn build_layout_rules(left_panel_width: i32) -> Vec<LayoutRule> {
-    let jobs_width = (left_panel_width - INPUT_PANEL_FIXED_WIDTH).max(0);
-    vec![
-        LayoutRule {
-            control_id: PANEL_PROGRESS,
-            parent_control_id: None,
-            dock_style: DockStyle::Top,
-            order: 0,
-            fixed_size: Some(64),
-            margin: (0, 0, 0, 0),
-        },
-        LayoutRule {
-            control_id: LABEL_TOKEN_PROGRESS,
-            parent_control_id: Some(PANEL_PROGRESS),
-            dock_style: DockStyle::Top,
-            order: 0,
-            fixed_size: Some(22),
-            margin: (8, 8, 4, 8),
-        },
-        LayoutRule {
-            control_id: PROGRESS_TOKENS,
-            parent_control_id: Some(PANEL_PROGRESS),
-            dock_style: DockStyle::Fill,
-            order: 1,
-            fixed_size: None,
-            margin: (0, 8, 8, 8),
-        },
-        LayoutRule {
-            control_id: PANEL_BOTTOM,
-            parent_control_id: None,
-            dock_style: DockStyle::Bottom,
-            order: 100,
-            fixed_size: Some(32),
-            margin: (0, 0, 0, 0),
-        },
-        LayoutRule {
-            control_id: PANEL_BUTTONS,
-            parent_control_id: None,
-            dock_style: DockStyle::Bottom,
-            order: 110,
-            fixed_size: Some(44),
-            margin: (0, 0, 0, 0),
-        },
-        LayoutRule {
-            control_id: PANEL_INPUT,
-            parent_control_id: None,
-            dock_style: DockStyle::Left,
-            order: 200,
-            fixed_size: Some(INPUT_PANEL_FIXED_WIDTH),
-            margin: (6, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: PANEL_JOBS,
-            parent_control_id: None,
-            dock_style: DockStyle::Left,
-            order: 300,
-            fixed_size: Some(jobs_width),
-            margin: (6, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: LABEL_JOBS_HEADER,
-            parent_control_id: Some(PANEL_JOBS),
-            dock_style: DockStyle::Top,
-            order: 0,
-            fixed_size: Some(28),
-            margin: (0, 0, 4, 0),
-        },
-        LayoutRule {
-            control_id: TREE_JOBS,
-            parent_control_id: Some(PANEL_JOBS),
-            dock_style: DockStyle::Fill,
-            order: 1,
-            fixed_size: None,
-            margin: (0, 0, 0, 0),
-        },
-        LayoutRule {
-            control_id: SPLITTER_MAIN,
-            parent_control_id: None,
-            dock_style: DockStyle::Left,
-            order: 305,
-            fixed_size: Some(4),
-            margin: (6, 0, 6, 0),
-        },
-        LayoutRule {
-            control_id: PANEL_PREVIEW,
-            parent_control_id: None,
-            dock_style: DockStyle::Fill,
-            order: 310,
-            fixed_size: None,
-            margin: (6, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: LABEL_PREVIEW_HEADER,
-            parent_control_id: Some(PANEL_PREVIEW),
-            dock_style: DockStyle::Top,
-            order: 0,
-            fixed_size: Some(28),
-            margin: (6, 6, 4, 0),
-        },
-        LayoutRule {
-            control_id: VIEWER_PREVIEW,
-            parent_control_id: Some(PANEL_PREVIEW),
-            dock_style: DockStyle::Fill,
-            order: 1,
-            fixed_size: None,
-            margin: (0, 0, 0, 0),
-        },
-        LayoutRule {
-            control_id: LABEL_INPUT_HINT,
-            parent_control_id: Some(PANEL_INPUT),
-            dock_style: DockStyle::Top,
-            order: 0,
-            fixed_size: Some(28),
-            margin: (0, 0, 4, 0),
-        },
-        LayoutRule {
-            control_id: INPUT_URLS,
-            parent_control_id: Some(PANEL_INPUT),
-            dock_style: DockStyle::Fill,
-            order: 1,
-            fixed_size: None,
-            margin: (0, 0, 0, 0),
-        },
-        LayoutRule {
-            control_id: LABEL_STATUS,
-            parent_control_id: Some(PANEL_BOTTOM),
-            dock_style: DockStyle::Fill,
-            order: 0,
-            fixed_size: None,
-            margin: (6, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_ARCHIVE,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 0,
-            fixed_size: Some(160),
-            margin: (6, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_STOP,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 1,
-            fixed_size: Some(160),
-            margin: (6, 6, 6, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_BRIEFING,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 2,
-            fixed_size: Some(160),
-            margin: (6, 6, 6, 0),
-        },
-    ]
 }
 
 fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
@@ -507,6 +367,189 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     });
 }
 
+pub(crate) fn build_layout_command(
+    window_id: WindowId,
+    left_panel_width: i32,
+    input_panel_visible: bool,
+) -> PlatformCommand {
+    PlatformCommand::DefineLayout {
+        window_id,
+        rules: build_layout_rules(left_panel_width, input_panel_visible),
+    }
+}
+
+fn build_layout_rules(left_panel_width: i32, input_panel_visible: bool) -> Vec<LayoutRule> {
+    let input_width = if input_panel_visible {
+        INPUT_PANEL_FIXED_WIDTH
+    } else {
+        0
+    };
+    let jobs_width = (left_panel_width - input_width).max(0);
+
+    vec![
+        LayoutRule {
+            control_id: PANEL_PROGRESS,
+            parent_control_id: None,
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(64),
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_TOKEN_PROGRESS,
+            parent_control_id: Some(PANEL_PROGRESS),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(22),
+            margin: (8, 8, 4, 8),
+        },
+        LayoutRule {
+            control_id: PROGRESS_TOKENS,
+            parent_control_id: Some(PANEL_PROGRESS),
+            dock_style: DockStyle::Fill,
+            order: 1,
+            fixed_size: None,
+            margin: (0, 8, 8, 8),
+        },
+        LayoutRule {
+            control_id: PANEL_BOTTOM,
+            parent_control_id: None,
+            dock_style: DockStyle::Bottom,
+            order: 100,
+            fixed_size: Some(32),
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_BUTTONS,
+            parent_control_id: None,
+            dock_style: DockStyle::Bottom,
+            order: 110,
+            fixed_size: Some(44),
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_INPUT,
+            parent_control_id: None,
+            dock_style: DockStyle::Left,
+            order: 200,
+            fixed_size: Some(input_width),
+            margin: (6, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: PANEL_JOBS,
+            parent_control_id: None,
+            dock_style: DockStyle::Left,
+            order: 300,
+            fixed_size: Some(jobs_width),
+            margin: (6, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: LABEL_JOBS_HEADER,
+            parent_control_id: Some(PANEL_JOBS),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(28),
+            margin: (0, 0, 4, 0),
+        },
+        LayoutRule {
+            control_id: TREE_JOBS,
+            parent_control_id: Some(PANEL_JOBS),
+            dock_style: DockStyle::Fill,
+            order: 1,
+            fixed_size: None,
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: SPLITTER_MAIN,
+            parent_control_id: None,
+            dock_style: DockStyle::Left,
+            order: 305,
+            fixed_size: Some(4),
+            margin: (6, 0, 6, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_PREVIEW,
+            parent_control_id: None,
+            dock_style: DockStyle::Fill,
+            order: 310,
+            fixed_size: None,
+            margin: (6, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: LABEL_PREVIEW_HEADER,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(28),
+            margin: (6, 6, 4, 0),
+        },
+        LayoutRule {
+            control_id: VIEWER_PREVIEW,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: DockStyle::Fill,
+            order: 1,
+            fixed_size: None,
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_INPUT_HINT,
+            parent_control_id: Some(PANEL_INPUT),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(28),
+            margin: (0, 0, 4, 0),
+        },
+        LayoutRule {
+            control_id: INPUT_URLS,
+            parent_control_id: Some(PANEL_INPUT),
+            dock_style: DockStyle::Fill,
+            order: 1,
+            fixed_size: None,
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_STATUS,
+            parent_control_id: Some(PANEL_BOTTOM),
+            dock_style: DockStyle::Fill,
+            order: 0,
+            fixed_size: None,
+            margin: (6, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: BUTTON_ADD_URL,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 0,
+            fixed_size: Some(160),
+            margin: (6, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: BUTTON_ARCHIVE,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 1,
+            fixed_size: Some(160),
+            margin: (6, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: BUTTON_STOP,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 2,
+            fixed_size: Some(160),
+            margin: (6, 6, 6, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_BRIEFING,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 3,
+            fixed_size: Some(160),
+            margin: (6, 6, 6, 0),
+        },
+    ]
+}
+
 fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     for control_id in [
         PANEL_PROGRESS,
@@ -573,6 +616,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_ARCHIVE,
+        style_id: StyleId::DefaultButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_ADD_URL,
         style_id: StyleId::DefaultButton,
     });
 

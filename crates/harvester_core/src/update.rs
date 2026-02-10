@@ -88,6 +88,30 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
         }
         Msg::ArchiveClicked => vec![Effect::ArchiveRequested],
+        Msg::ToggleInputPanel => {
+            let opening = !state.input_panel_visible();
+            let desired_left_width_px = if opening {
+                state.left_panel_width() + INPUT_PANEL_FIXED_WIDTH
+            } else {
+                state.left_panel_width() - INPUT_PANEL_FIXED_WIDTH
+            };
+            state.set_input_panel_visible(opening);
+            let min_left = if opening {
+                MIN_LEFT_WIDTH
+            } else {
+                MIN_JOBS_PANEL_WIDTH
+            };
+            let clamped = calc_left_width(
+                desired_left_width_px,
+                state.window_width(),
+                min_left,
+                MIN_PREVIEW_WIDTH,
+                SPLITTER_TOTAL_WIDTH,
+            );
+            state.set_left_panel_width(clamped);
+            state.mark_dirty();
+            Vec::new()
+        }
         Msg::JobProgress {
             job_id,
             stage,
@@ -167,10 +191,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::SplitterMoved {
             desired_left_width_px,
         } => {
+            let min_left = if state.input_panel_visible() {
+                MIN_LEFT_WIDTH
+            } else {
+                MIN_JOBS_PANEL_WIDTH
+            };
             let clamped = calc_left_width(
                 desired_left_width_px,
                 state.window_width(),
-                MIN_LEFT_WIDTH,
+                min_left,
                 MIN_PREVIEW_WIDTH,
                 SPLITTER_TOTAL_WIDTH,
             );
@@ -181,10 +210,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::WindowResized { window_width } => {
             state.set_window_width(window_width);
             // Re-clamp the left panel width based on new window width
+            let min_left = if state.input_panel_visible() {
+                MIN_LEFT_WIDTH
+            } else {
+                MIN_JOBS_PANEL_WIDTH
+            };
             let clamped = calc_left_width(
                 state.left_panel_width(),
                 window_width,
-                MIN_LEFT_WIDTH,
+                min_left,
                 MIN_PREVIEW_WIDTH,
                 SPLITTER_TOTAL_WIDTH,
             );

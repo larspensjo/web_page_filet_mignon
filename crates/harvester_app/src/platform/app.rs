@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use chrono::Utc;
 
-use commanductui::types::TreeItemMarkerKind;
+use commanductui::types::{MenuActionId, TreeItemMarkerKind};
 use commanductui::{
-    AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface,
-    UiStateProvider, WindowConfig, WindowId,
+    AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
+    WindowConfig, WindowId,
 };
 use harvester_core::{
     update, AppState, AppViewModel, Effect, JobResultKind, LinkDownloadState, Msg,
@@ -27,6 +27,8 @@ use super::logging::{self, LogDestination};
 use super::ui;
 use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::{effects, persistence};
+
+const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
     logging::initialize(LogDestination::Both);
@@ -250,6 +252,14 @@ impl PlatformEventHandler for AppEventHandler {
                 if control_id == ui::constants::BUTTON_BRIEFING =>
             {
                 let _ = self.msg_tx.send(Msg::GenerateBriefingClicked);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_ADD_URL =>
+            {
+                let _ = self.msg_tx.send(Msg::ToggleInputPanel);
+            }
+            AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ADD_URL => {
+                let _ = self.msg_tx.send(Msg::ToggleInputPanel);
             }
             AppEvent::InputTextChanged {
                 control_id, text, ..

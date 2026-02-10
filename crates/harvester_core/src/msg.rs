@@ -17,6 +17,8 @@ pub enum Msg {
     StopFinishClicked,
     /// User clicked Archive.
     ArchiveClicked,
+    /// User toggled visibility of the URL input/dropbox panel.
+    ToggleInputPanel,
     /// UI/render tick to coalesce rendering.
     Tick,
     /// Engine progress for a job.

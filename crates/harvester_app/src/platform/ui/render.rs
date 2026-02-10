@@ -3,7 +3,7 @@ use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, Window
 use engine_logging::engine_debug;
 use harvester_core::{
     AppViewModel, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView, SessionState,
-    Stage, DEFAULT_LEFT_PANEL_WIDTH,
+    Stage, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::LinkKind;
 
@@ -22,6 +22,7 @@ pub struct TreeRenderState {
     check_state_by_id: HashMap<TreeItemId, CheckState>,
     /// Tracks the previous left_panel_width to detect changes
     prev_left_panel_width: i32,
+    prev_input_panel_visible: bool,
     prev_status_text: Option<String>,
     prev_progress_text: Option<String>,
     prev_preview_text: Option<String>,
@@ -41,7 +42,8 @@ impl Default for TreeRenderState {
             structure: Vec::new(),
             text_by_id: HashMap::new(),
             check_state_by_id: HashMap::new(),
-            prev_left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
+            prev_left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
+            prev_input_panel_visible: false,
             prev_status_text: None,
             prev_progress_text: None,
             prev_preview_text: None,
@@ -147,14 +149,23 @@ pub fn render(
     let mut cmds = Vec::new();
 
     // Check if left_panel_width changed and emit updated layout
-    if view.left_panel_width != tree_state.prev_left_panel_width {
+    let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
+        || view.input_panel_visible != tree_state.prev_input_panel_visible;
+    if layout_changed {
         engine_debug!(
-            "[Render] Layout update: left_panel_width {} -> {}",
+            "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}",
             tree_state.prev_left_panel_width,
-            view.left_panel_width
+            view.left_panel_width,
+            tree_state.prev_input_panel_visible,
+            view.input_panel_visible
         );
-        cmds.push(build_layout_command(window_id, view.left_panel_width));
+        cmds.push(build_layout_command(
+            window_id,
+            view.left_panel_width,
+            view.input_panel_visible,
+        ));
         tree_state.prev_left_panel_width = view.left_panel_width;
+        tree_state.prev_input_panel_visible = view.input_panel_visible;
     }
 
     let briefing_progress = view.briefing_progress.as_deref();

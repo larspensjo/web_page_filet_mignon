@@ -24,8 +24,9 @@ pub struct PreviewHeaderView {
     pub nav_heavy: bool,
 }
 
-// Default left panel width (PANEL_INPUT + PANEL_JOBS = 160 + 440)
+// Default left panel width when the input panel is shown (PANEL_INPUT + PANEL_JOBS = 160 + 440)
 pub const DEFAULT_LEFT_PANEL_WIDTH: i32 = 600;
+pub const DEFAULT_JOBS_PANEL_WIDTH: i32 = DEFAULT_LEFT_PANEL_WIDTH - INPUT_PANEL_FIXED_WIDTH;
 // Default window width
 pub const DEFAULT_WINDOW_WIDTH: i32 = 960;
 
@@ -46,6 +47,8 @@ pub struct AppViewModel {
     pub briefing_preview: Option<String>,
     /// Width of the left panels region (PANEL_INPUT + PANEL_JOBS).
     pub left_panel_width: i32,
+    /// Whether the dropbox/input panel is currently visible.
+    pub input_panel_visible: bool,
     /// Current window width.
     pub window_width: i32,
 }
@@ -66,7 +69,8 @@ impl Default for AppViewModel {
             briefing_can_start: true,
             briefing_progress: None,
             briefing_preview: None,
-            left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
+            left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
+            input_panel_visible: false,
             window_width: DEFAULT_WINDOW_WIDTH,
         }
     }

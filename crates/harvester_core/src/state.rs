@@ -1,7 +1,8 @@
 use crate::briefing::BriefingSession;
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
-    AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TOKEN_LIMIT,
+    AppViewModel, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, JobRowView, LastPasteStats,
+    LinkRowView, PreviewHeaderView, TOKEN_LIMIT,
 };
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind};
@@ -127,6 +128,7 @@ impl AppState {
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
             left_panel_width: self.ui.left_panel_width(),
+            input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),
         }
     }
@@ -522,9 +524,17 @@ impl AppState {
         self.ui.left_panel_width()
     }
 
+    pub(crate) fn input_panel_visible(&self) -> bool {
+        self.ui.input_panel_visible()
+    }
+
     /// Sets the left panel width.
     pub(crate) fn set_left_panel_width(&mut self, width: i32) {
         self.ui.set_left_panel_width(width);
+    }
+
+    pub(crate) fn set_input_panel_visible(&mut self, visible: bool) {
+        self.ui.set_input_panel_visible(visible);
     }
 
     /// Returns the current window width.
@@ -874,17 +884,13 @@ impl PreviewState {
     }
 }
 
-// Default left panel width (PANEL_INPUT + PANEL_JOBS = 320 + 280)
-const DEFAULT_LEFT_PANEL_WIDTH: i32 = 600;
-// Default window width
-const DEFAULT_WINDOW_WIDTH: i32 = 960;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct UiState {
     urls: Vec<String>,
     input_buffer: String,
     preview: PreviewState,
     left_panel_width: i32,
+    input_panel_visible: bool,
     window_width: i32,
 }
 
@@ -894,7 +900,8 @@ impl Default for UiState {
             urls: Vec::new(),
             input_buffer: String::new(),
             preview: PreviewState::default(),
-            left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
+            left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
+            input_panel_visible: false,
             window_width: DEFAULT_WINDOW_WIDTH,
         }
     }
@@ -949,8 +956,16 @@ impl UiState {
         self.left_panel_width
     }
 
+    fn input_panel_visible(&self) -> bool {
+        self.input_panel_visible
+    }
+
     fn set_left_panel_width(&mut self, width: i32) {
         self.left_panel_width = width;
+    }
+
+    fn set_input_panel_visible(&mut self, visible: bool) {
+        self.input_panel_visible = visible;
     }
 
     fn window_width(&self) -> i32 {
