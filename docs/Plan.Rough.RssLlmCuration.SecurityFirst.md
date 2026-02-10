@@ -147,14 +147,14 @@ LLMs are sensitive to noisy and unbounded input. We need deterministic preparati
 Improves overall quality and predictability of summaries; also reduces costs.
 
 ### Implementation note
-Implemented as 7 parts (CleanText type with provenance, CleanText derivation pipeline, smart truncation, ContentBudget and PreparedInput, module integration and re-exports). See `Plan.Phase3.ExecutiveBriefing.md` for the next phase that builds on this pipeline.
+Implemented as 7 parts (CleanText type with provenance, CleanText derivation pipeline, smart truncation, ContentBudget and PreparedInput, module integration and re-exports).
 
-## Phase 3 — Executive summary for existing downloaded pages (manual trigger)
+## Phase 3 — Executive summary for existing downloaded pages (manual trigger) [COMPLETE]
 ### Purpose
 First visible value with minimal scope expansion:
 - no RSS yet,
 - no scheduling yet,
-- delivers the “briefing” outcome for current workflows.
+- delivers the "briefing" outcome for current workflows.
 
 ### Deliverables
 - UI action(s) to generate:
@@ -181,6 +181,9 @@ Users can immediately save time by reading briefings instead of raw articles.
 - **Batch/concurrent LLM requests**: The current `LlmHandle` processes one request at a time. Phase 3 will need batch mode with rate limiting to process multiple articles efficiently.
 - **Output caching**: Skip LLM call entirely when input hash + prompt version match a previous successful result (extends `ReplayProvider`). Keyed by full input hash + prompt version + model ID.
 - **Model selection UX**: Add app-level controls to choose/filter model profiles (cheap triage vs deep summary) and switch active profile without restart.
+
+### Implementation note
+Implemented as 10 parts (LLM bootstrap wiring, frontmatter parsing, improved prompt templates, BriefingSession state machine, Msg/Effect extensions, reducer orchestration, article loading pipeline, replay cache with same-process updates, UI integration, integration testing). See `Plan.Phase4.TriageRanking.md` for the next phase.
 
 ## Phase 4 — AI ranking and filtering presented as a deterministic UI list
 ### Purpose
@@ -277,7 +280,7 @@ More automation, but higher complexity and security requirements.
 
 ## Cross-cutting future work (not phase-specific)
 
-These items were identified during Phase 0, Phase 1, and Phase 2 implementation and are relevant across multiple phases. They should be considered when planning future work:
+These items were identified during Phase 0–3 implementation and are relevant across multiple phases. They should be considered when planning future work:
 
 - **Unified download path**: Route linked-page downloads through the engine as tagged jobs rather than the current separate path. Reduces code duplication and ensures all downloads benefit from the same policy/quota enforcement.
 - **Policy-as-configuration**: Load `UrlPolicy`, `SessionQuotas`, and `LlmQuotas` from a config file (RON or TOML) rather than compile-time defaults. Enables per-deployment tuning without recompilation.
@@ -301,6 +304,15 @@ These items were identified during Phase 0, Phase 1, and Phase 2 implementation 
 - **Retry with smaller excerpt**: If LLM returns MaxTokens finish reason, automatically retry with a smaller content budget.
 - **Near-duplicate detection**: Stable fingerprint of normalized clean text to skip redundant LLM calls before expensive processing.
 - **Strict content mode**: Refuse to process if prepared input cannot satisfy a minimum retained-content threshold after truncation.
+- **Concurrent LLM processing**: Spawn N workers or use a concurrent pool. State machines already support tracking multiple in-progress articles; only dispatch logic changes from "one at a time" to "up to K at a time".
+- **Summary-as-input for briefings**: Feed per-article summaries (not raw text) to the briefing prompt. Reduces token usage dramatically. Two modes: "raw-article aggregate" and "summary-of-summaries aggregate" selectable per run.
+- **Incremental re-summarization**: Only re-summarize articles whose content hash changed. Replay cache handles this partially; explicit "retry failed only" and "retry with smaller budget" actions are UX improvements.
+- **Briefing history**: Keep previous briefing sessions, allow browsing and comparing past briefings.
+- **Export briefing to file**: Write formatted briefing to markdown in output directory for archival and sharing.
+- **Include linked pages in briefing**: Option to include `linked/*.md` in the briefing article set, with inclusion profiles based on link age/risk heuristics.
+- **Cancel active session**: Button that stops dispatching new LLM requests for briefing or triage and transitions to Complete with partial results.
+- **DTO boundary discipline**: Preserve clear DTO boundaries at crate seams with explicit mapping helpers rather than implicit type reuse. Prevents accidental coupling between engine and core types.
+- **Session lifecycle invariant**: Any `AppState` lifecycle transition that invalidates the job set must also reset all derived session state (briefing, triage, future sessions). Enforce via tests.
 
 ## Notes for planning and estimation
 - Phases 0–2 are enabling work that reduces long-term iteration cost and risk.
