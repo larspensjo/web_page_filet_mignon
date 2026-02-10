@@ -380,6 +380,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
+        Msg::TriageClicked => Vec::new(),
+        Msg::TriageArticlesLoaded { .. } => Vec::new(),
+        Msg::TriageArticlesLoadFailed { .. } => Vec::new(),
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 

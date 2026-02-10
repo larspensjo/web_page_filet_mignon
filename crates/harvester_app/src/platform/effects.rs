@@ -268,6 +268,9 @@ impl EffectRunner {
                     }
                 });
             }
+            Effect::LoadArticlesForTriage => {
+                engine_warn!("[triage-loader] TODO: effect not implemented yet");
+            }
         }
     }
 

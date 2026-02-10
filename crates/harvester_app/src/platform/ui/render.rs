@@ -532,6 +532,7 @@ mod tests {
             link_count: 0,
             downloaded_link_count: 0,
             links: Vec::new(),
+            triage_annotation: None,
         }
     }
 
@@ -686,6 +687,7 @@ mod tests {
             link_count: 4,
             downloaded_link_count: 1,
             links: vec![link],
+            triage_annotation: None,
         };
         let view = make_view(vec![job]);
         let commands = render(window_id, &view, &mut tree_state);

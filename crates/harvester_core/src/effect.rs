@@ -9,6 +9,7 @@ pub enum Effect {
         url: String,
     },
     LoadArticlesForBriefing,
+    LoadArticlesForTriage,
     RequestLlmCompletion {
         request_id: u64,
         prompt_id: PromptId,

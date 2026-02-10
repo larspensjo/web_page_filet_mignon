@@ -81,6 +81,8 @@ pub enum Msg {
     },
     /// User requested generation of a briefing.
     GenerateBriefingClicked,
+    /// User requested triage.
+    TriageClicked,
     /// Articles prepared by the loader.
     ArticlesLoaded {
         articles: Vec<LoadedArticle>,
@@ -88,6 +90,12 @@ pub enum Msg {
     },
     /// Loader failed.
     ArticlesLoadFailed { reason: String },
+    /// Triage-specific articles prepared by the loader.
+    TriageArticlesLoaded {
+        articles: Vec<LoadedArticle>,
+    },
+    /// Loader failed for triage.
+    TriageArticlesLoadFailed { reason: String },
 }
 
 /// Result payload returned by the LLM worker.

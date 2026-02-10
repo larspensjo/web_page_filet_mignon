@@ -45,6 +45,8 @@ pub struct AppViewModel {
     pub briefing_can_start: bool,
     pub briefing_progress: Option<String>,
     pub briefing_preview: Option<String>,
+    pub triage_can_start: bool,
+    pub triage_progress: Option<String>,
     /// Width of the left panels region (PANEL_INPUT + PANEL_JOBS).
     pub left_panel_width: i32,
     /// Whether the dropbox/input panel is currently visible.
@@ -69,7 +71,9 @@ impl Default for AppViewModel {
             briefing_can_start: true,
             briefing_progress: None,
             briefing_preview: None,
-            left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
+            triage_can_start: false,
+            triage_progress: None,
+            left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
             input_panel_visible: false,
             window_width: DEFAULT_WINDOW_WIDTH,
         }
@@ -87,6 +91,7 @@ pub struct JobRowView {
     pub link_count: usize,
     pub downloaded_link_count: usize,
     pub links: Vec<LinkRowView>,
+    pub triage_annotation: Option<TriageAnnotationView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,4 +102,11 @@ pub struct LinkRowView {
     pub kind: LinkKind,
     pub download_state: LinkDownloadState,
     pub age_suspect: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TriageAnnotationView {
+    pub priority: u8,
+    pub category: String,
+    pub tags: Vec<String>,
 }

@@ -127,6 +127,8 @@ impl AppState {
             briefing_can_start: self.briefing.can_start(),
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
+            triage_can_start: false,
+            triage_progress: None,
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),
@@ -652,6 +654,7 @@ impl JobState {
             link_count: self.links.len(),
             downloaded_link_count,
             links,
+            triage_annotation: None,
         }
     }
 
