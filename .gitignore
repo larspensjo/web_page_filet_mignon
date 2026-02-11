@@ -19,6 +19,7 @@ target
 /incoming_urls.txt
 /sources.ron
 /contexts/
+/.rss_seen_guids.ron
 
 # Coverage analysis outputs
 /tests/coverage_reports/*.json
