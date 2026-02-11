@@ -16,6 +16,7 @@ mod persist;
 mod preview;
 mod quota;
 mod rss_parse;
+mod rss_seen_set;
 mod source_config;
 mod source_poll;
 mod text_safety;
@@ -57,6 +58,7 @@ pub use types::{
 pub use url_policy::{UrlPolicy, UrlPolicyViolation};
 
 pub use rss_parse::{parse_feed_content, FeedEntry, FeedParseError, RssPollItem};
+pub use rss_seen_set::RssSeenSet;
 
 pub use content_prep::{
     compute_prompt_overhead, derive_clean_text, truncate_to_budget, BoilerplatePolicy,
