@@ -15,6 +15,7 @@ mod path_policy;
 mod persist;
 mod preview;
 mod quota;
+mod rss_parse;
 mod source_config;
 mod source_poll;
 mod text_safety;
@@ -54,6 +55,8 @@ pub use types::{
     JobProgress, Stage,
 };
 pub use url_policy::{UrlPolicy, UrlPolicyViolation};
+
+pub use rss_parse::{parse_feed_content, FeedEntry, FeedParseError, RssPollItem};
 
 pub use content_prep::{
     compute_prompt_overhead, derive_clean_text, truncate_to_budget, BoilerplatePolicy,
