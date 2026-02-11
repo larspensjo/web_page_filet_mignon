@@ -208,7 +208,7 @@ Users get a "most important first" view and can focus on high-value items.
 - **A/B testing UI**: Compare results from different prompt versions side-by-side. The prompt registry and replay harness already support multiple versions per prompt ID.
 - **Evaluation UX**: Replay-backed scoring views (precision/recall for filtering, summary quality rubric, cost and latency metrics per model/prompt version).
 
-## Phase 5 — Automated URL input sources (non-RSS first)
+## Phase 5 — Automated URL input sources (non-RSS first) [COMPLETE]
 ### Purpose
 Before adding RSS variability, prove automation with controlled sources.
 This reduces risk and keeps debugging simpler.
@@ -228,7 +228,10 @@ As soon as URLs are ingested automatically:
 - cap redirects and download sizes.
 
 ### Expected product impact
-Less manual copy/paste; more repeatable “daily intake” runs.
+Less manual copy/paste; more repeatable "daily intake" runs.
+
+### Implementation note
+Implemented as 9 parts (core types with SourceId validation and config loading, source state tracking with poll guard, file/curated source polling with path validation, shared ingest_urls() function, messages and effects, reducer logic with idempotency guard, effect execution, UI integration, script source support). File and curated list sources are operational; script source is defined in the data model but not yet implemented at runtime. See `Plan.Phase6.RssIngestion.md` for the next phase.
 
 ## Phase 6 — RSS ingestion as another input source
 ### Purpose
@@ -328,6 +331,16 @@ See [docs/PromptContextFiles.md](docs/PromptContextFiles.md) for context file lo
 - **Operator controls for sessions**: Pause/resume LLM processing, skip failed articles, retry with adjusted budgets. Advanced session management for long-running briefings.
 - **Replay quality diagnostics**: Distribution of priorities, tag cardinality, validation failure rates, cost/latency percentiles across runs. Structured evaluation metrics for prompt/model tuning.
 - **A/B prompt comparison UI**: Run same articles through multiple prompt versions, display side-by-side results. Prompt registry + replay already support this pattern.
+- **Per-source cursoring/state**: Track last read position for incremental file sources (avoid re-reading entire file on each poll).
+- **Source trust tiers**: Stricter URL policy for untrusted sources (e.g., new/unvetted feeds get host allowlisting, trusted feeds get default policy).
+- **Dry-run mode for source polling**: Poll + validate + report what would be ingested, without actually enqueuing. Useful for testing new source configurations.
+- **Preview before enqueue**: Show diff from seen set (new items), let user approve before actually enqueuing jobs. Reduces accidental large ingestions.
+- **Parallel source polling**: Thread pool or async tasks for concurrent feed fetches when sequential polling proves too slow for many feeds.
+- **Source health scoring and backoff**: Track consecutive failures per source, implement exponential backoff. Separate from LLM retry budget.
+- **Feed discovery from HTML**: Given a website URL, discover its RSS feed via `<link rel="alternate" type="application/rss+xml">` in the HTML `<head>`.
+- **OPML import**: Import feed collections from standard OPML format for bulk feed onboarding.
+- **Conditional feed fetch**: Use `ETag` and `If-Modified-Since` headers to skip re-downloading unchanged feeds. Store per-feed headers in seen set state.
+- **PollGuard scope guard**: Ensure `AllSourcesPollEnded` is always sent even on thread panic (via drop guard). Prevents permanently stuck poll-in-progress flag.
 
 ## Notes for planning and estimation
 - Phases 0–2 are enabling work that reduces long-term iteration cost and risk.
