@@ -1,4 +1,4 @@
-use super::source_loader;
+use super::{seen_set_store, source_loader};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -8,6 +8,7 @@ use std::sync::{
 };
 use std::thread;
 use std::time::Duration;
+use std::{error::Error as StdError, fmt};
 
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
@@ -17,13 +18,17 @@ use harvester_engine::{
     is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
     load_and_prepare_articles, load_and_prepare_articles_for_triage, poll_curated_source,
-    poll_file_source, AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent,
-    EngineHandle, Extractor, FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor,
-    SourceType, UrlPolicy, WhitespaceTokenCounter,
+    poll_file_source, poll_rss_source, AtomicFileWriter, Converter, DecodeError, EngineConfig,
+    EngineEvent, EngineHandle, Extractor, FetchSettings, LinkExtractingConverter,
+    ReadabilityLikeExtractor, SourceType, UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use reqwest::redirect::Policy;
+use url::Url;
+const MAX_FEED_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+const FEED_ACCEPT_HEADER: &str =
+    "application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml";
 
 pub(crate) fn default_output_dir() -> std::path::PathBuf {
     std::env::current_dir()
@@ -365,7 +370,10 @@ impl EffectRunner {
             Effect::PollAllSources => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
+                let url_policy = self.url_policy.clone();
+                let fetch_settings = self.fetch_settings.clone();
                 thread::spawn(move || {
+                    let _guard = PollGuard::new(msg_tx.clone());
                     let config_path = source_loader::default_source_config_path();
                     engine_info!("[source-config] loading {}", config_path.display());
                     let registry = source_loader::load_source_registry(&config_path);
@@ -374,6 +382,8 @@ impl EffectRunner {
                         .unwrap_or_else(|| Path::new("."))
                         .to_path_buf();
                     let allowed_dirs = vec![config_dir.clone(), output_dir.clone()];
+                    let seen_set_path = seen_set_store::default_seen_set_path();
+                    let mut seen_set = seen_set_store::load_seen_set(&seen_set_path);
                     for config in registry.sources.into_iter().filter(|s| s.enabled) {
                         let source_id = config.id.clone();
                         match config.source_type {
@@ -419,19 +429,63 @@ impl EffectRunner {
                                     error: "script sources not implemented".to_string(),
                                 });
                             }
-                            SourceType::Rss { .. } => {
-                                engine_warn!(
-                                    "[source-poll] rss sources not implemented yet for {}",
-                                    source_id
-                                );
-                                let _ = msg_tx.send(Msg::SourcePollFailed {
-                                    source_id: source_id.clone(),
-                                    error: "rss sources not implemented yet".to_string(),
-                                });
+                            SourceType::Rss { feed_url } => {
+                                match fetch_feed(&feed_url, &url_policy, &fetch_settings) {
+                                    Ok(bytes) => match poll_rss_source(
+                                        source_id.clone(),
+                                        &bytes,
+                                        &feed_url,
+                                        &mut seen_set,
+                                        config.max_urls_per_poll,
+                                    ) {
+                                        Ok(result) => {
+                                            if let Err(err) = seen_set_store::save_seen_set(
+                                                &seen_set,
+                                                &seen_set_path,
+                                            ) {
+                                                engine_warn!(
+                                                    "[rss-poll] failed to persist seen set for {}: {}",
+                                                    source_id,
+                                                    err
+                                                );
+                                            }
+                                            engine_info!(
+                                                "[rss-poll] {} => {} new URL(s)",
+                                                source_id,
+                                                result.urls.len()
+                                            );
+                                            let _ = msg_tx.send(Msg::SourcePollCompleted {
+                                                source_id: source_id.clone(),
+                                                urls: result.urls,
+                                            });
+                                        }
+                                        Err(err) => {
+                                            engine_warn!(
+                                                "[rss-poll] {} failed: {}",
+                                                source_id,
+                                                err
+                                            );
+                                            let _ = msg_tx.send(Msg::SourcePollFailed {
+                                                source_id: source_id.clone(),
+                                                error: err.to_string(),
+                                            });
+                                        }
+                                    },
+                                    Err(reason) => {
+                                        engine_warn!(
+                                            "[rss-poll] fetch failed for {}: {}",
+                                            source_id,
+                                            reason
+                                        );
+                                        let _ = msg_tx.send(Msg::SourcePollFailed {
+                                            source_id: source_id.clone(),
+                                            error: reason,
+                                        });
+                                    }
+                                }
                             }
                         }
                     }
-                    let _ = msg_tx.send(Msg::AllSourcesPollEnded);
                 });
             }
         }
@@ -635,6 +689,116 @@ fn map_llm_event(event: LlmEvent) -> Msg {
             }
         }
     }
+}
+
+struct PollGuard {
+    msg_tx: mpsc::Sender<Msg>,
+}
+
+impl PollGuard {
+    fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
+        Self { msg_tx }
+    }
+}
+
+impl Drop for PollGuard {
+    fn drop(&mut self) {
+        let _ = self.msg_tx.send(Msg::AllSourcesPollEnded);
+    }
+}
+
+#[derive(Debug)]
+struct RedirectPolicyError(String);
+
+impl fmt::Display for RedirectPolicyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl StdError for RedirectPolicyError {}
+
+fn fetch_feed(
+    feed_url: &str,
+    url_policy: &UrlPolicy,
+    fetch_settings: &FetchSettings,
+) -> Result<Vec<u8>, String> {
+    let parsed =
+        Url::parse(feed_url).map_err(|err| format!("invalid feed url {}: {}", feed_url, err))?;
+    if let Err(violation) = url_policy.check(&parsed) {
+        return Err(format!(
+            "feed url {} violates policy: {}",
+            feed_url, violation
+        ));
+    }
+
+    let redirect_limit = fetch_settings.redirect_limit;
+    let policy = Policy::custom({
+        let url_policy = url_policy.clone();
+        move |attempt| {
+            let count = attempt.previous().len();
+            if count >= redirect_limit {
+                attempt.error("redirect limit exceeded")
+            } else {
+                let target_url = attempt.url().clone();
+                if let Err(violation) = url_policy.check(&target_url) {
+                    attempt.error(RedirectPolicyError(format!(
+                        "redirect target {} violated policy: {}",
+                        target_url, violation
+                    )))
+                } else {
+                    attempt.follow()
+                }
+            }
+        }
+    });
+
+    let client = Client::builder()
+        .connect_timeout(fetch_settings.connect_timeout)
+        .timeout(fetch_settings.request_timeout)
+        .redirect(policy)
+        .user_agent(fetch_settings.user_agent.clone())
+        .build()
+        .map_err(|err| err.to_string())?;
+
+    let mut response = client
+        .get(parsed.clone())
+        .header(ACCEPT, FEED_ACCEPT_HEADER)
+        .send()
+        .map_err(|err| err.to_string())?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP error {} for {}", response.status(), feed_url));
+    }
+
+    if let Some(len) = response.content_length() {
+        if len > MAX_FEED_RESPONSE_BYTES as u64 {
+            return Err(format!(
+                "feed {} too large: {} bytes",
+                feed_url, MAX_FEED_RESPONSE_BYTES
+            ));
+        }
+    }
+
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let mut total = 0;
+    loop {
+        let read = response.read(&mut chunk).map_err(|err| err.to_string())?;
+        if read == 0 {
+            break;
+        }
+        total += read;
+        if total > MAX_FEED_RESPONSE_BYTES {
+            return Err(format!(
+                "feed {} exceeded {} bytes",
+                feed_url, MAX_FEED_RESPONSE_BYTES
+            ));
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+
+    Ok(buffer)
 }
 
 fn llm_error_reason(error: LlmCompletionError) -> String {

@@ -616,6 +616,8 @@ dependencies = [
  "simplelog",
  "tempfile",
  "thiserror 2.0.18",
+ "url",
+ "wiremock",
 ]
 
 [[package]]

@@ -46,8 +46,8 @@ pub use source_config::{
     SourceType,
 };
 pub use source_poll::{
-    poll_curated_source, poll_file_source, validate_source_file_path, SourcePollError,
-    SourcePollResult,
+    poll_curated_source, poll_file_source, poll_rss_source, validate_source_file_path,
+    SourcePollError, SourcePollResult,
 };
 pub use text_safety::truncate_to_char_boundary;
 pub use token::{TokenCounter, WhitespaceTokenCounter};
