@@ -102,24 +102,51 @@ fn resolve_link_href(link: &Link, entry_base: Option<&Url>, feed_base: &Url) -> 
     }
 
     if let Ok(url) = Url::parse(href) {
-        return Some(url.into());
+        return Some(normalize_entry_url(url));
     }
 
     if let Some(base) = entry_base {
         if let Ok(url) = base.join(href) {
-            return Some(url.into());
+            return Some(normalize_entry_url(url));
         }
     }
 
-    feed_base.join(href).ok().map(|url| url.into())
+    feed_base.join(href).ok().map(normalize_entry_url)
 }
 
 fn parse_guid_as_url(guid: &str) -> Option<String> {
-    Url::parse(guid).ok().map(|url| url.into())
+    Url::parse(guid).ok().map(normalize_entry_url)
 }
 
 fn is_alternate_rel(rel: Option<&str>) -> bool {
     matches!(rel, Some(value) if value.eq_ignore_ascii_case("alternate"))
+}
+
+fn normalize_entry_url(url: Url) -> String {
+    // Some feeds (for example Google Alerts) wrap the article URL in a redirect link.
+    if is_google_redirector(&url) {
+        for (key, value) in url.query_pairs() {
+            if key.eq_ignore_ascii_case("url") || key.eq_ignore_ascii_case("q") {
+                if let Ok(target) = Url::parse(&value) {
+                    if matches!(target.scheme(), "http" | "https") {
+                        return target.into();
+                    }
+                }
+            }
+        }
+    }
+
+    url.into()
+}
+
+fn is_google_redirector(url: &Url) -> bool {
+    let host = match url.host_str() {
+        Some(host) => host.to_ascii_lowercase(),
+        None => return false,
+    };
+
+    (host == "google.com" || host == "www.google.com" || host.ends_with(".google.com"))
+        && url.path() == "/url"
 }
 
 #[cfg(test)]
@@ -264,6 +291,50 @@ mod tests {
         assert_eq!(
             entries[0].url.as_deref(),
             Some("https://example.com/guid-only")
+        );
+    }
+
+    #[test]
+    fn google_redirect_links_are_unwrapped() {
+        let feed = r#"<?xml version="1.0"?><rss version="2.0"><channel>
+            <title>Google Alerts</title>
+            <link>https://www.google.com/alerts</link>
+            <description>Alerts</description>
+            <item>
+                <guid>ga-1</guid>
+                <link>https://www.google.com/url?rct=j&amp;sa=t&amp;url=https://www.example.com/article&amp;ct=ga</link>
+            </item>
+        </channel></rss>"#;
+
+        let entries = parse_feed_content(feed.as_bytes(), "https://www.google.com/alerts/feed")
+            .expect("parse feed");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].url.as_deref(),
+            Some("https://www.example.com/article")
+        );
+    }
+
+    #[test]
+    fn google_redirect_with_non_http_target_keeps_original_url() {
+        let feed = r#"<?xml version="1.0"?><rss version="2.0"><channel>
+            <title>Google Alerts</title>
+            <link>https://www.google.com/alerts</link>
+            <description>Alerts</description>
+            <item>
+                <guid>ga-2</guid>
+                <link>https://www.google.com/url?url=ftp://example.com/file</link>
+            </item>
+        </channel></rss>"#;
+
+        let entries = parse_feed_content(feed.as_bytes(), "https://www.google.com/alerts/feed")
+            .expect("parse feed");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].url.as_deref(),
+            Some("https://www.google.com/url?url=ftp://example.com/file")
         );
     }
 }
