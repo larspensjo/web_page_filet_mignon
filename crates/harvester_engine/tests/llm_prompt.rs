@@ -1,12 +1,81 @@
-use harvester_engine::llm::prompt::{content_nonce, TemplateVars};
+use engine_logging::initialize_for_tests;
+use harvester_engine::llm::prompt::{content_nonce, render_template, TemplateVars};
 use harvester_engine::llm::{PromptId, PromptRegistry};
+use std::collections::HashMap;
+use std::str::FromStr;
+
+#[test]
+fn single_pass_renderer_no_resubstitution() {
+    initialize_for_tests();
+    let template = "Context: {{context}}, Content: {{content}}";
+    let mut vars = HashMap::new();
+    vars.insert("context".to_string(), "Holdings: {{content}}".to_string());
+    vars.insert("content".to_string(), "AAPL".to_string());
+
+    let result = render_template(template, &vars).expect("render should succeed");
+
+    // The {{content}} inside the context value should NOT be replaced
+    assert!(result.contains("Holdings: {{content}}"));
+    assert!(result.contains("Content: AAPL"));
+    // Ensure no double-substitution occurred
+    assert_eq!(result, "Context: Holdings: {{content}}, Content: AAPL");
+}
+
+#[test]
+fn render_template_errors_on_unresolved_variables() {
+    initialize_for_tests();
+    let template = "Hello {{name}}, your age is {{age}}";
+    let mut vars = HashMap::new();
+    vars.insert("name".to_string(), "Alice".to_string());
+
+    let result = render_template(template, &vars);
+
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("age"));
+}
+
+#[test]
+fn render_template_succeeds_with_all_variables() {
+    initialize_for_tests();
+    let template = "Name: {{name}}, Age: {{age}}";
+    let mut vars = HashMap::new();
+    vars.insert("name".to_string(), "Bob".to_string());
+    vars.insert("age".to_string(), "30".to_string());
+
+    let result = render_template(template, &vars).expect("should render successfully");
+
+    assert_eq!(result, "Name: Bob, Age: 30");
+}
+
+#[test]
+fn prompt_id_from_str_round_trips() {
+    initialize_for_tests();
+    let ids = vec![
+        (PromptId::ArticleTriage, "ArticleTriage"),
+        (PromptId::ArticleSummary, "ArticleSummary"),
+        (PromptId::AggregateBriefing, "AggregateBriefing"),
+    ];
+
+    for (id, s) in ids {
+        assert_eq!(PromptId::from_str(s).unwrap(), id);
+        assert_eq!(id.to_string(), s);
+    }
+}
+
+#[test]
+fn prompt_id_from_str_rejects_unknown() {
+    initialize_for_tests();
+    let result = PromptId::from_str("UnknownPrompt");
+    assert!(result.is_err());
+}
 
 #[test]
 fn registry_with_defaults_has_restart_scope() {
     let registry = PromptRegistry::with_defaults();
-    assert_eq!(registry.active(PromptId::ArticleTriage).unwrap().version, 2);
-    assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 2);
-    assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 2);
+    assert_eq!(registry.active(PromptId::ArticleTriage).unwrap().version, 3);
+    assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 3);
+    assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 3);
 }
 
 #[test]

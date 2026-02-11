@@ -190,6 +190,7 @@ fn prompt_overhead_matches_rendered_prompt_length() {
     let mut vars = TemplateVars::new();
     let document = "Brief article content.";
     vars.set_document("content", document);
+    vars.insert("context".to_string(), "".to_string());
     let overhead = compute_prompt_overhead(&SUMMARY_PROMPT, "content", &[]);
     let rendered = vars.to_map();
     let system = render_like_worker(SUMMARY_PROMPT.system_template, &rendered);

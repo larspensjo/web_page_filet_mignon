@@ -209,6 +209,19 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
 
     let mut vars = TemplateVars::new();
     vars.set_document(document_key, &input_content);
+
+    // Build context string from key-value pairs
+    let context_text = if context.is_empty() {
+        String::new()
+    } else {
+        context
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k, v))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    vars.insert("context".to_string(), context_text);
+
     for (key, value) in context.iter() {
         vars.insert(key.clone(), value.clone());
     }

@@ -209,7 +209,7 @@ impl std::error::Error for RenderError {}
 /// placeholders in the original template text, never inside injected values.
 ///
 /// This function is **pure**: no IO, no mutation, deterministic output.
-pub(crate) fn render_template(
+pub fn render_template(
     template: &str,
     vars: &HashMap<String, String>,
 ) -> Result<String, RenderError> {

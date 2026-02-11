@@ -143,7 +143,7 @@ In `dispatch_next_triage_job` and `dispatch_next_briefing_step` in
 - Log on each dispatch: `engine_info!("[Context] Dispatching ... with context
   version N")` for traceability.
 
-### 7. Create V3 prompt templates with `{{context}}` placeholder
+### 7. [COMPLETE] Create V3 prompt templates with `{{context}}` placeholder
 
 Add V3 variants of the triage, summary, and briefing prompts in
 `crates/harvester_engine/src/llm/prompts/` that include a `{{context}}`
@@ -153,7 +153,7 @@ Register them in `PromptRegistry::with_defaults` in
 `crates/harvester_engine/src/llm/prompt.rs` and set V3 as active.
 Keep V2 registered for fallback / A-B comparison.
 
-### 8. Add unit and integration tests
+### 8. [COMPLETE] Add unit and integration tests
 
 - **Renderer single-pass correctness (critical, new):** Verify that
   `render_template` does *not* replace placeholders inside injected values.
@@ -264,21 +264,9 @@ Consumer gadget reviews, generic "Top 10 AI tools" lists, Crypto/Web3.
 
 ## Future Extensions
 
-1. **Multiple fine-grained context keys** per template (`{{core_holdings}}`,
-   `{{watchlist}}`, `{{themes}}`, `{{exclude}}`).
-2. **Hot-reload without restart** via debounced file-watcher effect (reload
+1. **Hot-reload without restart** via debounced file-watcher effect (reload
    only on stable file change).
-3. **Context versioning & audit trail** with `contexts/archive/` directory and
-   version logging in action trace.
-4. **`ContextSource` trait** for pluggable backends (file, API, database).
-5. **Prompt A/B testing** using template version × context version matrix.
-6. **Context composition** — allow context inheritance (e.g.,
-   `aggregate_briefing` includes `article_summary` context) to reduce
-   duplication.
-7. **Per-session context snapshot** — store loaded context hash in state and
-   persist with session to allow replays.
-8. **Context linting CLI** — command or effect to validate all contexts against
-   all templates without running the app.
+2. **Prompt token count** made visible to the user. Can be used to flag too big prompts.
 
 ---
 

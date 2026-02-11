@@ -178,7 +178,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
         .send(LlmCommand::Complete {
             request_id: 7,
             prompt_id: PromptId::ArticleSummary,
-            prompt_version: Some(2),
+            prompt_version: Some(3),
             input_content: input_content.to_string(),
             context: Vec::new(),
         })
@@ -203,7 +203,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
         .send(LlmCommand::Complete {
             request_id: 8,
             prompt_id: PromptId::ArticleSummary,
-            prompt_version: Some(2),
+            prompt_version: Some(3),
             input_content: input_content.to_string(),
             context: Vec::new(),
         })

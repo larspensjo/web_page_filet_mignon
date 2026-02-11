@@ -68,19 +68,29 @@ pub fn compute_prompt_overhead(
 ) -> usize {
     let mut vars = TemplateVars::new();
     vars.set_document(document_key, "");
+
+    // Build context string from key-value pairs
+    let context_text = if context_vars.is_empty() {
+        String::new()
+    } else {
+        context_vars
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k, v))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    vars.insert("context".to_string(), context_text);
+
     for (key, value) in context_vars {
         vars.insert(key.clone(), value.clone());
     }
     let rendered = vars.to_map();
-    let system = render_template(template.system_template, &rendered)
-        .unwrap_or_else(|e| {
-            // If template rendering fails, use conservative estimate
-            format!("ERROR: {}", e)
-        });
+    let system = render_template(template.system_template, &rendered).unwrap_or_else(|e| {
+        // If template rendering fails, use conservative estimate
+        format!("ERROR: {}", e)
+    });
     let user = render_template(template.user_template, &rendered)
-        .unwrap_or_else(|e| {
-            format!("ERROR: {}", e)
-        });
+        .unwrap_or_else(|e| format!("ERROR: {}", e));
     system.len() + user.len() + NONCE_OVERHEAD_BYTES
 }
 

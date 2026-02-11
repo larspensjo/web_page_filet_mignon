@@ -139,10 +139,8 @@ pub fn validate_context_covers_template(
             let is_runtime = known_runtime_vars.contains(&key);
             let is_in_context = context.variables.contains_key(key);
 
-            if !is_runtime && !is_in_context {
-                if !missing.contains(&key.to_string()) {
-                    missing.push(key.to_string());
-                }
+            if !is_runtime && !is_in_context && !missing.contains(&key.to_string()) {
+                missing.push(key.to_string());
             }
 
             pos = close_pos + 2;
