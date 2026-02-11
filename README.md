@@ -4,4 +4,5 @@ Serve your LLM the premium cut. A native Rust Windows app for collecting web pag
 ## Documentation
 - [docs/ApplicationDescription.md](docs/ApplicationDescription.md)
 - [docs/Architecture.md](docs/Architecture.md)
+- [docs/PromptContextFiles.md](docs/PromptContextFiles.md)
 - [docs/ThreatModel.md](docs/ThreatModel.md)

@@ -282,6 +282,8 @@ More automation, but higher complexity and security requirements.
 
 These items were identified during Phase 0–3 implementation and are relevant across multiple phases. They should be considered when planning future work:
 
+See [docs/PromptContextFiles.md](docs/PromptContextFiles.md) for context file location and format details.
+
 - **Unified download path**: Route linked-page downloads through the engine as tagged jobs rather than the current separate path. Reduces code duplication and ensures all downloads benefit from the same policy/quota enforcement.
 - **Hot-reload prompt context**: Debounced watcher for `contexts/` so analyst targeting updates can be applied without restart. Improves iteration speed and reduces operational friction.
 - **Policy-as-configuration**: Load `UrlPolicy`, `SessionQuotas`, and `LlmQuotas` from a config file (RON or TOML) rather than compile-time defaults. Enables per-deployment tuning without recompilation.
