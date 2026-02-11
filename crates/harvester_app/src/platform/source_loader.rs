@@ -171,4 +171,54 @@ SourceRegistry(
         let registry = load_source_registry(&config_path);
         assert!(registry.sources.is_empty());
     }
+
+    #[test]
+    fn loads_rss_source_registry() {
+        init_logging();
+        let temp = TempDir::new().expect("temp");
+        let config_path = temp.path().join("rss.ron");
+        let contents = r#"
+SourceRegistry(
+    sources: [
+        SourceConfig(
+            id: "rss-feed",
+            source_type: Rss(feed_url: "https://example.com/feed"),
+            enabled: true,
+            max_urls_per_poll: Some(10),
+            description: "rss test",
+        ),
+    ],
+)
+"#;
+        fs::write(&config_path, contents).expect("write config");
+
+        let registry = load_source_registry(&config_path);
+        assert_eq!(registry.sources.len(), 1);
+        if let SourceType::Rss { feed_url } = &registry.sources[0].source_type {
+            assert_eq!(feed_url, "https://example.com/feed");
+        } else {
+            panic!("expected rss source");
+        }
+    }
+
+    #[test]
+    fn load_registry_rejects_invalid_rss_feed_url() {
+        init_logging();
+        let ron = r#"
+SourceRegistry(
+    sources: [
+        SourceConfig(
+            id: "rss-bad",
+            source_type: Rss(feed_url: "not a url"),
+            enabled: true,
+            max_urls_per_poll: None,
+            description: "",
+        ),
+    ],
+)
+"#;
+        let dir = TempDir::new().expect("temp");
+        let err = load_source_registry_from_str(ron, dir.path()).unwrap_err();
+        assert!(matches!(err, SourceLoaderError::Validation(_)));
+    }
 }

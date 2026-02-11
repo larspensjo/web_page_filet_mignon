@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
+use url::Url;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SourceId(String);
@@ -62,6 +63,7 @@ pub enum SourceType {
     File { path: PathBuf },
     Script { command: String, args: Vec<String> },
     CuratedList { urls: Vec<String> },
+    Rss { feed_url: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,6 +102,9 @@ impl SourceType {
                 args: args.clone(),
             },
             SourceType::CuratedList { urls } => SourceType::CuratedList { urls: urls.clone() },
+            SourceType::Rss { feed_url } => SourceType::Rss {
+                feed_url: feed_url.clone(),
+            },
         }
     }
 }
@@ -125,6 +130,23 @@ impl SourceRegistry {
                 return Err(SourceRegistryValidationError::DuplicateSourceId(
                     source.id.clone(),
                 ));
+            }
+
+            if let SourceType::Rss { feed_url } = &source.source_type {
+                let trimmed = feed_url.trim();
+                if trimmed.is_empty() {
+                    return Err(SourceRegistryValidationError::InvalidFeedUrl {
+                        source_id: source.id.clone(),
+                        reason: "feed_url cannot be empty".to_string(),
+                    });
+                }
+
+                Url::parse(trimmed).map_err(|err| {
+                    SourceRegistryValidationError::InvalidFeedUrl {
+                        source_id: source.id.clone(),
+                        reason: err.to_string(),
+                    }
+                })?;
             }
         }
         Ok(())
@@ -153,6 +175,8 @@ pub enum SourceIdError {
 pub enum SourceRegistryValidationError {
     #[error("duplicate source id: {0}")]
     DuplicateSourceId(SourceId),
+    #[error("rss source '{source_id}' has invalid feed url: {reason}")]
+    InvalidFeedUrl { source_id: SourceId, reason: String },
 }
 
 #[cfg(test)]
@@ -222,6 +246,83 @@ mod tests {
             assert_eq!(path, &config_dir.join("feed.txt"));
         } else {
             panic!("expected file source");
+        }
+    }
+
+    #[test]
+    fn rss_source_registry_accepts_valid_feed() {
+        let registry = SourceRegistry {
+            sources: vec![SourceConfig {
+                id: SourceId::new("rss").unwrap(),
+                source_type: SourceType::Rss {
+                    feed_url: "https://example.com/feed".to_string(),
+                },
+                enabled: true,
+                max_urls_per_poll: None,
+                description: String::new(),
+            }],
+        };
+
+        assert!(registry.validate().is_ok());
+    }
+
+    #[test]
+    fn rss_source_registry_rejects_empty_feed_url() {
+        let registry = SourceRegistry {
+            sources: vec![SourceConfig {
+                id: SourceId::new("rss").unwrap(),
+                source_type: SourceType::Rss {
+                    feed_url: "".to_string(),
+                },
+                enabled: true,
+                max_urls_per_poll: None,
+                description: String::new(),
+            }],
+        };
+
+        assert!(matches!(
+            registry.validate(),
+            Err(SourceRegistryValidationError::InvalidFeedUrl { .. })
+        ));
+    }
+
+    #[test]
+    fn rss_source_registry_detects_bad_url() {
+        let registry = SourceRegistry {
+            sources: vec![SourceConfig {
+                id: SourceId::new("rss").unwrap(),
+                source_type: SourceType::Rss {
+                    feed_url: "not-a-url".to_string(),
+                },
+                enabled: true,
+                max_urls_per_poll: None,
+                description: String::new(),
+            }],
+        };
+
+        assert!(matches!(
+            registry.validate(),
+            Err(SourceRegistryValidationError::InvalidFeedUrl { .. })
+        ));
+    }
+
+    #[test]
+    fn rss_resolve_paths_is_noop() {
+        let config = SourceConfig {
+            id: SourceId::new("rss").unwrap(),
+            source_type: SourceType::Rss {
+                feed_url: "https://example.com/feed".to_string(),
+            },
+            enabled: true,
+            max_urls_per_poll: None,
+            description: String::new(),
+        };
+
+        let resolved = config.resolve_paths(Path::new("/tmp"));
+        if let SourceType::Rss { feed_url } = resolved.source_type {
+            assert_eq!(feed_url, "https://example.com/feed");
+        } else {
+            panic!("expected rss source");
         }
     }
 }

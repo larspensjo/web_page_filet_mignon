@@ -419,6 +419,16 @@ impl EffectRunner {
                                     error: "script sources not implemented".to_string(),
                                 });
                             }
+                            SourceType::Rss { .. } => {
+                                engine_warn!(
+                                    "[source-poll] rss sources not implemented yet for {}",
+                                    source_id
+                                );
+                                let _ = msg_tx.send(Msg::SourcePollFailed {
+                                    source_id: source_id.clone(),
+                                    error: "rss sources not implemented yet".to_string(),
+                                });
+                            }
                         }
                     }
                     let _ = msg_tx.send(Msg::AllSourcesPollEnded);
