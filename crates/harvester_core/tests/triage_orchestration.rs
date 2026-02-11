@@ -96,7 +96,10 @@ fn triage_clicked_emits_load_effect() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let (state, effects) = update(state, Msg::TriageClicked);
-    assert_eq!(effects, vec![Effect::LoadArticlesForTriage]);
+    assert_eq!(
+        effects,
+        vec![Effect::LoadPromptContexts, Effect::LoadArticlesForTriage]
+    );
     assert!(!state.view().triage_can_start);
 }
 
@@ -289,7 +292,10 @@ fn triage_rerun_after_complete_starts_fresh() {
         },
     );
     let (state, effects) = update(state, Msg::TriageClicked);
-    assert_eq!(effects, vec![Effect::LoadArticlesForTriage]);
+    assert_eq!(
+        effects,
+        vec![Effect::LoadPromptContexts, Effect::LoadArticlesForTriage]
+    );
     assert!(!state.view().triage_can_start);
 }
 

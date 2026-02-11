@@ -9,7 +9,7 @@ use crate::view_model::{
 use crate::Effect;
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind, SourceId};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use url::Url;
 
@@ -70,6 +70,7 @@ pub struct AppState {
     briefing: BriefingSession,
     triage: TriageSession,
     source_states: SourceStateIndex,
+    prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
 }
 
 pub struct IngestResult {
@@ -94,6 +95,7 @@ impl Default for AppState {
             briefing: BriefingSession::default(),
             triage: TriageSession::default(),
             source_states: SourceStateIndex::default(),
+            prompt_contexts: HashMap::new(),
         }
     }
 }
@@ -313,6 +315,22 @@ impl AppState {
     #[allow(dead_code)]
     pub fn job_links(&self, job_id: JobId) -> Option<&[LinkRecord]> {
         self.jobs.get(&job_id).map(|job| job.links())
+    }
+
+    /// Get the context variables for a specific prompt, if loaded.
+    /// Returns an empty slice if no context has been loaded for this prompt.
+    pub fn context_for(&self, prompt_id: PromptId) -> &[(String, String)] {
+        self.prompt_contexts
+            .get(&prompt_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub(crate) fn set_prompt_contexts(
+        &mut self,
+        contexts: HashMap<PromptId, Vec<(String, String)>>,
+    ) {
+        self.prompt_contexts = contexts;
     }
 
     pub(crate) fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {

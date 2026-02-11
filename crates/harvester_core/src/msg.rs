@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
@@ -108,6 +109,12 @@ pub enum Msg {
     TriageArticlesLoaded { articles: Vec<LoadedArticle> },
     /// Loader failed for triage.
     TriageArticlesLoadFailed { reason: String },
+    /// Prompt contexts loaded from disk.
+    PromptContextsLoaded {
+        contexts: HashMap<PromptId, Vec<(String, String)>>,
+    },
+    /// Prompt contexts failed to load.
+    PromptContextsLoadFailed { reason: String },
 }
 
 /// Result payload returned by the LLM worker.

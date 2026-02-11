@@ -43,7 +43,7 @@ analyst-controlled context injection.
 
 ## Steps
 
-### 1. Rewrite `render_template` as a single-pass renderer (blocker)
+### 1. [COMPLETE] Rewrite `render_template` as a single-pass renderer (blocker)
 
 In `crates/harvester_engine/src/llm/prompt.rs`:
 
@@ -64,7 +64,7 @@ In `crates/harvester_engine/src/llm/prompt.rs`:
   - `UnresolvedVariable { variable: String, template_fragment: String }`
   - `ExceedsTokenBudget { rendered_len: usize, budget: usize }`
 
-### 2. Add `FromStr` / stable string mapping for `PromptId`
+### 2. [COMPLETE] Add `FromStr` / stable string mapping for `PromptId`
 
 In `crates/harvester_engine/src/llm/prompt.rs`:
 
@@ -75,7 +75,7 @@ In `crates/harvester_engine/src/llm/prompt.rs`:
 - Return a clear error for unknown strings. This is needed so TOML context
   files can reference prompt IDs by name and be validated at load time.
 
-### 3. Add context file types in `harvester_engine`
+### 3. [COMPLETE] Add context file types in `harvester_engine`
 
 Create `crates/harvester_engine/src/llm/prompt_context.rs`:
 
@@ -95,7 +95,7 @@ Create `crates/harvester_engine/src/llm/prompt_context.rs`:
   error to allow future backward-compatible evolution.
 - Register the module in `crates/harvester_engine/src/llm/mod.rs`.
 
-### 4. Add validation that context covers template placeholders
+### 4. [COMPLETE] Add validation that context covers template placeholders
 
 In the same module or a companion function:
 
@@ -108,7 +108,7 @@ In the same module or a companion function:
 - Also validate the reverse: warn if the context provides keys that no
   template placeholder references (likely a typo or stale context).
 
-### 5. Store loaded context in `State` and wire loading through effects
+### 5. [COMPLETE] Store loaded context in `State` and wire loading through effects
 
 - Add a `prompt_contexts: HashMap<PromptId, Vec<(String, String)>>` field to
   `State` in `crates/harvester_core/src/state.rs`. Keep it encapsulated:
@@ -129,7 +129,7 @@ In the same module or a companion function:
   from the app layer. The effect runner (app layer) performs the IO and
   dispatches `Msg::PromptContextsLoaded` back to the reducer.
 
-### 6. Populate the `context` vec in triage/briefing dispatch
+### 6. [COMPLETE] Populate the `context` vec in triage/briefing dispatch
 
 In `dispatch_next_triage_job` and `dispatch_next_briefing_step` in
 `crates/harvester_core/src/update.rs`:

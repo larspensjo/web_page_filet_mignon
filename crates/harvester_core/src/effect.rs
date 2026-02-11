@@ -10,6 +10,7 @@ pub enum Effect {
     },
     LoadArticlesForBriefing,
     LoadArticlesForTriage,
+    LoadPromptContexts,
     PollAllSources,
     RequestLlmCompletion {
         request_id: u64,

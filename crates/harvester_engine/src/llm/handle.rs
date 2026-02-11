@@ -116,6 +116,9 @@ pub enum LlmCompletionError {
         size: usize,
         limit: usize,
     },
+    TemplateRenderFailed {
+        detail: String,
+    },
 }
 
 pub enum LlmEvent {
@@ -210,8 +213,32 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
         vars.insert(key.clone(), value.clone());
     }
     let rendered = vars.to_map();
-    let system_message = render_template(template.system_template, &rendered);
-    let user_message = render_template(template.user_template, &rendered);
+    let system_message = match render_template(template.system_template, &rendered) {
+        Ok(msg) => msg,
+        Err(e) => {
+            engine_error!("[llm-render] Failed to render system template: {}", e);
+            let _ = ctx.event_tx.send(LlmEvent::Completed {
+                request_id,
+                result: Err(LlmCompletionError::TemplateRenderFailed {
+                    detail: format!("system template: {}", e),
+                }),
+            });
+            return;
+        }
+    };
+    let user_message = match render_template(template.user_template, &rendered) {
+        Ok(msg) => msg,
+        Err(e) => {
+            engine_error!("[llm-render] Failed to render user template: {}", e);
+            let _ = ctx.event_tx.send(LlmEvent::Completed {
+                request_id,
+                result: Err(LlmCompletionError::TemplateRenderFailed {
+                    detail: format!("user template: {}", e),
+                }),
+            });
+            return;
+        }
+    };
     let input_hash = content_hash(&input_content);
 
     if let Some(ref cache) = ctx.config.replay_cache {

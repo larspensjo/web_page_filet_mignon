@@ -350,7 +350,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.set_briefing(BriefingSession::new_loading(None));
             engine_info!("[briefing] briefing requested");
-            vec![Effect::LoadArticlesForBriefing]
+            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForBriefing]
         }
         Msg::ArticlesLoaded {
             articles,
@@ -381,7 +381,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.set_triage(TriageSession::new_loading(None));
             engine_info!("[triage] triage requested");
-            vec![Effect::LoadArticlesForTriage]
+            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForTriage]
         }
         Msg::TriageArticlesLoaded { articles } => {
             if articles.is_empty() {
@@ -400,6 +400,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::TriageArticlesLoadFailed { reason } => {
             state.triage_mut().fail(reason);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptContextsLoaded { contexts } => {
+            engine_info!("[PromptContext] Loaded {} context(s)", contexts.len());
+            state.set_prompt_contexts(contexts);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptContextsLoadFailed { reason } => {
+            engine_warn!("[PromptContext] Failed to load contexts: {}", reason);
+            // Continue with empty contexts (degraded but functional)
             state.mark_dirty();
             Vec::new()
         }
@@ -452,12 +464,15 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
         let request_id = state.allocate_next_llm_request_id();
         state.record_pending_llm_request(request_id, PromptId::ArticleTriage);
         state.triage_mut().start_article(next_idx, request_id);
+
+        let context = state.context_for(PromptId::ArticleTriage).to_vec();
+
         effects.push(Effect::RequestLlmCompletion {
             request_id,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: None,
             input_content: prepared_text,
-            context: Vec::new(),
+            context,
         });
         state.mark_dirty();
         return;
@@ -478,12 +493,15 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         let request_id = state.allocate_next_llm_request_id();
         state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
         state.briefing_mut().start_article(next_idx, request_id);
+
+        let context = state.context_for(PromptId::ArticleSummary).to_vec();
+
         effects.push(Effect::RequestLlmCompletion {
             request_id,
             prompt_id: PromptId::ArticleSummary,
             prompt_version: None,
             input_content: prepared_text,
-            context: Vec::new(),
+            context,
         });
         state.mark_dirty();
         return;
@@ -510,12 +528,15 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
     let request_id = state.allocate_next_llm_request_id();
     state.record_pending_llm_request(request_id, PromptId::AggregateBriefing);
     state.briefing_mut().set_briefing_request_id(request_id);
+
+    let context = state.context_for(PromptId::AggregateBriefing).to_vec();
+
     effects.push(Effect::RequestLlmCompletion {
         request_id,
         prompt_id: PromptId::AggregateBriefing,
         prompt_version: None,
         input_content: collection_text,
-        context: Vec::new(),
+        context,
     });
     state.mark_dirty();
 }
@@ -566,7 +587,10 @@ mod tests {
         let state = AppState::new();
         let (state, effects) = update(state, Msg::GenerateBriefingClicked);
 
-        assert_eq!(effects, vec![Effect::LoadArticlesForBriefing]);
+        assert_eq!(
+            effects,
+            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForBriefing]
+        );
         assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
     }
 

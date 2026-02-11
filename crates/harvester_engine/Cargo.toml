@@ -24,6 +24,7 @@ tempfile = "3"
 serde_json.workspace = true
 serde.workspace = true
 hex = "0.4"
+toml.workspace = true
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }

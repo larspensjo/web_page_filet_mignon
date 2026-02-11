@@ -72,8 +72,15 @@ pub fn compute_prompt_overhead(
         vars.insert(key.clone(), value.clone());
     }
     let rendered = vars.to_map();
-    let system = render_template(template.system_template, &rendered);
-    let user = render_template(template.user_template, &rendered);
+    let system = render_template(template.system_template, &rendered)
+        .unwrap_or_else(|e| {
+            // If template rendering fails, use conservative estimate
+            format!("ERROR: {}", e)
+        });
+    let user = render_template(template.user_template, &rendered)
+        .unwrap_or_else(|e| {
+            format!("ERROR: {}", e)
+        });
     system.len() + user.len() + NONCE_OVERHEAD_BYTES
 }
 
@@ -241,8 +248,8 @@ mod tests {
             vars.insert(key.clone(), value.clone());
         }
         let rendered = vars.to_map();
-        let system = render_template(template.system_template, &rendered);
-        let user = render_template(template.user_template, &rendered);
+        let system = render_template(template.system_template, &rendered).unwrap();
+        let user = render_template(template.user_template, &rendered).unwrap();
         assert_eq!(overhead, system.len() + user.len() + NONCE_OVERHEAD_BYTES);
     }
 }

@@ -3,6 +3,7 @@ pub mod handle;
 pub mod mock_provider;
 pub mod pricing;
 pub mod prompt;
+pub mod prompt_context;
 pub mod prompts;
 pub mod provider;
 pub mod providers;
@@ -18,6 +19,10 @@ pub use handle::{
 pub use mock_provider::MockLlmProvider;
 pub use pricing::{ModelPricing, PricingRegistry};
 pub use prompt::{PromptId, PromptRegistry, PromptTemplate, PromptVersion, TemplateVars};
+pub use prompt_context::{
+    load_context_file, validate_context_covers_template, ContextLoadError, ContextMeta,
+    PromptContextFile,
+};
 pub use provider::LlmProvider;
 pub use providers::OpenAiProvider;
 pub use quota::{LlmQuotaTracker, LlmQuotas, LlmUsageTotals};

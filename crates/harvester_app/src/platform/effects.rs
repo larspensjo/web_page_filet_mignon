@@ -270,6 +270,67 @@ impl EffectRunner {
                     }
                 });
             }
+            Effect::LoadPromptContexts => {
+                let msg_tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    use harvester_engine::llm::{load_context_file, PromptId};
+                    use std::collections::HashMap;
+                    use std::path::PathBuf;
+
+                    // Load contexts from a default directory
+                    // TODO: Make this configurable
+                    let contexts_dir = PathBuf::from("contexts");
+
+                    if !contexts_dir.exists() {
+                        engine_warn!(
+                            "[PromptContext] contexts directory not found at {:?}",
+                            contexts_dir
+                        );
+                        let _ = msg_tx.send(Msg::PromptContextsLoaded {
+                            contexts: HashMap::new(),
+                        });
+                        return;
+                    }
+
+                    let mut contexts = HashMap::new();
+                    let prompt_ids = [
+                        PromptId::ArticleTriage,
+                        PromptId::ArticleSummary,
+                        PromptId::AggregateBriefing,
+                    ];
+
+                    for prompt_id in prompt_ids {
+                        let filename = match prompt_id {
+                            PromptId::ArticleTriage => "article_triage.toml",
+                            PromptId::ArticleSummary => "article_summary.toml",
+                            PromptId::AggregateBriefing => "aggregate_briefing.toml",
+                        };
+                        let path = contexts_dir.join(filename);
+
+                        if !path.exists() {
+                            engine_info!(
+                                "[PromptContext] Context file not found: {:?}, skipping",
+                                path
+                            );
+                            continue;
+                        }
+
+                        match load_context_file(&path) {
+                            Ok(ctx_file) => {
+                                let vec: Vec<(String, String)> =
+                                    ctx_file.variables.into_iter().collect();
+                                contexts.insert(prompt_id, vec);
+                            }
+                            Err(e) => {
+                                engine_warn!("[PromptContext] Failed to load {:?}: {}", path, e);
+                                // Continue with other contexts
+                            }
+                        }
+                    }
+
+                    let _ = msg_tx.send(Msg::PromptContextsLoaded { contexts });
+                });
+            }
             Effect::LoadArticlesForTriage => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
@@ -578,6 +639,9 @@ fn llm_error_reason(error: LlmCompletionError) -> String {
         }
         LlmCompletionError::InputTooLarge { size, limit } => {
             format!("input too large ({} > {})", size, limit)
+        }
+        LlmCompletionError::TemplateRenderFailed { detail } => {
+            format!("template rendering failed: {}", detail)
         }
         LlmCompletionError::ValidationFailed { .. } => unreachable!(),
     }
