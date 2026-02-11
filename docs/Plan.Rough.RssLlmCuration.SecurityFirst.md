@@ -24,7 +24,7 @@ Manually collecting URLs and reading a large volume of articles does not scale. 
 A repeatable pipeline that, on demand (and later on schedule), outputs:
 - a prioritized list of downloaded items with **tags and importance**,
 - an **executive summary** across the set,
-- traceability: which model/prompt produced which result.
+- traceability: which model/prompt/context version produced which result.
 
 ### Success criteria (initial)
 - Works with existing downloaded pages first (no RSS required initially).
@@ -283,8 +283,10 @@ More automation, but higher complexity and security requirements.
 These items were identified during Phase 0–3 implementation and are relevant across multiple phases. They should be considered when planning future work:
 
 - **Unified download path**: Route linked-page downloads through the engine as tagged jobs rather than the current separate path. Reduces code duplication and ensures all downloads benefit from the same policy/quota enforcement.
+- **Hot-reload prompt context**: Debounced watcher for `contexts/` so analyst targeting updates can be applied without restart. Improves iteration speed and reduces operational friction.
 - **Policy-as-configuration**: Load `UrlPolicy`, `SessionQuotas`, and `LlmQuotas` from a config file (RON or TOML) rather than compile-time defaults. Enables per-deployment tuning without recompilation.
 - **Audit log**: Structured log entries for all policy decisions (URL rejections, quota enforcement, path confinement checks). Useful for debugging and compliance.
+- **Prompt token count visibility**: Surface the per-run prompt token estimate in the UI to flag overly large contexts and guide trimming before costs spike.
 - **Typed trust wrappers**: `SafePath` newtype for path confinement, `ValidatedLlmOutput<T>` for compile-time safety that LLM output validation was performed, `UntrustedContent(String)` for raw downloaded text that can only be unwrapped through the content preparation pipeline. Makes security guarantees compile-time rather than runtime.
 - **Input debounce**: Review auto-submission behavior on `InputTextChanged` to prevent rapid-fire URL enqueuing from paste events.
 - **Additional LLM providers** (Anthropic, Google): Follow the same pattern as the OpenAI adapter. ~100 lines each, structurally identical.
