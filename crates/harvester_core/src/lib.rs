@@ -4,6 +4,7 @@ mod effect;
 mod msg;
 mod source_state;
 mod state;
+mod summary_cache;
 mod triage;
 mod ui_geometry;
 mod update;
@@ -21,6 +22,7 @@ pub use state::{
     normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind,
     LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex, SessionState, Stage,
 };
+pub use summary_cache::{context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
 pub use triage::{
     ArticleTriageResult, ArticleTriageState, TriageArticle, TriageArticleId, TriagePhase,
     TriageSession,

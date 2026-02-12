@@ -124,7 +124,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 2: Add Core Cache Types
+### Step 2: Add Core Cache Types [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/summary_cache.rs` (NEW)
