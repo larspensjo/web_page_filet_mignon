@@ -415,6 +415,28 @@ impl EffectRunner {
                     });
                 });
             }
+            Effect::PersistSummaryCache { cache } => {
+                use super::summary_cache_store::{default_summary_cache_path, save_summary_cache};
+
+                let msg_tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    let path = default_summary_cache_path();
+                    match save_summary_cache(&cache, &path) {
+                        Ok(_) => {
+                            engine_info!("[summary-cache] Persisted cache to {:?}", path);
+                        }
+                        Err(err) => {
+                            engine_warn!(
+                                "[summary-cache] Failed to persist cache to {:?}: {}",
+                                path,
+                                err
+                            );
+                        }
+                    }
+                    // No message needed on completion - fire and forget
+                    let _ = msg_tx;
+                });
+            }
             Effect::LoadArticlesForTriage => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();

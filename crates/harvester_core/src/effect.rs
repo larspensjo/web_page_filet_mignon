@@ -35,6 +35,9 @@ pub enum Effect {
         link_index: u32,
         path: PathBuf,
     },
+    PersistSummaryCache {
+        cache: crate::SummaryCache,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

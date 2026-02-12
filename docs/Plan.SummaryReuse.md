@@ -212,7 +212,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 6: Hydration + Persist-at-Briefing-End
+### Step 6: Hydration + Persist-at-Briefing-End [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/msg.rs`

@@ -363,14 +363,23 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 input_tokens: *input_tokens,
                                 output_tokens: *output_tokens,
                             });
+                            effects.push(Effect::PersistSummaryCache {
+                                cache: state.summary_cache().clone(),
+                            });
                         }
                         Err(err) => {
                             engine_warn!("[briefing] briefing validation failed: {err}");
                             state.briefing_mut().complete_without_briefing();
+                            effects.push(Effect::PersistSummaryCache {
+                                cache: state.summary_cache().clone(),
+                            });
                         }
                     },
                     _ => {
                         state.briefing_mut().complete_without_briefing();
+                        effects.push(Effect::PersistSummaryCache {
+                            cache: state.summary_cache().clone(),
+                        });
                     }
                 }
                 state.mark_dirty();
@@ -398,7 +407,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     .briefing_mut()
                     .fail("no completed articles found".to_string());
                 state.mark_dirty();
-                return (state, Vec::new());
+                let cache = state.summary_cache().clone();
+                return (state, vec![Effect::PersistSummaryCache { cache }]);
             }
             state.briefing_mut().set_articles(articles, collection_text);
             state.briefing_mut().transition_to_summarizing();
@@ -410,7 +420,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::ArticlesLoadFailed { reason } => {
             state.briefing_mut().fail(reason);
             state.mark_dirty();
-            Vec::new()
+            let cache = state.summary_cache().clone();
+            vec![Effect::PersistSummaryCache { cache }]
         }
         Msg::TriageClicked => {
             if !state.triage().can_start() {
@@ -465,6 +476,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 active_versions.len()
             );
             state.set_llm_metadata(active_versions, effective_models);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::SummaryCacheHydrated { cache } => {
+            engine_info!(
+                "[summary-cache] Hydrated {} entries from persistent store",
+                cache.len()
+            );
+            state.set_summary_cache(cache);
             state.mark_dirty();
             Vec::new()
         }
@@ -605,6 +625,9 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
             .briefing_mut()
             .fail("all article summaries failed".to_string());
         state.mark_dirty();
+        effects.push(Effect::PersistSummaryCache {
+            cache: state.summary_cache().clone(),
+        });
         return;
     }
 
@@ -615,6 +638,9 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                 .briefing_mut()
                 .fail("missing briefing collection".to_string());
             state.mark_dirty();
+            effects.push(Effect::PersistSummaryCache {
+                cache: state.summary_cache().clone(),
+            });
             return;
         }
     };
@@ -824,7 +850,8 @@ mod tests {
             },
         );
 
-        assert!(effects.is_empty());
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::PersistSummaryCache { .. }));
         assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
         assert!(state.briefing().briefing_result().is_some());
     }

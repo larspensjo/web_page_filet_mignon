@@ -17,7 +17,7 @@ pub struct SummaryCacheKey {
 }
 
 /// Cached entry for an article summary result.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryCacheEntry {
     pub result: ArticleSummaryResult,
     pub created_at_utc: String,
@@ -25,7 +25,7 @@ pub struct SummaryCacheEntry {
 
 /// In-memory cache for article summary results.
 /// Provides lookup and insertion with optional eviction by size limit.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryCache {
     entries: HashMap<SummaryCacheKey, SummaryCacheEntry>,
 }

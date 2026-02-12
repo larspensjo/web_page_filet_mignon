@@ -120,6 +120,8 @@ pub enum Msg {
         active_versions: std::collections::HashMap<PromptId, PromptVersion>,
         effective_models: std::collections::HashMap<PromptId, String>,
     },
+    /// Summary cache hydrated from persisted store at startup.
+    SummaryCacheHydrated { cache: crate::SummaryCache },
 }
 
 /// Result payload returned by the LLM worker.
