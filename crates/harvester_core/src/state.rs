@@ -1531,7 +1531,11 @@ mod tests {
             output_tokens: 50,
         };
 
-        state.store_summary_result(key.clone(), result.clone(), "2026-01-01T00:00:00Z".to_string());
+        state.store_summary_result(
+            key.clone(),
+            result.clone(),
+            "2026-01-01T00:00:00Z".to_string(),
+        );
 
         let retrieved = state.try_reuse_summary(&key);
         assert!(retrieved.is_some());
@@ -1564,7 +1568,7 @@ mod tests {
         use harvester_engine::llm::prompt::PromptId;
 
         let mut state = AppState::new();
-        
+
         // Store initial entry
         let key1 = SummaryCacheKey {
             content_hash: "hash1".to_string(),

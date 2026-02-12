@@ -167,7 +167,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 4: Wire Reducer Reuse + Progress Behavior
+### Step 4: Wire Reducer Reuse + Progress Behavior [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/update.rs`
