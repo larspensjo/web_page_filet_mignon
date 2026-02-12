@@ -1,3 +1,6 @@
 [submodule "src/CommanDuctUI"]
 	path = src/CommanDuctUI
 	url = https://github.com/larspensjo/CommanDuctUI.git
+[submodule "ministry-of-future-plans"]
+	path = ministry-of-future-plans
+	url = https://github.com/larspensjo/ministry-of-future-plans.git
