@@ -1,0 +1,3 @@
+2026-02-12T04:07:27.886085Z [INFO] harvester_app::platform::app: Logger initialized. Starting harvester_app...
+2026-02-12T04:07:30.6533519Z [INFO] harvester_core::update: [source-poll] polling requested
+2026-02-12T04:07:30.653746Z [INFO] harvester_app::platform::effects: [source-config] loading C:\Users\larsp\src\web_page_filet_mignon\main\sources.ron

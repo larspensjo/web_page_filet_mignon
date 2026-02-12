@@ -239,7 +239,9 @@ async fn run_job(
     engine_info!("Job {} starting: {}", job_id, url);
     let sink = ChannelProgressSink::new(event_tx.clone());
 
-    let fetch_result = fetcher.fetch(job_id, &url, &sink).await;
+    let fetch_result = fetcher
+        .fetch(job_id, &url, &sink, &cancel_token)
+        .await;
     let fetch_output = match fetch_result {
         Ok(out) => {
             engine_debug!(
@@ -260,16 +262,6 @@ async fn run_job(
             return Err(failure);
         }
     };
-
-    // Check cancellation after fetching stage boundary.
-    if cancel_token.is_cancelled() {
-        let failure = FailureKind::Cancelled;
-        let _ = event_tx.send(EngineEvent::JobCompleted {
-            job_id,
-            result: Err(failure.clone()),
-        });
-        return Err(failure);
-    }
 
     let decoded = match timeout(config.extract_timeout, async {
         decode_html(

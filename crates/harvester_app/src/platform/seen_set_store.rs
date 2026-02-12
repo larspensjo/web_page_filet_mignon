@@ -53,7 +53,7 @@ pub(crate) fn save_seen_set(set: &RssSeenSet, path: &Path) -> io::Result<()> {
         .map(|_| {
             engine_info!("[rss-seen] saved seen set to {:?}", path);
         })
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        .map_err(io::Error::other)
 }
 
 #[cfg(test)]

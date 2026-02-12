@@ -5,6 +5,7 @@ use harvester_engine::{
     Fetcher, Html2MdConverter, ProgressSink, ReadabilityLikeExtractor, ReqwestFetcher, UrlPolicy,
     WhitespaceTokenCounter,
 };
+use tokio_util::sync::CancellationToken;
 use reqwest::Url;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -99,7 +100,7 @@ async fn url_policy_allows_wiremock_host_when_allowed() {
     let sink = NoopSink;
     let url = format!("{}/doc", server.uri());
     let output = fetcher
-        .fetch(1, &url, &sink)
+        .fetch(1, &url, &sink, &CancellationToken::new())
         .await
         .expect("fetch should succeed");
     assert_eq!(output.metadata.original_url, url);
@@ -130,6 +131,9 @@ async fn url_policy_redirect_to_private_is_blocked() {
     let fetcher = ReqwestFetcher::new(FetchSettings::default(), policy);
     let sink = NoopSink;
     let url = format!("{}/redirect", server.uri());
-    let err = fetcher.fetch(2, &url, &sink).await.unwrap_err();
+    let err = fetcher
+        .fetch(2, &url, &sink, &CancellationToken::new())
+        .await
+        .unwrap_err();
     assert!(matches!(err.kind, FailureKind::UrlPolicyViolation { .. }));
 }

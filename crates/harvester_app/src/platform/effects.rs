@@ -14,13 +14,12 @@ use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, Stage, StopPolicy};
 use harvester_engine::{
-    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
-    is_confined_to,
+    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir, is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
     load_and_prepare_articles, load_and_prepare_articles_for_triage, poll_curated_source,
     poll_file_source, poll_rss_source, AtomicFileWriter, Converter, DecodeError, EngineConfig,
     EngineEvent, EngineHandle, Extractor, FetchSettings, LinkExtractingConverter,
-    ReadabilityLikeExtractor, SourceType, UrlPolicy, WhitespaceTokenCounter,
+    ReadabilityLikeExtractor, RssSeenSet, SourceId, SourceType, UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
@@ -34,6 +33,66 @@ pub(crate) fn default_output_dir() -> std::path::PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("output")
+}
+
+struct RssPollContext<'a> {
+    seen_set: &'a mut RssSeenSet,
+    seen_set_path: &'a Path,
+    msg_tx: &'a mpsc::Sender<Msg>,
+}
+
+fn handle_rss_source_poll(
+    source_id: &SourceId,
+    feed_url: &str,
+    url_policy: &UrlPolicy,
+    fetch_settings: &FetchSettings,
+    context: &mut RssPollContext,
+    max_urls_per_poll: Option<usize>,
+) {
+    let bytes = match fetch_feed(feed_url, url_policy, fetch_settings) {
+        Ok(bytes) => bytes,
+        Err(reason) => {
+            engine_warn!("[rss-poll] fetch failed for {}: {}", source_id, reason);
+            let _ = context.msg_tx.send(Msg::SourcePollFailed {
+                source_id: source_id.clone(),
+                error: reason,
+            });
+            return;
+        }
+    };
+    let result = match poll_rss_source(
+        source_id.clone(),
+        &bytes,
+        feed_url,
+        context.seen_set,
+        max_urls_per_poll,
+    ) {
+        Ok(result) => result,
+        Err(err) => {
+            engine_warn!("[rss-poll] {} failed: {}", source_id, err);
+            let _ = context.msg_tx.send(Msg::SourcePollFailed {
+                source_id: source_id.clone(),
+                error: err.to_string(),
+            });
+            return;
+        }
+    };
+    if let Err(err) = seen_set_store::save_seen_set(context.seen_set, context.seen_set_path) {
+        engine_warn!(
+            "[rss-poll] failed to persist seen set for {}: {}",
+            source_id,
+            err
+        );
+    }
+    engine_info!(
+        "[rss-poll] {} => {} new URL(s)",
+        source_id,
+        result.urls.len()
+    );
+    let _ = context.msg_tx.send(Msg::SourcePollCompleted {
+        source_id: source_id.clone(),
+        urls: result.urls,
+    });
 }
 
 pub struct EffectRunner {
@@ -430,59 +489,19 @@ impl EffectRunner {
                                 });
                             }
                             SourceType::Rss { feed_url } => {
-                                match fetch_feed(&feed_url, &url_policy, &fetch_settings) {
-                                    Ok(bytes) => match poll_rss_source(
-                                        source_id.clone(),
-                                        &bytes,
-                                        &feed_url,
-                                        &mut seen_set,
-                                        config.max_urls_per_poll,
-                                    ) {
-                                        Ok(result) => {
-                                            if let Err(err) = seen_set_store::save_seen_set(
-                                                &seen_set,
-                                                &seen_set_path,
-                                            ) {
-                                                engine_warn!(
-                                                    "[rss-poll] failed to persist seen set for {}: {}",
-                                                    source_id,
-                                                    err
-                                                );
-                                            }
-                                            engine_info!(
-                                                "[rss-poll] {} => {} new URL(s)",
-                                                source_id,
-                                                result.urls.len()
-                                            );
-                                            let _ = msg_tx.send(Msg::SourcePollCompleted {
-                                                source_id: source_id.clone(),
-                                                urls: result.urls,
-                                            });
-                                        }
-                                        Err(err) => {
-                                            engine_warn!(
-                                                "[rss-poll] {} failed: {}",
-                                                source_id,
-                                                err
-                                            );
-                                            let _ = msg_tx.send(Msg::SourcePollFailed {
-                                                source_id: source_id.clone(),
-                                                error: err.to_string(),
-                                            });
-                                        }
-                                    },
-                                    Err(reason) => {
-                                        engine_warn!(
-                                            "[rss-poll] fetch failed for {}: {}",
-                                            source_id,
-                                            reason
-                                        );
-                                        let _ = msg_tx.send(Msg::SourcePollFailed {
-                                            source_id: source_id.clone(),
-                                            error: reason,
-                                        });
-                                    }
-                                }
+                                let mut context = RssPollContext {
+                                    seen_set: &mut seen_set,
+                                    seen_set_path: &seen_set_path,
+                                    msg_tx: &msg_tx,
+                                };
+                                handle_rss_source_poll(
+                                    &source_id,
+                                    &feed_url,
+                                    &url_policy,
+                                    &fetch_settings,
+                                    &mut context,
+                                    config.max_urls_per_poll,
+                                );
                             }
                         }
                     }

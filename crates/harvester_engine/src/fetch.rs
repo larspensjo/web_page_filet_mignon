@@ -8,12 +8,35 @@ use std::time::Duration;
 
 use engine_logging::{engine_info, engine_warn};
 use futures_util::StreamExt;
-use reqwest::header::CONTENT_TYPE;
+use reqwest::{
+    header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, CONTENT_TYPE, RETRY_AFTER},
+    StatusCode,
+};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     EngineEvent, FailureKind, FetchError, FetchMetadata, FetchOutput, JobId, JobProgress, Stage,
     UrlPolicy,
 };
+
+#[derive(Debug, Clone)]
+pub struct RetrySettings {
+    pub max_retries: usize,
+    pub initial_backoff: Duration,
+    pub max_backoff: Duration,
+    pub backoff_multiplier: f64,
+}
+
+impl Default for RetrySettings {
+    fn default() -> Self {
+        Self {
+            max_retries: 2,
+            initial_backoff: Duration::from_secs(1),
+            max_backoff: Duration::from_secs(8),
+            backoff_multiplier: 2.0,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct FetchSettings {
@@ -23,6 +46,7 @@ pub struct FetchSettings {
     pub max_bytes: u64,
     pub allowed_content_types: Vec<String>,
     pub user_agent: String,
+    pub retry_settings: RetrySettings,
 }
 
 impl Default for FetchSettings {
@@ -38,6 +62,7 @@ impl Default for FetchSettings {
                 "text/plain".to_string(),
             ],
             user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36".to_string(),
+            retry_settings: RetrySettings::default(),
         }
     }
 }
@@ -69,6 +94,7 @@ pub trait Fetcher: Send + Sync {
         job_id: JobId,
         url: &str,
         sink: &dyn ProgressSink,
+        cancel: &CancellationToken,
     ) -> Result<FetchOutput, FetchError>;
 }
 
@@ -113,11 +139,19 @@ impl ReqwestFetcher {
             }
         });
 
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+        );
+        default_headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
+
         reqwest::Client::builder()
             .connect_timeout(self.settings.connect_timeout)
             .timeout(self.settings.request_timeout)
             .redirect(policy)
             .user_agent(self.settings.user_agent.clone())
+            .default_headers(default_headers)
             .build()
             .map_err(|err| FetchError::new(FailureKind::Network, err.to_string()))
     }
@@ -133,23 +167,20 @@ impl ReqwestFetcher {
             .iter()
             .any(|allowed| allowed.eq_ignore_ascii_case(ct))
     }
-}
 
-#[async_trait::async_trait]
-impl Fetcher for ReqwestFetcher {
-    async fn fetch(
+    async fn fetch_once(
         &self,
         job_id: JobId,
         url: &str,
         sink: &dyn ProgressSink,
     ) -> Result<FetchOutput, FetchError> {
         let parsed = reqwest::Url::parse(url).map_err(|err| {
-            engine_warn!("Invalid URL '{}': {}", url, err);
+            engine_warn!("[fetch] Invalid URL '{}': {}", url, err);
             FetchError::new(FailureKind::InvalidUrl, err.to_string())
         })?;
         if let Err(violation) = self.url_policy.check(&parsed) {
             let reason = violation.to_string();
-            engine_warn!("URL policy violation for '{}': {}", url, reason);
+            engine_warn!("[fetch] URL policy violation for '{}': {}", url, reason);
             return Err(FetchError::new(
                 FailureKind::UrlPolicyViolation {
                     description: reason.clone(),
@@ -162,23 +193,25 @@ impl Fetcher for ReqwestFetcher {
 
         let response = client.get(parsed.clone()).send().await.map_err(|err| {
             let fetch_err = map_reqwest_error(err);
-            engine_warn!("Fetch failed for '{}': {}", url, fetch_err.kind);
+            engine_warn!("[fetch] Fetch failed for '{}': {}", url, fetch_err.kind);
             fetch_err
         })?;
 
         let status = response.status();
         if !status.is_success() {
-            engine_warn!("HTTP error {} for URL '{}'", status.as_u16(), url);
-            return Err(FetchError::new(
+            engine_warn!("[fetch] HTTP error {} for URL '{}'", status.as_u16(), url);
+            let retry_after = parse_retry_after(status, response.headers());
+            return Err(FetchError::new_with_retry_after(
                 FailureKind::HttpStatus(status.as_u16()),
                 status.to_string(),
+                retry_after,
             ));
         }
 
         if let Some(content_len) = response.content_length() {
             if content_len > self.settings.max_bytes {
                 engine_warn!(
-                    "Response too large for '{}': {} bytes (max {})",
+                    "[fetch] Response too large for '{}': {} bytes (max {})",
                     url,
                     content_len,
                     self.settings.max_bytes
@@ -202,7 +235,7 @@ impl Fetcher for ReqwestFetcher {
 
         if let Some(ct) = content_type.as_deref() {
             if !self.is_content_type_allowed(ct) {
-                engine_warn!("Unsupported content type '{}' for URL '{}'", ct, url);
+                engine_warn!("[fetch] Unsupported content type '{}' for URL '{}'", ct, url);
                 return Err(FetchError::new(
                     FailureKind::UnsupportedContentType {
                         content_type: ct.to_string(),
@@ -220,7 +253,7 @@ impl Fetcher for ReqwestFetcher {
             content_preview: None,
         }));
         engine_info!(
-            "Fetch start job_id={} url_len={} url={}",
+            "[fetch] Fetch start job_id={} url_len={} url={}",
             job_id,
             url.len(),
             url
@@ -231,13 +264,13 @@ impl Fetcher for ReqwestFetcher {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|err| {
                 let fetch_err = map_reqwest_error(err);
-                engine_warn!("Stream error for '{}': {}", url, fetch_err.kind);
+                engine_warn!("[fetch] Stream error for '{}': {}", url, fetch_err.kind);
                 fetch_err
             })?;
             let next_len = bytes.len() as u64 + chunk.len() as u64;
             if next_len > self.settings.max_bytes {
                 engine_warn!(
-                    "Response too large (streaming) for '{}': {} bytes (max {})",
+                    "[fetch] Response too large (streaming) for '{}': {} bytes (max {})",
                     url,
                     next_len,
                     self.settings.max_bytes
@@ -269,6 +302,78 @@ impl Fetcher for ReqwestFetcher {
         };
 
         Ok(FetchOutput { bytes, metadata })
+    }
+
+    fn calculate_backoff(&self, attempt: usize) -> Duration {
+        let settings = &self.settings.retry_settings;
+        let multiplier = settings.backoff_multiplier.powf((attempt - 1) as f64);
+        let base_secs = settings.initial_backoff.as_secs_f64() * multiplier;
+        let max_secs = settings.max_backoff.as_secs_f64();
+        let scaled_secs = base_secs.min(max_secs);
+        let jitter_factor = 1.0 + (fastrand::f64() - 0.5);
+        let jittered = (scaled_secs * jitter_factor).min(max_secs);
+        Duration::from_secs_f64(jittered.max(0.0)).max(Duration::from_millis(1))
+    }
+}
+
+#[async_trait::async_trait]
+impl Fetcher for ReqwestFetcher {
+    async fn fetch(
+        &self,
+        job_id: JobId,
+        url: &str,
+        sink: &dyn ProgressSink,
+        cancel: &CancellationToken,
+    ) -> Result<FetchOutput, FetchError> {
+        let max_attempts = self.settings.retry_settings.max_retries + 1;
+        for attempt in 1..=max_attempts {
+            match self.fetch_once(job_id, url, sink).await {
+                Ok(output) => {
+                    if attempt > 1 {
+                        engine_info!(
+                            "[fetch] succeeded on attempt {}/{} url={}",
+                            attempt,
+                            max_attempts,
+                            url
+                        );
+                    }
+                    return Ok(output);
+                }
+                Err(err) => {
+                    if !is_retryable(&err.kind) || attempt == max_attempts {
+                        engine_warn!(
+                            "[fetch] attempt {}/{} failed url={} error={}",
+                            attempt,
+                            max_attempts,
+                            url,
+                            err.kind
+                        );
+                        return Err(err);
+                    }
+                    let retry_after = err.retry_after;
+                    let kind = err.kind;
+                    let backoff = retry_after
+                        .filter(|duration| *duration <= self.settings.retry_settings.max_backoff)
+                        .unwrap_or_else(|| self.calculate_backoff(attempt));
+                    engine_info!(
+                        "[fetch] attempt {}/{} failed url={} error={} retrying_after={:?}",
+                        attempt,
+                        max_attempts,
+                        url,
+                        kind,
+                        backoff
+                    );
+                    tokio::select! {
+                        _ = tokio::time::sleep(backoff) => {},
+                        _ = cancel.cancelled() => {
+                            engine_warn!("[fetch] cancelled during retry backoff for url={}", url);
+                            return Err(FetchError::new(FailureKind::Cancelled, "cancelled during retry backoff"));
+                        }
+                    }
+                }
+            }
+        }
+        unreachable!("[fetch] fetch loop exited without returning for url={}", url)
     }
 }
 
@@ -310,4 +415,24 @@ fn map_reqwest_error(err: reqwest::Error) -> FetchError {
     }
 
     FetchError::new(FailureKind::Network, err.to_string())
+}
+
+fn parse_retry_after(status: StatusCode, headers: &HeaderMap) -> Option<Duration> {
+    match status {
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE => headers
+            .get(RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.trim().parse::<u64>().ok())
+            .map(Duration::from_secs),
+        _ => None,
+    }
+}
+
+fn is_retryable(kind: &FailureKind) -> bool {
+    matches!(
+        kind,
+        FailureKind::Timeout
+            | FailureKind::Network
+            | FailureKind::HttpStatus(408 | 429 | 500 | 502 | 503 | 504)
+    )
 }

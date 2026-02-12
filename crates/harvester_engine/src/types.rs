@@ -1,5 +1,6 @@
 use crate::links::ExtractedLink;
 use std::fmt;
+use std::time::Duration;
 
 pub type JobId = u64;
 
@@ -60,6 +61,7 @@ pub struct FetchMetadata {
 pub struct FetchError {
     pub kind: FailureKind,
     pub message: String,
+    pub retry_after: Option<Duration>,
 }
 
 impl FetchError {
@@ -67,6 +69,19 @@ impl FetchError {
         Self {
             kind,
             message: message.into(),
+            retry_after: None,
+        }
+    }
+
+    pub(crate) fn new_with_retry_after(
+        kind: FailureKind,
+        message: impl Into<String>,
+        retry_after: Option<Duration>,
+    ) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+            retry_after,
         }
     }
 }

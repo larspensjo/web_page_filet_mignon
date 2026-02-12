@@ -10,8 +10,8 @@ log.workspace = true
 bytes = "1"
 async-trait = "0.1"
 futures-util = "0.3"
-reqwest = { version = "0.13.1", default-features = false, features = ["rustls", "stream"] }
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+reqwest = { version = "0.13.1", default-features = false, features = ["rustls", "stream", "gzip", "deflate", "brotli"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 tokio-util = "0.7"
 html2md = "0.2"
 scraper = "0.25.0"
@@ -23,6 +23,7 @@ feed-rs = "2.3"
 thiserror.workspace = true
 sha2 = "0.10"
 tempfile = "3"
+fastrand = "2"
 serde_json.workspace = true
 serde.workspace = true
 hex = "0.4"
