@@ -234,11 +234,11 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 7: Observability + Guardrails
+### Step 7: Observability + Guardrails [COMPLETE]
 
 **Files**
+- `crates/harvester_core/src/summary_cache.rs`
 - `crates/harvester_core/src/update.rs`
-- `crates/harvester_app/src/platform/effects.rs`
 
 **Tasks**
 - Add `[summary-cache]` logs for hit/miss/persist results.

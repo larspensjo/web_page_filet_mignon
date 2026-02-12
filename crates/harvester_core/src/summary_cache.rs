@@ -1,9 +1,14 @@
+use engine_logging::engine_info;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use crate::briefing::ArticleSummaryResult;
+
+/// Maximum number of entries allowed in the cache before eviction.
+/// Prevents unbounded growth in memory and on disk.
+pub const DEFAULT_CACHE_CAPACITY: usize = 10_000;
 
 /// Cache key for article summary results.
 /// Includes all dimensions that could affect the summary output.
@@ -43,8 +48,23 @@ impl SummaryCache {
     }
 
     /// Insert a new cache entry, replacing any existing entry with the same key.
+    /// Automatically evicts oldest entries if capacity limit is exceeded.
     pub fn insert(&mut self, key: SummaryCacheKey, entry: SummaryCacheEntry) {
         self.entries.insert(key, entry);
+        
+        // Enforce capacity limit
+        if self.entries.len() > DEFAULT_CACHE_CAPACITY {
+            let before = self.entries.len();
+            self.evict_to_limit(DEFAULT_CACHE_CAPACITY);
+            let evicted = before - self.entries.len();
+            if evicted > 0 {
+                engine_info!(
+                    "[summary-cache] Evicted {} oldest entries (capacity: {})",
+                    evicted,
+                    DEFAULT_CACHE_CAPACITY
+                );
+            }
+        }
     }
 
     /// Get the number of cached entries.
@@ -93,9 +113,24 @@ impl SummaryCache {
 
     /// Evict entries older than the given UTC timestamp.
     /// Uses lexicographic comparison of ISO 8601 timestamps.
-    pub fn evict_older_than(&mut self, cutoff_utc: &str) {
+    /// Returns the number of entries evicted.
+    pub fn evict_older_than(&mut self, cutoff_utc: &str) -> usize {
+        let before = self.entries.len();
         self.entries
             .retain(|_, entry| entry.created_at_utc.as_str() >= cutoff_utc);
+        before - self.entries.len()
+    }
+
+    /// Evict entries older than the specified TTL (in seconds).
+    /// Returns the number of entries evicted.
+    pub fn evict_by_ttl(&mut self, ttl_seconds: u64) -> usize {
+        use chrono::{Duration, Utc};
+        
+        let now = Utc::now();
+        let cutoff = now - Duration::seconds(ttl_seconds as i64);
+        let cutoff_str = cutoff.to_rfc3339();
+        
+        self.evict_older_than(&cutoff_str)
     }
 }
 
@@ -412,5 +447,112 @@ mod tests {
         cache.clear();
         assert_eq!(cache.len(), 0);
         assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn capacity_enforcement_evicts_oldest() {
+        engine_logging::initialize_for_tests();
+        
+        let mut cache = SummaryCache::new();
+        let base_key = SummaryCacheKey {
+            content_hash: "base".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        };
+        let base_result = ArticleSummaryResult {
+            title: "Title".to_string(),
+            summary: "Summary".to_string(),
+            key_points: vec![],
+            input_tokens: 10,
+            output_tokens: 5,
+        };
+
+        // Insert DEFAULT_CACHE_CAPACITY + 10 entries with sequential timestamps
+        for i in 0..(DEFAULT_CACHE_CAPACITY + 10) {
+            let key = SummaryCacheKey {
+                content_hash: format!("hash{}", i),
+                ..base_key.clone()
+            };
+            // Use microseconds to ensure unique ordering
+            let entry = SummaryCacheEntry {
+                result: base_result.clone(),
+                created_at_utc: format!("2026-01-01T00:00:00.{:06}Z", i),
+            };
+            cache.insert(key, entry);
+        }
+
+        // Should have been evicted to capacity
+        assert_eq!(cache.len(), DEFAULT_CACHE_CAPACITY);
+
+        // Oldest 10 should be gone
+        for i in 0..10 {
+            let key = SummaryCacheKey {
+                content_hash: format!("hash{}", i),
+                ..base_key.clone()
+            };
+            assert!(cache.lookup(&key).is_none(), "hash{} should be evicted", i);
+        }
+
+        // Newest should remain
+        let key_last = SummaryCacheKey {
+            content_hash: format!("hash{}", DEFAULT_CACHE_CAPACITY + 9),
+            ..base_key.clone()
+        };
+        assert!(cache.lookup(&key_last).is_some());
+    }
+
+    #[test]
+    fn evict_by_ttl_removes_expired_entries() {
+        use chrono::{Duration, Utc};
+
+        let mut cache = SummaryCache::new();
+        let base_key = SummaryCacheKey {
+            content_hash: "base".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        };
+        let base_result = ArticleSummaryResult {
+            title: "Title".to_string(),
+            summary: "Summary".to_string(),
+            key_points: vec![],
+            input_tokens: 10,
+            output_tokens: 5,
+        };
+
+        // Insert old entry (2 hours old)
+        let key_old = SummaryCacheKey {
+            content_hash: "old".to_string(),
+            ..base_key.clone()
+        };
+        let old_time = Utc::now() - Duration::hours(2);
+        let entry_old = SummaryCacheEntry {
+            result: base_result.clone(),
+            created_at_utc: old_time.to_rfc3339(),
+        };
+        cache.insert(key_old.clone(), entry_old);
+
+        // Insert recent entry (30 minutes old)
+        let key_recent = SummaryCacheKey {
+            content_hash: "recent".to_string(),
+            ..base_key.clone()
+        };
+        let recent_time = Utc::now() - Duration::minutes(30);
+        let entry_recent = SummaryCacheEntry {
+            result: base_result.clone(),
+            created_at_utc: recent_time.to_rfc3339(),
+        };
+        cache.insert(key_recent.clone(), entry_recent);
+
+        // Evict entries older than 1 hour
+        let evicted = cache.evict_by_ttl(3600);
+
+        assert_eq!(evicted, 1);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.lookup(&key_old).is_none());
+        assert!(cache.lookup(&key_recent).is_some());
     }
 }

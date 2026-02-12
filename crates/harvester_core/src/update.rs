@@ -2,8 +2,7 @@ use engine_logging::{engine_info, engine_warn};
 
 use crate::{
     briefing::{ArticleSummaryResult, BriefingResult, BriefingSession, BriefingThemeResult},
-    calc_left_width,
-    context_hash,
+    calc_left_width, context_hash,
     triage::{ArticleTriageResult, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     SummaryCacheKey, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,

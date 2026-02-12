@@ -2,9 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{
-    ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey,
-};
+use harvester_core::{ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
@@ -15,7 +13,7 @@ const CACHE_FILENAME: &str = ".summary_cache.ron";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedCacheKey {
     content_hash: String,
-    prompt_id: String,  // Serialize as string for forward compatibility
+    prompt_id: String, // Serialize as string for forward compatibility
     prompt_version: u32,
     model_id: String,
     context_hash: String,
@@ -135,7 +133,10 @@ pub(crate) fn load_summary_cache(path: &Path) -> SummaryCache {
 }
 
 /// Save the summary cache to disk
-pub(crate) fn save_summary_cache(cache: &SummaryCache, path: &Path) -> Result<(), harvester_engine::PersistError> {
+pub(crate) fn save_summary_cache(
+    cache: &SummaryCache,
+    path: &Path,
+) -> Result<(), harvester_engine::PersistError> {
     // Ensure output directory exists
     if let Some(parent) = path.parent() {
         ensure_output_dir(parent)?;
@@ -168,17 +169,19 @@ pub(crate) fn save_summary_cache(cache: &SummaryCache, path: &Path) -> Result<()
         })
         .collect();
 
-    let persisted = PersistedCache { version: 1, entries };
+    let persisted = PersistedCache {
+        version: 1,
+        entries,
+    };
 
     // Serialize to RON format
-    let serialized =
-        ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default())
-            .map_err(|err| {
-                std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to serialize cache: {}", err),
-                )
-            })?;
+    let serialized = ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default())
+        .map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to serialize cache: {}", err),
+            )
+        })?;
 
     // Write atomically
     let parent_dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -189,7 +192,11 @@ pub(crate) fn save_summary_cache(cache: &SummaryCache, path: &Path) -> Result<()
         .unwrap_or(CACHE_FILENAME);
     writer.write(filename, &serialized)?;
 
-    engine_info!("[summary-cache] Saved {} entries to {:?}", cache.len(), path);
+    engine_info!(
+        "[summary-cache] Saved {} entries to {:?}",
+        cache.len(),
+        path
+    );
     Ok(())
 }
 
