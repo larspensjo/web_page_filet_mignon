@@ -14,7 +14,8 @@ use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, Stage, StopPolicy};
 use harvester_engine::{
-    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir, is_confined_to,
+    build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
+    is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
     load_and_prepare_articles, load_and_prepare_articles_for_triage, poll_curated_source,
     poll_file_source, poll_rss_source, AtomicFileWriter, Converter, DecodeError, EngineConfig,

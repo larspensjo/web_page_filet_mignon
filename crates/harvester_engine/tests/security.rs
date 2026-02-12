@@ -5,8 +5,8 @@ use harvester_engine::{
     Fetcher, Html2MdConverter, ProgressSink, ReadabilityLikeExtractor, ReqwestFetcher, UrlPolicy,
     WhitespaceTokenCounter,
 };
-use tokio_util::sync::CancellationToken;
 use reqwest::Url;
+use tokio_util::sync::CancellationToken;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

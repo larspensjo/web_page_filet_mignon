@@ -239,9 +239,7 @@ async fn run_job(
     engine_info!("Job {} starting: {}", job_id, url);
     let sink = ChannelProgressSink::new(event_tx.clone());
 
-    let fetch_result = fetcher
-        .fetch(job_id, &url, &sink, &cancel_token)
-        .await;
+    let fetch_result = fetcher.fetch(job_id, &url, &sink, &cancel_token).await;
     let fetch_output = match fetch_result {
         Ok(out) => {
             engine_debug!(

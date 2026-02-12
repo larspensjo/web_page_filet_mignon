@@ -364,7 +364,7 @@ async fn cancellation_stops_retry_loop() {
     let cancel_handle = {
         let cancel_clone = cancel_token.clone();
         tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(1)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
             cancel_clone.cancel();
         })
     };

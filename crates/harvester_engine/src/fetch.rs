@@ -142,7 +142,9 @@ impl ReqwestFetcher {
         let mut default_headers = HeaderMap::new();
         default_headers.insert(
             ACCEPT,
-            HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+            HeaderValue::from_static(
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            ),
         );
         default_headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("en-US,en;q=0.9"));
 
@@ -235,7 +237,11 @@ impl ReqwestFetcher {
 
         if let Some(ct) = content_type.as_deref() {
             if !self.is_content_type_allowed(ct) {
-                engine_warn!("[fetch] Unsupported content type '{}' for URL '{}'", ct, url);
+                engine_warn!(
+                    "[fetch] Unsupported content type '{}' for URL '{}'",
+                    ct,
+                    url
+                );
                 return Err(FetchError::new(
                     FailureKind::UnsupportedContentType {
                         content_type: ct.to_string(),
@@ -373,7 +379,10 @@ impl Fetcher for ReqwestFetcher {
                 }
             }
         }
-        unreachable!("[fetch] fetch loop exited without returning for url={}", url)
+        unreachable!(
+            "[fetch] fetch loop exited without returning for url={}",
+            url
+        )
     }
 }
 
