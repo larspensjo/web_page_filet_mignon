@@ -7,7 +7,7 @@ use crate::view_model::{
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use crate::Effect;
-use harvester_engine::llm::prompt::PromptId;
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind, SourceId};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -71,6 +71,8 @@ pub struct AppState {
     triage: TriageSession,
     source_states: SourceStateIndex,
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
+    active_prompt_versions: HashMap<PromptId, PromptVersion>,
+    effective_models: HashMap<PromptId, String>,
 }
 
 pub struct IngestResult {
@@ -96,6 +98,8 @@ impl Default for AppState {
             triage: TriageSession::default(),
             source_states: SourceStateIndex::default(),
             prompt_contexts: HashMap::new(),
+            active_prompt_versions: HashMap::new(),
+            effective_models: HashMap::new(),
         }
     }
 }
@@ -331,6 +335,25 @@ impl AppState {
         contexts: HashMap<PromptId, Vec<(String, String)>>,
     ) {
         self.prompt_contexts = contexts;
+    }
+
+    /// Get the active prompt version for a specific prompt.
+    pub fn active_version_for(&self, prompt_id: PromptId) -> Option<PromptVersion> {
+        self.active_prompt_versions.get(&prompt_id).copied()
+    }
+
+    /// Get the effective model for a specific prompt.
+    pub fn effective_model_for(&self, prompt_id: PromptId) -> Option<&str> {
+        self.effective_models.get(&prompt_id).map(|s| s.as_str())
+    }
+
+    pub(crate) fn set_llm_metadata(
+        &mut self,
+        active_versions: HashMap<PromptId, PromptVersion>,
+        effective_models: HashMap<PromptId, String>,
+    ) {
+        self.active_prompt_versions = active_versions;
+        self.effective_models = effective_models;
     }
 
     pub(crate) fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {

@@ -101,7 +101,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ## Implementation Plan (Commit-Sized)
 
-### Step 1: Surface LLM Metadata to Reducer (Unblocks Everything)
+### Step 1: Surface LLM Metadata to Reducer (Unblocks Everything) [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/effect.rs`

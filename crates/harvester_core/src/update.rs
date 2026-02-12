@@ -206,6 +206,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     output_json,
                     input_tokens,
                     output_tokens,
+                    ..
                 } => LlmRequestState::Completed {
                     output_json: output_json.clone(),
                     input_tokens: *input_tokens,
@@ -236,6 +237,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         output_json,
                         input_tokens,
                         output_tokens,
+                        ..
                     } => match validate_summary(output_json) {
                         Ok(summary) => {
                             state.briefing_mut().complete_article(
@@ -277,6 +279,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         output_json,
                         input_tokens,
                         output_tokens,
+                        ..
                     } => match validate_triage(output_json) {
                         Ok(triage) => {
                             state.triage_mut().complete_article(
@@ -313,6 +316,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         output_json,
                         input_tokens,
                         output_tokens,
+                        ..
                     } => match validate_briefing(output_json) {
                         Ok(briefing) => {
                             let themes = briefing
@@ -350,7 +354,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.set_briefing(BriefingSession::new_loading(None));
             engine_info!("[briefing] briefing requested");
-            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForBriefing]
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadLlmMetadata,
+                Effect::LoadArticlesForBriefing,
+            ]
         }
         Msg::ArticlesLoaded {
             articles,
@@ -381,7 +389,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.set_triage(TriageSession::new_loading(None));
             engine_info!("[triage] triage requested");
-            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForTriage]
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadLlmMetadata,
+                Effect::LoadArticlesForTriage,
+            ]
         }
         Msg::TriageArticlesLoaded { articles } => {
             if articles.is_empty() {
@@ -412,6 +424,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::PromptContextsLoadFailed { reason } => {
             engine_warn!("[PromptContext] Failed to load contexts: {}", reason);
             // Continue with empty contexts (degraded but functional)
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        } => {
+            engine_info!(
+                "[LlmMetadata] Loaded {} active version(s)",
+                active_versions.len()
+            );
+            state.set_llm_metadata(active_versions, effective_models);
             state.mark_dirty();
             Vec::new()
         }
@@ -589,7 +613,11 @@ mod tests {
 
         assert_eq!(
             effects,
-            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForBriefing]
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadLlmMetadata,
+                Effect::LoadArticlesForBriefing
+            ]
         );
         assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
     }
@@ -651,6 +679,8 @@ mod tests {
                     output_json: summary_json("Article A"),
                     input_tokens: 10,
                     output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
                 },
             },
         );
@@ -674,6 +704,8 @@ mod tests {
                     output_json: summary_json("Article B"),
                     input_tokens: 10,
                     output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
                 },
             },
         );
@@ -697,6 +729,8 @@ mod tests {
                     output_json: briefing_json(2),
                     input_tokens: 20,
                     output_tokens: 8,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
                 },
             },
         );
