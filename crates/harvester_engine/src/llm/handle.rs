@@ -6,6 +6,7 @@ use std::{
 };
 
 use engine_logging::{engine_error, engine_info, engine_warn};
+use serde_json::{json, Value};
 use tokio::runtime::Runtime;
 
 use crate::llm::{
@@ -263,8 +264,13 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
                     request_id,
                     &input_hash[..8]
                 );
+                let output_json = record
+                    .validated_output
+                    .as_ref()
+                    .and_then(|value| serde_json::to_string(value).ok())
+                    .unwrap_or_else(|| record.raw_response.clone());
                 let result = LlmCompletionResult {
-                    output_json: record.raw_response.clone(),
+                    output_json,
                     usage: record.usage,
                     model_id: model.clone(),
                     prompt_id,
@@ -370,95 +376,101 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
         cost_microdollars: cost,
     };
 
-    if validation_result.is_ok() {
-        let validated_output = match serde_json::from_str::<serde_json::Value>(&raw_response) {
-            Ok(value) => Some(value),
-            Err(err) => {
-                engine_warn!(
-                    "[llm-validation] request_id={} prompt_id={:?} serialization failed: {}",
+    match validation_result {
+        Ok(validated_output_json) => {
+            let validated_output = match serde_json::from_str::<Value>(&validated_output_json) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    engine_warn!(
+                        "[llm-validation] request_id={} prompt_id={:?} serialization failed: {}",
+                        request_id,
+                        prompt_id,
+                        err
+                    );
+                    None
+                }
+            };
+
+            let success_record = ReplayRecord {
+                validated_output,
+                ..record
+            };
+
+            if let Err(err) =
+                persist_replay_record(&ctx.config.replay_output_dir(), &success_record)
+            {
+                engine_error!(
+                    "[llm-replay] request_id={} persist failed: {}",
                     request_id,
-                    prompt_id,
                     err
                 );
-                None
+                let _ = ctx.event_tx.send(LlmEvent::Completed {
+                    request_id,
+                    result: Err(LlmCompletionError::PersistenceFailed {
+                        detail: err.to_string(),
+                    }),
+                });
+                return;
             }
-        };
 
-        let success_record = ReplayRecord {
-            validated_output,
-            ..record
-        };
+            if let Some(ref cache) = ctx.config.replay_cache {
+                let mut guard = cache.write().unwrap();
+                guard.insert(success_record.clone());
+            }
 
-        if let Err(err) = persist_replay_record(&ctx.config.replay_output_dir(), &success_record) {
-            engine_error!(
-                "[llm-replay] request_id={} persist failed: {}",
-                request_id,
-                err
-            );
+            let result = LlmCompletionResult {
+                output_json: validated_output_json,
+                usage,
+                model_id: response.model_id().clone(),
+                prompt_id,
+                prompt_version: version,
+            };
+
             let _ = ctx.event_tx.send(LlmEvent::Completed {
                 request_id,
-                result: Err(LlmCompletionError::PersistenceFailed {
-                    detail: err.to_string(),
+                result: Ok(result),
+            });
+        }
+        Err(validation_error) => {
+            let reason = validation_error.to_string();
+            log_validation_failure(
+                request_id,
+                prompt_id,
+                &validation_error,
+                raw_response.chars().count(),
+            );
+
+            let failure_record = ReplayRecord {
+                validation_error: Some(reason.clone()),
+                ..record
+            };
+
+            if let Err(err) =
+                persist_replay_record(&ctx.config.replay_output_dir(), &failure_record)
+            {
+                engine_error!(
+                    "[llm-replay] request_id={} persist failed: {}",
+                    request_id,
+                    err
+                );
+                let _ = ctx.event_tx.send(LlmEvent::Completed {
+                    request_id,
+                    result: Err(LlmCompletionError::PersistenceFailed {
+                        detail: err.to_string(),
+                    }),
+                });
+                return;
+            }
+
+            let _ = ctx.event_tx.send(LlmEvent::Completed {
+                request_id,
+                result: Err(LlmCompletionError::ValidationFailed {
+                    reason,
+                    raw_response,
                 }),
             });
-            return;
         }
-
-        if let Some(ref cache) = ctx.config.replay_cache {
-            let mut guard = cache.write().unwrap();
-            guard.insert(success_record.clone());
-        }
-
-        let result = LlmCompletionResult {
-            output_json: raw_response,
-            usage,
-            model_id: response.model_id().clone(),
-            prompt_id,
-            prompt_version: version,
-        };
-
-        let _ = ctx.event_tx.send(LlmEvent::Completed {
-            request_id,
-            result: Ok(result),
-        });
-        return;
     }
-
-    let reason = validation_result.err().unwrap().to_string();
-    engine_warn!(
-        "[llm-validation] request_id={} prompt_id={:?} failure={}",
-        request_id,
-        prompt_id,
-        reason
-    );
-
-    let failure_record = ReplayRecord {
-        validation_error: Some(reason.clone()),
-        ..record
-    };
-
-    if let Err(err) = persist_replay_record(&ctx.config.replay_output_dir(), &failure_record) {
-        engine_error!(
-            "[llm-replay] request_id={} persist failed: {}",
-            request_id,
-            err
-        );
-        let _ = ctx.event_tx.send(LlmEvent::Completed {
-            request_id,
-            result: Err(LlmCompletionError::PersistenceFailed {
-                detail: err.to_string(),
-            }),
-        });
-        return;
-    }
-
-    let _ = ctx.event_tx.send(LlmEvent::Completed {
-        request_id,
-        result: Err(LlmCompletionError::ValidationFailed {
-            reason,
-            raw_response,
-        }),
-    });
 }
 
 fn resolve_model(prompt_id: PromptId, config: &LlmConfig) -> ModelId {
@@ -499,19 +511,63 @@ fn fetch_prompt_template(
     }
 }
 
-fn validate_response(prompt_id: PromptId, content: &str) -> Result<(), ValidationError> {
+fn validate_response(prompt_id: PromptId, content: &str) -> Result<String, ValidationError> {
     match prompt_id {
         PromptId::ArticleTriage => {
             let _ = validate_triage(content)?;
-            Ok(())
+            Ok(content.to_string())
         }
         PromptId::ArticleSummary => {
             let _ = validate_summary(content)?;
-            Ok(())
+            Ok(content.to_string())
         }
         PromptId::AggregateBriefing => {
-            let _ = validate_briefing(content)?;
-            Ok(())
+            let validated = validate_briefing(content)?;
+            let normalized = json!({
+                "executive_summary": validated.executive_summary,
+                "themes": validated.themes.iter().map(|theme| {
+                    json!({
+                        "name": theme.name,
+                        "description": theme.description,
+                    })
+                }).collect::<Vec<_>>(),
+                "article_count": validated.article_count,
+            });
+            Ok(normalized.to_string())
+        }
+    }
+}
+
+fn log_validation_failure(
+    request_id: u64,
+    prompt_id: PromptId,
+    error: &ValidationError,
+    raw_response_chars: usize,
+) {
+    match error {
+        ValidationError::FieldTooLong {
+            field,
+            max_chars,
+            actual_chars,
+        } => {
+            engine_warn!(
+                "[llm-validation] request_id={} prompt_id={:?} failure=field too long field={} actual_chars={} max_chars={} raw_response_chars={}",
+                request_id,
+                prompt_id,
+                field,
+                actual_chars,
+                max_chars,
+                raw_response_chars
+            );
+        }
+        _ => {
+            engine_warn!(
+                "[llm-validation] request_id={} prompt_id={:?} failure={} raw_response_chars={}",
+                request_id,
+                prompt_id,
+                error,
+                raw_response_chars
+            );
         }
     }
 }

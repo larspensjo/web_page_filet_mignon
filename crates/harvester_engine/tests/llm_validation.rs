@@ -1,4 +1,6 @@
-use harvester_engine::llm::{validate_triage, TriagePriority, ValidationError};
+use harvester_engine::llm::{
+    validate_briefing, validate_summary, validate_triage, TriagePriority, ValidationError,
+};
 
 #[test]
 fn valid_triage_json_parses() {
@@ -62,7 +64,11 @@ fn oversized_fields_are_rejected() {
     );
     assert_eq!(
         validate_triage(&json).unwrap_err(),
-        ValidationError::FieldTooLong("category")
+        ValidationError::FieldTooLong {
+            field: "category",
+            max_chars: 120,
+            actual_chars: 125,
+        }
     );
 }
 
@@ -79,4 +85,44 @@ fn triage_priority_range_is_enforced() {
     assert!(TriagePriority::new(3).is_some());
     assert!(TriagePriority::new(0).is_none());
     assert!(TriagePriority::new(6).is_none());
+}
+
+#[test]
+fn summary_limit_error_reports_actual_and_max() {
+    let summary = "s".repeat(1201);
+    let json = format!(
+        r#"{{"title":"T","summary":"{}","key_points":["k1"]}}"#,
+        summary
+    );
+    assert_eq!(
+        validate_summary(&json).unwrap_err(),
+        ValidationError::FieldTooLong {
+            field: "summary",
+            max_chars: 1200,
+            actual_chars: 1201,
+        }
+    );
+}
+
+#[test]
+fn executive_summary_over_limit_is_truncated_with_notice() {
+    let executive_summary = "e".repeat(3200);
+    let json = format!(
+        r#"{{
+            "executive_summary":"{}",
+            "themes":[{{"name":"Theme","description":"Description"}}],
+            "article_count":1
+        }}"#,
+        executive_summary
+    );
+
+    let validated = validate_briefing(&json).unwrap();
+    let chars = validated.executive_summary.chars().count();
+    assert_eq!(chars, 3000);
+    assert!(
+        validated
+            .executive_summary
+            .contains("[Truncated response: removed"),
+        "missing truncation notice in executive summary"
+    );
 }

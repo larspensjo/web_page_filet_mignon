@@ -6,16 +6,17 @@ use thiserror::Error;
 use crate::llm::dto::{
     AggregateBriefing, ArticleSummary, BriefingTheme, TriagePriority, TriageResult,
 };
+use crate::text_safety::truncate_to_char_boundary;
 
 const MAX_CATEGORY_LEN: usize = 120;
 const MAX_RATIONALE_LEN: usize = 1024;
 const MAX_TAGS: usize = 12;
 const MAX_TAG_LEN: usize = 64;
 const MAX_TITLE_LEN: usize = 200;
-const MAX_SUMMARY_LEN: usize = 1200;
+const MAX_RESPONSE_SUMMARY_CHARS: usize = 1200;
 const MAX_KEY_POINTS: usize = 8;
 const MAX_KEY_POINT_LEN: usize = 256;
-const MAX_EXEC_SUMMARY_LEN: usize = 1400;
+const MAX_RESPONSE_EXEC_SUMMARY_CHARS: usize = 3000;
 const MAX_THEMES: usize = 10;
 const MAX_THEME_NAME_LEN: usize = 120;
 const MAX_THEME_DESCRIPTION_LEN: usize = 512;
@@ -32,6 +33,8 @@ const FIELD_THEMES: &str = "themes";
 const FIELD_THEME_NAME: &str = "name";
 const FIELD_THEME_DESCRIPTION: &str = "description";
 const FIELD_ARTICLE_COUNT: &str = "article_count";
+const EXEC_SUMMARY_TRUNCATION_SUFFIX: &str =
+    "\n\n[Truncated response: removed {removed} characters to fit the 3000-character limit.]";
 
 /// Errors produced while validating parsed LLM output.
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -44,8 +47,12 @@ pub enum ValidationError {
     ValueOutOfRange(&'static str),
     #[error("missing field: {0}")]
     MissingField(&'static str),
-    #[error("field too long: {0}")]
-    FieldTooLong(&'static str),
+    #[error("field too long: {field} (actual_chars={actual_chars}, max_chars={max_chars})")]
+    FieldTooLong {
+        field: &'static str,
+        max_chars: usize,
+        actual_chars: usize,
+    },
 }
 
 pub fn validate_triage(content: &str) -> Result<TriageResult, ValidationError> {
@@ -91,7 +98,7 @@ pub fn validate_summary(content: &str) -> Result<ArticleSummary, ValidationError
     ensure_max_length(title, MAX_TITLE_LEN, FIELD_TITLE)?;
 
     let summary = require_string(&document, FIELD_SUMMARY)?;
-    ensure_max_length(summary, MAX_SUMMARY_LEN, FIELD_SUMMARY)?;
+    ensure_max_length(summary, MAX_RESPONSE_SUMMARY_CHARS, FIELD_SUMMARY)?;
 
     let key_points_array = require_array(&document, FIELD_KEY_POINTS)?;
     ensure_max_items(key_points_array.len(), MAX_KEY_POINTS, FIELD_KEY_POINTS)?;
@@ -116,7 +123,7 @@ pub fn validate_summary(content: &str) -> Result<ArticleSummary, ValidationError
 pub fn validate_briefing(content: &str) -> Result<AggregateBriefing, ValidationError> {
     let document = parse_document(content)?;
     let executive_summary = require_string(&document, FIELD_EXEC_SUMMARY)?;
-    ensure_max_length(executive_summary, MAX_EXEC_SUMMARY_LEN, FIELD_EXEC_SUMMARY)?;
+    let executive_summary = truncate_executive_summary(executive_summary);
 
     let themes_array = require_array(&document, FIELD_THEMES)?;
     ensure_max_items(themes_array.len(), MAX_THEMES, FIELD_THEMES)?;
@@ -146,7 +153,7 @@ pub fn validate_briefing(content: &str) -> Result<AggregateBriefing, ValidationE
         .map_err(|_| ValidationError::ValueOutOfRange(FIELD_ARTICLE_COUNT))?;
 
     Ok(AggregateBriefing {
-        executive_summary: executive_summary.to_string(),
+        executive_summary,
         themes,
         article_count,
     })
@@ -196,10 +203,40 @@ fn require_u64(document: &Map<String, Value>, key: &'static str) -> Result<u64, 
 }
 
 fn ensure_max_length(value: &str, max: usize, field: &'static str) -> Result<(), ValidationError> {
-    if value.len() > max {
-        Err(ValidationError::FieldTooLong(field))
+    let actual_chars = value.chars().count();
+    if actual_chars > max {
+        Err(ValidationError::FieldTooLong {
+            field,
+            max_chars: max,
+            actual_chars,
+        })
     } else {
         Ok(())
+    }
+}
+
+fn truncate_executive_summary(value: &str) -> String {
+    let actual_chars = value.chars().count();
+    if actual_chars <= MAX_RESPONSE_EXEC_SUMMARY_CHARS {
+        return value.to_string();
+    }
+
+    let mut removed_chars = actual_chars - MAX_RESPONSE_EXEC_SUMMARY_CHARS;
+    loop {
+        let suffix =
+            EXEC_SUMMARY_TRUNCATION_SUFFIX.replace("{removed}", &removed_chars.to_string());
+        let suffix_chars = suffix.chars().count();
+        if suffix_chars >= MAX_RESPONSE_EXEC_SUMMARY_CHARS {
+            return truncate_to_char_boundary(&suffix, MAX_RESPONSE_EXEC_SUMMARY_CHARS).to_string();
+        }
+
+        let preserved_chars = MAX_RESPONSE_EXEC_SUMMARY_CHARS - suffix_chars;
+        let recalculated_removed = actual_chars - preserved_chars;
+        if recalculated_removed == removed_chars {
+            let prefix = truncate_to_char_boundary(value, preserved_chars);
+            return format!("{prefix}{suffix}");
+        }
+        removed_chars = recalculated_removed;
     }
 }
 
