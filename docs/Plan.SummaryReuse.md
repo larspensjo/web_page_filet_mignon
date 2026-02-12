@@ -147,7 +147,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 3: Add Cache Ownership to AppState
+### Step 3: Add Cache Ownership to AppState [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/state.rs`
