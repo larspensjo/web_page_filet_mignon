@@ -233,7 +233,7 @@ Less manual copy/paste; more repeatable "daily intake" runs.
 ### Implementation note
 Implemented as 9 parts (core types with SourceId validation and config loading, source state tracking with poll guard, file/curated source polling with path validation, shared ingest_urls() function, messages and effects, reducer logic with idempotency guard, effect execution, UI integration, script source support). File and curated list sources are operational; script source is defined in the data model but not yet implemented at runtime. See `Plan.Phase6.RssIngestion.md` for the next phase.
 
-## Phase 6 — RSS ingestion as another input source
+## Phase 6 — RSS ingestion as another input source [COMPLETE]
 ### Purpose
 Now that summarization + ranking work reliably, add RSS as the scalable intake mechanism.
 
@@ -280,67 +280,6 @@ we must add a sandbox and explicit approvals to avoid “confused deputy”.
 
 ### Expected product impact
 More automation, but higher complexity and security requirements.
-
-## Cross-cutting future work (not phase-specific)
-
-These items were identified during Phase 0–3 implementation and are relevant across multiple phases. They should be considered when planning future work:
-
-See [docs/PromptContextFiles.md](docs/PromptContextFiles.md) for context file location and format details.
-
-- **Unified download path**: Route linked-page downloads through the engine as tagged jobs rather than the current separate path. Reduces code duplication and ensures all downloads benefit from the same policy/quota enforcement.
-- **Hot-reload prompt context**: Debounced watcher for `contexts/` so analyst targeting updates can be applied without restart. Improves iteration speed and reduces operational friction.
-- **Policy-as-configuration**: Load `UrlPolicy`, `SessionQuotas`, and `LlmQuotas` from a config file (RON or TOML) rather than compile-time defaults. Enables per-deployment tuning without recompilation.
-- **Audit log**: Structured log entries for all policy decisions (URL rejections, quota enforcement, path confinement checks). Useful for debugging and compliance.
-- **Prompt token count visibility**: Surface the per-run prompt token estimate in the UI to flag overly large contexts and guide trimming before costs spike.
-- **Typed trust wrappers**: `SafePath` newtype for path confinement, `ValidatedLlmOutput<T>` for compile-time safety that LLM output validation was performed, `UntrustedContent(String)` for raw downloaded text that can only be unwrapped through the content preparation pipeline. Makes security guarantees compile-time rather than runtime.
-- **Input debounce**: Review auto-submission behavior on `InputTextChanged` to prevent rapid-fire URL enqueuing from paste events.
-- **Additional LLM providers** (Anthropic, Google): Follow the same pattern as the OpenAI adapter. ~100 lines each, structurally identical.
-- **Streaming LLM responses**: Add `stream()` method to `LlmProvider` trait returning `Pin<Box<dyn Stream>>`. Not needed for batch processing, but useful for interactive UX.
-- **Retry budget + backoff policy**: Transient provider failures (rate limiting, 5xx) could benefit from exponential backoff with jitter. Separate from quota enforcement.
-- **API key management**: Currently environment variables. Future: encrypted config, key rotation.
-- **Content fingerprinting for dedup**: Extend SHA-256 content hashing to deduplicate across sessions (same article, different download time — skip re-processing).
-- **Privacy controls for replay artifacts**: Optional redaction of raw LLM responses in replay records.
-- **Offline re-validation**: Deterministic "rejudge" command that re-validates saved raw LLM outputs against updated DTO schemas without re-calling the API.
-- **Replay record retention policy**: Count/size/age-based cleanup of old replay records to prevent unbounded disk usage.
-- **Tiktoken-accurate token counting**: Replace `WhitespaceTokenCounter` with BPE-based estimator for accurate budget calculation. The `TokenCounter` trait already supports injection.
-- **Priority-weighted budget allocation**: Allocate more tokens to higher-priority articles (after Phase 4 provides triage scores).
-- **Normalization versioning**: Include normalization policy version hash in replay lookup key for cache-safe policy evolution.
-- **Disk caching of CleanText**: Optional persistence of derived clean text alongside markdown for large corpora. Feature-gated.
-- **Chunking for very long articles**: Split into overlapping chunks instead of truncation. Requires merge strategy for DTO outputs.
-- **Configurable boilerplate rule sets**: Load boilerplate detection patterns from config file instead of compile-time defaults.
-- **Retry with smaller excerpt**: If LLM returns MaxTokens finish reason, automatically retry with a smaller content budget.
-- **Near-duplicate detection**: Stable fingerprint of normalized clean text to skip redundant LLM calls before expensive processing.
-- **Strict content mode**: Refuse to process if prepared input cannot satisfy a minimum retained-content threshold after truncation.
-- **Concurrent LLM processing**: Spawn N workers or use a concurrent pool. State machines already support tracking multiple in-progress articles; only dispatch logic changes from "one at a time" to "up to K at a time".
-- **Summary-as-input for briefings**: Feed per-article summaries (not raw text) to the briefing prompt. Reduces token usage dramatically. Two modes: "raw-article aggregate" and "summary-of-summaries aggregate" selectable per run.
-- **Incremental re-summarization**: Only re-summarize articles whose content hash changed. Replay cache handles this partially; explicit "retry failed only" and "retry with smaller budget" actions are UX improvements.
-- **Briefing history**: Keep previous briefing sessions, allow browsing and comparing past briefings.
-- **Export briefing to file**: Write formatted briefing to markdown in output directory for archival and sharing.
-- **Include linked pages in briefing**: Option to include `linked/*.md` in the briefing article set, with inclusion profiles based on link age/risk heuristics.
-- **Cancel active session**: Button that stops dispatching new LLM requests for briefing or triage and transitions to Complete with partial results.
-- **DTO boundary discipline**: Preserve clear DTO boundaries at crate seams with explicit mapping helpers rather than implicit type reuse. Prevents accidental coupling between engine and core types.
-- **Session lifecycle invariant**: Any `AppState` lifecycle transition that invalidates the job set must also reset all derived session state (briefing, triage, future sessions). Enforce via tests.
-- **Triage-informed briefing**: Filter briefing article set by triage priority (e.g., "brief only P4+ articles"). Orchestration ready: run triage first, briefing reads triage results for filtering.
-- **Injection indicator**: Heuristic flags (e.g., "rationale mentions following instructions") shown as UI signals for analysis of triage/summary output quality. Non-blocking indicators, not validation failures.
-- **Category/tag filtering**: UI controls to filter job tree by category or minimum priority threshold. Enable focusing on specific topics (e.g., show only "security" articles).
-- **Tag cloud aggregation**: Aggregate tag counts across all triaged articles, display in panel for overview of content distribution.
-- **Color-coded priority**: Use tree item style overrides to color job rows by priority (red=P5, orange=P4, etc.). Requires CommanDuctUI per-item style support.
-- **Export triage/briefing results**: Write `triage_results.json` and `briefing.md` with provenance metadata alongside replay records for external analysis and archival.
-- **Batch triage+briefing**: Single button that runs triage first, then auto-starts briefing for P3+ articles. Reduces manual orchestration steps.
-- **Content-hash result cache**: Skip re-triage/re-summarization when `(content_hash, prompt_id, prompt_version, model)` matches prior success. Complements existing replay cache by avoiding redundant LLM calls.
-- **Operator controls for sessions**: Pause/resume LLM processing, skip failed articles, retry with adjusted budgets. Advanced session management for long-running briefings.
-- **Replay quality diagnostics**: Distribution of priorities, tag cardinality, validation failure rates, cost/latency percentiles across runs. Structured evaluation metrics for prompt/model tuning.
-- **A/B prompt comparison UI**: Run same articles through multiple prompt versions, display side-by-side results. Prompt registry + replay already support this pattern.
-- **Per-source cursoring/state**: Track last read position for incremental file sources (avoid re-reading entire file on each poll).
-- **Source trust tiers**: Stricter URL policy for untrusted sources (e.g., new/unvetted feeds get host allowlisting, trusted feeds get default policy).
-- **Dry-run mode for source polling**: Poll + validate + report what would be ingested, without actually enqueuing. Useful for testing new source configurations.
-- **Preview before enqueue**: Show diff from seen set (new items), let user approve before actually enqueuing jobs. Reduces accidental large ingestions.
-- **Parallel source polling**: Thread pool or async tasks for concurrent feed fetches when sequential polling proves too slow for many feeds.
-- **Source health scoring and backoff**: Track consecutive failures per source, implement exponential backoff. Separate from LLM retry budget.
-- **Feed discovery from HTML**: Given a website URL, discover its RSS feed via `<link rel="alternate" type="application/rss+xml">` in the HTML `<head>`.
-- **OPML import**: Import feed collections from standard OPML format for bulk feed onboarding.
-- **Conditional feed fetch**: Use `ETag` and `If-Modified-Since` headers to skip re-downloading unchanged feeds. Store per-feed headers in seen set state.
-- **PollGuard scope guard**: Ensure `AllSourcesPollEnded` is always sent even on thread panic (via drop guard). Prevents permanently stuck poll-in-progress flag.
 
 ## Notes for planning and estimation
 - Phases 0–2 are enabling work that reduces long-term iteration cost and risk.
