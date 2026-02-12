@@ -62,6 +62,11 @@ impl SummaryCache {
         self.entries.clear();
     }
 
+    /// Iterate over all cache entries (key, entry pairs).
+    pub fn iter(&self) -> impl Iterator<Item = (&SummaryCacheKey, &SummaryCacheEntry)> {
+        self.entries.iter().map(|(k, v)| (k, v))
+    }
+
     /// Evict the oldest entries to keep the cache size at or below the limit.
     /// Uses created_at_utc to determine age (lexicographic ordering of ISO 8601 timestamps).
     pub fn evict_to_limit(&mut self, limit: usize) {

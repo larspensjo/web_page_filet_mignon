@@ -191,7 +191,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 5: Platform Persistence Store (No Serde in Core Domain Types)
+### Step 5: Platform Persistence Store (No Serde in Core Domain Types) [COMPLETE]
 
 **Files**
 - `crates/harvester_app/src/platform/summary_cache_store.rs` (NEW)
