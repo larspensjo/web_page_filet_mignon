@@ -11,6 +11,7 @@ pub enum Effect {
     LoadArticlesForBriefing,
     LoadArticlesForTriage,
     LoadPromptContexts,
+    LoadLlmMetadata,
     PollAllSources,
     RequestLlmCompletion {
         request_id: u64,
@@ -33,6 +34,9 @@ pub enum Effect {
         job_id: crate::JobId,
         link_index: u32,
         path: PathBuf,
+    },
+    PersistSummaryCache {
+        cache: crate::SummaryCache,
     },
 }
 

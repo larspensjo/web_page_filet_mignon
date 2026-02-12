@@ -2,12 +2,12 @@ use engine_logging::{engine_info, engine_warn};
 
 use crate::{
     briefing::{ArticleSummaryResult, BriefingResult, BriefingSession, BriefingThemeResult},
-    calc_left_width,
+    calc_left_width, context_hash,
     triage::{ArticleTriageResult, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
-    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
+    SummaryCacheKey, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
-use harvester_engine::llm::prompt::PromptId;
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage};
 
 // Left side is split into a fixed-width input panel plus a resizable jobs panel.
@@ -206,6 +206,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     output_json,
                     input_tokens,
                     output_tokens,
+                    ..
                 } => LlmRequestState::Completed {
                     output_json: output_json.clone(),
                     input_tokens: *input_tokens,
@@ -236,17 +237,46 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         output_json,
                         input_tokens,
                         output_tokens,
+                        prompt_version,
+                        model_id,
                     } => match validate_summary(output_json) {
                         Ok(summary) => {
-                            state.briefing_mut().complete_article(
+                            let summary_result = ArticleSummaryResult {
+                                title: summary.title,
+                                summary: summary.summary,
+                                key_points: summary.key_points,
+                                input_tokens: *input_tokens,
+                                output_tokens: *output_tokens,
+                            };
+
+                            // Clone data needed for cache key before mutable operations
+                            let content_hash = state.briefing().articles()[article_idx]
+                                .content_hash
+                                .clone();
+                            let context = state.context_for(PromptId::ArticleSummary).to_vec();
+
+                            // Complete the article
+                            state
+                                .briefing_mut()
+                                .complete_article(article_idx, summary_result.clone());
+
+                            // Store in cache using actual prompt_version and model_id from completion
+                            let cache_key = SummaryCacheKey {
+                                content_hash: content_hash.clone(),
+                                prompt_id: PromptId::ArticleSummary,
+                                prompt_version: *prompt_version,
+                                model_id: model_id.clone(),
+                                context_hash: context_hash(&context),
+                            };
+                            state.store_summary_result(
+                                cache_key,
+                                summary_result,
+                                chrono::Utc::now().to_rfc3339(),
+                            );
+                            engine_info!(
+                                "[summary-cache] stored result for article {} (hash={})",
                                 article_idx,
-                                ArticleSummaryResult {
-                                    title: summary.title,
-                                    summary: summary.summary,
-                                    key_points: summary.key_points,
-                                    input_tokens: *input_tokens,
-                                    output_tokens: *output_tokens,
-                                },
+                                &content_hash[..content_hash.len().min(8)]
                             );
                         }
                         Err(err) => {
@@ -277,6 +307,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         output_json,
                         input_tokens,
                         output_tokens,
+                        ..
                     } => match validate_triage(output_json) {
                         Ok(triage) => {
                             state.triage_mut().complete_article(
@@ -313,6 +344,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         output_json,
                         input_tokens,
                         output_tokens,
+                        ..
                     } => match validate_briefing(output_json) {
                         Ok(briefing) => {
                             let themes = briefing
@@ -330,14 +362,23 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 input_tokens: *input_tokens,
                                 output_tokens: *output_tokens,
                             });
+                            effects.push(Effect::PersistSummaryCache {
+                                cache: state.summary_cache().clone(),
+                            });
                         }
                         Err(err) => {
                             engine_warn!("[briefing] briefing validation failed: {err}");
                             state.briefing_mut().complete_without_briefing();
+                            effects.push(Effect::PersistSummaryCache {
+                                cache: state.summary_cache().clone(),
+                            });
                         }
                     },
                     _ => {
                         state.briefing_mut().complete_without_briefing();
+                        effects.push(Effect::PersistSummaryCache {
+                            cache: state.summary_cache().clone(),
+                        });
                     }
                 }
                 state.mark_dirty();
@@ -350,7 +391,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.set_briefing(BriefingSession::new_loading(None));
             engine_info!("[briefing] briefing requested");
-            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForBriefing]
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadLlmMetadata,
+                Effect::LoadArticlesForBriefing,
+            ]
         }
         Msg::ArticlesLoaded {
             articles,
@@ -361,7 +406,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     .briefing_mut()
                     .fail("no completed articles found".to_string());
                 state.mark_dirty();
-                return (state, Vec::new());
+                let cache = state.summary_cache().clone();
+                return (state, vec![Effect::PersistSummaryCache { cache }]);
             }
             state.briefing_mut().set_articles(articles, collection_text);
             state.briefing_mut().transition_to_summarizing();
@@ -373,7 +419,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::ArticlesLoadFailed { reason } => {
             state.briefing_mut().fail(reason);
             state.mark_dirty();
-            Vec::new()
+            let cache = state.summary_cache().clone();
+            vec![Effect::PersistSummaryCache { cache }]
         }
         Msg::TriageClicked => {
             if !state.triage().can_start() {
@@ -381,7 +428,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.set_triage(TriageSession::new_loading(None));
             engine_info!("[triage] triage requested");
-            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForTriage]
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadLlmMetadata,
+                Effect::LoadArticlesForTriage,
+            ]
         }
         Msg::TriageArticlesLoaded { articles } => {
             if articles.is_empty() {
@@ -412,6 +463,27 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::PromptContextsLoadFailed { reason } => {
             engine_warn!("[PromptContext] Failed to load contexts: {}", reason);
             // Continue with empty contexts (degraded but functional)
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        } => {
+            engine_info!(
+                "[LlmMetadata] Loaded {} active version(s)",
+                active_versions.len()
+            );
+            state.set_llm_metadata(active_versions, effective_models);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::SummaryCacheHydrated { cache } => {
+            engine_info!(
+                "[summary-cache] Hydrated {} entries from persistent store",
+                cache.len()
+            );
+            state.set_summary_cache(cache);
             state.mark_dirty();
             Vec::new()
         }
@@ -488,13 +560,52 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
 }
 
 fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
-    if let Some(next_idx) = state.briefing().next_pending_index() {
-        let prepared_text = state.briefing().articles()[next_idx].prepared_text.clone();
+    // Process consecutive cached articles first
+    loop {
+        let Some(next_idx) = state.briefing().next_pending_index() else {
+            break;
+        };
+
+        // Clone data we need before any mutable borrows
+        let article = &state.briefing().articles()[next_idx];
+        let prepared_text = article.prepared_text.clone();
+        let content_hash = article.content_hash.clone();
+        let context = state.context_for(PromptId::ArticleSummary).to_vec();
+
+        // Try to build cache key if we have metadata
+        let cache_key = build_summary_cache_key(
+            &content_hash,
+            &context,
+            state.active_version_for(PromptId::ArticleSummary),
+            state.effective_model_for(PromptId::ArticleSummary),
+        );
+
+        if let Some(key) = cache_key {
+            if let Some(cached_result) = state.try_reuse_summary(&key) {
+                // Cache hit: complete article inline
+                engine_info!(
+                    "[summary-cache] hit for article {} (hash={})",
+                    next_idx,
+                    &content_hash[..content_hash.len().min(8)]
+                );
+                let result = cached_result.clone();
+                state.briefing_mut().complete_article(next_idx, result);
+                state.mark_dirty();
+                // Continue loop to check next article
+                continue;
+            }
+        }
+
+        // Cache miss or no key: emit LLM request and stop
         let request_id = state.allocate_next_llm_request_id();
         state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
         state.briefing_mut().start_article(next_idx, request_id);
 
-        let context = state.context_for(PromptId::ArticleSummary).to_vec();
+        engine_info!(
+            "[summary-cache] miss for article {} (hash={})",
+            next_idx,
+            &content_hash[..content_hash.len().min(8)]
+        );
 
         effects.push(Effect::RequestLlmCompletion {
             request_id,
@@ -507,11 +618,15 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         return;
     }
 
+    // All summaries resolved (cached or completed)
     if state.briefing().completed_summary_count() == 0 {
         state
             .briefing_mut()
             .fail("all article summaries failed".to_string());
         state.mark_dirty();
+        effects.push(Effect::PersistSummaryCache {
+            cache: state.summary_cache().clone(),
+        });
         return;
     }
 
@@ -522,6 +637,9 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                 .briefing_mut()
                 .fail("missing briefing collection".to_string());
             state.mark_dirty();
+            effects.push(Effect::PersistSummaryCache {
+                cache: state.summary_cache().clone(),
+            });
             return;
         }
     };
@@ -539,6 +657,26 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         context,
     });
     state.mark_dirty();
+}
+
+/// Build a cache key for an article summary.
+/// Returns None if we don't have the necessary metadata (prompt_version or model_id).
+fn build_summary_cache_key(
+    content_hash: &str,
+    context: &[(String, String)],
+    prompt_version: Option<PromptVersion>,
+    model_id: Option<&str>,
+) -> Option<SummaryCacheKey> {
+    let prompt_version = prompt_version?;
+    let model_id = model_id?;
+
+    Some(SummaryCacheKey {
+        content_hash: content_hash.to_string(),
+        prompt_id: PromptId::ArticleSummary,
+        prompt_version,
+        model_id: model_id.to_string(),
+        context_hash: context_hash(context),
+    })
 }
 
 #[cfg(test)]
@@ -589,7 +727,11 @@ mod tests {
 
         assert_eq!(
             effects,
-            vec![Effect::LoadPromptContexts, Effect::LoadArticlesForBriefing]
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadLlmMetadata,
+                Effect::LoadArticlesForBriefing
+            ]
         );
         assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
     }
@@ -651,6 +793,8 @@ mod tests {
                     output_json: summary_json("Article A"),
                     input_tokens: 10,
                     output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
                 },
             },
         );
@@ -674,6 +818,8 @@ mod tests {
                     output_json: summary_json("Article B"),
                     input_tokens: 10,
                     output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
                 },
             },
         );
@@ -697,11 +843,14 @@ mod tests {
                     output_json: briefing_json(2),
                     input_tokens: 20,
                     output_tokens: 8,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
                 },
             },
         );
 
-        assert!(effects.is_empty());
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::PersistSummaryCache { .. }));
         assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
         assert!(state.briefing().briefing_result().is_some());
     }

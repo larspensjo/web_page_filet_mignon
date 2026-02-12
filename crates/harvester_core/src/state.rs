@@ -1,5 +1,6 @@
 use crate::briefing::BriefingSession;
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
+use crate::summary_cache::SummaryCache;
 use crate::triage::TriageSession;
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
@@ -7,7 +8,7 @@ use crate::view_model::{
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use crate::Effect;
-use harvester_engine::llm::prompt::PromptId;
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind, SourceId};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -71,6 +72,9 @@ pub struct AppState {
     triage: TriageSession,
     source_states: SourceStateIndex,
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
+    active_prompt_versions: HashMap<PromptId, PromptVersion>,
+    effective_models: HashMap<PromptId, String>,
+    summary_cache: SummaryCache,
 }
 
 pub struct IngestResult {
@@ -96,6 +100,9 @@ impl Default for AppState {
             triage: TriageSession::default(),
             source_states: SourceStateIndex::default(),
             prompt_contexts: HashMap::new(),
+            active_prompt_versions: HashMap::new(),
+            effective_models: HashMap::new(),
+            summary_cache: SummaryCache::new(),
         }
     }
 }
@@ -331,6 +338,58 @@ impl AppState {
         contexts: HashMap<PromptId, Vec<(String, String)>>,
     ) {
         self.prompt_contexts = contexts;
+    }
+
+    /// Get the active prompt version for a specific prompt.
+    pub fn active_version_for(&self, prompt_id: PromptId) -> Option<PromptVersion> {
+        self.active_prompt_versions.get(&prompt_id).copied()
+    }
+
+    /// Get the effective model for a specific prompt.
+    pub fn effective_model_for(&self, prompt_id: PromptId) -> Option<&str> {
+        self.effective_models.get(&prompt_id).map(|s| s.as_str())
+    }
+
+    pub(crate) fn set_llm_metadata(
+        &mut self,
+        active_versions: HashMap<PromptId, PromptVersion>,
+        effective_models: HashMap<PromptId, String>,
+    ) {
+        self.active_prompt_versions = active_versions;
+        self.effective_models = effective_models;
+    }
+
+    /// Try to reuse a cached summary result for the given cache key.
+    /// Returns None if there is no cached entry for this key.
+    pub(crate) fn try_reuse_summary(
+        &self,
+        key: &crate::summary_cache::SummaryCacheKey,
+    ) -> Option<&crate::briefing::ArticleSummaryResult> {
+        self.summary_cache.lookup(key).map(|entry| &entry.result)
+    }
+
+    /// Store a summary result in the cache with the given key.
+    pub(crate) fn store_summary_result(
+        &mut self,
+        key: crate::summary_cache::SummaryCacheKey,
+        result: crate::briefing::ArticleSummaryResult,
+        created_at_utc: String,
+    ) {
+        let entry = crate::summary_cache::SummaryCacheEntry {
+            result,
+            created_at_utc,
+        };
+        self.summary_cache.insert(key, entry);
+    }
+
+    /// Replace the entire summary cache (used for hydration).
+    pub(crate) fn set_summary_cache(&mut self, cache: SummaryCache) {
+        self.summary_cache = cache;
+    }
+
+    /// Get an immutable reference to the summary cache.
+    pub(crate) fn summary_cache(&self) -> &SummaryCache {
+        &self.summary_cache
     }
 
     pub(crate) fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {
@@ -1442,5 +1501,118 @@ mod tests {
             "https://other.example/path".to_string()
         );
         assert_eq!(stored_links[1].index, 2);
+    }
+
+    #[test]
+    fn cache_starts_empty() {
+        let state = AppState::new();
+        assert_eq!(state.summary_cache().len(), 0);
+    }
+
+    #[test]
+    fn store_and_retrieve_summary_result() {
+        use crate::briefing::ArticleSummaryResult;
+        use crate::summary_cache::SummaryCacheKey;
+        use harvester_engine::llm::prompt::PromptId;
+
+        let mut state = AppState::new();
+        let key = SummaryCacheKey {
+            content_hash: "hash1".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "model1".to_string(),
+            context_hash: "ctx1".to_string(),
+        };
+        let result = ArticleSummaryResult {
+            title: "Test Title".to_string(),
+            summary: "Test Summary".to_string(),
+            key_points: vec!["Point 1".to_string()],
+            input_tokens: 100,
+            output_tokens: 50,
+        };
+
+        state.store_summary_result(
+            key.clone(),
+            result.clone(),
+            "2026-01-01T00:00:00Z".to_string(),
+        );
+
+        let retrieved = state.try_reuse_summary(&key);
+        assert!(retrieved.is_some());
+        assert_eq!(retrieved.unwrap().title, "Test Title");
+        assert_eq!(retrieved.unwrap().summary, "Test Summary");
+        assert_eq!(state.summary_cache().len(), 1);
+    }
+
+    #[test]
+    fn cache_miss_returns_none() {
+        use crate::summary_cache::SummaryCacheKey;
+        use harvester_engine::llm::prompt::PromptId;
+
+        let state = AppState::new();
+        let key = SummaryCacheKey {
+            content_hash: "nonexistent".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        };
+
+        assert!(state.try_reuse_summary(&key).is_none());
+    }
+
+    #[test]
+    fn set_summary_cache_replaces_entire_cache() {
+        use crate::briefing::ArticleSummaryResult;
+        use crate::summary_cache::{SummaryCache, SummaryCacheEntry, SummaryCacheKey};
+        use harvester_engine::llm::prompt::PromptId;
+
+        let mut state = AppState::new();
+
+        // Store initial entry
+        let key1 = SummaryCacheKey {
+            content_hash: "hash1".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "model1".to_string(),
+            context_hash: "ctx1".to_string(),
+        };
+        let result1 = ArticleSummaryResult {
+            title: "Title1".to_string(),
+            summary: "Summary1".to_string(),
+            key_points: vec![],
+            input_tokens: 10,
+            output_tokens: 5,
+        };
+        state.store_summary_result(key1.clone(), result1, "2026-01-01T00:00:00Z".to_string());
+        assert_eq!(state.summary_cache().len(), 1);
+
+        // Replace with new cache containing different entry
+        let mut new_cache = SummaryCache::new();
+        let key2 = SummaryCacheKey {
+            content_hash: "hash2".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "model2".to_string(),
+            context_hash: "ctx2".to_string(),
+        };
+        let entry2 = SummaryCacheEntry {
+            result: ArticleSummaryResult {
+                title: "Title2".to_string(),
+                summary: "Summary2".to_string(),
+                key_points: vec![],
+                input_tokens: 20,
+                output_tokens: 10,
+            },
+            created_at_utc: "2026-01-02T00:00:00Z".to_string(),
+        };
+        new_cache.insert(key2.clone(), entry2);
+
+        state.set_summary_cache(new_cache);
+
+        // Old entry should be gone, new entry should be present
+        assert_eq!(state.summary_cache().len(), 1);
+        assert!(state.try_reuse_summary(&key1).is_none());
+        assert_eq!(state.try_reuse_summary(&key2).unwrap().title, "Title2");
     }
 }

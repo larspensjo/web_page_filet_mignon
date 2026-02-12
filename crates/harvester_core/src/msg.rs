@@ -115,6 +115,13 @@ pub enum Msg {
     },
     /// Prompt contexts failed to load.
     PromptContextsLoadFailed { reason: String },
+    /// LLM metadata (active prompt versions and effective models) loaded.
+    LlmMetadataLoaded {
+        active_versions: std::collections::HashMap<PromptId, PromptVersion>,
+        effective_models: std::collections::HashMap<PromptId, String>,
+    },
+    /// Summary cache hydrated from persisted store at startup.
+    SummaryCacheHydrated { cache: crate::SummaryCache },
 }
 
 /// Result payload returned by the LLM worker.
@@ -124,6 +131,8 @@ pub enum LlmResultKind {
         output_json: String,
         input_tokens: u32,
         output_tokens: u32,
+        prompt_version: PromptVersion,
+        model_id: String,
     },
     ValidationFailed {
         reason: String,

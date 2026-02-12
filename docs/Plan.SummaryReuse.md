@@ -101,7 +101,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ## Implementation Plan (Commit-Sized)
 
-### Step 1: Surface LLM Metadata to Reducer (Unblocks Everything)
+### Step 1: Surface LLM Metadata to Reducer (Unblocks Everything) [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/effect.rs`
@@ -124,7 +124,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 2: Add Core Cache Types
+### Step 2: Add Core Cache Types [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/summary_cache.rs` (NEW)
@@ -147,7 +147,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 3: Add Cache Ownership to AppState
+### Step 3: Add Cache Ownership to AppState [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/state.rs`
@@ -167,7 +167,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 4: Wire Reducer Reuse + Progress Behavior
+### Step 4: Wire Reducer Reuse + Progress Behavior [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/update.rs`
@@ -191,7 +191,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 5: Platform Persistence Store (No Serde in Core Domain Types)
+### Step 5: Platform Persistence Store (No Serde in Core Domain Types) [COMPLETE]
 
 **Files**
 - `crates/harvester_app/src/platform/summary_cache_store.rs` (NEW)
@@ -212,7 +212,7 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 6: Hydration + Persist-at-Briefing-End
+### Step 6: Hydration + Persist-at-Briefing-End [COMPLETE]
 
 **Files**
 - `crates/harvester_core/src/msg.rs`
@@ -234,11 +234,11 @@ Follow-up option (deferred): harden replay key to include `model_id` and `contex
 
 ---
 
-### Step 7: Observability + Guardrails
+### Step 7: Observability + Guardrails [COMPLETE]
 
 **Files**
+- `crates/harvester_core/src/summary_cache.rs`
 - `crates/harvester_core/src/update.rs`
-- `crates/harvester_app/src/platform/effects.rs`
 
 **Tasks**
 - Add `[summary-cache]` logs for hit/miss/persist results.

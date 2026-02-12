@@ -396,6 +396,47 @@ impl EffectRunner {
                     let _ = msg_tx.send(Msg::PromptContextsLoaded { contexts });
                 });
             }
+            Effect::LoadLlmMetadata => {
+                let msg_tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    use std::collections::HashMap;
+
+                    // Metadata will be populated from actual LLM completion results
+                    // The prompt_version and model_id are resolved by the LLM worker
+                    // and returned in the success payload.
+                    let active_versions = HashMap::new();
+                    let effective_models = HashMap::new();
+
+                    engine_info!("[llm-metadata] metadata prepared for runtime resolution");
+
+                    let _ = msg_tx.send(Msg::LlmMetadataLoaded {
+                        active_versions,
+                        effective_models,
+                    });
+                });
+            }
+            Effect::PersistSummaryCache { cache } => {
+                use super::summary_cache_store::{default_summary_cache_path, save_summary_cache};
+
+                let msg_tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    let path = default_summary_cache_path();
+                    match save_summary_cache(&cache, &path) {
+                        Ok(_) => {
+                            engine_info!("[summary-cache] Persisted cache to {:?}", path);
+                        }
+                        Err(err) => {
+                            engine_warn!(
+                                "[summary-cache] Failed to persist cache to {:?}: {}",
+                                path,
+                                err
+                            );
+                        }
+                    }
+                    // No message needed on completion - fire and forget
+                    let _ = msg_tx;
+                });
+            }
             Effect::LoadArticlesForTriage => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
@@ -686,6 +727,8 @@ fn map_llm_event(event: LlmEvent) -> Msg {
                     output_json: outcome.output_json,
                     input_tokens: outcome.usage.input_tokens,
                     output_tokens: outcome.usage.output_tokens,
+                    prompt_version: outcome.prompt_version,
+                    model_id: outcome.model_id.model_name().to_string(),
                 },
                 Err(LlmCompletionError::ValidationFailed {
                     reason,

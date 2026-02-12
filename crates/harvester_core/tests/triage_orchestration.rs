@@ -65,6 +65,8 @@ fn triage_success(priority: u8) -> LlmResultKind {
         output_json,
         input_tokens: 10,
         output_tokens: 5,
+        prompt_version: 1,
+        model_id: "test-model".to_string(),
     }
 }
 
@@ -98,7 +100,11 @@ fn triage_clicked_emits_load_effect() {
     let (state, effects) = update(state, Msg::TriageClicked);
     assert_eq!(
         effects,
-        vec![Effect::LoadPromptContexts, Effect::LoadArticlesForTriage]
+        vec![
+            Effect::LoadPromptContexts,
+            Effect::LoadLlmMetadata,
+            Effect::LoadArticlesForTriage
+        ]
     );
     assert!(!state.view().triage_can_start);
 }
@@ -294,7 +300,11 @@ fn triage_rerun_after_complete_starts_fresh() {
     let (state, effects) = update(state, Msg::TriageClicked);
     assert_eq!(
         effects,
-        vec![Effect::LoadPromptContexts, Effect::LoadArticlesForTriage]
+        vec![
+            Effect::LoadPromptContexts,
+            Effect::LoadLlmMetadata,
+            Effect::LoadArticlesForTriage
+        ]
     );
     assert!(!state.view().triage_can_start);
 }
