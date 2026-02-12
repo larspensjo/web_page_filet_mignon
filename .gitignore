@@ -18,7 +18,7 @@ target
 /lcov.info
 /incoming_urls.txt
 /sources.ron
-/contexts/
+# /contexts/
 /.rss_seen_guids.ron
 
 # Coverage analysis outputs

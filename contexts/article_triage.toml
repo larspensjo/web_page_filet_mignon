@@ -1,0 +1,45 @@
+[meta]
+prompt_id = "ArticleTriage"
+schema_version = 1
+version = 1
+updated = "2026-02-12"
+description = "Strategic context for triage scoring and prioritization"
+
+[variables]
+triage_instructions = """
+STRATEGIC MANDATE: "The Great Bifurcation"
+We are Long Infrastructure (Hardware, Energy, Space) and Short Services (SaaS, Consulting).
+We prioritize signals confirming the "Resource Grab" (Capex) and "The Physical Wall" (Energy constraints), or signals confirming "SaaS Deflation" (Jobless Boom).
+
+ENTITIES OF INTEREST:
+[CORE HOLDINGS - High Priority]: NVIDIA, TSMC, Broadcom, Micron, Amazon, Microsoft, Alphabet, AMD, Qualcomm, Rocket Lab, ASML, Arm.
+[WATCHLIST - Medium Priority]: OpenAI, SpaceX/xAI, Meta, Anthropic, Palantir, Vistra, Stoke Space.
+
+SCORING ALGORITHM (1-5):
+- 5 (CRITICAL): Actionable financial/strategic event for a CORE HOLDING.
+    * Must include: Earnings surprises, Capex guidance changes ($B+), Regulatory bans/approvals, or M&A >$1B.
+    * Or: Definitive confirmation of "Orbital Compute" (e.g., hardware in space).
+- 4 (HIGH): Material event for WATCHLIST or major Thematic Validation.
+    * Examples: Sovereign AI funding ($B+), Grid connection moratoriums, Hyperscalers launching custom chips (reducing Nvidia dependence).
+- 3 (RELEVANT): Competitor moves, Supply chain signals, or Strong thematic signals without specific dollar amounts.
+    * Examples: New open-source model releases, changes in GPU lead times, "Jobless boom" anecdotes without hard layoff numbers.
+- 2 (BACKGROUND): Long-term R&D (5+ years out), Op-Eds on AI ethics, or general industry analysis without new data.
+- 1 (NOISE): Consumer gadget reviews (e.g., new iPhone AI features), "Top 10 AI Tools" lists, generic hype, crypto-AI.
+
+HARD DATA REQUIREMENT (Score Capping):
+- If an article claims a trend but lacks specific Numbers, Dates, or Named Entities, CAP THE SCORE AT 3.
+- To achieve Score 4 or 5, the article MUST contain concrete metrics (e.g., "$135B capex", "100-year bonds", "16,000 layoffs").
+
+PREFERRED TAG TAXONOMY (Use these exact tags where applicable):
+[Hardware]: custom-silicon, hbm-shortage, gpu-demand, fab-capacity
+[Infrastructure]: capex-surge, energy-grid, nuclear-power, cooling-tech, physical-wall
+[Economics]: saas-deflation, jobless-boom, seat-compression, pricing-power
+[Space/Defense]: orbital-compute, sovereign-ai, launch-costs, defense-prime
+[Policy]: export-controls, antitrust, tariff-risk
+
+TIE-BREAKER LOGIC:
+- If undecided between two scores (e.g., 3 vs 4):
+    1. If the article mentions a CORE HOLDING, round UP.
+    2. If the impact is financial/regulatory, round UP.
+    3. If the impact is product/feature release, round DOWN.
+"""

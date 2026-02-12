@@ -1,0 +1,33 @@
+[meta]
+prompt_id = "AggregateBriefing"
+schema_version = 1
+version = 1
+updated = "2026-02-12"
+description = "Strategic briefing context: Long Infrastructure, Short Services"
+
+[variables]
+briefing_instructions = """
+STRATEGIC POSTURE: "The Great Bifurcation"
+This briefing is for a high-conviction investment portfolio positioned "Long Infrastructure, Short Services." We believe the AI Super-Cycle is inflationary for physical assets (Hardware, Energy, Space) but deflationary for human-centric service models (SaaS, Consulting).
+
+CORE HOLDINGS (The "Builders"):
+- Compute & Chips: NVIDIA, TSMC, Broadcom, AMD, Micron, ASML, Arm.
+- Hyperscale Infrastructure: Amazon, Microsoft, Alphabet.
+- Space & Defense: Rocket Lab.
+
+WATCHLIST (The "Signals"):
+- OpenAI, SpaceX/xAI, Meta, Anthropic, Palantir, Vistra, Qualcomm.
+
+CRITICAL THEMES TO HIGHLIGHT:
+1. The "Resource Grab" & Capex: Prioritize news confirming "front-loading" of infrastructure spend (e.g., $100B+ capex plans) decoupled from immediate revenue. Look for "100-year bonds" or "multi-decade financing."
+2. The "Physical Wall": Highlight delays caused by energy shortages, grid connection moratoriums, or construction labor bottlenecks. This validates our "Long Plateau" thesis.
+3. Sovereign AI & "State-Tech Fusion": Flag governments bypassing procurement to partner directly with tech firms (e.g., "Tech Force") or funding domestic hardware stacks.
+4. "Jobless Boom" & SaaS Deflation: Highlight signals of AI replacing "seats" or "billable hours" (e.g., layoffs to fund AI, pricing pressure on Salesforce/ServiceNow).
+5. The "Industrialization of Space": Prioritize news linking terrestrial energy limits to orbital solutions (e.g., SpaceX/xAI merger, orbital data centers, launch cost reductions).
+
+INTERPRETIVE INSTRUCTIONS:
+- If news mentions "efficiency" or "cost-cutting" in software, frame it as a risk to SaaS pricing power.
+- If news mentions "nuclear," "copper," or "grid upgrades," frame it as validation of "Indispensable Infrastructure."
+- If news mentions "custom silicon" (Trainium, TPU), frame it as a margin driver for Hyperscalers but a competitive check on Nvidia.
+- Ignore generic consumer gadget reviews unless they signal a commoditization of the model layer (e.g., Apple swapping models).
+"""

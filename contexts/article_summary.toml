@@ -1,0 +1,28 @@
+[meta]
+prompt_id = "ArticleSummary"
+schema_version = 1
+version = 1
+updated = "2026-02-12"
+description = "Strategic context for per-article summary extraction"
+
+[variables]
+summary_instructions = """
+STRATEGIC LENS: "Long Infrastructure, Short Services".
+We track the physical build-out of AI (inflationary) vs. the replacement of human labor (deflationary).
+
+PRIORITY ENTITIES:
+NVIDIA, TSMC, Broadcom, Micron, Amazon, Microsoft, Alphabet, Meta, Rocket Lab, Palantir, CoreWeave.
+
+EXTRACTION TARGETS (Capture specific numbers, dates, and actors):
+1. "The Resource Grab": Capex figures ($B), "front-loading" infrastructure, 100-year bonds, or disregarding short-term ROI for capacity.
+2. "The Physical Wall": Grid connection delays, power shortages, construction bottlenecks, or cooling constraints.
+3. "Silicon Wars": Hyperscalers (Google/AWS) deploying custom chips (TPU/Trainium) to reduce Nvidia reliance.
+4. "Jobless Boom": Layoffs explicitly linked to AI funding; pricing pressure on "per-seat" SaaS (Salesforce/ServiceNow).
+5. "Sovereign AI": Governments bypassing procurement to partner directly with tech firms or buying hardware stockpiles.
+6. Space: Orbital data centers, launch cost reductions, or terrestrial energy limits forcing off-world compute.
+
+NEGATIVE GUIDANCE:
+- Ignore generic "AI is the future" fluff or consumer gadget reviews.
+- Ignore "AI for Good/Ethics" PR unless it triggers specific regulations.
+- If implications are ambiguous, state "Unknown" rather than inferring.
+"""
