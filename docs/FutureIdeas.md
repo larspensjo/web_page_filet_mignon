@@ -13,6 +13,7 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | Architecture | TrustTypes       | Typed wrappers for trusted/untrusted data        |
 | Ingestion  | FeedDiscovery      | Find feed URLs from website pages                |
 | Ingestion  | OpmlImport         | Import feeds from OPML collections               |
+| Ingestion  | PdfPipeline        | Ingest and preview PDF content                   |
 | Ingestion  | RssTriage          | Pre-filter feed items before download            |
 | Ingestion  | Scheduling         | Scheduled polling configuration                  |
 | Ingestion  | SourceCursoring    | Incremental source read positions                |
@@ -42,10 +43,18 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | Storage   | ContentFingerprinting | Dedup and near-duplicate detection             |
 | Storage   | ExportArtifacts     | Export briefings and triage outputs              |
 | Storage   | NormalizationVersioning | Replay safety via versioned normalization   |
+| Storage   | PreviewCache        | Cache preview content for quick re-open          |
+| Storage   | PreviewLoading      | Load previews from disk on demand                |
 | Storage   | ReplayPrivacy       | Redaction controls for replay data               |
 | Storage   | ReplayRetention     | Retention policy for replay records              |
 | UX        | BriefingOptions     | Control briefing inclusion sources               |
+| UX        | DiscardWorkflow     | Review and discard downloaded content            |
 | UX        | InputDebounce       | Guard against rapid URL submissions              |
+| UX        | PreviewComparison   | Side-by-side preview comparison                  |
+| UX        | PreviewIndicators   | Quality signals in the preview header            |
+| UX        | PreviewOutline      | Outline navigation for preview content           |
+| UX        | PreviewRich         | Richer markdown preview rendering                |
+| UX        | PreviewSearch       | Find within preview content                      |
 | UX        | PromptComparison    | Side-by-side prompt evaluation UI                |
 | UX        | SessionControls     | Operator controls for active sessions            |
 | UX        | TriageUi            | Triage list filtering and visualization          |
@@ -174,6 +183,26 @@ Rationale: Enables bulk onboarding of curated feed lists.
 SuccessCriteria:
 - OPML file with multiple outlines produces corresponding RSS sources.
 - Invalid or non-feed URLs in OPML are reported and skipped.
+
+### PdfPipeline
+
+#### [FI-Ingestion-PdfPipeline-0001] PDF ingestion for preview pipeline
+Status: Candidate
+TopLevel: Ingestion
+SubLevel: PdfPipeline
+Priority: P3
+Effort: L
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FuturePDFPipelineV1
+- Captured: 2026-02-12
+Tags: [ingestion, pdf, preview]
+Summary: Add PDF ingestion that reuses the same content-through-events preview path.
+Rationale: Enables previewing and triaging PDF sources with the same UI.
+SuccessCriteria:
+- PDF sources produce markdown suitable for preview.
+- Preview flow works for PDF-derived content without disk reads in-session.
 
 ### RssTriage
 
@@ -875,6 +904,46 @@ SuccessCriteria:
 - Replay keys include a normalization version identifier.
 - Changing normalization rules results in new cache entries.
 
+### PreviewCache
+
+#### [FI-Storage-PreviewCache-0001] LRU cache for preview content
+Status: Candidate
+TopLevel: Storage
+SubLevel: PreviewCache
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FuturePreviewCachingV2
+- Captured: 2026-02-12
+Tags: [preview, caching, UX]
+Summary: Cache recently viewed previews in-memory to avoid repeated disk reads.
+Rationale: Improves responsiveness when reselecting recent jobs.
+SuccessCriteria:
+- Recently viewed previews are served from cache when available.
+- Cache invalidates on job re-run or file deletion.
+
+### PreviewLoading
+
+#### [FI-Storage-PreviewLoading-0001] Cold-path preview loading from disk
+Status: Candidate
+TopLevel: Storage
+SubLevel: PreviewLoading
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FutureColdPathFileLoadingV2
+- Captured: 2026-02-12
+Tags: [preview, io, persistence]
+Summary: Load preview content from disk when jobs are restored without in-memory content.
+Rationale: Enables preview after app restart without re-running jobs.
+SuccessCriteria:
+- Selecting a restored job loads its preview file with a size limit.
+- Missing files are handled gracefully with an informative message.
+
 ### ReplayPrivacy
 
 #### [FI-Storage-ReplayPrivacy-0001] Replay artifact redaction controls
@@ -937,6 +1006,26 @@ SuccessCriteria:
 - Inclusion profiles control whether linked pages are added.
 - Briefing input list reflects the selected inclusion profile.
 
+### DiscardWorkflow
+
+#### [FI-UX-DiscardWorkflow-0001] Discard workflow for downloaded artifacts
+Status: Candidate
+TopLevel: UX
+SubLevel: DiscardWorkflow
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FutureDiscardWorkflowV2
+- Captured: 2026-02-12
+Tags: [UX, cleanup, workflow]
+Summary: Add a discard action that removes or archives downloaded artifacts with a reversible flow.
+Rationale: Lets users prune low-value content while keeping safety via reversible deletion.
+SuccessCriteria:
+- Discarded items move to a reversible location before deletion.
+- UI provides per-job discard actions with confirmation.
+
 ### InputDebounce
 
 #### [FI-UX-InputDebounce-0001] Debounce URL input submission
@@ -956,6 +1045,106 @@ Rationale: Prevents accidental bursts of URL submissions.
 SuccessCriteria:
 - Rapid paste events trigger a single enqueue action.
 - Debounce delay is configurable.
+
+### PreviewComparison
+
+#### [FI-UX-PreviewComparison-0001] Side-by-side preview comparison
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewComparison
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FutureSideBySideComparisonV2
+- Captured: 2026-02-12
+Tags: [UX, preview, comparison]
+Summary: Allow selecting two jobs and show previews side-by-side with light diffing.
+Rationale: Helps detect near-duplicate pages or changes across sources.
+SuccessCriteria:
+- Two selected jobs render side-by-side previews.
+- Differences are visually indicated without blocking performance.
+
+### PreviewIndicators
+
+#### [FI-UX-PreviewIndicators-0001] Heuristic preview quality indicators
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewIndicators
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FutureHeuristicSignalsV2
+- Captured: 2026-02-12
+Tags: [UX, preview, quality]
+Summary: Add heuristic indicators (stub, paywall, cookie wall, duplicate) in the preview header.
+Rationale: Speeds keep/skip decisions without reading full content.
+SuccessCriteria:
+- Header displays indicators derived from deterministic heuristics.
+- Indicators are logged and test-covered.
+
+### PreviewOutline
+
+#### [FI-UX-PreviewOutline-0001] Outline navigation for preview content
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewOutline
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FutureOutlineNavigationV2
+- Captured: 2026-02-12
+Tags: [UX, preview, navigation]
+Summary: Extract headings into an outline list that scrolls the preview to sections.
+Rationale: Improves navigation through long articles.
+SuccessCriteria:
+- Outline list is populated from markdown headings.
+- Clicking an outline entry scrolls to the target section.
+
+### PreviewRich
+
+#### [FI-UX-PreviewRich-0001] Richer markdown preview rendering
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewRich
+Priority: P3
+Effort: L
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FutureRichPreviewV2
+- Captured: 2026-02-12
+Tags: [UX, preview, rendering]
+Summary: Add optional rich rendering (headings, bold, code) while keeping raw markdown default.
+Rationale: Improves readability without losing inspection fidelity.
+SuccessCriteria:
+- Users can toggle between raw and rich preview modes.
+- Rich preview renders headings, bold, and code consistently.
+
+### PreviewSearch
+
+#### [FI-UX-PreviewSearch-0001] Find within preview content
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewSearch
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.MarkdownPreviewPane.md
+- SourceSection: FutureSearchWithinPreviewV2
+- Captured: 2026-02-12
+Tags: [UX, preview, search]
+Summary: Provide a find box to search within the preview pane.
+Rationale: Helps users locate relevant sections quickly.
+SuccessCriteria:
+- Search finds and highlights matches in the preview.
+- Navigation jumps to the first match.
 
 ### PromptComparison
 
