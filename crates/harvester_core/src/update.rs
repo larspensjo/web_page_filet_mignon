@@ -571,22 +571,51 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         let prepared_text = article.prepared_text.clone();
         let content_hash = article.content_hash.clone();
         let context = state.context_for(PromptId::ArticleSummary).to_vec();
+        let context_hash_value = context_hash(&context);
+        let prompt_version = state.active_version_for(PromptId::ArticleSummary);
+        let model_id = state
+            .effective_model_for(PromptId::ArticleSummary)
+            .map(|s| s.to_string());
 
         // Try to build cache key if we have metadata
         let cache_key = build_summary_cache_key(
             &content_hash,
-            &context,
-            state.active_version_for(PromptId::ArticleSummary),
-            state.effective_model_for(PromptId::ArticleSummary),
+            &context_hash_value,
+            prompt_version,
+            model_id.as_deref(),
         );
+        let version_display = prompt_version
+            .map(|version| version.to_string())
+            .unwrap_or_else(|| "<none>".to_string());
+        let model_display = model_id.as_deref().unwrap_or("<none>");
+
+        if cache_key.is_none() {
+            let reason = if prompt_version.is_none() {
+                "missing prompt_version metadata"
+            } else if model_id.is_none() {
+                "missing model_id metadata"
+            } else {
+                "unknown"
+            };
+            engine_info!(
+                "[summary-cache] key unavailable for article {} (hash={}, reason={}, context={})",
+                next_idx,
+                &content_hash[..content_hash.len().min(8)],
+                reason,
+                &context_hash_value
+            );
+        }
 
         if let Some(key) = cache_key {
             if let Some(cached_result) = state.try_reuse_summary(&key) {
                 // Cache hit: complete article inline
                 engine_info!(
-                    "[summary-cache] hit for article {} (hash={})",
+                    "[summary-cache] hit for article {} (hash={}, version={}, model={}, context={})",
                     next_idx,
-                    &content_hash[..content_hash.len().min(8)]
+                    &content_hash[..content_hash.len().min(8)],
+                    version_display,
+                    model_display,
+                    &context_hash_value
                 );
                 let result = cached_result.clone();
                 state.briefing_mut().complete_article(next_idx, result);
@@ -602,9 +631,12 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         state.briefing_mut().start_article(next_idx, request_id);
 
         engine_info!(
-            "[summary-cache] miss for article {} (hash={})",
+            "[summary-cache] miss for article {} (hash={}, version={}, model={}, context={})",
             next_idx,
-            &content_hash[..content_hash.len().min(8)]
+            &content_hash[..content_hash.len().min(8)],
+            version_display,
+            model_display,
+            &context_hash_value
         );
 
         effects.push(Effect::RequestLlmCompletion {
@@ -663,7 +695,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
 /// Returns None if we don't have the necessary metadata (prompt_version or model_id).
 fn build_summary_cache_key(
     content_hash: &str,
-    context: &[(String, String)],
+    context_hash: &str,
     prompt_version: Option<PromptVersion>,
     model_id: Option<&str>,
 ) -> Option<SummaryCacheKey> {
@@ -675,7 +707,7 @@ fn build_summary_cache_key(
         prompt_id: PromptId::ArticleSummary,
         prompt_version,
         model_id: model_id.to_string(),
-        context_hash: context_hash(context),
+        context_hash: context_hash.to_string(),
     })
 }
 
