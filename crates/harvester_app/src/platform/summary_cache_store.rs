@@ -176,12 +176,7 @@ pub(crate) fn save_summary_cache(
 
     // Serialize to RON format
     let serialized = ron::ser::to_string_pretty(&persisted, ron::ser::PrettyConfig::default())
-        .map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to serialize cache: {}", err),
-            )
-        })?;
+        .map_err(|err| std::io::Error::other(format!("Failed to serialize cache: {}", err)))?;
 
     // Write atomically
     let parent_dir = path.parent().unwrap_or_else(|| Path::new("."));

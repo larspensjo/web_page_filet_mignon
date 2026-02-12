@@ -88,7 +88,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
 
         let path = default_summary_cache_path();
         let cache = load_summary_cache(&path);
-        if cache.len() > 0 {
+        if !cache.is_empty() {
             let mut guard = shared_state.lock().unwrap();
             let state = std::mem::take(&mut guard.state);
             let (state, effects) = update(state, Msg::SummaryCacheHydrated { cache });

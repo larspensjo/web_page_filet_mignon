@@ -51,7 +51,7 @@ impl SummaryCache {
     /// Automatically evicts oldest entries if capacity limit is exceeded.
     pub fn insert(&mut self, key: SummaryCacheKey, entry: SummaryCacheEntry) {
         self.entries.insert(key, entry);
-        
+
         // Enforce capacity limit
         if self.entries.len() > DEFAULT_CACHE_CAPACITY {
             let before = self.entries.len();
@@ -84,7 +84,7 @@ impl SummaryCache {
 
     /// Iterate over all cache entries (key, entry pairs).
     pub fn iter(&self) -> impl Iterator<Item = (&SummaryCacheKey, &SummaryCacheEntry)> {
-        self.entries.iter().map(|(k, v)| (k, v))
+        self.entries.iter()
     }
 
     /// Evict the oldest entries to keep the cache size at or below the limit.
@@ -125,11 +125,11 @@ impl SummaryCache {
     /// Returns the number of entries evicted.
     pub fn evict_by_ttl(&mut self, ttl_seconds: u64) -> usize {
         use chrono::{Duration, Utc};
-        
+
         let now = Utc::now();
         let cutoff = now - Duration::seconds(ttl_seconds as i64);
         let cutoff_str = cutoff.to_rfc3339();
-        
+
         self.evict_older_than(&cutoff_str)
     }
 }
@@ -452,7 +452,7 @@ mod tests {
     #[test]
     fn capacity_enforcement_evicts_oldest() {
         engine_logging::initialize_for_tests();
-        
+
         let mut cache = SummaryCache::new();
         let base_key = SummaryCacheKey {
             content_hash: "base".to_string(),
