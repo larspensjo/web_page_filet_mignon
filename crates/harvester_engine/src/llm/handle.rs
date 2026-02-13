@@ -2,7 +2,7 @@ use std::{
     path::PathBuf,
     sync::{mpsc, Arc, Mutex, RwLock},
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::Semaphore;
 
@@ -146,7 +146,7 @@ fn worker_loop(
     config: LlmConfig,
 ) {
     let max_concurrent = config.max_concurrent_requests.clamp(1, 10);
-    let runtime = Arc::new(Runtime::new().expect("failed to build tokio runtime for LLM worker"));
+    let runtime = Runtime::new().expect("failed to build tokio runtime for LLM worker");
     let quota_tracker = Arc::new(Mutex::new(LlmQuotaTracker::new(config.quotas.clone())));
     let config = Arc::new(config);
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
@@ -174,12 +174,37 @@ fn worker_loop(
         join_handles.push(handle);
     }
 
-    // Drain: wait for all in-flight tasks to emit their completion events.
-    runtime.block_on(async {
-        for handle in join_handles {
-            let _ = handle.await;
+    wait_for_inflight_tasks(&runtime, join_handles);
+    shutdown_runtime(runtime);
+}
+
+fn wait_for_inflight_tasks(runtime: &Runtime, join_handles: Vec<tokio::task::JoinHandle<()>>) {
+    runtime.block_on(async move {
+        for (index, handle) in join_handles.into_iter().enumerate() {
+            match tokio::time::timeout(LLM_TASK_DRAIN_TIMEOUT, handle).await {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => {
+                    engine_warn!(
+                        "[llm-shutdown] task join failed index={} error={}",
+                        index,
+                        err
+                    );
+                }
+                Err(_) => {
+                    engine_warn!(
+                        "[llm-shutdown] timed out waiting for task index={} timeout_ms={}",
+                        index,
+                        LLM_TASK_DRAIN_TIMEOUT.as_millis()
+                    );
+                    break;
+                }
+            }
         }
     });
+}
+
+fn shutdown_runtime(runtime: Runtime) {
+    runtime.shutdown_timeout(LLM_RUNTIME_SHUTDOWN_TIMEOUT);
 }
 
 
@@ -648,5 +673,34 @@ fn provider_kind_to_str(kind: ProviderKind) -> &'static str {
         ProviderKind::OpenAi => "openai",
         ProviderKind::Anthropic => "anthropic",
         ProviderKind::Google => "google",
+    }
+}
+
+const LLM_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
+const LLM_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_shutdown_is_time_bounded_when_blocking_task_is_stuck() {
+        engine_logging::initialize_for_tests();
+
+        let runtime = Runtime::new().expect("runtime");
+        let (_tx, rx) = mpsc::channel::<()>();
+        runtime.spawn_blocking(move || {
+            let _ = rx.recv();
+        });
+
+        let start = Instant::now();
+        shutdown_runtime(runtime);
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(4),
+            "runtime shutdown exceeded expected timeout: {:?}",
+            elapsed
+        );
     }
 }

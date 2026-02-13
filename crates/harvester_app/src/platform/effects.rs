@@ -655,6 +655,15 @@ impl EffectRunner {
     }
 }
 
+impl Drop for EffectRunner {
+    fn drop(&mut self) {
+        if let Some(handle) = self.llm_handle.take() {
+            engine_info!("[llm-shutdown] stopping llm worker");
+            handle.drain_and_stop();
+        }
+    }
+}
+
 impl EffectRunner {
     fn validate_effect(&self, effect: &Effect) -> Result<(), String> {
         match effect {
