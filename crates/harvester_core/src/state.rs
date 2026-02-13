@@ -170,6 +170,11 @@ impl AppState {
                 });
             }
         }
+        // Block 2: summary availability (separate loop for clarity)
+        for job_view in &mut jobs {
+            job_view.has_summary = self.briefing.summary_for_url(&job_view.url).is_some();
+        }
+
         jobs.sort_by(|a, b| {
             let p_a = a
                 .triage_annotation
@@ -183,6 +188,14 @@ impl AppState {
                 .unwrap_or(0);
             p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
         });
+
+        // Derive selected_url — only expose when summary is available
+        let selected_url = self.ui.selected_job_id()
+            .and_then(|job_id| self.jobs.get(&job_id))
+            .and_then(|job| {
+                self.briefing.summary_for_url(&job.url)?;
+                Some(job.url.clone())
+            });
         let briefing_preview = self.briefing.format_preview();
         let preview_text = match self.ui.preview_mode() {
             PreviewMode::SelectedJobSummary => {
@@ -232,6 +245,7 @@ impl AppState {
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),
+            selected_url,
         }
     }
 
@@ -1040,6 +1054,7 @@ impl JobState {
             downloaded_link_count,
             links,
             triage_annotation: None,
+            has_summary: false,
         }
     }
 
@@ -2095,5 +2110,60 @@ mod tests {
     fn selected_article_url_returns_none_when_no_selection() {
         let state = AppState::new();
         assert!(state.selected_article_url().is_none());
+    }
+
+    #[test]
+    fn view_has_summary_true_for_completed_articles() {
+        let state = make_state_with_summarized_job();
+        let view = state.view();
+        let job = view.jobs.iter().find(|j| j.job_id == 10).expect("job 10 exists");
+        assert!(job.has_summary);
+    }
+
+    #[test]
+    fn view_has_summary_false_before_briefing() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            13,
+            JobState {
+                url: "https://no-briefing.example".to_string(),
+                stage: Stage::Done,
+                ..Default::default()
+            },
+        );
+        let view = state.view();
+        let job = view.jobs.iter().find(|j| j.job_id == 13).expect("job 13 exists");
+        assert!(!job.has_summary);
+    }
+
+    #[test]
+    fn view_selected_url_populated_when_summarized_job_selected() {
+        let mut state = make_state_with_summarized_job();
+        state.select_job(10);
+        let view = state.view();
+        assert_eq!(view.selected_url, Some("https://summarized.example/article".to_string()));
+    }
+
+    #[test]
+    fn view_selected_url_none_when_unsummarized_job_selected() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            14,
+            JobState {
+                url: "https://unsummarized.example".to_string(),
+                stage: Stage::Done,
+                ..Default::default()
+            },
+        );
+        state.select_job(14);
+        let view = state.view();
+        assert!(view.selected_url.is_none());
+    }
+
+    #[test]
+    fn view_selected_url_none_when_no_selection() {
+        let state = make_state_with_summarized_job();
+        let view = state.view();
+        assert!(view.selected_url.is_none());
     }
 }

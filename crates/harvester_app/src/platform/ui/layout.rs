@@ -178,6 +178,13 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         text: "Poll Sources".to_string(),
     });
 
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_BUTTONS),
+        control_id: BUTTON_OPEN_BROWSER,
+        text: "Open in Browser".to_string(),
+    });
+
     commands.push(PlatformCommand::CreateLabel {
         window_id,
         parent_control_id: Some(PANEL_BOTTOM),
@@ -374,6 +381,19 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 r: 0x40,
                 g: 0x44,
                 b: 0x4B,
+            }),
+            ..Default::default()
+        },
+    });
+
+    // Muted gray for tree items without summaries
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::TreeItemDisabled,
+        style: ControlStyle {
+            text_color: Some(Color {
+                r: 0x60,
+                g: 0x65,
+                b: 0x6B,
             }),
             ..Default::default()
         },
@@ -576,6 +596,14 @@ fn build_layout_rules(left_panel_width: i32, input_panel_visible: bool) -> Vec<L
             fixed_size: Some(160),
             margin: (6, 6, 6, 0),
         },
+        LayoutRule {
+            control_id: BUTTON_OPEN_BROWSER,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 6,
+            fixed_size: Some(160),
+            margin: (6, 6, 6, 0),
+        },
     ]
 }
 
@@ -665,6 +693,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_POLL_SOURCES,
+        style_id: StyleId::DefaultButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_OPEN_BROWSER,
         style_id: StyleId::DefaultButton,
     });
 

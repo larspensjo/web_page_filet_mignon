@@ -36,6 +36,7 @@ pub struct TreeRenderState {
     prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
     prev_progress_pos: Option<u32>,
+    prev_open_browser_enabled: Option<bool>,
 }
 
 impl Default for TreeRenderState {
@@ -60,6 +61,7 @@ impl Default for TreeRenderState {
             prev_triage_progress: None,
             prev_progress_range: None,
             prev_progress_pos: None,
+            prev_open_browser_enabled: None,
         }
     }
 }
@@ -282,6 +284,16 @@ pub fn render(
         tree_state.prev_poll_enabled = Some(poll_enabled);
     }
 
+    let open_browser_enabled = view.selected_url.is_some();
+    if tree_state.prev_open_browser_enabled != Some(open_browser_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_OPEN_BROWSER,
+            enabled: open_browser_enabled,
+        });
+        tree_state.prev_open_browser_enabled = Some(open_browser_enabled);
+    }
+
     let job_items = build_job_tree(view);
     append_tree_commands(window_id, job_items, tree_state, &mut cmds);
 
@@ -394,7 +406,11 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
                 is_folder: true,
                 state: CheckState::Unchecked,
                 children,
-                style_override: None,
+                style_override: if job.has_summary {
+                    None
+                } else {
+                    Some(StyleId::TreeItemDisabled)
+                },
             }
         })
         .collect()
@@ -576,6 +592,7 @@ mod tests {
             downloaded_link_count: 0,
             links: Vec::new(),
             triage_annotation: None,
+            has_summary: false,
         }
     }
 
@@ -731,6 +748,7 @@ mod tests {
             downloaded_link_count: 1,
             links: vec![link],
             triage_annotation: None,
+            has_summary: false,
         };
         let view = make_view(vec![job]);
         let commands = render(window_id, &view, &mut tree_state);
@@ -821,5 +839,74 @@ mod tests {
 
         assert_eq!(input_width, 160);
         assert_eq!(jobs_width, 760 - 160);
+    }
+
+    #[test]
+    fn job_without_summary_gets_tree_item_disabled_style_override() {
+        init_logging();
+        let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
+        job.has_summary = false;
+        let view = make_view(vec![job]);
+        let items = build_job_tree(&view);
+        assert_eq!(items[0].style_override, Some(StyleId::TreeItemDisabled));
+    }
+
+    #[test]
+    fn job_with_summary_has_no_style_override() {
+        init_logging();
+        let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
+        job.has_summary = true;
+        let view = make_view(vec![job]);
+        let items = build_job_tree(&view);
+        assert_eq!(items[0].style_override, None);
+    }
+
+    #[test]
+    fn render_enables_open_browser_when_selected_url_is_some() {
+        init_logging();
+        let mut view = make_view(vec![]);
+        view.selected_url = Some("https://example.com".to_string());
+        let mut tree_state = TreeRenderState::new();
+        let window_id = WindowId::new(1);
+        let cmds = render(window_id, &view, &mut tree_state);
+        let enabled = cmds.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+            if *control_id == BUTTON_OPEN_BROWSER
+        ));
+        assert!(enabled, "BUTTON_OPEN_BROWSER should be enabled");
+    }
+
+    #[test]
+    fn render_disables_open_browser_when_selected_url_is_none() {
+        init_logging();
+        let view = make_view(vec![]);
+        let mut tree_state = TreeRenderState::new();
+        let window_id = WindowId::new(1);
+        let cmds = render(window_id, &view, &mut tree_state);
+        let disabled = cmds.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+            if *control_id == BUTTON_OPEN_BROWSER
+        ));
+        assert!(disabled, "BUTTON_OPEN_BROWSER should be disabled");
+    }
+
+    #[test]
+    fn render_is_idempotent_for_open_browser_state() {
+        init_logging();
+        let view = make_view(vec![]);
+        let mut tree_state = TreeRenderState::new();
+        let window_id = WindowId::new(1);
+        // First render sets initial state
+        render(window_id, &view, &mut tree_state);
+        // Second render should not emit SetControlEnabled for BUTTON_OPEN_BROWSER
+        let cmds = render(window_id, &view, &mut tree_state);
+        let changed = cmds.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, .. }
+            if *control_id == BUTTON_OPEN_BROWSER
+        ));
+        assert!(!changed, "BUTTON_OPEN_BROWSER state should not change on second render");
     }
 }

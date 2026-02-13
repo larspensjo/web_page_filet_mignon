@@ -54,6 +54,8 @@ pub struct AppViewModel {
     pub input_panel_visible: bool,
     /// Current window width.
     pub window_width: i32,
+    /// URL of the currently selected job, only when it has a completed summary.
+    pub selected_url: Option<String>,
 }
 
 impl Default for AppViewModel {
@@ -78,6 +80,7 @@ impl Default for AppViewModel {
             left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
             input_panel_visible: false,
             window_width: DEFAULT_WINDOW_WIDTH,
+            selected_url: None,
         }
     }
 }
@@ -94,6 +97,7 @@ pub struct JobRowView {
     pub downloaded_link_count: usize,
     pub links: Vec<LinkRowView>,
     pub triage_annotation: Option<TriageAnnotationView>,
+    pub has_summary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

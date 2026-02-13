@@ -7,6 +7,7 @@ pub const BUTTON_BRIEFING: ControlId = ControlId::new(1005);
 pub const BUTTON_TRIAGE: ControlId = ControlId::new(1007);
 pub const BUTTON_ADD_URL: ControlId = ControlId::new(1006);
 pub const BUTTON_POLL_SOURCES: ControlId = ControlId::new(1008);
+pub const BUTTON_OPEN_BROWSER: ControlId = ControlId::new(1009);
 pub const TREE_JOBS: ControlId = ControlId::new(1501);
 pub const PANEL_BOTTOM: ControlId = ControlId::new(2001);
 pub const PANEL_INPUT: ControlId = ControlId::new(2002);
