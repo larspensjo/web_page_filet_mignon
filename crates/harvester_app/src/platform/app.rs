@@ -30,6 +30,9 @@ use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::{effects, persistence};
 
 const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
+const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
+const LLM_MAX_CONCURRENT_REQUESTS_ENV: &str = "LLM_MAX_CONCURRENT_REQUESTS";
+const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
     logging::initialize(LogDestination::Both);
@@ -43,6 +46,21 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     })?;
 
     let shared_state = Arc::new(Mutex::new(SharedState::default()));
+    let llm_max_concurrent_requests = llm_max_concurrency_requests_from_env();
+    {
+        let mut guard = shared_state.lock().expect("lock shared state");
+        guard
+            .state
+            .set_triage_max_in_flight(llm_max_concurrent_requests);
+        guard
+            .state
+            .set_summary_max_in_flight(llm_max_concurrent_requests);
+    }
+    engine_info!(
+        "[llm-concurrency] configured max_concurrent_requests={}",
+        llm_max_concurrent_requests
+    );
+
     let output_dir = effects::default_output_dir();
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let effect_runner = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
@@ -63,7 +81,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
             session_id: format!("session-{}", Utc::now().format("%Y%m%d-%H%M%S")),
             replay_cache: None,
-            max_concurrent_requests: 1,
+            max_concurrent_requests: llm_max_concurrent_requests,
         };
         let model_map = effective_model_map(&config);
         let handle = LlmHandle::new(config);
@@ -133,6 +151,30 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     });
 
     platform.main_event_loop(event_handler, ui_state_provider, initial_commands)
+}
+
+fn parse_llm_max_concurrency_requests(raw: Option<&str>) -> usize {
+    match raw {
+        None => DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
+        Some(value) => match value.trim().parse::<usize>() {
+            Ok(parsed) => parsed.clamp(1, MAX_LLM_CONCURRENT_REQUESTS),
+            Err(_) => DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
+        },
+    }
+}
+
+fn llm_max_concurrency_requests_from_env() -> usize {
+    let raw = std::env::var(LLM_MAX_CONCURRENT_REQUESTS_ENV).ok();
+    let parsed = parse_llm_max_concurrency_requests(raw.as_deref());
+    if let Some(value) = raw {
+        engine_info!(
+            "[llm-concurrency] {}='{}' -> {}",
+            LLM_MAX_CONCURRENT_REQUESTS_ENV,
+            value,
+            parsed
+        );
+    }
+    parsed
 }
 
 fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
@@ -536,6 +578,39 @@ mod tests {
         assert_eq!(
             provider.tree_item_marker(WindowId::new(1), item_id),
             TreeItemMarkerKind::None
+        );
+    }
+
+    #[test]
+    fn parse_llm_max_concurrency_uses_default_when_missing_or_invalid() {
+        assert_eq!(
+            parse_llm_max_concurrency_requests(None),
+            DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
+        );
+        assert_eq!(
+            parse_llm_max_concurrency_requests(Some("not-a-number")),
+            DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
+        );
+        assert_eq!(
+            parse_llm_max_concurrency_requests(Some("")),
+            DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
+        );
+    }
+
+    #[test]
+    fn parse_llm_max_concurrency_clamps_to_valid_range() {
+        assert_eq!(parse_llm_max_concurrency_requests(Some("1")), 1);
+        assert_eq!(
+            parse_llm_max_concurrency_requests(Some("3")),
+            3
+        );
+        assert_eq!(
+            parse_llm_max_concurrency_requests(Some("999")),
+            MAX_LLM_CONCURRENT_REQUESTS
+        );
+        assert_eq!(
+            parse_llm_max_concurrency_requests(Some(" 2 ")),
+            2
         );
     }
 }
