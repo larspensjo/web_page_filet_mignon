@@ -317,6 +317,11 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
             }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_OPEN_BROWSER =>
+            {
+                let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
+            }
             AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ADD_URL => {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
             }

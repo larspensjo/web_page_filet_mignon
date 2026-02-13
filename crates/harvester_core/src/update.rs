@@ -566,6 +566,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
+        Msg::OpenInBrowserClicked => {
+            match state.selected_article_url() {
+                Some(url) => {
+                    engine_info!("[browser] Open in browser requested for URL: {}", url);
+                    vec![Effect::OpenUrlInBrowser { url }]
+                }
+                None => Vec::new(),
+            }
+        }
         Msg::PollSourcesClicked => {
             if matches!(
                 state.session(),
@@ -1181,5 +1190,81 @@ mod tests {
 
         assert!(effects.is_empty());
         assert_eq!(state.left_panel_width(), 360);
+    }
+
+    fn make_state_with_summarized_job_for_update() -> AppState {
+        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+        let mut state = AppState::new();
+        let url = "https://open-browser.example/article".to_string();
+        state.restore_completed_jobs(vec![crate::CompletedJobSnapshot {
+            url: url.clone(),
+            tokens: None,
+            bytes: None,
+            links: vec![],
+        }]);
+        // Set up briefing with completed summary for this URL
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(
+            vec![LoadedArticle {
+                url: url.clone(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash".to_string(),
+            }],
+            "collection".to_string(),
+        );
+        briefing.transition_to_summarizing();
+        briefing.start_article(0, 1);
+        briefing.complete_article(
+            0,
+            ArticleSummaryResult {
+                title: "Article".to_string(),
+                summary: "Summary".to_string(),
+                key_points: vec![],
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        state.set_briefing(briefing);
+        // Select the job
+        let job_id = state.view().jobs.first().map(|j| j.job_id).unwrap_or(1);
+        state.select_job(job_id);
+        state
+    }
+
+    #[test]
+    fn open_in_browser_with_summarized_job_selected_emits_effect() {
+        init_logging();
+        let state = make_state_with_summarized_job_for_update();
+        let (_state, effects) = update(state, Msg::OpenInBrowserClicked);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0],
+            Effect::OpenUrlInBrowser { url } if url == "https://open-browser.example/article"
+        ));
+    }
+
+    #[test]
+    fn open_in_browser_with_unsummarized_job_selected_emits_nothing() {
+        init_logging();
+        let mut state = AppState::new();
+        state.restore_completed_jobs(vec![crate::CompletedJobSnapshot {
+            url: "https://no-summary.example".to_string(),
+            tokens: None,
+            bytes: None,
+            links: vec![],
+        }]);
+        let job_id = state.view().jobs.first().map(|j| j.job_id).unwrap_or(1);
+        state.select_job(job_id);
+        let (_state, effects) = update(state, Msg::OpenInBrowserClicked);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn open_in_browser_with_no_selection_emits_nothing() {
+        init_logging();
+        let state = AppState::new();
+        let (_state, effects) = update(state, Msg::OpenInBrowserClicked);
+        assert!(effects.is_empty());
     }
 }

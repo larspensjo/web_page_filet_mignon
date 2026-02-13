@@ -350,15 +350,16 @@ mod tests {
     }
 
     fn make_session_with_article(url: &str, state: ArticleSummaryState) -> BriefingSession {
-        let mut session = BriefingSession::default();
-        session.articles = vec![BriefingArticle {
-            url: url.to_string(),
-            source_title: None,
-            prepared_text: "text".to_string(),
-            content_hash: "hash".to_string(),
-            summary_state: state,
-        }];
-        session
+        BriefingSession {
+            articles: vec![BriefingArticle {
+                url: url.to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash".to_string(),
+                summary_state: state,
+            }],
+            ..BriefingSession::default()
+        }
     }
 
     #[test]

@@ -122,6 +122,8 @@ pub enum Msg {
     },
     /// Summary cache hydrated from persisted store at startup.
     SummaryCacheHydrated { cache: crate::SummaryCache },
+    /// User requested to open the currently selected article URL in the default browser.
+    OpenInBrowserClicked,
 }
 
 /// Result payload returned by the LLM worker.

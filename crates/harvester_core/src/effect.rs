@@ -38,6 +38,10 @@ pub enum Effect {
     PersistSummaryCache {
         cache: crate::SummaryCache,
     },
+    /// Open a URL in the user's default web browser.
+    OpenUrlInBrowser {
+        url: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
