@@ -184,9 +184,14 @@ impl AppState {
             p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
         });
         let briefing_preview = self.briefing.format_preview();
-        let preview_text = briefing_preview
-            .clone()
-            .or_else(|| self.ui.preview_content().map(ToOwned::to_owned));
+        let preview_text = match self.ui.preview_mode() {
+            PreviewMode::SelectedJobSummary => {
+                self.ui.preview_content().map(ToOwned::to_owned)
+            }
+            PreviewMode::Briefing => briefing_preview
+                .clone()
+                .or_else(|| self.ui.preview_content().map(ToOwned::to_owned)),
+        };
         let preview_header = self
             .ui
             .selected_job_id()
@@ -571,12 +576,36 @@ impl AppState {
         self.source_states = SourceStateIndex::default();
     }
 
+    pub(crate) fn revert_preview_to_briefing(&mut self) {
+        self.ui.set_preview_mode(PreviewMode::Briefing);
+        self.dirty = true;
+    }
+
     pub(crate) fn select_job(&mut self, job_id: JobId) {
-        if let Some(job) = self.jobs.get(&job_id) {
-            if self.ui.select_job(job_id, job.content_preview.as_deref()) {
-                self.dirty = true;
-            }
+        let Some(job) = self.jobs.get(&job_id) else { return };
+
+        let content = match self.briefing.summary_for_url(&job.url) {
+            Some(summary) => format_summary_for_preview(summary),
+            None => "No summary available \u{2014} run Briefing first.".to_string(),
+        };
+
+        let changed = self.ui.select_job(job_id, Some(&content));
+        if changed {
+            self.ui.set_preview_mode(PreviewMode::SelectedJobSummary);
+            self.dirty = true;
+        } else {
+            // Even if preview content is same, ensure mode is set correctly
+            self.ui.set_preview_mode(PreviewMode::SelectedJobSummary);
         }
+    }
+
+    /// URL of the currently selected and summarized article.
+    /// Returns None if no job is selected or if the selected job has no summary.
+    pub fn selected_article_url(&self) -> Option<String> {
+        let job_id = self.ui.selected_job_id()?;
+        let job = self.jobs.get(&job_id)?;
+        self.briefing.summary_for_url(&job.url)?;
+        Some(job.url.clone())
     }
 
     pub(crate) fn link_metadata(
@@ -917,6 +946,23 @@ fn normalize_extracted_link(link: &str) -> String {
     }
 }
 
+fn format_summary_for_preview(summary: &crate::briefing::ArticleSummaryResult) -> String {
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = writeln!(out, "# {}", summary.title);
+    out.push('\n');
+    let _ = writeln!(out, "{}", summary.summary);
+    if !summary.key_points.is_empty() {
+        out.push('\n');
+        let _ = writeln!(out, "## Key Points");
+        out.push('\n');
+        for point in &summary.key_points {
+            let _ = writeln!(out, "  - {}", point);
+        }
+    }
+    out
+}
+
 fn domain_from_url(url: &str) -> String {
     let trimmed = url.trim();
     let without_scheme = trimmed
@@ -1226,11 +1272,19 @@ impl PreviewState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum PreviewMode {
+    #[default]
+    Briefing,
+    SelectedJobSummary,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct UiState {
     urls: Vec<String>,
     input_buffer: String,
     preview: PreviewState,
+    preview_mode: PreviewMode,
     left_panel_width: i32,
     input_panel_visible: bool,
     window_width: i32,
@@ -1242,6 +1296,7 @@ impl Default for UiState {
             urls: Vec::new(),
             input_buffer: String::new(),
             preview: PreviewState::default(),
+            preview_mode: PreviewMode::default(),
             left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
             input_panel_visible: false,
             window_width: DEFAULT_WINDOW_WIDTH,
@@ -1252,6 +1307,14 @@ impl Default for UiState {
 impl UiState {
     fn preview_content(&self) -> Option<&str> {
         self.preview.content()
+    }
+
+    fn preview_mode(&self) -> PreviewMode {
+        self.preview_mode
+    }
+
+    fn set_preview_mode(&mut self, mode: PreviewMode) {
+        self.preview_mode = mode;
     }
 
     fn selected_job_id(&self) -> Option<JobId> {
@@ -1402,7 +1465,8 @@ mod tests {
         );
         let (state, _) = update(state, Msg::JobSelected { job_id: 3 });
         let view = state.view();
-        assert_eq!(view.preview_text, Some("preview content".to_string()));
+        // No briefing session, so shows placeholder
+        assert!(view.preview_text.as_deref().unwrap_or("").contains("No summary available"));
         assert_eq!(view.preview_header.as_ref().unwrap().domain, "example.com");
     }
 
@@ -1419,7 +1483,8 @@ mod tests {
         );
         let (state, _) = update(state, Msg::JobSelected { job_id: 4 });
         let view = state.view();
-        assert_eq!(view.preview_text, None);
+        // No briefing, so shows placeholder text (not None)
+        assert!(view.preview_text.as_deref().unwrap_or("").contains("No summary available"));
         let header = view.preview_header.expect("header should exist");
         assert_eq!(header.domain, "sub.example.net");
         assert_eq!(header.stage, Stage::Downloading);
@@ -1660,6 +1725,154 @@ mod tests {
     }
 
     #[test]
+    fn briefing_complete_then_job_selected_shows_summary_not_briefing() {
+        use crate::briefing::{ArticleSummaryResult, BriefingResult, BriefingThemeResult, LoadedArticle};
+
+        let mut state = AppState::new();
+        state.jobs.insert(
+            1,
+            JobState {
+                url: "https://example.com/article".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+
+        // Simulate a completed briefing session
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(
+            vec![LoadedArticle {
+                url: "https://example.com/article".to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash".to_string(),
+            }],
+            "collection".to_string(),
+        );
+        briefing.transition_to_summarizing();
+        briefing.start_article(0, 1);
+        briefing.complete_article(
+            0,
+            ArticleSummaryResult {
+                title: "Article Title".to_string(),
+                summary: "Article summary text".to_string(),
+                key_points: vec![],
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        briefing.set_briefing_request_id(2);
+        briefing.complete_briefing(BriefingResult {
+            executive_summary: "Executive summary".to_string(),
+            themes: vec![BriefingThemeResult {
+                name: "Theme 1".to_string(),
+                description: "desc".to_string(),
+            }],
+            article_count: 1,
+            input_tokens: 20,
+            output_tokens: 10,
+        });
+        state.set_briefing(briefing);
+
+        // After briefing completes, view should show briefing text
+        let view = state.view();
+        assert!(view.preview_text.as_deref().unwrap_or("").contains("Executive Briefing"));
+
+        // After job selected, view should show summary not briefing
+        state.select_job(1);
+        let view = state.view();
+        assert!(view.preview_text.as_deref().unwrap_or("").contains("Article Title"));
+        assert!(!view.preview_text.as_deref().unwrap_or("").contains("Executive Briefing"));
+    }
+
+    #[test]
+    fn job_selected_then_briefing_completes_shows_briefing() {
+        use crate::briefing::{ArticleSummaryResult, BriefingResult, BriefingThemeResult, LoadedArticle};
+
+        let mut state = AppState::new();
+        state.jobs.insert(
+            1,
+            JobState {
+                url: "https://example.com/article".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+
+        // Select job first (summary exists via briefing session we'll add)
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(
+            vec![LoadedArticle {
+                url: "https://example.com/article".to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash".to_string(),
+            }],
+            "collection".to_string(),
+        );
+        briefing.transition_to_summarizing();
+        briefing.start_article(0, 1);
+        briefing.complete_article(
+            0,
+            ArticleSummaryResult {
+                title: "Article Title".to_string(),
+                summary: "Article summary text".to_string(),
+                key_points: vec![],
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        briefing.set_briefing_request_id(2);
+        briefing.complete_briefing(BriefingResult {
+            executive_summary: "Executive summary".to_string(),
+            themes: vec![BriefingThemeResult {
+                name: "Theme 1".to_string(),
+                description: "desc".to_string(),
+            }],
+            article_count: 1,
+            input_tokens: 20,
+            output_tokens: 10,
+        });
+        state.set_briefing(briefing);
+
+        state.select_job(1);
+        let view = state.view();
+        assert!(view.preview_text.as_deref().unwrap_or("").contains("Article Title"));
+
+        // Now revert to briefing mode (simulating briefing completing again)
+        state.revert_preview_to_briefing();
+        let view = state.view();
+        assert!(view.preview_text.as_deref().unwrap_or("").contains("Executive Briefing"));
+    }
+
+    #[test]
+    fn no_selection_shows_briefing_when_complete() {
+        use crate::briefing::{BriefingResult, BriefingThemeResult};
+
+        let mut state = AppState::new();
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(vec![], "collection".to_string());
+        // Force complete state directly
+        briefing.set_briefing_request_id(1);
+        briefing.complete_briefing(BriefingResult {
+            executive_summary: "Executive summary text".to_string(),
+            themes: vec![BriefingThemeResult {
+                name: "Theme".to_string(),
+                description: "desc".to_string(),
+            }],
+            article_count: 0,
+            input_tokens: 10,
+            output_tokens: 5,
+        });
+        state.set_briefing(briefing);
+
+        let view = state.view();
+        assert!(view.preview_text.as_deref().unwrap_or("").contains("Executive Briefing"));
+    }
+
+    #[test]
     fn cache_miss_returns_none() {
         use crate::summary_cache::SummaryCacheKey;
         use harvester_engine::llm::prompt::PromptId;
@@ -1729,5 +1942,158 @@ mod tests {
         assert_eq!(state.summary_cache().len(), 1);
         assert!(state.try_reuse_summary(&key1).is_none());
         assert_eq!(state.try_reuse_summary(&key2).unwrap().title, "Title2");
+    }
+
+    fn make_state_with_summarized_job() -> AppState {
+        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+        let mut state = AppState::new();
+        state.jobs.insert(
+            10,
+            JobState {
+                url: "https://summarized.example/article".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(
+            vec![LoadedArticle {
+                url: "https://summarized.example/article".to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash".to_string(),
+            }],
+            "collection".to_string(),
+        );
+        briefing.transition_to_summarizing();
+        briefing.start_article(0, 1);
+        briefing.complete_article(
+            0,
+            ArticleSummaryResult {
+                title: "My Title".to_string(),
+                summary: "My summary".to_string(),
+                key_points: vec!["Point A".to_string()],
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        state.set_briefing(briefing);
+        state
+    }
+
+    #[test]
+    fn selecting_job_with_summary_shows_formatted_summary() {
+        let mut state = make_state_with_summarized_job();
+        state.select_job(10);
+        let view = state.view();
+        let text = view.preview_text.unwrap_or_default();
+        assert!(text.contains("My Title"));
+        assert!(text.contains("My summary"));
+        assert!(text.contains("Point A"));
+    }
+
+    #[test]
+    fn selecting_job_without_summary_shows_placeholder() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            11,
+            JobState {
+                url: "https://no-summary.example".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+        state.select_job(11);
+        let view = state.view();
+        let text = view.preview_text.unwrap_or_default();
+        assert!(text.contains("No summary available"));
+    }
+
+    #[test]
+    fn selecting_job_sets_preview_mode_to_selected_job_summary() {
+        let mut state = make_state_with_summarized_job();
+        state.select_job(10);
+        // Confirm mode is SelectedJobSummary by verifying briefing text is NOT shown
+        // even though we manually put a complete briefing in state
+        use crate::briefing::{BriefingResult, BriefingThemeResult};
+        let mut s2 = make_state_with_summarized_job();
+        s2.briefing_mut().set_briefing_request_id(99);
+        s2.briefing_mut().complete_briefing(BriefingResult {
+            executive_summary: "Exec summary".to_string(),
+            themes: vec![BriefingThemeResult { name: "T".to_string(), description: "d".to_string() }],
+            article_count: 1,
+            input_tokens: 10,
+            output_tokens: 5,
+        });
+        s2.select_job(10);
+        let view = s2.view();
+        let text = view.preview_text.unwrap_or_default();
+        assert!(!text.contains("Exec summary"), "should not show briefing text when job selected");
+        assert!(text.contains("My Title"), "should show summary");
+    }
+
+    #[test]
+    fn format_summary_includes_title_summary_and_key_points() {
+        use crate::briefing::ArticleSummaryResult;
+        let result = ArticleSummaryResult {
+            title: "Test Title".to_string(),
+            summary: "Test summary body".to_string(),
+            key_points: vec!["KP1".to_string(), "KP2".to_string()],
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+        let formatted = format_summary_for_preview(&result);
+        assert!(formatted.contains("Test Title"));
+        assert!(formatted.contains("Test summary body"));
+        assert!(formatted.contains("KP1"));
+        assert!(formatted.contains("KP2"));
+        assert!(formatted.contains("Key Points"));
+    }
+
+    #[test]
+    fn format_summary_omits_key_points_section_when_empty() {
+        use crate::briefing::ArticleSummaryResult;
+        let result = ArticleSummaryResult {
+            title: "Title Only".to_string(),
+            summary: "Summary only".to_string(),
+            key_points: vec![],
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+        let formatted = format_summary_for_preview(&result);
+        assert!(formatted.contains("Title Only"));
+        assert!(formatted.contains("Summary only"));
+        assert!(!formatted.contains("Key Points"));
+    }
+
+    #[test]
+    fn selected_article_url_returns_url_when_summarized_job_selected() {
+        let mut state = make_state_with_summarized_job();
+        state.select_job(10);
+        let url = state.selected_article_url();
+        assert_eq!(url, Some("https://summarized.example/article".to_string()));
+    }
+
+    #[test]
+    fn selected_article_url_returns_none_when_no_summary() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            12,
+            JobState {
+                url: "https://no-summary.example".to_string(),
+                stage: Stage::Done,
+                ..Default::default()
+            },
+        );
+        state.select_job(12);
+        assert!(state.selected_article_url().is_none());
+    }
+
+    #[test]
+    fn selected_article_url_returns_none_when_no_selection() {
+        let state = AppState::new();
+        assert!(state.selected_article_url().is_none());
     }
 }

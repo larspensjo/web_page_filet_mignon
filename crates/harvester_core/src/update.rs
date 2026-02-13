@@ -430,6 +430,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 input_tokens: *input_tokens,
                                 output_tokens: *output_tokens,
                             });
+                            state.revert_preview_to_briefing();
                             effects.push(Effect::PersistSummaryCache {
                                 cache: state.summary_cache().clone(),
                             });
@@ -437,6 +438,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         Err(err) => {
                             engine_warn!("[briefing] briefing validation failed: {err}");
                             state.briefing_mut().complete_without_briefing();
+                            state.revert_preview_to_briefing();
                             effects.push(Effect::PersistSummaryCache {
                                 cache: state.summary_cache().clone(),
                             });
@@ -444,6 +446,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     },
                     _ => {
                         state.briefing_mut().complete_without_briefing();
+                        state.revert_preview_to_briefing();
                         effects.push(Effect::PersistSummaryCache {
                             cache: state.summary_cache().clone(),
                         });
@@ -460,6 +463,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.start_summary_cache_run();
             state.set_briefing(BriefingSession::new_loading(None));
+            state.revert_preview_to_briefing();
             engine_info!("[briefing] briefing requested");
             vec![
                 Effect::LoadPromptContexts,

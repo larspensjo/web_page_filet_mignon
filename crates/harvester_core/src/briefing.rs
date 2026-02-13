@@ -277,6 +277,14 @@ impl BriefingSession {
         }
     }
 
+    /// Returns the completed summary result for an article URL, if available.
+    pub fn summary_for_url(&self, url: &str) -> Option<&ArticleSummaryResult> {
+        self.articles.iter().find_map(|article| match &article.summary_state {
+            ArticleSummaryState::Completed { result } if article.url == url => Some(result),
+            _ => None,
+        })
+    }
+
     pub fn briefing_result(&self) -> Option<&BriefingResult> {
         self.briefing_result.as_ref()
     }
@@ -324,5 +332,75 @@ impl BriefingSession {
         )
         .ok();
         Some(buffer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_result() -> ArticleSummaryResult {
+        ArticleSummaryResult {
+            title: "Title".to_string(),
+            summary: "Summary".to_string(),
+            key_points: vec!["Point 1".to_string()],
+            input_tokens: 10,
+            output_tokens: 5,
+        }
+    }
+
+    fn make_session_with_article(url: &str, state: ArticleSummaryState) -> BriefingSession {
+        let mut session = BriefingSession::default();
+        session.articles = vec![BriefingArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash".to_string(),
+            summary_state: state,
+        }];
+        session
+    }
+
+    #[test]
+    fn summary_for_url_returns_none_when_no_articles() {
+        let session = BriefingSession::default();
+        assert!(session.summary_for_url("https://example.com").is_none());
+    }
+
+    #[test]
+    fn summary_for_url_returns_none_when_pending() {
+        let session = make_session_with_article("https://example.com", ArticleSummaryState::Pending);
+        assert!(session.summary_for_url("https://example.com").is_none());
+    }
+
+    #[test]
+    fn summary_for_url_returns_none_when_failed() {
+        let session = make_session_with_article(
+            "https://example.com",
+            ArticleSummaryState::Failed { reason: "err".to_string() },
+        );
+        assert!(session.summary_for_url("https://example.com").is_none());
+    }
+
+    #[test]
+    fn summary_for_url_returns_result_when_completed() {
+        let result = make_result();
+        let session = make_session_with_article(
+            "https://example.com",
+            ArticleSummaryState::Completed { result: result.clone() },
+        );
+        let found = session.summary_for_url("https://example.com");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().title, "Title");
+    }
+
+    #[test]
+    fn summary_for_url_returns_none_for_wrong_url() {
+        let result = make_result();
+        let session = make_session_with_article(
+            "https://example.com",
+            ArticleSummaryState::Completed { result },
+        );
+        assert!(session.summary_for_url("https://other.com").is_none());
     }
 }
