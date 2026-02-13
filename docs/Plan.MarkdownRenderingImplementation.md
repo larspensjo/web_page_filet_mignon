@@ -20,6 +20,7 @@ MVP = Render a safe markdown subset as RTF in `VIEWER_PREVIEW` using Rich Edit:
 - unordered/ordered list items (visual simulation: `\bullet\tab`)
 - paragraph breaks and line breaks
 - strict RTF escaping and unicode safety
+- surrogate-pair-safe Unicode encoding for non-BMP characters (e.g. emoji)
 - graceful fallback for unsupported constructs (render as plain text via `pulldown-cmark`'s `Event::Text`)
 
 No clickable links, tables, code-block syntax coloring, or nested-list perfection in MVP.
@@ -38,7 +39,8 @@ No clickable links, tables, code-block syntax coloring, or nested-list perfectio
 4. **RTF group balancing:** Unbalanced `{}`/`\\` from escaping bugs silently crash or misrender the Rich Edit control. The converter must be thoroughly tested.
 5. **`WM_SETTEXT` size limit:** Reliable for payloads under 64 KiB. For larger content, prefer `EM_STREAMIN`. The MVP truncates markdown input before conversion to stay within this budget.
 6. **Submodule commit order:** The `CommanDuctUI` API additions must be committed and the top-level submodule pointer updated before `harvester_app` code can use the new commands. Mixing these in one commit causes build failures.
-7. **Unicode surrogate pairs:** `\uN?` handles BMP codepoints (U+0000–U+FFFF). For codepoints above U+FFFF (e.g. emoji), the surrogate pair form `\uHIGH?\uLOW?` is required. The converter must handle this correctly or replace out-of-BMP characters with `?`.
+7. **RTF nesting depth:** Deeply nested markdown can overflow practical RTF group depth in controls; converter must cap depth and flatten when needed.
+8. **Dark-theme coupling:** Converter color table and platform RichEdit background handling must both be correct. If either side is wrong, preview appears as white/bright patches in dark UI.
 
 ---
 
@@ -52,10 +54,12 @@ Scope:
   - `PlatformCommand::SetRichEditContent { window_id, control_id, rtf_text }`
 - Add handler module `src/CommanDuctUI/src/controls/richedit_handler.rs`.
 - In `Win32ApiInternalState::new`: call `LoadLibraryW(w!("Msftedit.dll"))` once.
+  - Use a thread-safe one-time initialization guard (`std::sync::Once`) so repeated state construction never races or duplicates load attempts.
   - Log a warning (do not panic) if the DLL fails to load; control creation will fail later with a clear error.
 - Wire command execution in `src/CommanDuctUI/src/app.rs` + `src/CommanDuctUI/src/command_executor.rs`.
 - Control creation notes:
   - Use `CreateWindowExW` with `MSFTEDIT_CLASS` as the class name.
+  - Prefer flat look by default: avoid `WS_EX_CLIENTEDGE` unless explicitly desired.
   - After creation, send `EM_SETBKGNDCOLOR` for background color.
   - Send `EM_SETCHARFORMAT` (CFM_COLOR) to set default text color.
   - `WM_CTLCOLOREDIT` does **not** fire for Rich Edit — do not rely on it.
@@ -89,12 +93,19 @@ Scope:
 - Add `pulldown-cmark` to `crates/harvester_app/Cargo.toml`.
 - New module: `crates/harvester_app/src/platform/ui/markdown_to_rtf.rs`.
 - Public API: `pub fn convert_markdown_to_rtf(markdown: &str) -> String`
+- Define explicit font constants in the converter:
+  - `const FONT_BODY: usize = 0;`
+  - `const FONT_CODE: usize = 1;`
+  - Never emit ad-hoc font indices.
 - RTF preamble must include:
-  - Font table: `{\f0 Segoe UI;}` (body), `{\f1 Consolas;}` (monospace, for future code blocks)
-  - Color table matching the dark theme from `layout.rs`:
-    - `\red224\green229\blue236` — foreground (matches `ViewerReadable` text color `0xE0, 0xE5, 0xEC`)
+  - Font table: `{\f0 Segoe UI;}` (body), `{\f1 Consolas;}` (monospace, reserved)
+  - Color table matching the dark theme from `layout.rs` (`StyleId::ViewerReadable`):
+    - `\red216\green222\blue233` — foreground (matches `ViewerReadable` text color `0xD8, 0xDE, 0xE9`)
     - `\red26\green29\blue34` — background (matches `ViewerReadable` background `0x1A, 0x1D, 0x22`)
-  - Default character formatting: `\cf1\f0\fs20`
+    - `\red88\green166\blue255` — link-like blue for non-clickable MVP link rendering (`\cf3`)
+  - Include `\viewkind4\uc1\pard\cf1\cb2\f0\fs20` in the preamble
+    - `\cf1` sets default text color
+    - `\cb2` is required so paragraph/background regions do not revert to white.
 - Event mapping for MVP subset:
   - `Start(Heading { level })` → `\pard\sa120\sb60\b\fs{size} ` (H1=36, H2=32, H3=28 half-points)
   - `End(TagEnd::Heading)` → `\b0\fs20\par\pard\sa60\sb0 `
@@ -111,22 +122,29 @@ Scope:
   - `Text(t)` → `escape_rtf_text(buf, &t)`
   - `SoftBreak` → single space ` `
   - `HardBreak` → `\line `
+  - `Start(Tag::Link { .. })` / `End(TagEnd::Link)`:
+    - MVP visual representation only (not clickable): label in link color then URL in plain text, e.g. `\cf3 label\cf1 (url)`
+    - Keep explicit match arms so this can later switch to RTF hyperlink field syntax.
   - All other events → plain-text fallback via `Event::Text` (already handled)
+- Nesting-depth guard:
+  - Track active structural depth (lists/quotes/other grouped constructs).
+  - Cap emitted nesting at a fixed maximum (e.g. 20) and flatten deeper constructs.
+  - Never emit unbounded nested RTF groups.
 - RTF text escaping (`escape_rtf_text`):
   - `\\` → `\\\\`
   - `{` → `\\{`
   - `}` → `\\}`
-  - `\n` → `\\par ` (should rarely appear inside a text event, but handle defensively)
+  - `\n` → `\\line ` (line break within paragraph)
   - ASCII printable → as-is
-  - BMP non-ASCII (U+0080–U+FFFF): `\uN?` where N is the signed decimal codepoint
-  - Above-BMP (U+10000+): replace with `?` in MVP (add note about surrogate pairs for post-MVP)
+  - Non-ASCII: encode with `encode_utf16()` and emit each code unit as signed `i16` in `\uN?`
+    - This handles BMP and surrogate pairs correctly in MVP.
 - Truncation: apply `MAX_VIEWER_CHARS` cap to the **markdown input** before passing to the parser. Append a marker like `\par [display truncated]` at the end of the RTF output when truncated.
 - Close RTF with single `}`.
 
 Tests (in `crates/harvester_app`):
 - Unit: `escape_rtf_text` correctly escapes `\`, `{`, `}`.
 - Unit: `escape_rtf_text` produces `\uN?` for non-ASCII BMP characters.
-- Unit: `escape_rtf_text` replaces above-BMP characters with `?`.
+- Unit: `escape_rtf_text` correctly emits surrogate-pair sequence (`\uHIGH?\uLOW?`) for above-BMP characters.
 - Unit: heading levels H1/H2/H3 produce the expected font sizes in output.
 - Unit: bold, italic, and nested bold-italic produce correct RTF tags.
 - Unit: unordered list items include `\bullet\tab`.
@@ -134,6 +152,7 @@ Tests (in `crates/harvester_app`):
 - Golden/snapshot: a representative briefing markdown (with heading, bullet list, bold, paragraph) produces the expected RTF string exactly.
 - Property (brace-balance): for any arbitrary string input, the `{` and `}` count in the output is balanced. Use a loop over a variety of inputs including empty, Unicode, injection attempts `{\\}`, and very long strings.
 - Property (no panic): for any arbitrary string input, `convert_markdown_to_rtf` must not panic.
+- Property (depth): extremely deep markdown nesting (e.g. 500 nested list/blockquote levels) does not panic and produces bounded-depth RTF output.
 - Unit: input longer than `MAX_VIEWER_CHARS` produces output containing the truncation marker.
 
 Suggested commit message:
@@ -145,6 +164,7 @@ Scope:
 - Remove `read_only`, `multiline`, `vertical_scroll` fields from that command (Rich Edit is always multiline; read-only is set via `EM_SETREADONLY` in the handler).
 - Set `ES_READONLY | ES_MULTILINE | WS_VSCROLL | ES_AUTOVSCROLL` style flags in the richedit handler.
 - Keep `PlatformCommand::ApplyStyleToControl` with `StyleId::ViewerReadable` for font/color setup — but the Rich Edit handler must translate this to `EM_SETBKGNDCOLOR` + `EM_SETCHARFORMAT` rather than relying on `WM_CTLCOLOREDIT`.
+- In the Rich Edit create path, call `try_enable_dark_mode(hwnd)` immediately after control creation so scrollbar/theme rendering matches dark UI.
 - `INPUT_URLS` remains a normal Edit control (unaffected).
 
 Tests:
@@ -179,7 +199,14 @@ Suggested commit message:
 Scope:
 - Upgrade `SetRichEditContent` implementation in `CommanDuctUI` to use `EM_STREAMIN` instead of `WM_SETTEXT`.
   - `EM_STREAMIN` avoids a 64 KiB `WM_SETTEXT` ceiling and handles encoding more robustly.
-  - Implement an `EDITSTREAM` callback that serves the RTF bytes from a `&[u8]` slice.
+  - Implement an `EDITSTREAM` callback using an explicit context struct, e.g.:
+    - `struct RtfStreamContext<'a> { data: &'a [u8], position: usize }`
+    - pass context pointer via `dwCookie`
+    - callback copies into `pbBuff`, advances `position`, sets `*pcb`, returns `0` on success / non-zero on error
+  - FFI safety rules:
+    - do not call `Box::from_raw` inside callback
+    - ensure context outlives `SendMessage(EM_STREAMIN, ...)`
+    - avoid panics across FFI boundary; convert callback failures to non-zero return code
 - Retain the pre-conversion markdown truncation guard as a defense-in-depth layer even when `EM_STREAMIN` is used.
 - Add logging (`engine_warn!`) when truncation fires, including character counts and the `[preview]` category tag.
 
@@ -227,6 +254,9 @@ Scope:
 - Blockquotes (`Tag::BlockQuote`): left-indent with `\li360`, italicize.
 - Horizontal rules (`Tag::Rule`): emit a paragraph with a bottom border (`\brdrb\brdrs`).
 - Nested list indentation: track list depth and multiply `\li` indent by depth.
+- Code-block whitespace preservation:
+  - verify indentation/tabs visually in Rich Edit
+  - if needed, introduce stricter space/tab handling within code blocks.
 
 Suggested commit message:
 - `harvester_app: extend markdown-to-rtf coverage for code blocks and blockquotes`
@@ -273,4 +303,4 @@ Suggested commit message:
 - Export briefing as `.rtf` artifact alongside markdown outputs (see `[FI-Storage-ExportArtifacts-0001]`).
 - Section jump list from heading parse events for long briefings.
 - Future optional abstraction: `PreviewDocument` intermediate model for multi-renderer targets (plain text, RTF, HTML).
-- Above-BMP unicode (emoji, supplementary characters): implement surrogate-pair RTF encoding post-MVP rather than replacing with `?`.
+- Future improvement: make RTF color table/theme dynamic from style state instead of hardcoded MVP palette.
