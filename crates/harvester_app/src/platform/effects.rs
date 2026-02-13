@@ -560,9 +560,9 @@ impl EffectRunner {
             Effect::OpenUrlInBrowser { url } => {
                 use std::ffi::OsStr;
                 use std::os::windows::ffi::OsStrExt;
+                use windows::core::PCWSTR;
                 use windows::Win32::UI::Shell::ShellExecuteW;
                 use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-                use windows::core::PCWSTR;
 
                 engine_info!("[browser] Opening URL: {}", url);
 

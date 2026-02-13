@@ -207,7 +207,6 @@ fn shutdown_runtime(runtime: Runtime) {
     runtime.shutdown_timeout(LLM_RUNTIME_SHUTDOWN_TIMEOUT);
 }
 
-
 async fn handle_completion_concurrent(
     command: LlmCommand,
     config: &Arc<LlmConfig>,
@@ -484,9 +483,7 @@ async fn handle_completion_concurrent(
                 ..record
             };
 
-            if let Err(err) =
-                persist_replay_record(&config.replay_output_dir(), &success_record)
-            {
+            if let Err(err) = persist_replay_record(&config.replay_output_dir(), &success_record) {
                 engine_error!(
                     "[llm-replay] request_id={} persist failed: {}",
                     request_id,
@@ -533,9 +530,7 @@ async fn handle_completion_concurrent(
                 ..record
             };
 
-            if let Err(err) =
-                persist_replay_record(&config.replay_output_dir(), &failure_record)
-            {
+            if let Err(err) = persist_replay_record(&config.replay_output_dir(), &failure_record) {
                 engine_error!(
                     "[llm-replay] request_id={} persist failed: {}",
                     request_id,

@@ -9,7 +9,7 @@ use harvester_engine::LinkKind;
 
 use super::constants::*;
 use super::layout::build_layout_command;
-use super::markdown_to_rtf::{RTF_TRUNCATE_MARKER, convert_markdown_to_rtf};
+use super::markdown_to_rtf::{convert_markdown_to_rtf, RTF_TRUNCATE_MARKER};
 use super::tree_item_ids::{
     job_tree_item_id, link_tree_item_id, links_folder_tree_item_id, links_show_more_tree_item_id,
 };
@@ -605,7 +605,10 @@ fn normalize_bullets(text: &str) -> String {
     for line in text.lines() {
         let trimmed = line.trim_start();
         let indent_len = line.len().saturating_sub(trimmed.len());
-        if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+        if let Some(rest) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
             let mut rebuilt = String::new();
             rebuilt.push_str(&line[..indent_len]);
             rebuilt.push_str("• ");
@@ -1115,11 +1118,13 @@ mod tests {
         let mut tree_state = TreeRenderState::new();
         let window_id = WindowId::new(1);
         let cmds = render(window_id, &view, &mut tree_state);
-        let enabled = cmds.iter().any(|cmd| matches!(
-            cmd,
-            PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
-            if *control_id == BUTTON_OPEN_BROWSER
-        ));
+        let enabled = cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+                if *control_id == BUTTON_OPEN_BROWSER
+            )
+        });
         assert!(enabled, "BUTTON_OPEN_BROWSER should be enabled");
     }
 
@@ -1130,11 +1135,13 @@ mod tests {
         let mut tree_state = TreeRenderState::new();
         let window_id = WindowId::new(1);
         let cmds = render(window_id, &view, &mut tree_state);
-        let disabled = cmds.iter().any(|cmd| matches!(
-            cmd,
-            PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
-            if *control_id == BUTTON_OPEN_BROWSER
-        ));
+        let disabled = cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+                if *control_id == BUTTON_OPEN_BROWSER
+            )
+        });
         assert!(disabled, "BUTTON_OPEN_BROWSER should be disabled");
     }
 
@@ -1148,11 +1155,16 @@ mod tests {
         render(window_id, &view, &mut tree_state);
         // Second render should not emit SetControlEnabled for BUTTON_OPEN_BROWSER
         let cmds = render(window_id, &view, &mut tree_state);
-        let changed = cmds.iter().any(|cmd| matches!(
-            cmd,
-            PlatformCommand::SetControlEnabled { control_id, .. }
-            if *control_id == BUTTON_OPEN_BROWSER
-        ));
-        assert!(!changed, "BUTTON_OPEN_BROWSER state should not change on second render");
+        let changed = cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, .. }
+                if *control_id == BUTTON_OPEN_BROWSER
+            )
+        });
+        assert!(
+            !changed,
+            "BUTTON_OPEN_BROWSER state should not change on second render"
+        );
     }
 }

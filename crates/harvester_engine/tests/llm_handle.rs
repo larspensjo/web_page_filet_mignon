@@ -291,10 +291,7 @@ fn concurrent_requests_never_exceed_cap() {
 
     // Peak in-flight should not exceed cap.
     let peak = provider.peak_in_flight();
-    assert!(
-        peak <= cap,
-        "peak in-flight={peak} exceeded cap={cap}"
-    );
+    assert!(peak <= cap, "peak in-flight={peak} exceeded cap={cap}");
 
     // Release all blocked requests so the worker can finish.
     provider.release(total_requests);

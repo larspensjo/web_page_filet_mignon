@@ -217,7 +217,9 @@ impl AppState {
         });
 
         // Derive selected_url — only expose when summary is available
-        let selected_url = self.ui.selected_job_id()
+        let selected_url = self
+            .ui
+            .selected_job_id()
             .and_then(|job_id| self.jobs.get(&job_id))
             .and_then(|job| {
                 self.briefing.summary_for_url(&job.url)?;
@@ -225,9 +227,7 @@ impl AppState {
             });
         let briefing_preview = self.briefing.format_preview();
         let preview_text = match self.ui.preview_mode() {
-            PreviewMode::SelectedJobSummary => {
-                self.ui.preview_content().map(ToOwned::to_owned)
-            }
+            PreviewMode::SelectedJobSummary => self.ui.preview_content().map(ToOwned::to_owned),
             PreviewMode::Briefing => briefing_preview
                 .clone()
                 .or_else(|| self.ui.preview_content().map(ToOwned::to_owned)),
@@ -623,7 +623,9 @@ impl AppState {
     }
 
     pub(crate) fn select_job(&mut self, job_id: JobId) {
-        let Some(job) = self.jobs.get(&job_id) else { return };
+        let Some(job) = self.jobs.get(&job_id) else {
+            return;
+        };
 
         let content = match self.briefing.summary_for_url(&job.url) {
             Some(summary) => format_summary_for_preview(summary),
@@ -1508,7 +1510,11 @@ mod tests {
         let (state, _) = update(state, Msg::JobSelected { job_id: 3 });
         let view = state.view();
         // No briefing session, so shows placeholder
-        assert!(view.preview_text.as_deref().unwrap_or("").contains("No summary available"));
+        assert!(view
+            .preview_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("No summary available"));
         assert_eq!(view.preview_header.as_ref().unwrap().domain, "example.com");
     }
 
@@ -1526,7 +1532,11 @@ mod tests {
         let (state, _) = update(state, Msg::JobSelected { job_id: 4 });
         let view = state.view();
         // No briefing, so shows placeholder text (not None)
-        assert!(view.preview_text.as_deref().unwrap_or("").contains("No summary available"));
+        assert!(view
+            .preview_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("No summary available"));
         let header = view.preview_header.expect("header should exist");
         assert_eq!(header.domain, "sub.example.net");
         assert_eq!(header.stage, Stage::Downloading);
@@ -1768,7 +1778,9 @@ mod tests {
 
     #[test]
     fn briefing_complete_then_job_selected_shows_summary_not_briefing() {
-        use crate::briefing::{ArticleSummaryResult, BriefingResult, BriefingThemeResult, LoadedArticle};
+        use crate::briefing::{
+            ArticleSummaryResult, BriefingResult, BriefingThemeResult, LoadedArticle,
+        };
 
         let mut state = AppState::new();
         state.jobs.insert(
@@ -1819,18 +1831,32 @@ mod tests {
 
         // After briefing completes, view should show briefing text
         let view = state.view();
-        assert!(view.preview_text.as_deref().unwrap_or("").contains("Executive Briefing"));
+        assert!(view
+            .preview_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("Executive Briefing"));
 
         // After job selected, view should show summary not briefing
         state.select_job(1);
         let view = state.view();
-        assert!(view.preview_text.as_deref().unwrap_or("").contains("Article Title"));
-        assert!(!view.preview_text.as_deref().unwrap_or("").contains("Executive Briefing"));
+        assert!(view
+            .preview_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("Article Title"));
+        assert!(!view
+            .preview_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("Executive Briefing"));
     }
 
     #[test]
     fn job_selected_then_briefing_completes_shows_briefing() {
-        use crate::briefing::{ArticleSummaryResult, BriefingResult, BriefingThemeResult, LoadedArticle};
+        use crate::briefing::{
+            ArticleSummaryResult, BriefingResult, BriefingThemeResult, LoadedArticle,
+        };
 
         let mut state = AppState::new();
         state.jobs.insert(
@@ -1881,12 +1907,20 @@ mod tests {
 
         state.select_job(1);
         let view = state.view();
-        assert!(view.preview_text.as_deref().unwrap_or("").contains("Article Title"));
+        assert!(view
+            .preview_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("Article Title"));
 
         // Now revert to briefing mode (simulating briefing completing again)
         state.revert_preview_to_briefing();
         let view = state.view();
-        assert!(view.preview_text.as_deref().unwrap_or("").contains("Executive Briefing"));
+        assert!(view
+            .preview_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("Executive Briefing"));
     }
 
     #[test]
@@ -1911,7 +1945,11 @@ mod tests {
         state.set_briefing(briefing);
 
         let view = state.view();
-        assert!(view.preview_text.as_deref().unwrap_or("").contains("Executive Briefing"));
+        assert!(view
+            .preview_text
+            .as_deref()
+            .unwrap_or("")
+            .contains("Executive Briefing"));
     }
 
     #[test]
@@ -2064,7 +2102,10 @@ mod tests {
         s2.briefing_mut().set_briefing_request_id(99);
         s2.briefing_mut().complete_briefing(BriefingResult {
             executive_summary: "Exec summary".to_string(),
-            themes: vec![BriefingThemeResult { name: "T".to_string(), description: "d".to_string() }],
+            themes: vec![BriefingThemeResult {
+                name: "T".to_string(),
+                description: "d".to_string(),
+            }],
             article_count: 1,
             input_tokens: 10,
             output_tokens: 5,
@@ -2072,7 +2113,10 @@ mod tests {
         s2.select_job(10);
         let view = s2.view();
         let text = view.preview_text.unwrap_or_default();
-        assert!(!text.contains("Exec summary"), "should not show briefing text when job selected");
+        assert!(
+            !text.contains("Exec summary"),
+            "should not show briefing text when job selected"
+        );
         assert!(text.contains("My Title"), "should show summary");
     }
 
@@ -2143,7 +2187,11 @@ mod tests {
     fn view_has_summary_true_for_completed_articles() {
         let state = make_state_with_summarized_job();
         let view = state.view();
-        let job = view.jobs.iter().find(|j| j.job_id == 10).expect("job 10 exists");
+        let job = view
+            .jobs
+            .iter()
+            .find(|j| j.job_id == 10)
+            .expect("job 10 exists");
         assert!(job.has_summary);
     }
 
@@ -2159,7 +2207,11 @@ mod tests {
             },
         );
         let view = state.view();
-        let job = view.jobs.iter().find(|j| j.job_id == 13).expect("job 13 exists");
+        let job = view
+            .jobs
+            .iter()
+            .find(|j| j.job_id == 13)
+            .expect("job 13 exists");
         assert!(!job.has_summary);
     }
 
@@ -2168,7 +2220,10 @@ mod tests {
         let mut state = make_state_with_summarized_job();
         state.select_job(10);
         let view = state.view();
-        assert_eq!(view.selected_url, Some("https://summarized.example/article".to_string()));
+        assert_eq!(
+            view.selected_url,
+            Some("https://summarized.example/article".to_string())
+        );
     }
 
     #[test]

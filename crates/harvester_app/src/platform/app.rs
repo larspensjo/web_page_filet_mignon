@@ -600,17 +600,11 @@ mod tests {
     #[test]
     fn parse_llm_max_concurrency_clamps_to_valid_range() {
         assert_eq!(parse_llm_max_concurrency_requests(Some("1")), 1);
-        assert_eq!(
-            parse_llm_max_concurrency_requests(Some("3")),
-            3
-        );
+        assert_eq!(parse_llm_max_concurrency_requests(Some("3")), 3);
         assert_eq!(
             parse_llm_max_concurrency_requests(Some("999")),
             MAX_LLM_CONCURRENT_REQUESTS
         );
-        assert_eq!(
-            parse_llm_max_concurrency_requests(Some(" 2 ")),
-            2
-        );
+        assert_eq!(parse_llm_max_concurrency_requests(Some(" 2 ")), 2);
     }
 }

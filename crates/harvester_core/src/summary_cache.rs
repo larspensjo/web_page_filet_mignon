@@ -349,12 +349,22 @@ mod tests {
     #[test]
     fn summary_cache_key_changes_when_prompt_version_changes() {
         let ctx: Vec<(String, String)> = Vec::new();
-        let key_v1 =
-            SummaryCacheKey::try_new("hash", PromptId::ArticleSummary, Some(1), Some("model"), &ctx)
-                .unwrap();
-        let key_v2 =
-            SummaryCacheKey::try_new("hash", PromptId::ArticleSummary, Some(2), Some("model"), &ctx)
-                .unwrap();
+        let key_v1 = SummaryCacheKey::try_new(
+            "hash",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("model"),
+            &ctx,
+        )
+        .unwrap();
+        let key_v2 = SummaryCacheKey::try_new(
+            "hash",
+            PromptId::ArticleSummary,
+            Some(2),
+            Some("model"),
+            &ctx,
+        )
+        .unwrap();
         assert_ne!(key_v1, key_v2);
     }
 

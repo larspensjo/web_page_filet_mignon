@@ -256,7 +256,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 .content_hash
                                 .clone();
                             let context = state.context_for(PromptId::ArticleSummary).to_vec();
-                            let lookup_key = state.briefing().article_cache_key(article_idx).cloned();
+                            let lookup_key =
+                                state.briefing().article_cache_key(article_idx).cloned();
                             let run_metadata = state
                                 .summary_cache_metadata()
                                 .map(|(version, model)| (version, model.to_string()));
@@ -566,15 +567,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
-        Msg::OpenInBrowserClicked => {
-            match state.selected_article_url() {
-                Some(url) => {
-                    engine_info!("[browser] Open in browser requested for URL: {}", url);
-                    vec![Effect::OpenUrlInBrowser { url }]
-                }
-                None => Vec::new(),
+        Msg::OpenInBrowserClicked => match state.selected_article_url() {
+            Some(url) => {
+                engine_info!("[browser] Open in browser requested for URL: {}", url);
+                vec![Effect::OpenUrlInBrowser { url }]
             }
-        }
+            None => Vec::new(),
+        },
         Msg::PollSourcesClicked => {
             if matches!(
                 state.session(),
@@ -623,7 +622,10 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
 
     // Fill available in-flight slots.
     while state.triage().can_dispatch_more(limit) {
-        let next_idx = state.triage().next_pending_index().expect("can_dispatch_more guarantees pending exists");
+        let next_idx = state
+            .triage()
+            .next_pending_index()
+            .expect("can_dispatch_more guarantees pending exists");
         let prepared_text = state.triage().articles()[next_idx].prepared_text.clone();
         let request_id = state.allocate_next_llm_request_id();
         state.record_pending_llm_request(request_id, PromptId::ArticleTriage);
@@ -1132,7 +1134,11 @@ mod tests {
             },
         );
 
-        let keys: Vec<_> = state.summary_cache().iter().map(|(key, _)| key.clone()).collect();
+        let keys: Vec<_> = state
+            .summary_cache()
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect();
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].prompt_version, 1);
         assert_eq!(keys[0].model_id, "test-model");
@@ -1371,7 +1377,11 @@ mod tests {
             .iter()
             .filter(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
             .collect();
-        assert_eq!(llm_effects.len(), 2, "should dispatch 2 requests for limit=2");
+        assert_eq!(
+            llm_effects.len(),
+            2,
+            "should dispatch 2 requests for limit=2"
+        );
         assert_eq!(state.triage().in_progress_count(), 2);
         assert_eq!(state.triage().pending_count(), 1);
     }
@@ -1446,11 +1456,17 @@ mod tests {
             },
         );
         let text = state.triage().progress_text().unwrap();
-        assert!(text.contains("0/3"), "initial progress shows 0 settled: got '{text}'");
+        assert!(
+            text.contains("0/3"),
+            "initial progress shows 0 settled: got '{text}'"
+        );
 
         let (state, _) = update(state, triage_success(1));
         let text = state.triage().progress_text().unwrap();
-        assert!(text.contains("1/3"), "after 1 complete shows 1 settled: got '{text}'");
+        assert!(
+            text.contains("1/3"),
+            "after 1 complete shows 1 settled: got '{text}'"
+        );
     }
 
     #[test]
@@ -1490,7 +1506,13 @@ mod tests {
         let (articles, collection_text) = loaded_articles();
 
         // Load 2 articles with limit=2 → both go in-flight
-        let (state, _) = update(state, Msg::ArticlesLoaded { articles, collection_text });
+        let (state, _) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
         assert_eq!(state.briefing().in_progress_count(), 2);
         assert_eq!(state.briefing().pending_count(), 0);
 
@@ -1508,11 +1530,19 @@ mod tests {
                 },
             },
         );
-        let has_aggregate = effects.iter().any(|e| matches!(
-            e,
-            Effect::RequestLlmCompletion { prompt_id: PromptId::AggregateBriefing, .. }
-        ));
-        assert!(!has_aggregate, "aggregate must not dispatch while article 2 still in-flight");
+        let has_aggregate = effects.iter().any(|e| {
+            matches!(
+                e,
+                Effect::RequestLlmCompletion {
+                    prompt_id: PromptId::AggregateBriefing,
+                    ..
+                }
+            )
+        });
+        assert!(
+            !has_aggregate,
+            "aggregate must not dispatch while article 2 still in-flight"
+        );
         assert_eq!(state.briefing().in_progress_count(), 1);
 
         // Complete second article → aggregate should now be dispatched
@@ -1529,10 +1559,18 @@ mod tests {
                 },
             },
         );
-        let has_aggregate = effects.iter().any(|e| matches!(
-            e,
-            Effect::RequestLlmCompletion { prompt_id: PromptId::AggregateBriefing, .. }
-        ));
-        assert!(has_aggregate, "aggregate should dispatch after all articles settled");
+        let has_aggregate = effects.iter().any(|e| {
+            matches!(
+                e,
+                Effect::RequestLlmCompletion {
+                    prompt_id: PromptId::AggregateBriefing,
+                    ..
+                }
+            )
+        });
+        assert!(
+            has_aggregate,
+            "aggregate should dispatch after all articles settled"
+        );
     }
 }

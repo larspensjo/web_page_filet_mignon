@@ -195,7 +195,10 @@ impl BriefingSession {
         self.articles
             .iter()
             .filter(|article| {
-                matches!(article.summary_state, ArticleSummaryState::InProgress { .. })
+                matches!(
+                    article.summary_state,
+                    ArticleSummaryState::InProgress { .. }
+                )
             })
             .count()
     }
@@ -295,10 +298,12 @@ impl BriefingSession {
 
     /// Returns the completed summary result for an article URL, if available.
     pub fn summary_for_url(&self, url: &str) -> Option<&ArticleSummaryResult> {
-        self.articles.iter().find_map(|article| match &article.summary_state {
-            ArticleSummaryState::Completed { result } if article.url == url => Some(result),
-            _ => None,
-        })
+        self.articles
+            .iter()
+            .find_map(|article| match &article.summary_state {
+                ArticleSummaryState::Completed { result } if article.url == url => Some(result),
+                _ => None,
+            })
     }
 
     pub fn briefing_result(&self) -> Option<&BriefingResult> {
@@ -329,7 +334,10 @@ impl BriefingSession {
         };
         let mut sections = Vec::new();
         sections.push("# Executive Briefing".to_string());
-        sections.push(format!("## Executive Summary\n\n{}", result.executive_summary.trim()));
+        sections.push(format!(
+            "## Executive Summary\n\n{}",
+            result.executive_summary.trim()
+        ));
 
         let mut themes = String::from("## Themes");
         if result.themes.is_empty() {
@@ -416,7 +424,8 @@ mod tests {
 
     #[test]
     fn summary_for_url_returns_none_when_pending() {
-        let session = make_session_with_article("https://example.com", ArticleSummaryState::Pending);
+        let session =
+            make_session_with_article("https://example.com", ArticleSummaryState::Pending);
         assert!(session.summary_for_url("https://example.com").is_none());
     }
 
@@ -424,7 +433,9 @@ mod tests {
     fn summary_for_url_returns_none_when_failed() {
         let session = make_session_with_article(
             "https://example.com",
-            ArticleSummaryState::Failed { reason: "err".to_string() },
+            ArticleSummaryState::Failed {
+                reason: "err".to_string(),
+            },
         );
         assert!(session.summary_for_url("https://example.com").is_none());
     }
@@ -434,7 +445,9 @@ mod tests {
         let result = make_result();
         let session = make_session_with_article(
             "https://example.com",
-            ArticleSummaryState::Completed { result: result.clone() },
+            ArticleSummaryState::Completed {
+                result: result.clone(),
+            },
         );
         let found = session.summary_for_url("https://example.com");
         assert!(found.is_some());
