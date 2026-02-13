@@ -31,6 +31,7 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | LLM        | TokenCounting      | Token estimation accuracy and visibility         |
 | Networking | HttpCaching        | Conditional HTTP fetches for feeds               |
 | Observability | AuditLog        | Structured policy decision logging               |
+| Observability | PreviewRendering | Markdown/RTF preview diagnostics and telemetry  |
 | Observability | ReplayDiagnostics | Quality and cost diagnostics                     |
 | Observability | SourceHealth    | Per-source health metrics and backoff            |
 | Performance | LlmProcessing    | Throughput for LLM workloads                     |
@@ -659,6 +660,26 @@ SuccessCriteria:
 - Policy decisions produce structured audit log entries.
 - Logs include identifiers to trace source and action.
 
+### PreviewRendering
+
+#### [FI-Observability-PreviewRendering-0001] Markdown/RTF preview diagnostics
+Status: Candidate
+TopLevel: Observability
+SubLevel: PreviewRendering
+Priority: P2
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.MarkdownRenderingImplementation.md
+- SourceSection: Post-MVP Roadmap (Step 13: Observability and diagnostics)
+- Captured: 2026-02-13
+Tags: [preview, markdown, rtf, diagnostics, logging]
+Summary: Add structured telemetry around markdown-to-RTF conversion and truncation, plus an optional debug export of the last generated RTF payload.
+Rationale: Faster diagnosis of rendering defects and easier reproduction of control-specific formatting issues.
+SuccessCriteria:
+- Conversion and truncation events emit structured logs with stable category tags.
+- A debug mode can persist the last generated RTF payload to a temporary file for troubleshooting.
+
 ### ReplayDiagnostics
 
 #### [FI-Observability-ReplayDiagnostics-0001] Replay quality diagnostics
@@ -918,10 +939,11 @@ Origin:
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
 Tags: [export, artifacts, reporting]
-Summary: Export formatted briefing markdown and triage results with provenance metadata.
+Summary: Export formatted briefing markdown plus optional RTF output, and export triage results with provenance metadata.
 Rationale: Enables archival, sharing, and external analysis.
 SuccessCriteria:
 - Briefing output is written to a markdown file in the output directory.
+- Briefing output can optionally be written as `.rtf` suitable for rich-text consumers.
 - Triage results are exported as structured JSON with provenance fields.
 
 ### NormalizationVersioning
@@ -1136,35 +1158,75 @@ Priority: P3
 Effort: M
 Risk: M
 Origin:
-- SourceDoc: Plan.MarkdownPreviewPane.md
-- SourceSection: FutureOutlineNavigationV2
-- Captured: 2026-02-12
+- SourceDoc: Plan.MarkdownRenderingImplementation.md
+- SourceSection: Post-MVP Roadmap (Step 10: Outline navigation)
+- Captured: 2026-02-13
 Tags: [UX, preview, navigation]
 Summary: Extract headings into an outline list that scrolls the preview to sections.
 Rationale: Improves navigation through long articles.
 SuccessCriteria:
-- Outline list is populated from markdown headings.
-- Clicking an outline entry scrolls to the target section.
+- Markdown rendering returns heading metadata together with RTF output.
+- Outline list is populated from extracted heading metadata.
+- Clicking an outline entry navigates the Rich Edit preview to the target section.
 
 ### PreviewRich
 
-#### [FI-UX-PreviewRich-0001] Richer markdown preview rendering
+#### [FI-UX-PreviewRich-0001] Raw/rich preview mode toggle
 Status: Candidate
 TopLevel: UX
 SubLevel: PreviewRich
 Priority: P3
-Effort: L
-Risk: M
+Effort: M
+Risk: L
 Origin:
-- SourceDoc: Plan.MarkdownPreviewPane.md
-- SourceSection: FutureRichPreviewV2
-- Captured: 2026-02-12
-Tags: [UX, preview, rendering]
-Summary: Add optional rich rendering (headings, bold, code) while keeping raw markdown default.
-Rationale: Improves readability without losing inspection fidelity.
+- SourceDoc: Plan.MarkdownRenderingImplementation.md
+- SourceSection: Post-MVP Roadmap (Step 12: Raw/rich toggle)
+- Captured: 2026-02-13
+Tags: [UX, preview, rendering, toggle]
+Summary: Add a preview-header toggle to switch between rendered Rich Edit output and raw markdown text.
+Rationale: Preserves readability benefits while allowing exact markdown inspection when needed.
 SuccessCriteria:
 - Users can toggle between raw and rich preview modes.
-- Rich preview renders headings, bold, and code consistently.
+- Raw mode renders markdown text without rich formatting.
+
+#### [FI-UX-PreviewRich-0002] Rich Edit link interaction in preview
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewRich
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownRenderingImplementation.md
+- SourceSection: Post-MVP Roadmap (Step 8: Links and interaction)
+- Captured: 2026-02-13
+Tags: [UX, preview, links, interaction]
+Summary: Enable Rich Edit link detection and propagate link-click events back into app actions that open URLs safely.
+Rationale: Makes references in rendered previews directly actionable without copy/paste.
+SuccessCriteria:
+- Rich Edit link notifications are translated into platform/app events.
+- Clicking a link in preview dispatches the existing open-in-browser action path.
+Related: [FI-UX-PreviewRich-0001]
+
+#### [FI-UX-PreviewRich-0003] Extended markdown coverage in Rich Edit renderer
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewRich
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.MarkdownRenderingImplementation.md
+- SourceSection: Post-MVP Roadmap (Step 9: Improved markdown coverage)
+- Captured: 2026-02-13
+Tags: [UX, preview, markdown, rendering]
+Summary: Extend markdown-to-RTF support for code blocks, blockquotes, horizontal rules, and deeper nested-list indentation.
+Rationale: Reduces formatting loss for common article structures and improves fidelity of previewed content.
+SuccessCriteria:
+- Code blocks render in monospace with preserved whitespace.
+- Blockquotes and horizontal rules render with distinct visual treatment.
+- Nested list indentation scales with depth while remaining stable for deep inputs.
+Related: [FI-UX-PreviewRich-0001]
 
 ### PreviewSearch
 
@@ -1176,15 +1238,15 @@ Priority: P3
 Effort: S
 Risk: L
 Origin:
-- SourceDoc: Plan.MarkdownPreviewPane.md
-- SourceSection: FutureSearchWithinPreviewV2
-- Captured: 2026-02-12
+- SourceDoc: Plan.MarkdownRenderingImplementation.md
+- SourceSection: Post-MVP Roadmap (Step 11: Find-in-preview)
+- Captured: 2026-02-13
 Tags: [UX, preview, search]
-Summary: Provide a find box to search within the preview pane.
+Summary: Provide a find box that searches and highlights matches inside the Rich Edit preview pane.
 Rationale: Helps users locate relevant sections quickly.
 SuccessCriteria:
-- Search finds and highlights matches in the preview.
-- Navigation jumps to the first match.
+- Search uses Rich Edit find APIs to locate matches in rendered content.
+- Matches are highlighted and navigation jumps to the selected match.
 
 ### PromptComparison
 
