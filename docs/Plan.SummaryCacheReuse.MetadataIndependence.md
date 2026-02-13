@@ -1,166 +1,143 @@
-# Plan: Summary Cache Reuse Without LLM Metadata Preload Dependency
+# Plan: Summary Cache Reuse With Deterministic Metadata
 
 ## Problem statement
-Summary cache reuse fails during `Generate Briefing` even when content and context are unchanged, because cache key construction currently depends on preloaded LLM metadata (`prompt_version`, `model_id`) that is often unavailable at dispatch time.
+Summary cache lookup fails during `Generate Briefing` even when inputs are unchanged. Cache entries are stored, but lookups return `key unavailable` because lookup-time `prompt_version` and `model_id` are missing.
 
-Observed behavior:
-- Cache is loaded/hydrated.
-- Per-article summary lookup reports `key unavailable` due to missing prompt metadata.
-- Summaries are recomputed instead of reused.
+## Root cause (confirmed)
+- `LoadLlmMetadata` currently returns empty `active_versions` and `effective_models`.
+- `dispatch_next_briefing_step` lookup key builder requires both fields and returns `None` when either is missing.
+- Store path uses completion metadata and persists valid entries, so cache accumulates but cannot be reused.
 
 ## Goals
-- Make per-article summary cache lookup deterministic and available at dispatch time.
-- Preserve correctness: no false cache hits across prompt/model/context changes.
-- Keep architecture aligned with unidirectional data flow and pure reducers.
-- Improve observability so cache behavior is explainable article-by-article.
+- Make lookup-time key construction deterministic and available before article dispatch.
+- Guarantee lookup/store key semantic equivalence.
+- Preserve cache correctness across prompt/model/context/content changes.
+- Keep reducer pure and UDF boundaries intact.
+- Make cache behavior observable and diagnosable from logs.
 
 ## Non-goals
-- Changing final briefing input model or replacing summary/briefing pipeline.
-- Introducing speculative persistence layers or cross-machine cache distribution.
+- Redesigning summary/briefing product behavior.
+- Distributed cache or cross-machine synchronization.
 
-## Root cause
-`dispatch_next_briefing_step` builds `SummaryCacheKey` with:
+## Design decisions
+1. Canonical metadata source
+- `LlmConfig` is the authoritative source for effective model mapping and prompt registry active versions.
+- Core state keeps a synchronized mirror for reducer reads; it is not an independent authority.
+
+2. Ordering guarantee
+- Metadata required for summary lookup must be populated before `dispatch_next_briefing_step` can run.
+- Preferred implementation: resolve metadata once during initialization/startup and store in state.
+- If startup population is not possible, gate summary dispatch on explicit metadata readiness.
+
+3. Per-run freeze
+- Resolve summary key metadata once per briefing run and freeze it for that run.
+- This avoids mid-run drift if prompt/model config changes while processing articles.
+
+4. Model ID convention
+- Cache key `model_id` uses `ModelId::model_name()` format only.
+- Do not use provider-prefixed display formatting in cache keys.
+
+5. Context hash stability
+- Replace `DefaultHasher` for persisted `context_hash` with a stable hash algorithm.
+- Keep order-independent hashing behavior for context pairs.
+
+6. Fallback policy
+- If deterministic lookup metadata cannot be resolved, skip reuse and log `reason=missing-configured-model` or equivalent explicit reason.
+- No sentinel model ID fallback.
+
+## Key construction contract
+Summary cache key dimensions remain:
 - `content_hash`
 - `prompt_id`
 - `prompt_version`
 - `model_id`
 - `context_hash`
 
-`prompt_version` and `model_id` are read from state metadata maps populated by `LoadLlmMetadata`, but that effect currently emits empty maps. Key construction therefore returns `None`, so lookup cannot happen.
-
-## Proposed design
-1. Introduce a stable lookup identity source for summary cache
-- Build summary lookup keys from data available synchronously during dispatch.
-- Preferred sources:
-  - Prompt version: active version from prompt registry (or state fallback)
-  - Model id: effective configured model for `ArticleSummary`
-  - Context hash: computed from loaded context variables
-  - Content hash: from prepared article
-
-2. Make lookup independent of async metadata hydration
-- Keep `LoadLlmMetadata` optional for optimization/telemetry.
-- Cache lookup must not block on metadata availability.
-
-3. Keep completion metadata authoritative for storage
-- On successful completion, store result using actual completion metadata.
-- If lookup assumptions differ from completion metadata, log mismatch with clear dimensions.
-
-4. Centralize key computation
-- Add one helper/module for summary cache key derivation:
-  - `lookup_key(...)`
-  - `store_key(...)`
-- Avoid duplicate logic in update branches.
-
-5. Add explicit fallback policy
-- If configured model id is unavailable, choose one deterministic fallback strategy:
-  - Preferred: do not reuse cache and log `reason=missing-configured-model`.
-  - Alternative: use sentinel model id (only if documented and tested).
-
-## Architecture considerations (UDF + correctness)
-- Reducer remains pure: key derivation is deterministic string/hash logic only.
-- Effects remain isolated: no IO introduced in reducer for metadata retrieval.
-- Single source of truth:
-  - Prompt configuration source should be explicit and stable.
-  - Context variables in app state remain the source for context hashing.
-- Traceability:
-  - Every summary decision should be explainable from one log line:
-    `article idx, content hash, context hash, prompt version, model id, hit/miss reason`.
-
-## Robustness improvements
-- Add strict invariants and warnings:
-  - If completion metadata differs from lookup metadata, emit warning with both values.
-  - Track mismatch counters for diagnostics.
-- Bound cache growth remains unchanged.
-- Ensure deterministic context hashing remains order-independent.
-- Prevent accidental reuse across prompt changes by keeping version in key.
+Contract:
+- Lookup and store must both use one shared constructor module.
+- Store path passes completion metadata into the same constructor.
+- Lookup path passes run-frozen metadata into the same constructor.
 
 ## Implementation steps
-1. Add metadata resolution helper
-- Resolve effective summary prompt version/model from deterministic sources.
-- Return a structured result with explicit failure reason when unavailable.
+1. Implement real metadata loading
+- Make `LoadLlmMetadata` return real `active_versions` and `effective_models` derived from `LlmConfig`/registry.
+- Prefer moving this to initialization so metadata exists before first briefing dispatch.
 
-2. Refactor summary lookup path
-- In `dispatch_next_briefing_step`, always attempt resolution via helper.
-- If resolved, build lookup key and try cache hit.
-- If unresolved, skip lookup and log precise reason.
+2. Enforce dispatch ordering
+- Ensure summary dispatch cannot occur before required metadata is available.
+- Add explicit readiness state or startup population path.
 
-3. Refactor summary store path
-- Keep storing with completion metadata.
-- Compare with lookup assumptions when present; log mismatch.
+3. Centralize key creation
+- Replace duplicated inline store-key construction with shared constructor usage.
+- Keep constructor pure and deterministic.
 
-4. Keep/extend logging
-- Existing per-article hit/miss logs stay.
-- Add one per-run summary diagnostic (metadata source used).
+4. Add lookup/store mismatch detection
+- Persist attempted lookup metadata (or full key dimensions) with pending summary state.
+- On completion, compare attempted lookup dimensions to completion metadata and log warning on mismatch.
 
-5. Documentation
-- Update architecture or prompt-context docs with cache key rules and fallback policy.
+5. Add validation guards
+- Reject empty `content_hash` in key construction and log explicit reason.
 
-## Test strategy
-### Unit tests
-- Cache key resolution succeeds without `LoadLlmMetadata` maps when config/registry are present.
-- Cache lookup hit occurs on second run with unchanged content/context.
-- Cache miss when any key dimension changes:
-  - prompt version
-  - model id
-  - context hash
-  - content hash
-- Resolution failure path logs/returns explicit reason and bypasses lookup.
+6. Improve logging symmetry
+- Lookup and store logs must emit matching key dimensions: `prompt_version`, `model_id`, `context_hash`, `content_hash_short`.
+- Add run-start warm-up diagnostic and required run-end counters.
 
-### Integration tests
-- Simulate two `Generate Briefing` runs with same inputs:
-  - first run stores summaries
-  - second run reuses summaries (no summary LLM dispatch)
-- Scenario with one failed summary validation in run 1:
-  - second run should still reuse successful entries and only recompute missing ones.
-
-### Regression checks
-- No behavioral regression for triage pipeline.
-- Briefing generation still proceeds when all summaries are cache hits.
-
-## Observability requirements
-- Required fields in summary cache decision logs:
+## Required observability
+- Per-article decision log fields:
   - `article_idx`
-  - `content_hash_short`
-  - `context_hash`
+  - `decision` (`hit`, `miss`, `key_unavailable`)
+  - `reason`
   - `prompt_version`
   - `model_id`
-  - `decision` (`hit`, `miss`, `key_unavailable`)
-  - `reason` (for miss/key unavailable)
-- Add optional run-level counters:
-  - `cache_hits`, `cache_misses`, `lookup_unavailable`.
+  - `context_hash`
+  - `content_hash_short`
+- Store log fields:
+  - same key dimensions as lookup log
+  - metadata source (`from_completion`, and where lookup metadata originated)
+- Run-level required summary:
+  - `hits`, `misses`, `key_unavailable`, `total`
 
-## Blockers and risks
-- Blocker: no deterministic way to resolve effective `model_id` at dispatch time.
-  - Mitigation: expose configured/effective model in state during initialization.
-- Risk: divergence between lookup key and store key semantics.
-  - Mitigation: centralize key constructors and test both paths together.
-- Risk: cache fragmentation if model id formatting varies (aliases vs concrete model).
-  - Mitigation: normalize model id string before key construction.
-- Risk: hidden dependency on async metadata still present in edge paths.
-  - Mitigation: add test that leaves metadata maps empty and expects cache reuse.
+## Test plan
+1. Unit tests
+- Metadata resolution from config/registry returns correct prompt version and effective model.
+- Lookup succeeds with empty metadata maps when deterministic config path is populated.
+- Lookup/store key equivalence for identical dimensions via shared constructor.
+- Miss behavior when any single dimension changes: prompt version, model ID, context hash, content hash.
+- Empty `content_hash` is rejected.
+- Stable context-hash golden test for known input.
 
-## Rollout plan
-1. Implement helper + lookup refactor behind existing behavior.
-2. Add tests for empty metadata maps and two-run reuse.
-3. Run `cargo build`, `cargo nextest run`, `cargo clippy --all-targets -- -D warnings`.
-4. Validate on real run with engine logs for hit/miss counters.
+2. Integration tests
+- Two-run briefing scenario with mocked LLM:
+  - run 1 stores summaries
+  - run 2 reuses summaries and emits no summary completion effect dispatch for reused articles
+- Partial-failure scenario:
+  - only previously successful summaries are reused
+  - failed/missing entries are recomputed
 
-## Future extensions and nice ideas
-- Add explicit cache provenance in persisted entries:
-  - source prompt version/model/context hash used for lookup and store.
-- Add lightweight cache inspector command/UI panel for debugging key dimensions.
-- Add cache invalidation controls:
-  - per-prompt clear
-  - by context hash
-  - by model id
-  - by age/TTL
-- Add preflight diagnostics before briefing run:
-  - expected reusable article count and why not reusable.
-- Consider caching triage results with parallel key strategy.
-- Add optional strict mode: fail fast on metadata mismatch instead of warning.
+3. Regression tests
+- No triage pipeline behavior regression.
+- Briefing completes when all summaries are cache hits.
+
+## Risks and mitigations
+- Risk: metadata still races with article loading.
+  - Mitigation: initialization-time population or explicit readiness gate.
+- Risk: persisted cache invalidation after key schema/hash changes.
+  - Mitigation: treat load failure as expected invalidation; consider explicit cache key version field in future.
+- Risk: lookup/store divergence reintroduced later.
+  - Mitigation: single constructor plus key-equivalence tests.
+
+## Implementation order
+1. Real metadata population from `LlmConfig`/registry.
+2. Ordering guarantee for metadata readiness.
+3. Shared key constructor adoption for lookup and store.
+4. Stable `context_hash` algorithm replacement.
+5. Mismatch detection and logging symmetry.
+6. Unit/integration tests.
+7. `cargo build`.
+8. `cargo clippy --all-targets -- -D warnings`.
 
 ## Acceptance criteria
-- Second `Generate Briefing` run reuses summaries when content+context+prompt/model are unchanged.
-- Engine log clearly reports cache hit/miss decisions and reasons per article.
-- All tests and lint gates pass.
-- No change to unidirectional data flow boundaries.
+- Second run reuses summary cache when content/context/prompt/model are unchanged.
+- Reuse works even when previous `LoadLlmMetadata` empty-map failure mode is simulated, provided deterministic metadata path is populated.
+- Logs fully explain each article decision and provide run-level counters.
+- UDF boundaries remain intact: reducer pure, effects isolated, state updated only through actions.
