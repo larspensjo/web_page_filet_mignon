@@ -4,8 +4,8 @@
 
 The application creates per-article summaries during the briefing process, stored as
 `ArticleSummaryResult` (title, summary, key_points) inside `BriefingSession`. However,
-**there is no way to view these summaries**. Clicking an article in the treeview shows the
-markdown-converted article content, which is hard to read and not the user's primary interest.
+**there is no way to view these summaries**. Clicking an article shows the markdown-converted
+article content, which is hard to read and not the user's primary interest.
 
 **User workflow:**
 1. Generate and read the **Briefing** (one-page aggregated overview)
@@ -14,12 +14,9 @@ markdown-converted article content, which is hard to read and not the user's pri
 
 **Problems solved:**
 - Summaries exist but are never displayed
-- Markdown article preview is the default, but summaries should be primary
+- Markdown article preview is the default; summaries should be primary
 - No way to open the original article URL in a browser
 - No visual distinction between articles with/without summaries
-
-**Outcome:** Replace article preview with summary preview, add "Open in Browser" button,
-and style articles without summaries as disabled (gray, non-clickable).
 
 ---
 
@@ -33,26 +30,90 @@ Button click    ──►  Msg::OpenInBrowserClicked  ──►  Reducer  ──
                                                                    ──►  Effect handler (IO)
 ```
 
-- **Reducer is pure:** `select_job()` reads summary from `BriefingSession`, formats text, stores
-  in `PreviewState`. No IO.
-- **Effects are isolated:** Browser opening is an `Effect` dispatched by the reducer, executed
-  by the effect handler.
-- **Single source of truth:** Summary data lives in `BriefingSession.articles`. The `AppViewModel`
+- **Reducer is pure.** `select_job()` reads summary from `BriefingSession`, sets preview
+  mode, stores formatted text. No IO.
+- **Effects are isolated.** Browser opening is an `Effect`, executed by the effect handler.
+- **Single source of truth.** Summary data lives in `BriefingSession`. The `AppViewModel`
   receives a read-only projection.
+
+---
+
+## Blockers
+
+**Blocker A — Preview precedence bug (must fix):**
+`AppState::view()` at `state.rs:141` currently prioritizes aggregate briefing preview over
+the selected job:
+```rust
+let preview_text = briefing_preview.clone()
+    .or_else(|| self.ui.preview_content().map(ToOwned::to_owned));
+```
+After briefing completes, this always shows the briefing text, not the article summary —
+regardless of what the user clicks. The plan must introduce an explicit `PreviewMode` to
+control what is displayed rather than relying on the `or_else` precedence chain.
+
+**Blocker B — Gray items are visual-only; clicks still fire:**
+`TreeItemDescriptor.style_override` controls rendering only (via `NM_CUSTOMDRAW` in
+`treeview_handler.rs:1000–1047`). The `AppEvent::TreeViewItemSelectionChanged` event still
+fires on label clicks (`treeview_handler.rs:1325`). True "disable interaction" is not
+supported by CommanDuctUI today. **Resolution:** handle gracefully in the reducer — when
+a job without a summary is clicked, show placeholder text "No summary available — run
+Briefing first." Gray styling makes the intent clear; the reducer handles the edge case.
+
+**Blocker C — Shell-fragile browser launch:**
+`cmd /C start "" <url>` breaks on URLs with `&`, `%`, or spaces when processed through
+cmd's parser. **Resolution:** use `ShellExecuteW` directly (Windows) which passes the URL
+to the shell verbatim without cmd interpretation.
 
 ---
 
 ## Implementation Steps
 
-### Step 1: Add `summary_for_url()` to `BriefingSession`
+### Step 1: Introduce `PreviewMode` in Core State
+
+**File:** `crates/harvester_core/src/state.rs`
+
+Add an enum to replace the implicit `or_else` precedence:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+enum PreviewMode {
+    #[default]
+    Briefing,
+    SelectedJobSummary,
+}
+```
+
+Add `preview_mode: PreviewMode` to `UiState` (the struct that holds `preview` today).
+
+Change `AppState::view()` (line 141) to drive `preview_text` from mode:
+
+```rust
+let preview_text = match self.ui.preview_mode() {
+    PreviewMode::SelectedJobSummary => self.ui.preview_content().map(ToOwned::to_owned),
+    PreviewMode::Briefing => self.briefing.format_preview()
+        .or_else(|| self.ui.preview_content().map(ToOwned::to_owned)),
+};
+```
+
+When user selects a job, mode transitions to `SelectedJobSummary`. When briefing
+starts/completes, mode reverts to `Briefing`. This gives deterministic, auditable precedence
+instead of implicit chaining.
+
+**Tests:**
+- `briefing_complete_then_job_selected_shows_summary_not_briefing`
+- `job_selected_then_briefing_completes_shows_briefing`
+- `no_selection_shows_briefing_when_complete`
+
+---
+
+### Step 2: Add `summary_for_url()` to `BriefingSession`
 
 **File:** `crates/harvester_core/src/briefing.rs`
 
-Follow the existing `TriageSession::result_for_url()` pattern (triage.rs:199-206):
+Follow the `TriageSession::result_for_url()` pattern (triage.rs:199):
 
 ```rust
-/// Look up a completed summary by article URL.
-/// Returns None if the article has no completed summary.
+/// Returns the completed summary result for an article URL, if available.
 pub fn summary_for_url(&self, url: &str) -> Option<&ArticleSummaryResult> {
     self.articles.iter().find_map(|article| match &article.summary_state {
         ArticleSummaryState::Completed { result } if article.url == url => Some(result),
@@ -64,118 +125,116 @@ pub fn summary_for_url(&self, url: &str) -> Option<&ArticleSummaryResult> {
 **Tests:**
 - `summary_for_url_returns_none_when_no_articles`
 - `summary_for_url_returns_none_when_pending`
+- `summary_for_url_returns_none_when_failed`
 - `summary_for_url_returns_result_when_completed`
 - `summary_for_url_returns_none_for_wrong_url`
 
 ---
 
-### Step 2: Modify `select_job()` to Use Summaries
+### Step 3: Modify `select_job()` to Use Summaries
 
 **File:** `crates/harvester_core/src/state.rs` (line ~459)
 
-Change the job selection logic:
-
 ```rust
 pub(crate) fn select_job(&mut self, job_id: JobId) {
-    let job = match self.jobs.get(&job_id) {
-        Some(job) => job,
-        None => return,
+    let Some(job) = self.jobs.get(&job_id) else { return };
+
+    let content = match self.briefing.summary_for_url(&job.url) {
+        Some(summary) => format_summary_for_preview(summary),
+        None => "No summary available — run Briefing first.".to_string(),
     };
 
-    // Only allow selection if a summary exists for this article
-    let summary = match self.briefing.summary_for_url(&job.url) {
-        Some(s) => s,
-        None => return, // No summary → do nothing
-    };
-
-    let formatted = format_summary_for_preview(summary);
-    if self.ui.select_job(job_id, Some(&formatted)) {
+    if self.ui.select_job_with_mode(job_id, content, PreviewMode::SelectedJobSummary) {
         self.dirty = true;
     }
 }
 ```
 
-Add formatting helper (private function in `state.rs`):
+Note: even when no summary exists, we set preview mode to `SelectedJobSummary` with a
+placeholder. This ensures visual consistency — the preview area always reflects the
+selection state. The placeholder is better UX than ignoring the click (see Blocker B).
+
+Add private formatting helper:
 
 ```rust
 fn format_summary_for_preview(summary: &ArticleSummaryResult) -> String {
     use std::fmt::Write;
-    let mut output = String::new();
-    let _ = writeln!(output, "# {}", summary.title);
-    output.push('\n');
-    let _ = writeln!(output, "{}", summary.summary);
+    let mut out = String::new();
+    let _ = writeln!(out, "# {}", summary.title);
+    out.push('\n');
+    let _ = writeln!(out, "{}", summary.summary);
     if !summary.key_points.is_empty() {
-        output.push('\n');
-        let _ = writeln!(output, "## Key Points");
-        output.push('\n');
+        out.push('\n');
+        let _ = writeln!(out, "## Key Points");
+        out.push('\n');
         for point in &summary.key_points {
-            let _ = writeln!(output, "  - {}", point);
+            let _ = writeln!(out, "  - {}", point);
         }
     }
-    output
+    out
 }
 ```
 
+Revert mode to `Briefing` when briefing completes (in the existing briefing completion
+handler in `update.rs`).
+
 **Tests:**
 - `selecting_job_with_summary_shows_formatted_summary`
-- `selecting_job_without_summary_does_nothing`
-- `selecting_job_without_summary_keeps_previous_preview`
-- `format_summary_for_preview_includes_title_and_key_points`
-- `format_summary_for_preview_omits_key_points_section_when_empty`
+- `selecting_job_without_summary_shows_placeholder`
+- `selecting_job_sets_preview_mode_to_selected_job_summary`
+- `format_summary_includes_title_summary_and_key_points`
+- `format_summary_omits_key_points_section_when_empty`
 
 ---
 
-### Step 3: Add `selected_url` to `AppViewModel`
+### Step 4: Add `has_summary` to `JobRowView` and `selected_url` to `AppViewModel`
+
+These are derived views computed in `AppState::view()`. Keep them in **separate, independent
+derivation blocks** — do not mix triage and summary logic in the same loop.
 
 **File:** `crates/harvester_core/src/view_model.rs`
 
-Add field to `AppViewModel`:
 ```rust
-pub selected_url: Option<String>,
-```
-
-Default to `None`.
-
-**File:** `crates/harvester_core/src/state.rs` — in `view()` (line ~140)
-
-Populate from the selected job:
-```rust
-let selected_url = self.ui.selected_job_id()
-    .and_then(|job_id| self.jobs.get(&job_id))
-    .and_then(|job| {
-        // Only expose URL when summary is available (i.e., button should be active)
-        self.briefing.summary_for_url(&job.url)?;
-        Some(job.url.clone())
-    });
-```
-
-This ensures the "Open in Browser" button is only enabled when a summarized article is
-selected — correctness by construction.
-
----
-
-### Step 4: Add `has_summary` Flag to `JobRowView`
-
-**File:** `crates/harvester_core/src/view_model.rs`
-
-Add to `JobRowView`:
-```rust
+// In JobRowView:
 pub has_summary: bool,
+
+// In AppViewModel:
+pub selected_url: Option<String>,  // Some only when selected job has a completed summary
 ```
 
-**File:** `crates/harvester_core/src/state.rs` — in `view()` (around line 117-130)
+**File:** `crates/harvester_core/src/state.rs` — in `view()`:
 
-After building job views, annotate summary availability:
 ```rust
+// Block 1: triage annotations (existing, unchanged)
 for job_view in &mut jobs {
     if let Some(result) = self.triage.result_for_url(&job_view.url) {
         job_view.triage_annotation = Some(TriageAnnotationView { ... });
     }
+}
+
+// Block 2: summary availability (new, separate loop for clarity)
+for job_view in &mut jobs {
     job_view.has_summary = self.briefing.summary_for_url(&job_view.url).is_some();
 }
+
+// Derive selected_url — only expose when summary is available
+let selected_url = self.ui.selected_job_id()
+    .and_then(|job_id| self.jobs.get(&job_id))
+    .and_then(|job| {
+        self.briefing.summary_for_url(&job.url)?; // guard: summary must exist
+        Some(job.url.clone())
+    });
 ```
 
-This follows the exact pattern used for triage annotations (line 119).
+`selected_url` being `None` when no summary exists makes button enablement
+correct-by-construction: the renderer simply checks `view.selected_url.is_some()`.
+
+**Tests:**
+- `view_has_summary_true_for_completed_articles`
+- `view_has_summary_false_before_briefing`
+- `view_selected_url_populated_when_summarized_job_selected`
+- `view_selected_url_none_when_unsummarized_job_selected`
+- `view_selected_url_none_when_no_selection`
 
 ---
 
@@ -183,17 +242,14 @@ This follows the exact pattern used for triage annotations (line 119).
 
 **File:** `src/CommanDuctUI/src/styling_primitives.rs`
 
-Add new variant to `StyleId` enum:
+Add variant to `StyleId` enum (submodule change — bump version in Cargo.toml):
 ```rust
-pub enum StyleId {
-    // ...existing variants...
-    TreeItemDisabled,
-}
+TreeItemDisabled,
 ```
 
 **File:** `crates/harvester_app/src/platform/ui/layout.rs`
 
-Define the style in `define_dark_theme_styles()`:
+In `define_dark_theme_styles()`:
 ```rust
 commands.push(PlatformCommand::DefineStyle {
     style_id: StyleId::TreeItemDisabled,
@@ -204,9 +260,8 @@ commands.push(PlatformCommand::DefineStyle {
 });
 ```
 
-**File:** `crates/harvester_app/src/platform/ui/render.rs` — in `build_job_tree()`
+**File:** `crates/harvester_app/src/platform/ui/render.rs` — in `build_job_tree()`:
 
-Apply style override when no summary:
 ```rust
 TreeItemDescriptor {
     id: job_tree_item_id(job.job_id),
@@ -218,22 +273,24 @@ TreeItemDescriptor {
 }
 ```
 
-**Note:** `TreeItemDescriptor.style_override` already exists and is wired through
-`NM_CUSTOMDRAW` in `treeview_handler.rs:1000-1047`. No new infrastructure needed.
+`TreeItemDescriptor.style_override` already wires into `NM_CUSTOMDRAW` — no new
+infrastructure needed.
+
+**Tests (render.rs):**
+- `job_without_summary_gets_tree_item_disabled_style_override`
+- `job_with_summary_has_no_style_override`
 
 ---
 
-### Step 6: Add Message and Effect for Browser Opening
+### Step 6: Add `Msg::OpenInBrowserClicked` and `Effect::OpenUrlInBrowser`
 
 **File:** `crates/harvester_core/src/msg.rs`
-
 ```rust
-/// User requested to open the currently selected article in the default browser.
+/// User requested to open the currently selected article URL in the default browser.
 OpenInBrowserClicked,
 ```
 
 **File:** `crates/harvester_core/src/effect.rs`
-
 ```rust
 /// Open a URL in the user's default web browser.
 OpenUrlInBrowser {
@@ -243,76 +300,87 @@ OpenUrlInBrowser {
 
 **File:** `crates/harvester_core/src/update.rs`
 
-Add handler in the `match msg` block:
 ```rust
 Msg::OpenInBrowserClicked => {
-    if let Some(url) = state.selected_article_url() {
-        vec![Effect::OpenUrlInBrowser { url }]
-    } else {
-        Vec::new()
+    match state.selected_article_url() {
+        Some(url) => vec![Effect::OpenUrlInBrowser { url }],
+        None => Vec::new(),
     }
 }
 ```
 
-**File:** `crates/harvester_core/src/state.rs`
-
-Add accessor:
+Add accessor to `AppState` (`state.rs`):
 ```rust
-/// Returns the URL of the currently selected article, if one is selected and has a summary.
+/// URL of the currently selected and summarized article.
+/// Returns None if no job is selected or if the selected job has no summary.
 pub fn selected_article_url(&self) -> Option<String> {
     let job_id = self.ui.selected_job_id()?;
     let job = self.jobs.get(&job_id)?;
-    self.briefing.summary_for_url(&job.url)?; // Guard: only if summarized
+    self.briefing.summary_for_url(&job.url)?; // guard
     Some(job.url.clone())
 }
 ```
 
 **Tests:**
-- `open_in_browser_with_selected_job_emits_effect`
-- `open_in_browser_without_selection_emits_nothing`
-- `open_in_browser_without_summary_emits_nothing`
+- `open_in_browser_with_summarized_job_selected_emits_effect`
+- `open_in_browser_with_unsummarized_job_selected_emits_nothing`
+- `open_in_browser_with_no_selection_emits_nothing`
 
 ---
 
-### Step 7: Implement Browser Opening Effect
+### Step 7: Implement Browser Opening Effect via `ShellExecuteW`
 
 **File:** `crates/harvester_app/src/platform/effects.rs`
 
+Use `ShellExecuteW` directly — it passes the URL verbatim to the Windows shell handler
+without cmd string-parsing, avoiding breakage with `&`, `%`, spaces, and Unicode:
+
 ```rust
 Effect::OpenUrlInBrowser { url } => {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::PCWSTR;
+
     engine_info!("[browser] Opening URL: {}", url);
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    if let Err(e) = std::process::Command::new("cmd")
-        .args(["/C", "start", "", &url])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-    {
-        engine_error!("[browser] Failed to open URL {}: {}", url, e);
+
+    let operation: Vec<u16> = OsStr::new("open").encode_wide().chain(Some(0)).collect();
+    let url_wide: Vec<u16> = OsStr::new(&url).encode_wide().chain(Some(0)).collect();
+
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            PCWSTR(operation.as_ptr()),
+            PCWSTR(url_wide.as_ptr()),
+            None,
+            None,
+            SW_SHOWNORMAL,
+        )
+    };
+
+    // ShellExecuteW returns value > 32 on success
+    if result.0 as isize <= 32 {
+        engine_error!("[browser] ShellExecuteW failed for URL '{}', error code: {}", url, result.0 as isize);
     }
 }
 ```
 
-**Robustness notes:**
-- `CREATE_NO_WINDOW` prevents a flash of a console window.
-- The empty `""` argument before `&url` is required by `start` to handle URLs
-  containing `&` or spaces correctly (it treats the first quoted arg as window title).
-- Errors are logged but don't produce a follow-up Msg — opening a browser is
-  fire-and-forget; the user sees the result directly.
+**Robustness:** `ShellExecuteW` is the canonical Windows API for "open with default handler".
+It handles URL encoding, shell protocol dispatch, and browser selection without cmd parsing.
 
 ---
 
 ### Step 8: Add "Open in Browser" Button
 
 **File:** `crates/harvester_app/src/platform/ui/constants.rs`
-
 ```rust
 pub const BUTTON_OPEN_BROWSER: ControlId = ControlId::new(1009);
 ```
 
 **File:** `crates/harvester_app/src/platform/ui/layout.rs`
 
-In `initial_commands()`, add after the Poll Sources button:
+In `initial_commands()`, after the Poll Sources button:
 ```rust
 commands.push(PlatformCommand::CreateButton {
     window_id,
@@ -322,7 +390,7 @@ commands.push(PlatformCommand::CreateButton {
 });
 ```
 
-In `build_layout_rules()`, add layout rule:
+In `build_layout_rules()`:
 ```rust
 LayoutRule {
     control_id: BUTTON_OPEN_BROWSER,
@@ -334,7 +402,7 @@ LayoutRule {
 },
 ```
 
-In `apply_dark_theme()`, add style:
+In `apply_dark_theme()`:
 ```rust
 commands.push(PlatformCommand::ApplyStyleToControl {
     window_id,
@@ -345,11 +413,10 @@ commands.push(PlatformCommand::ApplyStyleToControl {
 
 ---
 
-### Step 9: Wire Up Button Click Event
+### Step 9: Wire Button Click in Platform Layer
 
 **File:** `crates/harvester_app/src/platform/app.rs`
 
-In `handle_event()`, add:
 ```rust
 AppEvent::ButtonClicked { control_id, .. }
     if control_id == ui::constants::BUTTON_OPEN_BROWSER =>
@@ -369,7 +436,7 @@ Add to `TreeRenderState`:
 prev_open_browser_enabled: Option<bool>,
 ```
 
-In `render()`, add button state tracking:
+In `render()`:
 ```rust
 let open_browser_enabled = view.selected_url.is_some();
 if tree_state.prev_open_browser_enabled != Some(open_browser_enabled) {
@@ -382,145 +449,112 @@ if tree_state.prev_open_browser_enabled != Some(open_browser_enabled) {
 }
 ```
 
----
-
-## Blockers
-
-### Keyboard Shortcut Support Does Not Exist
-
-The CommanDuctUI submodule has **no `AppEvent` variant for keyboard events** (no `KeyPressed`,
-no accelerator table support). All current interactions are button clicks, menu actions, tree
-selection, or input text changes.
-
-Adding keyboard shortcut support (e.g., Enter to open browser) requires:
-1. Adding `AppEvent::KeyPressed { window_id, virtual_key_code }` to `src/CommanDuctUI/src/types.rs`
-2. Handling `WM_KEYDOWN` or `WM_CHAR` in the window procedure
-3. Routing it through the event dispatch system
-
-**Decision:** Defer keyboard shortcuts to Phase 2 (see Future Ideas). The button alone provides
-full functionality. Keyboard support is a separate concern and should be planned independently.
+**Tests:**
+- `render_enables_open_browser_when_selected_url_is_some`
+- `render_disables_open_browser_when_selected_url_is_none`
+- `render_is_idempotent_for_open_browser_state`
 
 ---
 
 ## Files Modified (Summary)
 
 ### Core Logic (`harvester_core`):
-| File | Changes |
-|------|---------|
-| `src/briefing.rs` | Add `summary_for_url()` method |
-| `src/state.rs` | Modify `select_job()`, add `selected_article_url()`, add `format_summary_for_preview()`, populate `has_summary` and `selected_url` in `view()` |
-| `src/update.rs` | Handle `Msg::OpenInBrowserClicked` |
-| `src/msg.rs` | Add `OpenInBrowserClicked` variant |
-| `src/effect.rs` | Add `OpenUrlInBrowser { url }` variant |
-| `src/view_model.rs` | Add `selected_url: Option<String>` to `AppViewModel`, add `has_summary: bool` to `JobRowView` |
+| File | Change |
+|------|--------|
+| `src/briefing.rs` | Add `summary_for_url()` |
+| `src/state.rs` | Add `PreviewMode` enum; modify `select_job()`; add `selected_article_url()`, `format_summary_for_preview()`; add `has_summary` + `selected_url` derivation in `view()` |
+| `src/update.rs` | Handle `Msg::OpenInBrowserClicked`; revert `PreviewMode` to `Briefing` on briefing complete |
+| `src/msg.rs` | Add `OpenInBrowserClicked` |
+| `src/effect.rs` | Add `OpenUrlInBrowser { url }` |
+| `src/view_model.rs` | Add `has_summary: bool` to `JobRowView`; add `selected_url: Option<String>` to `AppViewModel` |
 
 ### UI/Platform (`harvester_app`):
-| File | Changes |
-|------|---------|
+| File | Change |
+|------|--------|
 | `src/platform/ui/constants.rs` | Add `BUTTON_OPEN_BROWSER` |
-| `src/platform/ui/layout.rs` | Create button, add layout rule, apply style |
-| `src/platform/ui/render.rs` | Add button enable/disable tracking, apply gray style to unsummarized jobs |
+| `src/platform/ui/layout.rs` | Create button, add layout rule, add dark theme style definition, apply style |
+| `src/platform/ui/render.rs` | Add button enable/disable tracking; apply `TreeItemDisabled` style based on `has_summary` |
 | `src/platform/app.rs` | Handle `ButtonClicked` for `BUTTON_OPEN_BROWSER` |
-| `src/platform/effects.rs` | Implement `Effect::OpenUrlInBrowser` |
+| `src/platform/effects.rs` | Implement `Effect::OpenUrlInBrowser` via `ShellExecuteW` |
 
 ### Submodule (`CommanDuctUI`):
-| File | Changes |
-|------|---------|
-| `src/styling_primitives.rs` | Add `TreeItemDisabled` variant to `StyleId` |
+| File | Change |
+|------|--------|
+| `src/styling_primitives.rs` | Add `TreeItemDisabled` to `StyleId` enum |
+| `Cargo.toml` | Bump version |
 
 ---
 
 ## Verification
 
 ### Manual Testing
-1. **Build:** `cargo build`
-2. **Download articles** and **run Briefing** to generate summaries
-3. **Before Briefing:** Click on an article — should do nothing. Articles appear gray.
-4. **After Briefing:** Click on an article with summary — preview shows formatted summary
-   (title, body, key points)
-5. **Click "Open in Browser"** — original URL opens in default browser
-6. **Button state:** "Open in Browser" is disabled when no summarized article is selected
-7. **Triage ordering:** High-priority articles still sort first, gray/non-gray styling
-   visually separates summarized from unsummarized
+1. `cargo build`
+2. Download articles, run Briefing to generate summaries
+3. **Before Briefing:** Click an article → preview shows "No summary available — run Briefing first." Tree items appear gray.
+4. **After Briefing:** Click a summarized article → preview shows formatted summary (title, body, key points). "Open in Browser" button becomes enabled.
+5. **Click "Open in Browser"** → original URL opens in default browser
+6. **Click a non-summarized article** (if any remain) → placeholder message, button stays disabled
+7. **Briefing state transitions:** running briefing reverts preview to briefing text; selecting a job again switches back to summary
 
 ### Automated Tests
-Run `cargo clippy --all-targets -- -D warnings` at end of implementation.
+`cargo clippy --all-targets -- -D warnings` at end of implementation.
 
-Key test scenarios (in `crates/harvester_core/`):
-- `briefing.rs`: `summary_for_url` correctness (match, miss, pending, failed)
-- `state.rs`: `select_job` with/without summary, `selected_article_url` accessor
-- `update.rs`: `Msg::OpenInBrowserClicked` → `Effect::OpenUrlInBrowser` mapping
-- `render.rs`: `has_summary` drives `style_override` on tree items
+Key test locations:
+- `crates/harvester_core/tests/` or `src/briefing.rs`, `src/state.rs`, `src/update.rs`
+- `crates/harvester_app/src/platform/ui/render.rs` (existing test pattern)
 
 ---
 
-## Robustness Considerations
+## Robustness Notes
 
-- **URL matching:** `BriefingSession.summary_for_url()` uses exact string match (`article.url == url`).
-  This is consistent with `TriageSession.result_for_url()`. If URL normalization becomes an issue
-  (e.g., trailing slashes, scheme differences), both should be updated together.
-- **Stale summaries:** After archive/reset, `BriefingSession` is reset to default
-  (`state.rs:454`), which clears all articles. Gray styling will reappear. This is correct.
-- **Race condition:** If briefing completes while the user already has a job selected,
-  the next `Tick` → `render()` cycle will update the gray styling. The user would need to
-  re-click to see the summary. This is acceptable UX.
-- **Browser command failure:** Logged via `engine_error!` but no user-visible error. A follow-up
-  could add status bar feedback.
+- **URL matching** uses exact string equality, consistent with `TriageSession::result_for_url()`. If URL normalization is ever needed, both should be updated together.
+- **Summary cache** is already persisted across sessions (`Effect::PersistSummaryCache`, `Msg::SummaryCacheHydrated`). However, the current lookup path is by composite key (content_hash + prompt metadata), not URL. The `BriefingSession` is the correct lookup source for the current session. Cross-session URL-indexed lookup is a future enhancement (see below).
+- **Stale state after archive:** `BriefingSession` resets on archive (`state.rs:454`), clearing all summaries. Gray styling reappears. This is correct behavior.
+- **Briefing in progress:** `summary_for_url()` returns `None` for articles in `Pending` or `InProgress` state. The placeholder message handles this gracefully.
 
 ---
 
 ## Future Ideas
 
-### Keyboard Shortcuts (Phase 2)
-Add keyboard navigation to CommanDuctUI:
-- `Enter` on selected tree item → open in browser
-- `Space` → toggle checkbox (already works natively for TreeView)
-- Arrow keys already work (native TreeView behavior)
-- Requires `AppEvent::KeyPressed` + `WM_KEYDOWN` handling in CommanDuctUI
+### Keyboard Shortcuts (Deferred — requires CommanDuctUI extension)
+Add `AppEvent::KeyPressed { window_id, virtual_key_code }` + `WM_KEYDOWN` handling to
+CommanDuctUI. Then bind Enter or a function key to `Msg::OpenInBrowserClicked`. This is
+a clean CommanDuctUI feature request, independent of this plan.
 
 ### Double-Click to Open Browser
-An alternative to keyboard shortcuts: double-clicking a tree item opens the URL directly.
-CommanDuctUI already handles `NM_DBLCLK` partially — could be extended to emit a
-`TreeViewItemDoubleClicked` event. Lower effort than full keyboard support.
+`NM_DBLCLK` handling could emit `AppEvent::TreeViewItemDoubleClicked`. Lower effort than
+full keyboard support. Could trigger `Msg::OpenInBrowserClicked` directly.
 
-### Summary Cache Lookup as Fallback
-Currently, summaries are only available during the current session (from `BriefingSession`).
-The `SummaryCache` persists across sessions but requires a composite key (content_hash +
-prompt metadata), not just URL. A future enhancement could:
-- Index `SummaryCache` by URL as a secondary index
-- Provide summaries for articles from previous sessions without re-running Briefing
-- This would make the "gray" state temporary — articles would eventually all become clickable
+### URL-Indexed Summary Cache (Cross-Session Summaries)
+Add a secondary URL → summary index into `SummaryCache` (or a separate `UrlSummaryIndex`),
+populated when summaries are computed and hydrated at startup. Would make summaries
+available without re-running Briefing after restart. Aligns with `FI-LLM-Caching-0001`,
+`FI-Storage-PreviewLoading-0001`.
 
-### Markdown-to-HTML Preview
-Instead of opening the original web page, render the saved markdown as HTML locally
-and open it in the browser. Useful for offline reading or when the original page
-has changed/disappeared. Could use a lightweight template with CSS for readability.
+### True "Disabled" Tree Items
+Extend CommanDuctUI to suppress `AppEvent::TreeViewItemSelectionChanged` for items with
+a specific style override (or a dedicated `disabled: bool` flag on `TreeItemDescriptor`).
+Would enable genuine non-clickable behavior without relying on the reducer as a fallback.
+Aligns with `FI-UX-PreviewRich-0001`.
 
-### Preview Panel Modes
-Add a mode selector to the preview panel header:
-- **Summary** (default) — LLM-generated summary
-- **Article** — markdown content (current behavior)
-- **Briefing** — aggregated briefing view
-This would restore in-app article viewing for users who want it.
+### Status Bar Feedback After Browser Open
+Have the effect handler send a follow-up `Msg::BrowserOpenSucceeded { url }` /
+`Msg::BrowserOpenFailed { url, reason }` to update the status bar. Improves traceability
+(every action should be explainable in `Action → State → Render`).
+
+### Preview Panel Mode Selector
+Add explicit mode toggle UI: **Summary** | **Article** | **Briefing**. The `PreviewMode`
+enum introduced in this plan is the foundation. Restores in-app markdown viewing for users
+who want it. Aligns with `FI-UX-PreviewRich-0001`, `FI-UX-PreviewSearch-0001`.
 
 ### Context Menu on Tree Items
-Right-click context menu with options:
-- "Open in Browser" (same as button)
-- "Copy URL to clipboard"
-- "View full article" (in-app)
-- "Re-summarize" (force regeneration)
-
-### Summary Quality Indicators
-Show metadata alongside the summary:
-- Token counts (input/output)
-- Model used
-- Summary age (from `SummaryCacheEntry.created_at_utc`)
-- Confidence indicators from the LLM response
+Right-click menu: "Open in Browser", "Copy URL", "View full article", "Re-summarize".
+Requires CommanDuctUI context menu support.
 
 ### Batch Browser Opening
-Select multiple articles (via checkboxes) and open all of them in the browser at once.
-Useful for "open the top 5 priority articles in tabs" workflow.
+Open top-N priority articles in browser at once. Useful for "open my morning reading list"
+workflow.
 
-### Status Bar Feedback for Browser Actions
-Show "Opened https://... in browser" in the status bar after the effect executes.
-Requires the effect handler to send a follow-up `Msg` back to the reducer.
+### Summary Quality Metadata in Preview Footer
+Show token counts, model used, and summary age from `SummaryCacheEntry.created_at_utc`
+below the summary text.
