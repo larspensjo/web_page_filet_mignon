@@ -5,9 +5,9 @@ use tempfile::tempdir;
 
 use harvester_engine::llm::provider::LlmProvider;
 use harvester_engine::llm::{
-    content_hash, LlmCommand, LlmConfig, LlmEvent, LlmHandle, LlmQuotas, MockLlmProvider, ModelId,
-    PricingRegistry, PromptId, PromptRegistry, ProviderKind, ReplayProvider, ReplayRecord,
-    TokenUsage,
+    content_hash, BlockingMockProvider, LlmCommand, LlmConfig, LlmEvent, LlmHandle, LlmQuotas,
+    MockLlmProvider, ModelId, PricingRegistry, PromptId, PromptRegistry, ProviderKind,
+    ReplayProvider, ReplayRecord, TokenUsage,
 };
 
 #[test]
@@ -35,6 +35,7 @@ fn llm_handle_dispatches_completion_event() {
         timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
         session_id: "test-session".to_string(),
         replay_cache: None,
+        max_concurrent_requests: 1,
     };
 
     let handle = LlmHandle::new(config);
@@ -110,6 +111,7 @@ fn llm_handle_skips_provider_when_cache_hit() {
         timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
         session_id: "test-session".to_string(),
         replay_cache: Some(replay_cache.clone()),
+        max_concurrent_requests: 1,
     };
 
     let handle = LlmHandle::new(config);
@@ -169,6 +171,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
         timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
         session_id: "test-session".to_string(),
         replay_cache: Some(Arc::clone(&replay_cache)),
+        max_concurrent_requests: 1,
     };
 
     let handle = LlmHandle::new(config);
@@ -236,4 +239,79 @@ fn llm_handle_inserts_cache_after_successful_response() {
             version
         )
         .is_some());
+}
+
+/// Verify that the LLM worker never allows more than `max_concurrent_requests`
+/// simultaneous provider calls, even when more requests are queued.
+#[test]
+fn concurrent_requests_never_exceed_cap() {
+    let cap = 2usize;
+    let total_requests = 5usize;
+
+    let triage_json = r#"{"category":"news","priority":3,"tags":["t"],"rationale":"ok"}"#;
+    let provider = Arc::new(BlockingMockProvider::new(triage_json));
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+    let registry = PromptRegistry::with_defaults();
+    let dir = tempdir().unwrap();
+
+    let config = LlmConfig {
+        provider: provider_trait,
+        default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
+        triage_model: None,
+        summary_model: None,
+        briefing_model: None,
+        registry,
+        quotas: LlmQuotas::default(),
+        output_dir: dir.path().to_path_buf(),
+        pricing: PricingRegistry::new(),
+        max_input_chars: 10_000,
+        timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
+        session_id: "test-session".to_string(),
+        replay_cache: None,
+        max_concurrent_requests: cap,
+    };
+
+    let handle = LlmHandle::new(config);
+
+    // Send all requests.
+    for i in 0..total_requests {
+        handle
+            .send(LlmCommand::Complete {
+                request_id: i as u64 + 1,
+                prompt_id: PromptId::ArticleTriage,
+                prompt_version: Some(1),
+                input_content: format!("document {i}"),
+                context: Vec::new(),
+            })
+            .expect("send should succeed");
+    }
+
+    // Give the worker a moment to fill the semaphore slots.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Peak in-flight should not exceed cap.
+    let peak = provider.peak_in_flight();
+    assert!(
+        peak <= cap,
+        "peak in-flight={peak} exceeded cap={cap}"
+    );
+
+    // Release all blocked requests so the worker can finish.
+    provider.release(total_requests);
+
+    // Drain all completion events.
+    let rx = handle.event_receiver();
+    let rx = rx.lock().unwrap();
+    for _ in 0..total_requests {
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("should receive completion event");
+    }
+
+    // Verify cap was never exceeded during the full run.
+    assert!(
+        provider.peak_in_flight() <= cap,
+        "final peak={} exceeded cap={}",
+        provider.peak_in_flight(),
+        cap
+    );
 }

@@ -619,13 +619,25 @@ fn parse_urls(raw: &str) -> Vec<String> {
 }
 
 fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
-    if let Some(next_idx) = state.triage().next_pending_index() {
+    let limit = state.triage_max_in_flight();
+
+    // Fill available in-flight slots.
+    while state.triage().can_dispatch_more(limit) {
+        let next_idx = state.triage().next_pending_index().expect("can_dispatch_more guarantees pending exists");
         let prepared_text = state.triage().articles()[next_idx].prepared_text.clone();
         let request_id = state.allocate_next_llm_request_id();
         state.record_pending_llm_request(request_id, PromptId::ArticleTriage);
         state.triage_mut().start_article(next_idx, request_id);
 
         let context = state.context_for(PromptId::ArticleTriage).to_vec();
+
+        engine_info!(
+            "[llm-concurrency] triage dispatch request_id={} article={} in_flight={} limit={}",
+            request_id,
+            next_idx,
+            state.triage().in_progress_count(),
+            limit
+        );
 
         effects.push(Effect::RequestLlmCompletion {
             request_id,
@@ -635,22 +647,32 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
             context,
         });
         state.mark_dirty();
-        return;
     }
-    if state.triage().completed_count() == 0 {
-        state
-            .triage_mut()
-            .fail("all triage attempts failed".to_string());
-    } else {
-        state.triage_mut().complete();
+
+    // Check if all articles are settled (no pending, no in-progress).
+    if state.triage().pending_count() == 0 && state.triage().in_progress_count() == 0 {
+        if state.triage().completed_count() == 0 {
+            state
+                .triage_mut()
+                .fail("all triage attempts failed".to_string());
+        } else {
+            state.triage_mut().complete();
+        }
+        state.mark_dirty();
     }
-    state.mark_dirty();
 }
 
 fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
     log_summary_cache_warmup_if_needed(state);
 
+    let limit = state.summary_max_in_flight();
+
     loop {
+        // Stop filling if we've reached the concurrency limit.
+        if state.briefing().in_progress_count() >= limit {
+            break;
+        }
+
         let Some(next_idx) = state.briefing().next_pending_index() else {
             break;
         };
@@ -694,6 +716,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     state.briefing_mut().complete_article(next_idx, result);
                     state.briefing_mut().set_article_cache_key(next_idx, None);
                     state.mark_dirty();
+                    // Cache hit: slot not consumed, continue filling.
                     continue;
                 }
 
@@ -709,6 +732,13 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                 let request_id = state.allocate_next_llm_request_id();
                 state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
                 state.briefing_mut().start_article(next_idx, request_id);
+                engine_info!(
+                    "[llm-concurrency] summary dispatch request_id={} article={} in_flight={} limit={}",
+                    request_id,
+                    next_idx,
+                    state.briefing().in_progress_count(),
+                    limit
+                );
                 effects.push(Effect::RequestLlmCompletion {
                     request_id,
                     prompt_id: PromptId::ArticleSummary,
@@ -717,7 +747,8 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     context,
                 });
                 state.mark_dirty();
-                return;
+                // Live request: continue loop to fill remaining slots.
+                continue;
             }
             Err(err) => {
                 state.briefing_mut().set_article_cache_key(next_idx, None);
@@ -735,6 +766,13 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                 let request_id = state.allocate_next_llm_request_id();
                 state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
                 state.briefing_mut().start_article(next_idx, request_id);
+                engine_info!(
+                    "[llm-concurrency] summary dispatch (no-cache-key) request_id={} article={} in_flight={} limit={}",
+                    request_id,
+                    next_idx,
+                    state.briefing().in_progress_count(),
+                    limit
+                );
                 effects.push(Effect::RequestLlmCompletion {
                     request_id,
                     prompt_id: PromptId::ArticleSummary,
@@ -743,9 +781,15 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     context,
                 });
                 state.mark_dirty();
-                return;
+                // Live request: continue loop to fill remaining slots.
+                continue;
             }
         }
+    }
+
+    // Gate aggregate briefing on ALL articles settled (no pending, no in-progress).
+    if state.briefing().pending_count() > 0 || state.briefing().in_progress_count() > 0 {
+        return;
     }
 
     if state.briefing().completed_summary_count() == 0 {
@@ -794,7 +838,7 @@ fn try_start_briefing_with_metadata(state: &mut AppState, effects: &mut Vec<Effe
     if !state.is_briefing_metadata_ready() {
         return;
     }
-    if matches!(state.briefing().phase(), BriefingPhase::Summarizing { .. }) {
+    if matches!(state.briefing().phase(), BriefingPhase::Summarizing) {
         dispatch_next_briefing_step(state, effects);
     }
 }
@@ -966,7 +1010,7 @@ mod tests {
         );
         assert!(matches!(
             state.briefing().phase(),
-            BriefingPhase::Summarizing { .. }
+            BriefingPhase::Summarizing
         ));
         assert!(matches!(
             state.briefing().articles()[0].summary_state,
@@ -1266,5 +1310,229 @@ mod tests {
         let state = AppState::new();
         let (_state, effects) = update(state, Msg::OpenInBrowserClicked);
         assert!(effects.is_empty());
+    }
+
+    // ── Triage reducer integration tests ─────────────────────────────────────
+
+    fn loaded_triage_articles(count: usize) -> Vec<LoadedArticle> {
+        (0..count)
+            .map(|i| LoadedArticle {
+                url: format!("https://example.com/{i}"),
+                source_title: None,
+                prepared_text: format!("Article {i} text"),
+                content_hash: format!("hash-{i}"),
+            })
+            .collect()
+    }
+
+    fn triage_json() -> String {
+        r#"{"category":"news","priority":3,"tags":["tag"],"rationale":"ok"}"#.to_string()
+    }
+
+    fn triage_success(request_id: u64) -> Msg {
+        Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::Success {
+                output_json: triage_json(),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 1,
+                model_id: "test-model".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn triage_clicked_emits_load_effects() {
+        init_logging();
+        let state = AppState::new();
+        let (_state, effects) = update(state, Msg::TriageClicked);
+        assert!(effects.contains(&Effect::LoadArticlesForTriage));
+        assert!(effects.contains(&Effect::LoadLlmMetadata));
+        assert!(effects.contains(&Effect::LoadPromptContexts));
+    }
+
+    #[test]
+    fn triage_articles_loaded_dispatches_up_to_limit_requests() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_triage_max_in_flight(2);
+        let (_, _) = update(state.clone(), Msg::TriageClicked);
+
+        // Simulate loading 3 articles with limit=2: expect 2 effects emitted.
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+        let (state, effects) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                articles: loaded_triage_articles(3),
+            },
+        );
+        let llm_effects: Vec<_> = effects
+            .iter()
+            .filter(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
+            .collect();
+        assert_eq!(llm_effects.len(), 2, "should dispatch 2 requests for limit=2");
+        assert_eq!(state.triage().in_progress_count(), 2);
+        assert_eq!(state.triage().pending_count(), 1);
+    }
+
+    #[test]
+    fn triage_completion_backfills_one_slot() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_triage_max_in_flight(2);
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+
+        // Load 3 articles → 2 in-flight (ids 1, 2)
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                articles: loaded_triage_articles(3),
+            },
+        );
+        assert_eq!(state.triage().in_progress_count(), 2);
+
+        // Complete request_id=1 → should backfill 1 more slot
+        let (state, effects) = update(state, triage_success(1));
+        let llm_effects: Vec<_> = effects
+            .iter()
+            .filter(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
+            .collect();
+        assert_eq!(llm_effects.len(), 1, "backfill dispatches 1 new request");
+        assert_eq!(state.triage().in_progress_count(), 2);
+        assert_eq!(state.triage().completed_count(), 1);
+    }
+
+    #[test]
+    fn triage_out_of_order_completion_routes_correctly() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_triage_max_in_flight(3);
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+
+        // Load 3 articles → all 3 in-flight (request_ids 1, 2, 3)
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                articles: loaded_triage_articles(3),
+            },
+        );
+        assert_eq!(state.triage().in_progress_count(), 3);
+
+        // Complete in reverse order: 3, then 1, then 2
+        let (state, _) = update(state, triage_success(3));
+        let (state, _) = update(state, triage_success(1));
+        let (state, _) = update(state, triage_success(2));
+
+        assert_eq!(state.triage().completed_count(), 3);
+        assert_eq!(state.triage().failed_count(), 0);
+        assert!(matches!(
+            state.triage().phase(),
+            crate::triage::TriagePhase::Complete
+        ));
+    }
+
+    #[test]
+    fn triage_progress_text_counts_settled_articles() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_triage_max_in_flight(1);
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                articles: loaded_triage_articles(3),
+            },
+        );
+        let text = state.triage().progress_text().unwrap();
+        assert!(text.contains("0/3"), "initial progress shows 0 settled: got '{text}'");
+
+        let (state, _) = update(state, triage_success(1));
+        let text = state.triage().progress_text().unwrap();
+        assert!(text.contains("1/3"), "after 1 complete shows 1 settled: got '{text}'");
+    }
+
+    #[test]
+    fn triage_quota_exhausted_fails_all_pending() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_triage_max_in_flight(1);
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                articles: loaded_triage_articles(3),
+            },
+        );
+
+        // Quota exhausted on request_id=1 → all pending should fail
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 1,
+                result: LlmResultKind::QuotaExhausted {
+                    reason: "too many calls".to_string(),
+                },
+            },
+        );
+        assert_eq!(state.triage().failed_count(), 3); // 1 from quota + 2 pending
+    }
+
+    #[test]
+    fn briefing_aggregate_not_dispatched_until_all_articles_settled() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_summary_max_in_flight(2);
+        let (state, _) = update(state, Msg::GenerateBriefingClicked);
+        let state = with_summary_metadata(state);
+        let (articles, collection_text) = loaded_articles();
+
+        // Load 2 articles with limit=2 → both go in-flight
+        let (state, _) = update(state, Msg::ArticlesLoaded { articles, collection_text });
+        assert_eq!(state.briefing().in_progress_count(), 2);
+        assert_eq!(state.briefing().pending_count(), 0);
+
+        // Complete only first article → aggregate should NOT be dispatched yet
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 1,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article A"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
+                },
+            },
+        );
+        let has_aggregate = effects.iter().any(|e| matches!(
+            e,
+            Effect::RequestLlmCompletion { prompt_id: PromptId::AggregateBriefing, .. }
+        ));
+        assert!(!has_aggregate, "aggregate must not dispatch while article 2 still in-flight");
+        assert_eq!(state.briefing().in_progress_count(), 1);
+
+        // Complete second article → aggregate should now be dispatched
+        let (_state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 2,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article B"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
+                },
+            },
+        );
+        let has_aggregate = effects.iter().any(|e| matches!(
+            e,
+            Effect::RequestLlmCompletion { prompt_id: PromptId::AggregateBriefing, .. }
+        ));
+        assert!(has_aggregate, "aggregate should dispatch after all articles settled");
     }
 }

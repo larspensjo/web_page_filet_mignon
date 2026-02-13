@@ -6,7 +6,7 @@ pub type TriageArticleId = usize;
 pub enum TriagePhase {
     Idle,
     LoadingArticles,
-    Triaging { current_index: usize, total: usize },
+    Triaging,
     Complete,
     Failed { reason: String },
 }
@@ -78,7 +78,7 @@ impl TriageSession {
     pub fn is_active(&self) -> bool {
         matches!(
             self.phase,
-            TriagePhase::LoadingArticles | TriagePhase::Triaging { .. }
+            TriagePhase::LoadingArticles | TriagePhase::Triaging
         )
     }
 
@@ -100,28 +100,18 @@ impl TriageSession {
     }
 
     pub fn transition_to_triaging(&mut self) {
-        let total = self.articles.len();
-        if total == 0 {
+        if self.articles.is_empty() {
             self.phase = TriagePhase::Failed {
                 reason: "no articles to triage".to_string(),
             };
             return;
         }
-        self.phase = TriagePhase::Triaging {
-            current_index: 0,
-            total,
-        };
+        self.phase = TriagePhase::Triaging;
     }
 
     pub fn start_article(&mut self, article_id: TriageArticleId, request_id: u64) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.triage_state = ArticleTriageState::InProgress { request_id };
-            if let TriagePhase::Triaging { total, .. } = self.phase {
-                self.phase = TriagePhase::Triaging {
-                    current_index: article_id + 1,
-                    total,
-                };
-            }
         }
     }
 
@@ -135,6 +125,28 @@ impl TriageSession {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.triage_state = ArticleTriageState::Failed { reason };
         }
+    }
+
+    pub fn total(&self) -> usize {
+        self.articles.len()
+    }
+
+    pub fn in_progress_count(&self) -> usize {
+        self.articles
+            .iter()
+            .filter(|article| matches!(article.triage_state, ArticleTriageState::InProgress { .. }))
+            .count()
+    }
+
+    pub fn pending_count(&self) -> usize {
+        self.articles
+            .iter()
+            .filter(|article| matches!(article.triage_state, ArticleTriageState::Pending))
+            .count()
+    }
+
+    pub fn can_dispatch_more(&self, limit: usize) -> bool {
+        self.in_progress_count() < limit && self.pending_count() > 0
     }
 
     pub fn completed_count(&self) -> usize {
@@ -187,10 +199,11 @@ impl TriageSession {
     pub fn progress_text(&self) -> Option<String> {
         let text = match self.phase {
             TriagePhase::LoadingArticles => "Loading articles...".to_string(),
-            TriagePhase::Triaging {
-                current_index,
-                total,
-            } => format!("Triaging {current_index}/{total} articles..."),
+            TriagePhase::Triaging => {
+                let completed = self.completed_count() + self.failed_count();
+                let total = self.total();
+                format!("Triaging {completed}/{total} articles...")
+            }
             _ => return None,
         };
         Some(text)
@@ -257,22 +270,15 @@ mod tests {
     }
 
     #[test]
-    fn start_article_increments_progress() {
+    fn start_article_sets_in_progress() {
         let mut session = TriageSession::new_loading(None);
         session.set_articles(vec![loaded_article_with_url("https://example.com")]);
         session.transition_to_triaging();
         session.start_article(0, 123);
-        if let TriagePhase::Triaging {
-            current_index,
-            total,
-            ..
-        } = session.phase()
-        {
-            assert_eq!(*current_index, 1);
-            assert_eq!(*total, 1);
-        } else {
-            panic!("unexpected phase");
-        }
+        assert!(matches!(session.phase(), TriagePhase::Triaging));
+        assert_eq!(session.in_progress_count(), 1);
+        assert_eq!(session.pending_count(), 0);
+        assert_eq!(session.total(), 1);
     }
 
     #[test]

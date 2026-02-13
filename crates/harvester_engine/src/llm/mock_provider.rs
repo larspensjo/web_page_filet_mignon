@@ -1,4 +1,10 @@
-use std::{collections::VecDeque, sync::Mutex};
+use std::{
+    collections::VecDeque,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+};
 
 use super::provider::LlmProvider;
 use super::types::{
@@ -74,5 +80,86 @@ impl LlmProvider for MockLlmProvider {
 
     fn provider_name(&self) -> &str {
         "mock"
+    }
+}
+
+/// A mock provider that tracks concurrent in-flight requests and can be
+/// gated to block responses until explicitly released. Used in tests that
+/// verify concurrency cap invariants.
+pub struct BlockingMockProvider {
+    /// Response to return for every request.
+    response_content: String,
+    /// Gate semaphore: each permit allows one queued request to return.
+    gate: Arc<tokio::sync::Semaphore>,
+    /// Current number of in-flight requests.
+    current_in_flight: Arc<AtomicUsize>,
+    /// Peak simultaneous in-flight count observed.
+    peak_in_flight: Arc<AtomicUsize>,
+}
+
+impl BlockingMockProvider {
+    pub fn new(response_content: impl Into<String>) -> Self {
+        Self {
+            response_content: response_content.into(),
+            gate: Arc::new(tokio::sync::Semaphore::new(0)),
+            current_in_flight: Arc::new(AtomicUsize::new(0)),
+            peak_in_flight: Arc::new(AtomicUsize::new(0)),
+        }
+    }
+
+    /// Release `count` blocked requests to return.
+    pub fn release(&self, count: usize) {
+        self.gate.add_permits(count);
+    }
+
+    /// Current in-flight count.
+    pub fn current_in_flight(&self) -> usize {
+        self.current_in_flight.load(Ordering::SeqCst)
+    }
+
+    /// Peak simultaneous in-flight count observed across all requests.
+    pub fn peak_in_flight(&self) -> usize {
+        self.peak_in_flight.load(Ordering::SeqCst)
+    }
+
+    /// Clones that share the same counters and gate (for moving into the worker thread).
+    pub fn shared_counters(&self) -> (Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        (self.current_in_flight.clone(), self.peak_in_flight.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for BlockingMockProvider {
+    async fn complete(&self, _request: &LlmRequest) -> Result<LlmResponse, LlmError> {
+        // Track entry.
+        let prev = self.current_in_flight.fetch_add(1, Ordering::SeqCst);
+        let current = prev + 1;
+        // Update peak.
+        let mut peak = self.peak_in_flight.load(Ordering::SeqCst);
+        while current > peak {
+            match self.peak_in_flight.compare_exchange(
+                peak,
+                current,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => break,
+                Err(actual) => peak = actual,
+            }
+        }
+        // Block until a permit is available.
+        let _permit = self.gate.acquire().await.expect("gate closed");
+        self.current_in_flight.fetch_sub(1, Ordering::SeqCst);
+
+        Ok(LlmResponse::new(
+            self.response_content.clone(),
+            TokenUsage::new(0, 0),
+            ModelId::new(ProviderKind::OpenAi, "mock"),
+            FinishReason::Stop,
+        ))
+    }
+
+    fn provider_name(&self) -> &str {
+        "blocking-mock"
     }
 }

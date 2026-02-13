@@ -16,7 +16,7 @@ pub use dto::{AggregateBriefing, ArticleSummary, BriefingTheme, TriagePriority, 
 pub use handle::{
     LlmCommand, LlmCompletionError, LlmCompletionResult, LlmConfig, LlmEvent, LlmHandle,
 };
-pub use mock_provider::MockLlmProvider;
+pub use mock_provider::{BlockingMockProvider, MockLlmProvider};
 pub use pricing::{ModelPricing, PricingRegistry};
 pub use prompt::{PromptId, PromptRegistry, PromptTemplate, PromptVersion, TemplateVars};
 pub use prompt_context::{
