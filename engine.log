@@ -1,3 +1,31 @@
-2026-02-12T04:07:27.886085Z [INFO] harvester_app::platform::app: Logger initialized. Starting harvester_app...
-2026-02-12T04:07:30.6533519Z [INFO] harvester_core::update: [source-poll] polling requested
-2026-02-12T04:07:30.653746Z [INFO] harvester_app::platform::effects: [source-config] loading C:\Users\larsp\src\web_page_filet_mignon\main\sources.ron
+2026-02-13T07:45:03.9343362Z [INFO] harvester_app::platform::app: Logger initialized. Starting harvester_app...
+2026-02-13T07:45:03.9384876Z [INFO] harvester_app::platform::app: [llm-concurrency] configured max_concurrent_requests=3
+2026-02-13T07:45:03.9417271Z [INFO] harvester_app::platform::persistence: Loaded persisted completed jobs from "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.harvester_state.ron"
+2026-02-13T07:45:03.9453738Z [INFO] harvester_app::platform::summary_cache_store: [summary-cache] Loaded 4 entries from "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"
+2026-02-13T07:45:03.9466806Z [INFO] harvester_core::update: [summary-cache] Hydrated 4 entries from persistent store
+2026-02-13T07:45:13.5517747Z [INFO] harvester_core::update: [briefing] briefing requested
+2026-02-13T07:45:13.5522612Z [INFO] harvester_app::platform::effects: [llm-metadata] metadata prepared (versions=3, models=3)
+2026-02-13T07:45:13.5529453Z [INFO] harvester_core::update: [LlmMetadata] Loaded 3 active version(s)
+2026-02-13T07:45:13.55323Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleTriage' v1 (schema v1, updated: 2026-02-12)
+2026-02-13T07:45:13.5533166Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://aibusiness.com/generative-ai/how-ai-is-reducing-the-administrative-burden-in-sales original_bytes=464 clean_bytes=209 hash=cee0332a
+2026-02-13T07:45:13.5537545Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleSummary' v1 (schema v1, updated: 2026-02-12)
+2026-02-13T07:45:13.5543555Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'AggregateBriefing' v1 (schema v1, updated: 2026-02-12)
+2026-02-13T07:45:13.5545825Z [INFO] harvester_core::update: [PromptContext] Loaded 3 context(s)
+2026-02-13T07:45:13.5549753Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/technology/palantir-ceo-suggests-ai-bolsters-civil-liberties-warns-europe-falling-behind-us-china original_bytes=5645 clean_bytes=5178 hash=4db3b71e
+2026-02-13T07:45:13.5562971Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/01/20/servicenow-openai-ai-software-saas.html original_bytes=5320 clean_bytes=4961 hash=e7567d06
+2026-02-13T07:45:13.5576907Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/us-china-collaboration-neurips-papers/ original_bytes=4615 clean_bytes=4360 hash=1bcb0c37
+2026-02-13T07:45:13.5579672Z [INFO] harvester_app::platform::effects: [briefing-loader] prepared 4 article(s)
+2026-02-13T07:45:13.571263Z [INFO] harvester_core::update: [summary-cache] run warmup decision=run-start reason=metadata-loaded prompt_version=3 model_id=gpt-4o-mini
+2026-02-13T07:45:13.571563Z [INFO] harvester_core::update: [summary-cache] article=0 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=cee0332a
+2026-02-13T07:45:13.5718502Z [INFO] harvester_core::update: [summary-cache] article=1 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=4db3b71e
+2026-02-13T07:45:13.5720733Z [INFO] harvester_core::update: [summary-cache] article=2 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=e7567d06
+2026-02-13T07:45:13.5722928Z [INFO] harvester_core::update: [summary-cache] article=3 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=1bcb0c37
+2026-02-13T07:45:13.5725879Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=1 prompt_id=AggregateBriefing
+2026-02-13T07:45:13.5727496Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=1 prompt_id=AggregateBriefing chars=15081
+2026-02-13T07:45:13.5729463Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=1 pre-call reservation accepted calls=1
+2026-02-13T07:45:13.5739321Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=1 model=gpt-4o-mini start
+2026-02-13T07:45:22.4178878Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=1 model=gpt-4o-mini-2024-07-18 duration_ms=8843
+2026-02-13T07:45:22.418073Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=1 calls=1 input=4009 output=346 cost=0
+2026-02-13T07:45:22.4332174Z [INFO] harvester_core::update: [summary-cache] run summary hits=4 misses=0 key_unavailable=0 total=4
+2026-02-13T07:45:22.436793Z [INFO] harvester_app::platform::summary_cache_store: [summary-cache] Saved 4 entries to "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"
+2026-02-13T07:45:22.4371537Z [INFO] harvester_app::platform::effects: [summary-cache] Persisted cache to "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"

@@ -357,6 +357,27 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     });
 
     commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ViewerReadable,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1A,
+                g: 0x1D,
+                b: 0x22,
+            }),
+            text_color: Some(Color {
+                r: 0xD8,
+                g: 0xDE,
+                b: 0xE9,
+            }),
+            font: Some(FontDescription {
+                name: Some("Segoe UI".to_string()),
+                size: Some(10),
+                weight: Some(FontWeight::Normal),
+            }),
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
         style_id: StyleId::ProgressBar,
         style: ControlStyle {
             background_color: Some(Color {
@@ -662,7 +683,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: VIEWER_PREVIEW,
-        style_id: StyleId::ViewerMonospace,
+        style_id: StyleId::ViewerReadable,
     });
 
     commands.push(PlatformCommand::ApplyStyleToControl {

@@ -14,6 +14,9 @@ use super::tree_item_ids::{
 };
 use std::collections::HashMap;
 
+const MAX_VIEWER_CHARS: usize = 64 * 1024;
+const VIEWER_TRUNCATE_MARKER: &str = "[display truncated]";
+
 #[derive(Debug)]
 pub struct TreeRenderState {
     initialized: bool,
@@ -300,7 +303,8 @@ pub fn render(
     let preview_text = view
         .preview_text
         .as_deref()
-        .map(normalize_windows_newlines)
+        .map(shape_for_viewer)
+        .map(|text| normalize_windows_newlines(&text))
         .unwrap_or_default();
     let preview_text_changed = match tree_state.prev_preview_text.as_deref() {
         Some(prev) => prev != preview_text,
@@ -560,6 +564,96 @@ fn normalize_windows_newlines(text: &str) -> String {
     normalized
 }
 
+fn shape_for_viewer(text: &str) -> String {
+    let text = add_spacing_before_headings(text);
+    let text = normalize_bullets(&text);
+    let text = strip_bold_markers(&text);
+    let text = cap_blank_line_runs(&text);
+    truncate_for_viewer(&text)
+}
+
+fn add_spacing_before_headings(text: &str) -> String {
+    let mut output: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        let is_heading = line.starts_with('#');
+        if is_heading && !output.is_empty() && !output.last().unwrap_or(&"").trim().is_empty() {
+            output.push("");
+        }
+        output.push(line);
+    }
+    output.join("\n")
+}
+
+fn normalize_bullets(text: &str) -> String {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let indent_len = line.len().saturating_sub(trimmed.len());
+        if let Some(rest) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+            let mut rebuilt = String::new();
+            rebuilt.push_str(&line[..indent_len]);
+            rebuilt.push_str("• ");
+            rebuilt.push_str(rest);
+            out.push(rebuilt);
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    out.join("\n")
+}
+
+fn strip_bold_markers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '*' && matches!(chars.peek(), Some('*')) {
+            chars.next();
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn cap_blank_line_runs(text: &str) -> String {
+    let mut out = Vec::new();
+    let mut blank_run = 0usize;
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            blank_run += 1;
+            if blank_run <= 2 {
+                out.push("");
+            }
+        } else {
+            blank_run = 0;
+            out.push(line);
+        }
+    }
+    out.join("\n")
+}
+
+fn truncate_for_viewer(text: &str) -> String {
+    let total_chars = text.chars().count();
+    if total_chars <= MAX_VIEWER_CHARS {
+        return text.to_string();
+    }
+
+    let marker = format!("\r\n{VIEWER_TRUNCATE_MARKER}");
+    let marker_chars = marker.chars().count();
+    if marker_chars >= MAX_VIEWER_CHARS {
+        return marker;
+    }
+    let keep_chars = MAX_VIEWER_CHARS - marker_chars;
+    let cutoff = text
+        .char_indices()
+        .nth(keep_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    let mut truncated = text[..cutoff].to_string();
+    truncated.push_str(&marker);
+    truncated
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -804,6 +898,65 @@ mod tests {
             })
             .expect("SetViewerContent emitted");
         assert_eq!(viewer_text, "first\r\nsecond\r\nthird\r\nfourth");
+    }
+
+    #[test]
+    fn shape_adds_blank_line_before_heading() {
+        let shaped = shape_for_viewer("text\n# Heading");
+        assert_eq!(shaped, "text\n\n# Heading");
+    }
+
+    #[test]
+    fn shape_heading_already_preceded_by_blank_not_doubled() {
+        let shaped = shape_for_viewer("text\n\n# Heading");
+        assert_eq!(shaped, "text\n\n# Heading");
+    }
+
+    #[test]
+    fn shape_bullet_normalized() {
+        let shaped = shape_for_viewer("- item");
+        assert_eq!(shaped, "• item");
+    }
+
+    #[test]
+    fn shape_bold_markers_stripped() {
+        let shaped = shape_for_viewer("**term**");
+        assert_eq!(shaped, "term");
+    }
+
+    #[test]
+    fn shape_blank_line_runs_capped() {
+        let shaped = shape_for_viewer("a\n\n\n\nb");
+        assert_eq!(shaped, "a\n\n\nb");
+    }
+
+    #[test]
+    fn shape_length_guard_truncates() {
+        let source = "x".repeat(MAX_VIEWER_CHARS + 10);
+        let shaped = shape_for_viewer(&source);
+        assert!(shaped.ends_with(VIEWER_TRUNCATE_MARKER));
+        assert_eq!(shaped.chars().count(), MAX_VIEWER_CHARS);
+    }
+
+    #[test]
+    fn render_preview_uses_shaper() {
+        init_logging();
+        let window_id = WindowId::new(6);
+        let mut tree_state = TreeRenderState::new();
+        let view = AppViewModel {
+            preview_text: Some("text\n# Heading".to_string()),
+            ..Default::default()
+        };
+
+        let commands = render(window_id, &view, &mut tree_state);
+        let viewer_text = commands
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::SetViewerContent { text, .. } => Some(text),
+                _ => None,
+            })
+            .expect("SetViewerContent emitted");
+        assert_eq!(viewer_text, "text\r\n\r\n# Heading");
     }
 
     #[test]

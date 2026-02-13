@@ -4,8 +4,10 @@ pub mod triage;
 
 use super::PromptId;
 
-pub use briefing::BRIEFING_PROMPT_V3 as BRIEFING_PROMPT;
-pub use briefing::{BRIEFING_PROMPT_V1, BRIEFING_PROMPT_V2, BRIEFING_PROMPT_V3};
+pub use briefing::BRIEFING_PROMPT_V4 as BRIEFING_PROMPT;
+pub use briefing::{
+    BRIEFING_PROMPT_V1, BRIEFING_PROMPT_V2, BRIEFING_PROMPT_V3, BRIEFING_PROMPT_V4,
+};
 pub use summary::SUMMARY_PROMPT_V3 as SUMMARY_PROMPT;
 pub use summary::{SUMMARY_PROMPT_V1, SUMMARY_PROMPT_V2, SUMMARY_PROMPT_V3};
 pub use triage::TRIAGE_PROMPT_V3 as TRIAGE_PROMPT;
@@ -23,8 +25,32 @@ pub fn register_defaults(registry: &mut super::PromptRegistry) {
     registry.register(briefing::BRIEFING_PROMPT_V1);
     registry.register(briefing::BRIEFING_PROMPT_V2);
     registry.register(briefing::BRIEFING_PROMPT_V3);
+    registry.register(briefing::BRIEFING_PROMPT_V4);
     registry.set_active(
         PromptId::AggregateBriefing,
-        briefing::BRIEFING_PROMPT_V3.version,
+        briefing::BRIEFING_PROMPT_V4.version,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::PromptRegistry;
+
+    #[test]
+    fn register_defaults_sets_aggregate_briefing_to_v4() {
+        let mut registry = PromptRegistry::new();
+        register_defaults(&mut registry);
+        let active = registry
+            .active(PromptId::AggregateBriefing)
+            .expect("active AggregateBriefing prompt");
+        assert_eq!(active.version, 4);
+    }
+
+    #[test]
+    fn register_defaults_registers_four_aggregate_briefing_versions() {
+        let mut registry = PromptRegistry::new();
+        register_defaults(&mut registry);
+        assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 4);
+    }
 }

@@ -2,6 +2,8 @@ use crate::summary_cache::SummaryCacheKey;
 use std::fmt::Write;
 
 pub type BriefingArticleId = usize;
+const MAX_BRIEFING_PREVIEW_CHARS: usize = 32_768;
+const PREVIEW_TRUNCATE_MARKER: &str = "[...truncated]";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BriefingPhase {
@@ -325,27 +327,57 @@ impl BriefingSession {
             Some(result) => result,
             None => return None,
         };
-        let mut buffer = String::new();
-        writeln!(&mut buffer, "=== Executive Briefing ===").ok();
-        buffer.push('\n');
-        writeln!(&mut buffer, "{}", result.executive_summary).ok();
-        buffer.push('\n');
-        if !result.themes.is_empty() {
-            writeln!(&mut buffer, "=== Themes ===").ok();
-            writeln!(&mut buffer, "{}", result.theme_summary()).ok();
-            buffer.push('\n');
+        let mut sections = Vec::new();
+        sections.push("# Executive Briefing".to_string());
+        sections.push(format!("## Executive Summary\n\n{}", result.executive_summary.trim()));
+
+        let mut themes = String::from("## Themes");
+        if result.themes.is_empty() {
+            themes.push_str("\n\n(none)");
+        } else {
+            for (idx, theme) in result.themes.iter().enumerate() {
+                let _ = writeln!(
+                    themes,
+                    "\n{}. **{}** - {}",
+                    idx + 1,
+                    theme.name,
+                    theme.description
+                );
+            }
+            themes.pop();
         }
-        writeln!(&mut buffer, "=== Session Info ===").ok();
-        writeln!(
-            &mut buffer,
-            "Articles: {} total, {} summarized, {} failed",
+        sections.push(themes);
+
+        sections.push(format!(
+            "## Session Info\n\nArticles: {} total, {} summarized, {} failed",
             self.articles.len(),
             self.completed_summary_count(),
             self.failed_summary_count()
-        )
-        .ok();
-        Some(buffer)
+        ));
+
+        let preview = sections.join("\n\n");
+        Some(truncate_preview(&preview))
     }
+}
+
+fn truncate_preview(text: &str) -> String {
+    let total_chars = text.chars().count();
+    if total_chars <= MAX_BRIEFING_PREVIEW_CHARS {
+        return text.to_string();
+    }
+    let marker_chars = PREVIEW_TRUNCATE_MARKER.chars().count();
+    if marker_chars >= MAX_BRIEFING_PREVIEW_CHARS {
+        return PREVIEW_TRUNCATE_MARKER.to_string();
+    }
+    let keep_chars = MAX_BRIEFING_PREVIEW_CHARS - marker_chars;
+    let cutoff = text
+        .char_indices()
+        .nth(keep_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    let mut truncated = text[..cutoff].to_string();
+    truncated.push_str(PREVIEW_TRUNCATE_MARKER);
+    truncated
 }
 
 #[cfg(test)]
@@ -417,5 +449,116 @@ mod tests {
             ArticleSummaryState::Completed { result },
         );
         assert!(session.summary_for_url("https://other.com").is_none());
+    }
+
+    fn completed_session_with_themes(themes: Vec<BriefingThemeResult>) -> BriefingSession {
+        let mut session = BriefingSession::new_loading(None);
+        session.set_articles(
+            vec![
+                LoadedArticle {
+                    url: "https://example.com/a".to_string(),
+                    source_title: None,
+                    prepared_text: "Article A".to_string(),
+                    content_hash: "hash-a".to_string(),
+                },
+                LoadedArticle {
+                    url: "https://example.com/b".to_string(),
+                    source_title: None,
+                    prepared_text: "Article B".to_string(),
+                    content_hash: "hash-b".to_string(),
+                },
+            ],
+            "collection".to_string(),
+        );
+        session.transition_to_summarizing();
+        session.start_article(0, 1);
+        session.complete_article(0, make_result());
+        session.start_article(1, 2);
+        session.fail_article(1, "network".to_string());
+        session.set_briefing_request_id(3);
+        session.complete_briefing(BriefingResult {
+            executive_summary: "Concise executive summary".to_string(),
+            themes,
+            article_count: 2,
+            input_tokens: 20,
+            output_tokens: 10,
+        });
+        session
+    }
+
+    #[test]
+    fn briefing_format_preview_contains_sections() {
+        let session = completed_session_with_themes(vec![BriefingThemeResult {
+            name: "Theme A".to_string(),
+            description: "Description A".to_string(),
+        }]);
+        let preview = session.format_preview().expect("preview");
+        assert!(preview.contains("# Executive Briefing"));
+        assert!(preview.contains("## Executive Summary"));
+        assert!(preview.contains("## Themes"));
+        assert!(preview.contains("## Session Info"));
+    }
+
+    #[test]
+    fn briefing_format_preview_theme_list_stable() {
+        let session = completed_session_with_themes(vec![
+            BriefingThemeResult {
+                name: "First".to_string(),
+                description: "A".to_string(),
+            },
+            BriefingThemeResult {
+                name: "Second".to_string(),
+                description: "B".to_string(),
+            },
+        ]);
+        let preview = session.format_preview().expect("preview");
+        let first_pos = preview.find("1. **First**").expect("first theme");
+        let second_pos = preview.find("2. **Second**").expect("second theme");
+        assert!(first_pos < second_pos);
+    }
+
+    #[test]
+    fn briefing_format_preview_counts_correct() {
+        let session = completed_session_with_themes(vec![]);
+        let preview = session.format_preview().expect("preview");
+        assert!(preview.contains("Articles: 2 total, 1 summarized, 1 failed"));
+    }
+
+    #[test]
+    fn briefing_format_preview_none_when_not_complete() {
+        let mut session = BriefingSession::new_loading(None);
+        session.set_articles(
+            vec![LoadedArticle {
+                url: "https://example.com".to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash".to_string(),
+            }],
+            "collection".to_string(),
+        );
+        assert!(session.format_preview().is_none());
+    }
+
+    #[test]
+    fn briefing_format_preview_truncates_at_limit() {
+        let long_summary = "a".repeat(MAX_BRIEFING_PREVIEW_CHARS + 500);
+        let mut session = completed_session_with_themes(vec![BriefingThemeResult {
+            name: "Theme".to_string(),
+            description: "Description".to_string(),
+        }]);
+        session.complete_briefing(BriefingResult {
+            executive_summary: long_summary,
+            themes: vec![BriefingThemeResult {
+                name: "Theme".to_string(),
+                description: "Description".to_string(),
+            }],
+            article_count: 2,
+            input_tokens: 20,
+            output_tokens: 10,
+        });
+
+        let preview = session.format_preview().expect("preview");
+        assert!(preview.ends_with(PREVIEW_TRUNCATE_MARKER));
+        assert_eq!(preview.chars().count(), MAX_BRIEFING_PREVIEW_CHARS);
     }
 }

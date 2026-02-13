@@ -235,3 +235,7 @@ These are captured in FutureIdeas.md and are explicitly out of scope here:
    (Related: FI-Storage-ExportArtifacts-0001)
 7. **Preview quality indicators** in header: stub/paywall/duplicate signals.
    (FI-UX-PreviewIndicators-0001)
+8. **Theme ordering controls** — optional sort modes for themes (model order vs. impact-weighted)
+   to improve scanability during high-volume sessions.
+9. **Truncation telemetry in status bar** — surface when briefing/viewer truncation occurs and by how much,
+   so operators can choose to open raw/full artifacts when needed.
