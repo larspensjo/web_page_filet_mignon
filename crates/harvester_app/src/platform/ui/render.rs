@@ -1,6 +1,6 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
-use engine_logging::engine_debug;
+use engine_logging::{engine_debug, engine_warn};
 use harvester_core::{
     AppViewModel, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView, SessionState,
     Stage, DEFAULT_JOBS_PANEL_WIDTH,
@@ -9,12 +9,14 @@ use harvester_engine::LinkKind;
 
 use super::constants::*;
 use super::layout::build_layout_command;
+use super::markdown_to_rtf::{RTF_TRUNCATE_MARKER, convert_markdown_to_rtf};
 use super::tree_item_ids::{
     job_tree_item_id, link_tree_item_id, links_folder_tree_item_id, links_show_more_tree_item_id,
 };
 use std::collections::HashMap;
 
 const MAX_VIEWER_CHARS: usize = 64 * 1024;
+#[allow(dead_code)]
 const VIEWER_TRUNCATE_MARKER: &str = "[display truncated]";
 
 #[derive(Debug)]
@@ -300,23 +302,33 @@ pub fn render(
     let job_items = build_job_tree(view);
     append_tree_commands(window_id, job_items, tree_state, &mut cmds);
 
-    let preview_text = view
-        .preview_text
-        .as_deref()
-        .map(shape_for_viewer)
-        .map(|text| normalize_windows_newlines(&text))
-        .unwrap_or_default();
+    let preview_markdown = view.preview_text.as_deref().unwrap_or_default();
     let preview_text_changed = match tree_state.prev_preview_text.as_deref() {
-        Some(prev) => prev != preview_text,
+        Some(prev) => prev != preview_markdown,
         None => true,
     };
     if preview_text_changed {
-        cmds.push(PlatformCommand::SetViewerContent {
+        let (truncated_markdown, was_truncated) = truncate_markdown_for_preview(preview_markdown);
+        let mut rtf_text = convert_markdown_to_rtf(&truncated_markdown);
+        if was_truncated {
+            engine_warn!(
+                "[preview] markdown preview truncated from {} chars to {} chars",
+                preview_markdown.chars().count(),
+                truncated_markdown.chars().count()
+            );
+            if rtf_text.ends_with('}') {
+                rtf_text.pop();
+            }
+            rtf_text.push_str("\\par ");
+            rtf_text.push_str(RTF_TRUNCATE_MARKER);
+            rtf_text.push('}');
+        }
+        cmds.push(PlatformCommand::SetRichEditContent {
             window_id,
             control_id: VIEWER_PREVIEW,
-            text: preview_text.to_string(),
+            rtf_text,
         });
-        tree_state.prev_preview_text = Some(preview_text.to_string());
+        tree_state.prev_preview_text = Some(preview_markdown.to_string());
     }
 
     let header_text = view
@@ -546,6 +558,7 @@ fn format_preview_header(header: &PreviewHeaderView) -> String {
     parts.join(" | ")
 }
 
+#[allow(dead_code)]
 fn normalize_windows_newlines(text: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -564,6 +577,7 @@ fn normalize_windows_newlines(text: &str) -> String {
     normalized
 }
 
+#[allow(dead_code)]
 fn shape_for_viewer(text: &str) -> String {
     let text = add_spacing_before_headings(text);
     let text = normalize_bullets(&text);
@@ -572,6 +586,7 @@ fn shape_for_viewer(text: &str) -> String {
     truncate_for_viewer(&text)
 }
 
+#[allow(dead_code)]
 fn add_spacing_before_headings(text: &str) -> String {
     let mut output: Vec<&str> = Vec::new();
     for line in text.lines() {
@@ -584,6 +599,7 @@ fn add_spacing_before_headings(text: &str) -> String {
     output.join("\n")
 }
 
+#[allow(dead_code)]
 fn normalize_bullets(text: &str) -> String {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -602,6 +618,7 @@ fn normalize_bullets(text: &str) -> String {
     out.join("\n")
 }
 
+#[allow(dead_code)]
 fn strip_bold_markers(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -615,6 +632,7 @@ fn strip_bold_markers(text: &str) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn cap_blank_line_runs(text: &str) -> String {
     let mut out = Vec::new();
     let mut blank_run = 0usize;
@@ -632,6 +650,7 @@ fn cap_blank_line_runs(text: &str) -> String {
     out.join("\n")
 }
 
+#[allow(dead_code)]
 fn truncate_for_viewer(text: &str) -> String {
     let total_chars = text.chars().count();
     if total_chars <= MAX_VIEWER_CHARS {
@@ -652,6 +671,20 @@ fn truncate_for_viewer(text: &str) -> String {
     let mut truncated = text[..cutoff].to_string();
     truncated.push_str(&marker);
     truncated
+}
+
+fn truncate_markdown_for_preview(text: &str) -> (String, bool) {
+    let total_chars = text.chars().count();
+    if total_chars <= MAX_VIEWER_CHARS {
+        return (text.to_string(), false);
+    }
+
+    let cutoff = text
+        .char_indices()
+        .nth(MAX_VIEWER_CHARS)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len());
+    (text[..cutoff].to_string(), true)
 }
 
 #[cfg(test)]
@@ -880,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_text_newlines_are_normalized_before_set_viewer_content() {
+    fn preview_text_is_sent_as_rtf_to_rich_edit() {
         init_logging();
         let window_id = WindowId::new(3);
         let mut tree_state = TreeRenderState::new();
@@ -893,11 +926,12 @@ mod tests {
         let viewer_text = commands
             .iter()
             .find_map(|cmd| match cmd {
-                PlatformCommand::SetViewerContent { text, .. } => Some(text),
+                PlatformCommand::SetRichEditContent { rtf_text, .. } => Some(rtf_text),
                 _ => None,
             })
-            .expect("SetViewerContent emitted");
-        assert_eq!(viewer_text, "first\r\nsecond\r\nthird\r\nfourth");
+            .expect("SetRichEditContent emitted");
+        assert!(viewer_text.contains("first"));
+        assert!(viewer_text.contains("second"));
     }
 
     #[test]
@@ -939,12 +973,12 @@ mod tests {
     }
 
     #[test]
-    fn render_preview_uses_shaper() {
+    fn render_preview_uses_rtf_converter() {
         init_logging();
         let window_id = WindowId::new(6);
         let mut tree_state = TreeRenderState::new();
         let view = AppViewModel {
-            preview_text: Some("text\n# Heading".to_string()),
+            preview_text: Some("## Heading".to_string()),
             ..Default::default()
         };
 
@@ -952,11 +986,70 @@ mod tests {
         let viewer_text = commands
             .iter()
             .find_map(|cmd| match cmd {
-                PlatformCommand::SetViewerContent { text, .. } => Some(text),
+                PlatformCommand::SetRichEditContent { rtf_text, .. } => Some(rtf_text),
                 _ => None,
             })
-            .expect("SetViewerContent emitted");
-        assert_eq!(viewer_text, "text\r\n\r\n# Heading");
+            .expect("SetRichEditContent emitted");
+        assert!(viewer_text.contains("\\b"));
+    }
+
+    #[test]
+    fn render_preview_marks_bold_in_rtf() {
+        init_logging();
+        let window_id = WindowId::new(7);
+        let mut tree_state = TreeRenderState::new();
+        let view = AppViewModel {
+            preview_text: Some("**bold**".to_string()),
+            ..Default::default()
+        };
+
+        let commands = render(window_id, &view, &mut tree_state);
+        let viewer_text = commands
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::SetRichEditContent { rtf_text, .. } => Some(rtf_text),
+                _ => None,
+            })
+            .expect("SetRichEditContent emitted");
+        assert!(viewer_text.contains("\\b "));
+        assert!(viewer_text.contains("\\b0 "));
+    }
+
+    #[test]
+    fn render_preview_idempotent_when_text_unchanged() {
+        init_logging();
+        let window_id = WindowId::new(8);
+        let mut tree_state = TreeRenderState::new();
+        let view = AppViewModel {
+            preview_text: Some("same".to_string()),
+            ..Default::default()
+        };
+        let _ = render(window_id, &view, &mut tree_state);
+        let commands = render(window_id, &view, &mut tree_state);
+        assert!(!commands
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::SetRichEditContent { .. })));
+    }
+
+    #[test]
+    fn render_preview_truncation_adds_marker() {
+        init_logging();
+        let window_id = WindowId::new(9);
+        let mut tree_state = TreeRenderState::new();
+        let long_text = "x".repeat(MAX_VIEWER_CHARS + 1);
+        let view = AppViewModel {
+            preview_text: Some(long_text),
+            ..Default::default()
+        };
+        let commands = render(window_id, &view, &mut tree_state);
+        let viewer_text = commands
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::SetRichEditContent { rtf_text, .. } => Some(rtf_text),
+                _ => None,
+            })
+            .expect("SetRichEditContent emitted");
+        assert!(viewer_text.contains(RTF_TRUNCATE_MARKER));
     }
 
     #[test]

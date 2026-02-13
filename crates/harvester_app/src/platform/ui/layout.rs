@@ -81,14 +81,10 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         class: LabelClass::Default,
     });
 
-    commands.push(PlatformCommand::CreateInput {
+    commands.push(PlatformCommand::CreateRichEdit {
         window_id,
         parent_control_id: Some(PANEL_PREVIEW),
         control_id: VIEWER_PREVIEW,
-        initial_text: String::new(),
-        read_only: true,
-        multiline: true,
-        vertical_scroll: true,
     });
 
     commands.push(PlatformCommand::CreateLabel {
@@ -739,4 +735,22 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         control_id: SPLITTER_MAIN,
         style_id: StyleId::Splitter,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_control_uses_create_rich_edit() {
+        let commands = initial_commands(WindowId::new(1));
+        assert!(commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::CreateRichEdit { control_id, .. } if *control_id == VIEWER_PREVIEW
+        )));
+        assert!(!commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::CreateInput { control_id, .. } if *control_id == VIEWER_PREVIEW
+        )));
+    }
 }
