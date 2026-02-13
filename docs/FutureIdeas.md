@@ -11,6 +11,7 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | Architecture | DtoBoundaries    | Explicit DTO mappings at crate seams             |
 | Architecture | SessionInvariants| Enforce lifecycle invariants in state            |
 | Architecture | TrustTypes       | Typed wrappers for trusted/untrusted data        |
+| Ingestion  | AuthenticatedFetch | Cookie/session-backed authenticated ingestion    |
 | Ingestion  | FeedDiscovery      | Find feed URLs from website pages                |
 | Ingestion  | OpmlImport         | Import feeds from OPML collections               |
 | Ingestion  | PdfPipeline        | Ingest and preview PDF content                   |
@@ -30,6 +31,7 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | LLM        | Streaming          | Streaming LLM responses                           |
 | LLM        | TokenCounting      | Token estimation accuracy and visibility         |
 | Networking | HttpCaching        | Conditional HTTP fetches for feeds               |
+| Networking | RequestScheduling  | Per-host request concurrency controls            |
 | Observability | AuditLog        | Structured policy decision logging               |
 | Observability | PreviewRendering | Markdown/RTF preview diagnostics and telemetry  |
 | Observability | ReplayDiagnostics | Quality and cost diagnostics                     |
@@ -144,6 +146,28 @@ SuccessCriteria:
 - LLM outputs require a validated wrapper before use in reducers.
 
 ## Ingestion
+
+### AuthenticatedFetch
+
+#### [FI-Ingestion-AuthenticatedFetch-0001] Cookie import for authenticated source retrieval
+Status: Candidate
+TopLevel: Ingestion
+SubLevel: AuthenticatedFetch
+Priority: P3
+Effort: L
+Risk: H
+Origin:
+- SourceDoc: Plan.Main.md
+- SourceSection: Future ideas (after MVP)
+- Captured: 2026-02-13
+Tags: [ingestion, authentication, cookies, networking, security]
+Summary: Add optional cookie/session import so protected pages can be fetched through an explicit authenticated mode.
+Rationale: Some high-value sources are not fully accessible without user-authenticated context.
+SuccessCriteria:
+- Users can provide/import cookie material through an explicit authenticated-fetch configuration path.
+- Authenticated fetch mode is opt-in, bounded to configured domains, and disabled by default.
+- Fetch logs clearly indicate when authenticated mode is used for a request.
+Notes: Requires explicit threat-model and policy guardrails before implementation.
 
 ### FeedDiscovery
 
@@ -638,6 +662,27 @@ SuccessCriteria:
 - Conditional requests use stored ETag/Last-Modified headers.
 - Unchanged feeds produce a successful poll with zero new items and no parse errors.
 
+### RequestScheduling
+
+#### [FI-Networking-RequestScheduling-0001] Per-host concurrency caps for fetch scheduling
+Status: Candidate
+TopLevel: Networking
+SubLevel: RequestScheduling
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Main.md
+- SourceSection: Future ideas (after MVP)
+- Captured: 2026-02-13
+Tags: [networking, scheduling, concurrency, rate-limiting]
+Summary: Add optional per-host request concurrency limits on top of global worker concurrency.
+Rationale: Prevents overloading single origins and reduces host-specific throttling/failure cascades.
+SuccessCriteria:
+- Scheduler enforces a configurable maximum in-flight count per host.
+- Effective throughput remains bounded by both global and per-host caps.
+- Metrics/logs expose queueing caused by per-host caps.
+
 ## Observability
 
 ### AuditLog
@@ -700,6 +745,25 @@ SuccessCriteria:
 - Diagnostics include cost, latency, and validation failure rates.
 - Metrics can be exported per run for comparison.
 - End-of-run diagnostics include request totals, success/failure counts, p50/p95 latency, and peak in-flight.
+
+#### [FI-Observability-ReplayDiagnostics-0002] Extraction A/B harness for converter and extractor quality
+Status: Candidate
+TopLevel: Observability
+SubLevel: ReplayDiagnostics
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Main.md
+- SourceSection: Future ideas (after MVP)
+- Captured: 2026-02-13
+Tags: [observability, evaluation, extractor, converter, snapshots]
+Summary: Add a harness that runs multiple extractor/converter implementations on the same fixture corpus and reports deterministic diffs.
+Rationale: Makes extraction quality tradeoffs measurable before adopting parser/converter changes.
+SuccessCriteria:
+- A single command can execute at least two extractor/converter variants on the same fixture set.
+- Outputs are snapshot-compared with stable, reviewable diffs.
+- The harness report includes per-variant success/failure counts and notable diff categories.
 
 ### SourceHealth
 
@@ -945,6 +1009,25 @@ SuccessCriteria:
 - Briefing output is written to a markdown file in the output directory.
 - Briefing output can optionally be written as `.rtf` suitable for rich-text consumers.
 - Triage results are exported as structured JSON with provenance fields.
+
+#### [FI-Storage-ExportArtifacts-0002] Token-budgeted chunked export for LLM handoff
+Status: Candidate
+TopLevel: Storage
+SubLevel: ExportArtifacts
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Main.md
+- SourceSection: Future ideas (after MVP)
+- Captured: 2026-02-13
+Tags: [storage, export, llm, token-budgeting]
+Summary: Split concatenated export artifacts into deterministic chunks that each fit a configurable token budget.
+Rationale: Improves downstream usability when model context windows cannot accept full-session exports.
+SuccessCriteria:
+- Export pipeline can emit multi-part artifacts with per-part token counts and stable ordering.
+- No chunk exceeds the configured token ceiling.
+- A manifest maps chunk files back to original documents and ordering.
 
 ### NormalizationVersioning
 
