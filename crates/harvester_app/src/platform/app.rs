@@ -63,6 +63,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
             session_id: format!("session-{}", Utc::now().format("%Y%m%d-%H%M%S")),
             replay_cache: None,
+            max_concurrent_requests: 1,
         };
         let model_map = effective_model_map(&config);
         let handle = LlmHandle::new(config);

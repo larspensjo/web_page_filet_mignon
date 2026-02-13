@@ -94,6 +94,9 @@ pub struct CompletedJobSnapshot {
     pub links: Vec<LinkSnapshotRecord>,
 }
 
+/// Maximum allowed value for any per-flow in-flight limit.
+pub const MAX_IN_FLIGHT_LIMIT: usize = 10;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
     session: SessionState,
@@ -117,6 +120,10 @@ pub struct AppState {
     summary_cache_metadata_snapshot: Option<SummaryCacheMetadataSnapshot>,
     summary_cache_metrics: SummaryCacheMetrics,
     summary_cache_warmup_logged: bool,
+    /// Maximum number of concurrent triage LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
+    triage_max_in_flight: usize,
+    /// Maximum number of concurrent summary LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
+    summary_max_in_flight: usize,
 }
 
 pub struct IngestResult {
@@ -149,6 +156,8 @@ impl Default for AppState {
             summary_cache_metadata_snapshot: None,
             summary_cache_metrics: SummaryCacheMetrics::default(),
             summary_cache_warmup_logged: false,
+            triage_max_in_flight: 1,
+            summary_max_in_flight: 1,
         }
     }
 }
@@ -156,6 +165,24 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the maximum concurrent triage LLM requests. Clamped to MAX_IN_FLIGHT_LIMIT.
+    pub fn set_triage_max_in_flight(&mut self, limit: usize) {
+        self.triage_max_in_flight = limit.clamp(1, MAX_IN_FLIGHT_LIMIT);
+    }
+
+    /// Set the maximum concurrent summary LLM requests. Clamped to MAX_IN_FLIGHT_LIMIT.
+    pub fn set_summary_max_in_flight(&mut self, limit: usize) {
+        self.summary_max_in_flight = limit.clamp(1, MAX_IN_FLIGHT_LIMIT);
+    }
+
+    pub fn triage_max_in_flight(&self) -> usize {
+        self.triage_max_in_flight
+    }
+
+    pub fn summary_max_in_flight(&self) -> usize {
+        self.summary_max_in_flight
     }
 
     pub fn view(&self) -> AppViewModel {

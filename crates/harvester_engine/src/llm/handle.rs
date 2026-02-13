@@ -4,6 +4,7 @@ use std::{
     thread,
     time::Instant,
 };
+use tokio::sync::Semaphore;
 
 use engine_logging::{engine_error, engine_info, engine_warn};
 use serde_json::{json, Value};
@@ -35,6 +36,8 @@ pub struct LlmConfig {
     pub timestamp_utc: Arc<dyn Fn() -> String + Send + Sync>,
     pub session_id: String,
     pub replay_cache: Option<Arc<RwLock<ReplayProvider>>>,
+    /// Maximum number of concurrent LLM requests. Defaults to 1 (serial). Max enforced at 10.
+    pub max_concurrent_requests: usize,
 }
 
 impl LlmConfig {
@@ -75,6 +78,14 @@ impl LlmHandle {
 
     pub fn event_receiver(&self) -> Arc<Mutex<mpsc::Receiver<LlmEvent>>> {
         Arc::clone(&self.event_rx)
+    }
+
+    /// Send a stop signal and drop the sender, causing the worker thread to drain all
+    /// in-flight requests and shut down cleanly.
+    pub fn drain_and_stop(self) {
+        // Sending Stop signals the worker to break its receive loop after draining.
+        let _ = self.cmd_tx.send(LlmCommand::Stop);
+        // cmd_tx is dropped here, which also closes the channel.
     }
 }
 
@@ -134,32 +145,50 @@ fn worker_loop(
     event_tx: mpsc::Sender<LlmEvent>,
     config: LlmConfig,
 ) {
-    let runtime = Runtime::new().expect("failed to build tokio runtime for LLM worker");
-    let mut quota_tracker = LlmQuotaTracker::new(config.quotas.clone());
+    let max_concurrent = config.max_concurrent_requests.clamp(1, 10);
+    let runtime = Arc::new(Runtime::new().expect("failed to build tokio runtime for LLM worker"));
+    let quota_tracker = Arc::new(Mutex::new(LlmQuotaTracker::new(config.quotas.clone())));
+    let config = Arc::new(config);
+    let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
-    let mut ctx = HandleContext {
-        config: &config,
-        runtime: &runtime,
-        quota_tracker: &mut quota_tracker,
-        event_tx: &event_tx,
-    };
+    let mut join_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
-    for cmd in cmd_rx {
+    for cmd in &cmd_rx {
         if let LlmCommand::Stop = cmd {
             break;
         }
-        handle_completion(cmd, &mut ctx);
+
+        // Acquire a semaphore permit synchronously, bounding concurrency.
+        let permit = runtime
+            .block_on(semaphore.clone().acquire_owned())
+            .expect("semaphore closed");
+
+        let quota = quota_tracker.clone();
+        let cfg = config.clone();
+        let ev_tx = event_tx.clone();
+
+        let handle = runtime.spawn(async move {
+            let _permit = permit; // held for the lifetime of this request
+            handle_completion_concurrent(cmd, &cfg, &quota, &ev_tx).await;
+        });
+        join_handles.push(handle);
     }
+
+    // Drain: wait for all in-flight tasks to emit their completion events.
+    runtime.block_on(async {
+        for handle in join_handles {
+            let _ = handle.await;
+        }
+    });
 }
 
-struct HandleContext<'a> {
-    config: &'a LlmConfig,
-    runtime: &'a Runtime,
-    quota_tracker: &'a mut LlmQuotaTracker,
-    event_tx: &'a mpsc::Sender<LlmEvent>,
-}
 
-fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
+async fn handle_completion_concurrent(
+    command: LlmCommand,
+    config: &Arc<LlmConfig>,
+    quota_tracker: &Mutex<LlmQuotaTracker>,
+    event_tx: &mpsc::Sender<LlmEvent>,
+) {
     let LlmCommand::Complete {
         request_id,
         prompt_id,
@@ -172,12 +201,12 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
     };
 
     let input_len = input_content.len();
-    if input_len > ctx.config.max_input_chars {
+    if input_len > config.max_input_chars {
         let err = LlmCompletionError::InputTooLarge {
             size: input_len,
-            limit: ctx.config.max_input_chars,
+            limit: config.max_input_chars,
         };
-        let _ = ctx.event_tx.send(LlmEvent::Completed {
+        let _ = event_tx.send(LlmEvent::Completed {
             request_id,
             result: Err(err),
         });
@@ -191,11 +220,36 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
         input_len
     );
 
-    let model = resolve_model(prompt_id, ctx.config);
-    let (template, version) = match fetch_prompt_template(ctx.config, prompt_id, prompt_version) {
+    // Pre-call quota reservation: atomically check and reserve call slot.
+    {
+        let mut tracker = quota_tracker.lock().unwrap();
+        if let Err(failure) = tracker.reserve_call() {
+            engine_warn!(
+                "[llm-quota] request_id={} rejected=pre-call reason={}",
+                request_id,
+                failure
+            );
+            let _ = event_tx.send(LlmEvent::Completed {
+                request_id,
+                result: Err(LlmCompletionError::QuotaExhausted {
+                    description: failure.to_string(),
+                }),
+            });
+            return;
+        }
+        engine_info!(
+            "[llm-quota] request_id={} pre-call reservation accepted calls={}",
+            request_id,
+            tracker.totals().calls
+        );
+    }
+
+    let model = resolve_model(prompt_id, config);
+    let (template, version) = match fetch_prompt_template(config, prompt_id, prompt_version) {
         Some(pair) => pair,
         None => {
-            let _ = ctx.event_tx.send(LlmEvent::Completed {
+            quota_tracker.lock().unwrap().release_call();
+            let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Err(LlmCompletionError::PromptNotFound { prompt_id }),
             });
@@ -231,7 +285,8 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
         Ok(msg) => msg,
         Err(e) => {
             engine_error!("[llm-render] Failed to render system template: {}", e);
-            let _ = ctx.event_tx.send(LlmEvent::Completed {
+            quota_tracker.lock().unwrap().release_call();
+            let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Err(LlmCompletionError::TemplateRenderFailed {
                     detail: format!("system template: {}", e),
@@ -244,7 +299,8 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
         Ok(msg) => msg,
         Err(e) => {
             engine_error!("[llm-render] Failed to render user template: {}", e);
-            let _ = ctx.event_tx.send(LlmEvent::Completed {
+            quota_tracker.lock().unwrap().release_call();
+            let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Err(LlmCompletionError::TemplateRenderFailed {
                     detail: format!("user template: {}", e),
@@ -255,7 +311,7 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
     };
     let input_hash = content_hash(&input_content);
 
-    if let Some(ref cache) = ctx.config.replay_cache {
+    if let Some(ref cache) = config.replay_cache {
         let guard = cache.read().unwrap();
         if let Some(record) = guard.lookup(&input_hash, prompt_id, version) {
             if record.validated_output.is_some() {
@@ -276,7 +332,7 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
                     prompt_id,
                     prompt_version: version,
                 };
-                let _ = ctx.event_tx.send(LlmEvent::Completed {
+                let _ = event_tx.send(LlmEvent::Completed {
                     request_id,
                     result: Ok(result),
                 });
@@ -301,7 +357,7 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
     );
 
     let start_at = Instant::now();
-    let run_result = ctx.runtime.block_on(ctx.config.provider.complete(&request));
+    let run_result = config.provider.complete(&request).await;
     let duration_ms = start_at.elapsed().as_millis();
 
     if let Err(err) = run_result {
@@ -310,7 +366,8 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
             request_id,
             err
         );
-        let _ = ctx.event_tx.send(LlmEvent::Completed {
+        quota_tracker.lock().unwrap().release_call();
+        let _ = event_tx.send(LlmEvent::Completed {
             request_id,
             result: Err(LlmCompletionError::ProviderError(err)),
         });
@@ -326,47 +383,53 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
     );
 
     let usage = response.usage();
-    let cost = ctx
-        .config
+    let cost = config
         .pricing
         .cost_microdollars(response.model_id().model_name(), &usage);
 
-    if let Err(failure) =
-        ctx.quota_tracker
-            .check_call(usage.input_tokens as u64, usage.output_tokens as u64, cost)
+    // Post-call: record actual token/cost usage and check token/cost limits.
     {
-        let _ = ctx.event_tx.send(LlmEvent::Completed {
+        let mut tracker = quota_tracker.lock().unwrap();
+        if let Err(failure) =
+            tracker.record_call_usage(usage.input_tokens as u64, usage.output_tokens as u64, cost)
+        {
+            // Release the pre-reserved call slot since we're rejecting this result.
+            tracker.release_call();
+            drop(tracker);
+            engine_warn!(
+                "[llm-quota] request_id={} rejected=post-call reason={}",
+                request_id,
+                failure
+            );
+            let _ = event_tx.send(LlmEvent::Completed {
+                request_id,
+                result: Err(LlmCompletionError::QuotaExhausted {
+                    description: failure.to_string(),
+                }),
+            });
+            return;
+        }
+        let totals = tracker.totals();
+        engine_info!(
+            "[llm-quota] request_id={} calls={} input={} output={} cost={}",
             request_id,
-            result: Err(LlmCompletionError::QuotaExhausted {
-                description: failure.to_string(),
-            }),
-        });
-        return;
+            totals.calls,
+            totals.input_tokens,
+            totals.output_tokens,
+            totals.cost_microdollars
+        );
     }
-
-    ctx.quota_tracker
-        .record_call(usage.input_tokens as u64, usage.output_tokens as u64, cost);
-
-    let totals = ctx.quota_tracker.totals();
-    engine_info!(
-        "[llm-quota] request_id={} calls={} input={} output={} cost={}",
-        request_id,
-        totals.calls,
-        totals.input_tokens,
-        totals.output_tokens,
-        totals.cost_microdollars
-    );
 
     let raw_response = response.content().to_string();
     let validation_result = validate_response(prompt_id, &raw_response);
 
     let record = ReplayRecord {
-        request_id: format!("{}-{request_id}", ctx.config.session_id),
+        request_id: format!("{}-{request_id}", config.session_id),
         input_content_hash: input_hash.clone(),
         prompt_id,
         prompt_version: version,
         model_id: format_model_identifier(response.model_id()),
-        timestamp_utc: (ctx.config.timestamp_utc)(),
+        timestamp_utc: (config.timestamp_utc)(),
         rendered_system_message: system_message.clone(),
         rendered_user_message: user_message.clone(),
         raw_response: raw_response.clone(),
@@ -397,14 +460,14 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
             };
 
             if let Err(err) =
-                persist_replay_record(&ctx.config.replay_output_dir(), &success_record)
+                persist_replay_record(&config.replay_output_dir(), &success_record)
             {
                 engine_error!(
                     "[llm-replay] request_id={} persist failed: {}",
                     request_id,
                     err
                 );
-                let _ = ctx.event_tx.send(LlmEvent::Completed {
+                let _ = event_tx.send(LlmEvent::Completed {
                     request_id,
                     result: Err(LlmCompletionError::PersistenceFailed {
                         detail: err.to_string(),
@@ -413,7 +476,7 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
                 return;
             }
 
-            if let Some(ref cache) = ctx.config.replay_cache {
+            if let Some(ref cache) = config.replay_cache {
                 let mut guard = cache.write().unwrap();
                 guard.insert(success_record.clone());
             }
@@ -426,7 +489,7 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
                 prompt_version: version,
             };
 
-            let _ = ctx.event_tx.send(LlmEvent::Completed {
+            let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Ok(result),
             });
@@ -446,14 +509,14 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
             };
 
             if let Err(err) =
-                persist_replay_record(&ctx.config.replay_output_dir(), &failure_record)
+                persist_replay_record(&config.replay_output_dir(), &failure_record)
             {
                 engine_error!(
                     "[llm-replay] request_id={} persist failed: {}",
                     request_id,
                     err
                 );
-                let _ = ctx.event_tx.send(LlmEvent::Completed {
+                let _ = event_tx.send(LlmEvent::Completed {
                     request_id,
                     result: Err(LlmCompletionError::PersistenceFailed {
                         detail: err.to_string(),
@@ -462,7 +525,7 @@ fn handle_completion(command: LlmCommand, ctx: &mut HandleContext) {
                 return;
             }
 
-            let _ = ctx.event_tx.send(LlmEvent::Completed {
+            let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Err(LlmCompletionError::ValidationFailed {
                     reason,

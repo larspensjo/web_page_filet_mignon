@@ -7,7 +7,7 @@ pub type BriefingArticleId = usize;
 pub enum BriefingPhase {
     Idle,
     LoadingArticles,
-    Summarizing { current_index: usize, total: usize },
+    Summarizing,
     GeneratingBriefing,
     Complete,
     Failed { reason: String },
@@ -123,7 +123,7 @@ impl BriefingSession {
         matches!(
             self.phase,
             BriefingPhase::LoadingArticles
-                | BriefingPhase::Summarizing { .. }
+                | BriefingPhase::Summarizing
                 | BriefingPhase::GeneratingBriefing
         )
     }
@@ -152,28 +152,18 @@ impl BriefingSession {
     }
 
     pub fn transition_to_summarizing(&mut self) {
-        let total = self.articles.len();
-        if total == 0 {
+        if self.articles.is_empty() {
             self.phase = BriefingPhase::Failed {
                 reason: "no articles to summarize".to_string(),
             };
             return;
         }
-        self.phase = BriefingPhase::Summarizing {
-            current_index: 0,
-            total,
-        };
+        self.phase = BriefingPhase::Summarizing;
     }
 
     pub fn start_article(&mut self, article_id: BriefingArticleId, request_id: u64) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.summary_state = ArticleSummaryState::InProgress { request_id };
-            if let BriefingPhase::Summarizing { total, .. } = self.phase {
-                self.phase = BriefingPhase::Summarizing {
-                    current_index: article_id + 1,
-                    total,
-                };
-            }
         }
     }
 
@@ -193,6 +183,30 @@ impl BriefingSession {
             article.summary_state = ArticleSummaryState::Failed { reason };
             article.cache_key_snapshot = None;
         }
+    }
+
+    pub fn total(&self) -> usize {
+        self.articles.len()
+    }
+
+    pub fn in_progress_count(&self) -> usize {
+        self.articles
+            .iter()
+            .filter(|article| {
+                matches!(article.summary_state, ArticleSummaryState::InProgress { .. })
+            })
+            .count()
+    }
+
+    pub fn pending_count(&self) -> usize {
+        self.articles
+            .iter()
+            .filter(|article| matches!(article.summary_state, ArticleSummaryState::Pending))
+            .count()
+    }
+
+    pub fn can_dispatch_more(&self, limit: usize) -> bool {
+        self.in_progress_count() < limit && self.pending_count() > 0
     }
 
     pub fn completed_summary_count(&self) -> usize {
@@ -292,11 +306,10 @@ impl BriefingSession {
     pub fn progress_text(&self) -> Option<String> {
         let text = match self.phase {
             BriefingPhase::LoadingArticles => "Loading articles...".to_string(),
-            BriefingPhase::Summarizing {
-                current_index,
-                total,
-            } => {
-                format!("Summarizing {current_index}/{total} articles...")
+            BriefingPhase::Summarizing => {
+                let completed = self.completed_summary_count() + self.failed_summary_count();
+                let total = self.total();
+                format!("Summarizing {completed}/{total} articles...")
             }
             BriefingPhase::GeneratingBriefing => "Generating briefing...".to_string(),
             _ => return None,
@@ -357,6 +370,7 @@ mod tests {
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
                 summary_state: state,
+                cache_key_snapshot: None,
             }],
             ..BriefingSession::default()
         }
