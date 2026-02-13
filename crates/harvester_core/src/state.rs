@@ -21,6 +21,44 @@ const LINK_ROW_LIMIT: usize = 200;
 const LINK_LABEL_MAX: usize = 80;
 const LINK_LABEL_TRUNCATE_MARKER: &str = "…";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MetadataLoadState {
+    Idle,
+    Pending,
+    Ready,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SummaryCacheMetadataSnapshot {
+    prompt_version: PromptVersion,
+    model_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SummaryCacheMetrics {
+    hits: usize,
+    misses: usize,
+    key_unavailable: usize,
+}
+
+impl SummaryCacheMetrics {
+    pub(crate) fn hits(&self) -> usize {
+        self.hits
+    }
+
+    pub(crate) fn misses(&self) -> usize {
+        self.misses
+    }
+
+    pub(crate) fn key_unavailable(&self) -> usize {
+        self.key_unavailable
+    }
+
+    pub(crate) fn total(&self) -> usize {
+        self.hits + self.misses + self.key_unavailable
+    }
+}
+
 /// Represents the download status for a specific link.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +113,10 @@ pub struct AppState {
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
     effective_models: HashMap<PromptId, String>,
     summary_cache: SummaryCache,
+    briefing_metadata_state: MetadataLoadState,
+    summary_cache_metadata_snapshot: Option<SummaryCacheMetadataSnapshot>,
+    summary_cache_metrics: SummaryCacheMetrics,
+    summary_cache_warmup_logged: bool,
 }
 
 pub struct IngestResult {
@@ -103,6 +145,10 @@ impl Default for AppState {
             active_prompt_versions: HashMap::new(),
             effective_models: HashMap::new(),
             summary_cache: SummaryCache::new(),
+            briefing_metadata_state: MetadataLoadState::Idle,
+            summary_cache_metadata_snapshot: None,
+            summary_cache_metrics: SummaryCacheMetrics::default(),
+            summary_cache_warmup_logged: false,
         }
     }
 }
@@ -385,6 +431,75 @@ impl AppState {
     /// Replace the entire summary cache (used for hydration).
     pub(crate) fn set_summary_cache(&mut self, cache: SummaryCache) {
         self.summary_cache = cache;
+    }
+
+    pub(crate) fn start_summary_cache_run(&mut self) {
+        self.summary_cache_metrics = SummaryCacheMetrics::default();
+        self.summary_cache_metadata_snapshot = None;
+        self.summary_cache_warmup_logged = false;
+        self.briefing_metadata_state = MetadataLoadState::Pending;
+    }
+
+    pub(crate) fn mark_briefing_metadata_ready(&mut self) {
+        if self.briefing_metadata_state != MetadataLoadState::Pending {
+            return;
+        }
+        let snapshot = match (
+            self.active_prompt_versions
+                .get(&PromptId::ArticleSummary)
+                .copied(),
+            self.effective_models
+                .get(&PromptId::ArticleSummary)
+                .cloned(),
+        ) {
+            (Some(version), Some(model_id)) => Some(SummaryCacheMetadataSnapshot {
+                prompt_version: version,
+                model_id,
+            }),
+            _ => None,
+        };
+        self.summary_cache_metadata_snapshot = snapshot;
+        self.briefing_metadata_state = MetadataLoadState::Ready;
+    }
+
+    pub(crate) fn is_briefing_metadata_ready(&self) -> bool {
+        matches!(self.briefing_metadata_state, MetadataLoadState::Ready)
+    }
+
+    pub(crate) fn summary_cache_metadata(&self) -> Option<(PromptVersion, &str)> {
+        self.summary_cache_metadata_snapshot
+            .as_ref()
+            .map(|snapshot| (snapshot.prompt_version, snapshot.model_id.as_str()))
+    }
+
+    pub(crate) fn summary_cache_warmup_logged(&self) -> bool {
+        self.summary_cache_warmup_logged
+    }
+
+    pub(crate) fn mark_summary_cache_warmup_logged(&mut self) {
+        self.summary_cache_warmup_logged = true;
+    }
+
+    pub(crate) fn record_summary_cache_hit(&mut self) {
+        self.summary_cache_metrics.hits += 1;
+    }
+
+    pub(crate) fn record_summary_cache_miss(&mut self) {
+        self.summary_cache_metrics.misses += 1;
+    }
+
+    pub(crate) fn record_summary_cache_key_unavailable(&mut self) {
+        self.summary_cache_metrics.key_unavailable += 1;
+    }
+
+    pub(crate) fn summary_cache_metrics(&self) -> SummaryCacheMetrics {
+        self.summary_cache_metrics
+    }
+
+    pub(crate) fn finalize_summary_cache_run(&mut self) {
+        self.briefing_metadata_state = MetadataLoadState::Idle;
+        self.summary_cache_metadata_snapshot = None;
+        self.summary_cache_warmup_logged = false;
     }
 
     /// Get an immutable reference to the summary cache.

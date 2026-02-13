@@ -1,8 +1,7 @@
 use engine_logging::engine_info;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
-use std::collections::hash_map::DefaultHasher;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 
 use crate::briefing::ArticleSummaryResult;
 
@@ -19,6 +18,38 @@ pub struct SummaryCacheKey {
     pub prompt_version: PromptVersion,
     pub model_id: String,
     pub context_hash: String,
+}
+
+impl SummaryCacheKey {
+    pub fn try_new(
+        content_hash: &str,
+        prompt_id: PromptId,
+        prompt_version: Option<PromptVersion>,
+        model_id: Option<&str>,
+        context: &[(String, String)],
+    ) -> Result<Self, SummaryCacheKeyError> {
+        if content_hash.is_empty() {
+            return Err(SummaryCacheKeyError::EmptyContentHash);
+        }
+        let prompt_version = prompt_version.ok_or(SummaryCacheKeyError::MissingPromptVersion)?;
+        let model_id = model_id.ok_or(SummaryCacheKeyError::MissingModelId)?;
+        let context_hash = context_hash(context);
+        Ok(Self {
+            content_hash: content_hash.to_string(),
+            prompt_id,
+            prompt_version,
+            model_id: model_id.to_string(),
+            context_hash,
+        })
+    }
+}
+
+/// Error returned when a summary cache key cannot be constructed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummaryCacheKeyError {
+    MissingPromptVersion,
+    MissingModelId,
+    EmptyContentHash,
 }
 
 /// Cached entry for an article summary result.
@@ -152,19 +183,15 @@ pub fn context_hash(context: &[(String, String)]) -> String {
     let mut sorted: Vec<_> = context.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
-    // Build deterministic string representation
-    let mut payload = String::new();
+    let mut hasher = Sha256::new();
     for (key, value) in sorted {
-        payload.push_str(key);
-        payload.push('=');
-        payload.push_str(value);
-        payload.push('\n');
+        hasher.update(key.as_bytes());
+        hasher.update(b"=");
+        hasher.update(value.as_bytes());
+        hasher.update(b"\n");
     }
 
-    // Hash using DefaultHasher
-    let mut hasher = DefaultHasher::new();
-    payload.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+    format!("{:x}", hasher.finalize())
 }
 
 #[cfg(test)]
@@ -297,6 +324,72 @@ mod tests {
         let ctx1 = vec![("key1".to_string(), "value".to_string())];
         let ctx2 = vec![("key2".to_string(), "value".to_string())];
         assert_ne!(context_hash(&ctx1), context_hash(&ctx2));
+    }
+
+    #[test]
+    fn summary_cache_key_rejects_empty_content_hash() {
+        let err =
+            SummaryCacheKey::try_new("", PromptId::ArticleSummary, Some(1), Some("model"), &[]);
+        assert_eq!(err, Err(SummaryCacheKeyError::EmptyContentHash));
+    }
+
+    #[test]
+    fn summary_cache_key_requires_metadata() {
+        let ctx: Vec<(String, String)> = Vec::new();
+        assert_eq!(
+            SummaryCacheKey::try_new("hash", PromptId::ArticleSummary, None, Some("model"), &ctx,),
+            Err(SummaryCacheKeyError::MissingPromptVersion)
+        );
+        assert_eq!(
+            SummaryCacheKey::try_new("hash", PromptId::ArticleSummary, Some(1), None, &ctx,),
+            Err(SummaryCacheKeyError::MissingModelId)
+        );
+    }
+
+    #[test]
+    fn summary_cache_key_changes_when_prompt_version_changes() {
+        let ctx: Vec<(String, String)> = Vec::new();
+        let key_v1 =
+            SummaryCacheKey::try_new("hash", PromptId::ArticleSummary, Some(1), Some("model"), &ctx)
+                .unwrap();
+        let key_v2 =
+            SummaryCacheKey::try_new("hash", PromptId::ArticleSummary, Some(2), Some("model"), &ctx)
+                .unwrap();
+        assert_ne!(key_v1, key_v2);
+    }
+
+    #[test]
+    fn summary_cache_key_changes_when_model_changes() {
+        let ctx: Vec<(String, String)> = Vec::new();
+        let key_a = SummaryCacheKey::try_new(
+            "hash",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("model-a"),
+            &ctx,
+        )
+        .unwrap();
+        let key_b = SummaryCacheKey::try_new(
+            "hash",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("model-b"),
+            &ctx,
+        )
+        .unwrap();
+        assert_ne!(key_a, key_b);
+    }
+
+    #[test]
+    fn context_hash_stable_golden() {
+        let ctx = vec![
+            ("beta".to_string(), "two".to_string()),
+            ("alpha".to_string(), "1".to_string()),
+        ];
+        assert_eq!(
+            context_hash(&ctx),
+            "11de0a2282e37df6d29e032488527b81bc2053cd81a2140ac1d999a1e144ab04"
+        );
     }
 
     #[test]

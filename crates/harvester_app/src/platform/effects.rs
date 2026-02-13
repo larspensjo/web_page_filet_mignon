@@ -1,4 +1,5 @@
 use super::{seen_set_store, source_loader};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -13,6 +14,7 @@ use std::{error::Error as StdError, fmt};
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, Stage, StopPolicy};
+use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
@@ -105,12 +107,13 @@ pub struct EffectRunner {
     llm_handle: Option<LlmHandle>,
     llm_max_input_chars: Option<usize>,
     prompt_registry: PromptRegistry,
+    llm_metadata_models: HashMap<PromptId, String>,
 }
 
 impl EffectRunner {
     pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
         let registry = PromptRegistry::with_defaults();
-        Self::with_optional_llm(msg_tx, None, None, registry)
+        Self::with_optional_llm(msg_tx, None, None, registry, HashMap::new())
     }
 
     pub fn new_with_llm(
@@ -118,12 +121,14 @@ impl EffectRunner {
         llm_handle: LlmHandle,
         llm_max_input_chars: usize,
         prompt_registry: PromptRegistry,
+        llm_metadata_models: HashMap<PromptId, String>,
     ) -> Self {
         Self::with_optional_llm(
             msg_tx,
             Some(llm_handle),
             Some(llm_max_input_chars),
             prompt_registry,
+            llm_metadata_models,
         )
     }
 
@@ -132,6 +137,7 @@ impl EffectRunner {
         llm_handle: Option<LlmHandle>,
         llm_max_input_chars: Option<usize>,
         prompt_registry: PromptRegistry,
+        llm_metadata_models: HashMap<PromptId, String>,
     ) -> Self {
         let output_dir = default_output_dir();
 
@@ -150,6 +156,7 @@ impl EffectRunner {
             llm_handle,
             llm_max_input_chars,
             prompt_registry,
+            llm_metadata_models,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -398,16 +405,17 @@ impl EffectRunner {
             }
             Effect::LoadLlmMetadata => {
                 let msg_tx = self.msg_tx.clone();
+                let registry = self.prompt_registry.clone();
+                let models = self.llm_metadata_models.clone();
                 thread::spawn(move || {
-                    use std::collections::HashMap;
+                    let active_versions = registry.active_versions_map();
+                    let effective_models = models;
 
-                    // Metadata will be populated from actual LLM completion results
-                    // The prompt_version and model_id are resolved by the LLM worker
-                    // and returned in the success payload.
-                    let active_versions = HashMap::new();
-                    let effective_models = HashMap::new();
-
-                    engine_info!("[llm-metadata] metadata prepared for runtime resolution");
+                    engine_info!(
+                        "[llm-metadata] metadata prepared (versions={}, models={})",
+                        active_versions.len(),
+                        effective_models.len()
+                    );
 
                     let _ = msg_tx.send(Msg::LlmMetadataLoaded {
                         active_versions,

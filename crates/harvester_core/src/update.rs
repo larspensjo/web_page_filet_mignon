@@ -1,11 +1,13 @@
 use engine_logging::{engine_info, engine_warn};
 
 use crate::{
-    briefing::{ArticleSummaryResult, BriefingResult, BriefingSession, BriefingThemeResult},
+    briefing::{
+        ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingThemeResult,
+    },
     calc_left_width, context_hash,
     triage::{ArticleTriageResult, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
-    SummaryCacheKey, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
+    SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage};
@@ -254,30 +256,96 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 .content_hash
                                 .clone();
                             let context = state.context_for(PromptId::ArticleSummary).to_vec();
+                            let lookup_key = state.briefing().article_cache_key(article_idx).cloned();
+                            let run_metadata = state
+                                .summary_cache_metadata()
+                                .map(|(version, model)| (version, model.to_string()));
 
                             // Complete the article
                             state
                                 .briefing_mut()
                                 .complete_article(article_idx, summary_result.clone());
 
-                            // Store in cache using actual prompt_version and model_id from completion
-                            let cache_key = SummaryCacheKey {
-                                content_hash: content_hash.clone(),
-                                prompt_id: PromptId::ArticleSummary,
-                                prompt_version: *prompt_version,
-                                model_id: model_id.clone(),
-                                context_hash: context_hash(&context),
+                            let cache_key_result = match lookup_key.clone() {
+                                Some(key) => Ok(key),
+                                None => build_summary_cache_key(
+                                    &content_hash,
+                                    PromptId::ArticleSummary,
+                                    run_metadata.as_ref().map(|(version, _)| *version),
+                                    run_metadata.as_ref().map(|(_, model)| model.as_str()),
+                                    &context,
+                                ),
                             };
-                            state.store_summary_result(
-                                cache_key,
-                                summary_result,
-                                chrono::Utc::now().to_rfc3339(),
-                            );
-                            engine_info!(
-                                "[summary-cache] stored result for article {} (hash={})",
-                                article_idx,
-                                &content_hash[..content_hash.len().min(8)]
-                            );
+                            match cache_key_result {
+                                Ok(store_key) => {
+                                    if let Some(lookup) = lookup_key.as_ref() {
+                                        if lookup != &store_key {
+                                            engine_warn!(
+                                                "[summary-cache] metadata mismatch article={} lookup=(version={},model={},context={}) store=(version={},model={},context={})",
+                                                article_idx,
+                                                lookup.prompt_version,
+                                                lookup.model_id,
+                                                lookup.context_hash,
+                                                store_key.prompt_version,
+                                                store_key.model_id,
+                                                store_key.context_hash,
+                                            );
+                                        }
+                                    }
+
+                                    let completion_key = build_summary_cache_key(
+                                        &content_hash,
+                                        PromptId::ArticleSummary,
+                                        Some(*prompt_version),
+                                        Some(model_id.as_str()),
+                                        &context,
+                                    );
+                                    if let Ok(completion_key) = completion_key {
+                                        if completion_key != store_key {
+                                            engine_warn!(
+                                                "[summary-cache] completion metadata mismatch article={} cache=(version={},model={},context={}) completion=(version={},model={},context={})",
+                                                article_idx,
+                                                store_key.prompt_version,
+                                                store_key.model_id,
+                                                store_key.context_hash,
+                                                completion_key.prompt_version,
+                                                completion_key.model_id,
+                                                completion_key.context_hash,
+                                            );
+                                        }
+                                    }
+
+                                    state.store_summary_result(
+                                        store_key.clone(),
+                                        summary_result,
+                                        chrono::Utc::now().to_rfc3339(),
+                                    );
+                                    let lookup_label = if lookup_key.is_some() {
+                                        "metadata-snapshot"
+                                    } else {
+                                        "none"
+                                    };
+                                    engine_info!(
+                                        "[summary-cache] article={} decision=store metadata_source=run-frozen lookup_metadata={} prompt_version={} model_id={} context_hash={} content_hash_short={}",
+                                        article_idx,
+                                        lookup_label,
+                                        store_key.prompt_version,
+                                        store_key.model_id,
+                                        store_key.context_hash,
+                                        short_hash(&content_hash),
+                                    );
+                                }
+                                Err(err) => {
+                                    engine_warn!(
+                                        "[summary-cache] article={} skip storing result: {}",
+                                        article_idx,
+                                        summary_cache_key_error_reason(&err)
+                                    );
+                                }
+                            }
+                            state
+                                .briefing_mut()
+                                .set_article_cache_key(article_idx, None);
                         }
                         Err(err) => {
                             state
@@ -381,6 +449,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         });
                     }
                 }
+                log_summary_cache_run_summary(&mut state);
                 state.mark_dirty();
             }
             effects
@@ -389,6 +458,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if !state.briefing().can_start() {
                 return (state, Vec::new());
             }
+            state.start_summary_cache_run();
             state.set_briefing(BriefingSession::new_loading(None));
             engine_info!("[briefing] briefing requested");
             vec![
@@ -405,6 +475,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 state
                     .briefing_mut()
                     .fail("no completed articles found".to_string());
+                log_summary_cache_run_summary(&mut state);
                 state.mark_dirty();
                 let cache = state.summary_cache().clone();
                 return (state, vec![Effect::PersistSummaryCache { cache }]);
@@ -413,11 +484,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.briefing_mut().transition_to_summarizing();
             state.mark_dirty();
             let mut effects = Vec::new();
-            dispatch_next_briefing_step(&mut state, &mut effects);
+            try_start_briefing_with_metadata(&mut state, &mut effects);
             effects
         }
         Msg::ArticlesLoadFailed { reason } => {
             state.briefing_mut().fail(reason);
+            log_summary_cache_run_summary(&mut state);
             state.mark_dirty();
             let cache = state.summary_cache().clone();
             vec![Effect::PersistSummaryCache { cache }]
@@ -475,8 +547,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 active_versions.len()
             );
             state.set_llm_metadata(active_versions, effective_models);
+            state.mark_briefing_metadata_ready();
             state.mark_dirty();
-            Vec::new()
+            let mut effects = Vec::new();
+            try_start_briefing_with_metadata(&mut state, &mut effects);
+            effects
         }
         Msg::SummaryCacheHydrated { cache } => {
             engine_info!(
@@ -560,102 +635,112 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
 }
 
 fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
-    // Process consecutive cached articles first
+    log_summary_cache_warmup_if_needed(state);
+
     loop {
         let Some(next_idx) = state.briefing().next_pending_index() else {
             break;
         };
 
-        // Clone data we need before any mutable borrows
         let article = &state.briefing().articles()[next_idx];
         let prepared_text = article.prepared_text.clone();
         let content_hash = article.content_hash.clone();
+        let content_hash_short = short_hash(&content_hash);
         let context = state.context_for(PromptId::ArticleSummary).to_vec();
         let context_hash_value = context_hash(&context);
-        let prompt_version = state.active_version_for(PromptId::ArticleSummary);
-        let model_id = state
-            .effective_model_for(PromptId::ArticleSummary)
-            .map(|s| s.to_string());
-
-        // Try to build cache key if we have metadata
-        let cache_key = build_summary_cache_key(
-            &content_hash,
-            &context_hash_value,
-            prompt_version,
-            model_id.as_deref(),
-        );
-        let version_display = prompt_version
-            .map(|version| version.to_string())
+        let metadata = state.summary_cache_metadata();
+        let version_display = metadata
+            .map(|(version, _)| version.to_string())
             .unwrap_or_else(|| "<none>".to_string());
-        let model_display = model_id.as_deref().unwrap_or("<none>");
+        let model_display = metadata
+            .map(|(_, model)| model.to_string())
+            .unwrap_or_else(|| "<none>".to_string());
 
-        if cache_key.is_none() {
-            let reason = if prompt_version.is_none() {
-                "missing prompt_version metadata"
-            } else if model_id.is_none() {
-                "missing model_id metadata"
-            } else {
-                "unknown"
-            };
-            engine_info!(
-                "[summary-cache] key unavailable for article {} (hash={}, reason={}, context={})",
-                next_idx,
-                &content_hash[..content_hash.len().min(8)],
-                reason,
-                &context_hash_value
-            );
-        }
+        match build_summary_cache_key(
+            &content_hash,
+            PromptId::ArticleSummary,
+            metadata.map(|(version, _)| version),
+            metadata.map(|(_, model)| model),
+            &context,
+        ) {
+            Ok(key) => {
+                state
+                    .briefing_mut()
+                    .set_article_cache_key(next_idx, Some(key.clone()));
+                if let Some(cached_result) = state.try_reuse_summary(&key) {
+                    let result = cached_result.clone();
+                    state.record_summary_cache_hit();
+                    engine_info!(
+                        "[summary-cache] article={} decision=hit reason=cache-hit prompt_version={} model_id={} context_hash={} content_hash_short={}",
+                        next_idx,
+                        version_display,
+                        model_display,
+                        &context_hash_value,
+                        content_hash_short
+                    );
+                    state.briefing_mut().complete_article(next_idx, result);
+                    state.briefing_mut().set_article_cache_key(next_idx, None);
+                    state.mark_dirty();
+                    continue;
+                }
 
-        if let Some(key) = cache_key {
-            if let Some(cached_result) = state.try_reuse_summary(&key) {
-                // Cache hit: complete article inline
+                state.record_summary_cache_miss();
                 engine_info!(
-                    "[summary-cache] hit for article {} (hash={}, version={}, model={}, context={})",
+                    "[summary-cache] article={} decision=miss reason=cache-miss prompt_version={} model_id={} context_hash={} content_hash_short={}",
                     next_idx,
-                    &content_hash[..content_hash.len().min(8)],
                     version_display,
                     model_display,
-                    &context_hash_value
+                    &context_hash_value,
+                    content_hash_short
                 );
-                let result = cached_result.clone();
-                state.briefing_mut().complete_article(next_idx, result);
+                let request_id = state.allocate_next_llm_request_id();
+                state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
+                state.briefing_mut().start_article(next_idx, request_id);
+                effects.push(Effect::RequestLlmCompletion {
+                    request_id,
+                    prompt_id: PromptId::ArticleSummary,
+                    prompt_version: None,
+                    input_content: prepared_text,
+                    context,
+                });
                 state.mark_dirty();
-                // Continue loop to check next article
-                continue;
+                return;
+            }
+            Err(err) => {
+                state.briefing_mut().set_article_cache_key(next_idx, None);
+                state.record_summary_cache_key_unavailable();
+                let reason = summary_cache_key_error_reason(&err);
+                engine_info!(
+                    "[summary-cache] article={} decision=key_unavailable reason={} prompt_version={} model_id={} context_hash={} content_hash_short={}",
+                    next_idx,
+                    reason,
+                    version_display,
+                    model_display,
+                    &context_hash_value,
+                    content_hash_short
+                );
+                let request_id = state.allocate_next_llm_request_id();
+                state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
+                state.briefing_mut().start_article(next_idx, request_id);
+                effects.push(Effect::RequestLlmCompletion {
+                    request_id,
+                    prompt_id: PromptId::ArticleSummary,
+                    prompt_version: None,
+                    input_content: prepared_text,
+                    context,
+                });
+                state.mark_dirty();
+                return;
             }
         }
-
-        // Cache miss or no key: emit LLM request and stop
-        let request_id = state.allocate_next_llm_request_id();
-        state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
-        state.briefing_mut().start_article(next_idx, request_id);
-
-        engine_info!(
-            "[summary-cache] miss for article {} (hash={}, version={}, model={}, context={})",
-            next_idx,
-            &content_hash[..content_hash.len().min(8)],
-            version_display,
-            model_display,
-            &context_hash_value
-        );
-
-        effects.push(Effect::RequestLlmCompletion {
-            request_id,
-            prompt_id: PromptId::ArticleSummary,
-            prompt_version: None,
-            input_content: prepared_text,
-            context,
-        });
-        state.mark_dirty();
-        return;
     }
 
-    // All summaries resolved (cached or completed)
     if state.briefing().completed_summary_count() == 0 {
         state
             .briefing_mut()
             .fail("all article summaries failed".to_string());
         state.mark_dirty();
+        log_summary_cache_run_summary(state);
         effects.push(Effect::PersistSummaryCache {
             cache: state.summary_cache().clone(),
         });
@@ -669,6 +754,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                 .briefing_mut()
                 .fail("missing briefing collection".to_string());
             state.mark_dirty();
+            log_summary_cache_run_summary(state);
             effects.push(Effect::PersistSummaryCache {
                 cache: state.summary_cache().clone(),
             });
@@ -691,28 +777,74 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
     state.mark_dirty();
 }
 
-/// Build a cache key for an article summary.
-/// Returns None if we don't have the necessary metadata (prompt_version or model_id).
+fn try_start_briefing_with_metadata(state: &mut AppState, effects: &mut Vec<Effect>) {
+    if !state.is_briefing_metadata_ready() {
+        return;
+    }
+    if matches!(state.briefing().phase(), BriefingPhase::Summarizing { .. }) {
+        dispatch_next_briefing_step(state, effects);
+    }
+}
+
+fn log_summary_cache_warmup_if_needed(state: &mut AppState) {
+    if state.summary_cache_warmup_logged() {
+        return;
+    }
+    let (version_display, model_display, reason_label) = match state.summary_cache_metadata() {
+        Some((version, model)) => (version.to_string(), model.to_string(), "metadata-loaded"),
+        None => (
+            "<none>".to_string(),
+            "<none>".to_string(),
+            "missing-configured-model",
+        ),
+    };
+    engine_info!(
+        "[summary-cache] run warmup decision=run-start reason={} prompt_version={} model_id={}",
+        reason_label,
+        version_display,
+        model_display
+    );
+    state.mark_summary_cache_warmup_logged();
+}
+
+fn log_summary_cache_run_summary(state: &mut AppState) {
+    let metrics = state.summary_cache_metrics();
+    engine_info!(
+        "[summary-cache] run summary hits={} misses={} key_unavailable={} total={}",
+        metrics.hits(),
+        metrics.misses(),
+        metrics.key_unavailable(),
+        metrics.total()
+    );
+    state.finalize_summary_cache_run();
+}
+
+fn summary_cache_key_error_reason(error: &SummaryCacheKeyError) -> &'static str {
+    match error {
+        SummaryCacheKeyError::MissingPromptVersion => "missing prompt_version metadata",
+        SummaryCacheKeyError::MissingModelId => "missing model_id metadata",
+        SummaryCacheKeyError::EmptyContentHash => "empty content_hash",
+    }
+}
+
 fn build_summary_cache_key(
     content_hash: &str,
-    context_hash: &str,
+    prompt_id: PromptId,
     prompt_version: Option<PromptVersion>,
     model_id: Option<&str>,
-) -> Option<SummaryCacheKey> {
-    let prompt_version = prompt_version?;
-    let model_id = model_id?;
+    context: &[(String, String)],
+) -> Result<SummaryCacheKey, SummaryCacheKeyError> {
+    SummaryCacheKey::try_new(content_hash, prompt_id, prompt_version, model_id, context)
+}
 
-    Some(SummaryCacheKey {
-        content_hash: content_hash.to_string(),
-        prompt_id: PromptId::ArticleSummary,
-        prompt_version,
-        model_id: model_id.to_string(),
-        context_hash: context_hash.to_string(),
-    })
+fn short_hash(hash: &str) -> &str {
+    let end = hash.len().min(8);
+    &hash[..end]
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Once;
 
     use super::*;
@@ -739,6 +871,31 @@ mod tests {
             },
         ];
         (articles, "Collection text".to_string())
+    }
+
+    fn loaded_single_article() -> (Vec<LoadedArticle>, String) {
+        let articles = vec![LoadedArticle {
+            url: "https://example.com/a".to_string(),
+            source_title: Some("Article A".to_string()),
+            prepared_text: "Article A text".to_string(),
+            content_hash: "hash-a".to_string(),
+        }];
+        (articles, "Collection text".to_string())
+    }
+
+    fn with_summary_metadata(state: AppState) -> AppState {
+        let mut active_versions = HashMap::new();
+        active_versions.insert(PromptId::ArticleSummary, 1);
+        let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
+        let (state, _) = update(
+            state,
+            Msg::LlmMetadataLoaded {
+                active_versions,
+                effective_models,
+            },
+        );
+        state
     }
 
     fn summary_json(title: &str) -> String {
@@ -773,6 +930,7 @@ mod tests {
         init_logging();
         let state = AppState::new();
         let (state, _effects) = update(state, Msg::GenerateBriefingClicked);
+        let state = with_summary_metadata(state);
         let (articles, collection_text) = loaded_articles();
 
         let (state, effects) = update(
@@ -808,6 +966,7 @@ mod tests {
         init_logging();
         let state = AppState::new();
         let (state, _effects) = update(state, Msg::GenerateBriefingClicked);
+        let state = with_summary_metadata(state);
         let (articles, collection_text) = loaded_articles();
         let (state, _effects) = update(
             state,
@@ -885,6 +1044,123 @@ mod tests {
         assert!(matches!(effects[0], Effect::PersistSummaryCache { .. }));
         assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
         assert!(state.briefing().briefing_result().is_some());
+    }
+
+    #[test]
+    fn summary_store_uses_run_frozen_metadata_when_completion_model_differs() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::GenerateBriefingClicked);
+        let state = with_summary_metadata(state);
+        let (articles, collection_text) = loaded_single_article();
+        let (state, _) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 1,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article A"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 77,
+                    model_id: "test-model-2024-07-18".to_string(),
+                },
+            },
+        );
+
+        let keys: Vec<_> = state.summary_cache().iter().map(|(key, _)| key.clone()).collect();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].prompt_version, 1);
+        assert_eq!(keys[0].model_id, "test-model");
+    }
+
+    #[test]
+    fn second_run_reuses_cached_summary_with_configured_model_key() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::GenerateBriefingClicked);
+        let state = with_summary_metadata(state);
+        let (articles, collection_text) = loaded_single_article();
+        let (state, _) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 1,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article A"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 88,
+                    model_id: "test-model-2024-07-18".to_string(),
+                },
+            },
+        );
+        assert_eq!(
+            effects,
+            vec![Effect::RequestLlmCompletion {
+                request_id: 2,
+                prompt_id: PromptId::AggregateBriefing,
+                prompt_version: None,
+                input_content: "Collection text".to_string(),
+                context: Vec::new(),
+            }]
+        );
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 2,
+                result: LlmResultKind::Success {
+                    output_json: briefing_json(1),
+                    input_tokens: 10,
+                    output_tokens: 4,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
+                },
+            },
+        );
+
+        let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+        assert_eq!(
+            effects,
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadLlmMetadata,
+                Effect::LoadArticlesForBriefing
+            ]
+        );
+        let state = with_summary_metadata(state);
+        let (articles, collection_text) = loaded_single_article();
+        let (_state, effects) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+
+        assert_eq!(
+            effects,
+            vec![Effect::RequestLlmCompletion {
+                request_id: 3,
+                prompt_id: PromptId::AggregateBriefing,
+                prompt_version: None,
+                input_content: "Collection text".to_string(),
+                context: Vec::new(),
+            }]
+        );
     }
 
     #[test]

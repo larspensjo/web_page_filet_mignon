@@ -22,7 +22,9 @@ pub use state::{
     normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind,
     LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex, SessionState, Stage,
 };
-pub use summary_cache::{context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
+pub use summary_cache::{
+    context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
+};
 pub use triage::{
     ArticleTriageResult, ArticleTriageState, TriageArticle, TriageArticleId, TriagePhase,
     TriageSession,

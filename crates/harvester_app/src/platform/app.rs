@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -16,6 +16,7 @@ use harvester_core::{
 
 use engine_logging::{engine_info, engine_warn};
 
+use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
     LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
@@ -63,8 +64,9 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             session_id: format!("session-{}", Utc::now().format("%Y%m%d-%H%M%S")),
             replay_cache: None,
         };
+        let model_map = effective_model_map(&config);
         let handle = LlmHandle::new(config);
-        EffectRunner::new_with_llm(msg_tx.clone(), handle, 100_000, registry)
+        EffectRunner::new_with_llm(msg_tx.clone(), handle, 100_000, registry, model_map)
     } else {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
         EffectRunner::new(msg_tx.clone())
@@ -130,6 +132,36 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     });
 
     platform.main_event_loop(event_handler, ui_state_provider, initial_commands)
+}
+
+fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
+    let mut map = HashMap::new();
+
+    let triage_model = config
+        .triage_model
+        .as_ref()
+        .unwrap_or(&config.default_model)
+        .model_name()
+        .to_string();
+    map.insert(PromptId::ArticleTriage, triage_model);
+
+    let summary_model = config
+        .summary_model
+        .as_ref()
+        .unwrap_or(&config.default_model)
+        .model_name()
+        .to_string();
+    map.insert(PromptId::ArticleSummary, summary_model);
+
+    let briefing_model = config
+        .briefing_model
+        .as_ref()
+        .unwrap_or(&config.default_model)
+        .model_name()
+        .to_string();
+    map.insert(PromptId::AggregateBriefing, briefing_model);
+
+    map
 }
 
 #[derive(Default)]

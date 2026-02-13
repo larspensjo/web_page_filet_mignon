@@ -150,6 +150,10 @@ impl PromptRegistry {
             .unwrap_or_default()
     }
 
+    pub fn active_versions_map(&self) -> HashMap<PromptId, PromptVersion> {
+        self.active_versions.clone()
+    }
+
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
         crate::llm::prompts::register_defaults(&mut registry);

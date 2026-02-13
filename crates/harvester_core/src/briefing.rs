@@ -1,3 +1,4 @@
+use crate::summary_cache::SummaryCacheKey;
 use std::fmt::Write;
 
 pub type BriefingArticleId = usize;
@@ -36,6 +37,7 @@ pub struct BriefingArticle {
     pub prepared_text: String,
     pub content_hash: String,
     pub summary_state: ArticleSummaryState,
+    pub cache_key_snapshot: Option<SummaryCacheKey>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -143,6 +145,7 @@ impl BriefingSession {
                 prepared_text: article.prepared_text,
                 content_hash: article.content_hash,
                 summary_state: ArticleSummaryState::Pending,
+                cache_key_snapshot: None,
             })
             .collect();
         self.collection_text = Some(collection_text);
@@ -181,12 +184,14 @@ impl BriefingSession {
     ) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.summary_state = ArticleSummaryState::Completed { result };
+            article.cache_key_snapshot = None;
         }
     }
 
     pub fn fail_article(&mut self, article_id: BriefingArticleId, reason: String) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.summary_state = ArticleSummaryState::Failed { reason };
+            article.cache_key_snapshot = None;
         }
     }
 
@@ -210,6 +215,22 @@ impl BriefingSession {
         self.articles
             .iter()
             .position(|article| matches!(article.summary_state, ArticleSummaryState::Pending))
+    }
+
+    pub fn set_article_cache_key(
+        &mut self,
+        article_id: BriefingArticleId,
+        key: Option<SummaryCacheKey>,
+    ) {
+        if let Some(article) = self.articles.get_mut(article_id) {
+            article.cache_key_snapshot = key;
+        }
+    }
+
+    pub fn article_cache_key(&self, article_id: BriefingArticleId) -> Option<&SummaryCacheKey> {
+        self.articles
+            .get(article_id)
+            .and_then(|article| article.cache_key_snapshot.as_ref())
     }
 
     pub fn find_article_by_request_id(&self, request_id: u64) -> Option<BriefingArticleId> {

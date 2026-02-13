@@ -719,6 +719,7 @@ dependencies = [
  "engine_logging",
  "harvester_engine",
  "log",
+ "sha2",
  "url",
 ]
 

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Once;
 
 use harvester_core::{update, AppState, Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg};
@@ -11,6 +12,21 @@ fn init_logging() {
 fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
     let (state, _) = update(state, Msg::InputChanged(input.to_string()));
     update(state, Msg::UrlsSubmitted)
+}
+
+fn with_summary_metadata(state: AppState) -> AppState {
+    let mut active_versions = HashMap::new();
+    active_versions.insert(PromptId::ArticleSummary, 1);
+    let mut effective_models = HashMap::new();
+    effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
+    let (state, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    );
+    state
 }
 
 fn add_completed_job(state: AppState, url: &str) -> (AppState, u64) {
@@ -426,6 +442,7 @@ fn triage_and_briefing_can_interleave() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let (state, _) = update(state, Msg::GenerateBriefingClicked);
+    let state = with_summary_metadata(state);
     let (state, summary_effects) = update(
         state,
         Msg::ArticlesLoaded {
@@ -483,6 +500,7 @@ fn triage_and_briefing_concurrent_request_ids() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let (state, _) = update(state, Msg::GenerateBriefingClicked);
+    let state = with_summary_metadata(state);
     let (state, summary_effects) = update(
         state,
         Msg::ArticlesLoaded {
