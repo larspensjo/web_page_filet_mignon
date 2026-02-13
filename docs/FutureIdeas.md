@@ -364,6 +364,24 @@ SuccessCriteria:
 - Token budgets scale with triage priority.
 - Lower-priority items are processed with smaller budgets.
 
+#### [FI-LLM-Budgeting-0003] Priority-aware quota cutover under budget exhaustion
+Status: Candidate
+TopLevel: LLM
+SubLevel: Budgeting
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.ConcurrentLlmProcessing.md
+- SourceSection: Future ideas enabled by this plan
+- Captured: 2026-02-13
+Tags: [llm, budgeting, quota, triage]
+Summary: When quota is exhausted mid-run, complete in-flight high-priority work and skip pending lower-priority requests first.
+Rationale: Preserves output quality for the most important items during constrained runs.
+SuccessCriteria:
+- Quota exhaustion applies a deterministic priority-based cutoff for pending requests.
+- Logs identify which requests were skipped due to quota cutover and their priorities.
+
 #### [FI-LLM-Budgeting-0002] Retry with smaller excerpt on max-tokens
 Status: Candidate
 TopLevel: LLM
@@ -550,10 +568,11 @@ Origin:
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
 Tags: [llm, retries, resilience]
-Summary: Add exponential backoff with jitter for transient provider failures.
+Summary: Add bounded retries for transient provider failures with jittered backoff and retry-after support.
 Rationale: Improves resilience to rate limits and transient errors.
 SuccessCriteria:
 - Retries follow a bounded backoff schedule with jitter.
+- Provider retry-after hints are respected when available.
 - Retry budget is enforced per run and recorded in logs.
 
 ### Streaming
@@ -654,11 +673,12 @@ Origin:
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
 Tags: [evaluation, diagnostics, llm]
-Summary: Report distribution metrics for priorities, tags, validation failures, and cost/latency.
+Summary: Report distribution metrics for priorities, tags, validation failures, and cost/latency, including run-level concurrency diagnostics.
 Rationale: Enables systematic prompt/model evaluation.
 SuccessCriteria:
 - Diagnostics include cost, latency, and validation failure rates.
 - Metrics can be exported per run for comparison.
+- End-of-run diagnostics include request totals, success/failure counts, p50/p95 latency, and peak in-flight.
 
 ### SourceHealth
 
@@ -719,6 +739,26 @@ Rationale: Reduces end-to-end latency for large batches.
 SuccessCriteria:
 - LLM dispatch runs up to a configurable concurrency limit.
 - Session state correctly tracks multiple in-flight requests.
+- Aggregate briefing dispatch waits for all summary requests to settle.
+
+#### [FI-Performance-LlmProcessing-0002] Adaptive concurrency cap from provider pressure
+Status: Candidate
+TopLevel: Performance
+SubLevel: LlmProcessing
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.ConcurrentLlmProcessing.md
+- SourceSection: Future ideas enabled by this plan
+- Captured: 2026-02-13
+Tags: [llm, concurrency, rate-limiting, adaptive]
+Summary: Dynamically lower concurrency after repeated 429/rate-limit responses and restore it after sustained success.
+Rationale: Keeps throughput high while reducing repeated rate-limit failures.
+SuccessCriteria:
+- Concurrency cap decreases automatically after repeated rate-limit failures.
+- Cap restores gradually toward configured maximum after successful requests.
+- Adaptive cap changes are logged with before/after values.
 
 ### Polling
 
@@ -1185,6 +1225,25 @@ Rationale: Gives operators control over long-running or failing runs.
 SuccessCriteria:
 - UI exposes session control actions.
 - Session state transitions are logged and deterministic.
+- Pause stops dispatching new requests while allowing in-flight requests to finish.
+
+#### [FI-UX-SessionControls-0002] Real-time in-flight progress indicator
+Status: Candidate
+TopLevel: UX
+SubLevel: SessionControls
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.ConcurrentLlmProcessing.md
+- SourceSection: Future ideas enabled by this plan
+- Captured: 2026-02-13
+Tags: [UX, progress, concurrency, llm]
+Summary: Show live progress such as "N/M done, K in flight" during triage and briefing.
+Rationale: Makes concurrent progress legible and improves operator confidence during long runs.
+SuccessCriteria:
+- UI shows completed/total and in-flight counts while processing is active.
+- Indicator updates on each LLM completion event.
 
 ### TriageUi
 
@@ -1225,82 +1284,3 @@ Rationale: Reduces manual orchestration steps.
 SuccessCriteria:
 - One action triggers triage followed by briefing using a priority threshold.
 - Workflow progress is visible in the UI.
-
----
-
-### Concurrency
-
-#### [FI-Concurrency-AdaptiveCap-0001] Adaptive concurrency cap based on 429 responses
-Status: Candidate
-TopLevel: Performance
-SubLevel: Concurrency
-Priority: P2
-Effort: M
-Risk: L
-Origin:
-- SourceDoc: Plan.ConcurrentLlmProcessing.md
-- SourceSection: Future ideas enabled by this plan
-- Captured: 2026-02-13
-Tags: [LLM, concurrency, rate-limiting, adaptive]
-Summary: Auto-reduce max_concurrent_requests on repeated 429 responses; restore on success.
-Rationale: Allows the system to self-tune to provider rate limits without manual cap adjustment.
-SuccessCriteria:
-- Concurrency cap automatically decreases on repeated 429/rate-limit errors.
-- Concurrency cap restores toward configured maximum after a series of successes.
-- Adaptive behavior is logged under [llm-concurrency] category.
-
-#### [FI-Concurrency-RetryPolicy-0001] Bounded retry with jitter and retry-after support
-Status: Candidate
-TopLevel: Robustness
-SubLevel: Concurrency
-Priority: P2
-Effort: M
-Risk: L
-Origin:
-- SourceDoc: Plan.ConcurrentLlmProcessing.md
-- SourceSection: Phase 3: Robustness policies
-- Captured: 2026-02-13
-Tags: [LLM, retry, rate-limiting, robustness]
-Summary: Add per-request retry policy with jittered backoff, retry-after header support, and retry budget.
-Rationale: Reduces transient failure rates during brief provider instability without unbounded retries.
-SuccessCriteria:
-- Transient errors (timeout, 429, network) are retried up to a per-request budget.
-- Provider Retry-After header is respected when available.
-- Retry holds the semaphore slot across attempts (not released between retries).
-- Retries are visible in [llm-retry] logs.
-
-#### [FI-Concurrency-ObservabilityRunSummary-0001] End-of-run latency and throughput summary logs
-Status: Candidate
-TopLevel: Observability
-SubLevel: Concurrency
-Priority: P3
-Effort: S
-Risk: L
-Origin:
-- SourceDoc: Plan.ConcurrentLlmProcessing.md
-- SourceSection: Phase 4: Observability and diagnostics
-- Captured: 2026-02-13
-Tags: [LLM, observability, logging, latency]
-Summary: Emit a structured run-level summary at end of triage and briefing with p50/p95 latency, success/failure counts, and peak in-flight.
-Rationale: Actionable data for tuning the concurrency cap and diagnosing performance regressions.
-SuccessCriteria:
-- Summary log emitted at end of each triage and briefing run.
-- Includes: total requests, success/failure counts, p50/p95 duration, max in-flight reached.
-
-#### [FI-Concurrency-RealtimeStatusBar-0001] Real-time in-flight indicator in status bar
-Status: Candidate
-TopLevel: UX
-SubLevel: Concurrency
-Priority: P3
-Effort: S
-Risk: L
-Origin:
-- SourceDoc: Plan.ConcurrentLlmProcessing.md
-- SourceSection: Future ideas enabled by this plan
-- Captured: 2026-02-13
-Tags: [UX, concurrency, progress, LLM]
-Summary: Show live "N/M done, K in flight" in the status bar during triage/briefing.
-Rationale: The count-based progress model from Phase 1 directly enables this without additional state changes.
-SuccessCriteria:
-- Status bar shows completed/total and in-flight counts during processing.
-- Counts update on each LlmCompleted event.
