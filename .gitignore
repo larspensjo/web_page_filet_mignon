@@ -20,6 +20,7 @@ target
 /sources.ron
 # /contexts/
 /.rss_seen_guids.ron
+/testResults.xml
 
 # Coverage analysis outputs
 /tests/coverage_reports/*.json
