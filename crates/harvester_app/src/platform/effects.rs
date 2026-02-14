@@ -743,7 +743,11 @@ impl EffectRunner {
     fn reject_effect(&self, effect: Effect, reason: String) {
         match effect {
             Effect::EnqueueUrl { job_id, .. } => {
-                engine_warn!("EnqueueUrl rejected job_id={} reason={}", job_id, reason);
+                if reason.starts_with("url parsing failed") {
+                    engine_info!("EnqueueUrl rejected job_id={} reason={}", job_id, reason);
+                } else {
+                    engine_warn!("EnqueueUrl rejected job_id={} reason={}", job_id, reason);
+                }
                 if let Err(err) = self.msg_tx.send(Msg::JobDone {
                     job_id,
                     result: JobResultKind::Failed {

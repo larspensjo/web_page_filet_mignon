@@ -108,8 +108,7 @@ pub fn validate_summary(content: &str) -> Result<ArticleSummary, ValidationError
             let point = value.as_str().ok_or_else(|| {
                 ValidationError::SchemaViolation("key point must be a string".into())
             })?;
-            ensure_max_length(point, MAX_KEY_POINT_LEN, FIELD_KEY_POINTS)?;
-            Ok(point.to_string())
+            Ok(truncate_to_char_boundary(point, MAX_KEY_POINT_LEN).to_string())
         })
         .collect::<Result<Vec<_>, ValidationError>>()?;
 

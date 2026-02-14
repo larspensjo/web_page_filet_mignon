@@ -304,16 +304,28 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                     );
                                     if let Ok(completion_key) = completion_key {
                                         if completion_key != store_key {
-                                            engine_warn!(
-                                                "[summary-cache] completion metadata mismatch article={} cache=(version={},model={},context={}) completion=(version={},model={},context={})",
-                                                article_idx,
-                                                store_key.prompt_version,
-                                                store_key.model_id,
-                                                store_key.context_hash,
-                                                completion_key.prompt_version,
-                                                completion_key.model_id,
-                                                completion_key.context_hash,
-                                            );
+                                            if summary_cache_model_ids_compatible(
+                                                &store_key.model_id,
+                                                &completion_key.model_id,
+                                            ) {
+                                                engine_info!(
+                                                    "[summary-cache] completion metadata differs by model variant article={} cache_model={} completion_model={}",
+                                                    article_idx,
+                                                    store_key.model_id,
+                                                    completion_key.model_id,
+                                                );
+                                            } else {
+                                                engine_warn!(
+                                                    "[summary-cache] completion metadata mismatch article={} cache=(version={},model={},context={}) completion=(version={},model={},context={})",
+                                                    article_idx,
+                                                    store_key.prompt_version,
+                                                    store_key.model_id,
+                                                    store_key.context_hash,
+                                                    completion_key.prompt_version,
+                                                    completion_key.model_id,
+                                                    completion_key.context_hash,
+                                                );
+                                            }
                                         }
                                     }
 
@@ -972,6 +984,17 @@ fn short_hash(hash: &str) -> &str {
     &hash[..end]
 }
 
+fn summary_cache_model_ids_compatible(store_model_id: &str, completion_model_id: &str) -> bool {
+    if store_model_id == completion_model_id {
+        return true;
+    }
+    completion_model_id.starts_with(store_model_id)
+        && completion_model_id
+            .as_bytes()
+            .get(store_model_id.len())
+            .is_some_and(|b| *b == b'-')
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -1489,6 +1512,18 @@ mod tests {
         assert!(effects.contains(&Effect::LoadArticlesForTriage));
         assert!(effects.contains(&Effect::LoadLlmMetadata));
         assert!(effects.contains(&Effect::LoadPromptContexts));
+    }
+
+    #[test]
+    fn summary_cache_model_id_compatibility_accepts_resolved_suffix() {
+        assert!(summary_cache_model_ids_compatible(
+            "gpt-4o-mini",
+            "gpt-4o-mini-2024-07-18",
+        ));
+        assert!(!summary_cache_model_ids_compatible(
+            "gpt-4o-mini",
+            "gpt-4o",
+        ));
     }
 
     #[test]

@@ -105,6 +105,19 @@ fn summary_limit_error_reports_actual_and_max() {
 }
 
 #[test]
+fn summary_key_points_over_limit_are_truncated() {
+    let long_point = "k".repeat(300);
+    let json = format!(
+        r#"{{"title":"T","summary":"S","key_points":["{}"]}}"#,
+        long_point
+    );
+
+    let validated = validate_summary(&json).unwrap();
+    assert_eq!(validated.key_points.len(), 1);
+    assert_eq!(validated.key_points[0].chars().count(), 256);
+}
+
+#[test]
 fn executive_summary_over_limit_is_truncated_with_notice() {
     let executive_summary = "e".repeat(3200);
     let json = format!(
