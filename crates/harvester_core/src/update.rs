@@ -7,6 +7,7 @@ use crate::{
         CorpusFingerprint,
     },
     calc_left_width, context_hash,
+    prompt_lab::PromptLabStage,
     triage::{ArticleTriageResult, TriagePhase, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
@@ -650,10 +651,71 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.end_poll();
             Vec::new()
         }
+        Msg::PromptLabOpenRequested => {
+            state.open_prompt_lab();
+            Vec::new()
+        }
+        Msg::PromptLabCloseRequested => {
+            state.close_prompt_lab();
+            Vec::new()
+        }
+        Msg::PromptLabStageSelected { stage } => {
+            state.select_prompt_lab_stage(stage);
+            Vec::new()
+        }
+        Msg::PromptLabInputChanged { text } => {
+            state.set_prompt_lab_input(text);
+            Vec::new()
+        }
+        Msg::PromptLabRunRequested => {
+            // Guard: one run at a time
+            if state.prompt_lab().has_in_flight_run() {
+                return (state, Vec::new());
+            }
+            // Guard: input must not be empty
+            if state.prompt_lab().input().is_empty() {
+                return (state, Vec::new());
+            }
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            let input = state.prompt_lab().input().to_string();
+            let request_id = state.allocate_next_llm_request_id();
+            let run_id = state.allocate_next_prompt_lab_run_id();
+            let prompt_version = state.active_version_for(prompt_id);
+            let context = state.context_for(prompt_id).to_vec();
+            state.record_pending_llm_request(request_id, prompt_id);
+            state.add_prompt_lab_pending_run(run_id, stage, prompt_id, input.clone(), request_id);
+            state.mark_dirty();
+            engine_info!(
+                "[prompt-lab] run requested run_id={} request_id={} stage={:?}",
+                run_id.0,
+                request_id,
+                stage
+            );
+            vec![Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                prompt_version,
+                input_content: input,
+                context,
+            }]
+        }
+        Msg::PromptLabHistoryCleared => {
+            state.clear_prompt_lab_history();
+            Vec::new()
+        }
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 
     (state, effects)
+}
+
+fn prompt_id_for_stage(stage: PromptLabStage) -> PromptId {
+    match stage {
+        PromptLabStage::Triage => PromptId::ArticleTriage,
+        PromptLabStage::Summary => PromptId::ArticleSummary,
+        PromptLabStage::Briefing => PromptId::AggregateBriefing,
+    }
 }
 
 fn parse_urls(raw: &str) -> Vec<String> {
@@ -1857,5 +1919,105 @@ mod tests {
             has_aggregate,
             "aggregate should dispatch after all articles settled"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Substep C: Prompt Lab reducer arm tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn prompt_lab_open_sets_visible_and_dirty() {
+        init_logging();
+        let state = AppState::new();
+        let (state, effects) = update(state, Msg::PromptLabOpenRequested);
+        assert!(state.prompt_lab().is_visible());
+        assert!(state.view().dirty);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn prompt_lab_close_clears_visible() {
+        init_logging();
+        let mut state = AppState::new();
+        state.open_prompt_lab();
+        let (state, effects) = update(state, Msg::PromptLabCloseRequested);
+        assert!(!state.prompt_lab().is_visible());
+        assert!(state.view().dirty);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn prompt_lab_stage_selected_updates_stage() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::PromptLabStageSelected { stage: crate::prompt_lab::PromptLabStage::Summary });
+        assert_eq!(state.prompt_lab().selected_stage(), crate::prompt_lab::PromptLabStage::Summary);
+    }
+
+    #[test]
+    fn prompt_lab_input_changed_updates_input() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::PromptLabInputChanged { text: "hello world".to_string() });
+        assert_eq!(state.prompt_lab().input(), "hello world");
+    }
+
+    #[test]
+    fn prompt_lab_run_requested_with_nonempty_input_emits_effect_and_creates_pending_run() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_prompt_lab_input("some article text".to_string());
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::RequestLlmCompletion { .. }));
+        assert_eq!(state.prompt_lab().run_count(), 1);
+        assert!(state.prompt_lab().has_in_flight_run());
+        // latest_run should exist and be Pending
+        use crate::prompt_lab::PromptLabRunStatus;
+        assert!(matches!(state.prompt_lab().latest_run().unwrap().status, PromptLabRunStatus::Pending { .. }));
+    }
+
+    #[test]
+    fn prompt_lab_run_requested_with_empty_input_emits_no_effects() {
+        init_logging();
+        let state = AppState::new(); // input is empty by default
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert!(effects.is_empty());
+        assert_eq!(state.prompt_lab().run_count(), 0);
+    }
+
+    #[test]
+    fn prompt_lab_run_requested_while_in_flight_emits_no_effects() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_prompt_lab_input("text".to_string());
+        // Dispatch first run
+        let (mut state, _) = update(state, Msg::PromptLabRunRequested);
+        assert!(state.prompt_lab().has_in_flight_run());
+        // Change input and try again — should be blocked
+        state.set_prompt_lab_input("different text".to_string());
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert!(effects.is_empty());
+        assert_eq!(state.prompt_lab().run_count(), 1);
+    }
+
+    #[test]
+    fn prompt_lab_history_cleared_removes_completed_and_failed() {
+        init_logging();
+        use crate::prompt_lab::{PromptLabRunId, PromptLabRunStatus, PromptLabStage};
+        let mut state = AppState::new();
+        // Add a completed run manually
+        let rid = state.allocate_next_llm_request_id();
+        let run = state.allocate_next_prompt_lab_run_id();
+        state.add_prompt_lab_pending_run(run, PromptLabStage::Triage, PromptId::ArticleTriage, "x".to_string(), rid);
+        state.complete_prompt_lab_run(run, "{}".to_string(), 1, 1, 1, "m".to_string());
+        state.consume_prompt_lab_ownership(rid);
+        assert_eq!(state.prompt_lab().run_count(), 1);
+        // Send clear message
+        let (state, effects) = update(state, Msg::PromptLabHistoryCleared);
+        assert_eq!(state.prompt_lab().run_count(), 0);
+        assert!(effects.is_empty());
+        // latest_run should be None after clearing all
+        assert!(state.prompt_lab().latest_run().is_none());
     }
 }

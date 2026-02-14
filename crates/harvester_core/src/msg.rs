@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::ExtractedLink;
 
+use crate::prompt_lab::PromptLabStage;
+
 use crate::briefing::LoadedArticle;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,6 +132,18 @@ pub enum Msg {
     TriageCacheHydrated { cache: crate::TriageCache },
     /// User requested to open the currently selected article URL in the default browser.
     OpenInBrowserClicked,
+    /// User requested to open the Prompt Lab panel.
+    PromptLabOpenRequested,
+    /// User requested to close the Prompt Lab panel.
+    PromptLabCloseRequested,
+    /// User selected a different stage in the Prompt Lab.
+    PromptLabStageSelected { stage: PromptLabStage },
+    /// User edited the Prompt Lab input text.
+    PromptLabInputChanged { text: String },
+    /// User requested a Prompt Lab LLM run with the current input and stage.
+    PromptLabRunRequested,
+    /// User requested to clear completed/failed runs from Prompt Lab history.
+    PromptLabHistoryCleared,
 }
 
 /// Result payload returned by the LLM worker.
