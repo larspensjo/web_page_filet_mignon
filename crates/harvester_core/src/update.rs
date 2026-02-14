@@ -2145,4 +2145,155 @@ mod tests {
         // latest_run should be None after clearing all
         assert!(state.prompt_lab().latest_run().is_none());
     }
+
+    // ------------------------------------------------------------------
+    // Substep E: Isolation and non-regression tests
+    // ------------------------------------------------------------------
+
+    /// A full Prompt Lab lifecycle (open → stage → run → LlmCompleted) must not
+    /// mutate briefing or triage state.
+    #[test]
+    fn prompt_lab_lifecycle_leaves_briefing_default() {
+        init_logging();
+        let state = AppState::new();
+        let briefing_before = state.briefing().clone();
+
+        // Open lab, change stage, dispatch a run
+        let (state, _) = update(state, Msg::PromptLabOpenRequested);
+        let (state, _) = update(state, Msg::PromptLabStageSelected { stage: crate::prompt_lab::PromptLabStage::Summary });
+        let (state, effects) = update(state, Msg::PromptLabInputChanged { text: "article text".to_string() });
+        let (state, effects) = {
+            let (s, e) = update(state, Msg::PromptLabRunRequested);
+            (s, e)
+        };
+        let request_id = effects.iter().find_map(|e| {
+            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
+        }).unwrap();
+
+        // Complete the run
+        let (state, _) = update(state, Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::Success {
+                output_json: r#"{"priority":3,"category":"news","tags":[],"rationale":"ok"}"#.to_string(),
+                input_tokens: 5,
+                output_tokens: 10,
+                prompt_version: 1,
+                model_id: "m".to_string(),
+            },
+        });
+
+        assert_eq!(state.briefing().clone(), briefing_before, "briefing must be unchanged");
+    }
+
+    #[test]
+    fn prompt_lab_lifecycle_leaves_triage_default() {
+        init_logging();
+        let state = AppState::new();
+        let triage_before = state.triage().clone();
+
+        let (mut state, _) = update(state, Msg::PromptLabOpenRequested);
+        state.set_prompt_lab_input("article text".to_string());
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        let request_id = effects.iter().find_map(|e| {
+            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
+        }).unwrap();
+
+        let (state, _) = update(state, Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::Failed { reason: "timeout".to_string() },
+        });
+
+        assert_eq!(state.triage().clone(), triage_before, "triage must be unchanged");
+    }
+
+    /// Triage and Prompt Lab both have active request_ids. Completing the triage request
+    /// must not touch the lab run, and vice versa.
+    #[test]
+    fn triage_and_lab_coexistence_no_bleed() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_triage_max_in_flight(1);
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+
+        // Dispatch triage for 1 article → triage request_id = 1
+        let (mut state, triage_effects) = update(
+            state,
+            Msg::TriageArticlesLoaded { articles: loaded_triage_articles(1) },
+        );
+        let triage_req_id = triage_effects.iter().find_map(|e| {
+            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
+        }).expect("triage request");
+
+        // Dispatch lab run → lab request_id = 2
+        state.set_prompt_lab_input("article text".to_string());
+        let (state, lab_effects) = update(state, Msg::PromptLabRunRequested);
+        let lab_req_id = lab_effects.iter().find_map(|e| {
+            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
+        }).expect("lab request");
+
+        assert_ne!(triage_req_id, lab_req_id, "request IDs must be distinct");
+
+        // Complete the triage request — lab run must still be Pending
+        let (state, _) = update(state, triage_success(triage_req_id));
+        use crate::prompt_lab::PromptLabRunStatus;
+        assert!(matches!(
+            state.prompt_lab().latest_run().unwrap().status,
+            PromptLabRunStatus::Pending { .. }
+        ), "lab run must remain Pending after triage completes");
+
+        // Complete the lab request — triage must not gain extra completed articles
+        let triage_completed_before = state.triage().completed_count();
+        let (state, _) = update(state, Msg::LlmCompleted {
+            request_id: lab_req_id,
+            result: LlmResultKind::Success {
+                output_json: r#"{"priority":3,"category":"news","tags":[],"rationale":"ok"}"#.to_string(),
+                input_tokens: 5,
+                output_tokens: 10,
+                prompt_version: 1,
+                model_id: "m".to_string(),
+            },
+        });
+        assert_eq!(state.triage().completed_count(), triage_completed_before, "triage completed count must not change");
+        assert!(matches!(
+            state.prompt_lab().latest_run().unwrap().status,
+            PromptLabRunStatus::Completed { .. }
+        ));
+    }
+
+    /// After N triage dispatches and M lab dispatches, all request_ids are distinct.
+    #[test]
+    fn id_namespace_all_request_ids_distinct() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_triage_max_in_flight(3);
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+
+        // 3 triage articles → 3 triage request_ids
+        let (mut state, triage_effects) = update(
+            state,
+            Msg::TriageArticlesLoaded { articles: loaded_triage_articles(3) },
+        );
+        let triage_ids: Vec<u64> = triage_effects.iter().filter_map(|e| {
+            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
+        }).collect();
+        assert_eq!(triage_ids.len(), 3);
+
+        // 2 lab runs
+        state.set_prompt_lab_input("text1".to_string());
+        let (state, e1) = update(state, Msg::PromptLabRunRequested);
+        let lab_id1 = e1.iter().find_map(|e| if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }).unwrap();
+
+        // Complete first lab run to allow second
+        let (mut state, _) = update(state, Msg::LlmCompleted {
+            request_id: lab_id1,
+            result: LlmResultKind::Failed { reason: "done".to_string() },
+        });
+        state.set_prompt_lab_input("text2".to_string());
+        let (_, e2) = update(state, Msg::PromptLabRunRequested);
+        let lab_id2 = e2.iter().find_map(|e| if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }).unwrap();
+
+        let all_ids = [triage_ids.as_slice(), &[lab_id1, lab_id2]].concat();
+        let unique: std::collections::HashSet<u64> = all_ids.iter().copied().collect();
+        assert_eq!(unique.len(), all_ids.len(), "all request_ids must be distinct");
+    }
 }
