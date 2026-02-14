@@ -3,9 +3,10 @@ use engine_logging::{engine_info, engine_warn};
 use crate::{
     briefing::{
         ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingThemeResult,
+        CorpusFingerprint,
     },
     calc_left_width, context_hash,
-    triage::{ArticleTriageResult, TriageSession},
+    triage::{ArticleTriageResult, TriagePhase, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
@@ -462,15 +463,50 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if !state.briefing().can_start() {
                 return (state, Vec::new());
             }
-            state.start_summary_cache_run();
-            state.set_briefing(BriefingSession::new_loading(None));
+            if state.triage().is_active() {
+                engine_info!("[briefing-triage] interleave blocked: triage in progress");
+                return (state, Vec::new());
+            }
+            state.request_briefing_orchestration();
+            state.set_briefing(BriefingSession::new_waiting_for_triage(None));
             state.revert_preview_to_briefing();
-            engine_info!("[briefing] briefing requested");
+            engine_info!("[briefing-triage] generate requested");
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefing,
+                Effect::LoadArticlesForBriefingPrereq,
             ]
+        }
+        Msg::BriefingPrereqArticlesLoaded { articles } => {
+            engine_info!("[briefing-triage] prereq loaded count={}", articles.len());
+            if articles.is_empty() {
+                state.briefing_mut().fail("No articles available".to_string());
+                state.clear_briefing_orchestration();
+                state.mark_dirty();
+                return (state, Vec::new());
+            }
+            let prereq_fingerprint = CorpusFingerprint::from_articles(&articles);
+            state.store_briefing_prereq_articles(articles.clone());
+            let triage_reusable = matches!(state.triage().phase(), TriagePhase::Complete)
+                && CorpusFingerprint::from_triage_results(state.triage()) == prereq_fingerprint;
+            let mut effects = Vec::new();
+            if triage_reusable {
+                engine_info!("[briefing-triage] triage reused");
+                on_triage_settled_for_briefing(&mut state, &mut effects);
+            } else {
+                engine_info!("[briefing-triage] triage rerun");
+                state.triage_mut().reset_with_articles(articles);
+                state.triage_mut().transition_to_triaging();
+                dispatch_next_triage_step(&mut state, &mut effects);
+            }
+            effects
+        }
+        Msg::BriefingPrereqLoadFailed { reason } => {
+            engine_warn!("[briefing-triage] prereq load failed reason={}", reason);
+            state.briefing_mut().fail(reason);
+            state.clear_briefing_orchestration();
+            state.mark_dirty();
+            Vec::new()
         }
         Msg::ArticlesLoaded {
             articles,
@@ -500,6 +536,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             vec![Effect::PersistSummaryCache { cache }]
         }
         Msg::TriageClicked => {
+            if state.briefing_orchestration_requested() {
+                engine_info!("[briefing-triage] interleave blocked: briefing owns triage");
+                return (state, Vec::new());
+            }
             if !state.triage().can_start() {
                 return (state, Vec::new());
             }
@@ -659,9 +699,40 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
                 .fail("all triage attempts failed".to_string());
         } else {
             state.triage_mut().complete();
+            if state.briefing_orchestration_requested() {
+                on_triage_settled_for_briefing(state, effects);
+            }
         }
         state.mark_dirty();
     }
+}
+
+fn on_triage_settled_for_briefing(state: &mut AppState, effects: &mut Vec<Effect>) {
+    if !state.briefing_orchestration_requested() {
+        return;
+    }
+    let policy = state.briefing_triage_policy();
+    let ordered_urls = policy.eligible_urls(state.triage());
+    engine_info!(
+        "[briefing-triage] eligible count={} cutoff={}",
+        ordered_urls.len(),
+        policy.cutoff_exclusive
+    );
+    if ordered_urls.is_empty() {
+        state
+            .briefing_mut()
+            .fail("No articles with sufficient priority".to_string());
+        state.clear_briefing_orchestration();
+        state.mark_dirty();
+        return;
+    }
+
+    let _ = state.take_briefing_prereq_articles();
+    state.start_summary_cache_run();
+    state.mark_briefing_metadata_ready();
+    state.set_briefing(BriefingSession::new_loading(None));
+    state.clear_briefing_orchestration_request();
+    effects.push(Effect::LoadArticlesForBriefing { ordered_urls });
 }
 
 fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
@@ -967,6 +1038,63 @@ mod tests {
         )
     }
 
+    fn request_id_for_prompt(effects: &[Effect], prompt_id: PromptId) -> Option<u64> {
+        effects.iter().find_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: pid,
+                ..
+            } if *pid == prompt_id => Some(*request_id),
+            _ => None,
+        })
+    }
+
+    fn start_briefing_after_triage(state: AppState, articles: Vec<LoadedArticle>) -> AppState {
+        let (state, _) = update(state, Msg::GenerateBriefingClicked);
+        let state = with_summary_metadata(state);
+        let (mut state, effects) = update(
+            state,
+            Msg::BriefingPrereqArticlesLoaded {
+                articles: articles.clone(),
+            },
+        );
+        let mut triage_request_id =
+            request_id_for_prompt(&effects, PromptId::ArticleTriage).expect("triage request");
+
+        for idx in 0..articles.len() {
+            let priority = (articles.len() - idx + 1) as u8;
+            let (next_state, next_effects) = update(
+                state,
+                Msg::LlmCompleted {
+                    request_id: triage_request_id,
+                    result: LlmResultKind::Success {
+                        output_json: format!(
+                            "{{\"category\":\"security\",\"priority\":{},\"tags\":[\"tag\"],\"rationale\":\"reason\"}}",
+                            priority
+                        ),
+                        input_tokens: 10,
+                        output_tokens: 5,
+                        prompt_version: 1,
+                        model_id: "test-model".to_string(),
+                    },
+                },
+            );
+            state = next_state;
+            if idx + 1 < articles.len() {
+                triage_request_id = request_id_for_prompt(&next_effects, PromptId::ArticleTriage)
+                    .expect("next triage request");
+            } else {
+                assert!(
+                    next_effects
+                        .iter()
+                        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefing { .. })),
+                    "final triage completion should trigger filtered briefing load"
+                );
+            }
+        }
+        state
+    }
+
     #[test]
     fn generate_briefing_emits_load_effect() {
         init_logging();
@@ -978,18 +1106,17 @@ mod tests {
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefing
+                Effect::LoadArticlesForBriefingPrereq
             ]
         );
-        assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
+        assert_eq!(state.briefing().phase(), &BriefingPhase::WaitingForTriage);
     }
 
     #[test]
     fn articles_loaded_dispatches_first_summary() {
         init_logging();
         let state = AppState::new();
-        let (state, _effects) = update(state, Msg::GenerateBriefingClicked);
-        let state = with_summary_metadata(state);
+        let state = start_briefing_after_triage(state, loaded_articles().0.clone());
         let (articles, collection_text) = loaded_articles();
 
         let (state, effects) = update(
@@ -1003,7 +1130,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![Effect::RequestLlmCompletion {
-                request_id: 1,
+                request_id: 3,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
                 input_content: "Article A text".to_string(),
@@ -1016,7 +1143,7 @@ mod tests {
         ));
         assert!(matches!(
             state.briefing().articles()[0].summary_state,
-            ArticleSummaryState::InProgress { request_id: 1 }
+            ArticleSummaryState::InProgress { request_id: 3 }
         ));
     }
 
@@ -1024,8 +1151,7 @@ mod tests {
     fn summary_completion_advances_and_generates_briefing() {
         init_logging();
         let state = AppState::new();
-        let (state, _effects) = update(state, Msg::GenerateBriefingClicked);
-        let state = with_summary_metadata(state);
+        let state = start_briefing_after_triage(state, loaded_articles().0.clone());
         let (articles, collection_text) = loaded_articles();
         let (state, _effects) = update(
             state,
@@ -1038,7 +1164,7 @@ mod tests {
         let (state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 1,
+                request_id: 3,
                 result: LlmResultKind::Success {
                     output_json: summary_json("Article A"),
                     input_tokens: 10,
@@ -1052,7 +1178,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![Effect::RequestLlmCompletion {
-                request_id: 2,
+                request_id: 4,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
                 input_content: "Article B text".to_string(),
@@ -1063,7 +1189,7 @@ mod tests {
         let (state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 2,
+                request_id: 4,
                 result: LlmResultKind::Success {
                     output_json: summary_json("Article B"),
                     input_tokens: 10,
@@ -1077,7 +1203,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![Effect::RequestLlmCompletion {
-                request_id: 3,
+                request_id: 5,
                 prompt_id: PromptId::AggregateBriefing,
                 prompt_version: None,
                 input_content: "Collection text".to_string(),
@@ -1088,7 +1214,7 @@ mod tests {
         let (state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 3,
+                request_id: 5,
                 result: LlmResultKind::Success {
                     output_json: briefing_json(2),
                     input_tokens: 20,
@@ -1109,8 +1235,7 @@ mod tests {
     fn summary_store_uses_run_frozen_metadata_when_completion_model_differs() {
         init_logging();
         let state = AppState::new();
-        let (state, _) = update(state, Msg::GenerateBriefingClicked);
-        let state = with_summary_metadata(state);
+        let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
         let (articles, collection_text) = loaded_single_article();
         let (state, _) = update(
             state,
@@ -1123,7 +1248,7 @@ mod tests {
         let (state, _) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 1,
+                request_id: 2,
                 result: LlmResultKind::Success {
                     output_json: summary_json("Article A"),
                     input_tokens: 10,
@@ -1148,8 +1273,7 @@ mod tests {
     fn second_run_reuses_cached_summary_with_configured_model_key() {
         init_logging();
         let state = AppState::new();
-        let (state, _) = update(state, Msg::GenerateBriefingClicked);
-        let state = with_summary_metadata(state);
+        let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
         let (articles, collection_text) = loaded_single_article();
         let (state, _) = update(
             state,
@@ -1161,7 +1285,7 @@ mod tests {
         let (state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 1,
+                request_id: 2,
                 result: LlmResultKind::Success {
                     output_json: summary_json("Article A"),
                     input_tokens: 10,
@@ -1174,7 +1298,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![Effect::RequestLlmCompletion {
-                request_id: 2,
+                request_id: 3,
                 prompt_id: PromptId::AggregateBriefing,
                 prompt_version: None,
                 input_content: "Collection text".to_string(),
@@ -1184,7 +1308,7 @@ mod tests {
         let (state, _) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 2,
+                request_id: 3,
                 result: LlmResultKind::Success {
                     output_json: briefing_json(1),
                     input_tokens: 10,
@@ -1201,10 +1325,19 @@ mod tests {
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefing
+                Effect::LoadArticlesForBriefingPrereq
             ]
         );
         let state = with_summary_metadata(state);
+        let (state, effects) = update(
+            state,
+            Msg::BriefingPrereqArticlesLoaded {
+                articles: loaded_single_article().0,
+            },
+        );
+        assert!(effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::LoadArticlesForBriefing { .. })));
         let (articles, collection_text) = loaded_single_article();
         let (_state, effects) = update(
             state,
@@ -1217,7 +1350,7 @@ mod tests {
         assert_eq!(
             effects,
             vec![Effect::RequestLlmCompletion {
-                request_id: 3,
+                request_id: 4,
                 prompt_id: PromptId::AggregateBriefing,
                 prompt_version: None,
                 input_content: "Collection text".to_string(),
@@ -1356,6 +1489,25 @@ mod tests {
         assert!(effects.contains(&Effect::LoadArticlesForTriage));
         assert!(effects.contains(&Effect::LoadLlmMetadata));
         assert!(effects.contains(&Effect::LoadPromptContexts));
+    }
+
+    #[test]
+    fn briefing_blocked_when_triage_in_progress() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_triage(crate::triage::TriageSession::new_loading(None));
+        let (next_state, effects) = update(state.clone(), Msg::GenerateBriefingClicked);
+        assert!(effects.is_empty());
+        assert_eq!(next_state.briefing().phase(), state.briefing().phase());
+    }
+
+    #[test]
+    fn triage_click_blocked_when_briefing_owns_triage() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::GenerateBriefingClicked);
+        let (_state, effects) = update(state, Msg::TriageClicked);
+        assert!(effects.is_empty());
     }
 
     #[test]
@@ -1501,8 +1653,7 @@ mod tests {
         init_logging();
         let mut state = AppState::new();
         state.set_summary_max_in_flight(2);
-        let (state, _) = update(state, Msg::GenerateBriefingClicked);
-        let state = with_summary_metadata(state);
+        let state = start_briefing_after_triage(state, loaded_articles().0.clone());
         let (articles, collection_text) = loaded_articles();
 
         // Load 2 articles with limit=2 → both go in-flight
@@ -1520,7 +1671,7 @@ mod tests {
         let (state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 1,
+                request_id: 3,
                 result: LlmResultKind::Success {
                     output_json: summary_json("Article A"),
                     input_tokens: 10,
@@ -1549,7 +1700,7 @@ mod tests {
         let (_state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 2,
+                request_id: 4,
                 result: LlmResultKind::Success {
                     output_json: summary_json("Article B"),
                     input_tokens: 10,

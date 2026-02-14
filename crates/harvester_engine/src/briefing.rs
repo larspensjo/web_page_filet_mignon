@@ -1,4 +1,4 @@
-use std::{fs, path::Path, sync::Arc};
+use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
 use engine_logging::{engine_info, engine_warn};
 
@@ -126,6 +126,15 @@ pub fn load_and_prepare_articles(
     max_input_bytes: usize,
     registry: &PromptRegistry,
 ) -> Result<(Vec<LoadedArticle>, String), String> {
+    let packages = scan_and_prepare_articles(output_dir)?;
+    prepare_loaded_articles_and_collection(packages, max_input_bytes, registry)
+}
+
+fn prepare_loaded_articles_and_collection(
+    packages: Vec<ArticlePackage>,
+    max_input_bytes: usize,
+    registry: &PromptRegistry,
+) -> Result<(Vec<LoadedArticle>, String), String> {
     let summary_template = registry
         .active(PromptId::ArticleSummary)
         .ok_or_else(|| "summary prompt not registered".to_string())?;
@@ -152,8 +161,6 @@ pub fn load_and_prepare_articles(
                 briefing_overhead, max_input_bytes
             )
         })?;
-
-    let packages = scan_and_prepare_articles(output_dir)?;
 
     if packages.is_empty() {
         return Ok((Vec::new(), String::new()));
@@ -221,6 +228,42 @@ pub fn load_and_prepare_articles(
         .to_string();
 
     Ok((loaded_articles, collection_text))
+}
+
+pub fn load_and_prepare_articles_filtered(
+    output_dir: &Path,
+    max_input_bytes: usize,
+    registry: &PromptRegistry,
+    ordered_urls: &[String],
+) -> Result<(Vec<LoadedArticle>, String), String> {
+    if ordered_urls.is_empty() {
+        return Ok((Vec::new(), String::new()));
+    }
+
+    let packages = scan_and_prepare_articles(output_dir)?;
+    let indexed: HashMap<String, ArticlePackage> = packages
+        .into_iter()
+        .map(|package| (package.url.clone(), package))
+        .collect();
+
+    let mut selected_packages = Vec::with_capacity(ordered_urls.len());
+    for url in ordered_urls {
+        match indexed.get(url) {
+            Some(package) => selected_packages.push(ArticlePackage {
+                url: package.url.clone(),
+                source_title: package.source_title.clone(),
+                clean_text: package.clean_text.clone(),
+            }),
+            None => {
+                engine_warn!(
+                    "[briefing-loader] selected url missing from corpus: {}",
+                    url
+                );
+            }
+        }
+    }
+
+    prepare_loaded_articles_and_collection(selected_packages, max_input_bytes, registry)
 }
 
 pub fn load_and_prepare_articles_for_triage(

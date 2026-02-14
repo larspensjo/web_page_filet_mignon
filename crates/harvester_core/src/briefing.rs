@@ -1,5 +1,8 @@
 use crate::summary_cache::SummaryCacheKey;
+use crate::triage::{ArticleTriageState, TriageSession};
+use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write;
+use std::hash::{Hash, Hasher};
 
 pub type BriefingArticleId = usize;
 const MAX_BRIEFING_PREVIEW_CHARS: usize = 32_768;
@@ -8,6 +11,7 @@ const PREVIEW_TRUNCATE_MARKER: &str = "[...truncated]";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BriefingPhase {
     Idle,
+    WaitingForTriage,
     LoadingArticles,
     Summarizing,
     GeneratingBriefing,
@@ -85,6 +89,65 @@ pub struct LoadedArticle {
     pub content_hash: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CorpusFingerprint(u64);
+
+impl CorpusFingerprint {
+    pub fn from_articles(articles: &[LoadedArticle]) -> Self {
+        let mut pairs: Vec<_> = articles
+            .iter()
+            .map(|article| (article.url.as_str(), article.content_hash.as_str()))
+            .collect();
+        pairs.sort_unstable_by(|a, b| a.0.cmp(b.0).then(a.1.cmp(b.1)));
+        let mut hasher = DefaultHasher::new();
+        pairs.hash(&mut hasher);
+        Self(hasher.finish())
+    }
+
+    pub fn from_triage_results(triage: &TriageSession) -> Self {
+        let mut pairs: Vec<_> = triage
+            .articles()
+            .iter()
+            .filter_map(|article| match article.triage_state {
+                ArticleTriageState::Completed { .. } => {
+                    Some((article.url.as_str(), article.content_hash.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        pairs.sort_unstable_by(|a, b| a.0.cmp(b.0).then(a.1.cmp(b.1)));
+        let mut hasher = DefaultHasher::new();
+        pairs.hash(&mut hasher);
+        Self(hasher.finish())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TriageSelectionPolicy {
+    pub cutoff_exclusive: u8,
+    pub exclude_untriaged: bool,
+}
+
+impl TriageSelectionPolicy {
+    pub fn eligible_urls(&self, triage: &TriageSession) -> Vec<String> {
+        let mut entries: Vec<_> = triage
+            .articles()
+            .iter()
+            .filter_map(|article| match &article.triage_state {
+                ArticleTriageState::Completed { result }
+                    if result.priority > self.cutoff_exclusive =>
+                {
+                    Some((result.priority, article.url.clone()))
+                }
+                _ if self.exclude_untriaged => None,
+                _ => None,
+            })
+            .collect();
+        entries.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        entries.into_iter().map(|(_, url)| url).collect()
+    }
+}
+
 impl Default for BriefingSession {
     fn default() -> Self {
         Self {
@@ -99,6 +162,17 @@ impl Default for BriefingSession {
 }
 
 impl BriefingSession {
+    pub fn new_waiting_for_triage(started_at: Option<String>) -> Self {
+        Self {
+            phase: BriefingPhase::WaitingForTriage,
+            articles: Vec::new(),
+            collection_text: None,
+            briefing_request_id: None,
+            briefing_result: None,
+            started_at,
+        }
+    }
+
     pub fn new_loading(started_at: Option<String>) -> Self {
         Self {
             phase: BriefingPhase::LoadingArticles,
@@ -313,6 +387,7 @@ impl BriefingSession {
     pub fn progress_text(&self) -> Option<String> {
         let text = match self.phase {
             BriefingPhase::LoadingArticles => "Loading articles...".to_string(),
+            BriefingPhase::WaitingForTriage => "Waiting for triage...".to_string(),
             BriefingPhase::Summarizing => {
                 let completed = self.completed_summary_count() + self.failed_summary_count();
                 let total = self.total();
@@ -573,5 +648,76 @@ mod tests {
         let preview = session.format_preview().expect("preview");
         assert!(preview.ends_with(PREVIEW_TRUNCATE_MARKER));
         assert_eq!(preview.chars().count(), MAX_BRIEFING_PREVIEW_CHARS);
+    }
+
+    fn make_loaded(url: &str, hash: &str) -> LoadedArticle {
+        LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: hash.to_string(),
+        }
+    }
+
+    #[test]
+    fn corpus_fingerprint_same_articles_different_order_are_equal() {
+        let a = vec![make_loaded("https://a", "h1"), make_loaded("https://b", "h2")];
+        let b = vec![make_loaded("https://b", "h2"), make_loaded("https://a", "h1")];
+        assert_eq!(
+            CorpusFingerprint::from_articles(&a),
+            CorpusFingerprint::from_articles(&b)
+        );
+    }
+
+    #[test]
+    fn policy_sorts_by_priority_desc_then_url_asc_and_excludes_cutoff() {
+        let mut triage = crate::triage::TriageSession::new_loading(None);
+        triage.set_articles(vec![
+            make_loaded("https://b", "h1"),
+            make_loaded("https://a", "h2"),
+            make_loaded("https://c", "h3"),
+        ]);
+        triage.transition_to_triaging();
+        triage.complete_article(
+            0,
+            crate::triage::ArticleTriageResult {
+                category: "cat".to_string(),
+                priority: 3,
+                tags: vec![],
+                rationale: "r".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+        triage.complete_article(
+            1,
+            crate::triage::ArticleTriageResult {
+                category: "cat".to_string(),
+                priority: 3,
+                tags: vec![],
+                rationale: "r".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+        triage.complete_article(
+            2,
+            crate::triage::ArticleTriageResult {
+                category: "cat".to_string(),
+                priority: 1,
+                tags: vec![],
+                rationale: "r".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+        let policy = TriageSelectionPolicy {
+            cutoff_exclusive: 1,
+            exclude_untriaged: true,
+        };
+        assert_eq!(
+            policy.eligible_urls(&triage),
+            vec!["https://a".to_string(), "https://b".to_string()]
+        );
     }
 }

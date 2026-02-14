@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use harvester_core::{update, AppState, Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg};
@@ -12,21 +11,6 @@ fn init_logging() {
 fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
     let (state, _) = update(state, Msg::InputChanged(input.to_string()));
     update(state, Msg::UrlsSubmitted)
-}
-
-fn with_summary_metadata(state: AppState) -> AppState {
-    let mut active_versions = HashMap::new();
-    active_versions.insert(PromptId::ArticleSummary, 1);
-    let mut effective_models = HashMap::new();
-    effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
-    let (state, _) = update(
-        state,
-        Msg::LlmMetadataLoaded {
-            active_versions,
-            effective_models,
-        },
-    );
-    state
 }
 
 fn add_completed_job(state: AppState, url: &str) -> (AppState, u64) {
@@ -442,25 +426,8 @@ fn triage_and_briefing_can_interleave() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let (state, _) = update(state, Msg::GenerateBriefingClicked);
-    let state = with_summary_metadata(state);
-    let (state, summary_effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles: sample_articles(&["https://one.example"]),
-            collection_text: "collection".to_string(),
-        },
-    );
-    let (state, _) = update(state, Msg::TriageClicked);
-    let (_state, effects) = update(
-        state,
-        Msg::TriageArticlesLoaded {
-            articles: sample_articles(&["https://one.example"]),
-        },
-    );
-    let summary_request_id =
-        request_id_for_prompt(&summary_effects, PromptId::ArticleSummary).unwrap();
-    let triage_request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
-    assert_eq!(triage_request_id, summary_request_id + 1);
+    let (_state, effects) = update(state, Msg::TriageClicked);
+    assert!(effects.is_empty(), "manual triage must be blocked while briefing owns triage");
 }
 
 #[test]
@@ -500,25 +467,6 @@ fn triage_and_briefing_concurrent_request_ids() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let (state, _) = update(state, Msg::GenerateBriefingClicked);
-    let state = with_summary_metadata(state);
-    let (state, summary_effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles: sample_articles(&["https://one.example"]),
-            collection_text: "collection".to_string(),
-        },
-    );
-    let (state, _) = update(state, Msg::TriageClicked);
-    let (_, triage_effects) = update(
-        state,
-        Msg::TriageArticlesLoaded {
-            articles: sample_articles(&["https://one.example"]),
-        },
-    );
-    let summary_request_id =
-        request_id_for_prompt(&summary_effects, PromptId::ArticleSummary).unwrap();
-    let triage_request_id =
-        request_id_for_prompt(&triage_effects, PromptId::ArticleTriage).unwrap();
-    assert_eq!(summary_request_id, 1);
-    assert_eq!(triage_request_id, 2);
+    let (_state, effects) = update(state, Msg::TriageClicked);
+    assert!(effects.is_empty(), "triage click should no-op during briefing triage ownership");
 }

@@ -19,10 +19,11 @@ use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
-    load_and_prepare_articles, load_and_prepare_articles_for_triage, poll_curated_source,
-    poll_file_source, poll_rss_source, AtomicFileWriter, Converter, DecodeError, EngineConfig,
-    EngineEvent, EngineHandle, Extractor, FetchSettings, LinkExtractingConverter,
-    ReadabilityLikeExtractor, RssSeenSet, SourceId, SourceType, UrlPolicy, WhitespaceTokenCounter,
+    load_and_prepare_articles_filtered, load_and_prepare_articles_for_triage,
+    poll_curated_source, poll_file_source, poll_rss_source, AtomicFileWriter, Converter,
+    DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor, FetchSettings,
+    LinkExtractingConverter, ReadabilityLikeExtractor, RssSeenSet, SourceId, SourceType,
+    UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
@@ -309,13 +310,18 @@ impl EffectRunner {
                     });
                 }
             }
-            Effect::LoadArticlesForBriefing => {
+            Effect::LoadArticlesForBriefing { ordered_urls } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
                 let max_input_bytes = self.llm_max_input_chars.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
-                    match load_and_prepare_articles(&output_dir, max_input_bytes, &registry) {
+                    match load_and_prepare_articles_filtered(
+                        &output_dir,
+                        max_input_bytes,
+                        &registry,
+                        &ordered_urls,
+                    ) {
                         Ok((articles, collection_text)) => {
                             let loaded_articles: Vec<LoadedArticle> = articles
                                 .into_iter()
@@ -338,6 +344,35 @@ impl EffectRunner {
                         Err(reason) => {
                             engine_warn!("[briefing-loader] load failed: {}", reason);
                             let _ = msg_tx.send(Msg::ArticlesLoadFailed { reason });
+                        }
+                    }
+                });
+            }
+            Effect::LoadArticlesForBriefingPrereq => {
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.output_dir.clone();
+                let max_input_bytes = self.llm_max_input_chars.unwrap_or(100_000);
+                let registry = self.prompt_registry.clone();
+                thread::spawn(move || {
+                    match load_and_prepare_articles_for_triage(
+                        &output_dir,
+                        max_input_bytes,
+                        &registry,
+                    ) {
+                        Ok(engine_articles) => {
+                            let articles: Vec<LoadedArticle> = engine_articles
+                                .into_iter()
+                                .map(|article| LoadedArticle {
+                                    url: article.url,
+                                    source_title: article.source_title,
+                                    prepared_text: article.prepared_text,
+                                    content_hash: article.content_hash,
+                                })
+                                .collect();
+                            let _ = msg_tx.send(Msg::BriefingPrereqArticlesLoaded { articles });
+                        }
+                        Err(reason) => {
+                            let _ = msg_tx.send(Msg::BriefingPrereqLoadFailed { reason });
                         }
                     }
                 });
@@ -1060,6 +1095,7 @@ fn map_stage(stage: harvester_engine::Stage) -> Stage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use std::sync::mpsc;
     use std::time::Duration;
     use tempfile::tempdir;
@@ -1082,6 +1118,19 @@ mod tests {
     fn runner_with_receiver() -> (EffectRunner, mpsc::Receiver<Msg>) {
         let (tx, rx) = mpsc::channel();
         (EffectRunner::new(tx), rx)
+    }
+
+    fn write_markdown(dir: &Path, filename: &str, url: &str) {
+        let counter = WhitespaceTokenCounter;
+        let (_, markdown) = build_markdown_document(
+            url,
+            Some("Title"),
+            "utf-8",
+            "2026-02-14T00:00:00Z",
+            "body",
+            &counter,
+        );
+        fs::write(dir.join(filename), markdown).expect("write markdown");
     }
 
     #[test]
@@ -1161,6 +1210,51 @@ mod tests {
             } => {
                 assert_eq!(received, job_id);
                 assert_eq!(received_index, link_index);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn load_articles_for_briefing_prereq_dispatches_loaded_message() {
+        let temp = tempdir().expect("tempdir");
+        write_markdown(temp.path(), "a.md", "https://example.com/a");
+        let (mut runner, rx) = runner_with_receiver();
+        runner.output_dir = temp.path().to_path_buf();
+        runner.enqueue(vec![Effect::LoadArticlesForBriefingPrereq]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected prereq loaded message");
+        match msg {
+            Msg::BriefingPrereqArticlesLoaded { articles } => {
+                assert_eq!(articles.len(), 1);
+                assert_eq!(articles[0].url, "https://example.com/a");
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn load_articles_for_briefing_with_empty_ordered_urls_dispatches_empty_articles_loaded() {
+        let temp = tempdir().expect("tempdir");
+        write_markdown(temp.path(), "a.md", "https://example.com/a");
+        let (mut runner, rx) = runner_with_receiver();
+        runner.output_dir = temp.path().to_path_buf();
+        runner.enqueue(vec![Effect::LoadArticlesForBriefing {
+            ordered_urls: Vec::new(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected articles loaded message");
+        match msg {
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            } => {
+                assert!(articles.is_empty());
+                assert!(collection_text.is_empty());
             }
             other => panic!("unexpected message: {:?}", other),
         }

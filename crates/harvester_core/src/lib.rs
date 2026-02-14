@@ -13,7 +13,7 @@ mod view_model;
 
 pub use briefing::{
     ArticleSummaryResult, BriefingArticle, BriefingArticleId, BriefingPhase, BriefingResult,
-    BriefingSession, BriefingThemeResult, LoadedArticle,
+    BriefingSession, BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
 pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};

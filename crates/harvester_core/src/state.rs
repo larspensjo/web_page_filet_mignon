@@ -34,6 +34,57 @@ struct SummaryCacheMetadataSnapshot {
     model_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BriefingOrchestration {
+    requested: bool,
+    priority_cutoff_exclusive: u8,
+    prereq_articles: Option<Vec<crate::briefing::LoadedArticle>>,
+}
+
+impl Default for BriefingOrchestration {
+    fn default() -> Self {
+        Self {
+            requested: false,
+            priority_cutoff_exclusive: 1,
+            prereq_articles: None,
+        }
+    }
+}
+
+impl BriefingOrchestration {
+    fn request(&mut self) {
+        self.requested = true;
+    }
+
+    fn store_prereq(&mut self, articles: Vec<crate::briefing::LoadedArticle>) {
+        self.prereq_articles = Some(articles);
+    }
+
+    fn take_prereq(&mut self) -> Option<Vec<crate::briefing::LoadedArticle>> {
+        self.prereq_articles.take()
+    }
+
+    fn clear(&mut self) {
+        self.requested = false;
+        self.prereq_articles = None;
+    }
+
+    fn is_requested(&self) -> bool {
+        self.requested
+    }
+
+    fn policy(&self) -> crate::briefing::TriageSelectionPolicy {
+        crate::briefing::TriageSelectionPolicy {
+            cutoff_exclusive: self.priority_cutoff_exclusive,
+            exclude_untriaged: true,
+        }
+    }
+
+    fn clear_request(&mut self) {
+        self.requested = false;
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct SummaryCacheMetrics {
     hits: usize,
@@ -120,6 +171,7 @@ pub struct AppState {
     summary_cache_metadata_snapshot: Option<SummaryCacheMetadataSnapshot>,
     summary_cache_metrics: SummaryCacheMetrics,
     summary_cache_warmup_logged: bool,
+    briefing_orchestration: BriefingOrchestration,
     /// Maximum number of concurrent triage LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
     triage_max_in_flight: usize,
     /// Maximum number of concurrent summary LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
@@ -156,6 +208,7 @@ impl Default for AppState {
             summary_cache_metadata_snapshot: None,
             summary_cache_metrics: SummaryCacheMetrics::default(),
             summary_cache_warmup_logged: false,
+            briefing_orchestration: BriefingOrchestration::default(),
             triage_max_in_flight: 1,
             summary_max_in_flight: 1,
         }
@@ -263,7 +316,9 @@ impl AppState {
             briefing_can_start: self.briefing.can_start(),
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
-            triage_can_start: self.triage.can_start() && self.has_completed_jobs(),
+            triage_can_start: self.triage.can_start()
+                && self.has_completed_jobs()
+                && !self.briefing_orchestration.is_requested(),
             triage_progress: self.triage.progress_text(),
             poll_sources_enabled: matches!(
                 self.session,
@@ -546,6 +601,39 @@ impl AppState {
         self.briefing_metadata_state = MetadataLoadState::Idle;
         self.summary_cache_metadata_snapshot = None;
         self.summary_cache_warmup_logged = false;
+    }
+
+    pub(crate) fn briefing_orchestration_requested(&self) -> bool {
+        self.briefing_orchestration.is_requested()
+    }
+
+    pub(crate) fn request_briefing_orchestration(&mut self) {
+        self.briefing_orchestration.request();
+    }
+
+    pub(crate) fn store_briefing_prereq_articles(
+        &mut self,
+        articles: Vec<crate::briefing::LoadedArticle>,
+    ) {
+        self.briefing_orchestration.store_prereq(articles);
+    }
+
+    pub(crate) fn take_briefing_prereq_articles(
+        &mut self,
+    ) -> Option<Vec<crate::briefing::LoadedArticle>> {
+        self.briefing_orchestration.take_prereq()
+    }
+
+    pub(crate) fn clear_briefing_orchestration(&mut self) {
+        self.briefing_orchestration.clear();
+    }
+
+    pub(crate) fn clear_briefing_orchestration_request(&mut self) {
+        self.briefing_orchestration.clear_request();
+    }
+
+    pub(crate) fn briefing_triage_policy(&self) -> crate::briefing::TriageSelectionPolicy {
+        self.briefing_orchestration.policy()
     }
 
     /// Get an immutable reference to the summary cache.

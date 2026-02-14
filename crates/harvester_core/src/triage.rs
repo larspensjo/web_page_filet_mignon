@@ -99,6 +99,13 @@ impl TriageSession {
             .collect();
     }
 
+    pub fn reset_with_articles(&mut self, loaded: Vec<LoadedArticle>) {
+        self.articles.clear();
+        self.set_articles(loaded);
+        self.started_at = None;
+        self.phase = TriagePhase::LoadingArticles;
+    }
+
     pub fn transition_to_triaging(&mut self) {
         if self.articles.is_empty() {
             self.phase = TriagePhase::Failed {
@@ -216,6 +223,13 @@ impl TriageSession {
                 ArticleTriageState::Completed { result } if article.url == url => Some(result),
                 _ => None,
             })
+    }
+
+    pub fn article_content_hash(&self, url: &str) -> Option<&str> {
+        self.articles
+            .iter()
+            .find(|article| article.url == url)
+            .map(|article| article.content_hash.as_str())
     }
 
     pub fn sorted_results(&self) -> Vec<&ArticleTriageResult> {

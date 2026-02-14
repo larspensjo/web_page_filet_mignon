@@ -8,7 +8,10 @@ pub enum Effect {
         job_id: crate::JobId,
         url: String,
     },
-    LoadArticlesForBriefing,
+    LoadArticlesForBriefing {
+        ordered_urls: Vec<String>,
+    },
+    LoadArticlesForBriefingPrereq,
     LoadArticlesForTriage,
     LoadPromptContexts,
     LoadLlmMetadata,

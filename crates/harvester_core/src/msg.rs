@@ -109,6 +109,10 @@ pub enum Msg {
     TriageArticlesLoaded { articles: Vec<LoadedArticle> },
     /// Loader failed for triage.
     TriageArticlesLoadFailed { reason: String },
+    /// Briefing prerequisite articles prepared by the loader.
+    BriefingPrereqArticlesLoaded { articles: Vec<LoadedArticle> },
+    /// Loader failed for briefing prerequisites.
+    BriefingPrereqLoadFailed { reason: String },
     /// Prompt contexts loaded from disk.
     PromptContextsLoaded {
         contexts: HashMap<PromptId, Vec<(String, String)>>,
