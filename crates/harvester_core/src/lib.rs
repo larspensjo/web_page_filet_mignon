@@ -3,6 +3,7 @@ mod briefing;
 mod cache_utils;
 mod effect;
 mod msg;
+mod prompt_lab;
 mod source_state;
 mod state;
 mod summary_cache;
