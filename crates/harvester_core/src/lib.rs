@@ -21,6 +21,7 @@ pub use briefing::{
 pub use cache_utils::model_ids_compatible;
 pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
+pub use prompt_lab::{PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage};
 pub use source_state::{SourceInstanceState, SourceStateIndex};
 pub use state::{
     normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind,
@@ -37,7 +38,7 @@ pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCach
 pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
-    AppViewModel, JobRowView, LinkRowView, PreviewHeaderView, TriageAnnotationView,
-    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
-    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
+    AppViewModel, JobRowView, LinkRowView, PreviewHeaderView, PromptLabRunSummaryView,
+    PromptLabView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH,
+    DEFAULT_WINDOW_WIDTH, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };

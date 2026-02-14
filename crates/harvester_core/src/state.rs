@@ -1,5 +1,6 @@
 use crate::briefing::BriefingSession;
 use crate::context_hash;
+use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState};
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
 use crate::triage::{ArticleTriageResult, TriageSession};
@@ -220,6 +221,8 @@ pub struct AppState {
     triage_max_in_flight: usize,
     /// Maximum number of concurrent summary LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
     summary_max_in_flight: usize,
+    prompt_lab: PromptLabState,
+    next_prompt_lab_run_id: u64,
 }
 
 pub struct IngestResult {
@@ -259,6 +262,8 @@ impl Default for AppState {
             briefing_orchestration: BriefingOrchestration::default(),
             triage_max_in_flight: 1,
             summary_max_in_flight: 1,
+            prompt_lab: PromptLabState::default(),
+            next_prompt_lab_run_id: 1,
         }
     }
 }
@@ -382,6 +387,7 @@ impl AppState {
             input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),
             selected_url,
+            prompt_lab: crate::view_model::PromptLabView::from_state(&self.prompt_lab),
         }
     }
 
@@ -1215,6 +1221,83 @@ impl AppState {
     /// Sets the window width.
     pub(crate) fn set_window_width(&mut self, width: i32) {
         self.ui.set_window_width(width);
+    }
+
+    // ------------------------------------------------------------------
+    // Prompt Lab command API
+    // ------------------------------------------------------------------
+
+    pub(crate) fn prompt_lab(&self) -> &PromptLabState {
+        &self.prompt_lab
+    }
+
+    pub(crate) fn open_prompt_lab(&mut self) {
+        self.prompt_lab.open();
+        self.dirty = true;
+    }
+
+    pub(crate) fn close_prompt_lab(&mut self) {
+        self.prompt_lab.close();
+        self.dirty = true;
+    }
+
+    pub(crate) fn select_prompt_lab_stage(&mut self, stage: PromptLabStage) {
+        self.prompt_lab.select_stage(stage);
+        self.dirty = true;
+    }
+
+    pub(crate) fn set_prompt_lab_input(&mut self, text: String) {
+        self.prompt_lab.set_input(text);
+    }
+
+    pub(crate) fn allocate_next_prompt_lab_run_id(&mut self) -> PromptLabRunId {
+        let id = PromptLabRunId(self.next_prompt_lab_run_id);
+        self.next_prompt_lab_run_id = self.next_prompt_lab_run_id.saturating_add(1);
+        id
+    }
+
+    pub(crate) fn add_prompt_lab_pending_run(
+        &mut self,
+        run_id: PromptLabRunId,
+        stage: PromptLabStage,
+        prompt_id: PromptId,
+        input_snapshot: String,
+        request_id: u64,
+    ) {
+        self.prompt_lab
+            .add_pending_run(run_id, stage, prompt_id, input_snapshot, request_id);
+    }
+
+    pub(crate) fn complete_prompt_lab_run(
+        &mut self,
+        run_id: PromptLabRunId,
+        output_json: String,
+        input_tokens: u32,
+        output_tokens: u32,
+        prompt_version: PromptVersion,
+        model_id: String,
+    ) {
+        self.prompt_lab.complete_run(
+            run_id,
+            output_json,
+            input_tokens,
+            output_tokens,
+            prompt_version,
+            model_id,
+        );
+    }
+
+    pub(crate) fn fail_prompt_lab_run(&mut self, run_id: PromptLabRunId, reason: String) {
+        self.prompt_lab.fail_run(run_id, reason);
+    }
+
+    pub(crate) fn consume_prompt_lab_ownership(&mut self, request_id: u64) {
+        self.prompt_lab.consume_ownership(request_id);
+    }
+
+    pub(crate) fn clear_prompt_lab_history(&mut self) {
+        self.prompt_lab.clear_history();
+        self.dirty = true;
     }
 }
 
@@ -2507,5 +2590,84 @@ mod tests {
         let state = make_state_with_summarized_job();
         let view = state.view();
         assert!(view.selected_url.is_none());
+    }
+
+    // ------------------------------------------------------------------
+    // Substep B: Prompt Lab AppState integration tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn default_app_state_has_closed_empty_prompt_lab() {
+        let state = AppState::new();
+        let lab = state.prompt_lab();
+        assert!(!lab.is_visible());
+        assert_eq!(lab.run_count(), 0);
+        assert!(!lab.has_in_flight_run());
+    }
+
+    #[test]
+    fn allocate_prompt_lab_run_id_is_monotonic_starting_at_one() {
+        let mut state = AppState::new();
+        let id1 = state.allocate_next_prompt_lab_run_id();
+        let id2 = state.allocate_next_prompt_lab_run_id();
+        let id3 = state.allocate_next_prompt_lab_run_id();
+        use crate::prompt_lab::PromptLabRunId;
+        assert_eq!(id1, PromptLabRunId(1));
+        assert_eq!(id2, PromptLabRunId(2));
+        assert_eq!(id3, PromptLabRunId(3));
+    }
+
+    #[test]
+    fn prompt_lab_and_llm_request_id_counters_are_independent() {
+        let mut state = AppState::new();
+        // Allocate some LLM request IDs
+        let llm1 = state.allocate_next_llm_request_id();
+        let llm2 = state.allocate_next_llm_request_id();
+        // Allocate some Prompt Lab run IDs
+        let lab1 = state.allocate_next_prompt_lab_run_id();
+        let lab2 = state.allocate_next_prompt_lab_run_id();
+        // Both start at 1, but they are independent counters on distinct types
+        assert_eq!(llm1, 1u64);
+        assert_eq!(llm2, 2u64);
+        use crate::prompt_lab::PromptLabRunId;
+        assert_eq!(lab1, PromptLabRunId(1));
+        assert_eq!(lab2, PromptLabRunId(2));
+    }
+
+    #[test]
+    fn clear_prompt_lab_history_preserves_pending_entries() {
+        use harvester_engine::llm::prompt::PromptId;
+        let mut state = AppState::new();
+        state.open_prompt_lab();
+
+        // Add a pending run
+        let req_id = state.allocate_next_llm_request_id();
+        let run_id = state.allocate_next_prompt_lab_run_id();
+        state.add_prompt_lab_pending_run(
+            run_id,
+            crate::prompt_lab::PromptLabStage::Triage,
+            PromptId::ArticleTriage,
+            "input".to_string(),
+            req_id,
+        );
+
+        // Add a completed run
+        let req_id2 = state.allocate_next_llm_request_id();
+        let run_id2 = state.allocate_next_prompt_lab_run_id();
+        state.add_prompt_lab_pending_run(
+            run_id2,
+            crate::prompt_lab::PromptLabStage::Triage,
+            PromptId::ArticleTriage,
+            "input2".to_string(),
+            req_id2,
+        );
+        state.complete_prompt_lab_run(run_id2, "{}".to_string(), 1, 1, 1, "m".to_string());
+        state.consume_prompt_lab_ownership(req_id2);
+
+        state.clear_prompt_lab_history();
+
+        // Pending run survives
+        assert_eq!(state.prompt_lab().run_count(), 1);
+        assert!(state.prompt_lab().ownership_for(req_id).is_some());
     }
 }

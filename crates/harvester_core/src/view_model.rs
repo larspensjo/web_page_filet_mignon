@@ -1,3 +1,4 @@
+use crate::prompt_lab::{PromptLabRunId, PromptLabRunStatus, PromptLabStage, PromptLabState};
 use crate::state::LinkDownloadState;
 use crate::{JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::LinkKind;
@@ -56,6 +57,7 @@ pub struct AppViewModel {
     pub window_width: i32,
     /// URL of the currently selected job, only when it has a completed summary.
     pub selected_url: Option<String>,
+    pub prompt_lab: PromptLabView,
 }
 
 impl Default for AppViewModel {
@@ -81,6 +83,88 @@ impl Default for AppViewModel {
             input_panel_visible: false,
             window_width: DEFAULT_WINDOW_WIDTH,
             selected_url: None,
+            prompt_lab: PromptLabView::default(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Prompt Lab view types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabRunSummaryView {
+    pub run_id: PromptLabRunId,
+    pub stage: PromptLabStage,
+    pub status_label: &'static str,
+    pub output_json: Option<String>,
+    pub failure_reason: Option<String>,
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabView {
+    pub visible: bool,
+    pub selected_stage: PromptLabStage,
+    pub input_is_set: bool,
+    pub is_in_flight: bool,
+    pub run_count: usize,
+    pub latest_run: Option<PromptLabRunSummaryView>,
+}
+
+impl Default for PromptLabView {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            selected_stage: PromptLabStage::Triage,
+            input_is_set: false,
+            is_in_flight: false,
+            run_count: 0,
+            latest_run: None,
+        }
+    }
+}
+
+impl PromptLabView {
+    pub(crate) fn from_state(state: &PromptLabState) -> Self {
+        let latest_run = state.latest_run().map(|r| {
+            let (status_label, output_json, failure_reason, input_tokens, output_tokens) =
+                match &r.status {
+                    PromptLabRunStatus::Pending { .. } => ("pending", None, None, None, None),
+                    PromptLabRunStatus::Completed {
+                        output_json,
+                        input_tokens,
+                        output_tokens,
+                        ..
+                    } => (
+                        "completed",
+                        Some(output_json.clone()),
+                        None,
+                        Some(*input_tokens),
+                        Some(*output_tokens),
+                    ),
+                    PromptLabRunStatus::Failed { reason } => {
+                        ("failed", None, Some(reason.clone()), None, None)
+                    }
+                };
+            PromptLabRunSummaryView {
+                run_id: r.run_id,
+                stage: r.stage,
+                status_label,
+                output_json,
+                failure_reason,
+                input_tokens,
+                output_tokens,
+            }
+        });
+        Self {
+            visible: state.is_visible(),
+            selected_stage: state.selected_stage(),
+            input_is_set: !state.input().is_empty(),
+            is_in_flight: state.has_in_flight_run(),
+            run_count: state.run_count(),
+            latest_run,
         }
     }
 }
