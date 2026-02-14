@@ -447,6 +447,52 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 }
                 log_summary_cache_run_summary(&mut state);
                 state.mark_dirty();
+            } else if let Some(run_id) = state.prompt_lab().ownership_for(request_id) {
+                let run_id = run_id;
+                let reason_from_result = |r: &LlmResultKind| -> String {
+                    match r {
+                        LlmResultKind::ValidationFailed { reason, raw_response } => {
+                            format!("validation failed: {reason}; response: {raw_response}")
+                        }
+                        LlmResultKind::QuotaExhausted { reason } => {
+                            format!("quota exhausted: {reason}")
+                        }
+                        LlmResultKind::Failed { reason } => reason.clone(),
+                        LlmResultKind::Success { .. } => String::new(),
+                    }
+                };
+                match &result {
+                    LlmResultKind::Success {
+                        output_json,
+                        input_tokens,
+                        output_tokens,
+                        prompt_version,
+                        model_id,
+                    } => {
+                        engine_info!(
+                            "[prompt-lab] run completed run_id={} request_id={} tokens_in={} tokens_out={}",
+                            run_id.0, request_id, input_tokens, output_tokens
+                        );
+                        state.complete_prompt_lab_run(
+                            run_id,
+                            output_json.clone(),
+                            *input_tokens,
+                            *output_tokens,
+                            *prompt_version,
+                            model_id.clone(),
+                        );
+                    }
+                    _ => {
+                        let reason = reason_from_result(&result);
+                        engine_warn!(
+                            "[prompt-lab] run failed run_id={} request_id={} reason={}",
+                            run_id.0, request_id, reason
+                        );
+                        state.fail_prompt_lab_run(run_id, reason);
+                    }
+                }
+                state.consume_prompt_lab_ownership(request_id);
+                state.mark_dirty();
             }
             effects
         }
@@ -1999,6 +2045,85 @@ mod tests {
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         assert!(effects.is_empty());
         assert_eq!(state.prompt_lab().run_count(), 1);
+    }
+
+    // ------------------------------------------------------------------
+    // Substep D: LlmCompleted → Prompt Lab routing tests
+    // ------------------------------------------------------------------
+
+    fn dispatch_lab_run(state: AppState) -> (AppState, u64) {
+        let mut state = state;
+        state.set_prompt_lab_input("article content".to_string());
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        // Extract the request_id from the emitted effect
+        let request_id = effects.iter().find_map(|e| {
+            if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                Some(*request_id)
+            } else {
+                None
+            }
+        }).expect("expected RequestLlmCompletion effect");
+        (state, request_id)
+    }
+
+    #[test]
+    fn llm_completed_success_routes_to_lab_run() {
+        init_logging();
+        let state = AppState::new();
+        let (state, request_id) = dispatch_lab_run(state);
+        let (state, effects) = update(state, Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::Success {
+                output_json: r#"{"priority":3}"#.to_string(),
+                input_tokens: 10,
+                output_tokens: 20,
+                prompt_version: 1,
+                model_id: "model-x".to_string(),
+            },
+        });
+        assert!(effects.is_empty());
+        use crate::prompt_lab::PromptLabRunStatus;
+        assert!(matches!(
+            state.prompt_lab().latest_run().unwrap().status,
+            PromptLabRunStatus::Completed { .. }
+        ));
+        assert!(!state.prompt_lab().has_in_flight_run());
+    }
+
+    #[test]
+    fn llm_completed_validation_failed_routes_to_lab_run_as_failed() {
+        init_logging();
+        let state = AppState::new();
+        let (state, request_id) = dispatch_lab_run(state);
+        let (state, _) = update(state, Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::ValidationFailed {
+                reason: "bad json".to_string(),
+                raw_response: "garbage".to_string(),
+            },
+        });
+        use crate::prompt_lab::PromptLabRunStatus;
+        assert!(matches!(
+            state.prompt_lab().latest_run().unwrap().status,
+            PromptLabRunStatus::Failed { .. }
+        ));
+        assert!(!state.prompt_lab().has_in_flight_run());
+    }
+
+    #[test]
+    fn llm_completed_quota_exhausted_routes_to_lab_run_as_failed() {
+        init_logging();
+        let state = AppState::new();
+        let (state, request_id) = dispatch_lab_run(state);
+        let (state, _) = update(state, Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::QuotaExhausted { reason: "over limit".to_string() },
+        });
+        use crate::prompt_lab::PromptLabRunStatus;
+        assert!(matches!(
+            state.prompt_lab().latest_run().unwrap().status,
+            PromptLabRunStatus::Failed { .. }
+        ));
     }
 
     #[test]
