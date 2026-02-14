@@ -24,7 +24,7 @@ SCORING ALGORITHM (1-5):
 - 3 (RELEVANT): Competitor moves, Supply chain signals, or Strong thematic signals without specific dollar amounts.
     * Examples: New open-source model releases, changes in GPU lead times, "Jobless boom" anecdotes without hard layoff numbers.
 - 2 (BACKGROUND): Long-term R&D (5+ years out), Op-Eds on AI ethics, or general industry analysis without new data.
-- 1 (NOISE): Consumer gadget reviews (e.g., new iPhone AI features), "Top 10 AI Tools" lists, generic hype, crypto-AI.
+- 1 (NOISE): Consumer gadget reviews (e.g., new iPhone AI features), "Top 10 AI Tools" lists, generic hype, crypto-AI, plans or recommendations how businesses should use AI.
 
 HARD DATA REQUIREMENT (Score Capping):
 - If an article claims a trend but lacks specific Numbers, Dates, or Named Entities, CAP THE SCORE AT 3.
