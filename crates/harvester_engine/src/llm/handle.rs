@@ -299,9 +299,18 @@ async fn handle_completion_concurrent(
         );
     }
 
-    // model_override will be plumbed into resolve_model in Step 5.
-    let _ = model_override;
-    let model = resolve_model(prompt_id, config);
+    // Validate the model override (if any) before doing any further work.
+    if let Some(ref override_model) = model_override {
+        if let Err(err) = validate_model_override(override_model, config) {
+            quota_tracker.lock().unwrap().release_call();
+            let _ = event_tx.send(LlmEvent::Completed {
+                request_id,
+                result: Err(err),
+            });
+            return;
+        }
+    }
+    let model = resolve_model(prompt_id, model_override.as_ref(), config);
     let (template, version) = match fetch_prompt_template(config, prompt_id, prompt_version) {
         Some(pair) => pair,
         None => {
@@ -669,7 +678,20 @@ async fn handle_completion_concurrent(
     }
 }
 
-fn resolve_model(prompt_id: PromptId, config: &LlmConfig) -> ModelId {
+/// Resolve the model for a request.
+///
+/// Precedence (highest to lowest):
+/// 1. `model_override` if `Some` — caller's explicit choice.
+/// 2. Per-prompt-id stage model (`triage_model`, `summary_model`, `briefing_model`) if configured.
+/// 3. `config.default_model` — unconditional fallback.
+fn resolve_model(
+    prompt_id: PromptId,
+    model_override: Option<&ModelId>,
+    config: &LlmConfig,
+) -> ModelId {
+    if let Some(override_model) = model_override {
+        return override_model.clone();
+    }
     match prompt_id {
         PromptId::ArticleTriage => config
             .triage_model
@@ -687,6 +709,72 @@ fn resolve_model(prompt_id: PromptId, config: &LlmConfig) -> ModelId {
             .unwrap_or(&config.default_model)
             .clone(),
     }
+}
+
+/// Validate a model override before use.
+///
+/// Checks (in order):
+/// 1. Provider must match `config.default_model.provider()` (proxy for the configured provider).
+/// 2. Model name must be in the allow-list built from config models and the pricing registry.
+///
+/// Returns `Err(LlmCompletionError::UnsupportedModel)` on validation failure.
+fn validate_model_override(
+    override_model: &ModelId,
+    config: &LlmConfig,
+) -> Result<(), LlmCompletionError> {
+    let configured_provider = config.default_model.provider();
+
+    // Check 1: provider must match.
+    if override_model.provider() != configured_provider {
+        engine_warn!(
+            "[llm-dispatch] unsupported model override: wrong provider {:?} (expected {:?}) model={}",
+            override_model.provider(),
+            configured_provider,
+            override_model.model_name()
+        );
+        return Err(LlmCompletionError::UnsupportedModel {
+            model: override_model.clone(),
+            reason: format!(
+                "provider {:?} does not match configured provider {:?}",
+                override_model.provider(),
+                configured_provider
+            ),
+        });
+    }
+
+    // Check 2: model name must be in the allow-list.
+    let mut allow_list: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    allow_list.insert(config.default_model.model_name());
+    if let Some(m) = &config.triage_model {
+        allow_list.insert(m.model_name());
+    }
+    if let Some(m) = &config.summary_model {
+        allow_list.insert(m.model_name());
+    }
+    if let Some(m) = &config.briefing_model {
+        allow_list.insert(m.model_name());
+    }
+    // Also include pricing registry keys (bare model-name strings).
+    // This set is built inline; a formal catalog will replace it in a later step.
+
+    if !allow_list.contains(override_model.model_name())
+        && config.pricing.get(override_model.model_name()).is_none()
+    {
+        engine_warn!(
+            "[llm-dispatch] unsupported model override: unknown model name={} provider={:?}",
+            override_model.model_name(),
+            override_model.provider()
+        );
+        return Err(LlmCompletionError::UnsupportedModel {
+            model: override_model.clone(),
+            reason: format!(
+                "model name '{}' is not in the known-model allow-list",
+                override_model.model_name()
+            ),
+        });
+    }
+
+    Ok(())
 }
 
 fn fetch_prompt_template(
