@@ -466,6 +466,24 @@ SuccessCriteria:
 - Max-token failures trigger a single retry with reduced input size.
 - Retry outcomes are recorded with the adjusted budget.
 
+#### [FI-LLM-Budgeting-0004] Pre-dispatch cost estimate line item
+Status: Candidate
+TopLevel: LLM
+SubLevel: Budgeting
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.Step5.PromptLab.PromptTuningWorkflow.md
+- SourceSection: Nice extensions after Step 5
+- Captured: 2026-02-15
+Tags: [llm, budgeting, prompt-lab]
+Summary: Show a pre-dispatch estimate of token and dollar impact for the currently selected Prompt Lab run settings.
+Rationale: Helps operators compare prompt/context/model variants before spending quota.
+SuccessCriteria:
+- Prompt Lab displays an estimated cost line before dispatch.
+- Estimate updates when stage, model override, or context draft changes.
+
 ### Caching
 
 #### [FI-LLM-Caching-0001] Content-hash result cache
@@ -603,6 +621,96 @@ Rationale: Improves iteration speed for prompt tuning.
 SuccessCriteria:
 - Prompt context updates are detected and reloaded automatically.
 - Reloads do not require application restart.
+
+#### [FI-LLM-PromptContext-0002] Inline diff for production vs draft context
+Status: Candidate
+TopLevel: LLM
+SubLevel: PromptContext
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Step5.PromptLab.PromptTuningWorkflow.md
+- SourceSection: Nice extensions after Step 5
+- Captured: 2026-02-15
+Tags: [llm, prompt-lab, ux]
+Summary: Provide an inline diff view that compares production prompt context and the current draft in Prompt Lab.
+Rationale: Reduces editing mistakes by making context changes reviewable before apply/save.
+SuccessCriteria:
+- Diff view highlights key/value additions, removals, and modifications.
+- Diff stays in sync as draft text changes.
+
+#### [FI-LLM-PromptContext-0003] Persist per-stage last-used draft
+Status: Candidate
+TopLevel: LLM
+SubLevel: PromptContext
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Step5.PromptLab.PromptTuningWorkflow.md
+- SourceSection: Nice extensions after Step 5
+- Captured: 2026-02-15
+Tags: [llm, prompt-lab, state]
+Summary: Persist the last-used context draft per Prompt Lab stage so temporary panel close/reopen does not lose edits.
+Rationale: Supports iterative tuning sessions without forcing early save-to-disk.
+SuccessCriteria:
+- Stage-specific drafts are restored after Prompt Lab close/reopen.
+- Reload/revert operations remain explicit and deterministic.
+
+#### [FI-LLM-PromptContext-0004] Context presets with import/export
+Status: Candidate
+TopLevel: LLM
+SubLevel: PromptContext
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Step5.PromptLab.PromptTuningWorkflow.md
+- SourceSection: Nice extensions after Step 5
+- Captured: 2026-02-15
+Tags: [llm, prompt-lab, tooling]
+Summary: Add named context presets and import/export support for reusing prompt context configurations.
+Rationale: Speeds up repeated experiments across runs and machines.
+SuccessCriteria:
+- Operators can save and apply named presets from Prompt Lab.
+- Presets can be exported and imported in a stable file format.
+
+#### [FI-LLM-PromptContext-0005] Save conflict detection for context files
+Status: Candidate
+TopLevel: LLM
+SubLevel: PromptContext
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Step5.PromptLab.PromptTuningWorkflow.md
+- SourceSection: Nice extensions after Step 5
+- Captured: 2026-02-15
+Tags: [llm, prompt-lab, storage]
+Summary: Detect on-disk version drift before save and warn when the file has advanced since the lab draft was loaded.
+Rationale: Prevents silent overwrite in multi-operator or external-edit scenarios.
+SuccessCriteria:
+- Save path checks file version against last-loaded metadata.
+- UI warns on conflict and requires explicit operator decision before overwrite.
+
+#### [FI-LLM-PromptContext-0006] Validation error highlighting in editor
+Status: Candidate
+TopLevel: LLM
+SubLevel: PromptContext
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.Step5.PromptLab.PromptTuningWorkflow.md
+- SourceSection: Nice extensions after Step 5
+- Captured: 2026-02-15
+Tags: [llm, prompt-lab, validation]
+Summary: Highlight parse and validation errors directly in the context editor with line-aware navigation.
+Rationale: Makes invalid drafts faster to correct and lowers apply friction.
+SuccessCriteria:
+- Validation messages include exact line references.
+- Editor can focus and highlight offending lines.
 
 ### Providers
 
@@ -1516,3 +1624,21 @@ Rationale: Reduces manual orchestration steps.
 SuccessCriteria:
 - One action triggers triage followed by briefing using a priority threshold.
 - Workflow progress is visible in the UI.
+
+#### [FI-UX-WorkflowAutomation-0002] Apply and run triage-summary-briefing trio
+Status: Candidate
+TopLevel: UX
+SubLevel: WorkflowAutomation
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Step5.PromptLab.PromptTuningWorkflow.md
+- SourceSection: Nice extensions after Step 5
+- Captured: 2026-02-15
+Tags: [ux, prompt-lab, workflow]
+Summary: Add a single Prompt Lab action that applies current context draft and runs triage, summary, and briefing in sequence on the same source.
+Rationale: Removes repetitive manual orchestration during prompt tuning.
+SuccessCriteria:
+- One action dispatches the three stage runs with clear per-stage status.
+- Failure in one stage is surfaced without obscuring outcomes of completed stages.
