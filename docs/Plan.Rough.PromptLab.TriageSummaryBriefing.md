@@ -36,6 +36,14 @@ This plan is intentionally rough and step-oriented. Each step has a clear goal a
 - Stream Prompt Lab output incrementally for faster visibility.
 - Promote `ValidationFailed` to a first-class `PromptLabRunStatus` variant (beyond annotating `Failed`).
 
+## Additional Future Ideas Harvested from Step 6 (Template Drafts)
+- Add a two-column **template diff preview** (base vs draft) before Apply.
+- Add **stage-specific placeholder hints/autocomplete** directly in the template editor status area.
+- Add a **template-vs-validator consistency check** after save to detect drift against `validate_response()` expectations.
+- Add a **single-file export bundle** for `(context + template)` to share Prompt Lab tuning setups.
+- Add **replay/template correlation** by recording template version/source in replay records for post-hoc analysis.
+- Extend Step 7 compare mode with a dedicated **A/B template compare view** reusing preserved base/draft snapshots.
+
 ## Blockers and Early Decisions
 
 ### B1 — Runtime prompt template editing
