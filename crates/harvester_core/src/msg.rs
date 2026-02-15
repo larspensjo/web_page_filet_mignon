@@ -15,6 +15,8 @@ use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
 pub enum Msg {
     /// User edited the URL input box (debounced text).
     InputChanged(String),
+    /// App startup hook for reducer-owned metadata hydration.
+    StartupHydrationRequested,
     /// User submitted the current URL input for ingestion.
     UrlsSubmitted,
     /// Restore previously completed jobs from persisted state.

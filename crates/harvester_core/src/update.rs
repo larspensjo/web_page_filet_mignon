@@ -38,6 +38,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.set_input_buffer(text);
             Vec::new()
         }
+        Msg::StartupHydrationRequested => {
+            state.mark_triage_metadata_pending();
+            vec![Effect::LoadPromptContexts, Effect::LoadLlmMetadata]
+        }
         Msg::UrlsSubmitted => {
             let raw = state.input_buffer().to_owned();
             let urls = parse_urls(&raw);
@@ -615,6 +619,16 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if !matches!(state.pre_triage().phase(), PreTriagePhase::ReadyToTriage) {
                 return (state, Vec::new());
             }
+            if !state.triage_metadata_ready() {
+                state.mark_triage_metadata_pending();
+                engine_warn!(
+                    "[triage-cache] metadata not ready; loading metadata before dispatch"
+                );
+                return (
+                    state,
+                    vec![Effect::LoadPromptContexts, Effect::LoadLlmMetadata],
+                );
+            }
             engine_info!("[triage] triage requested");
             start_triage_from_pretriage(&mut state)
         }
@@ -663,6 +677,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::PromptContextsLoadFailed { reason } => {
             engine_warn!("[PromptContext] Failed to load contexts: {}", reason);
             // Continue with empty contexts (degraded but functional)
+            state.mark_triage_metadata_ready();
             state.mark_dirty();
             Vec::new()
         }
@@ -1175,10 +1190,17 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
             }
             TriageCacheLookupResult::KeyUnavailable => {
                 state.record_triage_cache_key_unavailable();
-                engine_info!(
-                    "[triage-cache] key-unavailable content_hash={}",
-                    content_hash_short
-                );
+                if state.triage_metadata_ready() {
+                    engine_warn!(
+                        "[triage-cache] key-unavailable despite metadata-ready content_hash={}",
+                        content_hash_short
+                    );
+                } else {
+                    engine_info!(
+                        "[triage-cache] key-unavailable metadata-pending content_hash={}",
+                        content_hash_short
+                    );
+                }
             }
         }
 
@@ -2121,6 +2143,23 @@ mod tests {
     }
 
     fn start_triage_for_test(state: AppState, articles: Vec<LoadedArticle>) -> (AppState, Vec<Effect>) {
+        let mut active_versions = std::collections::HashMap::new();
+        active_versions.insert(PromptId::ArticleTriage, 1);
+        let mut effective_models = std::collections::HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "test-model".to_string());
+        let (state, _) = update(
+            state,
+            Msg::LlmMetadataLoaded {
+                active_versions,
+                effective_models,
+            },
+        );
+        let (state, _) = update(
+            state,
+            Msg::PromptContextsLoaded {
+                contexts: std::collections::HashMap::new(),
+            },
+        );
         let (state, _) = update(state, Msg::TriageArticlesLoaded { articles });
         update(state, Msg::TriageClicked)
     }

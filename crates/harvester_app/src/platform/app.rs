@@ -94,7 +94,15 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
         EffectRunner::new(msg_tx.clone())
     };
-    effect_runner.enqueue(vec![Effect::LoadPromptContexts, Effect::LoadLlmMetadata]);
+    {
+        let mut guard = shared_state.lock().unwrap();
+        let state = std::mem::take(&mut guard.state);
+        let (state, effects) = update(state, Msg::StartupHydrationRequested);
+        if !effects.is_empty() {
+            effect_runner.enqueue(effects);
+        }
+        guard.state = state;
+    }
     {
         let completed = persistence::load_completed_jobs(&output_dir);
         if !completed.is_empty() {

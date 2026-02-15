@@ -1,4 +1,5 @@
 use std::sync::Once;
+use std::collections::HashMap;
 
 use harvester_core::{update, AppState, Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg};
 use harvester_engine::llm::prompt::PromptId;
@@ -47,6 +48,7 @@ fn completed_state_with_jobs(urls: &[&str]) -> (AppState, Vec<u64>) {
 
 fn ready_state_with_pretriage(urls: &[&str]) -> (AppState, Vec<u64>) {
     let (state, job_ids) = completed_state_with_jobs(urls);
+    let state = with_triage_metadata_ready(state);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
@@ -127,6 +129,27 @@ fn triage_clicked_emits_load_effect() {
     assert!(!state.view().triage_can_start);
 }
 
+fn with_triage_metadata_ready(state: AppState) -> AppState {
+    let (state, _) = update(
+        state,
+        Msg::PromptContextsLoaded {
+            contexts: HashMap::new(),
+        },
+    );
+    let mut active_versions = HashMap::new();
+    active_versions.insert(PromptId::ArticleTriage, 1);
+    let mut effective_models = HashMap::new();
+    effective_models.insert(PromptId::ArticleTriage, "test-model".to_string());
+    let (state, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    );
+    state
+}
+
 #[test]
 fn triage_clicked_while_active_is_noop() {
     init_logging();
@@ -140,6 +163,7 @@ fn triage_clicked_while_active_is_noop() {
 fn triage_articles_loaded_dispatches_first_request() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let state = with_triage_metadata_ready(state);
     let articles = sample_articles(&["https://one.example"]);
     let (state, _) = update(state, Msg::TriageArticlesLoaded { articles });
     let (_, effects) = update(state, Msg::TriageClicked);
@@ -177,6 +201,7 @@ fn triage_load_failed_transitions_to_failed() {
 
 fn triage_flow_with_two_articles() -> (AppState, Vec<LoadedArticle>) {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let state = with_triage_metadata_ready(state);
     let articles = sample_articles(&["https://one.example", "https://two.example"]);
     let (state, _) = update(
         state,
@@ -304,7 +329,7 @@ fn triage_quota_exhaustion_fails_remaining() {
 }
 
 #[test]
-fn triage_rerun_after_complete_starts_fresh() {
+fn triage_rerun_after_complete_reuses_cache_when_available() {
     init_logging();
     let (state, _articles) = triage_flow_with_two_articles();
     let (state, _) = update(
@@ -324,10 +349,12 @@ fn triage_rerun_after_complete_starts_fresh() {
         },
     );
     let (state, effects) = update(state, Msg::TriageClicked);
-    assert!(effects
-        .iter()
-        .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
-    assert!(!state.view().triage_can_start);
+    assert!(
+        !effects
+            .iter()
+            .any(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
+    );
+    assert!(state.view().triage_can_start);
 }
 
 #[test]
@@ -358,6 +385,7 @@ fn view_model_annotates_jobs_with_triage() {
 fn view_model_sorts_by_priority() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://low.example", "https://high.example"]);
+    let state = with_triage_metadata_ready(state);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
@@ -391,6 +419,7 @@ fn view_model_equal_priority_sorted_by_job_id() {
     init_logging();
     let (state, job_ids) =
         completed_state_with_jobs(&["https://first.example", "https://second.example"]);
+    let state = with_triage_metadata_ready(state);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
@@ -423,6 +452,7 @@ fn view_model_equal_priority_sorted_by_job_id() {
 fn view_model_stale_triage_url_ignored() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let state = with_triage_metadata_ready(state);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
@@ -503,5 +533,44 @@ fn triage_and_briefing_concurrent_request_ids() {
     assert!(
         effects.is_empty(),
         "triage click should no-op during briefing triage ownership"
+    );
+}
+
+#[test]
+fn rerun_uses_triage_cache_when_metadata_and_corpus_unchanged() {
+    init_logging();
+    let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let state = with_triage_metadata_ready(state);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            articles: sample_articles(&["https://one.example"]),
+        },
+    );
+    let (state, first_effects) = update(state, Msg::TriageClicked);
+    let first_request = request_id_for_prompt(&first_effects, PromptId::ArticleTriage)
+        .expect("first run dispatches llm request");
+
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: first_request,
+            result: triage_success(3),
+            metadata: None,
+        },
+    );
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            articles: sample_articles(&["https://one.example"]),
+        },
+    );
+    let (_state, rerun_effects) = update(state, Msg::TriageClicked);
+
+    assert!(
+        !rerun_effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::RequestLlmCompletion { .. })),
+        "rerun should reuse triage cache and avoid new llm requests"
     );
 }

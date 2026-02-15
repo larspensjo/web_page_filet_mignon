@@ -220,6 +220,7 @@ pub struct AppState {
     summary_cache_metrics: SummaryCacheMetrics,
     summary_cache_warmup_logged: bool,
     triage_cache: TriageCache,
+    triage_metadata_state: MetadataLoadState,
     triage_cache_metadata_snapshot: Option<TriageCacheMetadataSnapshot>,
     triage_cache_run_metrics: TriageCacheRunMetrics,
     triage_cache_run_start_logged: bool,
@@ -266,6 +267,7 @@ impl Default for AppState {
             summary_cache_metrics: SummaryCacheMetrics::default(),
             summary_cache_warmup_logged: false,
             triage_cache: TriageCache::new(),
+            triage_metadata_state: MetadataLoadState::Idle,
             triage_cache_metadata_snapshot: None,
             triage_cache_run_metrics: TriageCacheRunMetrics::default(),
             triage_cache_run_start_logged: false,
@@ -833,8 +835,11 @@ impl AppState {
 
     pub(crate) fn start_triage_cache_run(&mut self) {
         self.triage_cache_run_metrics = TriageCacheRunMetrics::default();
-        self.triage_cache_metadata_snapshot = None;
         self.triage_cache_run_start_logged = false;
+    }
+
+    pub(crate) fn mark_triage_metadata_pending(&mut self) {
+        self.triage_metadata_state = MetadataLoadState::Pending;
     }
 
     pub(crate) fn mark_triage_metadata_ready(&mut self) {
@@ -849,9 +854,19 @@ impl AppState {
                 model_id,
                 context_hash: context_hash(self.context_for(PromptId::ArticleTriage)),
             }),
-            _ => None,
+            _ => {
+                self.triage_metadata_state = MetadataLoadState::Pending;
+                None
+            }
         };
+        if snapshot.is_some() {
+            self.triage_metadata_state = MetadataLoadState::Ready;
+        }
         self.triage_cache_metadata_snapshot = snapshot;
+    }
+
+    pub(crate) fn triage_metadata_ready(&self) -> bool {
+        matches!(self.triage_metadata_state, MetadataLoadState::Ready)
     }
 
     pub(crate) fn triage_cache_metadata(&self) -> Option<(PromptVersion, &str, &str)> {
@@ -935,7 +950,6 @@ impl AppState {
     }
 
     pub(crate) fn finalize_triage_cache_run(&mut self) {
-        self.triage_cache_metadata_snapshot = None;
         self.triage_cache_run_start_logged = false;
     }
 
