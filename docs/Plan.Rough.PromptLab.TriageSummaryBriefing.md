@@ -274,6 +274,10 @@ Tests after step:
 - **Token budget visualizer**: for a given stage and model, show how much of the input budget is consumed by overhead (nonce, system prompt, context) vs. article content.
 - **Diff view for template edits**: side-by-side view of the draft template vs. the currently active version, using a simple line-diff representation.
 - **Annotation history**: allow the operator to add a free-text note to any `LabRunRecord`, persisted in the run index for later recall.
+- **Step 2 metadata gate**: extend each `LabRunRecord` with the richer `LlmRunMetadata` so future cost/latency dashboards can reuse the same schema.
+- **Step 3 override lab**: keep the per-run prompt+model metadata stored to fuel an automated recommender for "cheapest good enough" choices later.
+- **Step 7 compare batches**: show compare batch run groupings as a structured object that can also be serialized/exported (e.g., for Step 9 exports).
+- **Step 8 persistence surface**: let run index entries drive retention metadata or reporting for regulators, the same way the lab persistence layer will.
 
 ## Final Validation Gate for Full Implementation
 - `cargo build`
