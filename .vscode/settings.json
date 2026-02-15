@@ -1,4 +1,10 @@
 {
+  "workbench.colorCustomizations": {
+    "titleBar.activeBackground": "#2b3a67",
+    "titleBar.activeForeground": "#ffffff",
+    "titleBar.inactiveBackground": "#1f2a4a",
+    "titleBar.inactiveForeground": "#cfcfcf"
+  },
   "rust-analyzer.cargo.features": [],
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.check.extraArgs": [
