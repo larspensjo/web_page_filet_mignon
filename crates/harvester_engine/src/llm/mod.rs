@@ -11,6 +11,7 @@ pub mod quota;
 pub mod replay;
 pub mod run_metadata;
 pub mod types;
+pub mod template_validation;
 pub mod validation;
 
 pub use dto::{AggregateBriefing, ArticleSummary, BriefingTheme, TriagePriority, TriageResult};
@@ -37,5 +38,8 @@ pub use run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata};
 pub use types::{
     ChatMessage, ChatRole, FinishReason, LlmError, LlmRequest, LlmResponse, ModelId, ProviderKind,
     ResponseFormat, TokenUsage,
+};
+pub use template_validation::{
+    validate_template, TemplateField, TemplateValidationError,
 };
 pub use validation::{validate_briefing, validate_summary, validate_triage, ValidationError};
