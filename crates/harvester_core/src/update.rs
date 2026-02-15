@@ -10,11 +10,8 @@ use crate::{
     },
     calc_left_width, context_hash,
     pre_triage_filter::{PreTriagePhase, PreTriagePolicy, PreTriageSession},
-    prompt_lab::{
-        prompt_id_for_stage, PromptLabCompareBatchStatus, PromptLabInputSource,
-        PromptLabRunStatus, PromptLabStage,
-    },
-    triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession},
+    prompt_lab::{prompt_id_for_stage, PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage},
+    triage::{ArticleTriageResult, TriagePhase, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
@@ -173,7 +170,24 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::JobSelected { job_id } => {
             state.select_job(job_id);
-            Vec::new()
+            let Some(url) = state.selected_job_url() else {
+                return (state, Vec::new());
+            };
+            let url_changed = state.prompt_lab().url_input() != url;
+            if url_changed {
+                state.prompt_lab_mut().set_url_input(url.clone());
+                state.mark_dirty();
+            }
+            let should_resolve = state.prompt_lab().pending_resolve_id().is_none()
+                && (url_changed || state.prompt_lab().resolved_url_snapshot().is_none());
+            if should_resolve {
+                let resolve_id = state.allocate_next_prompt_lab_resolve_id();
+                state.prompt_lab_mut().begin_url_resolution(resolve_id);
+                state.mark_dirty();
+                vec![Effect::ResolvePromptLabInputFromUrl { resolve_id, url }]
+            } else {
+                Vec::new()
+            }
         }
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
@@ -958,13 +972,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
             }
-            let snapshot = match state.prompt_lab().selected_input_source() {
-                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
-                PromptLabInputSource::TypeUrl => state
-                    .prompt_lab()
-                    .resolved_url_snapshot()
-                    .map(ToOwned::to_owned),
-            };
+            let snapshot = state
+                .prompt_lab()
+                .resolved_url_snapshot()
+                .map(ToOwned::to_owned);
             let input = match snapshot {
                 Some(text) => text,
                 None => return (state, Vec::new()),
@@ -1125,13 +1136,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
             }
-            let snapshot = match state.prompt_lab().selected_input_source() {
-                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
-                PromptLabInputSource::TypeUrl => state
-                    .prompt_lab()
-                    .resolved_url_snapshot()
-                    .map(ToOwned::to_owned),
-            };
+            let snapshot = state
+                .prompt_lab()
+                .resolved_url_snapshot()
+                .map(ToOwned::to_owned);
             let input = match snapshot {
                 Some(text) => text,
                 None => return (state, Vec::new()),
@@ -1224,13 +1232,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
             }
-            let snapshot = match state.prompt_lab().selected_input_source() {
-                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
-                PromptLabInputSource::TypeUrl => state
-                    .prompt_lab()
-                    .resolved_url_snapshot()
-                    .map(ToOwned::to_owned),
-            };
+            let snapshot = state
+                .prompt_lab()
+                .resolved_url_snapshot()
+                .map(ToOwned::to_owned);
             let input = match snapshot {
                 Some(text) => text,
                 None => return (state, Vec::new()),
@@ -1332,13 +1337,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
             }
-            let snapshot = match state.prompt_lab().selected_input_source() {
-                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
-                PromptLabInputSource::TypeUrl => state
-                    .prompt_lab()
-                    .resolved_url_snapshot()
-                    .map(ToOwned::to_owned),
-            };
+            let snapshot = state
+                .prompt_lab()
+                .resolved_url_snapshot()
+                .map(ToOwned::to_owned);
             let input = match snapshot {
                 Some(text) => text,
                 None => return (state, Vec::new()),
@@ -1519,28 +1521,6 @@ fn dispatch_next_compare_candidate(
             .record_compare_dispatch(batch_id, candidate.candidate_id, run_id);
     }
     effects
-}
-
-fn triage_snapshot_for_prompt_lab(state: &AppState) -> Option<String> {
-    if let Some(job_id) = state.selected_job_id() {
-        if let Some(url) = state.job_url(job_id) {
-            if let Some(article) = state.triage().articles().iter().find(|article| {
-                article.url == url
-                    && matches!(article.triage_state, ArticleTriageState::Completed { .. })
-            }) {
-                return Some(article.prepared_text.clone());
-            }
-        }
-    }
-    state
-        .triage()
-        .articles()
-        .iter()
-        .rev()
-        .find_map(|article| match &article.triage_state {
-            ArticleTriageState::Completed { .. } => Some(article.prepared_text.clone()),
-            _ => None,
-        })
 }
 
 fn parse_urls(raw: &str) -> Vec<String> {
@@ -2982,12 +2962,12 @@ mod tests {
         let (state, _) = update(
             state,
             Msg::PromptLabInputSourceSelected {
-                source: PromptLabInputSource::TypeUrl,
+                source: crate::prompt_lab::PromptLabInputSource::TypeUrl,
             },
         );
         assert_eq!(
             state.prompt_lab().selected_input_source(),
-            PromptLabInputSource::TypeUrl
+            crate::prompt_lab::PromptLabInputSource::TypeUrl
         );
         assert!(state.view().dirty);
     }
@@ -3070,12 +3050,82 @@ mod tests {
     }
 
     #[test]
+    fn run_requested_uses_resolved_snapshot_after_job_selection() {
+        init_logging();
+        let (state, _) = update(
+            AppState::new(),
+            Msg::InputChanged("https://example.com/article/".to_string()),
+        );
+        let (mut state, _) = update(state, Msg::UrlsSubmitted);
+
+        state.triage_mut().set_articles(vec![LoadedArticle {
+            url: "https://example.com/article".to_string(),
+            source_title: Some("Example".to_string()),
+            prepared_text: "selected article prepared text".to_string(),
+            content_hash: "hash-selected".to_string(),
+        }]);
+        state.triage_mut().transition_to_triaging();
+        state.triage_mut().complete_article(
+            0,
+            crate::triage::ArticleTriageResult {
+                category: "news".to_string(),
+                priority: 3,
+                tags: vec!["tag".to_string()],
+                rationale: "ok".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+
+        let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+        let resolve_id = match effects.first() {
+            Some(Effect::ResolvePromptLabInputFromUrl { resolve_id, .. }) => *resolve_id,
+            other => panic!("expected resolve effect, got {other:?}"),
+        };
+        let (state, _) = update(
+            state,
+            Msg::PromptLabInputResolved {
+                resolve_id,
+                result: Ok("selected article prepared text".to_string()),
+            },
+        );
+        let (_state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            Effect::RequestLlmCompletion { input_content, .. } => {
+                assert_eq!(input_content, "selected article prepared text");
+            }
+            other => panic!("expected RequestLlmCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn job_selected_populates_prompt_lab_url_and_requests_resolve() {
+        init_logging();
+        let (state, _) = update(
+            AppState::new(),
+            Msg::InputChanged("https://example.com/article".to_string()),
+        );
+        let (state, _) = update(state, Msg::UrlsSubmitted);
+        let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+        assert_eq!(
+            state.prompt_lab().url_input(),
+            "https://example.com/article"
+        );
+        assert!(
+            effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::ResolvePromptLabInputFromUrl { .. }))
+        );
+    }
+
+    #[test]
     fn run_requested_typeurl_no_op_when_snapshot_not_resolved() {
         init_logging();
         let (state, _effects) = update(
             AppState::new(),
             Msg::PromptLabInputSourceSelected {
-                source: PromptLabInputSource::TypeUrl,
+                source: crate::prompt_lab::PromptLabInputSource::TypeUrl,
             },
         );
         let (state, _) = update(
@@ -3153,7 +3203,7 @@ mod tests {
     fn prepare_type_url_snapshot(state: &mut AppState, snapshot: &str) {
         state
             .prompt_lab_mut()
-            .select_input_source(PromptLabInputSource::TypeUrl);
+            .select_input_source(crate::prompt_lab::PromptLabInputSource::TypeUrl);
         state
             .prompt_lab_mut()
             .set_url_input("https://example.com".to_string());

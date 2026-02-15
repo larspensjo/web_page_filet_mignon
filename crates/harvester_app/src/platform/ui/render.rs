@@ -3,7 +3,7 @@ use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, Window
 use engine_logging::{engine_debug, engine_warn};
 use harvester_core::{
     AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView,
-    PromptLabInputSource, PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
+    PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::LinkKind;
 
@@ -51,15 +51,11 @@ pub struct TreeRenderState {
     prev_prompt_lab_metadata_text: Option<String>,
     prev_prompt_lab_url_input: Option<String>,
     prev_prompt_lab_run_enabled: Option<bool>,
-    prev_prompt_lab_rerun_enabled: Option<bool>,
     prev_prompt_lab_resolve_enabled: Option<bool>,
     prev_prompt_lab_url_enabled: Option<bool>,
-    prev_prompt_lab_clear_enabled: Option<bool>,
     prev_prompt_lab_stage_triage_text: Option<String>,
     prev_prompt_lab_stage_summary_text: Option<String>,
     prev_prompt_lab_stage_briefing_text: Option<String>,
-    prev_prompt_lab_source_triage_text: Option<String>,
-    prev_prompt_lab_source_url_text: Option<String>,
     prev_prompt_lab_context_text: Option<String>,
     prev_prompt_lab_context_status_text: Option<String>,
     prev_prompt_lab_context_apply_enabled: Option<bool>,
@@ -123,15 +119,11 @@ impl Default for TreeRenderState {
             prev_prompt_lab_metadata_text: None,
             prev_prompt_lab_url_input: None,
             prev_prompt_lab_run_enabled: None,
-            prev_prompt_lab_rerun_enabled: None,
             prev_prompt_lab_resolve_enabled: None,
             prev_prompt_lab_url_enabled: None,
-            prev_prompt_lab_clear_enabled: None,
             prev_prompt_lab_stage_triage_text: None,
             prev_prompt_lab_stage_summary_text: None,
             prev_prompt_lab_stage_briefing_text: None,
-            prev_prompt_lab_source_triage_text: None,
-            prev_prompt_lab_source_url_text: None,
             prev_prompt_lab_context_text: None,
             prev_prompt_lab_context_status_text: None,
             prev_prompt_lab_context_apply_enabled: None,
@@ -507,34 +499,6 @@ pub fn render(
         tree_state.prev_prompt_lab_stage_briefing_text = Some(stage_briefing_text);
     }
 
-    let source_from_triage_text = select_label(
-        "From triage",
-        view.prompt_lab.selected_input_source == PromptLabInputSource::FromTriageArticles,
-    );
-    if tree_state.prev_prompt_lab_source_triage_text.as_deref()
-        != Some(source_from_triage_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
-            window_id,
-            control_id: BTN_SOURCE_FROM_TRIAGE,
-            text: source_from_triage_text.clone(),
-        });
-        tree_state.prev_prompt_lab_source_triage_text = Some(source_from_triage_text);
-    }
-    let source_type_url_text = select_label(
-        "Type URL",
-        view.prompt_lab.selected_input_source == PromptLabInputSource::TypeUrl,
-    );
-    if tree_state.prev_prompt_lab_source_url_text.as_deref() != Some(source_type_url_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
-            window_id,
-            control_id: BTN_SOURCE_TYPE_URL,
-            text: source_type_url_text.clone(),
-        });
-        tree_state.prev_prompt_lab_source_url_text = Some(source_type_url_text);
-    }
-
     if tree_state.prev_prompt_lab_run_enabled != Some(view.prompt_lab.can_run) {
         cmds.push(PlatformCommand::SetControlEnabled {
             window_id,
@@ -543,16 +507,7 @@ pub fn render(
         });
         tree_state.prev_prompt_lab_run_enabled = Some(view.prompt_lab.can_run);
     }
-    if tree_state.prev_prompt_lab_rerun_enabled != Some(view.prompt_lab.can_rerun) {
-        cmds.push(PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BTN_PROMPT_LAB_RERUN,
-            enabled: view.prompt_lab.can_rerun,
-        });
-        tree_state.prev_prompt_lab_rerun_enabled = Some(view.prompt_lab.can_rerun);
-    }
-    let type_url_selected = view.prompt_lab.selected_input_source == PromptLabInputSource::TypeUrl;
-    let resolve_enabled = type_url_selected && !view.prompt_lab.resolve_pending;
+    let resolve_enabled = !view.prompt_lab.resolve_pending;
     if tree_state.prev_prompt_lab_resolve_enabled != Some(resolve_enabled) {
         cmds.push(PlatformCommand::SetControlEnabled {
             window_id,
@@ -561,22 +516,13 @@ pub fn render(
         });
         tree_state.prev_prompt_lab_resolve_enabled = Some(resolve_enabled);
     }
-    if tree_state.prev_prompt_lab_url_enabled != Some(type_url_selected) {
+    if tree_state.prev_prompt_lab_url_enabled != Some(true) {
         cmds.push(PlatformCommand::SetControlEnabled {
             window_id,
             control_id: INPUT_PROMPT_LAB_URL,
-            enabled: type_url_selected,
+            enabled: true,
         });
-        tree_state.prev_prompt_lab_url_enabled = Some(type_url_selected);
-    }
-    let clear_enabled = view.prompt_lab.run_count > 0;
-    if tree_state.prev_prompt_lab_clear_enabled != Some(clear_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BTN_PROMPT_LAB_CLEAR,
-            enabled: clear_enabled,
-        });
-        tree_state.prev_prompt_lab_clear_enabled = Some(clear_enabled);
+        tree_state.prev_prompt_lab_url_enabled = Some(true);
     }
     let compare_add_enabled = view.prompt_lab.can_add_candidate;
     if tree_state.prev_prompt_lab_compare_add_current_enabled != Some(compare_add_enabled) {
@@ -2050,23 +1996,6 @@ mod tests {
     }
 
     #[test]
-    fn rerun_button_enabled_with_completed_run() {
-        let window_id = WindowId::new(11);
-        let mut tree_state = TreeRenderState::new();
-        let mut view = make_view(vec![]);
-        view.prompt_lab.can_rerun = true;
-        view.prompt_lab.latest_run = completed_prompt_lab_view().latest_run;
-        let cmds = render(window_id, &view, &mut tree_state);
-        assert!(cmds.iter().any(|cmd| {
-            matches!(
-                cmd,
-                PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
-                if *control_id == BTN_PROMPT_LAB_RERUN
-            )
-        }));
-    }
-
-    #[test]
     fn compare_start_disabled_by_default() {
         let window_id = WindowId::new(18);
         let mut tree_state = TreeRenderState::new();
@@ -2158,11 +2087,11 @@ mod tests {
     }
 
     #[test]
-    fn resolve_button_enabled_only_in_typeurl_mode() {
+    fn resolve_button_enabled_when_not_pending() {
         let window_id = WindowId::new(12);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.selected_input_source = PromptLabInputSource::FromTriageArticles;
+        view.prompt_lab.resolve_pending = true;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2172,7 +2101,6 @@ mod tests {
             )
         }));
 
-        view.prompt_lab.selected_input_source = PromptLabInputSource::TypeUrl;
         view.prompt_lab.resolve_pending = false;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {

@@ -412,10 +412,22 @@ impl AppState {
                     nav_heavy: quality.nav_heavy(),
                 }
             });
-        let triage_articles_available =
-            self.triage().articles().iter().any(|article| {
-                matches!(article.triage_state, ArticleTriageState::Completed { .. })
-            });
+        let selected_triage_article_available = self
+            .ui
+            .selected_job_id()
+            .and_then(|job_id| self.jobs.get(&job_id))
+            .and_then(|job| {
+                let selected_norm = normalize_url_for_dedupe(&job.url);
+                self.triage()
+                    .articles()
+                    .iter()
+                    .find(|article| {
+                        normalize_url_for_dedupe(&article.url) == selected_norm
+                            && matches!(article.triage_state, ArticleTriageState::Completed { .. })
+                    })
+                    .map(|_| ())
+            })
+            .is_some();
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -446,7 +458,7 @@ impl AppState {
                 &self.prompt_lab,
                 &self.prompt_contexts,
                 &self.prompt_lab_templates,
-                triage_articles_available,
+                selected_triage_article_available,
             ),
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
         }
@@ -669,14 +681,6 @@ impl AppState {
                     .collect(),
             })
             .collect()
-    }
-
-    pub(crate) fn job_url(&self, job_id: JobId) -> Option<&str> {
-        self.jobs.get(&job_id).map(|job| job.url.as_str())
-    }
-
-    pub(crate) fn selected_job_id(&self) -> Option<JobId> {
-        self.ui.selected_job_id()
     }
 
     #[allow(dead_code)]
@@ -1085,6 +1089,13 @@ impl AppState {
         let job_id = self.ui.selected_job_id()?;
         let job = self.jobs.get(&job_id)?;
         self.briefing.summary_for_url(&job.url)?;
+        Some(job.url.clone())
+    }
+
+    /// URL of the currently selected job, regardless of summarization state.
+    pub(crate) fn selected_job_url(&self) -> Option<String> {
+        let job_id = self.ui.selected_job_id()?;
+        let job = self.jobs.get(&job_id)?;
         Some(job.url.clone())
     }
 

@@ -12,8 +12,7 @@ use commanductui::{
 };
 use harvester_core::{
     update, AppState, AppViewModel, Effect, JobFilterStatus, JobResultKind, LinkDownloadState,
-    ManualDecision, Msg,
-    PromptLabInputSource, PromptLabStage,
+    ManualDecision, Msg, PromptLabStage,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -507,20 +506,6 @@ impl PlatformEventHandler for AppEventHandler {
                 });
             }
             AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_SOURCE_FROM_TRIAGE =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabInputSourceSelected {
-                    source: PromptLabInputSource::FromTriageArticles,
-                });
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_SOURCE_TYPE_URL =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabInputSourceSelected {
-                    source: PromptLabInputSource::TypeUrl,
-                });
-            }
-            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_RESOLVE =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabResolveRequested);
@@ -529,16 +514,6 @@ impl PlatformEventHandler for AppEventHandler {
                 if control_id == ui::constants::BTN_PROMPT_LAB_RUN =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabRunRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_RERUN =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabRerunRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_CLEAR =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabHistoryCleared);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_COMPARE_ADD_CURRENT =>
@@ -967,22 +942,6 @@ mod tests {
     }
 
     #[test]
-    fn prompt_lab_source_button_emits_source_selected_msg() {
-        let (mut handler, rx) = test_handler_with_outbound();
-        handler.handle_event(AppEvent::ButtonClicked {
-            window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_SOURCE_TYPE_URL,
-        });
-        let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
-        assert_eq!(
-            msg,
-            Msg::PromptLabInputSourceSelected {
-                source: PromptLabInputSource::TypeUrl
-            }
-        );
-    }
-
-    #[test]
     fn prompt_lab_url_input_emits_url_changed_msg() {
         let (mut handler, rx) = test_handler_with_outbound();
         handler.handle_event(AppEvent::InputTextChanged {
@@ -1010,14 +969,6 @@ mod tests {
             window_id: WindowId::new(1),
             control_id: ui::constants::BTN_PROMPT_LAB_RUN,
         });
-        handler.handle_event(AppEvent::ButtonClicked {
-            window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_RERUN,
-        });
-        handler.handle_event(AppEvent::ButtonClicked {
-            window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_CLEAR,
-        });
 
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250))
@@ -1027,14 +978,6 @@ mod tests {
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250)).expect("run"),
             Msg::PromptLabRunRequested
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("rerun"),
-            Msg::PromptLabRerunRequested
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("clear"),
-            Msg::PromptLabHistoryCleared
         );
     }
 

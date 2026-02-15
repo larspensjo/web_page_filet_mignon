@@ -276,7 +276,7 @@ impl PromptLabView {
         state: &PromptLabState,
         contexts: &HashMap<PromptId, Vec<(String, String)>>,
         templates: &HashMap<PromptId, PromptLabTemplateSnapshot>,
-        triage_articles_available: bool,
+        _selected_triage_article_available: bool,
     ) -> Self {
         let latest_run_record = state.latest_run();
         let latest_run = latest_run_record.map(|r| {
@@ -344,21 +344,12 @@ impl PromptLabView {
             }
         });
         let selected_input_source = state.selected_input_source();
-        let source_reason = match selected_input_source {
-            PromptLabInputSource::FromTriageArticles => {
-                if triage_articles_available {
-                    None
-                } else {
-                    Some("No triage articles available")
-                }
-            }
-            PromptLabInputSource::TypeUrl => {
-                if state.resolved_url_snapshot().is_some() {
-                    None
-                } else {
-                    Some("Resolve URL input")
-                }
-            }
+        let source_reason = if state.url_input().trim().is_empty() {
+            Some("Enter URL and resolve input")
+        } else if state.resolved_url_snapshot().is_some() {
+            None
+        } else {
+            Some("Resolve URL input")
         };
         let is_in_flight = state.has_in_flight_run();
         let can_run = !is_in_flight && source_reason.is_none();
@@ -735,7 +726,27 @@ mod tests {
         let contexts = HashMap::new();
         let view = PromptLabView::from_state(&state, &contexts, &HashMap::new(), false);
         assert!(!view.can_run);
+        assert_eq!(view.run_disabled_reason, Some("Enter URL and resolve input"));
+    }
+
+    #[test]
+    fn can_run_false_for_typeurl_when_url_set_but_not_resolved() {
+        let mut state = PromptLabState::default();
+        state.select_input_source(PromptLabInputSource::TypeUrl);
+        state.set_url_input("https://example.com".to_string());
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, &HashMap::new(), false);
+        assert!(!view.can_run);
         assert_eq!(view.run_disabled_reason, Some("Resolve URL input"));
+    }
+
+    #[test]
+    fn can_run_false_when_url_input_missing() {
+        let state = PromptLabState::default();
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, &HashMap::new(), false);
+        assert!(!view.can_run);
+        assert_eq!(view.run_disabled_reason, Some("Enter URL and resolve input"));
     }
 
     #[test]

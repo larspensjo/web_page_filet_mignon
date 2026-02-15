@@ -277,7 +277,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_SOURCE_ROW),
         control_id: BTN_SOURCE_FROM_TRIAGE,
-        text: "From triage".to_string(),
+        text: "Selected article".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -305,18 +305,6 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_PROMPT_LAB_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_RUN,
         text: "Run".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_RERUN,
-        text: "Rerun".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_CLEAR,
-        text: "Clear".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -1061,7 +1049,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_STAGE_ROW),
                 dock_style: DockStyle::Left,
                 order: 0,
-                fixed_size: Some(66),
+                fixed_size: Some(110),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1069,23 +1057,23 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_STAGE_ROW),
                 dock_style: DockStyle::Left,
                 order: 1,
-                fixed_size: Some(66),
+                fixed_size: Some(110),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
                 control_id: BTN_STAGE_BRIEFING,
                 parent_control_id: Some(PANEL_PROMPT_LAB_STAGE_ROW),
-                dock_style: DockStyle::Fill,
+                dock_style: DockStyle::Left,
                 order: 2,
-                fixed_size: None,
-                margin: (0, 0, 0, 0),
+                fixed_size: Some(110),
+                margin: (0, 4, 0, 0),
             },
             LayoutRule {
                 control_id: PANEL_PROMPT_LAB_SOURCE_ROW,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Top,
                 order: 3,
-                fixed_size: Some(26),
+                fixed_size: Some(0),
                 margin: (0, 0, 2, 0),
             },
             LayoutRule {
@@ -1093,7 +1081,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_SOURCE_ROW),
                 dock_style: DockStyle::Left,
                 order: 0,
-                fixed_size: Some(100),
+                fixed_size: Some(180),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1143,22 +1131,6 @@ fn build_layout_rules(
                 order: 0,
                 fixed_size: Some(44),
                 margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_RERUN,
-                parent_control_id: Some(PANEL_PROMPT_LAB_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 1,
-                fixed_size: Some(54),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_CLEAR,
-                parent_control_id: Some(PANEL_PROMPT_LAB_ACTION_ROW),
-                dock_style: DockStyle::Fill,
-                order: 2,
-                fixed_size: None,
-                margin: (0, 0, 0, 0),
             },
         ]);
 
@@ -1851,12 +1823,8 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_STAGE_TRIAGE,
         BTN_STAGE_SUMMARY,
         BTN_STAGE_BRIEFING,
-        BTN_SOURCE_FROM_TRIAGE,
-        BTN_SOURCE_TYPE_URL,
         BTN_PROMPT_LAB_RESOLVE,
         BTN_PROMPT_LAB_RUN,
-        BTN_PROMPT_LAB_RERUN,
-        BTN_PROMPT_LAB_CLEAR,
         BTN_PROMPT_LAB_CONTEXT_APPLY,
         BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
         BTN_PROMPT_LAB_CONTEXT_REVERT,
