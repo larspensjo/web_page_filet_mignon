@@ -362,12 +362,53 @@ Origin:
 - SourceDoc: Plan.Rough.RssLlmCuration.SecurityFirst.md
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
+- SourceDoc: Plan.BriefingDependsOnTriage.md
+- SourceSection: Future Extensions (Nice-to-Have)
+- Captured: 2026-02-15
 Tags: [llm, briefing, triage]
 Summary: Filter briefing inputs based on triage priority (e.g., P3+ only).
 Rationale: Focuses briefing output on high-value items.
 SuccessCriteria:
 - Briefing respects a configurable minimum triage priority threshold.
+- Operators can override the minimum threshold per run and persist a default threshold.
 - Lower-priority items are excluded from the briefing input set.
+- Eligible article ordering can be configured (for example, by priority or recency) while remaining deterministic.
+
+#### [FI-LLM-Briefing-0003] Minimum-eligible fallback for sparse triage days
+Status: Candidate
+TopLevel: LLM
+SubLevel: Briefing
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.BriefingDependsOnTriage.md
+- SourceSection: Future Extensions (Nice-to-Have)
+- Captured: 2026-02-15
+Tags: [llm, briefing, triage, fallback]
+Summary: Add a fallback policy that includes top-N triaged articles when the normal priority cutoff yields no eligible articles.
+Rationale: Prevents empty briefings on low-signal days without discarding triage gating.
+SuccessCriteria:
+- Briefing supports a configurable minimum eligible floor used only when cutoff-filtered results are empty.
+- Fallback selection remains deterministic and auditable.
+
+#### [FI-LLM-Briefing-0004] Briefing explainability block for triage filtering
+Status: Candidate
+TopLevel: LLM
+SubLevel: Briefing
+Priority: P2
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.BriefingDependsOnTriage.md
+- SourceSection: Future Extensions (Nice-to-Have)
+- Captured: 2026-02-15
+Tags: [llm, briefing, triage, explainability]
+Summary: Include an explainability block in briefing output that reports inclusion and exclusion counts from triage filtering.
+Rationale: Makes filtering outcomes transparent and easier to validate operationally.
+SuccessCriteria:
+- Briefing output reports included count, excluded low-priority count, and excluded untriaged count.
+- Explainability counts match the triage selection inputs used for the run.
 
 ### Budgeting
 
@@ -467,6 +508,25 @@ Rationale: Speeds up repeated runs and avoids unnecessary cost.
 SuccessCriteria:
 - Re-summarization is skipped when the content hash is unchanged.
 - Changed content triggers a new summary generation.
+
+#### [FI-LLM-Caching-0003] Incremental triage reuse for partially changed corpora
+Status: Candidate
+TopLevel: LLM
+SubLevel: Caching
+Priority: P2
+Effort: L
+Risk: M
+Origin:
+- SourceDoc: Plan.BriefingDependsOnTriage.md
+- SourceSection: Future Extensions (Nice-to-Have)
+- Captured: 2026-02-15
+Tags: [llm, triage, caching, incremental]
+Summary: Reuse previously completed triage results for unchanged articles and only re-triage the subset whose content changed.
+Rationale: Reduces LLM cost and latency when the corpus changes incrementally between runs.
+SuccessCriteria:
+- Triage orchestration detects changed versus unchanged articles using stable content identity.
+- Unchanged articles reuse prior triage results while changed articles are re-triaged.
+- Integration tests show parity with full re-triage results for mixed-change corpora.
 
 ### ContentPreparation
 
@@ -743,6 +803,9 @@ Origin:
 - SourceDoc: Plan.Rough.RssLlmCuration.SecurityFirst.md
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
+- SourceDoc: Plan.BriefingDependsOnTriage.md
+- SourceSection: Future Extensions (Nice-to-Have)
+- Captured: 2026-02-15
 Tags: [evaluation, diagnostics, llm]
 Summary: Report distribution metrics for priorities, tags, validation failures, and cost/latency, including run-level concurrency diagnostics.
 Rationale: Enables systematic prompt/model evaluation.
@@ -750,6 +813,7 @@ SuccessCriteria:
 - Diagnostics include cost, latency, and validation failure rates.
 - Metrics can be exported per run for comparison.
 - End-of-run diagnostics include request totals, success/failure counts, p50/p95 latency, and peak in-flight.
+- Diagnostics include triage reuse hit rate and briefing filtered-out ratio counters.
 
 #### [FI-Observability-ReplayDiagnostics-0002] Extraction A/B harness for converter and extractor quality
 Status: Candidate
@@ -1394,6 +1458,24 @@ Rationale: Makes concurrent progress legible and improves operator confidence du
 SuccessCriteria:
 - UI shows completed/total and in-flight counts while processing is active.
 - Indicator updates on each LLM completion event.
+
+#### [FI-UX-SessionControls-0003] Retriage override when briefing would reuse prior triage
+Status: Candidate
+TopLevel: UX
+SubLevel: SessionControls
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.BriefingDependsOnTriage.md
+- SourceSection: Future Extensions (Nice-to-Have)
+- Captured: 2026-02-15
+Tags: [UX, triage, briefing, control]
+Summary: Add a user-facing "Retriage now" action to force a fresh triage run before briefing instead of reusing existing triage results.
+Rationale: Gives operators explicit control when they suspect stale or low-quality triage outcomes.
+SuccessCriteria:
+- UI exposes a retriage override action in the briefing flow.
+- Using the override bypasses reuse checks and runs triage against the current corpus.
 
 ### TriageUi
 
