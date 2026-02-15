@@ -145,6 +145,7 @@ fn with_triage_metadata_ready(state: AppState) -> AppState {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
+            templates: HashMap::new(),
         },
     );
     state

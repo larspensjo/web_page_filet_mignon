@@ -45,6 +45,10 @@ pub(crate) fn prompt_id_for_stage(stage: PromptLabStage) -> PromptId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PromptLabRunId(pub u64);
 
+/// Identifies a compare batch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PromptLabCompareBatchId(pub u64);
+
 // ---------------------------------------------------------------------------
 // Run status
 // ---------------------------------------------------------------------------
@@ -91,6 +95,85 @@ pub struct PromptLabRunRecord {
     pub prompt_version_used: Option<PromptVersion>,
     /// Model override recorded at dispatch time (`None` = stage/default model).
     pub model_override: Option<ModelId>,
+    pub compare_batch_id: Option<PromptLabCompareBatchId>,
+    pub compare_candidate_id: Option<u64>,
+    pub operator_rating: Option<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptLabCompareBatchStatus {
+    Draft,
+    Running { dispatched: u32, total: u32 },
+    AllComplete,
+    PartialFailure,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabCompareCandidate {
+    pub candidate_id: u64,
+    pub stage: PromptLabStage,
+    pub prompt_id: PromptId,
+    pub prompt_version: Option<PromptVersion>,
+    pub model_override: Option<ModelId>,
+    pub context_snapshot: Vec<(String, String)>,
+    pub template_snapshot: Option<PromptTemplateOwned>,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabComparePolicy {
+    pub require_parse_ok: bool,
+    pub max_cost_microdollars: Option<u64>,
+    pub max_wall_ms: Option<u64>,
+    pub rating_beats_cost: bool,
+}
+
+impl Default for PromptLabComparePolicy {
+    fn default() -> Self {
+        Self {
+            require_parse_ok: true,
+            max_cost_microdollars: None,
+            max_wall_ms: None,
+            rating_beats_cost: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabCompareBatchRecord {
+    pub batch_id: PromptLabCompareBatchId,
+    pub created_utc: String,
+    pub input_snapshot: String,
+    pub candidates: Vec<PromptLabCompareCandidate>,
+    pub candidate_run_ids: Vec<(u64, Option<PromptLabRunId>)>,
+    pub status: PromptLabCompareBatchStatus,
+    pub policy: PromptLabComparePolicy,
+    pub selected_run_id: Option<PromptLabRunId>,
+    pub auto_selected_run_id: Option<PromptLabRunId>,
+    pub auto_select_warning: Option<String>,
+    pub warning: Option<String>,
+}
+
+impl PromptLabCompareBatchRecord {
+    pub fn effective_winner(&self) -> Option<PromptLabRunId> {
+        self.selected_run_id.or(self.auto_selected_run_id)
+    }
+
+    pub fn pending_candidate_count(&self) -> usize {
+        self.candidate_run_ids
+            .iter()
+            .filter(|(_, run_id)| run_id.is_none())
+            .count()
+    }
+
+    pub fn next_undispatched_candidate(&self) -> Option<&PromptLabCompareCandidate> {
+        let next = self
+            .candidate_run_ids
+            .iter()
+            .find_map(|(candidate_id, run_id)| run_id.is_none().then_some(*candidate_id))?;
+        self.candidates.iter().find(|c| c.candidate_id == next)
+    }
 }
 
 /// Snapshot of an effective template for UI consumption.
@@ -365,6 +448,12 @@ pub struct PromptLabState {
     pub(crate) context_overlays: HashMap<PromptId, PromptLabContextDraft>,
     pub(crate) template_drafts: HashMap<PromptId, PromptLabTemplateDraft>,
     pub(crate) template_editor_open: bool,
+    pub(crate) next_compare_batch_id: u64,
+    pub(crate) batches: Vec<PromptLabCompareBatchRecord>,
+    pub(crate) active_batch_idx: Option<usize>,
+    pub(crate) draft_candidates: Vec<PromptLabCompareCandidate>,
+    pub(crate) next_draft_candidate_id: u64,
+    pub(crate) compare_policy: PromptLabComparePolicy,
 }
 
 impl Default for PromptLabState {
@@ -386,6 +475,12 @@ impl Default for PromptLabState {
             context_overlays: HashMap::new(),
             template_drafts: HashMap::new(),
             template_editor_open: false,
+            next_compare_batch_id: 1,
+            batches: Vec::new(),
+            active_batch_idx: None,
+            draft_candidates: Vec::new(),
+            next_draft_candidate_id: 1,
+            compare_policy: PromptLabComparePolicy::default(),
         }
     }
 }
@@ -551,6 +646,9 @@ impl PromptLabState {
             status: PromptLabRunStatus::Pending { request_id },
             prompt_version_used,
             model_override,
+            compare_batch_id: None,
+            compare_candidate_id: None,
+            operator_rating: None,
         };
         self.runs.push((run_id, record));
         self.ownership.insert(request_id, run_id);
@@ -616,6 +714,190 @@ impl PromptLabState {
     pub fn latest_run(&self) -> Option<&PromptLabRunRecord> {
         self.latest_run_id
             .and_then(|id| self.runs.iter().find(|(rid, _)| *rid == id).map(|(_, r)| r))
+    }
+
+    pub fn run_by_id(&self, run_id: PromptLabRunId) -> Option<&PromptLabRunRecord> {
+        self.runs
+            .iter()
+            .find_map(|(id, run)| (*id == run_id).then_some(run))
+    }
+
+    pub fn run_by_id_mut(&mut self, run_id: PromptLabRunId) -> Option<&mut PromptLabRunRecord> {
+        self.runs
+            .iter_mut()
+            .find_map(|(id, run)| (*id == run_id).then_some(run))
+    }
+
+    pub fn has_active_batch(&self) -> bool {
+        self.active_batch_idx
+            .and_then(|idx| self.batches.get(idx))
+            .map(|batch| matches!(batch.status, PromptLabCompareBatchStatus::Running { .. }))
+            .unwrap_or(false)
+    }
+
+    pub fn add_draft_candidate_from_current(&mut self, label: Option<String>) -> Result<u64, String> {
+        if self.has_active_batch() {
+            return Err("batch already running".to_string());
+        }
+        let stage = self.selected_stage;
+        let prompt_id = prompt_id_for_stage(stage);
+        let candidate_id = self.next_draft_candidate_id;
+        self.next_draft_candidate_id = self.next_draft_candidate_id.saturating_add(1);
+        let context_snapshot = self
+            .applied_context_pairs(prompt_id)
+            .map_or_else(Vec::new, |pairs| pairs.to_vec());
+        let candidate = PromptLabCompareCandidate {
+            candidate_id,
+            stage,
+            prompt_id,
+            prompt_version: self.selected_prompt_version,
+            model_override: self.selected_model_override.clone(),
+            context_snapshot,
+            template_snapshot: self.applied_template_override(prompt_id),
+            label: label.unwrap_or_else(|| format!("Candidate {candidate_id}")),
+        };
+        self.draft_candidates.push(candidate);
+        Ok(candidate_id)
+    }
+
+    pub fn add_baseline_candidate(&mut self, label: Option<String>) -> Result<u64, String> {
+        if self.has_active_batch() {
+            return Err("batch already running".to_string());
+        }
+        let stage = self.selected_stage;
+        let prompt_id = prompt_id_for_stage(stage);
+        let candidate_id = self.next_draft_candidate_id;
+        self.next_draft_candidate_id = self.next_draft_candidate_id.saturating_add(1);
+        self.draft_candidates.push(PromptLabCompareCandidate {
+            candidate_id,
+            stage,
+            prompt_id,
+            prompt_version: None,
+            model_override: None,
+            context_snapshot: Vec::new(),
+            template_snapshot: None,
+            label: label.unwrap_or_else(|| format!("Baseline {candidate_id}")),
+        });
+        Ok(candidate_id)
+    }
+
+    pub fn freeze_batch(&mut self, input_snapshot: String) -> Result<PromptLabCompareBatchId, String> {
+        if self.draft_candidates.len() < 2 {
+            return Err("compare needs at least two candidates".to_string());
+        }
+        let batch_id = PromptLabCompareBatchId(self.next_compare_batch_id);
+        self.next_compare_batch_id = self.next_compare_batch_id.saturating_add(1);
+        let candidates = self.draft_candidates.clone();
+        let total = candidates.len() as u32;
+        let candidate_run_ids = candidates
+            .iter()
+            .map(|c| (c.candidate_id, None))
+            .collect::<Vec<_>>();
+        let record = PromptLabCompareBatchRecord {
+            batch_id,
+            created_utc: chrono::Utc::now().to_rfc3339(),
+            input_snapshot,
+            candidates,
+            candidate_run_ids,
+            status: PromptLabCompareBatchStatus::Running {
+                dispatched: 0,
+                total,
+            },
+            policy: self.compare_policy.clone(),
+            selected_run_id: None,
+            auto_selected_run_id: None,
+            auto_select_warning: None,
+            warning: None,
+        };
+        self.batches.push(record);
+        self.active_batch_idx = Some(self.batches.len() - 1);
+        self.draft_candidates.clear();
+        Ok(batch_id)
+    }
+
+    pub fn batches(&self) -> &[PromptLabCompareBatchRecord] {
+        &self.batches
+    }
+
+    pub fn active_batch(&self) -> Option<&PromptLabCompareBatchRecord> {
+        self.active_batch_idx.and_then(|idx| self.batches.get(idx))
+    }
+
+    pub fn active_batch_mut(&mut self) -> Option<&mut PromptLabCompareBatchRecord> {
+        self.active_batch_idx
+            .and_then(|idx| self.batches.get_mut(idx))
+    }
+
+    pub fn record_compare_dispatch(
+        &mut self,
+        batch_id: PromptLabCompareBatchId,
+        candidate_id: u64,
+        run_id: PromptLabRunId,
+    ) -> bool {
+        let Some(batch) = self.batches.iter_mut().find(|b| b.batch_id == batch_id) else {
+            return false;
+        };
+        let mut updated = false;
+        for (cid, maybe_run) in &mut batch.candidate_run_ids {
+            if *cid == candidate_id && maybe_run.is_none() {
+                *maybe_run = Some(run_id);
+                updated = true;
+                break;
+            }
+        }
+        if let PromptLabCompareBatchStatus::Running { dispatched, total } = batch.status {
+            let new_dispatched = if updated {
+                dispatched.saturating_add(1)
+            } else {
+                dispatched
+            };
+            batch.status = PromptLabCompareBatchStatus::Running {
+                dispatched: new_dispatched,
+                total,
+            };
+        }
+        updated
+    }
+
+    pub fn set_batch_status(&mut self, batch_id: PromptLabCompareBatchId, status: PromptLabCompareBatchStatus) -> bool {
+        if let Some(batch) = self.batches.iter_mut().find(|b| b.batch_id == batch_id) {
+            batch.status = status;
+            return true;
+        }
+        false
+    }
+
+    pub fn clear_active_batch_if(&mut self, batch_id: PromptLabCompareBatchId) {
+        if self
+            .active_batch_idx
+            .and_then(|idx| self.batches.get(idx))
+            .map(|batch| batch.batch_id == batch_id)
+            .unwrap_or(false)
+        {
+            self.active_batch_idx = None;
+        }
+    }
+
+    pub fn recompute_auto_select_for_batch(&mut self, batch_id: PromptLabCompareBatchId) {
+        let Some(batch_idx) = self.batches.iter().position(|b| b.batch_id == batch_id) else {
+            return;
+        };
+        let policy = self.compare_policy.clone();
+        let batch = self.batches[batch_idx].clone();
+        let scored = batch
+            .candidate_run_ids
+            .iter()
+            .filter_map(|(candidate_id, run_id)| {
+                let run_id = (*run_id)?;
+                let run = self.run_by_id(run_id)?;
+                let candidate = batch.candidates.iter().find(|c| c.candidate_id == *candidate_id)?;
+                Some((run_id, run, candidate))
+            });
+        let (winner, warning) = cheap_enough_select(scored, &policy);
+        if let Some(batch_mut) = self.batches.get_mut(batch_idx) {
+            batch_mut.auto_selected_run_id = winner;
+            batch_mut.auto_select_warning = warning;
+        }
     }
 
     /// Initialize the context draft for `prompt_id` if it has not been created yet.
@@ -795,6 +1077,98 @@ impl PromptLabState {
                 None
             }
         })
+    }
+}
+
+pub fn cheap_enough_select<'a>(
+    candidates: impl Iterator<Item = (PromptLabRunId, &'a PromptLabRunRecord, &'a PromptLabCompareCandidate)>,
+    policy: &PromptLabComparePolicy,
+) -> (Option<PromptLabRunId>, Option<String>) {
+    let rows = candidates.collect::<Vec<_>>();
+    if rows.is_empty() {
+        return (None, Some("no candidates".to_string()));
+    }
+    let terminal = rows
+        .into_iter()
+        .filter(|(_, run, _)| !matches!(run.status, PromptLabRunStatus::Pending { .. }))
+        .collect::<Vec<_>>();
+    if terminal.is_empty() {
+        return (None, Some("no terminal runs".to_string()));
+    }
+    let succeeded = terminal
+        .into_iter()
+        .filter(|(_, run, _)| !matches!(run.status, PromptLabRunStatus::Failed { .. }))
+        .collect::<Vec<_>>();
+    if succeeded.is_empty() {
+        return (None, Some("all failed".to_string()));
+    }
+    let parse_ok = succeeded
+        .into_iter()
+        .filter(|(_, run, _)| {
+            if !policy.require_parse_ok {
+                return true;
+            }
+            let parse_ok = match &run.status {
+                PromptLabRunStatus::Completed { metadata, .. } => metadata.parse_ok,
+                PromptLabRunStatus::Failed { metadata, .. } => {
+                    metadata.as_ref().map(|m| m.parse_ok).unwrap_or(false)
+                }
+                PromptLabRunStatus::Pending { .. } => false,
+            };
+            parse_ok
+        })
+        .collect::<Vec<_>>();
+    if parse_ok.is_empty() {
+        return (None, Some("parse gate".to_string()));
+    }
+    let cost_ok = parse_ok
+        .into_iter()
+        .filter(|(_, run, _)| match policy.max_cost_microdollars {
+            Some(limit) => run_metadata(run).map(|m| m.cost_microdollars <= limit).unwrap_or(false),
+            None => true,
+        })
+        .collect::<Vec<_>>();
+    if cost_ok.is_empty() {
+        return (None, Some("cost gate".to_string()));
+    }
+    let mut wall_ok = cost_ok
+        .into_iter()
+        .filter(|(_, run, _)| match policy.max_wall_ms {
+            Some(limit) => run_metadata(run).map(|m| m.wall_ms <= limit).unwrap_or(false),
+            None => true,
+        })
+        .collect::<Vec<_>>();
+    if wall_ok.is_empty() {
+        return (None, Some("wall gate".to_string()));
+    }
+    wall_ok.sort_by(|(run_id_a, run_a, _), (run_id_b, run_b, _)| {
+        let meta_a = run_metadata(run_a).expect("filtered to terminal successful runs");
+        let meta_b = run_metadata(run_b).expect("filtered to terminal successful runs");
+        let rating_a = run_a.operator_rating.unwrap_or(0);
+        let rating_b = run_b.operator_rating.unwrap_or(0);
+        if policy.rating_beats_cost {
+            rating_b
+                .cmp(&rating_a)
+                .then(meta_a.cost_microdollars.cmp(&meta_b.cost_microdollars))
+                .then(meta_a.wall_ms.cmp(&meta_b.wall_ms))
+                .then(run_id_a.0.cmp(&run_id_b.0))
+        } else {
+            meta_a
+                .cost_microdollars
+                .cmp(&meta_b.cost_microdollars)
+                .then(meta_a.wall_ms.cmp(&meta_b.wall_ms))
+                .then(rating_b.cmp(&rating_a))
+                .then(run_id_a.0.cmp(&run_id_b.0))
+        }
+    });
+    (wall_ok.first().map(|(run_id, _, _)| *run_id), None)
+}
+
+fn run_metadata(run: &PromptLabRunRecord) -> Option<&LlmRunMetadata> {
+    match &run.status {
+        PromptLabRunStatus::Completed { metadata, .. } => Some(metadata),
+        PromptLabRunStatus::Failed { metadata, .. } => metadata.as_ref(),
+        PromptLabRunStatus::Pending { .. } => None,
     }
 }
 
@@ -1120,5 +1494,103 @@ mod tests {
         assert_eq!(draft.text(), "");
         assert!(!draft.dirty());
         assert!(!draft.applied());
+    }
+
+    #[test]
+    fn freeze_batch_rejects_less_than_two_candidates() {
+        let mut state = PromptLabState::default();
+        assert!(state.freeze_batch("input".to_string()).is_err());
+        state.add_baseline_candidate(None).expect("baseline");
+        assert!(state.freeze_batch("input".to_string()).is_err());
+    }
+
+    #[test]
+    fn freeze_batch_with_two_candidates_creates_running_batch() {
+        let mut state = PromptLabState::default();
+        state
+            .add_draft_candidate_from_current(Some("A".to_string()))
+            .expect("candidate A");
+        state
+            .add_baseline_candidate(Some("B".to_string()))
+            .expect("candidate B");
+        let batch_id = state.freeze_batch("input".to_string()).expect("batch");
+        let batch = state
+            .batches()
+            .iter()
+            .find(|batch| batch.batch_id == batch_id)
+            .expect("batch exists");
+        assert!(matches!(
+            batch.status,
+            PromptLabCompareBatchStatus::Running { .. }
+        ));
+        assert_eq!(batch.pending_candidate_count(), 2);
+        assert!(state.active_batch().is_some());
+    }
+
+    #[test]
+    fn cheap_enough_prefers_cheapest_with_deterministic_tie_break() {
+        let mut state = PromptLabState::default();
+        let run_1 = PromptLabRunId(1);
+        state.add_pending_run(
+            run_1,
+            PromptLabStage::Triage,
+            PromptId::ArticleTriage,
+            "in".to_string(),
+            10,
+            None,
+            None,
+        );
+        state.complete_run(run_1, "{}".to_string(), LlmRunMetadata::stub());
+        state.consume_ownership(10);
+        let run_2 = PromptLabRunId(2);
+        state.add_pending_run(
+            run_2,
+            PromptLabStage::Triage,
+            PromptId::ArticleTriage,
+            "in".to_string(),
+            11,
+            None,
+            None,
+        );
+        state.complete_run(run_2, "{}".to_string(), LlmRunMetadata::stub());
+        state.consume_ownership(11);
+        let candidates = vec![
+            PromptLabCompareCandidate {
+                candidate_id: 1,
+                stage: PromptLabStage::Triage,
+                prompt_id: PromptId::ArticleTriage,
+                prompt_version: None,
+                model_override: None,
+                context_snapshot: Vec::new(),
+                template_snapshot: None,
+                label: "c1".to_string(),
+            },
+            PromptLabCompareCandidate {
+                candidate_id: 2,
+                stage: PromptLabStage::Triage,
+                prompt_id: PromptId::ArticleTriage,
+                prompt_version: None,
+                model_override: None,
+                context_snapshot: Vec::new(),
+                template_snapshot: None,
+                label: "c2".to_string(),
+            },
+        ];
+        let rows = vec![
+            (
+                run_1,
+                state.run_by_id(run_1).expect("run_1"),
+                candidates.first().expect("candidate 1"),
+            ),
+            (
+                run_2,
+                state.run_by_id(run_2).expect("run_2"),
+                candidates.get(1).expect("candidate 2"),
+            ),
+        ];
+        let policy = PromptLabComparePolicy::default();
+        let (winner, warning) = cheap_enough_select(rows.into_iter(), &policy);
+        assert_eq!(winner, Some(run_1));
+        assert!(warning.is_none());
     }
 }
