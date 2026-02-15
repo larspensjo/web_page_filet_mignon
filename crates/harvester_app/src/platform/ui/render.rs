@@ -57,6 +57,12 @@ pub struct TreeRenderState {
     prev_prompt_lab_stage_briefing_text: Option<String>,
     prev_prompt_lab_source_triage_text: Option<String>,
     prev_prompt_lab_source_url_text: Option<String>,
+    prev_prompt_lab_context_text: Option<String>,
+    prev_prompt_lab_context_status_text: Option<String>,
+    prev_prompt_lab_context_apply_enabled: Option<bool>,
+    prev_prompt_lab_context_apply_rerun_enabled: Option<bool>,
+    prev_prompt_lab_context_revert_enabled: Option<bool>,
+    prev_prompt_lab_context_save_enabled: Option<bool>,
 }
 
 impl Default for TreeRenderState {
@@ -97,6 +103,12 @@ impl Default for TreeRenderState {
             prev_prompt_lab_stage_briefing_text: None,
             prev_prompt_lab_source_triage_text: None,
             prev_prompt_lab_source_url_text: None,
+            prev_prompt_lab_context_text: None,
+            prev_prompt_lab_context_status_text: None,
+            prev_prompt_lab_context_apply_enabled: None,
+            prev_prompt_lab_context_apply_rerun_enabled: None,
+            prev_prompt_lab_context_revert_enabled: None,
+            prev_prompt_lab_context_save_enabled: None,
         }
     }
 }
@@ -363,7 +375,8 @@ pub fn render(
         "Summary",
         view.prompt_lab.selected_stage == PromptLabStage::Summary,
     );
-    if tree_state.prev_prompt_lab_stage_summary_text.as_deref() != Some(stage_summary_text.as_str()) {
+    if tree_state.prev_prompt_lab_stage_summary_text.as_deref() != Some(stage_summary_text.as_str())
+    {
         cmds.push(PlatformCommand::SetControlText {
             window_id,
             control_id: BTN_STAGE_SUMMARY,
@@ -457,6 +470,43 @@ pub fn render(
         });
         tree_state.prev_prompt_lab_clear_enabled = Some(clear_enabled);
     }
+    if tree_state.prev_prompt_lab_context_apply_enabled != Some(view.prompt_lab.can_apply_context) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_CONTEXT_APPLY,
+            enabled: view.prompt_lab.can_apply_context,
+        });
+        tree_state.prev_prompt_lab_context_apply_enabled = Some(view.prompt_lab.can_apply_context);
+    }
+    if tree_state.prev_prompt_lab_context_apply_rerun_enabled
+        != Some(view.prompt_lab.can_apply_and_rerun)
+    {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
+            enabled: view.prompt_lab.can_apply_and_rerun,
+        });
+        tree_state.prev_prompt_lab_context_apply_rerun_enabled =
+            Some(view.prompt_lab.can_apply_and_rerun);
+    }
+    if tree_state.prev_prompt_lab_context_revert_enabled != Some(view.prompt_lab.can_revert_context)
+    {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_CONTEXT_REVERT,
+            enabled: view.prompt_lab.can_revert_context,
+        });
+        tree_state.prev_prompt_lab_context_revert_enabled =
+            Some(view.prompt_lab.can_revert_context);
+    }
+    if tree_state.prev_prompt_lab_context_save_enabled != Some(view.prompt_lab.can_save_context) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_CONTEXT_SAVE,
+            enabled: view.prompt_lab.can_save_context,
+        });
+        tree_state.prev_prompt_lab_context_save_enabled = Some(view.prompt_lab.can_save_context);
+    }
 
     if tree_state.prev_prompt_lab_url_input.as_deref() != Some(view.prompt_lab.url_input.as_str()) {
         cmds.push(PlatformCommand::SetInputText {
@@ -484,6 +534,31 @@ pub fn render(
             text: metadata_text.clone(),
         });
         tree_state.prev_prompt_lab_metadata_text = Some(metadata_text);
+    }
+    let context_text = view.prompt_lab.context_draft_text.clone();
+    if tree_state.prev_prompt_lab_context_text.as_deref() != Some(context_text.as_str()) {
+        cmds.push(PlatformCommand::SetInputText {
+            window_id,
+            control_id: INPUT_PROMPT_LAB_CONTEXT,
+            text: context_text.clone(),
+        });
+        tree_state.prev_prompt_lab_context_text = Some(context_text);
+    }
+    let context_status_text = if !view.prompt_lab.context_validation_errors.is_empty() {
+        view.prompt_lab.context_validation_errors.join(" • ")
+    } else {
+        view.prompt_lab
+            .context_status_message
+            .clone()
+            .unwrap_or_default()
+    };
+    if tree_state.prev_prompt_lab_context_status_text != Some(context_status_text.clone()) {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_PROMPT_LAB_CONTEXT_STATUS,
+            text: context_status_text.clone(),
+        });
+        tree_state.prev_prompt_lab_context_status_text = Some(context_status_text);
     }
 
     let job_items = build_job_tree(view);
@@ -1003,8 +1078,8 @@ fn truncate_markdown_for_preview(text: &str) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harvester_core::{LinkRowView, PromptLabRunId, PromptLabRunSummaryView, PromptLabView};
     use harvester_core::Stage;
+    use harvester_core::{LinkRowView, PromptLabRunId, PromptLabRunSummaryView, PromptLabView};
     use std::path::PathBuf;
     use std::sync::Once;
 

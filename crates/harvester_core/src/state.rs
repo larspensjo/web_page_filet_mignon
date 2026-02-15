@@ -364,11 +364,10 @@ impl AppState {
                     nav_heavy: quality.nav_heavy(),
                 }
             });
-        let triage_articles_available = self
-            .triage()
-            .articles()
-            .iter()
-            .any(|article| matches!(article.triage_state, ArticleTriageState::Completed { .. }));
+        let triage_articles_available =
+            self.triage().articles().iter().any(|article| {
+                matches!(article.triage_state, ArticleTriageState::Completed { .. })
+            });
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -397,6 +396,7 @@ impl AppState {
             selected_url,
             prompt_lab: crate::view_model::PromptLabView::from_state(
                 &self.prompt_lab,
+                &self.prompt_contexts,
                 triage_articles_available,
             ),
         }

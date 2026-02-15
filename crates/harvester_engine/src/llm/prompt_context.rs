@@ -1,5 +1,5 @@
 use engine_logging::engine_info;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
@@ -9,13 +9,13 @@ use crate::llm::prompt::PromptId;
 /// User-editable context that is loaded from a TOML file and injected
 /// into a `PromptTemplate` at render time.
 /// Pure data container — no behaviour beyond deserialization.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct PromptContextFile {
     pub meta: ContextMeta,
     pub variables: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ContextMeta {
     pub prompt_id: String,
     pub schema_version: u32,
@@ -158,4 +158,34 @@ pub fn validate_context_covers_template(
     }
 
     (missing, unused)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::prompt::PromptId;
+
+    #[test]
+    fn prompt_context_file_roundtrip_serialization() {
+        let mut variables = HashMap::new();
+        variables.insert("first".to_string(), "value".to_string());
+        variables.insert("second".to_string(), "value-two".to_string());
+        let meta = ContextMeta {
+            prompt_id: PromptId::ArticleTriage.to_string(),
+            schema_version: 1,
+            version: 5,
+            updated: "2025-01-01T00:00:00Z".to_string(),
+            description: Some("desc".to_string()),
+            changelog: Some("changelog".to_string()),
+        };
+        let file = PromptContextFile {
+            meta: meta.clone(),
+            variables: variables.clone(),
+        };
+        let serialized = toml::to_string(&file).expect("serialize prompt context");
+        let parsed: PromptContextFile =
+            toml::from_str(&serialized).expect("deserialize prompt context");
+        assert_eq!(parsed.meta, meta);
+        assert_eq!(parsed.variables, variables);
+    }
 }

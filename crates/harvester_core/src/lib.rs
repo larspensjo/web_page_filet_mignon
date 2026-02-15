@@ -1,6 +1,7 @@
 //! Harvester core: pure state machine and view-model helpers.
 mod briefing;
 mod cache_utils;
+mod context_draft;
 mod effect;
 mod msg;
 mod prompt_lab;
@@ -19,6 +20,7 @@ pub use briefing::{
     BriefingSession, BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
 pub use cache_utils::model_ids_compatible;
+pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
 pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
 pub use prompt_lab::{

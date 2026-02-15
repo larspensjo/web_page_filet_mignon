@@ -400,7 +400,11 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_TOGGLE =>
             {
-                let _ = self.msg_tx.send(self.prompt_lab_toggle_msg());
+                let msg = self.prompt_lab_toggle_msg();
+                let _ = self.msg_tx.send(msg.clone());
+                if matches!(msg, Msg::PromptLabOpenRequested) {
+                    let _ = self.msg_tx.send(Msg::PromptLabContextEditorOpened);
+                }
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_STAGE_TRIAGE =>
@@ -457,6 +461,33 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::PromptLabHistoryCleared);
             }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_APPLY =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabContextApplyRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN =>
+            {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabContextApplyAndRerunRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_REVERT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabContextRevertRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_SAVE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabContextSaveRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_RELOAD =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabContextReloadRequested);
+            }
             AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ADD_URL => {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
             }
@@ -474,7 +505,14 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::InputTextChanged {
                 control_id, text, ..
             } if control_id == ui::constants::INPUT_PROMPT_LAB_URL => {
-                let _ = self.msg_tx.send(Msg::PromptLabUrlInputChanged { url: text });
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabUrlInputChanged { url: text });
+            }
+            AppEvent::InputTextChanged {
+                control_id, text, ..
+            } if control_id == ui::constants::INPUT_PROMPT_LAB_CONTEXT => {
+                let _ = self.msg_tx.send(Msg::PromptLabContextDraftChanged { text });
             }
             AppEvent::TreeViewItemSelectionChanged { window_id, item_id }
                 if window_id == self.window_id =>
@@ -794,7 +832,8 @@ mod tests {
         });
 
         assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("resolve"),
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("resolve"),
             Msg::PromptLabResolveRequested
         );
         assert_eq!(
@@ -822,10 +861,18 @@ mod tests {
             rx.recv_timeout(Duration::from_millis(250)).expect("open"),
             Msg::PromptLabOpenRequested
         );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("context open"),
+            Msg::PromptLabContextEditorOpened
+        );
 
         {
             let mut guard = handler.shared.lock().expect("shared lock");
-            let (state, _) = update(std::mem::take(&mut guard.state), Msg::PromptLabOpenRequested);
+            let (state, _) = update(
+                std::mem::take(&mut guard.state),
+                Msg::PromptLabOpenRequested,
+            );
             guard.state = state;
         }
         handler.handle_event(AppEvent::ButtonClicked {

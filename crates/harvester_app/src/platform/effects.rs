@@ -12,9 +12,11 @@ use std::time::Duration;
 use std::{error::Error as StdError, fmt};
 
 use chrono::Utc;
-use engine_logging::{engine_info, engine_warn};
+use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, Stage, StopPolicy};
+use harvester_engine::llm::load_context_file;
 use harvester_engine::llm::prompt::PromptId;
+use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
@@ -36,6 +38,18 @@ pub(crate) fn default_output_dir() -> std::path::PathBuf {
     std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
         .join("output")
+}
+
+fn contexts_directory() -> PathBuf {
+    PathBuf::from("contexts")
+}
+
+fn prompt_context_filename(prompt_id: PromptId) -> &'static str {
+    match prompt_id {
+        PromptId::ArticleTriage => "article_triage.toml",
+        PromptId::ArticleSummary => "article_summary.toml",
+        PromptId::AggregateBriefing => "aggregate_briefing.toml",
+    }
 }
 
 struct RssPollContext<'a> {
@@ -210,7 +224,7 @@ impl EffectRunner {
                         &output_dir,
                         max_input_bytes,
                         &registry,
-                        &[url.clone()],
+                        std::slice::from_ref(&url),
                     ) {
                         Ok((mut articles, _collection_text)) => {
                             if let Some(article) = articles.pop() {
@@ -275,6 +289,123 @@ impl EffectRunner {
                             });
                         }
                     }
+                });
+            }
+            Effect::SavePromptContextFile {
+                prompt_id,
+                mut context_pairs,
+            } => {
+                let contexts_dir = contexts_directory();
+                if let Err(err) = fs::create_dir_all(&contexts_dir) {
+                    let reason = format!("failed to create contexts directory: {}", err);
+                    engine_error!(
+                        "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                        reason,
+                        prompt_id
+                    );
+                    let _ = self
+                        .msg_tx
+                        .send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
+                    return;
+                }
+
+                let filename = prompt_context_filename(prompt_id);
+                let path = contexts_dir.join(filename);
+
+                let existing_meta = if path.exists() {
+                    match load_context_file(&path) {
+                        Ok(file) => file.meta,
+                        Err(err) => {
+                            let reason = format!("failed to read existing context: {}", err);
+                            engine_error!(
+                                "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                                reason,
+                                prompt_id
+                            );
+                            let _ = self
+                                .msg_tx
+                                .send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
+                            return;
+                        }
+                    }
+                } else {
+                    ContextMeta {
+                        prompt_id: prompt_id.to_string(),
+                        schema_version: 1,
+                        version: 0,
+                        updated: Utc::now().to_rfc3339(),
+                        description: None,
+                        changelog: None,
+                    }
+                };
+
+                let mut meta = existing_meta;
+                meta.schema_version = 1;
+                meta.prompt_id = prompt_id.to_string();
+                meta.version = meta.version.saturating_add(1);
+                meta.updated = Utc::now().to_rfc3339();
+
+                context_pairs.sort_by(|a, b| a.0.cmp(&b.0));
+                let variables = context_pairs.into_iter().collect::<HashMap<_, _>>();
+
+                let ctx_file = PromptContextFile {
+                    meta: meta.clone(),
+                    variables,
+                };
+
+                let mut toml_string = match toml::to_string(&ctx_file) {
+                    Ok(serialized) => serialized,
+                    Err(err) => {
+                        let reason = format!("failed to serialize context: {}", err);
+                        engine_error!(
+                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                            reason,
+                            prompt_id
+                        );
+                        let _ = self
+                            .msg_tx
+                            .send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
+                        return;
+                    }
+                };
+                toml_string.push('\n');
+
+                let tmp_path = path.with_extension("toml.tmp");
+                if let Err(err) = fs::write(&tmp_path, toml_string) {
+                    let reason = format!("failed to write temp file: {}", err);
+                    engine_error!(
+                        "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                        reason,
+                        prompt_id
+                    );
+                    let _ = self
+                        .msg_tx
+                        .send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
+                    return;
+                }
+
+                if let Err(err) = fs::rename(&tmp_path, &path) {
+                    let reason = format!("failed to rename temp file: {}", err);
+                    engine_error!(
+                        "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                        reason,
+                        prompt_id
+                    );
+                    let _ = self
+                        .msg_tx
+                        .send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
+                    return;
+                }
+
+                engine_info!(
+                    "[prompt-lab-context] Saved context for {:?} to {:?}",
+                    prompt_id,
+                    path
+                );
+                let _ = self.msg_tx.send(Msg::PromptLabContextSaved {
+                    prompt_id,
+                    path: path.display().to_string(),
+                    version: meta.version as u64,
                 });
             }
             Effect::DeleteLinkedPage {
@@ -453,11 +584,7 @@ impl EffectRunner {
                     ];
 
                     for prompt_id in prompt_ids {
-                        let filename = match prompt_id {
-                            PromptId::ArticleTriage => "article_triage.toml",
-                            PromptId::ArticleSummary => "article_summary.toml",
-                            PromptId::AggregateBriefing => "aggregate_briefing.toml",
-                        };
+                        let filename = prompt_context_filename(prompt_id);
                         let path = contexts_dir.join(filename);
 
                         if !path.exists() {
@@ -1198,6 +1325,7 @@ fn map_stage(stage: harvester_engine::Stage) -> Stage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harvester_engine::llm::load_context_file;
     use std::fs;
     use std::sync::mpsc;
     use std::time::Duration;
@@ -1234,6 +1362,15 @@ mod tests {
             &counter,
         );
         fs::write(dir.join(filename), markdown).expect("write markdown");
+    }
+
+    fn with_temp_working_dir<T>(callback: impl FnOnce(&Path) -> T) -> T {
+        let original = std::env::current_dir().expect("current dir");
+        let temp = tempdir().expect("tempdir");
+        std::env::set_current_dir(temp.path()).expect("set cwd");
+        let result = callback(temp.path());
+        std::env::set_current_dir(original).expect("restore cwd");
+        result
     }
 
     #[test]
@@ -1316,6 +1453,62 @@ mod tests {
             }
             other => panic!("unexpected message: {:?}", other),
         }
+    }
+
+    #[test]
+    fn save_prompt_context_file_writes_file_and_dispatches_saved_msg() {
+        with_temp_working_dir(|_| {
+            let (runner, rx) = runner_with_receiver();
+            let prompt_id = PromptId::ArticleTriage;
+            runner.enqueue(vec![Effect::SavePromptContextFile {
+                prompt_id,
+                context_pairs: vec![("foo".into(), "bar".into())],
+            }]);
+
+            let msg = rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("expected context saved msg");
+
+            match msg {
+                Msg::PromptLabContextSaved {
+                    prompt_id: received,
+                    path,
+                    version,
+                } => {
+                    assert_eq!(received, prompt_id);
+                    assert_eq!(version, 1);
+                    let saved = load_context_file(&PathBuf::from(&path)).expect("load saved");
+                    assert_eq!(saved.variables.get("foo").map(String::as_str), Some("bar"));
+                }
+                other => panic!("unexpected message: {:?}", other),
+            }
+        });
+    }
+
+    #[test]
+    fn save_prompt_context_file_reports_failure_when_existing_file_invalid() {
+        with_temp_working_dir(|_| {
+            fs::create_dir_all("contexts").expect("create contexts dir");
+            fs::write("contexts/article_triage.toml", "bad toml").expect("write invalid file");
+
+            let (runner, rx) = runner_with_receiver();
+            runner.enqueue(vec![Effect::SavePromptContextFile {
+                prompt_id: PromptId::ArticleTriage,
+                context_pairs: vec![("foo".into(), "bar".into())],
+            }]);
+
+            let msg = rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("expected save failed msg");
+
+            match msg {
+                Msg::PromptLabContextSaveFailed { prompt_id, reason } => {
+                    assert_eq!(prompt_id, PromptId::ArticleTriage);
+                    assert!(reason.contains("failed to parse"));
+                }
+                other => panic!("unexpected message: {:?}", other),
+            }
+        });
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use engine_logging::{engine_info, engine_warn};
+use engine_logging::{engine_error, engine_info, engine_warn};
 use std::borrow::ToOwned;
 
 use crate::state::TriageCacheLookupResult;
@@ -8,7 +8,7 @@ use crate::{
         CorpusFingerprint,
     },
     calc_left_width, context_hash,
-    prompt_lab::{PromptLabInputSource, PromptLabRunStatus, PromptLabStage},
+    prompt_lab::{prompt_id_for_stage, PromptLabInputSource, PromptLabRunStatus, PromptLabStage},
     triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
@@ -500,11 +500,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 "[prompt-lab] run completed but metadata missing run_id={} request_id={}",
                                 run_id.0, request_id
                             );
-                            state.fail_prompt_lab_run(
-                                run_id,
-                                "metadata missing".to_string(),
-                                None,
-                            );
+                            state.fail_prompt_lab_run(run_id, "metadata missing".to_string(), None);
                         }
                     }
                     _ => {
@@ -643,6 +639,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::PromptContextsLoaded { contexts } => {
             engine_info!("[PromptContext] Loaded {} context(s)", contexts.len());
+            state.prompt_lab_mut().clear_context_overlays();
             state.set_prompt_contexts(contexts);
             state.mark_triage_metadata_ready();
             state.mark_dirty();
@@ -771,6 +768,192 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             Vec::new()
         }
+        Msg::PromptLabContextEditorOpened => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            let base_snapshot = state.context_for(prompt_id).to_vec();
+            state
+                .prompt_lab_mut()
+                .initialize_context_draft(prompt_id, &base_snapshot);
+            engine_info!(
+                "[prompt-lab-context] PromptLabContextEditorOpened prompt_id={:?}",
+                prompt_id
+            );
+            Vec::new()
+        }
+        Msg::PromptLabContextDraftChanged { text } => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            let base_snapshot = state.context_for(prompt_id).to_vec();
+            state
+                .prompt_lab_mut()
+                .initialize_context_draft(prompt_id, &base_snapshot);
+            state
+                .prompt_lab_mut()
+                .update_context_draft_text(prompt_id, text);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabContextApplyRequested => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            let base_snapshot = state.context_for(prompt_id).to_vec();
+            state
+                .prompt_lab_mut()
+                .initialize_context_draft(prompt_id, &base_snapshot);
+            if state.prompt_lab_mut().apply_context_draft(prompt_id) {
+                let count = state
+                    .prompt_lab()
+                    .applied_context_pairs(prompt_id)
+                    .map(|pairs: &[(String, String)]| pairs.len())
+                    .unwrap_or(0);
+                engine_info!(
+                    "[prompt-lab-context] PromptLabContextApplied prompt_id={:?} pair_count={}",
+                    prompt_id,
+                    count
+                );
+                state.mark_dirty();
+            } else {
+                engine_warn!(
+                    "[prompt-lab-context] PromptLabContextApplyRequested rejected for {:?}",
+                    prompt_id
+                );
+            }
+            Vec::new()
+        }
+        Msg::PromptLabContextApplyAndRerunRequested => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            let base_snapshot = state.context_for(prompt_id).to_vec();
+            state
+                .prompt_lab_mut()
+                .initialize_context_draft(prompt_id, &base_snapshot);
+            if !state.prompt_lab_mut().apply_context_draft(prompt_id) {
+                return (state, Vec::new());
+            }
+            if state.prompt_lab().has_in_flight_run() {
+                return (state, Vec::new());
+            }
+            let snapshot = match state.prompt_lab().selected_input_source() {
+                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
+                PromptLabInputSource::TypeUrl => state
+                    .prompt_lab()
+                    .resolved_url_snapshot()
+                    .map(ToOwned::to_owned),
+            };
+            let input = match snapshot {
+                Some(text) => text,
+                None => return (state, Vec::new()),
+            };
+            let prompt_version = state
+                .prompt_lab()
+                .selected_prompt_version()
+                .or_else(|| state.active_version_for(prompt_id));
+            let model_override = state.prompt_lab().selected_model_override().cloned();
+            state.mark_dirty();
+            let effects = dispatch_prompt_lab_run(
+                &mut state,
+                stage,
+                prompt_id,
+                input,
+                prompt_version,
+                model_override,
+            );
+            return (state, effects);
+        }
+        Msg::PromptLabContextRevertRequested => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            let base_snapshot = state.context_for(prompt_id).to_vec();
+            state
+                .prompt_lab_mut()
+                .initialize_context_draft(prompt_id, &base_snapshot);
+            if state.prompt_lab_mut().revert_context_draft(prompt_id) {
+                engine_info!(
+                    "[prompt-lab-context] PromptLabContextReverted prompt_id={:?}",
+                    prompt_id
+                );
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabContextSaveRequested => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            let base_snapshot = state.context_for(prompt_id).to_vec();
+            state
+                .prompt_lab_mut()
+                .initialize_context_draft(prompt_id, &base_snapshot);
+            if !state.prompt_lab().can_save_context(prompt_id) {
+                engine_warn!(
+                    "[prompt-lab-context] PromptLabContextSaveRequested without applied changes for {:?}",
+                    prompt_id
+                );
+                return (state, Vec::new());
+            }
+            let context_pairs = match state.prompt_lab().applied_context_pairs(prompt_id) {
+                Some(pairs) => pairs.to_vec(),
+                None => {
+                    engine_warn!(
+                        "[prompt-lab-context] Save requested but no applied context for {:?}",
+                        prompt_id
+                    );
+                    return (state, Vec::new());
+                }
+            };
+            engine_info!(
+                "[prompt-lab-context] PromptLabContextSaveRequested prompt_id={:?} pair_count={}",
+                prompt_id,
+                context_pairs.len()
+            );
+            return (
+                state,
+                vec![Effect::SavePromptContextFile {
+                    prompt_id,
+                    context_pairs,
+                }],
+            );
+        }
+        Msg::PromptLabContextReloadRequested => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            state.prompt_lab_mut().drop_context_draft(prompt_id);
+            engine_info!(
+                "[prompt-lab-context] PromptLabContextReloadRequested prompt_id={:?}",
+                prompt_id
+            );
+            return (state, vec![Effect::LoadPromptContexts]);
+        }
+        Msg::PromptLabContextSaved {
+            prompt_id,
+            path,
+            version,
+        } => {
+            let message = Some(format!("Saved prompt context v{} to {}", version, path));
+            state
+                .prompt_lab_mut()
+                .mark_context_saved(prompt_id, message.clone());
+            engine_info!(
+                "[prompt-lab-context] PromptLabContextSaved prompt_id={:?} path={} version={}",
+                prompt_id,
+                path,
+                version
+            );
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabContextSaveFailed { prompt_id, reason } => {
+            let message = Some(format!("Save failed: {}", reason));
+            state
+                .prompt_lab_mut()
+                .set_context_status_message(prompt_id, message.clone());
+            engine_error!(
+                "[prompt-lab-context] PromptLabContextSaveFailed prompt_id={:?} reason={}",
+                prompt_id,
+                reason
+            );
+            Vec::new()
+        }
         Msg::PromptLabRunRequested => {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
@@ -838,15 +1021,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
 
     (state, effects)
 }
-
-fn prompt_id_for_stage(stage: PromptLabStage) -> PromptId {
-    match stage {
-        PromptLabStage::Triage => PromptId::ArticleTriage,
-        PromptLabStage::Summary => PromptId::ArticleSummary,
-        PromptLabStage::Briefing => PromptId::AggregateBriefing,
-    }
-}
-
 fn dispatch_prompt_lab_run(
     state: &mut AppState,
     stage: PromptLabStage,
@@ -857,8 +1031,12 @@ fn dispatch_prompt_lab_run(
 ) -> Vec<Effect> {
     let request_id = state.allocate_next_llm_request_id();
     let run_id = state.allocate_next_prompt_lab_run_id();
-    let context = state.context_for(prompt_id).to_vec();
-    let pending_prompt_version = prompt_version.clone();
+    let context = state
+        .prompt_lab()
+        .applied_context_pairs(prompt_id)
+        .map(|pairs| pairs.to_vec())
+        .unwrap_or_else(|| state.context_for(prompt_id).to_vec());
+    let pending_prompt_version = prompt_version;
     let pending_model_override = model_override.clone();
     state.record_pending_llm_request(request_id, prompt_id);
     state.add_prompt_lab_pending_run(
@@ -890,13 +1068,10 @@ fn dispatch_prompt_lab_run(
 fn triage_snapshot_for_prompt_lab(state: &AppState) -> Option<String> {
     if let Some(job_id) = state.selected_job_id() {
         if let Some(url) = state.job_url(job_id) {
-            if let Some(article) = state
-                .triage()
-                .articles()
-                .iter()
-                .find(|article| article.url == url
-                    && matches!(article.triage_state, ArticleTriageState::Completed { .. }))
-            {
+            if let Some(article) = state.triage().articles().iter().find(|article| {
+                article.url == url
+                    && matches!(article.triage_state, ArticleTriageState::Completed { .. })
+            }) {
                 return Some(article.prepared_text.clone());
             }
         }
@@ -2279,7 +2454,8 @@ mod tests {
     fn resolve_requested_emits_effect() {
         init_logging();
         let mut state = AppState::new();
-        state.prompt_lab_mut()
+        state
+            .prompt_lab_mut()
             .set_url_input("https://example.com".to_string());
         let (state, effects) = update(state, Msg::PromptLabResolveRequested);
         assert_eq!(effects.len(), 1);
@@ -2420,13 +2596,16 @@ mod tests {
     // ------------------------------------------------------------------
 
     fn prepare_type_url_snapshot(state: &mut AppState, snapshot: &str) {
-        state.prompt_lab_mut().select_input_source(PromptLabInputSource::TypeUrl);
+        state
+            .prompt_lab_mut()
+            .select_input_source(PromptLabInputSource::TypeUrl);
         state
             .prompt_lab_mut()
             .set_url_input("https://example.com".to_string());
         let resolve_id = state.allocate_next_prompt_lab_resolve_id();
         state.prompt_lab_mut().begin_url_resolution(resolve_id);
-        state.prompt_lab_mut()
+        state
+            .prompt_lab_mut()
             .finish_url_resolution(resolve_id, Ok(snapshot.to_string()));
     }
 
@@ -2906,6 +3085,96 @@ mod tests {
                 model_override.is_none(),
                 "triage path must emit None override"
             );
+        }
+    }
+
+    #[test]
+    fn dispatch_prompt_lab_run_uses_applied_context_overlay() {
+        init_logging();
+        let mut state = AppState::new();
+        let prompt_id = PromptId::ArticleTriage;
+        let mut contexts = HashMap::new();
+        contexts.insert(prompt_id, vec![("prod".into(), "value".into())]);
+        state.set_prompt_contexts(contexts);
+        let context_snapshot = state.context_for(prompt_id).to_vec();
+        state
+            .prompt_lab_mut()
+            .initialize_context_draft(prompt_id, &context_snapshot);
+        state
+            .prompt_lab_mut()
+            .update_context_draft_text(prompt_id, "override=two".to_string());
+        assert!(state.prompt_lab_mut().apply_context_draft(prompt_id));
+        let effects = dispatch_prompt_lab_run(
+            &mut state,
+            PromptLabStage::Triage,
+            prompt_id,
+            "input".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(effects.len(), 1);
+        if let Effect::RequestLlmCompletion { context, .. } = &effects[0] {
+            assert_eq!(context, &vec![("override".into(), "two".into())]);
+        } else {
+            panic!("expected RequestLlmCompletion effect");
+        }
+    }
+
+    #[test]
+    fn dispatch_prompt_lab_run_uses_production_context_without_overlay() {
+        init_logging();
+        let mut state = AppState::new();
+        let prompt_id = PromptId::ArticleTriage;
+        let mut contexts = HashMap::new();
+        contexts.insert(prompt_id, vec![("prod".into(), "value".into())]);
+        state.set_prompt_contexts(contexts);
+        // Do not apply any overlay.
+        let effects = dispatch_prompt_lab_run(
+            &mut state,
+            PromptLabStage::Triage,
+            prompt_id,
+            "input".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(effects.len(), 1);
+        if let Effect::RequestLlmCompletion { context, .. } = &effects[0] {
+            assert_eq!(context, &vec![("prod".into(), "value".into())]);
+        } else {
+            panic!("expected RequestLlmCompletion effect");
+        }
+    }
+
+    #[test]
+    fn prompt_lab_save_requested_without_applied_context_emits_no_effect() {
+        init_logging();
+        let state = AppState::new();
+        let (_state, effects) = update(state, Msg::PromptLabContextSaveRequested);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn prompt_lab_save_requested_emits_save_effect() {
+        init_logging();
+        let mut state = AppState::new();
+        let prompt_id = PromptId::ArticleTriage;
+        let mut contexts = HashMap::new();
+        contexts.insert(prompt_id, vec![("prod".into(), "value".into())]);
+        state.set_prompt_contexts(contexts);
+        let context_snapshot = state.context_for(prompt_id).to_vec();
+        state
+            .prompt_lab_mut()
+            .initialize_context_draft(prompt_id, &context_snapshot);
+        state
+            .prompt_lab_mut()
+            .update_context_draft_text(prompt_id, "override=two".to_string());
+        assert!(state.prompt_lab_mut().apply_context_draft(prompt_id));
+        let (_state, effects) = update(state, Msg::PromptLabContextSaveRequested);
+        assert_eq!(effects.len(), 1);
+        if let Effect::SavePromptContextFile { context_pairs, .. } = &effects[0] {
+            assert_eq!(context_pairs, &vec![("override".into(), "two".into())]);
+        } else {
+            panic!("expected SavePromptContextFile effect");
         }
     }
 }

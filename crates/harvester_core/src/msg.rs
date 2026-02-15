@@ -158,6 +158,28 @@ pub enum Msg {
         resolve_id: u64,
         result: Result<String, String>,
     },
+    /// User opened the Prompt Lab context editor.
+    PromptLabContextEditorOpened,
+    /// User changed the context draft text.
+    PromptLabContextDraftChanged { text: String },
+    /// User requested the draft to be applied.
+    PromptLabContextApplyRequested,
+    /// User requested apply and rerun.
+    PromptLabContextApplyAndRerunRequested,
+    /// User requested to revert draft edits.
+    PromptLabContextRevertRequested,
+    /// User requested saving the applied context to disk.
+    PromptLabContextSaveRequested,
+    /// User requested reloading the context from disk.
+    PromptLabContextReloadRequested,
+    /// Save effect succeeded.
+    PromptLabContextSaved {
+        prompt_id: PromptId,
+        path: String,
+        version: u64,
+    },
+    /// Save effect failed.
+    PromptLabContextSaveFailed { prompt_id: PromptId, reason: String },
     /// User requested a Prompt Lab LLM run with the current input and stage.
     PromptLabRunRequested,
     /// User requested rerunning using the latest completed/final run parameters.

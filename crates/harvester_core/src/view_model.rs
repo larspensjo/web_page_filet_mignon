@@ -1,9 +1,12 @@
 use crate::prompt_lab::{
-    PromptLabInputSource, PromptLabRunId, PromptLabRunStatus, PromptLabStage, PromptLabState,
+    prompt_id_for_stage, PromptLabInputSource, PromptLabRunId, PromptLabRunStatus, PromptLabStage,
+    PromptLabState,
 };
 use crate::state::LinkDownloadState;
-use crate::{JobId, JobResultKind, SessionState, Stage};
+use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
+use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::LinkKind;
+use std::collections::HashMap;
 
 pub const TOKEN_LIMIT: u64 = 200_000;
 pub const INPUT_PANEL_FIXED_WIDTH: i32 = 160;
@@ -131,6 +134,15 @@ pub struct PromptLabView {
     pub resolve_pending: bool,
     pub url_resolve_failed: bool,
     pub latest_validation_error: Option<String>,
+    pub context_draft_text: String,
+    pub context_validation_errors: Vec<String>,
+    pub context_dirty: bool,
+    pub context_applied: bool,
+    pub can_apply_context: bool,
+    pub can_apply_and_rerun: bool,
+    pub can_revert_context: bool,
+    pub can_save_context: bool,
+    pub context_status_message: Option<String>,
 }
 
 impl Default for PromptLabView {
@@ -150,12 +162,25 @@ impl Default for PromptLabView {
             resolve_pending: false,
             url_resolve_failed: false,
             latest_validation_error: None,
+            context_draft_text: String::new(),
+            context_validation_errors: Vec::new(),
+            context_dirty: false,
+            context_applied: false,
+            can_apply_context: false,
+            can_apply_and_rerun: false,
+            can_revert_context: false,
+            can_save_context: false,
+            context_status_message: None,
         }
     }
 }
 
 impl PromptLabView {
-    pub(crate) fn from_state(state: &PromptLabState, triage_articles_available: bool) -> Self {
+    pub(crate) fn from_state(
+        state: &PromptLabState,
+        contexts: &HashMap<PromptId, Vec<(String, String)>>,
+        triage_articles_available: bool,
+    ) -> Self {
         let latest_run_record = state.latest_run();
         let latest_run = latest_run_record.map(|r| {
             let metadata = match &r.status {
@@ -203,8 +228,7 @@ impl PromptLabView {
                     metadata.map(|m| m.wall_ms),
                     metadata.map(|m| m.resolved_model.clone()),
                     metadata.map(|m| m.parse_ok),
-                    metadata
-                        .map(|m| format!("{:?}", m.cache_status).to_lowercase()),
+                    metadata.map(|m| format!("{:?}", m.cache_status).to_lowercase()),
                 ),
             };
             PromptLabRunSummaryView {
@@ -263,6 +287,34 @@ impl PromptLabView {
                 None
             }
         });
+        let prompt_id = prompt_id_for_stage(state.selected_stage());
+        let context_pairs = contexts
+            .get(&prompt_id)
+            .map(|pairs| pairs.as_slice())
+            .unwrap_or(&[]);
+        let context_draft = state.context_draft(prompt_id);
+        let context_draft_text = context_draft
+            .map(|draft| draft.text().to_string())
+            .unwrap_or_else(|| serialize_pairs(context_pairs));
+        let context_validation_errors = context_draft
+            .map(|draft| {
+                draft
+                    .validation_errors()
+                    .iter()
+                    .map(|err| err.to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let context_dirty = context_draft.map(|draft| draft.dirty()).unwrap_or(false);
+        let context_applied = context_draft.map(|draft| draft.applied()).unwrap_or(false);
+        let context_is_valid = context_draft.map(|draft| draft.is_valid()).unwrap_or(true);
+        let context_status_message = context_draft
+            .and_then(|draft| draft.status_message())
+            .map(|msg| msg.to_string());
+        let can_save_context = state.can_save_context(prompt_id);
+        let can_apply_context = context_is_valid && context_dirty;
+        let can_apply_and_rerun = can_run && can_apply_context;
+        let can_revert_context = context_dirty || context_applied;
         Self {
             visible: state.is_visible(),
             selected_stage: state.selected_stage(),
@@ -278,6 +330,15 @@ impl PromptLabView {
             resolve_pending,
             url_resolve_failed,
             latest_validation_error,
+            context_draft_text,
+            context_validation_errors,
+            context_dirty,
+            context_applied,
+            can_apply_context,
+            can_apply_and_rerun,
+            can_revert_context,
+            can_save_context,
+            context_status_message,
         }
     }
 }
@@ -321,7 +382,8 @@ mod tests {
     fn can_run_false_when_in_flight() {
         let mut state = PromptLabState::default();
         add_pending_run(&mut state);
-        let view = PromptLabView::from_state(&state, true);
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, true);
         assert!(!view.can_run);
         assert_eq!(view.run_disabled_reason, Some("Running…"));
     }
@@ -334,7 +396,8 @@ mod tests {
         let resolve_id = 1;
         state.begin_url_resolution(resolve_id);
         state.finish_url_resolution(resolve_id, Ok("snapshot".to_string()));
-        let view = PromptLabView::from_state(&state, false);
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, false);
         assert!(view.can_run);
         assert_eq!(view.run_disabled_reason, None);
     }
@@ -343,7 +406,8 @@ mod tests {
     fn can_run_false_for_typeurl_when_snapshot_absent() {
         let mut state = PromptLabState::default();
         state.select_input_source(PromptLabInputSource::TypeUrl);
-        let view = PromptLabView::from_state(&state, false);
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, false);
         assert!(!view.can_run);
         assert_eq!(view.run_disabled_reason, Some("Resolve URL input"));
     }
@@ -352,7 +416,8 @@ mod tests {
     fn can_rerun_false_when_in_flight() {
         let mut state = PromptLabState::default();
         add_pending_run(&mut state);
-        let view = PromptLabView::from_state(&state, true);
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, true);
         assert!(!view.can_rerun);
     }
 
@@ -360,7 +425,8 @@ mod tests {
     fn can_rerun_true_when_latest_run_is_completed() {
         let mut state = PromptLabState::default();
         add_completed_run(&mut state);
-        let view = PromptLabView::from_state(&state, true);
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, true);
         assert!(view.can_rerun);
     }
 
@@ -368,7 +434,8 @@ mod tests {
     fn metadata_line_present_for_failed_run_with_metadata() {
         let mut state = PromptLabState::default();
         let _run_id = add_failed_run(&mut state, "error".to_string());
-        let view = PromptLabView::from_state(&state, true);
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, true);
         let latest = view
             .latest_run
             .as_ref()
@@ -382,7 +449,8 @@ mod tests {
     fn validation_error_extracted_when_relevant() {
         let mut state = PromptLabState::default();
         add_failed_run(&mut state, "validation failed: reason".to_string());
-        let view = PromptLabView::from_state(&state, true);
+        let contexts = HashMap::new();
+        let view = PromptLabView::from_state(&state, &contexts, true);
         assert!(view.latest_validation_error.is_some());
     }
 }

@@ -15,6 +15,10 @@ pub enum Effect {
     LoadArticlesForBriefingPrereq,
     LoadArticlesForTriage,
     LoadPromptContexts,
+    SavePromptContextFile {
+        prompt_id: PromptId,
+        context_pairs: Vec<(String, String)>,
+    },
     LoadLlmMetadata,
     PollAllSources,
     RequestLlmCompletion {

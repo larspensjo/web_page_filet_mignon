@@ -158,6 +158,25 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: PANEL_PROMPT_LAB_ACTION_ROW,
     });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
+    });
+    commands.push(PlatformCommand::CreateInput {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ROW),
+        control_id: INPUT_PROMPT_LAB_CONTEXT,
+        initial_text: String::new(),
+        read_only: false,
+        multiline: true,
+        vertical_scroll: true,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
+    });
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
@@ -234,10 +253,47 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_PROMPT_LAB_CLEAR,
         text: "Clear".to_string(),
     });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_CONTEXT_APPLY,
+        text: "Apply".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
+        text: "Apply + Rerun".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_CONTEXT_REVERT,
+        text: "Revert".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_CONTEXT_SAVE,
+        text: "Save to Disk".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
+        text: "Reload From Disk".to_string(),
+    });
     commands.push(PlatformCommand::CreateLabel {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: LABEL_PROMPT_LAB_METADATA,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: LABEL_PROMPT_LAB_CONTEXT_STATUS,
         initial_text: String::new(),
         class: LabelClass::Default,
     });
@@ -300,7 +356,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
 
     apply_dark_theme(window_id, &mut commands);
 
-    commands.push(build_layout_command(window_id, initial_left_width, false, false));
+    commands.push(build_layout_command(
+        window_id,
+        initial_left_width,
+        false,
+        false,
+    ));
 
     commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
     commands.push(PlatformCommand::ShowWindow { window_id });
@@ -549,7 +610,7 @@ fn build_layout_rules(
         0
     };
     let jobs_width = (left_panel_width - input_width).max(0);
-    let prompt_lab_height = if prompt_lab_visible { 220 } else { 56 };
+    let prompt_lab_height = if prompt_lab_visible { 420 } else { 56 };
     let mut rules = vec![
         LayoutRule {
             control_id: PANEL_PROGRESS,
@@ -876,10 +937,82 @@ fn build_layout_rules(
                 margin: (0, 0, 0, 0),
             },
             LayoutRule {
+                control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
+                parent_control_id: Some(PANEL_PROMPT_LAB),
+                dock_style: DockStyle::Top,
+                order: 6,
+                fixed_size: Some(150),
+                margin: (0, 0, 2, 0),
+            },
+            LayoutRule {
+                control_id: INPUT_PROMPT_LAB_CONTEXT,
+                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ROW),
+                dock_style: DockStyle::Fill,
+                order: 0,
+                fixed_size: None,
+                margin: (4, 4, 4, 4),
+            },
+            LayoutRule {
+                control_id: PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
+                parent_control_id: Some(PANEL_PROMPT_LAB),
+                dock_style: DockStyle::Top,
+                order: 7,
+                fixed_size: Some(32),
+                margin: (0, 0, 2, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_CONTEXT_APPLY,
+                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                dock_style: DockStyle::Left,
+                order: 0,
+                fixed_size: Some(64),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
+                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                dock_style: DockStyle::Left,
+                order: 1,
+                fixed_size: Some(120),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_CONTEXT_REVERT,
+                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                dock_style: DockStyle::Left,
+                order: 2,
+                fixed_size: Some(64),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_CONTEXT_SAVE,
+                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                dock_style: DockStyle::Left,
+                order: 3,
+                fixed_size: Some(110),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
+                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                dock_style: DockStyle::Fill,
+                order: 4,
+                fixed_size: None,
+                margin: (0, 0, 0, 0),
+            },
+            LayoutRule {
+                control_id: LABEL_PROMPT_LAB_CONTEXT_STATUS,
+                parent_control_id: Some(PANEL_PROMPT_LAB),
+                dock_style: DockStyle::Top,
+                order: 8,
+                fixed_size: Some(24),
+                margin: (0, 0, 2, 0),
+            },
+            LayoutRule {
                 control_id: LABEL_PROMPT_LAB_METADATA,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Fill,
-                order: 6,
+                order: 9,
                 fixed_size: None,
                 margin: (0, 0, 0, 0),
             },
@@ -901,6 +1034,8 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_PROMPT_LAB_SOURCE_ROW,
         PANEL_PROMPT_LAB_INPUT_ROW,
         PANEL_PROMPT_LAB_ACTION_ROW,
+        PANEL_PROMPT_LAB_CONTEXT_ROW,
+        PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
@@ -1013,6 +1148,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_PROMPT_LAB_RUN,
         BTN_PROMPT_LAB_RERUN,
         BTN_PROMPT_LAB_CLEAR,
+        BTN_PROMPT_LAB_CONTEXT_APPLY,
+        BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
+        BTN_PROMPT_LAB_CONTEXT_REVERT,
+        BTN_PROMPT_LAB_CONTEXT_SAVE,
+        BTN_PROMPT_LAB_CONTEXT_RELOAD,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
@@ -1020,6 +1160,12 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
             style_id: StyleId::DefaultButton,
         });
     }
+
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: INPUT_PROMPT_LAB_CONTEXT,
+        style_id: StyleId::DefaultInput,
+    });
 
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -1107,8 +1253,23 @@ mod tests {
         assert!(rules
             .iter()
             .any(|r| r.control_id == PANEL_PROMPT_LAB_STAGE_ROW));
-        assert!(rules.iter().any(|r| r.control_id == PANEL_PROMPT_LAB_SOURCE_ROW));
-        assert!(rules.iter().any(|r| r.control_id == PANEL_PROMPT_LAB_INPUT_ROW));
-        assert!(rules.iter().any(|r| r.control_id == PANEL_PROMPT_LAB_ACTION_ROW));
+        assert!(rules
+            .iter()
+            .any(|r| r.control_id == PANEL_PROMPT_LAB_SOURCE_ROW));
+        assert!(rules
+            .iter()
+            .any(|r| r.control_id == PANEL_PROMPT_LAB_INPUT_ROW));
+        assert!(rules
+            .iter()
+            .any(|r| r.control_id == PANEL_PROMPT_LAB_ACTION_ROW));
+        assert!(rules
+            .iter()
+            .any(|r| r.control_id == PANEL_PROMPT_LAB_CONTEXT_ROW));
+        assert!(rules
+            .iter()
+            .any(|r| r.control_id == PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW));
+        assert!(rules
+            .iter()
+            .any(|r| r.control_id == LABEL_PROMPT_LAB_CONTEXT_STATUS));
     }
 }
