@@ -302,6 +302,10 @@ impl PreTriageSession {
         self.job_key_by_id.get(&job_id).cloned()
     }
 
+    pub fn entry_for_url(&self, url: &str) -> Option<&ArticleFilterEntry> {
+        self.entries.iter().find(|entry| entry.key.url == url)
+    }
+
     pub fn reset(&mut self) {
         *self = Self::default();
     }

@@ -2,7 +2,7 @@ use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
 use engine_logging::{engine_debug, engine_warn};
 use harvester_core::{
-    AppViewModel, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView,
+    AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView,
     PromptLabInputSource, PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::LinkKind;
@@ -770,7 +770,7 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
                 id: job_tree_item_id(job.job_id),
                 text: format_job_row(job),
                 is_folder: true,
-                state: CheckState::Unchecked,
+                state: job_check_state(view, job),
                 children,
                 style_override: if job.has_summary {
                     None
@@ -780,6 +780,18 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
             }
         })
         .collect()
+}
+
+fn job_check_state(view: &AppViewModel, job: &JobRowView) -> CheckState {
+    if !view.is_pre_triage_reviewing {
+        return CheckState::Unchecked;
+    }
+    match job.filter_status {
+        Some(JobFilterStatus::HardExcluded { .. })
+        | Some(JobFilterStatus::ManuallyExcluded)
+        | Some(JobFilterStatus::ReviewNeeded { .. }) => CheckState::Checked,
+        _ => CheckState::Unchecked,
+    }
 }
 
 fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
@@ -816,6 +828,13 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
 }
 
 fn format_job_row(job: &JobRowView) -> String {
+    let filter_prefix = match &job.filter_status {
+        Some(JobFilterStatus::HardExcluded { .. }) => "[FILTERED] ",
+        Some(JobFilterStatus::ReviewNeeded { .. }) => "[REVIEW] ",
+        Some(JobFilterStatus::ManuallyExcluded) => "[EXCLUDED] ",
+        Some(JobFilterStatus::ManuallyIncluded) => "[INCLUDED] ",
+        _ => "",
+    };
     if job.has_summary {
         let title = job
             .summary_title
@@ -830,7 +849,7 @@ fn format_job_row(job: &JobRowView) -> String {
             .as_ref()
             .map(|annotation| format!("P{} [{}] ", annotation.priority, annotation.category))
             .unwrap_or_default();
-        return format!("{triage_prefix}{title} — {source}");
+        return format!("{filter_prefix}{triage_prefix}{title} — {source}");
     }
 
     let status = match &job.outcome {
@@ -860,7 +879,7 @@ fn format_job_row(job: &JobRowView) -> String {
     } else {
         job.url.clone()
     };
-    if metrics.is_empty() {
+    let base = if metrics.is_empty() {
         format!(
             "[#{id}] {status} — {annotated_url}",
             id = job.job_id,
@@ -875,7 +894,8 @@ fn format_job_row(job: &JobRowView) -> String {
             annotated_url = annotated_url,
             metrics = metrics
         )
-    }
+    };
+    format!("{filter_prefix}{base}")
 }
 
 fn stage_label(stage: Stage) -> &'static str {
@@ -1109,6 +1129,7 @@ mod tests {
             triage_annotation: None,
             has_summary: false,
             summary_title: None,
+            filter_status: None,
         }
     }
 
@@ -1287,6 +1308,7 @@ mod tests {
             triage_annotation: None,
             has_summary: false,
             summary_title: None,
+            filter_status: None,
         };
         let view = make_view(vec![job]);
         let commands = render(window_id, &view, &mut tree_state);

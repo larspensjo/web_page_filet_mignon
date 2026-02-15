@@ -8,7 +8,8 @@ use crate::triage::{ArticleTriageResult, ArticleTriageState, TriageSession};
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
-    AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TriageAnnotationView,
+    AppViewModel, JobFilterStatus, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView,
+    TriageAnnotationView,
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use crate::Effect;
@@ -319,6 +320,17 @@ impl AppState {
                 job_view.summary_title = None;
             }
         }
+        if matches!(
+            self.pre_triage.phase(),
+            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+        ) {
+            for job_view in &mut jobs {
+                job_view.filter_status = self
+                    .pre_triage
+                    .entry_for_url(&job_view.url)
+                    .map(map_job_filter_status);
+            }
+        }
 
         jobs.sort_by(|a, b| {
             let p_a = a
@@ -408,6 +420,7 @@ impl AppState {
                 &self.prompt_contexts,
                 triage_articles_available,
             ),
+            is_pre_triage_reviewing: matches!(self.pre_triage.phase(), PreTriagePhase::Reviewing),
         }
     }
 
@@ -472,6 +485,14 @@ impl AppState {
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
         self.pre_triage = pre_triage;
         self.dirty = true;
+    }
+
+    pub fn is_pre_triage_reviewing(&self) -> bool {
+        matches!(self.pre_triage.phase(), PreTriagePhase::Reviewing)
+    }
+
+    pub fn pre_triage_key_for_job(&self, job_id: JobId) -> Option<crate::ArticleFilterKey> {
+        self.pre_triage.key_for_job(job_id)
     }
 
     fn pre_triage_progress_text(&self) -> Option<String> {
@@ -1523,6 +1544,7 @@ impl JobState {
             triage_annotation: None,
             has_summary: false,
             summary_title: None,
+            filter_status: None,
         }
     }
 
@@ -1624,6 +1646,22 @@ impl JobState {
         if let Some(record) = self.find_link_mut(link_index) {
             record.download_state = LinkDownloadState::NotDownloaded;
         }
+    }
+}
+
+fn map_job_filter_status(entry: &crate::ArticleFilterEntry) -> JobFilterStatus {
+    match entry.manual_decision {
+        Some(crate::ManualDecision::Exclude) => JobFilterStatus::ManuallyExcluded,
+        Some(crate::ManualDecision::Include) => JobFilterStatus::ManuallyIncluded,
+        None => match entry.auto_verdict {
+            crate::AutoVerdict::HardExclude => JobFilterStatus::HardExcluded {
+                reasons: entry.reasons.clone(),
+            },
+            crate::AutoVerdict::Review => JobFilterStatus::ReviewNeeded {
+                reasons: entry.reasons.clone(),
+            },
+            crate::AutoVerdict::Include => JobFilterStatus::AutoIncluded,
+        },
     }
 }
 

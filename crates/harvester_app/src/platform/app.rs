@@ -11,7 +11,8 @@ use commanductui::{
     UiStateProvider, WindowConfig, WindowId,
 };
 use harvester_core::{
-    update, AppState, AppViewModel, Effect, JobResultKind, LinkDownloadState, Msg,
+    update, AppState, AppViewModel, Effect, JobFilterStatus, JobResultKind, LinkDownloadState,
+    ManualDecision, Msg,
     PromptLabInputSource, PromptLabStage,
 };
 
@@ -533,6 +534,20 @@ impl PlatformEventHandler for AppEventHandler {
                         link_index,
                         checked,
                     });
+                } else if let TreeItemKind::Job { job_id } = decode_tree_item_id(item_id) {
+                    let guard = self.shared.lock().unwrap();
+                    if guard.state.is_pre_triage_reviewing() {
+                        if let Some(key) = guard.state.pre_triage_key_for_job(job_id) {
+                            let decision = if matches!(new_state, CheckState::Checked) {
+                                ManualDecision::Exclude
+                            } else {
+                                ManualDecision::Include
+                            };
+                            let _ = self
+                                .msg_tx
+                                .send(Msg::PreTriageDecisionSet { key, decision });
+                        }
+                    }
                 }
             }
             AppEvent::WindowCloseRequestedByUser { .. } => {
@@ -597,6 +612,19 @@ impl UiStateProvider for AppUiStateProvider {
         _window_id: WindowId,
         item_id: commanductui::TreeItemId,
     ) -> TreeItemMarkerKind {
+        if let TreeItemKind::Job { job_id } = decode_tree_item_id(item_id) {
+            let guard = self.shared.lock().unwrap();
+            let view = guard.state.view();
+            if let Some(job) = view.jobs.iter().find(|job| job.job_id == job_id) {
+                return match job.filter_status {
+                    Some(JobFilterStatus::HardExcluded { .. }) => TreeItemMarkerKind::Red,
+                    Some(JobFilterStatus::ReviewNeeded { .. }) => TreeItemMarkerKind::Yellow,
+                    Some(JobFilterStatus::ManuallyExcluded) => TreeItemMarkerKind::Gray,
+                    Some(JobFilterStatus::ManuallyIncluded) => TreeItemMarkerKind::Blue,
+                    _ => TreeItemMarkerKind::None,
+                };
+            }
+        }
         if let TreeItemKind::Link { job_id, link_index } = decode_tree_item_id(item_id) {
             let guard = self.shared.lock().unwrap();
             if let Some((download_state, age_suspect)) = guard.state.link_state(job_id, link_index)

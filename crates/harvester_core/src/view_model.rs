@@ -2,6 +2,7 @@ use crate::prompt_lab::{
     prompt_id_for_stage, PromptLabInputSource, PromptLabRunId, PromptLabRunStatus, PromptLabStage,
     PromptLabState,
 };
+use crate::pre_triage_filter::FilterReason;
 use crate::state::LinkDownloadState;
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::llm::prompt::PromptId;
@@ -63,6 +64,7 @@ pub struct AppViewModel {
     /// URL of the currently selected job, only when it has a completed summary.
     pub selected_url: Option<String>,
     pub prompt_lab: PromptLabView,
+    pub is_pre_triage_reviewing: bool,
 }
 
 impl Default for AppViewModel {
@@ -89,6 +91,7 @@ impl Default for AppViewModel {
             window_width: DEFAULT_WINDOW_WIDTH,
             selected_url: None,
             prompt_lab: PromptLabView::default(),
+            is_pre_triage_reviewing: false,
         }
     }
 }
@@ -469,6 +472,16 @@ pub struct JobRowView {
     pub triage_annotation: Option<TriageAnnotationView>,
     pub has_summary: bool,
     pub summary_title: Option<String>,
+    pub filter_status: Option<JobFilterStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobFilterStatus {
+    HardExcluded { reasons: Vec<FilterReason> },
+    ReviewNeeded { reasons: Vec<FilterReason> },
+    ManuallyExcluded,
+    ManuallyIncluded,
+    AutoIncluded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
