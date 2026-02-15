@@ -1,6 +1,6 @@
 use crate::briefing::BriefingSession;
 use crate::context_hash;
-use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState};
+use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState, PromptLabTemplateSnapshot};
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
@@ -15,7 +15,7 @@ use crate::view_model::{
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use crate::Effect;
-use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind, SourceId};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -28,6 +28,29 @@ const MAX_EXTRACTED_LINKS: usize = 5_000;
 const LINK_ROW_LIMIT: usize = 200;
 const LINK_LABEL_MAX: usize = 80;
 const LINK_LABEL_TRUNCATE_MARKER: &str = "…";
+
+fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSnapshot> {
+    let registry = PromptRegistry::with_defaults();
+    let prompt_ids = [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::AggregateBriefing,
+    ];
+    prompt_ids
+        .into_iter()
+        .filter_map(|prompt_id| {
+            registry.active_effective(prompt_id).map(|template| {
+                (
+                    prompt_id,
+                    PromptLabTemplateSnapshot {
+                        template: template.to_owned(),
+                        source: template.source(),
+                    },
+                )
+            })
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MetadataLoadState {
@@ -214,6 +237,7 @@ pub struct AppState {
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
     effective_models: HashMap<PromptId, String>,
+    prompt_lab_templates: HashMap<PromptId, PromptLabTemplateSnapshot>,
     summary_cache: SummaryCache,
     briefing_metadata_state: MetadataLoadState,
     summary_cache_metadata_snapshot: Option<SummaryCacheMetadataSnapshot>,
@@ -277,6 +301,7 @@ impl Default for AppState {
             prompt_lab: PromptLabState::default(),
             next_prompt_lab_run_id: 1,
             prompt_lab_next_resolve_id: 1,
+            prompt_lab_templates: default_prompt_template_snapshots(),
         }
     }
 }
@@ -418,6 +443,7 @@ impl AppState {
             prompt_lab: crate::view_model::PromptLabView::from_state(
                 &self.prompt_lab,
                 &self.prompt_contexts,
+                &self.prompt_lab_templates,
                 triage_articles_available,
             ),
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
@@ -686,9 +712,18 @@ impl AppState {
         &mut self,
         active_versions: HashMap<PromptId, PromptVersion>,
         effective_models: HashMap<PromptId, String>,
+        templates: HashMap<PromptId, PromptLabTemplateSnapshot>,
     ) {
         self.active_prompt_versions = active_versions;
         self.effective_models = effective_models;
+        self.prompt_lab_templates = templates;
+    }
+
+    pub fn prompt_lab_template_snapshot(
+        &self,
+        prompt_id: PromptId,
+    ) -> Option<&PromptLabTemplateSnapshot> {
+        self.prompt_lab_templates.get(&prompt_id)
     }
 
     /// Try to reuse a cached summary result for the given cache key.

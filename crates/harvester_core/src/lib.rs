@@ -26,6 +26,7 @@ pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
 pub use prompt_lab::{
     PromptLabInputSource, PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage,
+    PromptLabTemplateSnapshot,
 };
 pub use pre_triage_filter::{
     ArticleFilterEntry, ArticleFilterKey, AutoVerdict, FilterReason, ManualDecision,

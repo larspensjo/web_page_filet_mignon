@@ -6,7 +6,7 @@ use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::types::ModelId;
 use harvester_engine::ExtractedLink;
 
-use crate::prompt_lab::{PromptLabInputSource, PromptLabStage};
+use crate::prompt_lab::{PromptLabInputSource, PromptLabStage, PromptLabTemplateSnapshot};
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
@@ -142,6 +142,7 @@ pub enum Msg {
     LlmMetadataLoaded {
         active_versions: std::collections::HashMap<PromptId, PromptVersion>,
         effective_models: std::collections::HashMap<PromptId, String>,
+        templates: std::collections::HashMap<PromptId, PromptLabTemplateSnapshot>,
     },
     /// Summary cache hydrated from persisted store at startup.
     SummaryCacheHydrated { cache: crate::SummaryCache },
@@ -194,6 +195,28 @@ pub enum Msg {
     },
     /// Save effect failed.
     PromptLabContextSaveFailed { prompt_id: PromptId, reason: String },
+    /// User opened the Prompt Lab template editor.
+    PromptLabTemplateEditorOpened,
+    /// User changed the system template draft text.
+    PromptLabTemplateSystemDraftChanged { text: String },
+    /// User changed the user template draft text.
+    PromptLabTemplateUserDraftChanged { text: String },
+    /// User requested the template draft to be validated/applied.
+    PromptLabTemplateApplyRequested,
+    /// User requested to apply the template draft and rerun immediately.
+    PromptLabTemplateApplyAndRerunRequested,
+    /// User requested to revert template edits.
+    PromptLabTemplateRevertRequested,
+    /// User requested saving the applied template to disk.
+    PromptLabTemplateSaveRequested,
+    /// Template save effect succeeded.
+    PromptLabTemplateSaved {
+        prompt_id: PromptId,
+        version: PromptVersion,
+        path: String,
+    },
+    /// Template save effect failed.
+    PromptLabTemplateSaveFailed { prompt_id: PromptId, reason: String },
     /// User requested a Prompt Lab LLM run with the current input and stage.
     PromptLabRunRequested,
     /// User requested rerunning using the latest completed/final run parameters.

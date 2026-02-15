@@ -1,5 +1,6 @@
 use engine_logging::{engine_error, engine_info, engine_warn};
 use std::borrow::ToOwned;
+use std::path::PathBuf;
 
 use crate::state::TriageCacheLookupResult;
 use crate::{
@@ -16,7 +17,7 @@ use crate::{
 };
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::types::ModelId;
-use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage};
+use harvester_engine::llm::{validate_briefing, validate_summary, validate_template, validate_triage};
 
 // Left side is split into a fixed-width input panel plus a resizable jobs panel.
 // Minimum width for the left region (PANEL_INPUT + PANEL_JOBS).
@@ -541,6 +542,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let ordered_urls = state.ordered_completed_job_urls();
             vec![
                 Effect::LoadPromptContexts,
+                Effect::LoadPromptTemplateFiles,
                 Effect::LoadLlmMetadata,
                 Effect::LoadArticlesForBriefingPrereq { ordered_urls },
             ]
@@ -686,12 +688,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
+            templates,
         } => {
             engine_info!(
                 "[LlmMetadata] Loaded {} active version(s)",
                 active_versions.len()
             );
-            state.set_llm_metadata(active_versions, effective_models);
+            state.set_llm_metadata(active_versions, effective_models, templates);
             state.mark_briefing_metadata_ready();
             state.mark_triage_metadata_ready();
             state.mark_dirty();
@@ -990,6 +993,144 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             Vec::new()
         }
+        Msg::PromptLabTemplateEditorOpened => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            state.prompt_lab_mut().set_template_editor_open(true);
+            ensure_prompt_lab_template_draft(&mut state, prompt_id);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabTemplateSystemDraftChanged { text } => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            ensure_prompt_lab_template_draft(&mut state, prompt_id);
+            if state
+                .prompt_lab_mut()
+                .update_template_system(prompt_id, text)
+            {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabTemplateUserDraftChanged { text } => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            ensure_prompt_lab_template_draft(&mut state, prompt_id);
+            if state.prompt_lab_mut().update_template_user(prompt_id, text) {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabTemplateApplyRequested => {
+            let prompt_id = prompt_id_for_stage(state.prompt_lab().selected_stage());
+            if apply_prompt_lab_template_draft(&mut state, prompt_id) {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabTemplateApplyAndRerunRequested => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            if !apply_prompt_lab_template_draft(&mut state, prompt_id) {
+                return (state, Vec::new());
+            }
+            if state.prompt_lab().has_in_flight_run() {
+                return (state, Vec::new());
+            }
+            let snapshot = match state.prompt_lab().selected_input_source() {
+                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
+                PromptLabInputSource::TypeUrl => state
+                    .prompt_lab()
+                    .resolved_url_snapshot()
+                    .map(ToOwned::to_owned),
+            };
+            let input = match snapshot {
+                Some(text) => text,
+                None => return (state, Vec::new()),
+            };
+            let prompt_version = state
+                .prompt_lab()
+                .selected_prompt_version()
+                .or_else(|| state.active_version_for(prompt_id));
+            let model_override = state.prompt_lab().selected_model_override().cloned();
+            state.mark_dirty();
+            let effects = dispatch_prompt_lab_run(
+                &mut state,
+                stage,
+                prompt_id,
+                input,
+                prompt_version,
+                model_override,
+            );
+            return (state, effects);
+        }
+        Msg::PromptLabTemplateRevertRequested => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            ensure_prompt_lab_template_draft(&mut state, prompt_id);
+            if state.prompt_lab_mut().revert_template(prompt_id) {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabTemplateSaveRequested => {
+            let stage = state.prompt_lab().selected_stage();
+            let prompt_id = prompt_id_for_stage(stage);
+            let effect = if let Some(draft) = state.prompt_lab().template_draft(prompt_id) {
+                if draft.is_applied() && draft.validation_errors().is_empty() {
+                    Some(Effect::SavePromptTemplateFile {
+                        prompt_id,
+                        system_template: draft.system_draft().to_string(),
+                        user_template: draft.user_draft().to_string(),
+                        description: draft.description().to_string(),
+                        expected_format: draft.expected_format().to_string(),
+                    })
+                } else {
+                    engine_warn!(
+                        "[prompt-lab-template] Save requested without applied draft prompt_id={:?}",
+                        prompt_id
+                    );
+                    None
+                }
+            } else {
+                engine_warn!(
+                    "[prompt-lab-template] Save requested but no draft open prompt_id={:?}",
+                    prompt_id
+                );
+                None
+            };
+            if let Some(effect) = effect {
+                return (state, vec![effect]);
+            }
+            Vec::new()
+        }
+        Msg::PromptLabTemplateSaved {
+            prompt_id,
+            version,
+            path,
+        } => {
+            let path_buf = PathBuf::from(path.clone());
+            state
+                .prompt_lab_mut()
+                .mark_template_saved(prompt_id, version, path_buf);
+            engine_info!(
+                "[prompt-lab-template] PromptLabTemplateSaved prompt_id={:?} path={} version={}",
+                prompt_id,
+                path,
+                version
+            );
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabTemplateSaveFailed { prompt_id, reason } => {
+            engine_error!(
+                "[prompt-lab-template] PromptLabTemplateSaveFailed prompt_id={:?} reason={}",
+                prompt_id,
+                reason
+            );
+            Vec::new()
+        }
         Msg::PromptLabRunRequested => {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
@@ -1098,7 +1239,7 @@ fn dispatch_prompt_lab_run(
         model_override,
         input_content: input_snapshot,
         context,
-        template_override: None,
+        template_override: state.prompt_lab().applied_template_override(prompt_id),
     }]
 }
 
@@ -1252,6 +1393,53 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
         });
         state.mark_dirty();
     }
+}
+
+fn ensure_prompt_lab_template_draft(state: &mut AppState, prompt_id: PromptId) {
+    if state.prompt_lab().template_draft(prompt_id).is_some() {
+        return;
+    }
+    if let Some(snapshot) = state.prompt_lab_template_snapshot(prompt_id).cloned() {
+        let template = snapshot.template;
+        state.prompt_lab_mut().open_template_draft(
+            prompt_id,
+            &template.system_template,
+            &template.user_template,
+            &template.description,
+            &template.expected_format,
+        );
+    }
+}
+
+fn template_draft_texts(state: &mut AppState, prompt_id: PromptId) -> Option<(String, String)> {
+    ensure_prompt_lab_template_draft(state, prompt_id);
+    state
+        .prompt_lab()
+        .template_draft(prompt_id)
+        .map(|draft| (draft.system_draft().to_string(), draft.user_draft().to_string()))
+}
+
+fn apply_prompt_lab_template_draft(state: &mut AppState, prompt_id: PromptId) -> bool {
+    let (system, user) = match template_draft_texts(state, prompt_id) {
+        Some(pair) => pair,
+        None => return false,
+    };
+    let errors = validate_template(prompt_id, &system, &user);
+    if !errors.is_empty() {
+        engine_warn!(
+            "[prompt-lab-template] validation failed prompt_id={:?} error_count={}",
+            prompt_id,
+            errors.len()
+        );
+    }
+    let applied = state.prompt_lab_mut().apply_template(prompt_id, errors);
+    if applied {
+        engine_info!(
+            "[prompt-lab-template] PromptLabTemplateApplied prompt_id={:?}",
+            prompt_id
+        );
+    }
+    applied
 }
 
 fn on_triage_settled_for_briefing(state: &mut AppState, effects: &mut Vec<Effect>) {
@@ -1660,20 +1848,21 @@ mod tests {
         (articles, "Collection text".to_string())
     }
 
-    fn with_summary_metadata(state: AppState) -> AppState {
-        let mut active_versions = HashMap::new();
-        active_versions.insert(PromptId::ArticleSummary, 1);
-        let mut effective_models = HashMap::new();
-        effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
-        let (state, _) = update(
-            state,
-            Msg::LlmMetadataLoaded {
-                active_versions,
-                effective_models,
-            },
-        );
-        state
-    }
+fn with_summary_metadata(state: AppState) -> AppState {
+    let mut active_versions = HashMap::new();
+    active_versions.insert(PromptId::ArticleSummary, 1);
+    let mut effective_models = HashMap::new();
+    effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
+    let (state, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+            templates: HashMap::new(),
+        },
+    );
+    state
+}
 
     fn summary_json(title: &str) -> String {
         format!("{{\"title\":\"{title}\",\"summary\":\"Summary\",\"key_points\":[\"p1\"]}}")
@@ -1753,6 +1942,7 @@ mod tests {
             effects,
             vec![
                 Effect::LoadPromptContexts,
+                Effect::LoadPromptTemplateFiles,
                 Effect::LoadLlmMetadata,
                 Effect::LoadArticlesForBriefingPrereq {
                     ordered_urls: Vec::new(),
@@ -1990,6 +2180,7 @@ mod tests {
             effects,
             vec![
                 Effect::LoadPromptContexts,
+                Effect::LoadPromptTemplateFiles,
                 Effect::LoadLlmMetadata,
                 Effect::LoadArticlesForBriefingPrereq {
                     ordered_urls: Vec::new(),
@@ -2164,6 +2355,7 @@ mod tests {
             Msg::LlmMetadataLoaded {
                 active_versions,
                 effective_models,
+                templates: std::collections::HashMap::new(),
             },
         );
         let (state, _) = update(

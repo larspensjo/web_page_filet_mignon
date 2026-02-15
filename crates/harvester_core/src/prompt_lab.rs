@@ -5,10 +5,14 @@
 //! or `TriageSession` directly.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
-use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::prompt::{
+    PromptId, PromptTemplateOwned, PromptVersion, TemplateSource, PROMPT_VERSION_DRAFT,
+};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::types::ModelId;
+use harvester_engine::llm::TemplateValidationError;
 
 use crate::context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
 
@@ -87,6 +91,128 @@ pub struct PromptLabRunRecord {
     pub prompt_version_used: Option<PromptVersion>,
     /// Model override recorded at dispatch time (`None` = stage/default model).
     pub model_override: Option<ModelId>,
+}
+
+/// Snapshot of an effective template for UI consumption.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabTemplateSnapshot {
+    pub template: PromptTemplateOwned,
+    pub source: TemplateSource,
+}
+
+/// Draft state for the Prompt Lab template editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabTemplateDraft {
+    system_base: String,
+    user_base: String,
+    system_draft: String,
+    user_draft: String,
+    validation_errors: Vec<TemplateValidationError>,
+    dirty: bool,
+    applied: bool,
+    saved_version: Option<PromptVersion>,
+    saved_path: Option<PathBuf>,
+    description: String,
+    expected_format: String,
+}
+
+impl PromptLabTemplateDraft {
+    fn new(system: &str, user: &str, description: &str, expected_format: &str) -> Self {
+        Self {
+            system_base: system.to_string(),
+            user_base: user.to_string(),
+            system_draft: system.to_string(),
+            user_draft: user.to_string(),
+            validation_errors: Vec::new(),
+            dirty: false,
+            applied: false,
+            saved_version: None,
+            saved_path: None,
+            description: description.to_string(),
+            expected_format: expected_format.to_string(),
+        }
+    }
+
+    fn update_dirty(&mut self) {
+        self.dirty =
+            self.system_draft != self.system_base || self.user_draft != self.user_base;
+    }
+
+    fn update_system(&mut self, text: String) {
+        self.system_draft = text;
+        self.applied = false;
+        self.validation_errors.clear();
+        self.update_dirty();
+    }
+
+    fn update_user(&mut self, text: String) {
+        self.user_draft = text;
+        self.applied = false;
+        self.validation_errors.clear();
+        self.update_dirty();
+    }
+
+    fn apply(&mut self, errors: Vec<TemplateValidationError>) -> bool {
+        self.validation_errors = errors;
+        if !self.validation_errors.is_empty() {
+            self.applied = false;
+            return false;
+        }
+        self.system_base = self.system_draft.clone();
+        self.user_base = self.user_draft.clone();
+        self.dirty = false;
+        self.applied = true;
+        true
+    }
+
+    fn revert(&mut self) {
+        self.system_draft = self.system_base.clone();
+        self.user_draft = self.user_base.clone();
+        self.validation_errors.clear();
+        self.dirty = false;
+        self.applied = false;
+    }
+
+    fn mark_saved(&mut self, version: PromptVersion, path: PathBuf) {
+        self.saved_version = Some(version);
+        self.saved_path = Some(path);
+    }
+
+    pub(crate) fn description(&self) -> &str {
+        &self.description
+    }
+
+    pub(crate) fn expected_format(&self) -> &str {
+        &self.expected_format
+    }
+
+    pub(crate) fn system_draft(&self) -> &str {
+        &self.system_draft
+    }
+
+    pub(crate) fn user_draft(&self) -> &str {
+        &self.user_draft
+    }
+
+    pub(crate) fn validation_errors(&self) -> &[TemplateValidationError] {
+        &self.validation_errors
+    }
+
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    pub(crate) fn is_applied(&self) -> bool {
+        self.applied
+    }
+
+    pub(crate) fn saved_version(&self) -> Option<PromptVersion> {
+        self.saved_version
+    }
+
+    pub(crate) fn saved_path(&self) -> Option<&PathBuf> {
+        self.saved_path.as_ref()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +364,8 @@ pub struct PromptLabState {
     /// Per-run model override (`None` = use stage/default model).
     pub(crate) selected_model_override: Option<ModelId>,
     pub(crate) context_overlays: HashMap<PromptId, PromptLabContextDraft>,
+    pub(crate) template_drafts: HashMap<PromptId, PromptLabTemplateDraft>,
+    pub(crate) template_editor_open: bool,
 }
 
 impl Default for PromptLabState {
@@ -257,6 +385,8 @@ impl Default for PromptLabState {
             selected_prompt_version: None,
             selected_model_override: None,
             context_overlays: HashMap::new(),
+            template_drafts: HashMap::new(),
+            template_editor_open: false,
         }
     }
 }
@@ -530,6 +660,14 @@ impl PromptLabState {
         self.context_overlays.remove(&prompt_id);
     }
 
+    pub(crate) fn set_template_editor_open(&mut self, open: bool) {
+        self.template_editor_open = open;
+    }
+
+    pub(crate) fn template_editor_open(&self) -> bool {
+        self.template_editor_open
+    }
+
     pub(crate) fn clear_context_overlays(&mut self) {
         self.context_overlays.clear();
     }
@@ -565,6 +703,100 @@ impl PromptLabState {
 
     pub(crate) fn context_draft(&self, prompt_id: PromptId) -> Option<&PromptLabContextDraft> {
         self.context_overlays.get(&prompt_id)
+    }
+
+    pub(crate) fn open_template_draft(
+        &mut self,
+        prompt_id: PromptId,
+        system_template: &str,
+        user_template: &str,
+        description: &str,
+        expected_format: &str,
+    ) {
+        self.template_drafts.insert(
+            prompt_id,
+            PromptLabTemplateDraft::new(
+                system_template,
+                user_template,
+                description,
+                expected_format,
+            ),
+        );
+    }
+
+    pub(crate) fn update_template_system(&mut self, prompt_id: PromptId, text: String) -> bool {
+        if let Some(draft) = self.template_drafts.get_mut(&prompt_id) {
+            draft.update_system(text);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn update_template_user(&mut self, prompt_id: PromptId, text: String) -> bool {
+        if let Some(draft) = self.template_drafts.get_mut(&prompt_id) {
+            draft.update_user(text);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn apply_template(
+        &mut self,
+        prompt_id: PromptId,
+        errors: Vec<TemplateValidationError>,
+    ) -> bool {
+        if let Some(draft) = self.template_drafts.get_mut(&prompt_id) {
+            draft.apply(errors)
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn revert_template(&mut self, prompt_id: PromptId) -> bool {
+        if let Some(draft) = self.template_drafts.get_mut(&prompt_id) {
+            draft.revert();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn mark_template_saved(
+        &mut self,
+        prompt_id: PromptId,
+        version: PromptVersion,
+        path: PathBuf,
+    ) {
+        if let Some(draft) = self.template_drafts.get_mut(&prompt_id) {
+            draft.mark_saved(version, path);
+        }
+    }
+
+    pub(crate) fn template_draft(&self, prompt_id: PromptId) -> Option<&PromptLabTemplateDraft> {
+        self.template_drafts.get(&prompt_id)
+    }
+
+    pub(crate) fn drop_template_draft(&mut self, prompt_id: PromptId) {
+        self.template_drafts.remove(&prompt_id);
+    }
+
+    pub(crate) fn applied_template_override(&self, prompt_id: PromptId) -> Option<PromptTemplateOwned> {
+        self.template_drafts.get(&prompt_id).and_then(|draft| {
+            if draft.is_applied() && draft.validation_errors().is_empty() {
+                Some(PromptTemplateOwned {
+                    id: prompt_id,
+                    version: PROMPT_VERSION_DRAFT,
+                    system_template: draft.system_draft.clone(),
+                    user_template: draft.user_draft.clone(),
+                    description: draft.description.clone(),
+                    expected_format: draft.expected_format.clone(),
+                })
+            } else {
+                None
+            }
+        })
     }
 }
 

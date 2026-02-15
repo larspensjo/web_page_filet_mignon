@@ -23,6 +23,14 @@ pub enum Effect {
         prompt_id: PromptId,
         context_pairs: Vec<(String, String)>,
     },
+    SavePromptTemplateFile {
+        prompt_id: PromptId,
+        system_template: String,
+        user_template: String,
+        description: String,
+        expected_format: String,
+    },
+    LoadPromptTemplateFiles,
     LoadLlmMetadata,
     PollAllSources,
     RequestLlmCompletion {
