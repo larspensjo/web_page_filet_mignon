@@ -1,5 +1,5 @@
 use std::collections::{HashMap, VecDeque};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -69,13 +69,14 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         let provider = Arc::new(OpenAiProvider::new(api_key));
         let mut registry = PromptRegistry::new();
         register_defaults(&mut registry);
+        let registry = Arc::new(RwLock::new(registry));
         let config = LlmConfig {
             provider,
             default_model: ModelId::new(ProviderKind::OpenAi, "gpt-4o-mini"),
             triage_model: None,
             summary_model: None,
             briefing_model: None,
-            registry: registry.clone(),
+            registry: Arc::clone(&registry),
             quotas: LlmQuotas::default(),
             output_dir: output_dir.clone(),
             pricing: PricingRegistry::with_defaults(),
@@ -89,7 +90,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         };
         let model_map = effective_model_map(&config);
         let handle = LlmHandle::new(config);
-        EffectRunner::new_with_llm(msg_tx.clone(), handle, 100_000, registry, model_map)
+        EffectRunner::new_with_llm(msg_tx.clone(), handle, 100_000, Arc::clone(&registry), model_map)
     } else {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
         EffectRunner::new(msg_tx.clone())

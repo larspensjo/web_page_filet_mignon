@@ -13,8 +13,8 @@ use tokio::runtime::Runtime;
 use crate::llm::{
     pricing::PricingRegistry,
     prompt::{
-        is_draft_version, render_template, PromptId, PromptRegistry, PromptTemplate,
-        PromptTemplateOwned, PromptVersion, TemplateVars,
+        is_draft_version, render_template, PromptId, PromptRegistry, PromptTemplateOwned,
+        PromptVersion, TemplateVars,
     },
     quota::{LlmQuotaTracker, LlmQuotas},
     replay::{content_hash, persist_replay_record, ReplayProvider, ReplayRecord},
@@ -30,7 +30,7 @@ pub struct LlmConfig {
     pub triage_model: Option<ModelId>,
     pub summary_model: Option<ModelId>,
     pub briefing_model: Option<ModelId>,
-    pub registry: PromptRegistry,
+    pub registry: Arc<RwLock<PromptRegistry>>,
     pub quotas: LlmQuotas,
     pub output_dir: PathBuf,
     pub pricing: PricingRegistry,
@@ -329,8 +329,8 @@ async fn handle_completion_concurrent(
         &template_override
     {
         (
-            override_template.system_template.as_str(),
-            override_template.user_template.as_str(),
+            override_template.system_template.clone(),
+            override_template.user_template.clone(),
             override_template.version,
         )
     } else {
@@ -372,7 +372,7 @@ async fn handle_completion_concurrent(
         vars.insert(key.clone(), value.clone());
     }
     let rendered = vars.to_map();
-    let system_message = match render_template(system_template, &rendered) {
+    let system_message = match render_template(&system_template, &rendered) {
         Ok(msg) => msg,
         Err(e) => {
             engine_error!("[llm-render] Failed to render system template: {}", e);
@@ -386,7 +386,7 @@ async fn handle_completion_concurrent(
             return;
         }
     };
-    let user_message = match render_template(user_template, &rendered) {
+    let user_message = match render_template(&user_template, &rendered) {
         Ok(msg) => msg,
         Err(e) => {
             engine_error!("[llm-render] Failed to render user template: {}", e);
@@ -810,21 +810,20 @@ fn fetch_prompt_template(
     config: &LlmConfig,
     prompt_id: PromptId,
     prompt_version: Option<PromptVersion>,
-) -> Option<(&PromptTemplate, PromptVersion)> {
+) -> Option<(PromptTemplateOwned, PromptVersion)> {
+    let registry = config.registry.read().unwrap();
     if let Some(version) = prompt_version {
         if is_draft_version(version) {
             return None;
         }
-        return config
-            .registry
+        return registry
             .get(prompt_id, version)
-            .map(|template| (template, version));
+            .map(|template| (PromptTemplateOwned::from(template), version));
     }
 
-    config
-        .registry
+    registry
         .active(prompt_id)
-        .map(|template| (template, template.version))
+        .map(|template| (PromptTemplateOwned::from(template), template.version))
 }
 
 fn validate_response(prompt_id: PromptId, content: &str) -> Result<String, ValidationError> {

@@ -12,7 +12,7 @@ use harvester_engine::llm::{
 
 fn make_config(
     provider_trait: Arc<dyn LlmProvider>,
-    registry: PromptRegistry,
+    registry: Arc<RwLock<PromptRegistry>>,
     dir: &tempfile::TempDir,
 ) -> LlmConfig {
     LlmConfig {
@@ -21,7 +21,7 @@ fn make_config(
         triage_model: None,
         summary_model: None,
         briefing_model: None,
-        registry,
+        registry: Arc::clone(&registry),
         quotas: LlmQuotas::default(),
         output_dir: dir.path().to_path_buf(),
         pricing: PricingRegistry::new(),
@@ -35,6 +35,10 @@ fn make_config(
     }
 }
 
+fn prompt_registry_arc() -> Arc<RwLock<PromptRegistry>> {
+    Arc::new(RwLock::new(PromptRegistry::with_defaults()))
+}
+
 #[test]
 fn llm_handle_dispatches_completion_event() {
     let provider = Arc::new(MockLlmProvider::new());
@@ -43,7 +47,7 @@ fn llm_handle_dispatches_completion_event() {
         r#"{"category":"news","priority":3,"tags":["alpha","beta"],"rationale":"ok"}"#,
     );
 
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
 
     let config = make_config(provider_trait, registry, &dir);
@@ -87,7 +91,7 @@ fn llm_handle_dispatches_completion_event() {
 fn llm_handle_skips_provider_when_cache_hit() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
 
     let input_content = "cached document";
@@ -155,7 +159,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
     let provider = Arc::new(MockLlmProvider::new());
     provider.queue_json_success(r#"{"title":"fresh","summary":"short","key_points":["one"]}"#);
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
     let replay_cache = Arc::new(RwLock::new(ReplayProvider::new()));
 
@@ -219,10 +223,13 @@ fn llm_handle_inserts_cache_after_successful_response() {
 
     assert_eq!(provider.recorded_requests().len(), 1);
 
-    let version = registry
-        .active(PromptId::ArticleSummary)
-        .expect("summary prompt missing")
-        .version;
+    let version = {
+        let guard = registry.read().unwrap();
+        guard
+            .active(PromptId::ArticleSummary)
+            .expect("summary prompt missing")
+            .version
+    };
     let guard = replay_cache.read().unwrap();
     assert!(guard
         .lookup(
@@ -243,7 +250,7 @@ fn concurrent_requests_never_exceed_cap() {
     let triage_json = r#"{"category":"news","priority":3,"tags":["t"],"rationale":"ok"}"#;
     let provider = Arc::new(BlockingMockProvider::new(triage_json));
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
 
     let mut config = make_config(provider_trait, registry, &dir);
@@ -313,7 +320,7 @@ fn override_model_wins_over_stage_and_default() {
     provider
         .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
 
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
     let mut config = make_config(provider_trait, registry, &dir);
     // Stage model set to something different
@@ -351,7 +358,7 @@ fn stage_model_wins_over_default_when_override_is_none() {
     provider
         .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
 
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
     let mut config = make_config(provider_trait, registry, &dir);
     config.triage_model = Some(ModelId::new(ProviderKind::OpenAi, "stage-specific"));
@@ -389,7 +396,7 @@ fn stage_model_wins_over_default_when_override_is_none() {
 fn unsupported_model_wrong_provider_fires_before_provider_call() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
     let config = make_config(provider_trait, registry, &dir);
     // default_model is OpenAi, but we try to send Anthropic
@@ -427,7 +434,7 @@ fn unsupported_model_wrong_provider_fires_before_provider_call() {
 fn unsupported_model_unknown_name_fires_before_provider_call() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
     let config = make_config(provider_trait, registry, &dir);
     // Right provider but unknown name
@@ -468,7 +475,7 @@ fn valid_override_cache_miss_records_override_in_metadata() {
     provider
         .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
 
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
     let config = make_config(provider_trait, registry, &dir);
     // "mock" is the default model name, so it's in the allow-list
@@ -499,7 +506,7 @@ fn valid_override_cache_miss_records_override_in_metadata() {
 fn valid_override_cache_hit_records_override_in_metadata() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    let registry = PromptRegistry::with_defaults();
+    let registry = prompt_registry_arc();
     let dir = tempdir().unwrap();
 
     let input_content = "cached content for override test";

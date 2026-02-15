@@ -5,7 +5,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
-    mpsc, Arc,
+    mpsc, Arc, RwLock,
 };
 use std::thread;
 use std::time::Duration;
@@ -120,13 +120,13 @@ pub struct EffectRunner {
     fetch_settings: FetchSettings,
     llm_handle: Option<LlmHandle>,
     llm_max_input_bytes: Option<usize>,
-    prompt_registry: PromptRegistry,
+    prompt_registry: Arc<RwLock<PromptRegistry>>,
     llm_metadata_models: HashMap<PromptId, String>,
 }
 
 impl EffectRunner {
     pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
-        let registry = PromptRegistry::with_defaults();
+        let registry = Arc::new(RwLock::new(PromptRegistry::with_defaults()));
         Self::with_optional_llm(msg_tx, None, None, registry, HashMap::new())
     }
 
@@ -134,7 +134,7 @@ impl EffectRunner {
         msg_tx: mpsc::Sender<Msg>,
         llm_handle: LlmHandle,
         llm_max_input_bytes: usize,
-        prompt_registry: PromptRegistry,
+        prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
     ) -> Self {
         Self::with_optional_llm(
@@ -150,7 +150,7 @@ impl EffectRunner {
         msg_tx: mpsc::Sender<Msg>,
         llm_handle: Option<LlmHandle>,
         llm_max_input_bytes: Option<usize>,
-        prompt_registry: PromptRegistry,
+        prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
     ) -> Self {
         let output_dir = default_output_dir();
@@ -220,10 +220,11 @@ impl EffectRunner {
                         resolve_id,
                         url
                     );
+                    let guard = registry.read().unwrap();
                     match load_and_prepare_articles_filtered(
                         &output_dir,
                         max_input_bytes,
-                        &registry,
+                        &*guard,
                         std::slice::from_ref(&url),
                     ) {
                         Ok((mut articles, _collection_text)) => {
@@ -495,10 +496,11 @@ impl EffectRunner {
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
+                    let guard = registry.read().unwrap();
                     match load_and_prepare_articles_filtered(
                         &output_dir,
                         max_input_bytes,
-                        &registry,
+                        &*guard,
                         &ordered_urls,
                     ) {
                         Ok((articles, collection_text)) => {
@@ -619,7 +621,10 @@ impl EffectRunner {
                 let registry = self.prompt_registry.clone();
                 let models = self.llm_metadata_models.clone();
                 thread::spawn(move || {
-                    let active_versions = registry.active_versions_map();
+                    let active_versions = {
+                        let guard = registry.read().unwrap();
+                        guard.active_versions_map()
+                    };
                     let effective_models = models;
 
                     engine_info!(
