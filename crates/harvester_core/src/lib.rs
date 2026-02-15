@@ -5,6 +5,7 @@ mod context_draft;
 mod effect;
 mod msg;
 mod prompt_lab;
+mod pre_triage_filter;
 mod source_state;
 mod state;
 mod summary_cache;
@@ -25,6 +26,10 @@ pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
 pub use prompt_lab::{
     PromptLabInputSource, PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage,
+};
+pub use pre_triage_filter::{
+    ArticleFilterEntry, ArticleFilterKey, AutoVerdict, FilterReason, ManualDecision,
+    PreTriagePhase, PreTriagePolicy, PreTriageSession,
 };
 pub use source_state::{SourceInstanceState, SourceStateIndex};
 pub use state::{
