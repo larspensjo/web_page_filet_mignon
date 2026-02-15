@@ -131,11 +131,7 @@ impl PreTriagePolicy {
         if word_count < self.hard_exclude_word_count || char_count < self.hard_exclude_char_count {
             reasons.push(FilterReason::VerySmallContent);
         }
-        if self
-            .paywall_shell_titles
-            .iter()
-            .any(|needle| normalized_title == *needle)
-        {
+        if self.paywall_shell_titles.contains(&normalized_title) {
             reasons.push(FilterReason::PaywallShellTitle);
         }
 
@@ -224,7 +220,7 @@ impl PreTriageSession {
                     content_hash: stable_hash_u64(&article.content_hash),
                     url: article.url.clone(),
                 };
-                let (auto_verdict, reasons) = policy.evaluate(&article);
+                let (auto_verdict, reasons) = policy.evaluate(article);
                 ArticleFilterEntry {
                     key,
                     source_title: article.source_title.clone(),
