@@ -819,6 +819,33 @@ impl PromptLabState {
         &self.batches
     }
 
+    pub fn draft_candidates(&self) -> &[PromptLabCompareCandidate] {
+        &self.draft_candidates
+    }
+
+    pub fn clear_draft_candidates(&mut self) {
+        self.draft_candidates.clear();
+    }
+
+    pub fn remove_draft_candidate(&mut self, candidate_id: u64) -> bool {
+        let before = self.draft_candidates.len();
+        self.draft_candidates
+            .retain(|candidate| candidate.candidate_id != candidate_id);
+        before != self.draft_candidates.len()
+    }
+
+    pub fn rename_draft_candidate(&mut self, candidate_id: u64, label: String) -> bool {
+        if let Some(candidate) = self
+            .draft_candidates
+            .iter_mut()
+            .find(|candidate| candidate.candidate_id == candidate_id)
+        {
+            candidate.label = label;
+            return true;
+        }
+        false
+    }
+
     pub fn active_batch(&self) -> Option<&PromptLabCompareBatchRecord> {
         self.active_batch_idx.and_then(|idx| self.batches.get(idx))
     }

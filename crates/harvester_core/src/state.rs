@@ -1452,6 +1452,8 @@ impl AppState {
         request_id: u64,
         prompt_version_used: Option<harvester_engine::llm::prompt::PromptVersion>,
         model_override: Option<harvester_engine::llm::types::ModelId>,
+        compare_batch_id: Option<crate::prompt_lab::PromptLabCompareBatchId>,
+        compare_candidate_id: Option<u64>,
     ) {
         self.prompt_lab.add_pending_run(
             run_id,
@@ -1462,6 +1464,10 @@ impl AppState {
             prompt_version_used,
             model_override,
         );
+        if let Some(record) = self.prompt_lab.run_by_id_mut(run_id) {
+            record.compare_batch_id = compare_batch_id;
+            record.compare_candidate_id = compare_candidate_id;
+        }
     }
 
     pub(crate) fn complete_prompt_lab_run(
@@ -2859,6 +2865,8 @@ mod tests {
             req_id,
             None,
             None,
+            None,
+            None,
         );
 
         // Add a completed run
@@ -2870,6 +2878,8 @@ mod tests {
             PromptId::ArticleTriage,
             "input2".to_string(),
             req_id2,
+            None,
+            None,
             None,
             None,
         );

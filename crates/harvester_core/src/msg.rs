@@ -6,7 +6,10 @@ use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::types::ModelId;
 use harvester_engine::ExtractedLink;
 
-use crate::prompt_lab::{PromptLabInputSource, PromptLabStage, PromptLabTemplateSnapshot};
+use crate::prompt_lab::{
+    PromptLabCompareBatchId, PromptLabInputSource, PromptLabRunId, PromptLabStage,
+    PromptLabTemplateSnapshot,
+};
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
@@ -223,6 +226,28 @@ pub enum Msg {
     PromptLabRerunRequested,
     /// User requested to clear completed/failed runs from Prompt Lab history.
     PromptLabHistoryCleared,
+    PromptLabCompareDraftReset,
+    PromptLabCompareCurrentSettingsCaptured,
+    PromptLabCompareBaselineCaptured,
+    PromptLabCompareCandidateRemoved { candidate_id: u64 },
+    PromptLabCompareCandidateLabelChanged { candidate_id: u64, label: String },
+    PromptLabCompareBatchStartRequested,
+    PromptLabCompareBatchConfirmedStart,
+    PromptLabCompareBatchCancelRequested,
+    PromptLabCompareWinnerSelected { run_id: PromptLabRunId },
+    PromptLabCompareWinnerCleared,
+    PromptLabCompareRunRated { run_id: PromptLabRunId, rating: u8 },
+    PromptLabComparePolicyUpdated {
+        require_parse_ok: Option<bool>,
+        max_cost_microdollars: Option<Option<u64>>,
+        max_wall_ms: Option<Option<u64>>,
+        rating_beats_cost: Option<bool>,
+    },
+    PromptLabCompareAutoSelectRequested,
+    PromptLabCompareBatchSetWarning {
+        batch_id: PromptLabCompareBatchId,
+        warning: Option<String>,
+    },
 }
 
 /// Result payload returned by the LLM worker.
