@@ -20,6 +20,8 @@ fn mock_record(request_id: &str) -> ReplayRecord {
         validated_output: Some(json!({"priority": 2})),
         validation_error: None,
         cost_microdollars: 250,
+        wall_ms: 150,
+        cache_status: "miss".to_string(),
     }
 }
 
@@ -66,4 +68,39 @@ fn persist_appends_suffix_when_collision() {
     assert_ne!(first, second);
     assert!(first.exists());
     assert!(second.exists());
+}
+
+#[test]
+fn replay_record_old_artifact_deserializes_with_defaults() {
+    // JSON without wall_ms and cache_status (pre-Step-2 artifact format).
+    let json = r#"{
+        "request_id": "old-session",
+        "input_content_hash": "abc123",
+        "prompt_id": "ArticleTriage",
+        "prompt_version": 1,
+        "model_id": "openai::gpt-4o-mini",
+        "timestamp_utc": "2025-01-01T00:00:00Z",
+        "rendered_system_message": "",
+        "rendered_user_message": "",
+        "raw_response": "{}",
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+        "validated_output": null,
+        "validation_error": null,
+        "cost_microdollars": 42
+    }"#;
+    let record: ReplayRecord = serde_json::from_str(json).expect("should deserialize");
+    assert_eq!(record.wall_ms, 0);
+    assert_eq!(record.cache_status, "miss");
+}
+
+#[test]
+fn replay_record_roundtrip_new_fields() {
+    let dir = tempdir().unwrap();
+    let mut record = mock_record("session--4");
+    record.wall_ms = 250;
+    record.cache_status = "hit_validated".to_string();
+    let path = persist_replay_record(dir.path(), &record).unwrap();
+    let loaded = load_replay_record(&path).unwrap();
+    assert_eq!(loaded.wall_ms, 250);
+    assert_eq!(loaded.cache_status, "hit_validated");
 }

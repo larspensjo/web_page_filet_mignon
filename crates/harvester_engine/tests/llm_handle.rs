@@ -104,6 +104,8 @@ fn llm_handle_skips_provider_when_cache_hit() {
         validated_output: Some(json!({"title": "cached"})),
         validation_error: None,
         cost_microdollars: 0,
+        wall_ms: 0,
+        cache_status: "miss".to_string(),
     });
     let replay_cache = Arc::new(RwLock::new(replay_provider));
 

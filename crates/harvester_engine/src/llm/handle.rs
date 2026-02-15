@@ -515,6 +515,8 @@ async fn handle_completion_concurrent(
         validated_output: None,
         validation_error: None,
         cost_microdollars: cost,
+        wall_ms,
+        cache_status: "miss".to_string(),
     };
 
     match validation_result {

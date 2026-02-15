@@ -31,6 +31,18 @@ pub struct ReplayRecord {
     pub validated_output: Option<Value>,
     pub validation_error: Option<String>,
     pub cost_microdollars: u64,
+    /// Measured wall time in milliseconds for this run. Defaults to 0 for
+    /// records written before this field was introduced.
+    #[serde(default)]
+    pub wall_ms: u64,
+    /// Cache status string (`"miss"` or `"hit_validated"`). Defaults to
+    /// `"miss"` for records written before this field was introduced.
+    #[serde(default = "default_cache_status")]
+    pub cache_status: String,
+}
+
+fn default_cache_status() -> String {
+    "miss".to_string()
 }
 
 /// Returns a SHA-256 hex digest for the provided input.
