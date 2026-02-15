@@ -312,6 +312,16 @@ async fn handle_completion_concurrent(
         }
     }
     let model = resolve_model(prompt_id, model_override.as_ref(), config);
+    if let Some(ref override_model) = model_override {
+        engine_info!(
+            "[llm-dispatch] request_id={} override model={:?}/{} resolved={:?}/{}",
+            request_id,
+            override_model.provider(),
+            override_model.model_name(),
+            model.provider(),
+            model.model_name()
+        );
+    }
     let (template, version) = match fetch_prompt_template(config, prompt_id, prompt_version) {
         Some(pair) => pair,
         None => {
