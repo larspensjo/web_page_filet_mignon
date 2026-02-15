@@ -142,6 +142,32 @@ pub struct LlmFailureMetadata {
 }
 
 // ---------------------------------------------------------------------------
+// Conversion
+// ---------------------------------------------------------------------------
+
+impl From<LlmFailureMetadata> for LlmRunMetadata {
+    /// Convert a `LlmFailureMetadata` into `LlmRunMetadata` for failed runs
+    /// that had partial timing/model info available (e.g. `ValidationFailed`).
+    /// Token and cost fields are set to zero; `parse_ok` is `false`.
+    fn from(f: LlmFailureMetadata) -> Self {
+        Self {
+            prompt_id: f.prompt_id,
+            prompt_version: f.prompt_version,
+            resolved_model: f.resolved_model.unwrap_or_default(),
+            input_bytes: f.input_bytes,
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_microdollars: 0,
+            wall_ms: f.wall_ms.unwrap_or(0),
+            parse_ok: false,
+            validation_error: None,
+            cache_status: CacheStatus::Miss,
+            timestamp_utc: f.timestamp_utc,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

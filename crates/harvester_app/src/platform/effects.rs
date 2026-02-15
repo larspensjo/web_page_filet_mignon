@@ -18,7 +18,7 @@ use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
-    llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, PromptRegistry},
+    llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, LlmRunMetadata, PromptRegistry},
     load_and_prepare_articles_filtered, load_and_prepare_articles_for_triage, poll_curated_source,
     poll_file_source, poll_rss_source, AtomicFileWriter, Converter, DecodeError, EngineConfig,
     EngineEvent, EngineHandle, Extractor, FetchSettings, LinkExtractingConverter,
@@ -847,19 +847,31 @@ fn map_llm_event(event: LlmEvent) -> Msg {
                 Err(LlmCompletionError::ValidationFailed {
                     reason,
                     raw_response,
-                    ..
+                    failure_metadata,
                 }) => (
                     LlmResultKind::ValidationFailed {
                         reason,
                         raw_response,
                     },
-                    None,
+                    failure_metadata.map(LlmRunMetadata::from),
                 ),
-                Err(LlmCompletionError::QuotaExhausted { description, .. }) => (
+                Err(LlmCompletionError::QuotaExhausted {
+                    description,
+                    failure_metadata,
+                }) => (
                     LlmResultKind::QuotaExhausted {
                         reason: description,
                     },
-                    None,
+                    failure_metadata.map(LlmRunMetadata::from),
+                ),
+                Err(LlmCompletionError::PersistenceFailed {
+                    detail,
+                    failure_metadata,
+                }) => (
+                    LlmResultKind::Failed {
+                        reason: format!("replay persistence failed: {}", detail),
+                    },
+                    failure_metadata.map(LlmRunMetadata::from),
                 ),
                 Err(error) => (
                     LlmResultKind::Failed {
