@@ -13,6 +13,7 @@ use crate::{
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage};
 
 // Left side is split into a fixed-width input panel plus a resizable jobs panel.
@@ -205,7 +206,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 context,
             }]
         }
-        Msg::LlmCompleted { request_id, result, .. } => {
+        Msg::LlmCompleted { request_id, result, metadata } => {
             let new_state = match &result {
                 LlmResultKind::Success {
                     output_json,
@@ -462,25 +463,25 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     }
                 };
                 match &result {
-                    LlmResultKind::Success {
-                        output_json,
-                        input_tokens,
-                        output_tokens,
-                        prompt_version,
-                        model_id,
-                    } => {
+                    LlmResultKind::Success { output_json, input_tokens, output_tokens, .. } => {
                         engine_info!(
                             "[prompt-lab] run completed run_id={} request_id={} tokens_in={} tokens_out={}",
                             run_id.0, request_id, input_tokens, output_tokens
                         );
-                        state.complete_prompt_lab_run(
-                            run_id,
-                            output_json.clone(),
-                            *input_tokens,
-                            *output_tokens,
-                            *prompt_version,
-                            model_id.clone(),
-                        );
+                        // metadata is always Some for a Success result.
+                        if let Some(run_metadata) = metadata {
+                            state.complete_prompt_lab_run(
+                                run_id,
+                                output_json.clone(),
+                                run_metadata,
+                            );
+                        } else {
+                            engine_warn!(
+                                "[prompt-lab] run completed but metadata missing run_id={} request_id={}",
+                                run_id.0, request_id
+                            );
+                            state.fail_prompt_lab_run(run_id, "metadata missing".to_string());
+                        }
                     }
                     _ => {
                         let reason = reason_from_result(&result);
@@ -2091,7 +2092,7 @@ mod tests {
                 prompt_version: 1,
                 model_id: "model-x".to_string(),
             },
-            metadata: None,
+            metadata: Some(LlmRunMetadata::stub()),
         });
         assert!(effects.is_empty());
         use crate::prompt_lab::PromptLabRunStatus;
@@ -2149,7 +2150,7 @@ mod tests {
         let rid = state.allocate_next_llm_request_id();
         let run = state.allocate_next_prompt_lab_run_id();
         state.add_prompt_lab_pending_run(run, PromptLabStage::Triage, PromptId::ArticleTriage, "x".to_string(), rid);
-        state.complete_prompt_lab_run(run, "{}".to_string(), 1, 1, 1, "m".to_string());
+        state.complete_prompt_lab_run(run, "{}".to_string(), LlmRunMetadata::stub());
         state.consume_prompt_lab_ownership(rid);
         assert_eq!(state.prompt_lab().run_count(), 1);
         // Send clear message
@@ -2268,7 +2269,7 @@ mod tests {
                 prompt_version: 1,
                 model_id: "m".to_string(),
             },
-            metadata: None,
+            metadata: Some(LlmRunMetadata::stub()),
         });
         assert_eq!(state.triage().completed_count(), triage_completed_before, "triage completed count must not change");
         assert!(matches!(

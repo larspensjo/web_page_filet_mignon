@@ -101,6 +101,16 @@ pub struct PromptLabRunSummaryView {
     pub failure_reason: Option<String>,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
+    /// Cost in microdollars (None if metadata not available).
+    pub cost_microdollars: Option<u64>,
+    /// Wall time in milliseconds (None if metadata not available).
+    pub wall_ms: Option<u64>,
+    /// Resolved model name (None if metadata not available).
+    pub resolved_model: Option<String>,
+    /// Whether the response parsed and validated successfully.
+    pub parse_ok: Option<bool>,
+    /// Cache hit/miss status as a display string (None if metadata not available).
+    pub cache_status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,23 +139,29 @@ impl Default for PromptLabView {
 impl PromptLabView {
     pub(crate) fn from_state(state: &PromptLabState) -> Self {
         let latest_run = state.latest_run().map(|r| {
-            let (status_label, output_json, failure_reason, input_tokens, output_tokens) =
+            let (status_label, output_json, failure_reason, input_tokens, output_tokens,
+                 cost_microdollars, wall_ms, resolved_model, parse_ok, cache_status) =
                 match &r.status {
-                    PromptLabRunStatus::Pending { .. } => ("pending", None, None, None, None),
+                    PromptLabRunStatus::Pending { .. } => {
+                        ("pending", None, None, None, None, None, None, None, None, None)
+                    }
                     PromptLabRunStatus::Completed {
                         output_json,
-                        input_tokens,
-                        output_tokens,
-                        ..
+                        metadata,
                     } => (
                         "completed",
                         Some(output_json.clone()),
                         None,
-                        Some(*input_tokens),
-                        Some(*output_tokens),
+                        Some(metadata.input_tokens),
+                        Some(metadata.output_tokens),
+                        Some(metadata.cost_microdollars),
+                        Some(metadata.wall_ms),
+                        Some(metadata.resolved_model.clone()),
+                        Some(metadata.parse_ok),
+                        Some(format!("{:?}", metadata.cache_status).to_lowercase()),
                     ),
                     PromptLabRunStatus::Failed { reason } => {
-                        ("failed", None, Some(reason.clone()), None, None)
+                        ("failed", None, Some(reason.clone()), None, None, None, None, None, None, None)
                     }
                 };
             PromptLabRunSummaryView {
@@ -156,6 +172,11 @@ impl PromptLabView {
                 failure_reason,
                 input_tokens,
                 output_tokens,
+                cost_microdollars,
+                wall_ms,
+                resolved_model,
+                parse_ok,
+                cache_status,
             }
         });
         Self {

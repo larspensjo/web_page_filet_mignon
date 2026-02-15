@@ -5,6 +5,7 @@
 //! or `TriageSession` directly.
 
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::run_metadata::LlmRunMetadata;
 
 // ---------------------------------------------------------------------------
 // Stage
@@ -38,10 +39,7 @@ pub enum PromptLabRunStatus {
     },
     Completed {
         output_json: String,
-        input_tokens: u32,
-        output_tokens: u32,
-        prompt_version: PromptVersion,
-        model_id: String,
+        metadata: LlmRunMetadata,
     },
     Failed {
         reason: String,
@@ -174,19 +172,13 @@ impl PromptLabState {
         &mut self,
         run_id: PromptLabRunId,
         output_json: String,
-        input_tokens: u32,
-        output_tokens: u32,
-        prompt_version: PromptVersion,
-        model_id: String,
+        metadata: LlmRunMetadata,
     ) {
         if let Some((_, record)) = self.runs.iter_mut().find(|(id, _)| *id == run_id) {
             if matches!(record.status, PromptLabRunStatus::Pending { .. }) {
                 record.status = PromptLabRunStatus::Completed {
                     output_json,
-                    input_tokens,
-                    output_tokens,
-                    prompt_version,
-                    model_id,
+                    metadata,
                 };
             }
         }
@@ -288,7 +280,7 @@ mod tests {
         let mut s = PromptLabState::default();
         let run_id = PromptLabRunId(1);
         s.add_pending_run(run_id, PromptLabStage::Triage, make_prompt_id(), "x".to_string(), 10);
-        s.complete_run(run_id, "{}".to_string(), 5, 10, make_prompt_version(), "model-x".to_string());
+        s.complete_run(run_id, "{}".to_string(), LlmRunMetadata::stub());
         let r = s.latest_run().unwrap();
         assert!(matches!(r.status, PromptLabRunStatus::Completed { .. }));
     }
@@ -308,9 +300,9 @@ mod tests {
         let mut s = PromptLabState::default();
         let run_id = PromptLabRunId(1);
         s.add_pending_run(run_id, PromptLabStage::Triage, make_prompt_id(), "x".to_string(), 10);
-        s.complete_run(run_id, "{}".to_string(), 5, 10, make_prompt_version(), "model-x".to_string());
+        s.complete_run(run_id, "{}".to_string(), LlmRunMetadata::stub());
         // Calling complete_run again on a Completed record is a no-op.
-        s.complete_run(run_id, "overwrite?".to_string(), 99, 99, make_prompt_version(), "other".to_string());
+        s.complete_run(run_id, "overwrite?".to_string(), LlmRunMetadata::stub());
         if let PromptLabRunStatus::Completed { output_json, .. } = &s.latest_run().unwrap().status {
             assert_eq!(output_json, "{}");
         } else {
@@ -324,7 +316,7 @@ mod tests {
         // Add a completed run
         let r1 = PromptLabRunId(1);
         s.add_pending_run(r1, PromptLabStage::Triage, make_prompt_id(), "a".to_string(), 10);
-        s.complete_run(r1, "{}".to_string(), 1, 1, make_prompt_version(), "m".to_string());
+        s.complete_run(r1, "{}".to_string(), LlmRunMetadata::stub());
         s.consume_ownership(10);
         // Add a failed run
         let r2 = PromptLabRunId(2);

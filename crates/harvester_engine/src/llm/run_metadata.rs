@@ -89,7 +89,7 @@ impl LlmRunMetadata {
         }
     }
 
-    #[cfg(test)]
+    /// Test/stub helper — returns a valid instance with sensible defaults.
     pub fn stub() -> Self {
         Self::new(
             PromptId::ArticleTriage,
@@ -107,7 +107,7 @@ impl LlmRunMetadata {
         )
     }
 
-    #[cfg(test)]
+    /// Test/stub helper — returns a stub with specified overrides.
     pub fn stub_with(
         parse_ok: bool,
         validation_error: Option<String>,

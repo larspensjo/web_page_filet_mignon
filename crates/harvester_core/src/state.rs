@@ -12,6 +12,7 @@ use crate::view_model::{
 };
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind, SourceId};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -1272,19 +1273,9 @@ impl AppState {
         &mut self,
         run_id: PromptLabRunId,
         output_json: String,
-        input_tokens: u32,
-        output_tokens: u32,
-        prompt_version: PromptVersion,
-        model_id: String,
+        metadata: LlmRunMetadata,
     ) {
-        self.prompt_lab.complete_run(
-            run_id,
-            output_json,
-            input_tokens,
-            output_tokens,
-            prompt_version,
-            model_id,
-        );
+        self.prompt_lab.complete_run(run_id, output_json, metadata);
     }
 
     pub(crate) fn fail_prompt_lab_run(&mut self, run_id: PromptLabRunId, reason: String) {
@@ -2654,14 +2645,8 @@ mod tests {
         // Add a completed run
         let req_id2 = state.allocate_next_llm_request_id();
         let run_id2 = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(
-            run_id2,
-            crate::prompt_lab::PromptLabStage::Triage,
-            PromptId::ArticleTriage,
-            "input2".to_string(),
-            req_id2,
-        );
-        state.complete_prompt_lab_run(run_id2, "{}".to_string(), 1, 1, 1, "m".to_string());
+        state.add_prompt_lab_pending_run(run_id2, crate::prompt_lab::PromptLabStage::Triage, PromptId::ArticleTriage, "input2".to_string(), req_id2);
+        state.complete_prompt_lab_run(run_id2, "{}".to_string(), harvester_engine::llm::run_metadata::LlmRunMetadata::stub());
         state.consume_prompt_lab_ownership(req_id2);
 
         state.clear_prompt_lab_history();
