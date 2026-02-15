@@ -32,6 +32,8 @@ use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::{effects, persistence};
 
 const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
+const MENU_ACTION_ARCHIVE: MenuActionId = MenuActionId(2);
+const MENU_ACTION_PROMPT_LAB: MenuActionId = MenuActionId(3);
 const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
 const LLM_MAX_CONCURRENT_REQUESTS_ENV: &str = "LLM_MAX_CONCURRENT_REQUESTS";
 const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
@@ -394,16 +396,27 @@ impl AppEventHandler {
         ));
     }
 
-    fn prompt_lab_toggle_msg(&self) -> Msg {
-        let visible = self
+    fn toggle_prompt_lab_from_menu(&self) {
+        let (input_panel_visible, prompt_lab_visible) = self
             .shared
             .lock()
-            .map(|guard| guard.state.view().prompt_lab.visible)
-            .unwrap_or(false);
-        if visible {
+            .map(|guard| {
+                let view = guard.state.view();
+                (view.input_panel_visible, view.prompt_lab.visible)
+            })
+            .unwrap_or((false, false));
+        if !prompt_lab_visible && !input_panel_visible {
+            let _ = self.msg_tx.send(Msg::ToggleInputPanel);
+        }
+        let msg = if prompt_lab_visible {
             Msg::PromptLabCloseRequested
         } else {
             Msg::PromptLabOpenRequested
+        };
+        let _ = self.msg_tx.send(msg.clone());
+        if matches!(msg, Msg::PromptLabOpenRequested) {
+            let _ = self.msg_tx.send(Msg::PromptLabContextEditorOpened);
+            let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorOpened);
         }
     }
 }
@@ -418,11 +431,6 @@ impl PlatformEventHandler for AppEventHandler {
                 if control_id == ui::constants::BUTTON_STOP =>
             {
                 let _ = self.msg_tx.send(Msg::StopFinishClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_ARCHIVE =>
-            {
-                let _ = self.msg_tx.send(Msg::ArchiveClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_BRIEFING =>
@@ -440,24 +448,9 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::PollSourcesClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_ADD_URL =>
-            {
-                let _ = self.msg_tx.send(Msg::ToggleInputPanel);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_OPEN_BROWSER =>
             {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_TOGGLE =>
-            {
-                let msg = self.prompt_lab_toggle_msg();
-                let _ = self.msg_tx.send(msg.clone());
-                if matches!(msg, Msg::PromptLabOpenRequested) {
-                    let _ = self.msg_tx.send(Msg::PromptLabContextEditorOpened);
-                    let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorOpened);
-                }
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_STAGE_TRIAGE =>
@@ -570,6 +563,12 @@ impl PlatformEventHandler for AppEventHandler {
             }
             AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ADD_URL => {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
+            }
+            AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ARCHIVE => {
+                let _ = self.msg_tx.send(Msg::ArchiveClicked);
+            }
+            AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_PROMPT_LAB => {
+                self.toggle_prompt_lab_from_menu();
             }
             AppEvent::InputTextChanged {
                 control_id, text, ..
@@ -1023,14 +1022,19 @@ mod tests {
     }
 
     #[test]
-    fn prompt_lab_toggle_emits_open_then_close() {
+    fn prompt_lab_menu_action_emits_open_then_close() {
         let (mut handler, rx) = test_handler_with_outbound();
-        handler.handle_event(AppEvent::ButtonClicked {
-            window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_TOGGLE,
+        handler.handle_event(AppEvent::MenuActionClicked {
+            action_id: MENU_ACTION_PROMPT_LAB,
         });
         assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("open"),
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("input panel open"),
+            Msg::ToggleInputPanel
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("lab open"),
             Msg::PromptLabOpenRequested
         );
         assert_eq!(
@@ -1052,9 +1056,8 @@ mod tests {
             );
             guard.state = state;
         }
-        handler.handle_event(AppEvent::ButtonClicked {
-            window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_TOGGLE,
+        handler.handle_event(AppEvent::MenuActionClicked {
+            action_id: MENU_ACTION_PROMPT_LAB,
         });
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250)).expect("close"),

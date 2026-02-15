@@ -2,15 +2,12 @@ use commanductui::types::ControlId;
 
 pub const INPUT_URLS: ControlId = ControlId::new(1001);
 pub const BUTTON_STOP: ControlId = ControlId::new(1003);
-pub const BUTTON_ARCHIVE: ControlId = ControlId::new(1004);
 pub const BUTTON_BRIEFING: ControlId = ControlId::new(1005);
 pub const BUTTON_TRIAGE: ControlId = ControlId::new(1007);
-pub const BUTTON_ADD_URL: ControlId = ControlId::new(1006);
 pub const BUTTON_POLL_SOURCES: ControlId = ControlId::new(1008);
 pub const BUTTON_OPEN_BROWSER: ControlId = ControlId::new(1009);
 pub const TREE_JOBS: ControlId = ControlId::new(1501);
 
-pub const BTN_PROMPT_LAB_TOGGLE: ControlId = ControlId::new(1010);
 pub const BTN_STAGE_TRIAGE: ControlId = ControlId::new(1011);
 pub const BTN_STAGE_SUMMARY: ControlId = ControlId::new(1012);
 pub const BTN_STAGE_BRIEFING: ControlId = ControlId::new(1013);

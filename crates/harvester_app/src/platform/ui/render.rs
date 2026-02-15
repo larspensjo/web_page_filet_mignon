@@ -33,7 +33,6 @@ pub struct TreeRenderState {
     prev_preview_text: Option<String>,
     prev_header_text: Option<String>,
     prev_stop_enabled: Option<bool>,
-    prev_archive_enabled: Option<bool>,
     prev_briefing_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
     prev_poll_enabled: Option<bool>,
@@ -44,7 +43,6 @@ pub struct TreeRenderState {
     prev_open_browser_enabled: Option<bool>,
     prev_prompt_lab_visible: bool,
     prev_prompt_lab_template_editor_open: bool,
-    prev_prompt_lab_toggle_text: Option<String>,
     prev_prompt_lab_status_text: Option<String>,
     prev_prompt_lab_metadata_text: Option<String>,
     prev_prompt_lab_url_input: Option<String>,
@@ -90,7 +88,6 @@ impl Default for TreeRenderState {
             prev_preview_text: None,
             prev_header_text: None,
             prev_stop_enabled: None,
-            prev_archive_enabled: None,
             prev_briefing_enabled: None,
             prev_triage_enabled: None,
             prev_poll_enabled: None,
@@ -101,7 +98,6 @@ impl Default for TreeRenderState {
             prev_open_browser_enabled: None,
             prev_prompt_lab_visible: false,
             prev_prompt_lab_template_editor_open: false,
-            prev_prompt_lab_toggle_text: None,
             prev_prompt_lab_status_text: None,
             prev_prompt_lab_metadata_text: None,
             prev_prompt_lab_url_input: None,
@@ -319,16 +315,6 @@ pub fn render(
         tree_state.prev_stop_enabled = Some(stop_enabled);
     }
 
-    let archive_enabled = view.job_count > 0;
-    if tree_state.prev_archive_enabled != Some(archive_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_ARCHIVE,
-            enabled: archive_enabled,
-        });
-        tree_state.prev_archive_enabled = Some(archive_enabled);
-    }
-
     let briefing_enabled = view.briefing_can_start;
     if tree_state.prev_briefing_enabled != Some(briefing_enabled) {
         cmds.push(PlatformCommand::SetControlEnabled {
@@ -367,21 +353,6 @@ pub fn render(
             enabled: open_browser_enabled,
         });
         tree_state.prev_open_browser_enabled = Some(open_browser_enabled);
-    }
-
-    let toggle_text = if view.prompt_lab.visible {
-        "Prompt Lab [open]"
-    } else {
-        "Prompt Lab [closed]"
-    }
-    .to_string();
-    if tree_state.prev_prompt_lab_toggle_text.as_deref() != Some(toggle_text.as_str()) {
-        cmds.push(PlatformCommand::SetControlText {
-            window_id,
-            control_id: BTN_PROMPT_LAB_TOGGLE,
-            text: toggle_text.clone(),
-        });
-        tree_state.prev_prompt_lab_toggle_text = Some(toggle_text);
     }
 
     let stage_triage_text = select_label(

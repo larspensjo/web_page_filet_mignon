@@ -9,6 +9,8 @@ use harvester_core::{DEFAULT_JOBS_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH, TOKEN_LI
 use super::constants::*;
 
 const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
+const MENU_ACTION_ARCHIVE: MenuActionId = MenuActionId(2);
+const MENU_ACTION_PROMPT_LAB: MenuActionId = MenuActionId(3);
 
 #[allow(clippy::vec_init_then_push)]
 pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
@@ -21,11 +23,23 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         menu_items: vec![MenuItemConfig {
             action: None,
             text: "File".to_string(),
-            children: vec![MenuItemConfig {
-                action: Some(MENU_ACTION_ADD_URL),
-                text: "Add URL\tCtrl+L".to_string(),
-                children: Vec::new(),
-            }],
+            children: vec![
+                MenuItemConfig {
+                    action: Some(MENU_ACTION_ADD_URL),
+                    text: "Add URL\tCtrl+L".to_string(),
+                    children: Vec::new(),
+                },
+                MenuItemConfig {
+                    action: Some(MENU_ACTION_ARCHIVE),
+                    text: "Archive".to_string(),
+                    children: Vec::new(),
+                },
+                MenuItemConfig {
+                    action: Some(MENU_ACTION_PROMPT_LAB),
+                    text: "Prompt Lab".to_string(),
+                    children: Vec::new(),
+                },
+            ],
         }],
     });
 
@@ -191,12 +205,6 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: PANEL_PROMPT_LAB_TEMPLATE_USER_ROW,
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB),
-        control_id: BTN_PROMPT_LAB_TOGGLE,
-        text: "Prompt Lab".to_string(),
     });
     commands.push(PlatformCommand::CreateLabel {
         window_id,
@@ -373,20 +381,6 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_STOP,
         text: "Stop / Finish".to_string(),
-    });
-
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_ARCHIVE,
-        text: "Archive".to_string(),
-    });
-
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_ADD_URL,
-        text: "Add URL".to_string(),
     });
 
     commands.push(PlatformCommand::CreateButton {
@@ -827,18 +821,10 @@ fn build_layout_rules(
             margin: (0, 6, 0, 6),
         },
         LayoutRule {
-            control_id: BTN_PROMPT_LAB_TOGGLE,
-            parent_control_id: Some(PANEL_PROMPT_LAB),
-            dock_style: DockStyle::Top,
-            order: 0,
-            fixed_size: Some(28),
-            margin: (0, 0, 2, 0),
-        },
-        LayoutRule {
             control_id: LABEL_PROMPT_LAB_STATUS,
             parent_control_id: Some(PANEL_PROMPT_LAB),
             dock_style: DockStyle::Top,
-            order: 1,
+            order: 0,
             fixed_size: Some(24),
             margin: (0, 0, 2, 0),
         },
@@ -851,26 +837,10 @@ fn build_layout_rules(
             margin: (6, 6, 6, 6),
         },
         LayoutRule {
-            control_id: BUTTON_ADD_URL,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 0,
-            fixed_size: Some(160),
-            margin: (6, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_ARCHIVE,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 1,
-            fixed_size: Some(160),
-            margin: (6, 6, 6, 6),
-        },
-        LayoutRule {
             control_id: BUTTON_STOP,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
-            order: 2,
+            order: 0,
             fixed_size: Some(160),
             margin: (6, 6, 6, 0),
         },
@@ -878,7 +848,7 @@ fn build_layout_rules(
             control_id: BUTTON_BRIEFING,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
-            order: 3,
+            order: 1,
             fixed_size: Some(160),
             margin: (6, 6, 6, 0),
         },
@@ -886,7 +856,7 @@ fn build_layout_rules(
             control_id: BUTTON_TRIAGE,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
-            order: 4,
+            order: 2,
             fixed_size: Some(160),
             margin: (6, 6, 6, 0),
         },
@@ -894,7 +864,7 @@ fn build_layout_rules(
             control_id: BUTTON_POLL_SOURCES,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
-            order: 5,
+            order: 3,
             fixed_size: Some(160),
             margin: (6, 6, 6, 0),
         },
@@ -902,7 +872,7 @@ fn build_layout_rules(
             control_id: BUTTON_OPEN_BROWSER,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
-            order: 6,
+            order: 4,
             fixed_size: Some(160),
             margin: (6, 6, 6, 0),
         },
@@ -1291,16 +1261,6 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
-        control_id: BUTTON_ARCHIVE,
-        style_id: StyleId::DefaultButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_ADD_URL,
-        style_id: StyleId::DefaultButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
         control_id: BUTTON_BRIEFING,
         style_id: StyleId::DefaultButton,
     });
@@ -1320,7 +1280,6 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::DefaultButton,
     });
     for control_id in [
-        BTN_PROMPT_LAB_TOGGLE,
         BTN_STAGE_TRIAGE,
         BTN_STAGE_SUMMARY,
         BTN_STAGE_BRIEFING,
