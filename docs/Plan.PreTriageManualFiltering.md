@@ -11,6 +11,77 @@ This plan prioritizes:
 3. Clear visual status in treeview without overloading the UI.
 4. Testability and long-term extensibility.
 
+## UX/Workflow Delta (2026-02-15)
+
+This section supersedes earlier interaction details in this plan where they conflict.
+
+### Final UX Rules
+
+1. **Pre-triage is automatic**:
+   - Pre-triage runs whenever the effective article/job corpus changes.
+   - Users do not start pre-triage manually in normal workflow.
+   - A manual "recompute pre-triage" action may exist only in debug/developer surfaces.
+
+2. **Checkbox semantics are include-oriented**:
+   - Checkbox label/significance is: `Include in triage`.
+   - `Checked` means included.
+   - `Unchecked` means excluded.
+   - We never use checked state to mean "exclude".
+
+3. **Manual overrides persist across restarts**:
+   - Override state is persisted and restored on app startup.
+   - Persisted key should be stable and deterministic (`ArticleFilterKey` or equivalent).
+   - On startup: recompute auto verdicts, then apply persisted manual overrides.
+
+4. **Buttons have single purpose**:
+   - `Run Triage`: starts AI triage from current resolved inclusion set only.
+   - `Reset Overrides`: clears manual override decisions only.
+   - Any debug-only button must keep one explicit behavior and be clearly labeled.
+   - No primary button behavior may switch meaning based on phase.
+
+### Canonical Workflow
+
+1. User fetches/loads articles.
+2. Reducer/effect pipeline runs automatic pre-triage and computes include/exclude recommendations.
+3. UI renders status and per-article include checkboxes (checked = included).
+4. User optionally adjusts include checkboxes (manual overrides are saved).
+5. User presses `Run Triage` once to start AI triage.
+6. Restarting app restores previous override decisions for matching keys.
+
+### State and Reducer Implications
+
+1. Keep `PreTriageSession`, but remove "manually initiated pre-triage phase" from normal UX.
+2. `Msg::TriageClicked` must not mean "run pre-triage"; it only means "run AI triage now".
+3. Add/update actions for automatic pre-triage recomputation trigger points:
+   - articles loaded
+   - completed job set changed
+   - policy/config changed
+4. Preserve UDF traceability:
+   - `Action -> Reducer -> State -> Render`
+   - optional effects for persistence/load become `Action -> Effect -> Action`.
+
+### Persistence Contract
+
+1. Persist manual decisions as a dedicated store in app state persistence.
+2. Persist only manual overrides, not raw auto verdicts.
+3. During rehydration:
+   - load overrides
+   - recompute policy verdicts for current corpus
+   - apply overrides where key matches
+4. Missing-key overrides are ignored safely (optional log at debug/info level).
+
+### UI Contract
+
+1. Job row control text and tooltip must use include terminology.
+2. Filter status strings should remain explicit:
+   - `Auto Included`
+   - `Auto Excluded`
+   - `Manual Included`
+   - `Manual Excluded`
+   - `Needs Review` (if retained as an informational status)
+3. Marker colors remain secondary to text and checkbox meaning.
+4. Avoid introducing a two-click "phase button" workflow in main UI.
+
 ## Current Code Baseline (verified against source)
 
 1. Triage starts from `Msg::TriageClicked` and dispatches `Effect::LoadArticlesForTriage` (a
@@ -338,17 +409,15 @@ precedence in non-reviewing phases.
 
 ## UI Interaction Proposal
 
-Lowest-risk UX:
-1. First click on `Triage Articles` runs filter evaluation.
-2. If review is required, same button label updates (e.g., `Apply Filter`) while in reviewing phase
-   (`PreTriageApplyClicked`).
-3. User sets overrides by toggling job rows (only active in `Reviewing` phase).
-4. Status text shows counts: `Pre-triage: 12 include, 4 review, 3 filtered`.
-5. Re-clicking `Triage Articles` during `Reviewing` resets the session (guard: prompt user or use
-   `PreTriageResetClicked`).
+Primary UX:
+1. Pre-triage executes automatically; no dedicated first-click action.
+2. User sets include/exclude overrides directly using include-oriented checkboxes.
+3. `Run Triage` always starts AI triage from the current resolved include set.
+4. `Reset Overrides` always clears manual decisions and returns to auto verdicts.
+5. Status text shows counts: `Pre-triage: 12 included, 4 excluded, 3 overridden`.
 
 Required event wiring (not yet implemented):
-1. Job item `CheckState` must be conditional on phase (currently hardcoded `Unchecked`).
+1. Job item `CheckState` must reflect resolved inclusion decision.
 2. `AppEvent::TreeViewItemToggledByUser` must arm `TreeItemKind::Job` (currently falls through).
 3. `tree_item_marker` must arm `TreeItemKind::Job` (currently falls through).
 
@@ -478,13 +547,12 @@ Use `engine_logging` with category tag `[pre-triage]`:
 
 ## Future Extensions
 
-1. **Persist manual decisions** by `(url, content_hash)` to avoid repeated review across sessions.
+1. **Bulk actions** (`Exclude all review`, `Include all review`).
 2. **Domain-specific policy profiles** (`strict` / `normal` / `relaxed`).
 3. **Policy file** (`contexts/pre_triage_filter.toml`) with validation on load.
-4. **Bulk actions** (`Exclude all review`, `Include all review`).
-5. **Preview panel** explaining matched reasons for a selected article.
-6. **Telemetry summary** (`false positive override rate`, `filter hit-rate`).
-7. **BriefingPrereq manual review** (Option B deferral resolved — add full review phase to briefing path).
+4. **Preview panel** explaining matched reasons for a selected article.
+5. **Telemetry summary** (`false positive override rate`, `filter hit-rate`).
+6. **BriefingPrereq manual review** (Option B deferral resolved — add full review phase to briefing path).
 
 ---
 

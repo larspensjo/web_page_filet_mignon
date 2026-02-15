@@ -206,6 +206,13 @@ impl PreTriageSession {
         matches!(self.phase, PreTriagePhase::Reviewing)
     }
 
+    pub fn is_interactive(&self) -> bool {
+        matches!(
+            self.phase,
+            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+        )
+    }
+
     pub fn has_unresolved_review(&self) -> bool {
         self.entries.iter().any(|entry| {
             matches!(entry.auto_verdict, AutoVerdict::Review) && entry.manual_decision.is_none()
@@ -248,7 +255,7 @@ impl PreTriageSession {
         key: &ArticleFilterKey,
         decision: ManualDecision,
     ) -> Result<(), &'static str> {
-        if !self.is_reviewing() {
+        if !self.is_interactive() {
             return Err("manual decisions are only allowed while reviewing");
         }
         let Some(entry) = self.entries.iter_mut().find(|entry| &entry.key == key) else {
@@ -265,6 +272,34 @@ impl PreTriageSession {
             PreTriagePhase::ReadyToTriage
         };
         Ok(())
+    }
+
+    pub fn clear_manual_decisions(&mut self) {
+        for entry in &mut self.entries {
+            entry.manual_decision = None;
+        }
+        self.phase = self.derive_phase_after_load();
+    }
+
+    pub fn apply_manual_overrides(
+        &mut self,
+        overrides: &HashMap<ArticleFilterKey, ManualDecision>,
+    ) {
+        if overrides.is_empty() {
+            self.phase = self.derive_phase_after_load();
+            return;
+        }
+        for entry in &mut self.entries {
+            entry.manual_decision = overrides.get(&entry.key).copied();
+        }
+        self.phase = self.derive_phase_after_load();
+    }
+
+    pub fn manual_overrides(&self) -> HashMap<ArticleFilterKey, ManualDecision> {
+        self.entries
+            .iter()
+            .filter_map(|entry| entry.manual_decision.map(|decision| (entry.key.clone(), decision)))
+            .collect()
     }
 
     pub fn resolved_included_urls(&self) -> Vec<String> {
@@ -318,11 +353,7 @@ impl PreTriageSession {
                 reason: "no articles passed pre-triage filters".to_string(),
             };
         }
-        if self.has_unresolved_review() {
-            PreTriagePhase::Reviewing
-        } else {
-            PreTriagePhase::ReadyToTriage
-        }
+        PreTriagePhase::ReadyToTriage
     }
 
     fn resolved_included_urls_internal(&self) -> Vec<String> {
@@ -341,8 +372,8 @@ fn resolved_decision(entry: &ArticleFilterEntry) -> ManualDecision {
         return decision;
     }
     match entry.auto_verdict {
-        AutoVerdict::HardExclude | AutoVerdict::Review => ManualDecision::Exclude,
-        AutoVerdict::Include => ManualDecision::Include,
+        AutoVerdict::HardExclude => ManualDecision::Exclude,
+        AutoVerdict::Review | AutoVerdict::Include => ManualDecision::Include,
     }
 }
 
@@ -530,12 +561,12 @@ mod tests {
             .join(" ");
         let mut session =
             PreTriageSession::load_articles(vec![article("https://example.com", None, &body)], &policy);
-        session.phase = PreTriagePhase::Reviewing;
+        session.phase = PreTriagePhase::ReadyToTriage;
         let before = session.corpus_fingerprint();
         let key = session.entries()[0].key.clone();
         session
-            .set_manual_decision(&key, ManualDecision::Include)
-            .expect("manual include");
+            .set_manual_decision(&key, ManualDecision::Exclude)
+            .expect("manual exclude");
         let after = session.corpus_fingerprint();
         assert_ne!(before, after);
     }

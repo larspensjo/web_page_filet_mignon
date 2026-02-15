@@ -45,6 +45,17 @@ fn completed_state_with_jobs(urls: &[&str]) -> (AppState, Vec<u64>) {
     (state, job_ids)
 }
 
+fn ready_state_with_pretriage(urls: &[&str]) -> (AppState, Vec<u64>) {
+    let (state, job_ids) = completed_state_with_jobs(urls);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            articles: sample_articles(urls),
+        },
+    );
+    (state, job_ids)
+}
+
 fn sample_articles(urls: &[&str]) -> Vec<LoadedArticle> {
     urls.iter()
         .map(|url| LoadedArticle {
@@ -108,25 +119,18 @@ fn assert_persist_triage_cache_effect(effects: &[Effect], state: &AppState) {
 #[test]
 fn triage_clicked_emits_load_effect() {
     init_logging();
-    let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let (state, _) = ready_state_with_pretriage(&["https://one.example"]);
     let (state, effects) = update(state, Msg::TriageClicked);
-    assert_eq!(
-        effects,
-        vec![
-            Effect::LoadPromptContexts,
-            Effect::LoadLlmMetadata,
-            Effect::LoadArticlesForTriage {
-                ordered_urls: vec!["https://one.example".to_string()],
-            }
-        ]
-    );
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
     assert!(!state.view().triage_can_start);
 }
 
 #[test]
 fn triage_clicked_while_active_is_noop() {
     init_logging();
-    let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let (state, _) = ready_state_with_pretriage(&["https://one.example"]);
     let (state, _) = update(state, Msg::TriageClicked);
     let (_state, effects) = update(state, Msg::TriageClicked);
     assert!(effects.is_empty());
@@ -136,9 +140,9 @@ fn triage_clicked_while_active_is_noop() {
 fn triage_articles_loaded_dispatches_first_request() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
-    let (state, _) = update(state, Msg::TriageClicked);
     let articles = sample_articles(&["https://one.example"]);
-    let (_, effects) = update(state, Msg::TriageArticlesLoaded { articles });
+    let (state, _) = update(state, Msg::TriageArticlesLoaded { articles });
+    let (_, effects) = update(state, Msg::TriageClicked);
     let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
     assert_eq!(request_id, 1);
 }
@@ -147,14 +151,13 @@ fn triage_articles_loaded_dispatches_first_request() {
 fn triage_articles_loaded_empty_fails() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
-    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             articles: Vec::new(),
         },
     );
-    assert!(state.view().triage_can_start);
+    assert!(!state.view().triage_can_start);
     assert!(state.view().triage_progress.is_none());
 }
 
@@ -162,27 +165,26 @@ fn triage_articles_loaded_empty_fails() {
 fn triage_load_failed_transitions_to_failed() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
-    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoadFailed {
             reason: "boom".to_string(),
         },
     );
-    assert!(state.view().triage_can_start);
+    assert!(!state.view().triage_can_start);
     assert!(state.view().triage_progress.is_none());
 }
 
 fn triage_flow_with_two_articles() -> (AppState, Vec<LoadedArticle>) {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let articles = sample_articles(&["https://one.example", "https://two.example"]);
-    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             articles: articles.clone(),
         },
     );
+    let (state, _) = update(state, Msg::TriageClicked);
     (state, articles)
 }
 
@@ -233,7 +235,6 @@ fn triage_all_completed_transitions_to_complete() {
     assert_persist_triage_cache_effect(&effects, &state);
     let view = state.view();
     assert!(view.triage_can_start);
-    assert!(view.triage_progress.is_none());
 }
 
 #[test]
@@ -323,16 +324,9 @@ fn triage_rerun_after_complete_starts_fresh() {
         },
     );
     let (state, effects) = update(state, Msg::TriageClicked);
-    assert_eq!(
-        effects,
-        vec![
-            Effect::LoadPromptContexts,
-            Effect::LoadLlmMetadata,
-            Effect::LoadArticlesForTriage {
-                ordered_urls: vec!["https://one.example".to_string()],
-            }
-        ]
-    );
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
     assert!(!state.view().triage_can_start);
 }
 
@@ -364,13 +358,13 @@ fn view_model_annotates_jobs_with_triage() {
 fn view_model_sorts_by_priority() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://low.example", "https://high.example"]);
-    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             articles: sample_articles(&["https://low.example", "https://high.example"]),
         },
     );
+    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
@@ -397,13 +391,13 @@ fn view_model_equal_priority_sorted_by_job_id() {
     init_logging();
     let (state, job_ids) =
         completed_state_with_jobs(&["https://first.example", "https://second.example"]);
-    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             articles: sample_articles(&["https://first.example", "https://second.example"]),
         },
     );
+    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
@@ -429,13 +423,13 @@ fn view_model_equal_priority_sorted_by_job_id() {
 fn view_model_stale_triage_url_ignored() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
-    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             articles: sample_articles(&["https://one.example", "https://stale.example"]),
         },
     );
+    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
@@ -478,7 +472,7 @@ fn triage_can_start_false_without_completed_jobs() {
 #[test]
 fn triage_can_start_true_with_completed_jobs() {
     init_logging();
-    let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let (state, _) = ready_state_with_pretriage(&["https://one.example"]);
     assert!(state.view().triage_can_start);
 }
 

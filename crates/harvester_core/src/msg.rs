@@ -144,6 +144,10 @@ pub enum Msg {
     SummaryCacheHydrated { cache: crate::SummaryCache },
     /// Triage cache hydrated from persisted store at startup.
     TriageCacheHydrated { cache: crate::TriageCache },
+    /// Pre-triage manual overrides hydrated from persisted store at startup.
+    PreTriageOverridesHydrated {
+        overrides: HashMap<ArticleFilterKey, ManualDecision>,
+    },
     /// User requested to open the currently selected article URL in the default browser.
     OpenInBrowserClicked,
     /// User requested to open the Prompt Lab panel.

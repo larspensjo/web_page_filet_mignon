@@ -110,7 +110,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             extracted_links,
         } => {
             state.apply_done(job_id, result, content_preview, extracted_links);
-            Vec::new()
+            refresh_pre_triage_if_needed(&mut state)
         }
         Msg::LinkToggleRequested {
             job_id,
@@ -167,7 +167,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
-            Vec::new()
+            refresh_pre_triage_if_needed(&mut state)
         }
         Msg::SplitterMoved {
             desired_left_width_px,
@@ -609,26 +609,14 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 engine_info!("[briefing-triage] interleave blocked: briefing owns triage");
                 return (state, Vec::new());
             }
-            if matches!(state.pre_triage().phase(), PreTriagePhase::LoadingArticles) {
-                return (state, Vec::new());
-            }
-            if matches!(
-                state.pre_triage().phase(),
-                PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
-            ) {
-                return update(state, Msg::PreTriageApplyClicked);
-            }
             if !state.triage().can_start() {
                 return (state, Vec::new());
             }
-            let ordered_urls = state.ordered_completed_job_urls();
-            state.set_pre_triage(PreTriageSession::new_loading());
+            if !matches!(state.pre_triage().phase(), PreTriagePhase::ReadyToTriage) {
+                return (state, Vec::new());
+            }
             engine_info!("[triage] triage requested");
-            vec![
-                Effect::LoadPromptContexts,
-                Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForTriage { ordered_urls },
-            ]
+            start_triage_from_pretriage(&mut state)
         }
         Msg::TriageArticlesLoaded { articles } => {
             let policy = PreTriagePolicy::default();
@@ -640,37 +628,27 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 .map(|job| (job.job_id, job.url.clone()))
                 .collect::<Vec<_>>();
             pre_triage.bind_job_ids(&job_url_pairs);
-            let phase = pre_triage.phase().clone();
+            pre_triage.apply_manual_overrides(state.pre_triage_manual_overrides());
             state.set_pre_triage(pre_triage);
-            match phase {
-                PreTriagePhase::ReadyToTriage => start_triage_from_pretriage(&mut state),
-                PreTriagePhase::Reviewing => {
-                    state.mark_dirty();
-                    Vec::new()
-                }
-                PreTriagePhase::Failed { reason } => {
-                    state.triage_mut().fail(reason);
-                    state.mark_dirty();
-                    Vec::new()
-                }
-                PreTriagePhase::LoadingArticles | PreTriagePhase::Idle => Vec::new(),
-            }
+            state.mark_dirty();
+            Vec::new()
         }
         Msg::TriageArticlesLoadFailed { reason } => {
+            state.set_pre_triage(PreTriageSession::default());
+            state.clear_pre_triage_manual_overrides();
             state.triage_mut().fail(reason);
-            state.pre_triage_mut().reset();
             state.mark_dirty();
             Vec::new()
         }
         Msg::PreTriageDecisionSet { key, decision } => {
-            if state.pre_triage_mut().set_manual_decision(&key, decision).is_ok() {
+            if state.set_pre_triage_manual_decision(key, decision) {
                 state.mark_dirty();
             }
             Vec::new()
         }
-        Msg::PreTriageApplyClicked => start_triage_from_pretriage(&mut state),
+        Msg::PreTriageApplyClicked => Vec::new(),
         Msg::PreTriageResetClicked => {
-            state.pre_triage_mut().reset();
+            state.clear_pre_triage_manual_overrides();
             state.mark_dirty();
             Vec::new()
         }
@@ -720,6 +698,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_triage_cache(cache);
             state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PreTriageOverridesHydrated { overrides } => {
+            state.set_pre_triage_manual_overrides(overrides);
             Vec::new()
         }
         Msg::OpenInBrowserClicked => match state.selected_article_url() {
@@ -1132,6 +1114,18 @@ fn parse_urls(raw: &str) -> Vec<String> {
         .collect()
 }
 
+fn refresh_pre_triage_if_needed(state: &mut AppState) -> Vec<Effect> {
+    let ordered_urls = state.ordered_completed_job_urls();
+    if ordered_urls.is_empty() {
+        state.set_pre_triage(PreTriageSession::default());
+        state.clear_pre_triage_manual_overrides();
+        return Vec::new();
+    }
+    state.set_pre_triage(PreTriageSession::new_loading());
+    state.mark_dirty();
+    vec![Effect::LoadArticlesForTriage { ordered_urls }]
+}
+
 fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
     let included = state.pre_triage().resolved_included_articles();
     if included.is_empty() {
@@ -1144,7 +1138,6 @@ fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
     state.set_triage(TriageSession::new_loading(None));
     state.triage_mut().set_articles(included);
     state.triage_mut().transition_to_triaging();
-    state.pre_triage_mut().reset();
     state.mark_dirty();
     state.start_triage_cache_run();
     state.mark_triage_metadata_ready();
@@ -2127,20 +2120,17 @@ mod tests {
         }
     }
 
+    fn start_triage_for_test(state: AppState, articles: Vec<LoadedArticle>) -> (AppState, Vec<Effect>) {
+        let (state, _) = update(state, Msg::TriageArticlesLoaded { articles });
+        update(state, Msg::TriageClicked)
+    }
+
     #[test]
     fn triage_clicked_emits_load_effects() {
         init_logging();
         let state = AppState::new();
         let (_state, effects) = update(state, Msg::TriageClicked);
-        assert!(effects.iter().any(|effect| {
-            matches!(
-                effect,
-                Effect::LoadArticlesForTriage { ordered_urls }
-                    if ordered_urls.is_empty()
-            )
-        }));
-        assert!(effects.contains(&Effect::LoadLlmMetadata));
-        assert!(effects.contains(&Effect::LoadPromptContexts));
+        assert!(effects.is_empty());
     }
 
     #[test]
@@ -2176,16 +2166,7 @@ mod tests {
         init_logging();
         let mut state = AppState::new();
         state.set_triage_max_in_flight(2);
-        let (_, _) = update(state.clone(), Msg::TriageClicked);
-
-        // Simulate loading 3 articles with limit=2: expect 2 effects emitted.
-        state.set_triage(crate::triage::TriageSession::new_loading(None));
-        let (state, effects) = update(
-            state,
-            Msg::TriageArticlesLoaded {
-                articles: loaded_triage_articles(3),
-            },
-        );
+        let (state, effects) = start_triage_for_test(state, loaded_triage_articles(3));
         let llm_effects: Vec<_> = effects
             .iter()
             .filter(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
@@ -2204,15 +2185,7 @@ mod tests {
         init_logging();
         let mut state = AppState::new();
         state.set_triage_max_in_flight(2);
-        state.set_triage(crate::triage::TriageSession::new_loading(None));
-
-        // Load 3 articles → 2 in-flight (ids 1, 2)
-        let (state, _) = update(
-            state,
-            Msg::TriageArticlesLoaded {
-                articles: loaded_triage_articles(3),
-            },
-        );
+        let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
         assert_eq!(state.triage().in_progress_count(), 2);
 
         // Complete request_id=1 → should backfill 1 more slot
@@ -2231,15 +2204,7 @@ mod tests {
         init_logging();
         let mut state = AppState::new();
         state.set_triage_max_in_flight(3);
-        state.set_triage(crate::triage::TriageSession::new_loading(None));
-
-        // Load 3 articles → all 3 in-flight (request_ids 1, 2, 3)
-        let (state, _) = update(
-            state,
-            Msg::TriageArticlesLoaded {
-                articles: loaded_triage_articles(3),
-            },
-        );
+        let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
         assert_eq!(state.triage().in_progress_count(), 3);
 
         // Complete in reverse order: 3, then 1, then 2
@@ -2260,14 +2225,7 @@ mod tests {
         init_logging();
         let mut state = AppState::new();
         state.set_triage_max_in_flight(1);
-        state.set_triage(crate::triage::TriageSession::new_loading(None));
-
-        let (state, _) = update(
-            state,
-            Msg::TriageArticlesLoaded {
-                articles: loaded_triage_articles(3),
-            },
-        );
+        let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
         let text = state.triage().progress_text().unwrap();
         assert!(
             text.contains("0/3"),
@@ -2287,14 +2245,7 @@ mod tests {
         init_logging();
         let mut state = AppState::new();
         state.set_triage_max_in_flight(1);
-        state.set_triage(crate::triage::TriageSession::new_loading(None));
-
-        let (state, _) = update(
-            state,
-            Msg::TriageArticlesLoaded {
-                articles: loaded_triage_articles(3),
-            },
-        );
+        let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
 
         // Quota exhausted on request_id=1 → all pending should fail
         let (state, _) = update(
@@ -2917,15 +2868,7 @@ mod tests {
         init_logging();
         let mut state = AppState::new();
         state.set_triage_max_in_flight(1);
-        state.set_triage(crate::triage::TriageSession::new_loading(None));
-
-        // Dispatch triage for 1 article → triage request_id = 1
-        let (mut state, triage_effects) = update(
-            state,
-            Msg::TriageArticlesLoaded {
-                articles: loaded_triage_articles(1),
-            },
-        );
+        let (mut state, triage_effects) = start_triage_for_test(state, loaded_triage_articles(1));
         let triage_req_id = triage_effects
             .iter()
             .find_map(|e| {
@@ -2998,15 +2941,7 @@ mod tests {
         init_logging();
         let mut state = AppState::new();
         state.set_triage_max_in_flight(3);
-        state.set_triage(crate::triage::TriageSession::new_loading(None));
-
-        // 3 triage articles → 3 triage request_ids
-        let (mut state, triage_effects) = update(
-            state,
-            Msg::TriageArticlesLoaded {
-                articles: loaded_triage_articles(3),
-            },
-        );
+        let (mut state, triage_effects) = start_triage_for_test(state, loaded_triage_articles(3));
         let triage_ids: Vec<u64> = triage_effects
             .iter()
             .filter_map(|e| {

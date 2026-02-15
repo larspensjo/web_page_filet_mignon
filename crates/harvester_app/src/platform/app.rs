@@ -139,6 +139,18 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             guard.state = state;
         }
     }
+    {
+        let overrides = persistence::load_pre_triage_overrides(&output_dir);
+        if !overrides.is_empty() {
+            let mut guard = shared_state.lock().unwrap();
+            let state = std::mem::take(&mut guard.state);
+            let (state, effects) = update(state, Msg::PreTriageOverridesHydrated { overrides });
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+            guard.state = state;
+        }
+    }
 
     let initial_view = shared_state.lock().unwrap().state.view();
     let mut tree_render_state = ui::render::TreeRenderState::new();
@@ -292,28 +304,47 @@ impl AppEventHandler {
             let mut guard = self.shared.lock().expect("lock shared state");
             let state = std::mem::take(&mut guard.state);
             let (state, effects) = update(state, msg);
-            let should_persist = matches!(
+            let should_persist_completed = matches!(
                 msg_for_log,
                 Msg::JobDone {
                     result: JobResultKind::Success,
                     ..
                 }
             );
+            let should_persist_overrides = matches!(
+                msg_for_log,
+                Msg::PreTriageDecisionSet { .. } | Msg::PreTriageResetClicked
+            );
             let clear_input = effects
                 .iter()
                 .any(|effect| matches!(effect, Effect::EnqueueUrl { .. }));
             let view = state.view();
             let mut state = state;
-            let completed_snapshot = if should_persist {
+            let completed_snapshot = if should_persist_completed {
                 Some(state.completed_jobs_snapshot())
+            } else {
+                None
+            };
+            let pre_triage_overrides = if should_persist_completed || should_persist_overrides {
+                Some(state.pre_triage_manual_overrides().clone())
             } else {
                 None
             };
             let was_dirty = state.consume_dirty();
             guard.state = state;
             self.effect_runner.enqueue(effects);
-            if let Some(snapshot) = completed_snapshot {
-                persistence::save_completed_jobs(&self.output_dir, &snapshot);
+            match (completed_snapshot, pre_triage_overrides) {
+                (Some(snapshot), Some(overrides)) => {
+                    persistence::save_state(&self.output_dir, &snapshot, &overrides);
+                }
+                (Some(snapshot), None) => {
+                    persistence::save_completed_jobs(&self.output_dir, &snapshot);
+                }
+                (None, Some(overrides)) => {
+                    let snapshot = guard.state.completed_jobs_snapshot();
+                    persistence::save_state(&self.output_dir, &snapshot, &overrides);
+                }
+                (None, None) => {}
             }
             if was_dirty {
                 (Some(view), clear_input)
@@ -539,9 +570,9 @@ impl PlatformEventHandler for AppEventHandler {
                     if guard.state.is_pre_triage_reviewing() {
                         if let Some(key) = guard.state.pre_triage_key_for_job(job_id) {
                             let decision = if matches!(new_state, CheckState::Checked) {
-                                ManualDecision::Exclude
-                            } else {
                                 ManualDecision::Include
+                            } else {
+                                ManualDecision::Exclude
                             };
                             let _ = self
                                 .msg_tx

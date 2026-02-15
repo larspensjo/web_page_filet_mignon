@@ -1,7 +1,9 @@
 use crate::briefing::BriefingSession;
 use crate::context_hash;
 use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState};
-use crate::pre_triage_filter::{PreTriagePhase, PreTriageSession};
+use crate::pre_triage_filter::{
+    ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
+};
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
 use crate::triage::{ArticleTriageResult, ArticleTriageState, TriageSession};
@@ -207,6 +209,7 @@ pub struct AppState {
     briefing: BriefingSession,
     triage: TriageSession,
     pre_triage: PreTriageSession,
+    pre_triage_manual_overrides: HashMap<ArticleFilterKey, ManualDecision>,
     source_states: SourceStateIndex,
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
@@ -252,6 +255,7 @@ impl Default for AppState {
             briefing: BriefingSession::default(),
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
+            pre_triage_manual_overrides: HashMap::new(),
             source_states: SourceStateIndex::default(),
             prompt_contexts: HashMap::new(),
             active_prompt_versions: HashMap::new(),
@@ -398,14 +402,8 @@ impl AppState {
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
             triage_can_start: (!self.briefing_orchestration.is_requested())
-                && (matches!(
-                    self.pre_triage.phase(),
-                    PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
-                ) || (matches!(
-                    self.pre_triage.phase(),
-                    PreTriagePhase::Idle | PreTriagePhase::Failed { .. }
-                ) && self.triage.can_start()
-                    && self.has_completed_jobs())),
+                && self.triage.can_start()
+                && matches!(self.pre_triage.phase(), PreTriagePhase::ReadyToTriage),
             triage_progress: self.triage.progress_text().or_else(|| self.pre_triage_progress_text()),
             poll_sources_enabled: matches!(
                 self.session,
@@ -420,7 +418,7 @@ impl AppState {
                 &self.prompt_contexts,
                 triage_articles_available,
             ),
-            is_pre_triage_reviewing: matches!(self.pre_triage.phase(), PreTriagePhase::Reviewing),
+            is_pre_triage_reviewing: self.pre_triage.is_interactive(),
         }
     }
 
@@ -478,21 +476,50 @@ impl AppState {
         &self.pre_triage
     }
 
-    pub(crate) fn pre_triage_mut(&mut self) -> &mut PreTriageSession {
-        &mut self.pre_triage
-    }
-
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
         self.pre_triage = pre_triage;
         self.dirty = true;
     }
 
     pub fn is_pre_triage_reviewing(&self) -> bool {
-        matches!(self.pre_triage.phase(), PreTriagePhase::Reviewing)
+        self.pre_triage.is_interactive()
     }
 
     pub fn pre_triage_key_for_job(&self, job_id: JobId) -> Option<crate::ArticleFilterKey> {
         self.pre_triage.key_for_job(job_id)
+    }
+
+    pub fn pre_triage_manual_overrides(&self) -> &HashMap<ArticleFilterKey, ManualDecision> {
+        &self.pre_triage_manual_overrides
+    }
+
+    pub(crate) fn set_pre_triage_manual_overrides(
+        &mut self,
+        overrides: HashMap<ArticleFilterKey, ManualDecision>,
+    ) {
+        self.pre_triage_manual_overrides = overrides;
+        self.pre_triage
+            .apply_manual_overrides(&self.pre_triage_manual_overrides);
+        self.dirty = true;
+    }
+
+    pub(crate) fn set_pre_triage_manual_decision(
+        &mut self,
+        key: ArticleFilterKey,
+        decision: ManualDecision,
+    ) -> bool {
+        if self.pre_triage.set_manual_decision(&key, decision).is_err() {
+            return false;
+        }
+        self.pre_triage_manual_overrides.insert(key, decision);
+        self.dirty = true;
+        true
+    }
+
+    pub(crate) fn clear_pre_triage_manual_overrides(&mut self) {
+        self.pre_triage_manual_overrides.clear();
+        self.pre_triage.clear_manual_decisions();
+        self.dirty = true;
     }
 
     fn pre_triage_progress_text(&self) -> Option<String> {
@@ -562,12 +589,6 @@ impl AppState {
     #[allow(dead_code)]
     pub(crate) fn is_poll_in_progress(&self) -> bool {
         self.source_states.is_poll_in_progress()
-    }
-
-    fn has_completed_jobs(&self) -> bool {
-        self.jobs
-            .values()
-            .any(|job| matches!(job.stage, Stage::Done))
     }
 
     pub(crate) fn ordered_completed_job_urls(&self) -> Vec<String> {

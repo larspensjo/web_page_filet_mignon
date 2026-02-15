@@ -787,10 +787,13 @@ fn job_check_state(view: &AppViewModel, job: &JobRowView) -> CheckState {
         return CheckState::Unchecked;
     }
     match job.filter_status {
-        Some(JobFilterStatus::HardExcluded { .. })
-        | Some(JobFilterStatus::ManuallyExcluded)
-        | Some(JobFilterStatus::ReviewNeeded { .. }) => CheckState::Checked,
-        _ => CheckState::Unchecked,
+        Some(JobFilterStatus::HardExcluded { .. }) | Some(JobFilterStatus::ManuallyExcluded) => {
+            CheckState::Unchecked
+        }
+        Some(JobFilterStatus::ReviewNeeded { .. })
+        | Some(JobFilterStatus::ManuallyIncluded)
+        | Some(JobFilterStatus::AutoIncluded) => CheckState::Checked,
+        None => CheckState::Unchecked,
     }
 }
 

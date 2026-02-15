@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::{CompletedJobSnapshot, LinkSnapshotRecord};
+use harvester_core::{
+    ArticleFilterKey, CompletedJobSnapshot, LinkSnapshotRecord, ManualDecision,
+};
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +28,15 @@ struct PersistedLink {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PersistedState {
     completed: Vec<PersistedJob>,
+    #[serde(default)]
+    pre_triage_overrides: Vec<PersistedPreTriageOverride>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedPreTriageOverride {
+    url: String,
+    content_hash: u64,
+    include: bool,
 }
 
 pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot> {
@@ -71,6 +82,46 @@ pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot
     completed
 }
 
+pub(crate) fn load_pre_triage_overrides(
+    output_dir: &Path,
+) -> std::collections::HashMap<ArticleFilterKey, ManualDecision> {
+    let path = output_dir.join(STATE_FILENAME);
+    let content = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return std::collections::HashMap::new();
+        }
+        Err(err) => {
+            engine_warn!("Failed to read persisted state from {:?}: {}", path, err);
+            return std::collections::HashMap::new();
+        }
+    };
+    let state: PersistedState = match ron::from_str(&content) {
+        Ok(state) => state,
+        Err(err) => {
+            engine_warn!("Failed to parse persisted state from {:?}: {}", path, err);
+            return std::collections::HashMap::new();
+        }
+    };
+    state
+        .pre_triage_overrides
+        .into_iter()
+        .map(|item| {
+            (
+                ArticleFilterKey {
+                    url: item.url,
+                    content_hash: item.content_hash,
+                },
+                if item.include {
+                    ManualDecision::Include
+                } else {
+                    ManualDecision::Exclude
+                },
+            )
+        })
+        .collect()
+}
+
 fn sanitize_downloaded_path(path: Option<String>) -> Option<String> {
     match path {
         Some(value) if is_safe_downloaded_path(&value) => Some(value),
@@ -99,6 +150,14 @@ fn is_safe_downloaded_path(value: &str) -> bool {
 }
 
 pub(crate) fn save_completed_jobs(output_dir: &Path, completed: &[CompletedJobSnapshot]) {
+    save_state(output_dir, completed, &std::collections::HashMap::new());
+}
+
+pub(crate) fn save_state(
+    output_dir: &Path,
+    completed: &[CompletedJobSnapshot],
+    pre_triage_overrides: &std::collections::HashMap<ArticleFilterKey, ManualDecision>,
+) {
     if let Err(err) = ensure_output_dir(output_dir) {
         engine_error!("Failed to ensure output dir {:?}: {}", output_dir, err);
         return;
@@ -119,6 +178,14 @@ pub(crate) fn save_completed_jobs(output_dir: &Path, completed: &[CompletedJobSn
                         downloaded_path: link.downloaded_path.clone(),
                     })
                     .collect(),
+            })
+            .collect(),
+        pre_triage_overrides: pre_triage_overrides
+            .iter()
+            .map(|(key, decision)| PersistedPreTriageOverride {
+                url: key.url.clone(),
+                content_hash: key.content_hash,
+                include: matches!(decision, ManualDecision::Include),
             })
             .collect(),
     };
