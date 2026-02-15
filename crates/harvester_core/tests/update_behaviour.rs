@@ -203,6 +203,7 @@ fn send_llm_request_with_context(state: AppState) -> (AppState, Vec<Effect>) {
             model_override: None,
             input_content: "llm input".to_string(),
             context: vec![("key".to_string(), "value".to_string())],
+            template_override: None,
         },
     )
 }

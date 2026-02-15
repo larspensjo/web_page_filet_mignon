@@ -443,6 +443,7 @@ impl EffectRunner {
                 model_override,
                 input_content,
                 context,
+                template_override,
             } => {
                 if let Some(handle) = &self.llm_handle {
                     let cmd = LlmCommand::Complete {
@@ -452,6 +453,7 @@ impl EffectRunner {
                         model_override,
                         input_content,
                         context,
+                        template_override,
                     };
                     if let Err(err) = handle.send(cmd) {
                         engine_warn!(

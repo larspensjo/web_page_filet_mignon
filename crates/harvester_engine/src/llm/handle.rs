@@ -13,7 +13,8 @@ use tokio::runtime::Runtime;
 use crate::llm::{
     pricing::PricingRegistry,
     prompt::{
-        render_template, PromptId, PromptRegistry, PromptTemplate, PromptVersion, TemplateVars,
+        is_draft_version, render_template, PromptId, PromptRegistry, PromptTemplate,
+        PromptTemplateOwned, PromptVersion, TemplateVars,
     },
     quota::{LlmQuotaTracker, LlmQuotas},
     replay::{content_hash, persist_replay_record, ReplayProvider, ReplayRecord},
@@ -113,6 +114,7 @@ pub enum LlmCommand {
         model_override: Option<ModelId>,
         input_content: String,
         context: Vec<(String, String)>,
+        template_override: Option<PromptTemplateOwned>,
     },
     Stop,
 }
@@ -245,6 +247,7 @@ async fn handle_completion_concurrent(
         model_override,
         input_content,
         context,
+        template_override,
     } = command
     else {
         return;
@@ -322,16 +325,27 @@ async fn handle_completion_concurrent(
             model.model_name()
         );
     }
-    let (template, version) = match fetch_prompt_template(config, prompt_id, prompt_version) {
-        Some(pair) => pair,
-        None => {
-            quota_tracker.lock().unwrap().release_call();
-            let _ = event_tx.send(LlmEvent::Completed {
-                request_id,
-                result: Err(LlmCompletionError::PromptNotFound { prompt_id }),
-            });
-            return;
-        }
+    let (system_template, user_template, version) = if let Some(override_template) =
+        &template_override
+    {
+        (
+            override_template.system_template.as_str(),
+            override_template.user_template.as_str(),
+            override_template.version,
+        )
+    } else {
+        let (template, version) = match fetch_prompt_template(config, prompt_id, prompt_version) {
+            Some(pair) => pair,
+            None => {
+                quota_tracker.lock().unwrap().release_call();
+                let _ = event_tx.send(LlmEvent::Completed {
+                    request_id,
+                    result: Err(LlmCompletionError::PromptNotFound { prompt_id }),
+                });
+                return;
+            }
+        };
+        (template.system_template, template.user_template, version)
     };
 
     let document_key = match prompt_id {
@@ -358,7 +372,7 @@ async fn handle_completion_concurrent(
         vars.insert(key.clone(), value.clone());
     }
     let rendered = vars.to_map();
-    let system_message = match render_template(template.system_template, &rendered) {
+    let system_message = match render_template(system_template, &rendered) {
         Ok(msg) => msg,
         Err(e) => {
             engine_error!("[llm-render] Failed to render system template: {}", e);
@@ -372,7 +386,7 @@ async fn handle_completion_concurrent(
             return;
         }
     };
-    let user_message = match render_template(template.user_template, &rendered) {
+    let user_message = match render_template(user_template, &rendered) {
         Ok(msg) => msg,
         Err(e) => {
             engine_error!("[llm-render] Failed to render user template: {}", e);
@@ -798,16 +812,19 @@ fn fetch_prompt_template(
     prompt_version: Option<PromptVersion>,
 ) -> Option<(&PromptTemplate, PromptVersion)> {
     if let Some(version) = prompt_version {
-        config
+        if is_draft_version(version) {
+            return None;
+        }
+        return config
             .registry
             .get(prompt_id, version)
-            .map(|template| (template, version))
-    } else {
-        config
-            .registry
-            .active(prompt_id)
-            .map(|template| (template, template.version))
+            .map(|template| (template, version));
     }
+
+    config
+        .registry
+        .active(prompt_id)
+        .map(|template| (template, template.version))
 }
 
 fn validate_response(prompt_id: PromptId, content: &str) -> Result<String, ValidationError> {

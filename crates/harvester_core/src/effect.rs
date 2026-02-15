@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
 use harvester_engine::llm::types::ModelId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,7 @@ pub enum Effect {
         model_override: Option<ModelId>,
         input_content: String,
         context: Vec<(String, String)>,
+        template_override: Option<PromptTemplateOwned>,
     },
     ResolvePromptLabInputFromUrl {
         resolve_id: u64,
