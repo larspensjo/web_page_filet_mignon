@@ -139,31 +139,49 @@ impl Default for PromptLabView {
 impl PromptLabView {
     pub(crate) fn from_state(state: &PromptLabState) -> Self {
         let latest_run = state.latest_run().map(|r| {
-            let (status_label, output_json, failure_reason, input_tokens, output_tokens,
-                 cost_microdollars, wall_ms, resolved_model, parse_ok, cache_status) =
-                match &r.status {
-                    PromptLabRunStatus::Pending { .. } => {
-                        ("pending", None, None, None, None, None, None, None, None, None)
-                    }
-                    PromptLabRunStatus::Completed {
-                        output_json,
-                        metadata,
-                    } => (
-                        "completed",
-                        Some(output_json.clone()),
-                        None,
-                        Some(metadata.input_tokens),
-                        Some(metadata.output_tokens),
-                        Some(metadata.cost_microdollars),
-                        Some(metadata.wall_ms),
-                        Some(metadata.resolved_model.clone()),
-                        Some(metadata.parse_ok),
-                        Some(format!("{:?}", metadata.cache_status).to_lowercase()),
-                    ),
-                    PromptLabRunStatus::Failed { reason } => {
-                        ("failed", None, Some(reason.clone()), None, None, None, None, None, None, None)
-                    }
-                };
+            let (
+                status_label,
+                output_json,
+                failure_reason,
+                input_tokens,
+                output_tokens,
+                cost_microdollars,
+                wall_ms,
+                resolved_model,
+                parse_ok,
+                cache_status,
+            ) = match &r.status {
+                PromptLabRunStatus::Pending { .. } => (
+                    "pending", None, None, None, None, None, None, None, None, None,
+                ),
+                PromptLabRunStatus::Completed {
+                    output_json,
+                    metadata,
+                } => (
+                    "completed",
+                    Some(output_json.clone()),
+                    None,
+                    Some(metadata.input_tokens),
+                    Some(metadata.output_tokens),
+                    Some(metadata.cost_microdollars),
+                    Some(metadata.wall_ms),
+                    Some(metadata.resolved_model.clone()),
+                    Some(metadata.parse_ok),
+                    Some(format!("{:?}", metadata.cache_status).to_lowercase()),
+                ),
+                PromptLabRunStatus::Failed { reason } => (
+                    "failed",
+                    None,
+                    Some(reason.clone()),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            };
             PromptLabRunSummaryView {
                 run_id: r.run_id,
                 stage: r.stage,

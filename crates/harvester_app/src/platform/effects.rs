@@ -1323,8 +1323,8 @@ mod tests {
     // --- Step 3: map_llm_event failure metadata propagation tests ---
 
     fn make_failure_metadata() -> harvester_engine::llm::LlmFailureMetadata {
-        use harvester_engine::llm::run_metadata::LlmFailureMetadata;
         use harvester_engine::llm::prompt::PromptId;
+        use harvester_engine::llm::run_metadata::LlmFailureMetadata;
         LlmFailureMetadata {
             prompt_id: PromptId::ArticleTriage,
             prompt_version: 1,
@@ -1348,7 +1348,10 @@ mod tests {
         };
         let msg = map_llm_event(event);
         if let Msg::LlmCompleted { metadata, .. } = msg {
-            assert!(metadata.is_some(), "ValidationFailed with metadata should propagate it");
+            assert!(
+                metadata.is_some(),
+                "ValidationFailed with metadata should propagate it"
+            );
             assert!(!metadata.unwrap().parse_ok);
         } else {
             panic!("expected LlmCompleted");
@@ -1367,7 +1370,10 @@ mod tests {
         };
         let msg = map_llm_event(event);
         if let Msg::LlmCompleted { metadata, .. } = msg {
-            assert!(metadata.is_some(), "QuotaExhausted with metadata should propagate it");
+            assert!(
+                metadata.is_some(),
+                "QuotaExhausted with metadata should propagate it"
+            );
         } else {
             panic!("expected LlmCompleted");
         }
@@ -1385,7 +1391,10 @@ mod tests {
         };
         let msg = map_llm_event(event);
         if let Msg::LlmCompleted { metadata, .. } = msg {
-            assert!(metadata.is_some(), "PersistenceFailed with metadata should propagate it");
+            assert!(
+                metadata.is_some(),
+                "PersistenceFailed with metadata should propagate it"
+            );
         } else {
             panic!("expected LlmCompleted");
         }
@@ -1402,8 +1411,14 @@ mod tests {
             }),
         };
         let msg = map_llm_event(event);
-        if let Msg::LlmCompleted { metadata, result, .. } = msg {
-            assert!(metadata.is_none(), "UnsupportedModel is pre-flight so metadata=None");
+        if let Msg::LlmCompleted {
+            metadata, result, ..
+        } = msg
+        {
+            assert!(
+                metadata.is_none(),
+                "UnsupportedModel is pre-flight so metadata=None"
+            );
             assert!(matches!(result, LlmResultKind::Failed { .. }));
         } else {
             panic!("expected LlmCompleted");

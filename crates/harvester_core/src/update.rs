@@ -24,7 +24,11 @@ const MIN_PREVIEW_WIDTH: i32 = 200;
 const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
 
 /// Pure update function: applies a message to state and returns any effects.
-#[allow(clippy::too_many_lines, clippy::cognitive_complexity, clippy::excessive_nesting)]
+#[allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    clippy::excessive_nesting
+)]
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let effects = match msg {
         Msg::InputChanged(text) => {
@@ -208,7 +212,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 context,
             }]
         }
-        Msg::LlmCompleted { request_id, result, metadata } => {
+        Msg::LlmCompleted {
+            request_id,
+            result,
+            metadata,
+        } => {
             let new_state = match &result {
                 LlmResultKind::Success {
                     output_json,
@@ -453,7 +461,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             } else if let Some(run_id) = state.prompt_lab().ownership_for(request_id) {
                 let reason_from_result = |r: &LlmResultKind| -> String {
                     match r {
-                        LlmResultKind::ValidationFailed { reason, raw_response } => {
+                        LlmResultKind::ValidationFailed {
+                            reason,
+                            raw_response,
+                        } => {
                             format!("validation failed: {reason}; response: {raw_response}")
                         }
                         LlmResultKind::QuotaExhausted { reason } => {
@@ -464,7 +475,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     }
                 };
                 match &result {
-                    LlmResultKind::Success { output_json, input_tokens, output_tokens, .. } => {
+                    LlmResultKind::Success {
+                        output_json,
+                        input_tokens,
+                        output_tokens,
+                        ..
+                    } => {
                         engine_info!(
                             "[prompt-lab] run completed run_id={} request_id={} tokens_in={} tokens_out={}",
                             run_id.0, request_id, input_tokens, output_tokens
@@ -488,7 +504,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         let reason = reason_from_result(&result);
                         engine_warn!(
                             "[prompt-lab] run failed run_id={} request_id={} reason={}",
-                            run_id.0, request_id, reason
+                            run_id.0,
+                            request_id,
+                            reason
                         );
                         state.fail_prompt_lab_run(run_id, reason);
                     }
@@ -2033,15 +2051,28 @@ mod tests {
     fn prompt_lab_stage_selected_updates_stage() {
         init_logging();
         let state = AppState::new();
-        let (state, _) = update(state, Msg::PromptLabStageSelected { stage: crate::prompt_lab::PromptLabStage::Summary });
-        assert_eq!(state.prompt_lab().selected_stage(), crate::prompt_lab::PromptLabStage::Summary);
+        let (state, _) = update(
+            state,
+            Msg::PromptLabStageSelected {
+                stage: crate::prompt_lab::PromptLabStage::Summary,
+            },
+        );
+        assert_eq!(
+            state.prompt_lab().selected_stage(),
+            crate::prompt_lab::PromptLabStage::Summary
+        );
     }
 
     #[test]
     fn prompt_lab_input_changed_updates_input() {
         init_logging();
         let state = AppState::new();
-        let (state, _) = update(state, Msg::PromptLabInputChanged { text: "hello world".to_string() });
+        let (state, _) = update(
+            state,
+            Msg::PromptLabInputChanged {
+                text: "hello world".to_string(),
+            },
+        );
         assert_eq!(state.prompt_lab().input(), "hello world");
     }
 
@@ -2057,7 +2088,10 @@ mod tests {
         assert!(state.prompt_lab().has_in_flight_run());
         // latest_run should exist and be Pending
         use crate::prompt_lab::PromptLabRunStatus;
-        assert!(matches!(state.prompt_lab().latest_run().unwrap().status, PromptLabRunStatus::Pending { .. }));
+        assert!(matches!(
+            state.prompt_lab().latest_run().unwrap().status,
+            PromptLabRunStatus::Pending { .. }
+        ));
     }
 
     #[test]
@@ -2093,13 +2127,16 @@ mod tests {
         state.set_prompt_lab_input("article content".to_string());
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         // Extract the request_id from the emitted effect
-        let request_id = effects.iter().find_map(|e| {
-            if let Effect::RequestLlmCompletion { request_id, .. } = e {
-                Some(*request_id)
-            } else {
-                None
-            }
-        }).expect("expected RequestLlmCompletion effect");
+        let request_id = effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .expect("expected RequestLlmCompletion effect");
         (state, request_id)
     }
 
@@ -2108,17 +2145,20 @@ mod tests {
         init_logging();
         let state = AppState::new();
         let (state, request_id) = dispatch_lab_run(state);
-        let (state, effects) = update(state, Msg::LlmCompleted {
-            request_id,
-            result: LlmResultKind::Success {
-                output_json: r#"{"priority":3}"#.to_string(),
-                input_tokens: 10,
-                output_tokens: 20,
-                prompt_version: 1,
-                model_id: "model-x".to_string(),
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::Success {
+                    output_json: r#"{"priority":3}"#.to_string(),
+                    input_tokens: 10,
+                    output_tokens: 20,
+                    prompt_version: 1,
+                    model_id: "model-x".to_string(),
+                },
+                metadata: Some(LlmRunMetadata::stub()),
             },
-            metadata: Some(LlmRunMetadata::stub()),
-        });
+        );
         assert!(effects.is_empty());
         use crate::prompt_lab::PromptLabRunStatus;
         assert!(matches!(
@@ -2133,14 +2173,17 @@ mod tests {
         init_logging();
         let state = AppState::new();
         let (state, request_id) = dispatch_lab_run(state);
-        let (state, _) = update(state, Msg::LlmCompleted {
-            request_id,
-            result: LlmResultKind::ValidationFailed {
-                reason: "bad json".to_string(),
-                raw_response: "garbage".to_string(),
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::ValidationFailed {
+                    reason: "bad json".to_string(),
+                    raw_response: "garbage".to_string(),
+                },
+                metadata: None,
             },
-            metadata: None,
-        });
+        );
         use crate::prompt_lab::PromptLabRunStatus;
         assert!(matches!(
             state.prompt_lab().latest_run().unwrap().status,
@@ -2154,11 +2197,16 @@ mod tests {
         init_logging();
         let state = AppState::new();
         let (state, request_id) = dispatch_lab_run(state);
-        let (state, _) = update(state, Msg::LlmCompleted {
-            request_id,
-            result: LlmResultKind::QuotaExhausted { reason: "over limit".to_string() },
-            metadata: None,
-        });
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::QuotaExhausted {
+                    reason: "over limit".to_string(),
+                },
+                metadata: None,
+            },
+        );
         use crate::prompt_lab::PromptLabRunStatus;
         assert!(matches!(
             state.prompt_lab().latest_run().unwrap().status,
@@ -2174,7 +2222,15 @@ mod tests {
         // Add a completed run manually
         let rid = state.allocate_next_llm_request_id();
         let run = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(run, PromptLabStage::Triage, PromptId::ArticleTriage, "x".to_string(), rid, None, None);
+        state.add_prompt_lab_pending_run(
+            run,
+            PromptLabStage::Triage,
+            PromptId::ArticleTriage,
+            "x".to_string(),
+            rid,
+            None,
+            None,
+        );
         state.complete_prompt_lab_run(run, "{}".to_string(), LlmRunMetadata::stub());
         state.consume_prompt_lab_ownership(rid);
         assert_eq!(state.prompt_lab().run_count(), 1);
@@ -2200,30 +2256,55 @@ mod tests {
 
         // Open lab, change stage, dispatch a run
         let (state, _) = update(state, Msg::PromptLabOpenRequested);
-        let (state, _) = update(state, Msg::PromptLabStageSelected { stage: crate::prompt_lab::PromptLabStage::Summary });
-        let (state, _) = update(state, Msg::PromptLabInputChanged { text: "article text".to_string() });
+        let (state, _) = update(
+            state,
+            Msg::PromptLabStageSelected {
+                stage: crate::prompt_lab::PromptLabStage::Summary,
+            },
+        );
+        let (state, _) = update(
+            state,
+            Msg::PromptLabInputChanged {
+                text: "article text".to_string(),
+            },
+        );
         let (state, effects) = {
             let (s, e) = update(state, Msg::PromptLabRunRequested);
             (s, e)
         };
-        let request_id = effects.iter().find_map(|e| {
-            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
-        }).unwrap();
+        let request_id = effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
         // Complete the run
-        let (state, _) = update(state, Msg::LlmCompleted {
-            request_id,
-            result: LlmResultKind::Success {
-                output_json: r#"{"priority":3,"category":"news","tags":[],"rationale":"ok"}"#.to_string(),
-                input_tokens: 5,
-                output_tokens: 10,
-                prompt_version: 1,
-                model_id: "m".to_string(),
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::Success {
+                    output_json: r#"{"priority":3,"category":"news","tags":[],"rationale":"ok"}"#
+                        .to_string(),
+                    input_tokens: 5,
+                    output_tokens: 10,
+                    prompt_version: 1,
+                    model_id: "m".to_string(),
+                },
+                metadata: None,
             },
-            metadata: None,
-        });
+        );
 
-        assert_eq!(state.briefing().clone(), briefing_before, "briefing must be unchanged");
+        assert_eq!(
+            state.briefing().clone(),
+            briefing_before,
+            "briefing must be unchanged"
+        );
     }
 
     #[test]
@@ -2235,17 +2316,33 @@ mod tests {
         let (mut state, _) = update(state, Msg::PromptLabOpenRequested);
         state.set_prompt_lab_input("article text".to_string());
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
-        let request_id = effects.iter().find_map(|e| {
-            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
-        }).unwrap();
+        let request_id = effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
-        let (state, _) = update(state, Msg::LlmCompleted {
-            request_id,
-            result: LlmResultKind::Failed { reason: "timeout".to_string() },
-            metadata: None,
-        });
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::Failed {
+                    reason: "timeout".to_string(),
+                },
+                metadata: None,
+            },
+        );
 
-        assert_eq!(state.triage().clone(), triage_before, "triage must be unchanged");
+        assert_eq!(
+            state.triage().clone(),
+            triage_before,
+            "triage must be unchanged"
+        );
     }
 
     /// Triage and Prompt Lab both have active request_ids. Completing the triage request
@@ -2260,43 +2357,70 @@ mod tests {
         // Dispatch triage for 1 article → triage request_id = 1
         let (mut state, triage_effects) = update(
             state,
-            Msg::TriageArticlesLoaded { articles: loaded_triage_articles(1) },
+            Msg::TriageArticlesLoaded {
+                articles: loaded_triage_articles(1),
+            },
         );
-        let triage_req_id = triage_effects.iter().find_map(|e| {
-            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
-        }).expect("triage request");
+        let triage_req_id = triage_effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .expect("triage request");
 
         // Dispatch lab run → lab request_id = 2
         state.set_prompt_lab_input("article text".to_string());
         let (state, lab_effects) = update(state, Msg::PromptLabRunRequested);
-        let lab_req_id = lab_effects.iter().find_map(|e| {
-            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
-        }).expect("lab request");
+        let lab_req_id = lab_effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .expect("lab request");
 
         assert_ne!(triage_req_id, lab_req_id, "request IDs must be distinct");
 
         // Complete the triage request — lab run must still be Pending
         let (state, _) = update(state, triage_success(triage_req_id));
         use crate::prompt_lab::PromptLabRunStatus;
-        assert!(matches!(
-            state.prompt_lab().latest_run().unwrap().status,
-            PromptLabRunStatus::Pending { .. }
-        ), "lab run must remain Pending after triage completes");
+        assert!(
+            matches!(
+                state.prompt_lab().latest_run().unwrap().status,
+                PromptLabRunStatus::Pending { .. }
+            ),
+            "lab run must remain Pending after triage completes"
+        );
 
         // Complete the lab request — triage must not gain extra completed articles
         let triage_completed_before = state.triage().completed_count();
-        let (state, _) = update(state, Msg::LlmCompleted {
-            request_id: lab_req_id,
-            result: LlmResultKind::Success {
-                output_json: r#"{"priority":3,"category":"news","tags":[],"rationale":"ok"}"#.to_string(),
-                input_tokens: 5,
-                output_tokens: 10,
-                prompt_version: 1,
-                model_id: "m".to_string(),
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: lab_req_id,
+                result: LlmResultKind::Success {
+                    output_json: r#"{"priority":3,"category":"news","tags":[],"rationale":"ok"}"#
+                        .to_string(),
+                    input_tokens: 5,
+                    output_tokens: 10,
+                    prompt_version: 1,
+                    model_id: "m".to_string(),
+                },
+                metadata: Some(LlmRunMetadata::stub()),
             },
-            metadata: Some(LlmRunMetadata::stub()),
-        });
-        assert_eq!(state.triage().completed_count(), triage_completed_before, "triage completed count must not change");
+        );
+        assert_eq!(
+            state.triage().completed_count(),
+            triage_completed_before,
+            "triage completed count must not change"
+        );
         assert!(matches!(
             state.prompt_lab().latest_run().unwrap().status,
             PromptLabRunStatus::Completed { .. }
@@ -2314,31 +2438,67 @@ mod tests {
         // 3 triage articles → 3 triage request_ids
         let (mut state, triage_effects) = update(
             state,
-            Msg::TriageArticlesLoaded { articles: loaded_triage_articles(3) },
+            Msg::TriageArticlesLoaded {
+                articles: loaded_triage_articles(3),
+            },
         );
-        let triage_ids: Vec<u64> = triage_effects.iter().filter_map(|e| {
-            if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }
-        }).collect();
+        let triage_ids: Vec<u64> = triage_effects
+            .iter()
+            .filter_map(|e| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(triage_ids.len(), 3);
 
         // 2 lab runs
         state.set_prompt_lab_input("text1".to_string());
         let (state, e1) = update(state, Msg::PromptLabRunRequested);
-        let lab_id1 = e1.iter().find_map(|e| if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }).unwrap();
+        let lab_id1 = e1
+            .iter()
+            .find_map(|e| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
         // Complete first lab run to allow second
-        let (mut state, _) = update(state, Msg::LlmCompleted {
-            request_id: lab_id1,
-            result: LlmResultKind::Failed { reason: "done".to_string() },
-            metadata: None,
-        });
+        let (mut state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: lab_id1,
+                result: LlmResultKind::Failed {
+                    reason: "done".to_string(),
+                },
+                metadata: None,
+            },
+        );
         state.set_prompt_lab_input("text2".to_string());
         let (_, e2) = update(state, Msg::PromptLabRunRequested);
-        let lab_id2 = e2.iter().find_map(|e| if let Effect::RequestLlmCompletion { request_id, .. } = e { Some(*request_id) } else { None }).unwrap();
+        let lab_id2 = e2
+            .iter()
+            .find_map(|e| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = e {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
 
         let all_ids = [triage_ids.as_slice(), &[lab_id1, lab_id2]].concat();
         let unique: std::collections::HashSet<u64> = all_ids.iter().copied().collect();
-        assert_eq!(unique.len(), all_ids.len(), "all request_ids must be distinct");
+        assert_eq!(
+            unique.len(),
+            all_ids.len(),
+            "all request_ids must be distinct"
+        );
     }
 
     // --- Step 3 per-run override tests ---
@@ -2350,7 +2510,9 @@ mod tests {
         let mut state = AppState::new();
         state.set_prompt_lab_input("some text".to_string());
         let override_model = ModelId::new(ProviderKind::OpenAi, "gpt-4o");
-        state.prompt_lab_mut().set_model_override(Some(override_model.clone()));
+        state
+            .prompt_lab_mut()
+            .set_model_override(Some(override_model.clone()));
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         assert_eq!(effects.len(), 1);
         if let Effect::RequestLlmCompletion { model_override, .. } = &effects[0] {
@@ -2387,7 +2549,9 @@ mod tests {
         let mut state = AppState::new();
         state.set_prompt_lab_input("some text".to_string());
         let override_model = ModelId::new(ProviderKind::OpenAi, "gpt-4o");
-        state.prompt_lab_mut().set_model_override(Some(override_model.clone()));
+        state
+            .prompt_lab_mut()
+            .set_model_override(Some(override_model.clone()));
         state.prompt_lab_mut().set_prompt_version_override(Some(7));
         let (state, _) = update(state, Msg::PromptLabRunRequested);
         let run = state.prompt_lab().latest_run().unwrap();
@@ -2404,7 +2568,10 @@ mod tests {
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         assert_eq!(effects.len(), 1);
         if let Effect::RequestLlmCompletion { model_override, .. } = &effects[0] {
-            assert!(model_override.is_none(), "model_override should be None when not set");
+            assert!(
+                model_override.is_none(),
+                "model_override should be None when not set"
+            );
         } else {
             panic!("expected RequestLlmCompletion effect");
         }
@@ -2419,11 +2586,18 @@ mod tests {
         // Triage path
         let (_, effects) = update(
             AppState::new(),
-            Msg::TriageArticlesLoaded { articles: loaded_triage_articles(1) },
+            Msg::TriageArticlesLoaded {
+                articles: loaded_triage_articles(1),
+            },
         );
-        let llm_effect = effects.iter().find(|e| matches!(e, Effect::RequestLlmCompletion { .. }));
+        let llm_effect = effects
+            .iter()
+            .find(|e| matches!(e, Effect::RequestLlmCompletion { .. }));
         if let Some(Effect::RequestLlmCompletion { model_override, .. }) = llm_effect {
-            assert!(model_override.is_none(), "triage path must emit None override");
+            assert!(
+                model_override.is_none(),
+                "triage path must emit None override"
+            );
         }
     }
 }

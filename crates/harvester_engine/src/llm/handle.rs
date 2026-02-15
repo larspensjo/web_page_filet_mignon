@@ -424,7 +424,10 @@ async fn handle_completion_concurrent(
                     metadata.input_bytes, metadata.input_tokens, metadata.output_tokens,
                     metadata.cost_microdollars, metadata.wall_ms
                 );
-                let result = LlmCompletionResult { output_json, metadata };
+                let result = LlmCompletionResult {
+                    output_json,
+                    metadata,
+                };
                 let _ = event_tx.send(LlmEvent::Completed {
                     request_id,
                     result: Ok(result),
@@ -729,6 +732,7 @@ fn resolve_model(
 /// 2. Model name must be in the allow-list built from config models and the pricing registry.
 ///
 /// Returns `Err(LlmCompletionError::UnsupportedModel)` on validation failure.
+#[allow(clippy::result_large_err)]
 fn validate_model_override(
     override_model: &ModelId,
     config: &LlmConfig,

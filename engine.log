@@ -1,444 +1,588 @@
-2026-02-14T20:05:06.4434529Z [INFO] harvester_app::platform::app: Logger initialized. Starting harvester_app...
-2026-02-14T20:05:06.4482675Z [INFO] harvester_app::platform::app: [llm-concurrency] configured max_concurrent_requests=3
-2026-02-14T20:05:06.4661207Z [INFO] harvester_app::platform::persistence: Loaded persisted completed jobs from "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.harvester_state.ron"
-2026-02-14T20:05:06.4778394Z [INFO] harvester_app::platform::summary_cache_store: [summary-cache] Loaded 6 entries from "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"
-2026-02-14T20:05:06.478254Z [INFO] harvester_core::update: [summary-cache] Hydrated 6 entries from persistent store
-2026-02-14T20:05:13.7572688Z [INFO] harvester_core::update: [source-poll] polling requested
-2026-02-14T20:05:13.7580329Z [INFO] harvester_app::platform::effects: [source-config] loading C:\Users\larsp\src\web_page_filet_mignon\rss-llm-curation\sources.ron
-2026-02-14T20:05:13.7587847Z [INFO] harvester_app::platform::seen_set_store: [rss-seen] loaded seen set from ".rss_seen_guids.ron"
-2026-02-14T20:05:14.1484232Z [INFO] harvester_app::platform::seen_set_store: [rss-seen] saved seen set to ".rss_seen_guids.ron"
-2026-02-14T20:05:14.1486456Z [INFO] harvester_app::platform::effects: [rss-poll] google-alerts-rss => 20 new URL(s)
-2026-02-14T20:05:14.1636898Z [INFO] harvester_core::update: [source-poll] google-alerts-rss returned 20 urls
-2026-02-14T20:05:14.1808923Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=12 url_len=63 url=https://www.ft.com/content/320c14a2-1428-4904-b978-6fe06b3e25bf
-2026-02-14T20:05:14.1811482Z [INFO] harvester_engine::engine: Job 12 starting: https://www.ft.com/content/320c14a2-1428-4904-b978-6fe06b3e25bf
-2026-02-14T20:05:14.2071039Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=13 url_len=56 url=https://www.cnbc.com/2026/02/14/big-food-ai-recipes.html
-2026-02-14T20:05:14.226692Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=14 url_len=71 url=https://finance.yahoo.com/news/forget-nvidia-buy-2-other-135000811.html
-2026-02-14T20:05:14.3331931Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=15 url_len=79 url=https://www.nytimes.com/2026/02/14/business/dealbook/software-companies-ai.html
-2026-02-14T20:05:14.3716726Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=16 url_len=112 url=https://www.businessinsider.com/amazon-employees-quit-tech-startup-office-mandate-artificial-intelligence-2026-2
-2026-02-14T20:05:14.3720411Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=17 url_len=63 url=https://www.ft.com/content/905df663-8c47-4e88-b6ff-24dd4bd46290
-2026-02-14T20:05:14.4921107Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=18 url_len=47 url=https://www.foxbusiness.com/video/6389252548112
-2026-02-14T20:05:14.5366603Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=19 url_len=106 url=https://www.scmp.com/tech/article/3343568/ai-rattles-us-investors-while-chinas-tech-stocks-hold-steady-now
-2026-02-14T20:05:14.5370822Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=20 url_len=43 url=https://www.youtube.com/watch?v=0xso7qXHK94
-2026-02-14T20:05:14.5374325Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=21 url_len=43 url=https://www.youtube.com/watch?v=USSJrgp4YzA
-2026-02-14T20:05:14.5644013Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=22 url_len=90 url=https://www.ekathimerini.com/economy/1295277/transforming-ai-into-tangible-business-value/
-2026-02-14T20:05:14.7031958Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=12 url_len=63 url=https://www.ft.com/content/320c14a2-1428-4904-b978-6fe06b3e25bf
-2026-02-14T20:05:14.7462193Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=23 url_len=150 url=https://www.oecd.org/en/publications/progress-in-implementing-the-european-union-coordinated-plan-on-artificial-intelligence-volume-2_3ac96d41-en.html
-2026-02-14T20:05:14.7466264Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=24 url_len=100 url=https://www.businessinsider.com/army-information-overload-battlefield-data-management-ai-tool-2026-2
-2026-02-14T20:05:14.7705743Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=25 url_len=83 url=https://www.wired.com/story/backchannel-how-artificial-intelligence-changed-zillow/
-2026-02-14T20:05:14.7709594Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=26 url_len=43 url=https://www.youtube.com/watch?v=OwJqcYfIdXM
-2026-02-14T20:05:14.7713293Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=27 url_len=97 url=https://www.nytimes.com/2026/02/14/business/artificial-intelligence-relationships-income-gap.html
-2026-02-14T20:05:14.7734221Z [INFO] harvester_engine::engine: Job 12 completed: 1643 tokens, 9559 bytes written
-2026-02-14T20:05:14.7736251Z [INFO] harvester_engine::engine: Job 13 starting: https://www.cnbc.com/2026/02/14/big-food-ai-recipes.html
-2026-02-14T20:05:14.798103Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=28 url_len=114 url=https://www.bloomberg.com/news/articles/2026-02-13/ai-morphs-into-villain-of-the-stock-market-it-powered-for-years
-2026-02-14T20:05:14.8203437Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=29 url_len=124 url=https://www.latimes.com/entertainment-arts/business/story/2026-02-13/brad-pitt-fighting-tom-cruise-ai-video-shakes-hollywood
-2026-02-14T20:05:14.8407412Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=30 url_len=128 url=https://fortune.com/2026/02/13/marc-andreessen-software-eating-the-world-saaspocalypse-morgan-stanley-gut-check-displaced-labor/
-2026-02-14T20:05:14.8603814Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=31 url_len=105 url=https://bridgemi.com/business-watch/west-michigan-faces-job-losses-and-uncertainty-as-economy-takes-toll/
-2026-02-14T20:05:15.2481268Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=13 url_len=56 url=https://www.cnbc.com/2026/02/14/big-food-ai-recipes.html
-2026-02-14T20:05:15.4493949Z [INFO] harvester_engine::engine: Job 13 completed: 2057 tokens, 12775 bytes written
-2026-02-14T20:05:15.4497332Z [INFO] harvester_engine::engine: Job 14 starting: https://finance.yahoo.com/news/forget-nvidia-buy-2-other-135000811.html
-2026-02-14T20:05:16.0709124Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=14 url_len=71 url=https://finance.yahoo.com/news/forget-nvidia-buy-2-other-135000811.html
-2026-02-14T20:05:16.0816489Z [INFO] harvester_engine::engine: Job 14 completed: 346 tokens, 2803 bytes written
-2026-02-14T20:05:16.08193Z [INFO] harvester_engine::engine: Job 15 starting: https://www.nytimes.com/2026/02/14/business/dealbook/software-companies-ai.html
-2026-02-14T20:05:16.2082877Z [WARN] harvester_engine::fetch: [fetch] HTTP error 403 for URL 'https://www.nytimes.com/2026/02/14/business/dealbook/software-companies-ai.html'
-2026-02-14T20:05:16.2085115Z [WARN] harvester_engine::fetch: [fetch] attempt 1/3 failed url=https://www.nytimes.com/2026/02/14/business/dealbook/software-companies-ai.html error=http status 403
-2026-02-14T20:05:16.2086851Z [INFO] harvester_engine::engine: Job 16 starting: https://www.businessinsider.com/amazon-employees-quit-tech-startup-office-mandate-artificial-intelligence-2026-2
-2026-02-14T20:05:16.2233025Z [WARN] harvester_app::platform::effects: Job 15 failed: http status 403
-2026-02-14T20:05:16.397453Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=16 url_len=112 url=https://www.businessinsider.com/amazon-employees-quit-tech-startup-office-mandate-artificial-intelligence-2026-2
-2026-02-14T20:05:16.474399Z [INFO] harvester_engine::engine: Job 16 completed: 31 tokens, 455 bytes written
-2026-02-14T20:05:16.4747249Z [INFO] harvester_engine::engine: Job 17 starting: https://www.ft.com/content/905df663-8c47-4e88-b6ff-24dd4bd46290
-2026-02-14T20:05:16.9374619Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=17 url_len=63 url=https://www.ft.com/content/905df663-8c47-4e88-b6ff-24dd4bd46290
-2026-02-14T20:05:17.0046148Z [INFO] harvester_engine::engine: Job 17 completed: 1647 tokens, 9585 bytes written
-2026-02-14T20:05:17.0048922Z [INFO] harvester_engine::engine: Job 18 starting: https://www.foxbusiness.com/video/6389252548112
-2026-02-14T20:05:17.8404796Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=18 url_len=47 url=https://www.foxbusiness.com/video/6389252548112
-2026-02-14T20:05:17.8559416Z [INFO] harvester_engine::engine: Job 18 completed: 294 tokens, 1910 bytes written
-2026-02-14T20:05:17.8561976Z [INFO] harvester_engine::engine: Job 19 starting: https://www.scmp.com/tech/article/3343568/ai-rattles-us-investors-while-chinas-tech-stocks-hold-steady-now
-2026-02-14T20:05:18.0127311Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=19 url_len=106 url=https://www.scmp.com/tech/article/3343568/ai-rattles-us-investors-while-chinas-tech-stocks-hold-steady-now
-2026-02-14T20:05:18.0595481Z [INFO] harvester_engine::engine: Job 19 completed: 286 tokens, 2252 bytes written
-2026-02-14T20:05:18.0598669Z [INFO] harvester_engine::engine: Job 20 starting: https://www.youtube.com/watch?v=0xso7qXHK94
-2026-02-14T20:05:18.1616956Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=20 url_len=43 url=https://www.youtube.com/watch?v=0xso7qXHK94
-2026-02-14T20:05:18.8257517Z [INFO] harvester_engine::engine: Job 20 completed: 12 tokens, 341 bytes written
-2026-02-14T20:05:18.8262565Z [INFO] harvester_engine::engine: Job 21 starting: https://www.youtube.com/watch?v=USSJrgp4YzA
-2026-02-14T20:05:18.929931Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=21 url_len=43 url=https://www.youtube.com/watch?v=USSJrgp4YzA
-2026-02-14T20:05:19.4581371Z [INFO] harvester_engine::engine: Job 21 completed: 12 tokens, 395 bytes written
-2026-02-14T20:05:19.4586166Z [INFO] harvester_engine::engine: Job 22 starting: https://www.ekathimerini.com/economy/1295277/transforming-ai-into-tangible-business-value/
-2026-02-14T20:05:19.5426495Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=22 url_len=90 url=https://www.ekathimerini.com/economy/1295277/transforming-ai-into-tangible-business-value/
-2026-02-14T20:05:19.595295Z [INFO] harvester_engine::engine: Job 22 completed: 275 tokens, 2151 bytes written
-2026-02-14T20:05:19.5956139Z [INFO] harvester_engine::engine: Job 23 starting: https://www.oecd.org/en/publications/progress-in-implementing-the-european-union-coordinated-plan-on-artificial-intelligence-volume-2_3ac96d41-en.html
-2026-02-14T20:05:19.8622795Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=23 url_len=150 url=https://www.oecd.org/en/publications/progress-in-implementing-the-european-union-coordinated-plan-on-artificial-intelligence-volume-2_3ac96d41-en.html
-2026-02-14T20:05:20.5267006Z [INFO] harvester_engine::engine: Job 23 completed: 6030 tokens, 43406 bytes written
-2026-02-14T20:05:20.527195Z [INFO] harvester_engine::engine: Job 24 starting: https://www.businessinsider.com/army-information-overload-battlefield-data-management-ai-tool-2026-2
-2026-02-14T20:05:20.6084473Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=24 url_len=100 url=https://www.businessinsider.com/army-information-overload-battlefield-data-management-ai-tool-2026-2
-2026-02-14T20:05:20.7225975Z [INFO] harvester_engine::engine: Job 24 completed: 11 tokens, 368 bytes written
-2026-02-14T20:05:20.7228451Z [INFO] harvester_engine::engine: Job 25 starting: https://www.wired.com/story/backchannel-how-artificial-intelligence-changed-zillow/
-2026-02-14T20:05:20.9268875Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=25 url_len=83 url=https://www.wired.com/story/backchannel-how-artificial-intelligence-changed-zillow/
-2026-02-14T20:05:21.0636866Z [INFO] harvester_engine::engine: Job 25 completed: 1416 tokens, 9009 bytes written
-2026-02-14T20:05:21.0640733Z [INFO] harvester_engine::engine: Job 26 starting: https://www.youtube.com/watch?v=OwJqcYfIdXM
-2026-02-14T20:05:21.2171583Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=26 url_len=43 url=https://www.youtube.com/watch?v=OwJqcYfIdXM
-2026-02-14T20:05:21.7412451Z [INFO] harvester_engine::engine: Job 26 completed: 12 tokens, 346 bytes written
-2026-02-14T20:05:21.7417346Z [INFO] harvester_engine::engine: Job 27 starting: https://www.nytimes.com/2026/02/14/business/artificial-intelligence-relationships-income-gap.html
-2026-02-14T20:05:21.8586358Z [WARN] harvester_engine::fetch: [fetch] HTTP error 403 for URL 'https://www.nytimes.com/2026/02/14/business/artificial-intelligence-relationships-income-gap.html'
-2026-02-14T20:05:21.8588596Z [WARN] harvester_engine::fetch: [fetch] attempt 1/3 failed url=https://www.nytimes.com/2026/02/14/business/artificial-intelligence-relationships-income-gap.html error=http status 403
-2026-02-14T20:05:21.8590327Z [INFO] harvester_engine::engine: Job 28 starting: https://www.bloomberg.com/news/articles/2026-02-13/ai-morphs-into-villain-of-the-stock-market-it-powered-for-years
-2026-02-14T20:05:21.87061Z [WARN] harvester_app::platform::effects: Job 27 failed: http status 403
-2026-02-14T20:05:21.9921493Z [WARN] harvester_engine::fetch: [fetch] HTTP error 403 for URL 'https://www.bloomberg.com/news/articles/2026-02-13/ai-morphs-into-villain-of-the-stock-market-it-powered-for-years'
-2026-02-14T20:05:21.9923927Z [WARN] harvester_engine::fetch: [fetch] attempt 1/3 failed url=https://www.bloomberg.com/news/articles/2026-02-13/ai-morphs-into-villain-of-the-stock-market-it-powered-for-years error=http status 403
-2026-02-14T20:05:21.9926998Z [INFO] harvester_engine::engine: Job 29 starting: https://www.latimes.com/entertainment-arts/business/story/2026-02-13/brad-pitt-fighting-tom-cruise-ai-video-shakes-hollywood
-2026-02-14T20:05:22.0128523Z [WARN] harvester_app::platform::effects: Job 28 failed: http status 403
-2026-02-14T20:05:22.1387014Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=29 url_len=124 url=https://www.latimes.com/entertainment-arts/business/story/2026-02-13/brad-pitt-fighting-tom-cruise-ai-video-shakes-hollywood
-2026-02-14T20:05:22.2570208Z [INFO] harvester_engine::engine: Job 29 completed: 695 tokens, 4724 bytes written
-2026-02-14T20:05:22.2573387Z [INFO] harvester_engine::engine: Job 30 starting: https://fortune.com/2026/02/13/marc-andreessen-software-eating-the-world-saaspocalypse-morgan-stanley-gut-check-displaced-labor/
-2026-02-14T20:05:22.6982Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=30 url_len=128 url=https://fortune.com/2026/02/13/marc-andreessen-software-eating-the-world-saaspocalypse-morgan-stanley-gut-check-displaced-labor/
-2026-02-14T20:05:22.7669318Z [INFO] harvester_engine::engine: Job 30 completed: 1433 tokens, 9766 bytes written
-2026-02-14T20:05:22.7672039Z [INFO] harvester_engine::engine: Job 31 starting: https://bridgemi.com/business-watch/west-michigan-faces-job-losses-and-uncertainty-as-economy-takes-toll/
-2026-02-14T20:05:22.8468683Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=31 url_len=105 url=https://bridgemi.com/business-watch/west-michigan-faces-job-losses-and-uncertainty-as-economy-takes-toll/
-2026-02-14T20:05:22.9191066Z [INFO] harvester_engine::engine: Job 31 completed: 2109 tokens, 17548 bytes written
-2026-02-14T20:05:39.4242092Z [INFO] harvester_core::update: [briefing-triage] generate requested
-2026-02-14T20:05:39.4254632Z [INFO] harvester_app::platform::effects: [llm-metadata] metadata prepared (versions=3, models=3)
-2026-02-14T20:05:39.4285722Z [INFO] harvester_core::update: [LlmMetadata] Loaded 3 active version(s)
-2026-02-14T20:05:39.4350621Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://allwork.space/2026/02/ai-is-shrinking-ceo-tenures-and-raising-the-bar-for-who-gets-to-stay/ original_bytes=562 clean_bytes=277 hash=1aaf8e92
-2026-02-14T20:05:39.4352165Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleTriage' v1 (schema v1, updated: 2026-02-12)
-2026-02-14T20:05:39.441197Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleSummary' v1 (schema v1, updated: 2026-02-12)
-2026-02-14T20:05:39.445275Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://t2conline.com/ai-stock-turmoil-what-the-anthropic-shockwave-means-for-businesses-worldwide/ original_bytes=23409 clean_bytes=23022 hash=23b502fb
-2026-02-14T20:05:39.4456409Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=OwJqcYfIdXM original_bytes=346 clean_bytes=18 hash=a7ffd314
-2026-02-14T20:05:39.4464751Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.scmp.com/tech/article/3343568/ai-rattles-us-investors-while-chinas-tech-stocks-hold-steady-now original_bytes=2252 clean_bytes=1888 hash=ef6af58b
-2026-02-14T20:05:39.4469979Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'AggregateBriefing' v1 (schema v1, updated: 2026-02-12)
-2026-02-14T20:05:39.4487619Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/02/14/big-food-ai-recipes.html original_bytes=12775 clean_bytes=12406 hash=822aa882
-2026-02-14T20:05:39.4490466Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/amazon-employees-quit-tech-startup-office-mandate-artificial-intelligence-2026-2 original_bytes=455 clean_bytes=143 hash=a7d098b0
-2026-02-14T20:05:39.4502049Z [INFO] harvester_core::update: [PromptContext] Loaded 3 context(s)
-2026-02-14T20:05:39.4549096Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/apple-siri-bet-ai-models-commodities-google-gemini-2026-1 original_bytes=350 clean_bytes=66 hash=7b459ffc
-2026-02-14T20:05:39.4552449Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=0xso7qXHK94 original_bytes=341 clean_bytes=18 hash=a7ffd314
-2026-02-14T20:05:39.4559923Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/video/6389252548112 original_bytes=1910 clean_bytes=1343 hash=81af0655
-2026-02-14T20:05:39.4567945Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://consent.yahoo.com/v2/collectConsent?sessionId=3_cc-session_6c73d5cc-e473-4d17-a11f-359b4747b43d original_bytes=2803 clean_bytes=946 hash=05efc061
-2026-02-14T20:05:39.4621251Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://aibusiness.com/generative-ai/how-ai-is-reducing-the-administrative-burden-in-sales original_bytes=464 clean_bytes=209 hash=cee0332a
-2026-02-14T20:05:39.4649694Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://fortune.com/2026/02/13/marc-andreessen-software-eating-the-world-saaspocalypse-morgan-stanley-gut-check-displaced-labor/ original_bytes=9766 clean_bytes=9408 hash=21d891fb
-2026-02-14T20:05:39.4723024Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://futurism.com/artificial-intelligence/microsoft-ai-efforts-faceplanting original_bytes=5259 clean_bytes=5025 hash=792fc20e
-2026-02-14T20:05:39.4799425Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/technology/palantir-ceo-suggests-ai-bolsters-civil-liberties-warns-europe-falling-behind-us-china original_bytes=5642 clean_bytes=5178 hash=4db3b71e
-2026-02-14T20:05:39.4889118Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.oecd.org/en/publications/progress-in-implementing-the-european-union-coordinated-plan-on-artificial-intelligence-volume-2_3ac96d41-en.html original_bytes=43406 clean_bytes=40437 hash=ebe37702
-2026-02-14T20:05:39.4969598Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://techcrunch.com/2026/01/22/quadric-rides-the-shift-from-cloud-ai-to-on-device-inference-and-its-paying-off/ original_bytes=9046 clean_bytes=8628 hash=c8323557
-2026-02-14T20:05:39.5041775Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/01/20/servicenow-openai-ai-software-saas.html original_bytes=5320 clean_bytes=4961 hash=e7567d06
-2026-02-14T20:05:39.5119531Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-23/silicon-valley-leaders-highlight-concrete-returns-as-ai-anxiety-grows original_bytes=6647 clean_bytes=6233 hash=818e0164
-2026-02-14T20:05:39.513899Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ft.com/content/905df663-8c47-4e88-b6ff-24dd4bd46290 original_bytes=9585 clean_bytes=9369 hash=6add5a47
-2026-02-14T20:05:39.5158488Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ft.com/content/320c14a2-1428-4904-b978-6fe06b3e25bf original_bytes=9559 clean_bytes=9343 hash=7b3e6754
-2026-02-14T20:05:39.5236112Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/us-china-collaboration-neurips-papers/ original_bytes=4615 clean_bytes=4360 hash=1bcb0c37
-2026-02-14T20:05:39.5243696Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ekathimerini.com/economy/1295277/transforming-ai-into-tangible-business-value/ original_bytes=2151 clean_bytes=1876 hash=1b17ce1c
-2026-02-14T20:05:39.5247009Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/army-information-overload-battlefield-data-management-ai-tool-2026-2 original_bytes=368 clean_bytes=66 hash=7b459ffc
-2026-02-14T20:05:39.5261366Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/entertainment-arts/business/story/2026-02-13/brad-pitt-fighting-tom-cruise-ai-video-shakes-hollywood original_bytes=4724 clean_bytes=4309 hash=ead4e491
-2026-02-14T20:05:39.5305943Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://bridgemi.com/business-watch/west-michigan-faces-job-losses-and-uncertainty-as-economy-takes-toll/ original_bytes=17548 clean_bytes=17218 hash=e41d1631
-2026-02-14T20:05:39.530991Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=USSJrgp4YzA original_bytes=395 clean_bytes=18 hash=a7ffd314
-2026-02-14T20:05:39.5379979Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-21/youtube-says-battling-ai-slop-is-top-priority original_bytes=3491 clean_bytes=3121 hash=b581f9fc
-2026-02-14T20:05:39.5403958Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/backchannel-how-artificial-intelligence-changed-zillow/ original_bytes=9009 clean_bytes=8778 hash=b4fbe961
-2026-02-14T20:05:39.5464305Z [INFO] harvester_core::update: [briefing-triage] prereq loaded count=28
-2026-02-14T20:05:39.5466779Z [INFO] harvester_core::update: [briefing-triage] triage rerun
-2026-02-14T20:05:39.5468359Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=1 article=0 in_flight=1 limit=3
-2026-02-14T20:05:39.5470165Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=2 article=1 in_flight=2 limit=3
-2026-02-14T20:05:39.5471789Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=3 article=2 in_flight=3 limit=3
-2026-02-14T20:05:39.548057Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=1 prompt_id=ArticleTriage
-2026-02-14T20:05:39.5481885Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=2 prompt_id=ArticleTriage
-2026-02-14T20:05:39.548316Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=3 prompt_id=ArticleTriage
-2026-02-14T20:05:39.5484378Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=1 prompt_id=ArticleTriage chars=277
-2026-02-14T20:05:39.5485367Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=2 prompt_id=ArticleTriage chars=23022
-2026-02-14T20:05:39.5486224Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=3 prompt_id=ArticleTriage chars=18
-2026-02-14T20:05:39.5487218Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=1 pre-call reservation accepted calls=1
-2026-02-14T20:05:39.5488879Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=2 pre-call reservation accepted calls=2
-2026-02-14T20:05:39.548984Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=1 model=gpt-4o-mini start
-2026-02-14T20:05:39.5490759Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=3 pre-call reservation accepted calls=3
-2026-02-14T20:05:39.5493045Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=3 model=gpt-4o-mini start
-2026-02-14T20:05:39.5501973Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=2 model=gpt-4o-mini start
-2026-02-14T20:05:41.9791331Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=3 model=gpt-4o-mini-2024-07-18 duration_ms=2429
-2026-02-14T20:05:41.979317Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=3 calls=3 input=989 output=50 cost=0
-2026-02-14T20:05:41.9938543Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=4 article=3 in_flight=3 limit=3
-2026-02-14T20:05:41.9949357Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=4 prompt_id=ArticleTriage
-2026-02-14T20:05:41.995032Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=4 prompt_id=ArticleTriage chars=1888
-2026-02-14T20:05:41.9951827Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=4 pre-call reservation accepted calls=4
-2026-02-14T20:05:41.9954563Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=4 model=gpt-4o-mini start
-2026-02-14T20:05:42.404756Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=1 model=gpt-4o-mini-2024-07-18 duration_ms=2855
-2026-02-14T20:05:42.4049476Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=1 calls=4 input=2033 output=111 cost=0
-2026-02-14T20:05:42.4168506Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=5 article=4 in_flight=3 limit=3
-2026-02-14T20:05:42.4179201Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=5 prompt_id=ArticleTriage
-2026-02-14T20:05:42.4179935Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=5 prompt_id=ArticleTriage chars=12406
-2026-02-14T20:05:42.4181279Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=5 pre-call reservation accepted calls=5
-2026-02-14T20:05:42.4188519Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=5 model=gpt-4o-mini start
-2026-02-14T20:05:44.7332781Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=4 model=gpt-4o-mini-2024-07-18 duration_ms=2737
-2026-02-14T20:05:44.7334545Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=4 calls=5 input=3403 output=208 cost=0
-2026-02-14T20:05:44.7483334Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=6 article=5 in_flight=3 limit=3
-2026-02-14T20:05:44.7493666Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=6 prompt_id=ArticleTriage
-2026-02-14T20:05:44.749444Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=6 prompt_id=ArticleTriage chars=143
-2026-02-14T20:05:44.7495908Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=6 pre-call reservation accepted calls=6
-2026-02-14T20:05:44.7497822Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=6 model=gpt-4o-mini start
-2026-02-14T20:05:44.8234835Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=5 model=gpt-4o-mini-2024-07-18 duration_ms=2404
-2026-02-14T20:05:44.8236428Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=5 calls=6 input=7008 output=297 cost=0
-2026-02-14T20:05:44.8303882Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=7 article=6 in_flight=3 limit=3
-2026-02-14T20:05:44.8312813Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=7 prompt_id=ArticleTriage
-2026-02-14T20:05:44.8313561Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=7 prompt_id=ArticleTriage chars=66
-2026-02-14T20:05:44.8315113Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=7 pre-call reservation accepted calls=7
-2026-02-14T20:05:44.8317148Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=7 model=gpt-4o-mini start
-2026-02-14T20:05:47.1958361Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=2 model=gpt-4o-mini-2024-07-18 duration_ms=7645
-2026-02-14T20:05:47.1960208Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=2 calls=7 input=12225 output=431 cost=0
-2026-02-14T20:05:47.2115641Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=8 article=7 in_flight=3 limit=3
-2026-02-14T20:05:47.2126926Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=8 prompt_id=ArticleTriage
-2026-02-14T20:05:47.2127748Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=8 prompt_id=ArticleTriage chars=18
-2026-02-14T20:05:47.2129283Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=8 pre-call reservation accepted calls=8
-2026-02-14T20:05:47.2131122Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=8 model=gpt-4o-mini start
-2026-02-14T20:05:47.340235Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=7 model=gpt-4o-mini-2024-07-18 duration_ms=2508
-2026-02-14T20:05:47.340404Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=7 calls=8 input=13223 output=485 cost=0
-2026-02-14T20:05:47.3569468Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=9 article=8 in_flight=3 limit=3
-2026-02-14T20:05:47.3580681Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=9 prompt_id=ArticleTriage
-2026-02-14T20:05:47.3581494Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=9 prompt_id=ArticleTriage chars=1343
-2026-02-14T20:05:47.3582928Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=9 pre-call reservation accepted calls=9
-2026-02-14T20:05:47.3585301Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=9 model=gpt-4o-mini start
-2026-02-14T20:05:47.6688719Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=6 model=gpt-4o-mini-2024-07-18 duration_ms=2918
-2026-02-14T20:05:47.6690566Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=6 calls=9 input=14244 output=550 cost=0
-2026-02-14T20:05:47.68313Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=10 article=9 in_flight=3 limit=3
-2026-02-14T20:05:47.6839931Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=10 prompt_id=ArticleTriage
-2026-02-14T20:05:47.6840678Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=10 prompt_id=ArticleTriage chars=946
-2026-02-14T20:05:47.6842191Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=10 pre-call reservation accepted calls=10
-2026-02-14T20:05:47.6844517Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=10 model=gpt-4o-mini start
-2026-02-14T20:05:49.2583936Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=8 model=gpt-4o-mini-2024-07-18 duration_ms=2045
-2026-02-14T20:05:49.2586033Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=8 calls=10 input=15233 output=605 cost=0
-2026-02-14T20:05:49.2721954Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=11 article=10 in_flight=3 limit=3
-2026-02-14T20:05:49.2730814Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=11 prompt_id=ArticleTriage
-2026-02-14T20:05:49.2731636Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=11 prompt_id=ArticleTriage chars=209
-2026-02-14T20:05:49.2733114Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=11 pre-call reservation accepted calls=11
-2026-02-14T20:05:49.2735016Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=11 model=gpt-4o-mini start
-2026-02-14T20:05:49.7447646Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=9 model=gpt-4o-mini-2024-07-18 duration_ms=2386
-2026-02-14T20:05:49.7449654Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=9 calls=11 input=16626 output=667 cost=0
-2026-02-14T20:05:49.7539242Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=12 article=11 in_flight=3 limit=3
-2026-02-14T20:05:49.7547871Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=12 prompt_id=ArticleTriage
-2026-02-14T20:05:49.7548648Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=12 prompt_id=ArticleTriage chars=9408
-2026-02-14T20:05:49.755068Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=12 pre-call reservation accepted calls=12
-2026-02-14T20:05:49.7557826Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=12 model=gpt-4o-mini start
-2026-02-14T20:05:50.1231104Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=10 model=gpt-4o-mini-2024-07-18 duration_ms=2438
-2026-02-14T20:05:50.123328Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=10 calls=12 input=17865 output=742 cost=0
-2026-02-14T20:05:50.1314518Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=13 article=12 in_flight=3 limit=3
-2026-02-14T20:05:50.1323228Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=13 prompt_id=ArticleTriage
-2026-02-14T20:05:50.1323974Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=13 prompt_id=ArticleTriage chars=5025
-2026-02-14T20:05:50.132555Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=13 pre-call reservation accepted calls=13
-2026-02-14T20:05:50.1330677Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=13 model=gpt-4o-mini start
-2026-02-14T20:05:51.5872194Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=11 model=gpt-4o-mini-2024-07-18 duration_ms=2313
-2026-02-14T20:05:51.587392Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=11 calls=13 input=18892 output=815 cost=0
-2026-02-14T20:05:51.6003879Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=14 article=13 in_flight=3 limit=3
-2026-02-14T20:05:51.6013898Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=14 prompt_id=ArticleTriage
-2026-02-14T20:05:51.601462Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=14 prompt_id=ArticleTriage chars=5178
-2026-02-14T20:05:51.601609Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=14 pre-call reservation accepted calls=14
-2026-02-14T20:05:51.6020243Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=14 model=gpt-4o-mini start
-2026-02-14T20:05:52.0911729Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=12 model=gpt-4o-mini-2024-07-18 duration_ms=2335
-2026-02-14T20:05:52.0913884Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=12 calls=14 input=21731 output=901 cost=0
-2026-02-14T20:05:52.0983296Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=15 article=14 in_flight=3 limit=3
-2026-02-14T20:05:52.0994489Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=15 prompt_id=ArticleTriage
-2026-02-14T20:05:52.0995618Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=15 prompt_id=ArticleTriage chars=40437
-2026-02-14T20:05:52.09975Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=15 pre-call reservation accepted calls=15
-2026-02-14T20:05:52.1020231Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=15 model=gpt-4o-mini start
-2026-02-14T20:05:53.2650062Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=13 model=gpt-4o-mini-2024-07-18 duration_ms=3131
-2026-02-14T20:05:53.2652061Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=13 calls=15 input=23738 output=1001 cost=0
-2026-02-14T20:05:53.2804238Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=16 article=15 in_flight=3 limit=3
-2026-02-14T20:05:53.2813579Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=16 prompt_id=ArticleTriage
-2026-02-14T20:05:53.2814861Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=16 prompt_id=ArticleTriage chars=8628
-2026-02-14T20:05:53.2817052Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=16 pre-call reservation accepted calls=16
-2026-02-14T20:05:53.2823869Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=16 model=gpt-4o-mini start
-2026-02-14T20:05:56.1489985Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=16 model=gpt-4o-mini-2024-07-18 duration_ms=2866
-2026-02-14T20:05:56.1492033Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=16 calls=16 input=26591 output=1109 cost=0
-2026-02-14T20:05:56.1633764Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=17 article=16 in_flight=3 limit=3
-2026-02-14T20:05:56.163717Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=14 model=gpt-4o-mini-2024-07-18 duration_ms=4561
-2026-02-14T20:05:56.1639319Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=14 calls=16 input=28734 output=1224 cost=0
-2026-02-14T20:05:56.1645376Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=17 prompt_id=ArticleTriage
-2026-02-14T20:05:56.1646492Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=17 prompt_id=ArticleTriage chars=4961
-2026-02-14T20:05:56.1648338Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=17 pre-call reservation accepted calls=17
-2026-02-14T20:05:56.1653074Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=17 model=gpt-4o-mini start
-2026-02-14T20:05:56.1676348Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=18 article=17 in_flight=3 limit=3
-2026-02-14T20:05:56.1685391Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=18 prompt_id=ArticleTriage
-2026-02-14T20:05:56.1686452Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=18 prompt_id=ArticleTriage chars=6233
-2026-02-14T20:05:56.1688291Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=18 pre-call reservation accepted calls=18
-2026-02-14T20:05:56.1693838Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=18 model=gpt-4o-mini start
-2026-02-14T20:05:59.5248395Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=17 model=gpt-4o-mini-2024-07-18 duration_ms=3359
-2026-02-14T20:05:59.5251029Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=17 calls=18 input=30913 output=1316 cost=0
-2026-02-14T20:05:59.5320105Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=19 article=18 in_flight=3 limit=3
-2026-02-14T20:05:59.5330245Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=19 prompt_id=ArticleTriage
-2026-02-14T20:05:59.5331318Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=19 prompt_id=ArticleTriage chars=9369
-2026-02-14T20:05:59.5333149Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=19 pre-call reservation accepted calls=19
-2026-02-14T20:05:59.5340673Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=19 model=gpt-4o-mini start
-2026-02-14T20:05:59.6857284Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=18 model=gpt-4o-mini-2024-07-18 duration_ms=3516
-2026-02-14T20:05:59.6859658Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=18 calls=19 input=33186 output=1424 cost=0
-2026-02-14T20:05:59.6943681Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=20 article=19 in_flight=3 limit=3
-2026-02-14T20:05:59.6954344Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=20 prompt_id=ArticleTriage
-2026-02-14T20:05:59.6955421Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=20 prompt_id=ArticleTriage chars=9343
-2026-02-14T20:05:59.6957254Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=20 pre-call reservation accepted calls=20
-2026-02-14T20:05:59.6964542Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=20 model=gpt-4o-mini start
-2026-02-14T20:06:01.8538396Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=20 model=gpt-4o-mini-2024-07-18 duration_ms=2157
-2026-02-14T20:06:01.8540192Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=20 calls=20 input=36469 output=1509 cost=0
-2026-02-14T20:06:01.8609504Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=21 article=20 in_flight=3 limit=3
-2026-02-14T20:06:01.8619629Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=21 prompt_id=ArticleTriage
-2026-02-14T20:06:01.8620738Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=21 prompt_id=ArticleTriage chars=4360
-2026-02-14T20:06:01.8622623Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=21 pre-call reservation accepted calls=21
-2026-02-14T20:06:01.8627351Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=21 model=gpt-4o-mini start
-2026-02-14T20:06:02.3522209Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=19 model=gpt-4o-mini-2024-07-18 duration_ms=2817
-2026-02-14T20:06:02.3524413Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=19 calls=21 input=39756 output=1600 cost=0
-2026-02-14T20:06:02.3634226Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=22 article=21 in_flight=3 limit=3
-2026-02-14T20:06:02.364987Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=22 prompt_id=ArticleTriage
-2026-02-14T20:06:02.3650963Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=22 prompt_id=ArticleTriage chars=1876
-2026-02-14T20:06:02.3652938Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=22 pre-call reservation accepted calls=22
-2026-02-14T20:06:02.3656726Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=22 model=gpt-4o-mini start
-2026-02-14T20:06:04.1704742Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=15 model=gpt-4o-mini-2024-07-18 duration_ms=12068
-2026-02-14T20:06:04.1706799Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=15 calls=22 input=50172 output=1702 cost=0
-2026-02-14T20:06:04.1895682Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=23 article=22 in_flight=3 limit=3
-2026-02-14T20:06:04.1906335Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=23 prompt_id=ArticleTriage
-2026-02-14T20:06:04.190735Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=23 prompt_id=ArticleTriage chars=66
-2026-02-14T20:06:04.1909221Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=23 pre-call reservation accepted calls=23
-2026-02-14T20:06:04.1911757Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=23 model=gpt-4o-mini start
-2026-02-14T20:06:04.2930459Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=21 model=gpt-4o-mini-2024-07-18 duration_ms=2430
-2026-02-14T20:06:04.2932368Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=21 calls=23 input=52018 output=1795 cost=0
-2026-02-14T20:06:04.3061454Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=24 article=23 in_flight=3 limit=3
-2026-02-14T20:06:04.3070307Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=24 prompt_id=ArticleTriage
-2026-02-14T20:06:04.3071074Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=24 prompt_id=ArticleTriage chars=4309
-2026-02-14T20:06:04.3072923Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=24 pre-call reservation accepted calls=24
-2026-02-14T20:06:04.3078559Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=24 model=gpt-4o-mini start
-2026-02-14T20:06:04.4418563Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=22 model=gpt-4o-mini-2024-07-18 duration_ms=2076
-2026-02-14T20:06:04.4421338Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=22 calls=24 input=53362 output=1863 cost=0
-2026-02-14T20:06:04.4532007Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=25 article=24 in_flight=3 limit=3
-2026-02-14T20:06:04.4543054Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=25 prompt_id=ArticleTriage
-2026-02-14T20:06:04.4543858Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=25 prompt_id=ArticleTriage chars=17218
-2026-02-14T20:06:04.4545731Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=25 pre-call reservation accepted calls=25
-2026-02-14T20:06:04.4559724Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=25 model=gpt-4o-mini start
-2026-02-14T20:06:05.2950766Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=23 model=gpt-4o-mini-2024-07-18 duration_ms=1103
-2026-02-14T20:06:05.2953394Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=23 calls=25 input=54360 output=1913 cost=0
-2026-02-14T20:06:05.3112103Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=26 article=25 in_flight=3 limit=3
-2026-02-14T20:06:05.3126307Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=26 prompt_id=ArticleTriage
-2026-02-14T20:06:05.3127418Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=26 prompt_id=ArticleTriage chars=18
-2026-02-14T20:06:05.3129273Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=26 pre-call reservation accepted calls=26
-2026-02-14T20:06:05.3132041Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=26 model=gpt-4o-mini start
-2026-02-14T20:06:06.2783205Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=24 model=gpt-4o-mini-2024-07-18 duration_ms=1970
-2026-02-14T20:06:06.2785955Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=24 calls=26 input=56290 output=2002 cost=0
-2026-02-14T20:06:06.2943433Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=27 article=26 in_flight=3 limit=3
-2026-02-14T20:06:06.2956973Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=27 prompt_id=ArticleTriage
-2026-02-14T20:06:06.2958053Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=27 prompt_id=ArticleTriage chars=3121
-2026-02-14T20:06:06.2959897Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=27 pre-call reservation accepted calls=27
-2026-02-14T20:06:06.2964386Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=27 model=gpt-4o-mini start
-2026-02-14T20:06:07.0170124Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=26 model=gpt-4o-mini-2024-07-18 duration_ms=1703
-2026-02-14T20:06:07.0172506Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=26 calls=27 input=57279 output=2058 cost=0
-2026-02-14T20:06:07.0357062Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=28 article=27 in_flight=3 limit=3
-2026-02-14T20:06:07.036808Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=28 prompt_id=ArticleTriage
-2026-02-14T20:06:07.0369233Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=28 prompt_id=ArticleTriage chars=8778
-2026-02-14T20:06:07.037116Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=28 pre-call reservation accepted calls=28
-2026-02-14T20:06:07.0378714Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=28 model=gpt-4o-mini start
-2026-02-14T20:06:07.9687689Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=25 model=gpt-4o-mini-2024-07-18 duration_ms=3512
-2026-02-14T20:06:07.9689876Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=25 calls=28 input=62530 output=2159 cost=0
-2026-02-14T20:06:09.2912084Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=27 model=gpt-4o-mini-2024-07-18 duration_ms=2994
-2026-02-14T20:06:09.2914134Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=27 calls=28 input=64183 output=2242 cost=0
-2026-02-14T20:06:09.8984297Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=28 model=gpt-4o-mini-2024-07-18 duration_ms=2860
-2026-02-14T20:06:09.8986614Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=28 calls=28 input=66987 output=2326 cost=0
-2026-02-14T20:06:09.917351Z [INFO] harvester_core::update: [briefing-triage] eligible count=13 cutoff=1
-2026-02-14T20:06:09.9206376Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://allwork.space/2026/02/ai-is-shrinking-ceo-tenures-and-raising-the-bar-for-who-gets-to-stay/ original_bytes=562 clean_bytes=277 hash=1aaf8e92
-2026-02-14T20:06:09.9257522Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://t2conline.com/ai-stock-turmoil-what-the-anthropic-shockwave-means-for-businesses-worldwide/ original_bytes=23409 clean_bytes=23022 hash=23b502fb
-2026-02-14T20:06:09.9262758Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=OwJqcYfIdXM original_bytes=346 clean_bytes=18 hash=a7ffd314
-2026-02-14T20:06:09.9276716Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.scmp.com/tech/article/3343568/ai-rattles-us-investors-while-chinas-tech-stocks-hold-steady-now original_bytes=2252 clean_bytes=1888 hash=ef6af58b
-2026-02-14T20:06:09.9312795Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/02/14/big-food-ai-recipes.html original_bytes=12775 clean_bytes=12406 hash=822aa882
-2026-02-14T20:06:09.9316858Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/amazon-employees-quit-tech-startup-office-mandate-artificial-intelligence-2026-2 original_bytes=455 clean_bytes=143 hash=a7d098b0
-2026-02-14T20:06:09.9321051Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/apple-siri-bet-ai-models-commodities-google-gemini-2026-1 original_bytes=350 clean_bytes=66 hash=7b459ffc
-2026-02-14T20:06:09.9327089Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=0xso7qXHK94 original_bytes=341 clean_bytes=18 hash=a7ffd314
-2026-02-14T20:06:09.933793Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/video/6389252548112 original_bytes=1910 clean_bytes=1343 hash=81af0655
-2026-02-14T20:06:09.9349625Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://consent.yahoo.com/v2/collectConsent?sessionId=3_cc-session_6c73d5cc-e473-4d17-a11f-359b4747b43d original_bytes=2803 clean_bytes=946 hash=05efc061
-2026-02-14T20:06:09.9354206Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://aibusiness.com/generative-ai/how-ai-is-reducing-the-administrative-burden-in-sales original_bytes=464 clean_bytes=209 hash=cee0332a
-2026-02-14T20:06:09.9391634Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://fortune.com/2026/02/13/marc-andreessen-software-eating-the-world-saaspocalypse-morgan-stanley-gut-check-displaced-labor/ original_bytes=9766 clean_bytes=9408 hash=21d891fb
-2026-02-14T20:06:09.941318Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://futurism.com/artificial-intelligence/microsoft-ai-efforts-faceplanting original_bytes=5259 clean_bytes=5025 hash=792fc20e
-2026-02-14T20:06:09.9442582Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/technology/palantir-ceo-suggests-ai-bolsters-civil-liberties-warns-europe-falling-behind-us-china original_bytes=5642 clean_bytes=5178 hash=4db3b71e
-2026-02-14T20:06:09.9583537Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.oecd.org/en/publications/progress-in-implementing-the-european-union-coordinated-plan-on-artificial-intelligence-volume-2_3ac96d41-en.html original_bytes=43406 clean_bytes=40437 hash=ebe37702
-2026-02-14T20:06:09.9609809Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://techcrunch.com/2026/01/22/quadric-rides-the-shift-from-cloud-ai-to-on-device-inference-and-its-paying-off/ original_bytes=9046 clean_bytes=8628 hash=c8323557
-2026-02-14T20:06:09.9629424Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/01/20/servicenow-openai-ai-software-saas.html original_bytes=5320 clean_bytes=4961 hash=e7567d06
-2026-02-14T20:06:09.9653357Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-23/silicon-valley-leaders-highlight-concrete-returns-as-ai-anxiety-grows original_bytes=6647 clean_bytes=6233 hash=818e0164
-2026-02-14T20:06:09.9682163Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ft.com/content/905df663-8c47-4e88-b6ff-24dd4bd46290 original_bytes=9585 clean_bytes=9369 hash=6add5a47
-2026-02-14T20:06:09.9708335Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ft.com/content/320c14a2-1428-4904-b978-6fe06b3e25bf original_bytes=9559 clean_bytes=9343 hash=7b3e6754
-2026-02-14T20:06:09.9729214Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/us-china-collaboration-neurips-papers/ original_bytes=4615 clean_bytes=4360 hash=1bcb0c37
-2026-02-14T20:06:09.9741904Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ekathimerini.com/economy/1295277/transforming-ai-into-tangible-business-value/ original_bytes=2151 clean_bytes=1876 hash=1b17ce1c
-2026-02-14T20:06:09.9745969Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/army-information-overload-battlefield-data-management-ai-tool-2026-2 original_bytes=368 clean_bytes=66 hash=7b459ffc
-2026-02-14T20:06:09.9767987Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/entertainment-arts/business/story/2026-02-13/brad-pitt-fighting-tom-cruise-ai-video-shakes-hollywood original_bytes=4724 clean_bytes=4309 hash=ead4e491
-2026-02-14T20:06:09.9840446Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://bridgemi.com/business-watch/west-michigan-faces-job-losses-and-uncertainty-as-economy-takes-toll/ original_bytes=17548 clean_bytes=17218 hash=e41d1631
-2026-02-14T20:06:09.9845677Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=USSJrgp4YzA original_bytes=395 clean_bytes=18 hash=a7ffd314
-2026-02-14T20:06:09.9860567Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-21/youtube-says-battling-ai-slop-is-top-priority original_bytes=3491 clean_bytes=3121 hash=b581f9fc
-2026-02-14T20:06:09.989635Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/backchannel-how-artificial-intelligence-changed-zillow/ original_bytes=9009 clean_bytes=8778 hash=b4fbe961
-2026-02-14T20:06:09.9906834Z [INFO] harvester_app::platform::effects: [briefing-loader] prepared 13 article(s)
-2026-02-14T20:06:10.0167208Z [INFO] harvester_core::update: [summary-cache] run warmup decision=run-start reason=metadata-loaded prompt_version=3 model_id=gpt-4o-mini
-2026-02-14T20:06:10.0170762Z [INFO] harvester_core::update: [summary-cache] article=0 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=23b502fb
-2026-02-14T20:06:10.0173408Z [INFO] harvester_core::update: [summary-cache] article=1 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=c8323557
-2026-02-14T20:06:10.017543Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=29 article=1 in_flight=1 limit=3
-2026-02-14T20:06:10.0179346Z [INFO] harvester_core::update: [summary-cache] article=2 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=6add5a47
-2026-02-14T20:06:10.0181668Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=30 article=2 in_flight=2 limit=3
-2026-02-14T20:06:10.0184253Z [INFO] harvester_core::update: [summary-cache] article=3 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=e41d1631
-2026-02-14T20:06:10.0185927Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=31 article=3 in_flight=3 limit=3
-2026-02-14T20:06:10.0196465Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=29 prompt_id=ArticleSummary
-2026-02-14T20:06:10.019749Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=29 prompt_id=ArticleSummary chars=8628
-2026-02-14T20:06:10.019881Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=30 prompt_id=ArticleSummary
-2026-02-14T20:06:10.0200173Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=30 prompt_id=ArticleSummary chars=9369
-2026-02-14T20:06:10.020156Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=29 pre-call reservation accepted calls=29
-2026-02-14T20:06:10.0202717Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=31 prompt_id=ArticleSummary
-2026-02-14T20:06:10.0203663Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=31 prompt_id=ArticleSummary chars=17218
-2026-02-14T20:06:10.0204831Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=30 pre-call reservation accepted calls=30
-2026-02-14T20:06:10.0206522Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=31 pre-call reservation accepted calls=31
-2026-02-14T20:06:10.0209743Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=29 model=gpt-4o-mini start
-2026-02-14T20:06:10.0212052Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=30 model=gpt-4o-mini start
-2026-02-14T20:06:10.0219309Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=31 model=gpt-4o-mini start
-2026-02-14T20:06:15.5108194Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=30 model=gpt-4o-mini-2024-07-18 duration_ms=5489
-2026-02-14T20:06:15.5110143Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=30 calls=31 input=69775 output=2537 cost=0
-2026-02-14T20:06:15.5282369Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=2 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
-2026-02-14T20:06:15.5283983Z [INFO] harvester_core::update: [summary-cache] article=2 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=6add5a47
-2026-02-14T20:06:15.5286956Z [INFO] harvester_core::update: [summary-cache] article=4 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=792fc20e
-2026-02-14T20:06:15.5289452Z [INFO] harvester_core::update: [summary-cache] article=5 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=e7567d06
-2026-02-14T20:06:15.5293059Z [INFO] harvester_core::update: [summary-cache] article=6 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=4db3b71e
-2026-02-14T20:06:15.5295795Z [INFO] harvester_core::update: [summary-cache] article=7 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=818e0164
-2026-02-14T20:06:15.5298399Z [INFO] harvester_core::update: [summary-cache] article=8 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ebe37702
-2026-02-14T20:06:15.5299934Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=32 article=8 in_flight=3 limit=3
-2026-02-14T20:06:15.5310503Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=32 prompt_id=ArticleSummary
-2026-02-14T20:06:15.5311568Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=32 prompt_id=ArticleSummary chars=40437
-2026-02-14T20:06:15.5313359Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=32 pre-call reservation accepted calls=32
-2026-02-14T20:06:15.5335561Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=32 model=gpt-4o-mini start
-2026-02-14T20:06:17.8100631Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=29 model=gpt-4o-mini-2024-07-18 duration_ms=7788
-2026-02-14T20:06:17.8103441Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=29 calls=32 input=72129 output=2766 cost=0
-2026-02-14T20:06:17.8262017Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=1 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
-2026-02-14T20:06:17.8264049Z [INFO] harvester_core::update: [summary-cache] article=1 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=c8323557
-2026-02-14T20:06:17.8266525Z [INFO] harvester_core::update: [summary-cache] article=9 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ef6af58b
-2026-02-14T20:06:17.8269173Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=33 article=9 in_flight=3 limit=3
-2026-02-14T20:06:17.8283237Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=33 prompt_id=ArticleSummary
-2026-02-14T20:06:17.8284276Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=33 prompt_id=ArticleSummary chars=1888
-2026-02-14T20:06:17.8286264Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=33 pre-call reservation accepted calls=33
-2026-02-14T20:06:17.8289196Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=33 model=gpt-4o-mini start
-2026-02-14T20:06:21.0314991Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=32 model=gpt-4o-mini-2024-07-18 duration_ms=5497
-2026-02-14T20:06:21.0316911Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=32 calls=33 input=82046 output=2980 cost=0
-2026-02-14T20:06:21.0470649Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=8 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
-2026-02-14T20:06:21.0472451Z [INFO] harvester_core::update: [summary-cache] article=8 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ebe37702
-2026-02-14T20:06:21.0475244Z [INFO] harvester_core::update: [summary-cache] article=10 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=21d891fb
-2026-02-14T20:06:21.0476729Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=34 article=10 in_flight=3 limit=3
-2026-02-14T20:06:21.0485688Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=34 prompt_id=ArticleSummary
-2026-02-14T20:06:21.0486465Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=34 prompt_id=ArticleSummary chars=9408
-2026-02-14T20:06:21.0488041Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=34 pre-call reservation accepted calls=34
-2026-02-14T20:06:21.0495346Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=34 model=gpt-4o-mini start
-2026-02-14T20:06:21.286002Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=31 model=gpt-4o-mini-2024-07-18 duration_ms=11263
-2026-02-14T20:06:21.2862122Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=31 calls=34 input=86798 output=3240 cost=0
-2026-02-14T20:06:21.2995534Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=3 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
-2026-02-14T20:06:21.2997346Z [INFO] harvester_core::update: [summary-cache] article=3 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=e41d1631
-2026-02-14T20:06:21.3000158Z [INFO] harvester_core::update: [summary-cache] article=11 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ead4e491
-2026-02-14T20:06:21.3001947Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=35 article=11 in_flight=3 limit=3
-2026-02-14T20:06:21.3011156Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=35 prompt_id=ArticleSummary
-2026-02-14T20:06:21.3011969Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=35 prompt_id=ArticleSummary chars=4309
-2026-02-14T20:06:21.3013298Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=35 pre-call reservation accepted calls=35
-2026-02-14T20:06:21.3017054Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=35 model=gpt-4o-mini start
-2026-02-14T20:06:24.0442133Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=33 model=gpt-4o-mini-2024-07-18 duration_ms=6215
-2026-02-14T20:06:24.0443813Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=33 calls=35 input=87669 output=3455 cost=0
-2026-02-14T20:06:24.063091Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=9 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
-2026-02-14T20:06:24.0632893Z [INFO] harvester_core::update: [summary-cache] article=9 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ef6af58b
-2026-02-14T20:06:24.0636046Z [INFO] harvester_core::update: [summary-cache] article=12 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=1bcb0c37
-2026-02-14T20:06:28.1159352Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=35 model=gpt-4o-mini-2024-07-18 duration_ms=6814
-2026-02-14T20:06:28.1161331Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=35 calls=35 input=89100 output=3687 cost=0
-2026-02-14T20:06:28.1236618Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=11 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
-2026-02-14T20:06:28.123854Z [INFO] harvester_core::update: [summary-cache] article=11 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ead4e491
-2026-02-14T20:06:28.4479343Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=34 model=gpt-4o-mini-2024-07-18 duration_ms=7398
-2026-02-14T20:06:28.4481109Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=34 calls=35 input=91440 output=3945 cost=0
-2026-02-14T20:06:28.465354Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=10 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
-2026-02-14T20:06:28.4655307Z [INFO] harvester_core::update: [summary-cache] article=10 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=21d891fb
-2026-02-14T20:06:28.4666207Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=36 prompt_id=AggregateBriefing
-2026-02-14T20:06:28.4667312Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=36 prompt_id=AggregateBriefing chars=76312
-2026-02-14T20:06:28.4669148Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=36 pre-call reservation accepted calls=36
-2026-02-14T20:06:28.4712682Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=36 model=gpt-4o-mini start
-2026-02-14T20:06:53.5994017Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=36 model=gpt-4o-mini-2024-07-18 duration_ms=25127
-2026-02-14T20:06:53.5996098Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=36 calls=36 input=107975 output=4400 cost=0
-2026-02-14T20:06:53.6115748Z [INFO] harvester_core::update: [summary-cache] run summary hits=6 misses=7 key_unavailable=0 total=13
-2026-02-14T20:06:53.6174947Z [INFO] harvester_app::platform::summary_cache_store: [summary-cache] Saved 13 entries to "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"
-2026-02-14T20:06:53.6178794Z [INFO] harvester_app::platform::effects: [summary-cache] Persisted cache to "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"
-2026-02-14T20:33:17.2593495Z [INFO] harvester_app::platform::effects: [llm-shutdown] stopping llm worker
+2026-02-15T05:12:51.5934544Z [INFO] harvester_app::platform::app: Logger initialized. Starting harvester_app...
+2026-02-15T05:12:51.5981098Z [INFO] harvester_app::platform::app: [llm-concurrency] configured max_concurrent_requests=3
+2026-02-15T05:12:51.6245359Z [INFO] harvester_app::platform::persistence: Loaded persisted completed jobs from "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.harvester_state.ron"
+2026-02-15T05:12:51.6460291Z [INFO] harvester_app::platform::summary_cache_store: [summary-cache] Loaded 13 entries from "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"
+2026-02-15T05:12:51.6463854Z [INFO] harvester_core::update: [summary-cache] Hydrated 13 entries from persistent store
+2026-02-15T05:12:57.1454676Z [INFO] harvester_core::update: [source-poll] polling requested
+2026-02-15T05:12:57.1467567Z [INFO] harvester_app::platform::effects: [source-config] loading C:\Users\larsp\src\web_page_filet_mignon\rss-llm-curation\sources.ron
+2026-02-15T05:12:57.1566816Z [INFO] harvester_app::platform::seen_set_store: [rss-seen] loaded seen set from ".rss_seen_guids.ron"
+2026-02-15T05:12:58.0082178Z [INFO] harvester_app::platform::seen_set_store: [rss-seen] saved seen set to ".rss_seen_guids.ron"
+2026-02-15T05:12:58.0084405Z [INFO] harvester_app::platform::effects: [rss-poll] google-alerts-rss => 18 new URL(s)
+2026-02-15T05:12:58.0228337Z [INFO] harvester_core::update: [source-poll] google-alerts-rss returned 18 urls
+2026-02-15T05:12:58.0390699Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=29 url_len=97 url=https://www.afr.com/technology/vc-turns-tech-founder-with-ai-company-buyout-plans-20260205-p5nzqj
+2026-02-15T05:12:58.0393331Z [INFO] harvester_engine::engine: Job 29 starting: https://www.afr.com/technology/vc-turns-tech-founder-with-ai-company-buyout-plans-20260205-p5nzqj
+2026-02-15T05:12:58.0953088Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=30 url_len=107 url=https://www.businesstimes.com.sg/companies-markets/nvidias-jensen-huang-falls-out-worlds-10-richest-ranking
+2026-02-15T05:12:58.0956498Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=31 url_len=82 url=https://tvpworld.com/91588326/7m-investment-for-ukrainian-estonian-defense-startup
+2026-02-15T05:12:58.1109208Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=32 url_len=118 url=https://www.forbes.com/sites/cathyhackl/2026/02/14/indias-ai-impact-summit-signals-a-power-shift-in-the-global-ai-era/
+2026-02-15T05:12:58.140642Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=33 url_len=109 url=https://www.bloomberg.com/news/articles/2026-02-14/ai-bubble-fears-are-creating-new-derivatives-credit-weekly
+2026-02-15T05:12:58.1645965Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=34 url_len=137 url=https://www.mayerbrown.com/en/insights/publications/2026/02/contracting-for-agentic-ai-solutions-shifting-the-model-from-saas-to-services
+2026-02-15T05:12:58.1807365Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=35 url_len=97 url=https://www.nytimes.com/video/business/100000010590569/can-you-rely-on-ai-relationships-love.html
+2026-02-15T05:12:58.2290529Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=36 url_len=76 url=https://colombiaone.com/2026/02/14/colombia-nicolas-rojas-dapta-ai-platform/
+2026-02-15T05:12:58.2451492Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=37 url_len=43 url=https://www.youtube.com/watch?v=PHxsXlUIuTs
+2026-02-15T05:12:58.2672549Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=38 url_len=67 url=https://emerj.com/artificial-intelligence-at-allianz-two-use-cases/
+2026-02-15T05:12:58.2676932Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=39 url_len=128 url=https://www.forbes.com/sites/quickerbettertech/2026/02/14/small-business-technology-news-ai-models-that-are-better-than-chatgpt/
+2026-02-15T05:12:58.2680955Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=40 url_len=43 url=https://www.youtube.com/watch?v=PrMOg3dW8t4
+2026-02-15T05:12:58.2977284Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=41 url_len=93 url=https://www.fool.com/investing/2026/02/14/forget-nvidia-buy-artificial-intelligence-ai-stock/
+2026-02-15T05:12:58.3334548Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=42 url_len=100 url=https://www.latimes.com/business/story/2026-02-13/wall-street-steadies-after-its-ai-induced-sell-off
+2026-02-15T05:12:58.3802302Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=43 url_len=61 url=https://www.scirp.org/journal/paperinformation?paperid=149677
+2026-02-15T05:12:58.3992903Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=29 url_len=97 url=https://www.afr.com/technology/vc-turns-tech-founder-with-ai-company-buyout-plans-20260205-p5nzqj
+2026-02-15T05:12:58.4146956Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=44 url_len=89 url=https://www.inc.com/ben-sherry/i-went-to-an-ai-dating-cafe-things-got-weird-fast/91302611
+2026-02-15T05:12:58.4281081Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=45 url_len=73 url=https://finance.yahoo.com/news/catch-22-behind-amazons-big-183500675.html
+2026-02-15T05:12:58.4439821Z [INFO] harvester_app::platform::effects: EnqueueUrl job_id=46 url_len=95 url=https://www.telegraphherald.com/news/business/article_49100c01-2553-4d97-91b2-f570028a516f.html
+2026-02-15T05:12:58.4536845Z [INFO] harvester_engine::engine: Job 29 completed: 249 tokens, 1877 bytes written
+2026-02-15T05:12:58.4539205Z [INFO] harvester_engine::engine: Job 30 starting: https://www.businesstimes.com.sg/companies-markets/nvidias-jensen-huang-falls-out-worlds-10-richest-ranking
+2026-02-15T05:12:58.8919735Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=30 url_len=107 url=https://www.businesstimes.com.sg/companies-markets/nvidias-jensen-huang-falls-out-worlds-10-richest-ranking
+2026-02-15T05:12:58.9225163Z [INFO] harvester_engine::engine: Job 30 completed: 654 tokens, 4360 bytes written
+2026-02-15T05:12:58.9227877Z [INFO] harvester_engine::engine: Job 31 starting: https://tvpworld.com/91588326/7m-investment-for-ukrainian-estonian-defense-startup
+2026-02-15T05:12:59.1214358Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=31 url_len=82 url=https://tvpworld.com/91588326/7m-investment-for-ukrainian-estonian-defense-startup
+2026-02-15T05:12:59.3271478Z [INFO] harvester_engine::engine: Job 31 completed: 0 tokens, 254 bytes written
+2026-02-15T05:12:59.3274107Z [INFO] harvester_engine::engine: Job 32 starting: https://www.forbes.com/sites/cathyhackl/2026/02/14/indias-ai-impact-summit-signals-a-power-shift-in-the-global-ai-era/
+2026-02-15T05:12:59.4048909Z [WARN] harvester_engine::fetch: [fetch] HTTP error 403 for URL 'https://www.forbes.com/sites/cathyhackl/2026/02/14/indias-ai-impact-summit-signals-a-power-shift-in-the-global-ai-era/'
+2026-02-15T05:12:59.4051207Z [WARN] harvester_engine::fetch: [fetch] attempt 1/3 failed url=https://www.forbes.com/sites/cathyhackl/2026/02/14/indias-ai-impact-summit-signals-a-power-shift-in-the-global-ai-era/ error=http status 403
+2026-02-15T05:12:59.4053447Z [INFO] harvester_engine::engine: Job 33 starting: https://www.bloomberg.com/news/articles/2026-02-14/ai-bubble-fears-are-creating-new-derivatives-credit-weekly
+2026-02-15T05:12:59.4169202Z [WARN] harvester_app::platform::effects: Job 32 failed: http status 403
+2026-02-15T05:12:59.5105164Z [WARN] harvester_engine::fetch: [fetch] HTTP error 403 for URL 'https://www.bloomberg.com/news/articles/2026-02-14/ai-bubble-fears-are-creating-new-derivatives-credit-weekly'
+2026-02-15T05:12:59.5107856Z [WARN] harvester_engine::fetch: [fetch] attempt 1/3 failed url=https://www.bloomberg.com/news/articles/2026-02-14/ai-bubble-fears-are-creating-new-derivatives-credit-weekly error=http status 403
+2026-02-15T05:12:59.5110426Z [INFO] harvester_engine::engine: Job 34 starting: https://www.mayerbrown.com/en/insights/publications/2026/02/contracting-for-agentic-ai-solutions-shifting-the-model-from-saas-to-services
+2026-02-15T05:12:59.5180421Z [WARN] harvester_app::platform::effects: Job 33 failed: http status 403
+2026-02-15T05:13:00.0304403Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=34 url_len=137 url=https://www.mayerbrown.com/en/insights/publications/2026/02/contracting-for-agentic-ai-solutions-shifting-the-model-from-saas-to-services
+2026-02-15T05:13:00.0822889Z [INFO] harvester_engine::engine: Job 34 completed: 2731 tokens, 17904 bytes written
+2026-02-15T05:13:00.0825496Z [INFO] harvester_engine::engine: Job 35 starting: https://www.nytimes.com/video/business/100000010590569/can-you-rely-on-ai-relationships-love.html
+2026-02-15T05:13:00.1646683Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=35 url_len=97 url=https://www.nytimes.com/video/business/100000010590569/can-you-rely-on-ai-relationships-love.html
+2026-02-15T05:13:00.2093673Z [INFO] harvester_engine::engine: Job 35 completed: 245 tokens, 1719 bytes written
+2026-02-15T05:13:00.2096938Z [INFO] harvester_engine::engine: Job 36 starting: https://colombiaone.com/2026/02/14/colombia-nicolas-rojas-dapta-ai-platform/
+2026-02-15T05:13:00.28305Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=36 url_len=76 url=https://colombiaone.com/2026/02/14/colombia-nicolas-rojas-dapta-ai-platform/
+2026-02-15T05:13:00.3394995Z [INFO] harvester_engine::engine: Job 36 completed: 1063 tokens, 7466 bytes written
+2026-02-15T05:13:00.339884Z [INFO] harvester_engine::engine: Job 37 starting: https://www.youtube.com/watch?v=PHxsXlUIuTs
+2026-02-15T05:13:00.6036738Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=37 url_len=43 url=https://www.youtube.com/watch?v=PHxsXlUIuTs
+2026-02-15T05:13:01.3280417Z [INFO] harvester_engine::engine: Job 37 completed: 12 tokens, 393 bytes written
+2026-02-15T05:13:01.3284503Z [INFO] harvester_engine::engine: Job 38 starting: https://emerj.com/artificial-intelligence-at-allianz-two-use-cases/
+2026-02-15T05:13:01.8838707Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=38 url_len=67 url=https://emerj.com/artificial-intelligence-at-allianz-two-use-cases/
+2026-02-15T05:13:02.4936814Z [INFO] harvester_engine::engine: Job 38 completed: 4063 tokens, 28783 bytes written
+2026-02-15T05:13:02.4941456Z [INFO] harvester_engine::engine: Job 39 starting: https://www.forbes.com/sites/quickerbettertech/2026/02/14/small-business-technology-news-ai-models-that-are-better-than-chatgpt/
+2026-02-15T05:13:02.5392575Z [WARN] harvester_engine::fetch: [fetch] HTTP error 403 for URL 'https://www.forbes.com/sites/quickerbettertech/2026/02/14/small-business-technology-news-ai-models-that-are-better-than-chatgpt/'
+2026-02-15T05:13:02.5394574Z [WARN] harvester_engine::fetch: [fetch] attempt 1/3 failed url=https://www.forbes.com/sites/quickerbettertech/2026/02/14/small-business-technology-news-ai-models-that-are-better-than-chatgpt/ error=http status 403
+2026-02-15T05:13:02.539647Z [INFO] harvester_engine::engine: Job 40 starting: https://www.youtube.com/watch?v=PrMOg3dW8t4
+2026-02-15T05:13:02.5589405Z [WARN] harvester_app::platform::effects: Job 39 failed: http status 403
+2026-02-15T05:13:02.8545722Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=40 url_len=43 url=https://www.youtube.com/watch?v=PrMOg3dW8t4
+2026-02-15T05:13:03.4525289Z [INFO] harvester_engine::engine: Job 40 completed: 12 tokens, 396 bytes written
+2026-02-15T05:13:03.4529588Z [INFO] harvester_engine::engine: Job 41 starting: https://www.fool.com/investing/2026/02/14/forget-nvidia-buy-artificial-intelligence-ai-stock/
+2026-02-15T05:13:04.0799176Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=41 url_len=93 url=https://www.fool.com/investing/2026/02/14/forget-nvidia-buy-artificial-intelligence-ai-stock/
+2026-02-15T05:13:04.2469373Z [INFO] harvester_engine::engine: Job 41 completed: 14 tokens, 391 bytes written
+2026-02-15T05:13:04.2471834Z [INFO] harvester_engine::engine: Job 42 starting: https://www.latimes.com/business/story/2026-02-13/wall-street-steadies-after-its-ai-induced-sell-off
+2026-02-15T05:13:04.3209919Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=42 url_len=100 url=https://www.latimes.com/business/story/2026-02-13/wall-street-steadies-after-its-ai-induced-sell-off
+2026-02-15T05:13:04.3849048Z [INFO] harvester_engine::engine: Job 42 completed: 874 tokens, 5591 bytes written
+2026-02-15T05:13:04.3851448Z [INFO] harvester_engine::engine: Job 43 starting: https://www.scirp.org/journal/paperinformation?paperid=149677
+2026-02-15T05:13:05.0171388Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=43 url_len=61 url=https://www.scirp.org/journal/paperinformation?paperid=149677
+2026-02-15T05:13:05.5028178Z [INFO] harvester_engine::engine: Job 43 completed: 8598 tokens, 62249 bytes written
+2026-02-15T05:13:05.5031111Z [INFO] harvester_engine::engine: Job 44 starting: https://www.inc.com/ben-sherry/i-went-to-an-ai-dating-cafe-things-got-weird-fast/91302611
+2026-02-15T05:13:05.5556502Z [WARN] harvester_engine::fetch: [fetch] HTTP error 403 for URL 'https://www.inc.com/ben-sherry/i-went-to-an-ai-dating-cafe-things-got-weird-fast/91302611'
+2026-02-15T05:13:05.5559265Z [WARN] harvester_engine::fetch: [fetch] attempt 1/3 failed url=https://www.inc.com/ben-sherry/i-went-to-an-ai-dating-cafe-things-got-weird-fast/91302611 error=http status 403
+2026-02-15T05:13:05.5561512Z [INFO] harvester_engine::engine: Job 45 starting: https://finance.yahoo.com/news/catch-22-behind-amazons-big-183500675.html
+2026-02-15T05:13:05.5632601Z [WARN] harvester_app::platform::effects: Job 44 failed: http status 403
+2026-02-15T05:13:06.267486Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=45 url_len=73 url=https://finance.yahoo.com/news/catch-22-behind-amazons-big-183500675.html
+2026-02-15T05:13:06.2799575Z [INFO] harvester_engine::engine: Job 45 completed: 346 tokens, 2803 bytes written
+2026-02-15T05:13:06.2801779Z [INFO] harvester_engine::engine: Job 46 starting: https://www.telegraphherald.com/news/business/article_49100c01-2553-4d97-91b2-f570028a516f.html
+2026-02-15T05:13:07.1350847Z [INFO] harvester_engine::fetch: [fetch] Fetch start job_id=46 url_len=95 url=https://www.telegraphherald.com/news/business/article_49100c01-2553-4d97-91b2-f570028a516f.html
+2026-02-15T05:13:07.1390278Z [INFO] harvester_engine::engine: Job 46 completed: 11 tokens, 577 bytes written
+2026-02-15T05:13:16.1071319Z [INFO] harvester_core::update: [briefing-triage] generate requested
+2026-02-15T05:13:16.1087939Z [INFO] harvester_app::platform::effects: [llm-metadata] metadata prepared (versions=3, models=3)
+2026-02-15T05:13:16.1097371Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleTriage' v1 (schema v1, updated: 2026-02-12)
+2026-02-15T05:13:16.1102518Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleSummary' v1 (schema v1, updated: 2026-02-12)
+2026-02-15T05:13:16.1108461Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'AggregateBriefing' v1 (schema v1, updated: 2026-02-12)
+2026-02-15T05:13:16.1147437Z [INFO] harvester_core::update: [LlmMetadata] Loaded 3 active version(s)
+2026-02-15T05:13:16.1155075Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=PrMOg3dW8t4 original_bytes=396 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:16.1168989Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://allwork.space/2026/02/ai-is-shrinking-ceo-tenures-and-raising-the-bar-for-who-gets-to-stay/ original_bytes=562 clean_bytes=277 hash=1aaf8e92
+2026-02-15T05:13:16.1203721Z [INFO] harvester_core::update: [PromptContext] Loaded 3 context(s)
+2026-02-15T05:13:16.1305443Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://t2conline.com/ai-stock-turmoil-what-the-anthropic-shockwave-means-for-businesses-worldwide/ original_bytes=23409 clean_bytes=23022 hash=23b502fb
+2026-02-15T05:13:16.1364008Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=OwJqcYfIdXM original_bytes=346 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:16.1433153Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.scmp.com/tech/article/3343568/ai-rattles-us-investors-while-chinas-tech-stocks-hold-steady-now original_bytes=2252 clean_bytes=1888 hash=ef6af58b
+2026-02-15T05:13:16.1436286Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://tvpworld.com/91588326/7m-investment-for-ukrainian-estonian-defense-startup original_bytes=254 clean_bytes=0 hash=e3b0c442
+2026-02-15T05:13:16.1526089Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/02/14/big-food-ai-recipes.html original_bytes=12775 clean_bytes=12406 hash=822aa882
+2026-02-15T05:13:16.1581139Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/amazon-employees-quit-tech-startup-office-mandate-artificial-intelligence-2026-2 original_bytes=455 clean_bytes=143 hash=a7d098b0
+2026-02-15T05:13:16.1633498Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/apple-siri-bet-ai-models-commodities-google-gemini-2026-1 original_bytes=350 clean_bytes=66 hash=7b459ffc
+2026-02-15T05:13:16.1680328Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://emerj.com/artificial-intelligence-at-allianz-two-use-cases/ original_bytes=28783 clean_bytes=28402 hash=1011cf39
+2026-02-15T05:13:16.1736449Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=0xso7qXHK94 original_bytes=341 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:16.1744192Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.nytimes.com/video/business/100000010590569/can-you-rely-on-ai-relationships-love.html original_bytes=1719 clean_bytes=1336 hash=4a8da4d9
+2026-02-15T05:13:16.1774263Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.mayerbrown.com/en/insights/publications/2026/02/contracting-for-agentic-ai-solutions-shifting-the-model-from-saas-to-services original_bytes=17904 clean_bytes=17486 hash=c0a7c32a
+2026-02-15T05:13:16.1838055Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/video/6389252548112 original_bytes=1910 clean_bytes=1343 hash=81af0655
+2026-02-15T05:13:16.1901682Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://consent.yahoo.com/v2/collectConsent?sessionId=3_cc-session_6c73d5cc-e473-4d17-a11f-359b4747b43d original_bytes=2803 clean_bytes=946 hash=05efc061
+2026-02-15T05:13:16.1909631Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://consent.yahoo.com/v2/collectConsent?sessionId=3_cc-session_95bb5d65-e815-4868-9b28-74aab2c0da26 original_bytes=2803 clean_bytes=946 hash=05efc061
+2026-02-15T05:13:16.1965108Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://aibusiness.com/generative-ai/how-ai-is-reducing-the-administrative-burden-in-sales original_bytes=464 clean_bytes=209 hash=cee0332a
+2026-02-15T05:13:16.205525Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://fortune.com/2026/02/13/marc-andreessen-software-eating-the-world-saaspocalypse-morgan-stanley-gut-check-displaced-labor/ original_bytes=9766 clean_bytes=9408 hash=21d891fb
+2026-02-15T05:13:16.2134971Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://futurism.com/artificial-intelligence/microsoft-ai-efforts-faceplanting original_bytes=5259 clean_bytes=5025 hash=792fc20e
+2026-02-15T05:13:16.2142311Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.afr.com/technology/vc-turns-tech-founder-with-ai-company-buyout-plans-20260205-p5nzqj original_bytes=1877 clean_bytes=1555 hash=7b2cf13f
+2026-02-15T05:13:16.2160297Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://colombiaone.com/2026/02/14/colombia-nicolas-rojas-dapta-ai-platform/ original_bytes=7466 clean_bytes=7136 hash=a6a91665
+2026-02-15T05:13:16.2173944Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businesstimes.com.sg/companies-markets/nvidias-jensen-huang-falls-out-worlds-10-richest-ranking original_bytes=4360 clean_bytes=4045 hash=24b46141
+2026-02-15T05:13:16.2249115Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/technology/palantir-ceo-suggests-ai-bolsters-civil-liberties-warns-europe-falling-behind-us-china original_bytes=5642 clean_bytes=5178 hash=4db3b71e
+2026-02-15T05:13:16.2401433Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.oecd.org/en/publications/progress-in-implementing-the-european-union-coordinated-plan-on-artificial-intelligence-volume-2_3ac96d41-en.html original_bytes=43406 clean_bytes=40437 hash=ebe37702
+2026-02-15T05:13:16.2483932Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://techcrunch.com/2026/01/22/quadric-rides-the-shift-from-cloud-ai-to-on-device-inference-and-its-paying-off/ original_bytes=9046 clean_bytes=8628 hash=c8323557
+2026-02-15T05:13:16.255517Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/01/20/servicenow-openai-ai-software-saas.html original_bytes=5320 clean_bytes=4961 hash=e7567d06
+2026-02-15T05:13:16.2558259Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.fool.com/investing/2026/02/14/forget-nvidia-buy-artificial-intelligence-ai-stock/ original_bytes=391 clean_bytes=83 hash=519bd3d4
+2026-02-15T05:13:16.2637976Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-23/silicon-valley-leaders-highlight-concrete-returns-as-ai-anxiety-grows original_bytes=6647 clean_bytes=6233 hash=818e0164
+2026-02-15T05:13:16.2720527Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ft.com/content/905df663-8c47-4e88-b6ff-24dd4bd46290 original_bytes=9585 clean_bytes=9369 hash=6add5a47
+2026-02-15T05:13:16.2798106Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ft.com/content/320c14a2-1428-4904-b978-6fe06b3e25bf original_bytes=9559 clean_bytes=9343 hash=7b3e6754
+2026-02-15T05:13:16.2801211Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=PHxsXlUIuTs original_bytes=393 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:16.2894426Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.scirp.org/journal/paperinformation?paperid=149677 original_bytes=62249 clean_bytes=61753 hash=5b5ce58e
+2026-02-15T05:13:16.2984711Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/us-china-collaboration-neurips-papers/ original_bytes=4615 clean_bytes=4360 hash=1bcb0c37
+2026-02-15T05:13:16.3049565Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ekathimerini.com/economy/1295277/transforming-ai-into-tangible-business-value/ original_bytes=2151 clean_bytes=1876 hash=1b17ce1c
+2026-02-15T05:13:16.3105937Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/army-information-overload-battlefield-data-management-ai-tool-2026-2 original_bytes=368 clean_bytes=66 hash=7b459ffc
+2026-02-15T05:13:16.3181618Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/entertainment-arts/business/story/2026-02-13/brad-pitt-fighting-tom-cruise-ai-video-shakes-hollywood original_bytes=4724 clean_bytes=4309 hash=ead4e491
+2026-02-15T05:13:16.3196071Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-02-13/wall-street-steadies-after-its-ai-induced-sell-off original_bytes=5591 clean_bytes=5206 hash=6a30deee
+2026-02-15T05:13:16.3325462Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://bridgemi.com/business-watch/west-michigan-faces-job-losses-and-uncertainty-as-economy-takes-toll/ original_bytes=17548 clean_bytes=17218 hash=e41d1631
+2026-02-15T05:13:16.3381373Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=USSJrgp4YzA original_bytes=395 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:16.3460926Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-21/youtube-says-battling-ai-slop-is-top-priority original_bytes=3491 clean_bytes=3121 hash=b581f9fc
+2026-02-15T05:13:16.360292Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/backchannel-how-artificial-intelligence-changed-zillow/ original_bytes=9009 clean_bytes=8778 hash=b4fbe961
+2026-02-15T05:13:16.3606002Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.telegraphherald.com/_services/v1/client_captcha/challenge?request=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NzExMzI2ODcsImlhdCI6MTc3MTEzMjM4NywicmVkaXJlY3QiOiIvbmV3cy9idXNpbmVzcy9hcnRpY2xlXzQ5MTAwYzAxLTI1NTMtNGQ5Ny05MWIyLWY1NzAwMjhhNTE2Zi5odG1sIiwic2VydmljZSI6Il9sYl9yYXRlX2Ntc2FwcF9mb3JlaWduIiwic2l0ZSI6InRlbGVncmFwaGhlcmFsZC5jb20ifQ.UwNWG6BaKuvcoVotTsFIBo1sUSJqKH6RGdW0x-J-6CQ original_bytes=577 clean_bytes=60 hash=7a0c4d8c
+2026-02-15T05:13:16.3668224Z [INFO] harvester_core::update: [briefing-triage] prereq loaded count=42
+2026-02-15T05:13:16.3671114Z [INFO] harvester_core::update: [briefing-triage] triage rerun
+2026-02-15T05:13:16.3672716Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=1 article=0 in_flight=1 limit=3
+2026-02-15T05:13:16.3674247Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=2 article=1 in_flight=2 limit=3
+2026-02-15T05:13:16.3675748Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=3 article=2 in_flight=3 limit=3
+2026-02-15T05:13:16.3690499Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=1 prompt_id=ArticleTriage
+2026-02-15T05:13:16.3691442Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=1 prompt_id=ArticleTriage bytes=18
+2026-02-15T05:13:16.3692481Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=2 prompt_id=ArticleTriage
+2026-02-15T05:13:16.3693257Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=2 prompt_id=ArticleTriage bytes=277
+2026-02-15T05:13:16.3694119Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=1 pre-call reservation accepted calls=1
+2026-02-15T05:13:16.3694863Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=3 prompt_id=ArticleTriage
+2026-02-15T05:13:16.3695661Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=3 prompt_id=ArticleTriage bytes=23022
+2026-02-15T05:13:16.3696465Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=1 model=gpt-4o-mini start
+2026-02-15T05:13:16.3697438Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=2 pre-call reservation accepted calls=2
+2026-02-15T05:13:16.3699724Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=2 model=gpt-4o-mini start
+2026-02-15T05:13:16.3700729Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=3 pre-call reservation accepted calls=3
+2026-02-15T05:13:16.3713187Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=3 model=gpt-4o-mini start
+2026-02-15T05:13:17.7592388Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:17.7593975Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=1 calls=3 input=989 output=51 cost=0
+2026-02-15T05:13:17.7628791Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=1 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=18 input_tokens=989 output_tokens=51 cost_microdollars=0 wall_ms=1390 parse_ok=true cache_status=miss
+2026-02-15T05:13:17.7647442Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=4 article=3 in_flight=3 limit=3
+2026-02-15T05:13:17.7661395Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=4 prompt_id=ArticleTriage
+2026-02-15T05:13:17.7662237Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=4 prompt_id=ArticleTriage bytes=18
+2026-02-15T05:13:17.766381Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=4 pre-call reservation accepted calls=4
+2026-02-15T05:13:17.7665657Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=4 model=gpt-4o-mini start
+2026-02-15T05:13:18.0224751Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:18.02263Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=2 calls=4 input=2033 output=123 cost=0
+2026-02-15T05:13:18.0256491Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=2 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=277 input_tokens=1044 output_tokens=72 cost_microdollars=0 wall_ms=1653 parse_ok=true cache_status=miss
+2026-02-15T05:13:18.0281834Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=5 article=4 in_flight=3 limit=3
+2026-02-15T05:13:18.0295946Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=5 prompt_id=ArticleTriage
+2026-02-15T05:13:18.0296702Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=5 prompt_id=ArticleTriage bytes=1888
+2026-02-15T05:13:18.0298785Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=5 pre-call reservation accepted calls=5
+2026-02-15T05:13:18.0302794Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=5 model=gpt-4o-mini start
+2026-02-15T05:13:19.5141417Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:19.5143163Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=3 calls=5 input=7250 output=260 cost=0
+2026-02-15T05:13:19.5192548Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=3 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=23022 input_tokens=5217 output_tokens=137 cost_microdollars=0 wall_ms=3144 parse_ok=true cache_status=miss
+2026-02-15T05:13:19.5225569Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=6 article=5 in_flight=3 limit=3
+2026-02-15T05:13:19.524008Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=6 prompt_id=ArticleTriage
+2026-02-15T05:13:19.5240811Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=6 prompt_id=ArticleTriage bytes=0
+2026-02-15T05:13:19.5242366Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=6 pre-call reservation accepted calls=6
+2026-02-15T05:13:19.5244437Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=6 model=gpt-4o-mini start
+2026-02-15T05:13:20.2643053Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:20.2644735Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=4 calls=6 input=8239 output=318 cost=0
+2026-02-15T05:13:20.2674875Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=4 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=18 input_tokens=989 output_tokens=58 cost_microdollars=0 wall_ms=2498 parse_ok=true cache_status=miss
+2026-02-15T05:13:20.2758802Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=7 article=6 in_flight=3 limit=3
+2026-02-15T05:13:20.2774273Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=7 prompt_id=ArticleTriage
+2026-02-15T05:13:20.2775247Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=7 prompt_id=ArticleTriage bytes=12406
+2026-02-15T05:13:20.2776758Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=7 pre-call reservation accepted calls=7
+2026-02-15T05:13:20.2784025Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=7 model=gpt-4o-mini start
+2026-02-15T05:13:20.4122815Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:20.4124309Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=5 calls=7 input=9609 output=413 cost=0
+2026-02-15T05:13:20.4154357Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=5 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=1888 input_tokens=1370 output_tokens=95 cost_microdollars=0 wall_ms=2382 parse_ok=true cache_status=miss
+2026-02-15T05:13:20.4270475Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=8 article=7 in_flight=3 limit=3
+2026-02-15T05:13:20.4285955Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=8 prompt_id=ArticleTriage
+2026-02-15T05:13:20.4286879Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=8 prompt_id=ArticleTriage bytes=143
+2026-02-15T05:13:20.4288545Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=8 pre-call reservation accepted calls=8
+2026-02-15T05:13:20.4290525Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=8 model=gpt-4o-mini start
+2026-02-15T05:13:20.758267Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:20.7584359Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=6 calls=8 input=10595 output=465 cost=0
+2026-02-15T05:13:20.7616187Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=6 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=0 input_tokens=986 output_tokens=52 cost_microdollars=0 wall_ms=1234 parse_ok=true cache_status=miss
+2026-02-15T05:13:20.7746604Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=9 article=8 in_flight=3 limit=3
+2026-02-15T05:13:20.7762071Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=9 prompt_id=ArticleTriage
+2026-02-15T05:13:20.7762878Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=9 prompt_id=ArticleTriage bytes=66
+2026-02-15T05:13:20.7764233Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=9 pre-call reservation accepted calls=9
+2026-02-15T05:13:20.776637Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=9 model=gpt-4o-mini start
+2026-02-15T05:13:21.7597501Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:21.7599546Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=7 calls=9 input=14200 output=544 cost=0
+2026-02-15T05:13:21.7653896Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=7 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=12406 input_tokens=3605 output_tokens=79 cost_microdollars=0 wall_ms=1482 parse_ok=true cache_status=miss
+2026-02-15T05:13:21.774185Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:21.7743338Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=8 calls=9 input=15221 output=614 cost=0
+2026-02-15T05:13:21.7770093Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=8 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=143 input_tokens=1021 output_tokens=70 cost_microdollars=0 wall_ms=1345 parse_ok=true cache_status=miss
+2026-02-15T05:13:21.7786033Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=10 article=9 in_flight=3 limit=3
+2026-02-15T05:13:21.7799314Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=10 prompt_id=ArticleTriage
+2026-02-15T05:13:21.7800269Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=10 prompt_id=ArticleTriage bytes=28402
+2026-02-15T05:13:21.7801769Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=10 pre-call reservation accepted calls=10
+2026-02-15T05:13:21.7816016Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=10 model=gpt-4o-mini start
+2026-02-15T05:13:21.782849Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=11 article=10 in_flight=3 limit=3
+2026-02-15T05:13:21.7841628Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=11 prompt_id=ArticleTriage
+2026-02-15T05:13:21.7842449Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=11 prompt_id=ArticleTriage bytes=18
+2026-02-15T05:13:21.7843946Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=11 pre-call reservation accepted calls=11
+2026-02-15T05:13:21.7845613Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=11 model=gpt-4o-mini start
+2026-02-15T05:13:22.6608168Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:22.6609971Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=9 calls=11 input=16219 output=671 cost=0
+2026-02-15T05:13:22.6639541Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=9 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=66 input_tokens=998 output_tokens=57 cost_microdollars=0 wall_ms=1884 parse_ok=true cache_status=miss
+2026-02-15T05:13:22.6740317Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=12 article=11 in_flight=3 limit=3
+2026-02-15T05:13:22.6754645Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=12 prompt_id=ArticleTriage
+2026-02-15T05:13:22.675538Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=12 prompt_id=ArticleTriage bytes=1336
+2026-02-15T05:13:22.675685Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=12 pre-call reservation accepted calls=12
+2026-02-15T05:13:22.6759502Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=12 model=gpt-4o-mini start
+2026-02-15T05:13:23.3342607Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:23.3344271Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=11 calls=12 input=17208 output=725 cost=0
+2026-02-15T05:13:23.3373488Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=11 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=18 input_tokens=989 output_tokens=54 cost_microdollars=0 wall_ms=1550 parse_ok=true cache_status=miss
+2026-02-15T05:13:23.339486Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=13 article=12 in_flight=3 limit=3
+2026-02-15T05:13:23.3408028Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=13 prompt_id=ArticleTriage
+2026-02-15T05:13:23.3408998Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=13 prompt_id=ArticleTriage bytes=17486
+2026-02-15T05:13:23.3410545Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=13 pre-call reservation accepted calls=13
+2026-02-15T05:13:23.3421563Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=13 model=gpt-4o-mini start
+2026-02-15T05:13:24.2692402Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:24.2694073Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=10 calls=13 input=23682 output=821 cost=0
+2026-02-15T05:13:24.2733894Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=10 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=28402 input_tokens=6474 output_tokens=96 cost_microdollars=0 wall_ms=2489 parse_ok=true cache_status=miss
+2026-02-15T05:13:24.2828037Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=14 article=13 in_flight=3 limit=3
+2026-02-15T05:13:24.2842268Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=14 prompt_id=ArticleTriage
+2026-02-15T05:13:24.2843085Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=14 prompt_id=ArticleTriage bytes=1343
+2026-02-15T05:13:24.2844611Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=14 pre-call reservation accepted calls=14
+2026-02-15T05:13:24.284707Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=14 model=gpt-4o-mini start
+2026-02-15T05:13:24.8017952Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:24.8019744Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=12 calls=14 input=25020 output=892 cost=0
+2026-02-15T05:13:24.8050528Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=12 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=1336 input_tokens=1338 output_tokens=71 cost_microdollars=0 wall_ms=2126 parse_ok=true cache_status=miss
+2026-02-15T05:13:24.8102202Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=15 article=14 in_flight=3 limit=3
+2026-02-15T05:13:24.8119996Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=15 prompt_id=ArticleTriage
+2026-02-15T05:13:24.8120808Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=15 prompt_id=ArticleTriage bytes=946
+2026-02-15T05:13:24.8122292Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=15 pre-call reservation accepted calls=15
+2026-02-15T05:13:24.8124578Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=15 model=gpt-4o-mini start
+2026-02-15T05:13:25.0454281Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:25.0455914Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=13 calls=15 input=29611 output=963 cost=0
+2026-02-15T05:13:25.0491349Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=13 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=17486 input_tokens=4591 output_tokens=71 cost_microdollars=0 wall_ms=1704 parse_ok=true cache_status=miss
+2026-02-15T05:13:25.0531293Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=16 article=15 in_flight=3 limit=3
+2026-02-15T05:13:25.0546056Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=16 prompt_id=ArticleTriage
+2026-02-15T05:13:25.0546814Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=16 prompt_id=ArticleTriage bytes=946
+2026-02-15T05:13:25.0548434Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=16 pre-call reservation accepted calls=16
+2026-02-15T05:13:25.0551056Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=16 model=gpt-4o-mini start
+2026-02-15T05:13:26.0570645Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:26.057244Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=14 calls=16 input=31004 output=1031 cost=0
+2026-02-15T05:13:26.0618645Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=14 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=1343 input_tokens=1393 output_tokens=68 cost_microdollars=0 wall_ms=1772 parse_ok=true cache_status=miss
+2026-02-15T05:13:26.0722377Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=17 article=16 in_flight=3 limit=3
+2026-02-15T05:13:26.0735563Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=17 prompt_id=ArticleTriage
+2026-02-15T05:13:26.073631Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=17 prompt_id=ArticleTriage bytes=209
+2026-02-15T05:13:26.0737923Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=17 pre-call reservation accepted calls=17
+2026-02-15T05:13:26.0740112Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=17 model=gpt-4o-mini start
+2026-02-15T05:13:26.3807206Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:26.3809067Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=16 calls=17 input=32243 output=1091 cost=0
+2026-02-15T05:13:26.3838793Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=16 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=946 input_tokens=1239 output_tokens=60 cost_microdollars=0 wall_ms=1326 parse_ok=true cache_status=miss
+2026-02-15T05:13:26.3893527Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=18 article=17 in_flight=3 limit=3
+2026-02-15T05:13:26.3908669Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=18 prompt_id=ArticleTriage
+2026-02-15T05:13:26.3909633Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=18 prompt_id=ArticleTriage bytes=9408
+2026-02-15T05:13:26.3911136Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=18 pre-call reservation accepted calls=18
+2026-02-15T05:13:26.3917125Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=18 model=gpt-4o-mini start
+2026-02-15T05:13:26.6490042Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:26.6491853Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=15 calls=18 input=33482 output=1162 cost=0
+2026-02-15T05:13:26.6533257Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=15 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=946 input_tokens=1239 output_tokens=71 cost_microdollars=0 wall_ms=1836 parse_ok=true cache_status=miss
+2026-02-15T05:13:26.6612183Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=19 article=18 in_flight=3 limit=3
+2026-02-15T05:13:26.6625391Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=19 prompt_id=ArticleTriage
+2026-02-15T05:13:26.6626161Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=19 prompt_id=ArticleTriage bytes=5025
+2026-02-15T05:13:26.6627889Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=19 pre-call reservation accepted calls=19
+2026-02-15T05:13:26.663285Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=19 model=gpt-4o-mini start
+2026-02-15T05:13:27.6751114Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:27.6752938Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=17 calls=19 input=34509 output=1231 cost=0
+2026-02-15T05:13:27.6794314Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=17 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=209 input_tokens=1027 output_tokens=69 cost_microdollars=0 wall_ms=1601 parse_ok=true cache_status=miss
+2026-02-15T05:13:27.6907732Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=20 article=19 in_flight=3 limit=3
+2026-02-15T05:13:27.6922057Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=20 prompt_id=ArticleTriage
+2026-02-15T05:13:27.6923019Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=20 prompt_id=ArticleTriage bytes=1555
+2026-02-15T05:13:27.6924458Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=20 pre-call reservation accepted calls=20
+2026-02-15T05:13:27.6926981Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=20 model=gpt-4o-mini start
+2026-02-15T05:13:29.1253229Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:29.1254966Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=18 calls=20 input=37348 output=1330 cost=0
+2026-02-15T05:13:29.1305094Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=18 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=9408 input_tokens=2839 output_tokens=99 cost_microdollars=0 wall_ms=2734 parse_ok=true cache_status=miss
+2026-02-15T05:13:29.1399464Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=21 article=20 in_flight=3 limit=3
+2026-02-15T05:13:29.1413606Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=21 prompt_id=ArticleTriage
+2026-02-15T05:13:29.1414329Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=21 prompt_id=ArticleTriage bytes=7136
+2026-02-15T05:13:29.1415977Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=21 pre-call reservation accepted calls=21
+2026-02-15T05:13:29.1421099Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=21 model=gpt-4o-mini start
+2026-02-15T05:13:29.638687Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:29.638867Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=20 calls=21 input=38678 output=1398 cost=0
+2026-02-15T05:13:29.6430538Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=20 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=1555 input_tokens=1330 output_tokens=68 cost_microdollars=0 wall_ms=1946 parse_ok=true cache_status=miss
+2026-02-15T05:13:29.6500896Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=22 article=21 in_flight=3 limit=3
+2026-02-15T05:13:29.6515938Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=22 prompt_id=ArticleTriage
+2026-02-15T05:13:29.6516674Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=22 prompt_id=ArticleTriage bytes=4045
+2026-02-15T05:13:29.6518069Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=22 pre-call reservation accepted calls=22
+2026-02-15T05:13:29.6522217Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=22 model=gpt-4o-mini start
+2026-02-15T05:13:29.7805624Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:29.7807295Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=19 calls=22 input=40685 output=1493 cost=0
+2026-02-15T05:13:29.7839298Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=19 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=5025 input_tokens=2007 output_tokens=95 cost_microdollars=0 wall_ms=3117 parse_ok=true cache_status=miss
+2026-02-15T05:13:29.7859837Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=23 article=22 in_flight=3 limit=3
+2026-02-15T05:13:29.787481Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=23 prompt_id=ArticleTriage
+2026-02-15T05:13:29.7875587Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=23 prompt_id=ArticleTriage bytes=5178
+2026-02-15T05:13:29.7877121Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=23 pre-call reservation accepted calls=23
+2026-02-15T05:13:29.7881829Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=23 model=gpt-4o-mini start
+2026-02-15T05:13:31.4725318Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:31.4731923Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=21 calls=23 input=42975 output=1599 cost=0
+2026-02-15T05:13:31.4776121Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=21 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=7136 input_tokens=2290 output_tokens=106 cost_microdollars=0 wall_ms=2331 parse_ok=true cache_status=miss
+2026-02-15T05:13:31.4928835Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=24 article=23 in_flight=3 limit=3
+2026-02-15T05:13:31.4942306Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=24 prompt_id=ArticleTriage
+2026-02-15T05:13:31.4943357Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=24 prompt_id=ArticleTriage bytes=40437
+2026-02-15T05:13:31.4944985Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=24 pre-call reservation accepted calls=24
+2026-02-15T05:13:31.4966276Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=24 model=gpt-4o-mini start
+2026-02-15T05:13:31.9712848Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:31.9714684Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=22 calls=24 input=44815 output=1692 cost=0
+2026-02-15T05:13:31.9761374Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=22 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=4045 input_tokens=1840 output_tokens=93 cost_microdollars=0 wall_ms=2319 parse_ok=true cache_status=miss
+2026-02-15T05:13:31.9850489Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=25 article=24 in_flight=3 limit=3
+2026-02-15T05:13:31.9865228Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=25 prompt_id=ArticleTriage
+2026-02-15T05:13:31.9866205Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=25 prompt_id=ArticleTriage bytes=8628
+2026-02-15T05:13:31.9867765Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=25 pre-call reservation accepted calls=25
+2026-02-15T05:13:31.9873639Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=25 model=gpt-4o-mini start
+2026-02-15T05:13:32.1605439Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:32.1607459Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=23 calls=25 input=46958 output=1776 cost=0
+2026-02-15T05:13:32.1637984Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=23 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=5178 input_tokens=2143 output_tokens=84 cost_microdollars=0 wall_ms=2372 parse_ok=true cache_status=miss
+2026-02-15T05:13:32.1681856Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=26 article=25 in_flight=3 limit=3
+2026-02-15T05:13:32.169725Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=26 prompt_id=ArticleTriage
+2026-02-15T05:13:32.1698021Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=26 prompt_id=ArticleTriage bytes=4961
+2026-02-15T05:13:32.1699632Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=26 pre-call reservation accepted calls=26
+2026-02-15T05:13:32.1703921Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=26 model=gpt-4o-mini start
+2026-02-15T05:13:34.153795Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:34.1539448Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=26 calls=26 input=49137 output=1873 cost=0
+2026-02-15T05:13:34.1570599Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=26 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=4961 input_tokens=2179 output_tokens=97 cost_microdollars=0 wall_ms=1983 parse_ok=true cache_status=miss
+2026-02-15T05:13:34.164435Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=27 article=26 in_flight=3 limit=3
+2026-02-15T05:13:34.1659131Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=27 prompt_id=ArticleTriage
+2026-02-15T05:13:34.1659966Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=27 prompt_id=ArticleTriage bytes=83
+2026-02-15T05:13:34.1661766Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=27 pre-call reservation accepted calls=27
+2026-02-15T05:13:34.1663972Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=27 model=gpt-4o-mini start
+2026-02-15T05:13:34.5420412Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:34.5422163Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=25 calls=27 input=51990 output=1994 cost=0
+2026-02-15T05:13:34.5454007Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=25 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=8628 input_tokens=2853 output_tokens=121 cost_microdollars=0 wall_ms=2555 parse_ok=true cache_status=miss
+2026-02-15T05:13:34.556517Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=28 article=27 in_flight=3 limit=3
+2026-02-15T05:13:34.5578975Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=28 prompt_id=ArticleTriage
+2026-02-15T05:13:34.557978Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=28 prompt_id=ArticleTriage bytes=6233
+2026-02-15T05:13:34.5581209Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=28 pre-call reservation accepted calls=28
+2026-02-15T05:13:34.5585811Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=28 model=gpt-4o-mini start
+2026-02-15T05:13:36.5020719Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:36.5022501Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=27 calls=28 input=53006 output=2075 cost=0
+2026-02-15T05:13:36.5065987Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=27 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=83 input_tokens=1016 output_tokens=81 cost_microdollars=0 wall_ms=2336 parse_ok=true cache_status=miss
+2026-02-15T05:13:36.5205443Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=29 article=28 in_flight=3 limit=3
+2026-02-15T05:13:36.5220401Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=29 prompt_id=ArticleTriage
+2026-02-15T05:13:36.5221277Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=29 prompt_id=ArticleTriage bytes=9369
+2026-02-15T05:13:36.5222889Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=29 pre-call reservation accepted calls=29
+2026-02-15T05:13:36.5228932Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=29 model=gpt-4o-mini start
+2026-02-15T05:13:36.6226359Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:36.6228095Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=24 calls=29 input=63422 output=2165 cost=0
+2026-02-15T05:13:36.6272101Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=24 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=40437 input_tokens=10416 output_tokens=90 cost_microdollars=0 wall_ms=5128 parse_ok=true cache_status=miss
+2026-02-15T05:13:36.6419151Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=30 article=29 in_flight=3 limit=3
+2026-02-15T05:13:36.6434595Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=30 prompt_id=ArticleTriage
+2026-02-15T05:13:36.6435766Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=30 prompt_id=ArticleTriage bytes=9343
+2026-02-15T05:13:36.6437279Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=30 pre-call reservation accepted calls=30
+2026-02-15T05:13:36.6443716Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=30 model=gpt-4o-mini start
+2026-02-15T05:13:37.1564695Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:37.1566522Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=28 calls=30 input=65695 output=2264 cost=0
+2026-02-15T05:13:37.1599869Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=28 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=6233 input_tokens=2273 output_tokens=99 cost_microdollars=0 wall_ms=2598 parse_ok=true cache_status=miss
+2026-02-15T05:13:37.174294Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=31 article=30 in_flight=3 limit=3
+2026-02-15T05:13:37.1757049Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=31 prompt_id=ArticleTriage
+2026-02-15T05:13:37.175793Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=31 prompt_id=ArticleTriage bytes=18
+2026-02-15T05:13:37.1759543Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=31 pre-call reservation accepted calls=31
+2026-02-15T05:13:37.1761602Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=31 model=gpt-4o-mini start
+2026-02-15T05:13:38.2135403Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:38.2137103Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=30 calls=31 input=68978 output=2330 cost=0
+2026-02-15T05:13:38.2169754Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=30 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=9343 input_tokens=3283 output_tokens=66 cost_microdollars=0 wall_ms=1570 parse_ok=true cache_status=miss
+2026-02-15T05:13:38.2232301Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=32 article=31 in_flight=3 limit=3
+2026-02-15T05:13:38.2246326Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=32 prompt_id=ArticleTriage
+2026-02-15T05:13:38.2247095Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=32 prompt_id=ArticleTriage bytes=61753
+2026-02-15T05:13:38.2248645Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=32 pre-call reservation accepted calls=32
+2026-02-15T05:13:38.2279538Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=32 model=gpt-4o-mini start
+2026-02-15T05:13:38.4934521Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:38.493626Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=31 calls=32 input=69967 output=2393 cost=0
+2026-02-15T05:13:38.4967822Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=31 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=18 input_tokens=989 output_tokens=63 cost_microdollars=0 wall_ms=1317 parse_ok=true cache_status=miss
+2026-02-15T05:13:38.4992799Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=33 article=32 in_flight=3 limit=3
+2026-02-15T05:13:38.5007617Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=33 prompt_id=ArticleTriage
+2026-02-15T05:13:38.5008362Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=33 prompt_id=ArticleTriage bytes=4360
+2026-02-15T05:13:38.5009943Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=33 pre-call reservation accepted calls=33
+2026-02-15T05:13:38.5014491Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=33 model=gpt-4o-mini start
+2026-02-15T05:13:38.7838518Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:38.7840283Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=29 calls=33 input=73254 output=2484 cost=0
+2026-02-15T05:13:38.7884262Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=29 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=9369 input_tokens=3287 output_tokens=91 cost_microdollars=0 wall_ms=2261 parse_ok=true cache_status=miss
+2026-02-15T05:13:38.8030153Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=34 article=33 in_flight=3 limit=3
+2026-02-15T05:13:38.8045016Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=34 prompt_id=ArticleTriage
+2026-02-15T05:13:38.8045983Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=34 prompt_id=ArticleTriage bytes=1876
+2026-02-15T05:13:38.8047483Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=34 pre-call reservation accepted calls=34
+2026-02-15T05:13:38.8050255Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=34 model=gpt-4o-mini start
+2026-02-15T05:13:39.9294713Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:39.9296415Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=33 calls=34 input=75100 output=2561 cost=0
+2026-02-15T05:13:39.9348736Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=33 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=4360 input_tokens=1846 output_tokens=77 cost_microdollars=0 wall_ms=1428 parse_ok=true cache_status=miss
+2026-02-15T05:13:39.9421628Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=35 article=34 in_flight=3 limit=3
+2026-02-15T05:13:39.9436348Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=35 prompt_id=ArticleTriage
+2026-02-15T05:13:39.9437163Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=35 prompt_id=ArticleTriage bytes=66
+2026-02-15T05:13:39.9438632Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=35 pre-call reservation accepted calls=35
+2026-02-15T05:13:39.9440484Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=35 model=gpt-4o-mini start
+2026-02-15T05:13:40.7981329Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:40.7982811Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=34 calls=35 input=76444 output=2631 cost=0
+2026-02-15T05:13:40.8013666Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=34 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=1876 input_tokens=1344 output_tokens=70 cost_microdollars=0 wall_ms=1993 parse_ok=true cache_status=miss
+2026-02-15T05:13:40.812167Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=36 article=35 in_flight=3 limit=3
+2026-02-15T05:13:40.8138155Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=36 prompt_id=ArticleTriage
+2026-02-15T05:13:40.813898Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=36 prompt_id=ArticleTriage bytes=4309
+2026-02-15T05:13:40.8140479Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=36 pre-call reservation accepted calls=36
+2026-02-15T05:13:40.8144356Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=36 model=gpt-4o-mini start
+2026-02-15T05:13:41.6245995Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:41.624764Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=35 calls=36 input=77442 output=2699 cost=0
+2026-02-15T05:13:41.6289109Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=35 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=66 input_tokens=998 output_tokens=68 cost_microdollars=0 wall_ms=1680 parse_ok=true cache_status=miss
+2026-02-15T05:13:41.6318092Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=37 article=36 in_flight=3 limit=3
+2026-02-15T05:13:41.6331238Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=37 prompt_id=ArticleTriage
+2026-02-15T05:13:41.6331982Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=37 prompt_id=ArticleTriage bytes=5206
+2026-02-15T05:13:41.6333381Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=37 pre-call reservation accepted calls=37
+2026-02-15T05:13:41.6337631Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=37 model=gpt-4o-mini start
+2026-02-15T05:13:43.3170522Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:43.3172319Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=36 calls=37 input=79372 output=2793 cost=0
+2026-02-15T05:13:43.3205739Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=36 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=4309 input_tokens=1930 output_tokens=94 cost_microdollars=0 wall_ms=2503 parse_ok=true cache_status=miss
+2026-02-15T05:13:43.322387Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=38 article=37 in_flight=3 limit=3
+2026-02-15T05:13:43.3238028Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=38 prompt_id=ArticleTriage
+2026-02-15T05:13:43.323883Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=38 prompt_id=ArticleTriage bytes=17218
+2026-02-15T05:13:43.3240416Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=38 pre-call reservation accepted calls=38
+2026-02-15T05:13:43.3249901Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=38 model=gpt-4o-mini start
+2026-02-15T05:13:43.5377364Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:43.5379145Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=37 calls=38 input=81522 output=2876 cost=0
+2026-02-15T05:13:43.5428123Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=37 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=5206 input_tokens=2150 output_tokens=83 cost_microdollars=0 wall_ms=1904 parse_ok=true cache_status=miss
+2026-02-15T05:13:43.5495327Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=39 article=38 in_flight=3 limit=3
+2026-02-15T05:13:43.5511298Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=39 prompt_id=ArticleTriage
+2026-02-15T05:13:43.551226Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=39 prompt_id=ArticleTriage bytes=18
+2026-02-15T05:13:43.5513748Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=39 pre-call reservation accepted calls=39
+2026-02-15T05:13:43.5515557Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=39 model=gpt-4o-mini start
+2026-02-15T05:13:45.3635209Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:45.3636991Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=39 calls=39 input=82511 output=2938 cost=0
+2026-02-15T05:13:45.3684562Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=39 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=18 input_tokens=989 output_tokens=62 cost_microdollars=0 wall_ms=1812 parse_ok=true cache_status=miss
+2026-02-15T05:13:45.373443Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=40 article=39 in_flight=3 limit=3
+2026-02-15T05:13:45.3748114Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=40 prompt_id=ArticleTriage
+2026-02-15T05:13:45.3748877Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=40 prompt_id=ArticleTriage bytes=3121
+2026-02-15T05:13:45.3750493Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=40 pre-call reservation accepted calls=40
+2026-02-15T05:13:45.3754328Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=40 model=gpt-4o-mini start
+2026-02-15T05:13:46.2996472Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:46.2998274Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=32 calls=40 input=96263 output=3036 cost=0
+2026-02-15T05:13:46.3060482Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=32 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=61753 input_tokens=13752 output_tokens=98 cost_microdollars=0 wall_ms=8074 parse_ok=true cache_status=miss
+2026-02-15T05:13:46.314001Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=41 article=40 in_flight=3 limit=3
+2026-02-15T05:13:46.3155215Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=41 prompt_id=ArticleTriage
+2026-02-15T05:13:46.3156176Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=41 prompt_id=ArticleTriage bytes=8778
+2026-02-15T05:13:46.3157668Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=41 pre-call reservation accepted calls=41
+2026-02-15T05:13:46.3163552Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=41 model=gpt-4o-mini start
+2026-02-15T05:13:47.8466823Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:47.8468544Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=40 calls=41 input=97916 output=3120 cost=0
+2026-02-15T05:13:47.849942Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=40 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=3121 input_tokens=1653 output_tokens=84 cost_microdollars=0 wall_ms=2471 parse_ok=true cache_status=miss
+2026-02-15T05:13:47.854322Z [INFO] harvester_core::update: [llm-concurrency] triage dispatch request_id=42 article=41 in_flight=3 limit=3
+2026-02-15T05:13:47.8558315Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=42 prompt_id=ArticleTriage
+2026-02-15T05:13:47.8559273Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=42 prompt_id=ArticleTriage bytes=60
+2026-02-15T05:13:47.8560841Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=42 pre-call reservation accepted calls=42
+2026-02-15T05:13:47.8562951Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=42 model=gpt-4o-mini start
+2026-02-15T05:13:48.0482143Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:48.0483715Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=38 calls=42 input=103167 output=3221 cost=0
+2026-02-15T05:13:48.0518098Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=38 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=17218 input_tokens=5251 output_tokens=101 cost_microdollars=0 wall_ms=4724 parse_ok=true cache_status=miss
+2026-02-15T05:13:48.4826002Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:48.4827938Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=41 calls=42 input=105971 output=3315 cost=0
+2026-02-15T05:13:48.4871853Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=41 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=8778 input_tokens=2804 output_tokens=94 cost_microdollars=0 wall_ms=2166 parse_ok=true cache_status=miss
+2026-02-15T05:13:48.9664164Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:48.9665961Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=42 calls=42 input=106977 output=3362 cost=0
+2026-02-15T05:13:48.9695168Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=42 prompt_id=ArticleTriage version=3 model=gpt-4o-mini-2024-07-18 input_bytes=60 input_tokens=1006 output_tokens=47 cost_microdollars=0 wall_ms=1110 parse_ok=true cache_status=miss
+2026-02-15T05:13:48.9772742Z [INFO] harvester_core::update: [briefing-triage] eligible count=17 cutoff=1
+2026-02-15T05:13:48.9804054Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=PrMOg3dW8t4 original_bytes=396 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:48.98076Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://allwork.space/2026/02/ai-is-shrinking-ceo-tenures-and-raising-the-bar-for-who-gets-to-stay/ original_bytes=562 clean_bytes=277 hash=1aaf8e92
+2026-02-15T05:13:48.9843738Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://t2conline.com/ai-stock-turmoil-what-the-anthropic-shockwave-means-for-businesses-worldwide/ original_bytes=23409 clean_bytes=23022 hash=23b502fb
+2026-02-15T05:13:48.9847097Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=OwJqcYfIdXM original_bytes=346 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:48.9855484Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.scmp.com/tech/article/3343568/ai-rattles-us-investors-while-chinas-tech-stocks-hold-steady-now original_bytes=2252 clean_bytes=1888 hash=ef6af58b
+2026-02-15T05:13:48.9858075Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://tvpworld.com/91588326/7m-investment-for-ukrainian-estonian-defense-startup original_bytes=254 clean_bytes=0 hash=e3b0c442
+2026-02-15T05:13:48.9880788Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/02/14/big-food-ai-recipes.html original_bytes=12775 clean_bytes=12406 hash=822aa882
+2026-02-15T05:13:48.988384Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/amazon-employees-quit-tech-startup-office-mandate-artificial-intelligence-2026-2 original_bytes=455 clean_bytes=143 hash=a7d098b0
+2026-02-15T05:13:48.9886747Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/apple-siri-bet-ai-models-commodities-google-gemini-2026-1 original_bytes=350 clean_bytes=66 hash=7b459ffc
+2026-02-15T05:13:48.99322Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://emerj.com/artificial-intelligence-at-allianz-two-use-cases/ original_bytes=28783 clean_bytes=28402 hash=1011cf39
+2026-02-15T05:13:48.9935366Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=0xso7qXHK94 original_bytes=341 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:48.994279Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.nytimes.com/video/business/100000010590569/can-you-rely-on-ai-relationships-love.html original_bytes=1719 clean_bytes=1336 hash=4a8da4d9
+2026-02-15T05:13:48.9972687Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.mayerbrown.com/en/insights/publications/2026/02/contracting-for-agentic-ai-solutions-shifting-the-model-from-saas-to-services original_bytes=17904 clean_bytes=17486 hash=c0a7c32a
+2026-02-15T05:13:48.9980028Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/video/6389252548112 original_bytes=1910 clean_bytes=1343 hash=81af0655
+2026-02-15T05:13:48.9988061Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://consent.yahoo.com/v2/collectConsent?sessionId=3_cc-session_6c73d5cc-e473-4d17-a11f-359b4747b43d original_bytes=2803 clean_bytes=946 hash=05efc061
+2026-02-15T05:13:48.9996047Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://consent.yahoo.com/v2/collectConsent?sessionId=3_cc-session_95bb5d65-e815-4868-9b28-74aab2c0da26 original_bytes=2803 clean_bytes=946 hash=05efc061
+2026-02-15T05:13:48.9999596Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://aibusiness.com/generative-ai/how-ai-is-reducing-the-administrative-burden-in-sales original_bytes=464 clean_bytes=209 hash=cee0332a
+2026-02-15T05:13:49.0026188Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://fortune.com/2026/02/13/marc-andreessen-software-eating-the-world-saaspocalypse-morgan-stanley-gut-check-displaced-labor/ original_bytes=9766 clean_bytes=9408 hash=21d891fb
+2026-02-15T05:13:49.0041914Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://futurism.com/artificial-intelligence/microsoft-ai-efforts-faceplanting original_bytes=5259 clean_bytes=5025 hash=792fc20e
+2026-02-15T05:13:49.0049368Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.afr.com/technology/vc-turns-tech-founder-with-ai-company-buyout-plans-20260205-p5nzqj original_bytes=1877 clean_bytes=1555 hash=7b2cf13f
+2026-02-15T05:13:49.0067264Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://colombiaone.com/2026/02/14/colombia-nicolas-rojas-dapta-ai-platform/ original_bytes=7466 clean_bytes=7136 hash=a6a91665
+2026-02-15T05:13:49.0080817Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businesstimes.com.sg/companies-markets/nvidias-jensen-huang-falls-out-worlds-10-richest-ranking original_bytes=4360 clean_bytes=4045 hash=24b46141
+2026-02-15T05:13:49.0097292Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/technology/palantir-ceo-suggests-ai-bolsters-civil-liberties-warns-europe-falling-behind-us-china original_bytes=5642 clean_bytes=5178 hash=4db3b71e
+2026-02-15T05:13:49.0184338Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.oecd.org/en/publications/progress-in-implementing-the-european-union-coordinated-plan-on-artificial-intelligence-volume-2_3ac96d41-en.html original_bytes=43406 clean_bytes=40437 hash=ebe37702
+2026-02-15T05:13:49.0201092Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://techcrunch.com/2026/01/22/quadric-rides-the-shift-from-cloud-ai-to-on-device-inference-and-its-paying-off/ original_bytes=9046 clean_bytes=8628 hash=c8323557
+2026-02-15T05:13:49.0214173Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/01/20/servicenow-openai-ai-software-saas.html original_bytes=5320 clean_bytes=4961 hash=e7567d06
+2026-02-15T05:13:49.0217326Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.fool.com/investing/2026/02/14/forget-nvidia-buy-artificial-intelligence-ai-stock/ original_bytes=391 clean_bytes=83 hash=519bd3d4
+2026-02-15T05:13:49.0232854Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-23/silicon-valley-leaders-highlight-concrete-returns-as-ai-anxiety-grows original_bytes=6647 clean_bytes=6233 hash=818e0164
+2026-02-15T05:13:49.0252196Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ft.com/content/905df663-8c47-4e88-b6ff-24dd4bd46290 original_bytes=9585 clean_bytes=9369 hash=6add5a47
+2026-02-15T05:13:49.0271587Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ft.com/content/320c14a2-1428-4904-b978-6fe06b3e25bf original_bytes=9559 clean_bytes=9343 hash=7b3e6754
+2026-02-15T05:13:49.0275098Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=PHxsXlUIuTs original_bytes=393 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:49.037034Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.scirp.org/journal/paperinformation?paperid=149677 original_bytes=62249 clean_bytes=61753 hash=5b5ce58e
+2026-02-15T05:13:49.0384756Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/us-china-collaboration-neurips-papers/ original_bytes=4615 clean_bytes=4360 hash=1bcb0c37
+2026-02-15T05:13:49.0392647Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.ekathimerini.com/economy/1295277/transforming-ai-into-tangible-business-value/ original_bytes=2151 clean_bytes=1876 hash=1b17ce1c
+2026-02-15T05:13:49.0395592Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/army-information-overload-battlefield-data-management-ai-tool-2026-2 original_bytes=368 clean_bytes=66 hash=7b459ffc
+2026-02-15T05:13:49.0408297Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/entertainment-arts/business/story/2026-02-13/brad-pitt-fighting-tom-cruise-ai-video-shakes-hollywood original_bytes=4724 clean_bytes=4309 hash=ead4e491
+2026-02-15T05:13:49.0421807Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-02-13/wall-street-steadies-after-its-ai-induced-sell-off original_bytes=5591 clean_bytes=5206 hash=6a30deee
+2026-02-15T05:13:49.046816Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://bridgemi.com/business-watch/west-michigan-faces-job-losses-and-uncertainty-as-economy-takes-toll/ original_bytes=17548 clean_bytes=17218 hash=e41d1631
+2026-02-15T05:13:49.0471443Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.youtube.com/watch?v=USSJrgp4YzA original_bytes=395 clean_bytes=18 hash=a7ffd314
+2026-02-15T05:13:49.0482616Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-21/youtube-says-battling-ai-slop-is-top-priority original_bytes=3491 clean_bytes=3121 hash=b581f9fc
+2026-02-15T05:13:49.0506519Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/backchannel-how-artificial-intelligence-changed-zillow/ original_bytes=9009 clean_bytes=8778 hash=b4fbe961
+2026-02-15T05:13:49.0509486Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.telegraphherald.com/_services/v1/client_captcha/challenge?request=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJleHAiOjE3NzExMzI2ODcsImlhdCI6MTc3MTEzMjM4NywicmVkaXJlY3QiOiIvbmV3cy9idXNpbmVzcy9hcnRpY2xlXzQ5MTAwYzAxLTI1NTMtNGQ5Ny05MWIyLWY1NzAwMjhhNTE2Zi5odG1sIiwic2VydmljZSI6Il9sYl9yYXRlX2Ntc2FwcF9mb3JlaWduIiwic2l0ZSI6InRlbGVncmFwaGhlcmFsZC5jb20ifQ.UwNWG6BaKuvcoVotTsFIBo1sUSJqKH6RGdW0x-J-6CQ original_bytes=577 clean_bytes=60 hash=7a0c4d8c
+2026-02-15T05:13:49.0519251Z [INFO] harvester_app::platform::effects: [briefing-loader] prepared 17 article(s)
+2026-02-15T05:13:49.082981Z [INFO] harvester_core::update: [summary-cache] run warmup decision=run-start reason=metadata-loaded prompt_version=3 model_id=gpt-4o-mini
+2026-02-15T05:13:49.0832555Z [INFO] harvester_core::update: [summary-cache] article=0 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=21d891fb
+2026-02-15T05:13:49.0835067Z [INFO] harvester_core::update: [summary-cache] article=1 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=23b502fb
+2026-02-15T05:13:49.0837533Z [INFO] harvester_core::update: [summary-cache] article=2 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=c8323557
+2026-02-15T05:13:49.0839998Z [INFO] harvester_core::update: [summary-cache] article=3 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=e41d1631
+2026-02-15T05:13:49.0842513Z [INFO] harvester_core::update: [summary-cache] article=4 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=1011cf39
+2026-02-15T05:13:49.0844094Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=43 article=4 in_flight=1 limit=3
+2026-02-15T05:13:49.0846341Z [INFO] harvester_core::update: [summary-cache] article=5 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=792fc20e
+2026-02-15T05:13:49.0848597Z [INFO] harvester_core::update: [summary-cache] article=6 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=519bd3d4
+2026-02-15T05:13:49.0850014Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=44 article=6 in_flight=2 limit=3
+2026-02-15T05:13:49.0852338Z [INFO] harvester_core::update: [summary-cache] article=7 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=6add5a47
+2026-02-15T05:13:49.0854784Z [INFO] harvester_core::update: [summary-cache] article=8 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=818e0164
+2026-02-15T05:13:49.0857014Z [INFO] harvester_core::update: [summary-cache] article=9 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=6a30deee
+2026-02-15T05:13:49.0858464Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=45 article=9 in_flight=3 limit=3
+2026-02-15T05:13:49.0871973Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=43 prompt_id=ArticleSummary
+2026-02-15T05:13:49.0872971Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=43 prompt_id=ArticleSummary bytes=28402
+2026-02-15T05:13:49.087379Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=44 prompt_id=ArticleSummary
+2026-02-15T05:13:49.0874688Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=44 prompt_id=ArticleSummary bytes=83
+2026-02-15T05:13:49.087574Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=45 prompt_id=ArticleSummary
+2026-02-15T05:13:49.0876722Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=43 pre-call reservation accepted calls=43
+2026-02-15T05:13:49.0877607Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=45 prompt_id=ArticleSummary bytes=5206
+2026-02-15T05:13:49.0878449Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=44 pre-call reservation accepted calls=44
+2026-02-15T05:13:49.0880077Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=45 pre-call reservation accepted calls=45
+2026-02-15T05:13:49.0880877Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=44 model=gpt-4o-mini start
+2026-02-15T05:13:49.0884368Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=45 model=gpt-4o-mini start
+2026-02-15T05:13:49.0892542Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=43 model=gpt-4o-mini start
+2026-02-15T05:13:53.2752313Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:53.2754078Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=44 calls=45 input=107494 output=3554 cost=0
+2026-02-15T05:13:53.2788065Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=44 prompt_id=ArticleSummary version=3 model=gpt-4o-mini-2024-07-18 input_bytes=83 input_tokens=517 output_tokens=192 cost_microdollars=0 wall_ms=4187 parse_ok=true cache_status=miss
+2026-02-15T05:13:53.2880759Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=6 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:53.2882335Z [INFO] harvester_core::update: [summary-cache] article=6 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=519bd3d4
+2026-02-15T05:13:53.2884761Z [INFO] harvester_core::update: [summary-cache] article=10 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ebe37702
+2026-02-15T05:13:53.2887048Z [INFO] harvester_core::update: [summary-cache] article=11 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ef6af58b
+2026-02-15T05:13:53.2889525Z [INFO] harvester_core::update: [summary-cache] article=12 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=e7567d06
+2026-02-15T05:13:53.2891933Z [INFO] harvester_core::update: [summary-cache] article=13 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=4db3b71e
+2026-02-15T05:13:53.2894208Z [INFO] harvester_core::update: [summary-cache] article=14 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=ead4e491
+2026-02-15T05:13:53.2896441Z [INFO] harvester_core::update: [summary-cache] article=15 decision=miss reason=cache-miss prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=5b5ce58e
+2026-02-15T05:13:53.2897839Z [INFO] harvester_core::update: [llm-concurrency] summary dispatch request_id=46 article=15 in_flight=3 limit=3
+2026-02-15T05:13:53.2911177Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=46 prompt_id=ArticleSummary
+2026-02-15T05:13:53.2911945Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=46 prompt_id=ArticleSummary bytes=61753
+2026-02-15T05:13:53.2913496Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=46 pre-call reservation accepted calls=46
+2026-02-15T05:13:53.2945592Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=46 model=gpt-4o-mini start
+2026-02-15T05:13:53.5450043Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:53.5451717Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=45 calls=46 input=109145 output=3775 cost=0
+2026-02-15T05:13:53.5499108Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=45 prompt_id=ArticleSummary version=3 model=gpt-4o-mini-2024-07-18 input_bytes=5206 input_tokens=1651 output_tokens=221 cost_microdollars=0 wall_ms=4457 parse_ok=true cache_status=miss
+2026-02-15T05:13:53.5636704Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=9 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:53.5638741Z [INFO] harvester_core::update: [summary-cache] article=9 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=6a30deee
+2026-02-15T05:13:53.5641511Z [INFO] harvester_core::update: [summary-cache] article=16 decision=hit reason=cache-hit prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=1bcb0c37
+2026-02-15T05:13:55.050304Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:55.0504821Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=43 calls=46 input=115120 output=4064 cost=0
+2026-02-15T05:13:55.0562783Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=43 prompt_id=ArticleSummary version=3 model=gpt-4o-mini-2024-07-18 input_bytes=28402 input_tokens=5975 output_tokens=289 cost_microdollars=0 wall_ms=5962 parse_ok=true cache_status=miss
+2026-02-15T05:13:55.0686408Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=4 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
+2026-02-15T05:13:55.0688238Z [INFO] harvester_core::update: [summary-cache] article=4 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=1011cf39
+2026-02-15T05:14:00.2177693Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:14:00.2179552Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=46 calls=46 input=128373 output=4301 cost=0
+2026-02-15T05:14:00.2231027Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=46 prompt_id=ArticleSummary version=3 model=gpt-4o-mini-2024-07-18 input_bytes=61753 input_tokens=13253 output_tokens=237 cost_microdollars=0 wall_ms=6926 parse_ok=true cache_status=miss
+2026-02-15T05:14:00.2357295Z [INFO] harvester_core::update: [summary-cache] completion metadata differs by model variant article=15 cache_model=gpt-4o-mini completion_model=gpt-4o-mini-2024-07-18
+2026-02-15T05:14:00.2359355Z [INFO] harvester_core::update: [summary-cache] article=15 decision=store metadata_source=run-frozen lookup_metadata=metadata-snapshot prompt_version=3 model_id=gpt-4o-mini context_hash=3ab4b48f0b8302a1489a1c4e45495535e80fc70a93c5ec63a64fc2197ee49f94 content_hash_short=5b5ce58e
+2026-02-15T05:14:00.2375757Z [INFO] harvester_app::platform::effects: [llm-dispatch] request_id=47 prompt_id=AggregateBriefing
+2026-02-15T05:14:00.2376593Z [INFO] harvester_engine::llm::handle: [llm-dispatch] request_id=47 prompt_id=AggregateBriefing bytes=79674
+2026-02-15T05:14:00.2378164Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=47 pre-call reservation accepted calls=47
+2026-02-15T05:14:00.2415761Z [INFO] harvester_engine::llm::handle: [llm-worker] request_id=47 model=gpt-4o-mini start
+2026-02-15T05:14:20.8583496Z [WARN] harvester_engine::llm::handle: [llm-run] WARN missing pricing model=gpt-4o-mini-2024-07-18
+2026-02-15T05:14:20.8585407Z [INFO] harvester_engine::llm::handle: [llm-quota] request_id=47 calls=47 input=145596 output=4757 cost=0
+2026-02-15T05:14:20.8663558Z [INFO] harvester_engine::llm::handle: [llm-run] request_id=47 prompt_id=AggregateBriefing version=4 model=gpt-4o-mini-2024-07-18 input_bytes=79674 input_tokens=17223 output_tokens=456 cost_microdollars=0 wall_ms=20620 parse_ok=true cache_status=miss
+2026-02-15T05:14:20.8786178Z [INFO] harvester_core::update: [summary-cache] run summary hits=13 misses=4 key_unavailable=0 total=17
+2026-02-15T05:14:20.8854758Z [INFO] harvester_app::platform::summary_cache_store: [summary-cache] Saved 17 entries to "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"
+2026-02-15T05:14:20.8858524Z [INFO] harvester_app::platform::effects: [summary-cache] Persisted cache to "C:\\Users\\larsp\\src\\web_page_filet_mignon\\rss-llm-curation\\output\\.summary_cache.ron"
+2026-02-15T05:15:14.492722Z [INFO] harvester_app::platform::app: Splitter drag ended: left_panel_width=547
+2026-02-15T05:18:19.0835528Z [INFO] harvester_app::platform::effects: [llm-shutdown] stopping llm worker

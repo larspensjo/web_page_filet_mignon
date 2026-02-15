@@ -1,6 +1,5 @@
 pub mod dto;
 pub mod handle;
-pub mod run_metadata;
 pub mod mock_provider;
 pub mod pricing;
 pub mod prompt;
@@ -10,6 +9,7 @@ pub mod provider;
 pub mod providers;
 pub mod quota;
 pub mod replay;
+pub mod run_metadata;
 pub mod types;
 pub mod validation;
 
@@ -19,7 +19,6 @@ pub use handle::{
 };
 pub use mock_provider::{BlockingMockProvider, MockLlmProvider};
 pub use pricing::{ModelPricing, PricingRegistry};
-pub use run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata};
 pub use prompt::{PromptId, PromptRegistry, PromptTemplate, PromptVersion, TemplateVars};
 pub use prompt_context::{
     load_context_file, validate_context_covers_template, ContextLoadError, ContextMeta,
@@ -31,6 +30,7 @@ pub use quota::{LlmQuotaTracker, LlmQuotas, LlmUsageTotals};
 pub use replay::{
     content_hash, load_replay_record, persist_replay_record, ReplayProvider, ReplayRecord,
 };
+pub use run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata};
 pub use types::{
     ChatMessage, ChatRole, FinishReason, LlmError, LlmRequest, LlmResponse, ModelId, ProviderKind,
     ResponseFormat, TokenUsage,

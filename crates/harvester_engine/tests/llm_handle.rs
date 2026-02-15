@@ -305,9 +305,8 @@ fn recv_event(handle: &LlmHandle) -> LlmEvent {
 fn override_model_wins_over_stage_and_default() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    provider.queue_json_success(
-        r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#,
-    );
+    provider
+        .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
 
     let registry = PromptRegistry::with_defaults();
     let dir = tempdir().unwrap();
@@ -343,16 +342,18 @@ fn override_model_wins_over_stage_and_default() {
 fn stage_model_wins_over_default_when_override_is_none() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    provider.queue_json_success(
-        r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#,
-    );
+    provider
+        .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
 
     let registry = PromptRegistry::with_defaults();
     let dir = tempdir().unwrap();
     let mut config = make_config(provider_trait, registry, &dir);
     config.triage_model = Some(ModelId::new(ProviderKind::OpenAi, "stage-specific"));
     // Pricing for "stage-specific" so allow-list is satisfied; but here we send None override
-    config.pricing.insert("stage-specific", harvester_engine::llm::ModelPricing::zero());
+    config.pricing.insert(
+        "stage-specific",
+        harvester_engine::llm::ModelPricing::zero(),
+    );
 
     let handle = LlmHandle::new(config);
     handle
@@ -455,9 +456,8 @@ fn unsupported_model_unknown_name_fires_before_provider_call() {
 fn valid_override_cache_miss_records_override_in_metadata() {
     let provider = Arc::new(MockLlmProvider::new());
     let provider_trait: Arc<dyn LlmProvider> = provider.clone();
-    provider.queue_json_success(
-        r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#,
-    );
+    provider
+        .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
 
     let registry = PromptRegistry::with_defaults();
     let dir = tempdir().unwrap();
@@ -506,7 +506,9 @@ fn valid_override_cache_hit_records_override_in_metadata() {
         raw_response: r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#
             .to_string(),
         usage: TokenUsage::new(1, 2),
-        validated_output: Some(json!({"category":"news","priority":3,"tags":["a"],"rationale":"ok"})),
+        validated_output: Some(
+            json!({"category":"news","priority":3,"tags":["a"],"rationale":"ok"}),
+        ),
         validation_error: None,
         cost_microdollars: 0,
         wall_ms: 0,
@@ -535,5 +537,9 @@ fn valid_override_cache_hit_records_override_in_metadata() {
             assert_eq!(metadata.resolved_model, "mock");
         }
     }
-    assert_eq!(provider.recorded_requests().len(), 0, "cache hit must skip provider");
+    assert_eq!(
+        provider.recorded_requests().len(),
+        0,
+        "cache hit must skip provider"
+    );
 }

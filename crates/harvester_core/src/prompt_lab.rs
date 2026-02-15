@@ -147,14 +147,18 @@ impl PromptLabState {
     // Per-run overrides
     // ------------------------------------------------------------------
 
+    // These setters will be used by the UI (Step 4). Allow dead_code until then.
+    #[allow(dead_code)]
     pub fn set_prompt_version_override(&mut self, version: Option<PromptVersion>) {
         self.selected_prompt_version = version;
     }
 
+    #[allow(dead_code)]
     pub fn set_model_override(&mut self, model: Option<ModelId>) {
         self.selected_model_override = model;
     }
 
+    #[allow(dead_code)]
     pub fn clear_overrides(&mut self) {
         self.selected_prompt_version = None;
         self.selected_model_override = None;
@@ -178,6 +182,7 @@ impl PromptLabState {
     }
 
     /// Register a new pending run record.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_pending_run(
         &mut self,
         run_id: PromptLabRunId,
@@ -254,12 +259,8 @@ impl PromptLabState {
 
     /// Latest run record (if any).
     pub fn latest_run(&self) -> Option<&PromptLabRunRecord> {
-        self.latest_run_id.and_then(|id| {
-            self.runs
-                .iter()
-                .find(|(rid, _)| *rid == id)
-                .map(|(_, r)| r)
-        })
+        self.latest_run_id
+            .and_then(|id| self.runs.iter().find(|(rid, _)| *rid == id).map(|(_, r)| r))
     }
 }
 
@@ -305,9 +306,20 @@ mod tests {
     fn run_record_pending_on_creation() {
         let mut s = PromptLabState::default();
         let run_id = PromptLabRunId(1);
-        s.add_pending_run(run_id, PromptLabStage::Triage, make_prompt_id(), "hello".to_string(), 42, None, None);
+        s.add_pending_run(
+            run_id,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "hello".to_string(),
+            42,
+            None,
+            None,
+        );
         let r = s.latest_run().unwrap();
-        assert!(matches!(r.status, PromptLabRunStatus::Pending { request_id: 42 }));
+        assert!(matches!(
+            r.status,
+            PromptLabRunStatus::Pending { request_id: 42 }
+        ));
         assert!(s.has_in_flight_run());
     }
 
@@ -315,7 +327,15 @@ mod tests {
     fn pending_to_completed() {
         let mut s = PromptLabState::default();
         let run_id = PromptLabRunId(1);
-        s.add_pending_run(run_id, PromptLabStage::Triage, make_prompt_id(), "x".to_string(), 10, None, None);
+        s.add_pending_run(
+            run_id,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "x".to_string(),
+            10,
+            None,
+            None,
+        );
         s.complete_run(run_id, "{}".to_string(), LlmRunMetadata::stub());
         let r = s.latest_run().unwrap();
         assert!(matches!(r.status, PromptLabRunStatus::Completed { .. }));
@@ -325,7 +345,15 @@ mod tests {
     fn pending_to_failed() {
         let mut s = PromptLabState::default();
         let run_id = PromptLabRunId(1);
-        s.add_pending_run(run_id, PromptLabStage::Triage, make_prompt_id(), "x".to_string(), 10, None, None);
+        s.add_pending_run(
+            run_id,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "x".to_string(),
+            10,
+            None,
+            None,
+        );
         s.fail_run(run_id, "something broke".to_string());
         let r = s.latest_run().unwrap();
         assert!(matches!(r.status, PromptLabRunStatus::Failed { .. }));
@@ -335,7 +363,15 @@ mod tests {
     fn completed_record_is_immutable() {
         let mut s = PromptLabState::default();
         let run_id = PromptLabRunId(1);
-        s.add_pending_run(run_id, PromptLabStage::Triage, make_prompt_id(), "x".to_string(), 10, None, None);
+        s.add_pending_run(
+            run_id,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "x".to_string(),
+            10,
+            None,
+            None,
+        );
         s.complete_run(run_id, "{}".to_string(), LlmRunMetadata::stub());
         // Calling complete_run again on a Completed record is a no-op.
         s.complete_run(run_id, "overwrite?".to_string(), LlmRunMetadata::stub());
@@ -351,22 +387,49 @@ mod tests {
         let mut s = PromptLabState::default();
         // Add a completed run
         let r1 = PromptLabRunId(1);
-        s.add_pending_run(r1, PromptLabStage::Triage, make_prompt_id(), "a".to_string(), 10, None, None);
+        s.add_pending_run(
+            r1,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "a".to_string(),
+            10,
+            None,
+            None,
+        );
         s.complete_run(r1, "{}".to_string(), LlmRunMetadata::stub());
         s.consume_ownership(10);
         // Add a failed run
         let r2 = PromptLabRunId(2);
-        s.add_pending_run(r2, PromptLabStage::Triage, make_prompt_id(), "b".to_string(), 11, None, None);
+        s.add_pending_run(
+            r2,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "b".to_string(),
+            11,
+            None,
+            None,
+        );
         s.fail_run(r2, "err".to_string());
         s.consume_ownership(11);
         // Add a still-pending run
         let r3 = PromptLabRunId(3);
-        s.add_pending_run(r3, PromptLabStage::Triage, make_prompt_id(), "c".to_string(), 12, None, None);
+        s.add_pending_run(
+            r3,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "c".to_string(),
+            12,
+            None,
+            None,
+        );
 
         s.clear_history();
 
         assert_eq!(s.run_count(), 1);
-        assert!(matches!(s.latest_run().unwrap().status, PromptLabRunStatus::Pending { .. }));
+        assert!(matches!(
+            s.latest_run().unwrap().status,
+            PromptLabRunStatus::Pending { .. }
+        ));
         // Ownership entry for r3 still intact
         assert!(s.ownership_for(12).is_some());
     }
@@ -381,7 +444,15 @@ mod tests {
     fn consume_ownership_removes_entry() {
         let mut s = PromptLabState::default();
         let run_id = PromptLabRunId(1);
-        s.add_pending_run(run_id, PromptLabStage::Triage, make_prompt_id(), "x".to_string(), 10, None, None);
+        s.add_pending_run(
+            run_id,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "x".to_string(),
+            10,
+            None,
+            None,
+        );
         s.consume_ownership(10);
         assert!(s.ownership_for(10).is_none());
         // has_in_flight is now false

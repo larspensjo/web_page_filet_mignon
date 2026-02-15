@@ -1232,6 +1232,8 @@ impl AppState {
         &self.prompt_lab
     }
 
+    // Used in tests; will be used by the reducer when UI override messages are added.
+    #[allow(dead_code)]
     pub(crate) fn prompt_lab_mut(&mut self) -> &mut PromptLabState {
         &mut self.prompt_lab
     }
@@ -1261,6 +1263,7 @@ impl AppState {
         id
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn add_prompt_lab_pending_run(
         &mut self,
         run_id: PromptLabRunId,
@@ -2647,13 +2650,33 @@ mod tests {
         // Add a pending run
         let req_id = state.allocate_next_llm_request_id();
         let run_id = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(run_id, crate::prompt_lab::PromptLabStage::Triage, PromptId::ArticleTriage, "input".to_string(), req_id, None, None);
+        state.add_prompt_lab_pending_run(
+            run_id,
+            crate::prompt_lab::PromptLabStage::Triage,
+            PromptId::ArticleTriage,
+            "input".to_string(),
+            req_id,
+            None,
+            None,
+        );
 
         // Add a completed run
         let req_id2 = state.allocate_next_llm_request_id();
         let run_id2 = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(run_id2, crate::prompt_lab::PromptLabStage::Triage, PromptId::ArticleTriage, "input2".to_string(), req_id2, None, None);
-        state.complete_prompt_lab_run(run_id2, "{}".to_string(), harvester_engine::llm::run_metadata::LlmRunMetadata::stub());
+        state.add_prompt_lab_pending_run(
+            run_id2,
+            crate::prompt_lab::PromptLabStage::Triage,
+            PromptId::ArticleTriage,
+            "input2".to_string(),
+            req_id2,
+            None,
+            None,
+        );
+        state.complete_prompt_lab_run(
+            run_id2,
+            "{}".to_string(),
+            harvester_engine::llm::run_metadata::LlmRunMetadata::stub(),
+        );
         state.consume_prompt_lab_ownership(req_id2);
 
         state.clear_prompt_lab_history();
