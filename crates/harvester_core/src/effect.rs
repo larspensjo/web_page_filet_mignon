@@ -41,6 +41,9 @@ pub enum Effect {
     PersistSummaryCache {
         cache: crate::SummaryCache,
     },
+    PersistTriageCache {
+        cache: crate::TriageCache,
+    },
     /// Open a URL in the user's default web browser.
     OpenUrlInBrowser {
         url: String,

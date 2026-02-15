@@ -93,6 +93,16 @@ fn request_id_for_prompt(effects: &[Effect], prompt_id: PromptId) -> Option<u64>
     })
 }
 
+fn assert_persist_triage_cache_effect(effects: &[Effect], state: &AppState) {
+    let expected_cache = state.triage_cache().clone();
+    assert_eq!(
+        effects,
+        &[Effect::PersistTriageCache {
+            cache: expected_cache,
+        }]
+    );
+}
+
 #[test]
 fn triage_clicked_emits_load_effect() {
     init_logging();
@@ -212,7 +222,7 @@ fn triage_all_completed_transitions_to_complete() {
             result: triage_success(4),
         },
     );
-    assert!(effects.is_empty());
+    assert_persist_triage_cache_effect(&effects, &state);
     let view = state.view();
     assert!(view.triage_can_start);
     assert!(view.triage_progress.is_none());
@@ -236,7 +246,7 @@ fn triage_all_failed_transitions_to_failed() {
             result: triage_failure("still bad"),
         },
     );
-    assert!(effects.is_empty());
+    assert_persist_triage_cache_effect(&effects, &state);
     assert!(state.view().triage_can_start);
     assert!(state.view().jobs[0].triage_annotation.is_none());
 }
@@ -259,7 +269,7 @@ fn triage_partial_failure_still_completes() {
             result: triage_failure("bad"),
         },
     );
-    assert!(effects.is_empty());
+    assert_persist_triage_cache_effect(&effects, &state);
     assert!(state.view().triage_can_start);
     assert!(state.view().jobs[0].triage_annotation.is_some());
 }
@@ -275,7 +285,7 @@ fn triage_quota_exhaustion_fails_remaining() {
             result: triage_quota(),
         },
     );
-    assert!(effects.is_empty());
+    assert_persist_triage_cache_effect(&effects, &state);
     assert!(state.view().triage_can_start);
 }
 

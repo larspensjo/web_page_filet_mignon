@@ -120,6 +120,22 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         }
     }
 
+    {
+        use super::triage_cache_store::{default_triage_cache_path, load_triage_cache};
+
+        let path = default_triage_cache_path();
+        let cache = load_triage_cache(&path);
+        if !cache.is_empty() {
+            let mut guard = shared_state.lock().unwrap();
+            let state = std::mem::take(&mut guard.state);
+            let (state, effects) = update(state, Msg::TriageCacheHydrated { cache });
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+            guard.state = state;
+        }
+    }
+
     let initial_view = shared_state.lock().unwrap().state.view();
     let mut tree_render_state = ui::render::TreeRenderState::new();
     let mut initial_commands = ui::layout::initial_commands(window_id);

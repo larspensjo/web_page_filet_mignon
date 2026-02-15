@@ -479,6 +479,27 @@ impl EffectRunner {
                     let _ = msg_tx;
                 });
             }
+            Effect::PersistTriageCache { cache } => {
+                use super::triage_cache_store::{default_triage_cache_path, save_triage_cache};
+
+                let msg_tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    let path = default_triage_cache_path();
+                    match save_triage_cache(&cache, &path) {
+                        Ok(_) => {
+                            engine_info!("[triage-cache] Persisted cache to {:?}", path);
+                        }
+                        Err(err) => {
+                            engine_warn!(
+                                "[triage-cache] Failed to persist cache to {:?}: {}",
+                                path,
+                                err
+                            );
+                        }
+                    }
+                    let _ = msg_tx;
+                });
+            }
             Effect::LoadArticlesForTriage => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();

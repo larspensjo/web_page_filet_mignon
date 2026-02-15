@@ -1,5 +1,6 @@
 use engine_logging::{engine_info, engine_warn};
 
+use crate::state::TriageCacheLookupResult;
 use crate::{
     briefing::{
         ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingThemeResult,
@@ -366,17 +367,20 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         ..
                     } => match validate_triage(output_json) {
                         Ok(triage) => {
-                            state.triage_mut().complete_article(
-                                article_idx,
-                                ArticleTriageResult {
-                                    category: triage.category,
-                                    priority: triage.priority.value(),
-                                    tags: triage.tags,
-                                    rationale: triage.rationale,
-                                    input_tokens: *input_tokens,
-                                    output_tokens: *output_tokens,
-                                },
-                            );
+                            let content_hash =
+                                state.triage().articles()[article_idx].content_hash.clone();
+                            let result = ArticleTriageResult {
+                                category: triage.category,
+                                priority: triage.priority.value(),
+                                tags: triage.tags,
+                                rationale: triage.rationale,
+                                input_tokens: *input_tokens,
+                                output_tokens: *output_tokens,
+                            };
+                            state
+                                .triage_mut()
+                                .complete_article(article_idx, result.clone());
+                            state.store_triage_result(&content_hash, result);
                         }
                         Err(err) => {
                             state
@@ -485,6 +489,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 engine_info!("[briefing-triage] triage rerun");
                 state.triage_mut().reset_with_articles(articles);
                 state.triage_mut().transition_to_triaging();
+                state.start_triage_cache_run();
+                state.mark_triage_metadata_ready();
                 dispatch_next_triage_step(&mut state, &mut effects);
             }
             effects
@@ -550,6 +556,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.triage_mut().set_articles(articles);
             state.triage_mut().transition_to_triaging();
             state.mark_dirty();
+            state.start_triage_cache_run();
+            state.mark_triage_metadata_ready();
             let mut effects = Vec::new();
             dispatch_next_triage_step(&mut state, &mut effects);
             effects
@@ -562,6 +570,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::PromptContextsLoaded { contexts } => {
             engine_info!("[PromptContext] Loaded {} context(s)", contexts.len());
             state.set_prompt_contexts(contexts);
+            state.mark_triage_metadata_ready();
             state.mark_dirty();
             Vec::new()
         }
@@ -581,6 +590,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_llm_metadata(active_versions, effective_models);
             state.mark_briefing_metadata_ready();
+            state.mark_triage_metadata_ready();
             state.mark_dirty();
             let mut effects = Vec::new();
             try_start_briefing_with_metadata(&mut state, &mut effects);
@@ -592,6 +602,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 cache.len()
             );
             state.set_summary_cache(cache);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::TriageCacheHydrated { cache } => {
+            engine_info!(
+                "[triage-cache] Hydrated {} entries from persistent store",
+                cache.len()
+            );
+            state.set_triage_cache(cache);
             state.mark_dirty();
             Vec::new()
         }
@@ -646,6 +665,7 @@ fn parse_urls(raw: &str) -> Vec<String> {
 }
 
 fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
+    log_triage_cache_run_start_if_needed(state);
     let limit = state.triage_max_in_flight();
 
     // Fill available in-flight slots.
@@ -654,6 +674,32 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
             .triage()
             .next_pending_index()
             .expect("can_dispatch_more guarantees pending exists");
+
+        let content_hash = state.triage().articles()[next_idx].content_hash.clone();
+        let content_hash_short = short_hash(&content_hash);
+
+        match state.try_reuse_triage(&content_hash) {
+            TriageCacheLookupResult::Hit(cached) => {
+                let result = cached.clone();
+                state.record_triage_cache_hit();
+                engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
+                state.triage_mut().complete_article(next_idx, result);
+                state.mark_dirty();
+                continue;
+            }
+            TriageCacheLookupResult::Miss => {
+                state.record_triage_cache_miss();
+                engine_info!("[triage-cache] miss content_hash={}", content_hash_short);
+            }
+            TriageCacheLookupResult::KeyUnavailable => {
+                state.record_triage_cache_key_unavailable();
+                engine_info!(
+                    "[triage-cache] key-unavailable content_hash={}",
+                    content_hash_short
+                );
+            }
+        }
+
         let prepared_text = state.triage().articles()[next_idx].prepared_text.clone();
         let request_id = state.allocate_next_llm_request_id();
         state.record_pending_llm_request(request_id, PromptId::ArticleTriage);
@@ -691,6 +737,10 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
                 on_triage_settled_for_briefing(state, effects);
             }
         }
+        log_triage_cache_run_summary(state);
+        effects.push(Effect::PersistTriageCache {
+            cache: state.triage_cache().clone(),
+        });
         state.mark_dirty();
     }
 }
@@ -935,6 +985,33 @@ fn log_summary_cache_run_summary(state: &mut AppState) {
         metrics.total()
     );
     state.finalize_summary_cache_run();
+}
+
+fn log_triage_cache_run_start_if_needed(state: &mut AppState) {
+    if state.triage_cache_run_start_logged() {
+        return;
+    }
+    let metadata = state.triage_cache_metadata();
+    if let Some((version, model_id, _)) = metadata {
+        engine_info!(
+            "[triage-cache] run-start prompt_version={} model_id={}",
+            version,
+            model_id
+        );
+        state.mark_triage_cache_run_started();
+    }
+}
+
+fn log_triage_cache_run_summary(state: &mut AppState) {
+    let metrics = state.triage_cache_metrics();
+    engine_info!(
+        "[triage-cache] run summary hits={} misses={} key_unavailable={} total={}",
+        metrics.hits(),
+        metrics.misses(),
+        metrics.key_unavailable(),
+        metrics.total()
+    );
+    state.finalize_triage_cache_run();
 }
 
 fn summary_cache_key_error_reason(error: &SummaryCacheKeyError) -> &'static str {

@@ -126,6 +126,8 @@ pub enum Msg {
     },
     /// Summary cache hydrated from persisted store at startup.
     SummaryCacheHydrated { cache: crate::SummaryCache },
+    /// Triage cache hydrated from persisted store at startup.
+    TriageCacheHydrated { cache: crate::TriageCache },
     /// User requested to open the currently selected article URL in the default browser.
     OpenInBrowserClicked,
 }

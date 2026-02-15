@@ -1,7 +1,9 @@
 use crate::briefing::BriefingSession;
+use crate::context_hash;
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
-use crate::triage::TriageSession;
+use crate::triage::{ArticleTriageResult, TriageSession};
+use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TriageAnnotationView,
@@ -32,6 +34,19 @@ enum MetadataLoadState {
 struct SummaryCacheMetadataSnapshot {
     prompt_version: PromptVersion,
     model_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TriageCacheMetadataSnapshot {
+    prompt_version: PromptVersion,
+    model_id: String,
+    context_hash: String,
+}
+
+pub(crate) enum TriageCacheLookupResult<'a> {
+    Hit(&'a ArticleTriageResult),
+    Miss,
+    KeyUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,6 +105,31 @@ pub(crate) struct SummaryCacheMetrics {
     hits: usize,
     misses: usize,
     key_unavailable: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TriageCacheRunMetrics {
+    hits: u32,
+    misses: u32,
+    key_unavailable: u32,
+}
+
+impl TriageCacheRunMetrics {
+    pub(crate) fn hits(&self) -> u32 {
+        self.hits
+    }
+
+    pub(crate) fn misses(&self) -> u32 {
+        self.misses
+    }
+
+    pub(crate) fn key_unavailable(&self) -> u32 {
+        self.key_unavailable
+    }
+
+    pub(crate) fn total(&self) -> u32 {
+        self.hits + self.misses + self.key_unavailable
+    }
 }
 
 impl SummaryCacheMetrics {
@@ -171,6 +211,10 @@ pub struct AppState {
     summary_cache_metadata_snapshot: Option<SummaryCacheMetadataSnapshot>,
     summary_cache_metrics: SummaryCacheMetrics,
     summary_cache_warmup_logged: bool,
+    triage_cache: TriageCache,
+    triage_cache_metadata_snapshot: Option<TriageCacheMetadataSnapshot>,
+    triage_cache_run_metrics: TriageCacheRunMetrics,
+    triage_cache_run_start_logged: bool,
     briefing_orchestration: BriefingOrchestration,
     /// Maximum number of concurrent triage LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
     triage_max_in_flight: usize,
@@ -208,6 +252,10 @@ impl Default for AppState {
             summary_cache_metadata_snapshot: None,
             summary_cache_metrics: SummaryCacheMetrics::default(),
             summary_cache_warmup_logged: false,
+            triage_cache: TriageCache::new(),
+            triage_cache_metadata_snapshot: None,
+            triage_cache_run_metrics: TriageCacheRunMetrics::default(),
+            triage_cache_run_start_logged: false,
             briefing_orchestration: BriefingOrchestration::default(),
             triage_max_in_flight: 1,
             summary_max_in_flight: 1,
@@ -645,6 +693,121 @@ impl AppState {
     /// Get an immutable reference to the summary cache.
     pub(crate) fn summary_cache(&self) -> &SummaryCache {
         &self.summary_cache
+    }
+    pub(crate) fn set_triage_cache(&mut self, cache: TriageCache) {
+        self.triage_cache = cache;
+    }
+
+    pub fn triage_cache(&self) -> &TriageCache {
+        &self.triage_cache
+    }
+
+    pub(crate) fn start_triage_cache_run(&mut self) {
+        self.triage_cache_run_metrics = TriageCacheRunMetrics::default();
+        self.triage_cache_metadata_snapshot = None;
+        self.triage_cache_run_start_logged = false;
+    }
+
+    pub(crate) fn mark_triage_metadata_ready(&mut self) {
+        let snapshot = match (
+            self.active_prompt_versions
+                .get(&PromptId::ArticleTriage)
+                .copied(),
+            self.effective_models.get(&PromptId::ArticleTriage).cloned(),
+        ) {
+            (Some(prompt_version), Some(model_id)) => Some(TriageCacheMetadataSnapshot {
+                prompt_version,
+                model_id,
+                context_hash: context_hash(self.context_for(PromptId::ArticleTriage)),
+            }),
+            _ => None,
+        };
+        self.triage_cache_metadata_snapshot = snapshot;
+    }
+
+    pub(crate) fn triage_cache_metadata(&self) -> Option<(PromptVersion, &str, &str)> {
+        self.triage_cache_metadata_snapshot
+            .as_ref()
+            .map(|snapshot| {
+                (
+                    snapshot.prompt_version,
+                    snapshot.model_id.as_str(),
+                    snapshot.context_hash.as_str(),
+                )
+            })
+    }
+
+    pub(crate) fn try_reuse_triage(&self, content_hash: &str) -> TriageCacheLookupResult<'_> {
+        let snapshot = match &self.triage_cache_metadata_snapshot {
+            Some(snapshot) => snapshot,
+            None => return TriageCacheLookupResult::KeyUnavailable,
+        };
+        let key = match TriageCacheKey::try_new_with_context_hash(
+            content_hash,
+            PromptId::ArticleTriage,
+            Some(snapshot.prompt_version),
+            Some(snapshot.model_id.as_str()),
+            &snapshot.context_hash,
+        ) {
+            Ok(key) => key,
+            Err(_) => return TriageCacheLookupResult::KeyUnavailable,
+        };
+        match self.triage_cache.lookup(&key) {
+            Some(result) => TriageCacheLookupResult::Hit(result),
+            None => TriageCacheLookupResult::Miss,
+        }
+    }
+
+    pub(crate) fn store_triage_result(&mut self, content_hash: &str, result: ArticleTriageResult) {
+        let snapshot = match &self.triage_cache_metadata_snapshot {
+            Some(snapshot) => snapshot,
+            None => return,
+        };
+        let key = match TriageCacheKey::try_new_with_context_hash(
+            content_hash,
+            PromptId::ArticleTriage,
+            Some(snapshot.prompt_version),
+            Some(snapshot.model_id.as_str()),
+            &snapshot.context_hash,
+        ) {
+            Ok(key) => key,
+            Err(_) => return,
+        };
+
+        self.triage_cache.insert(key, result);
+    }
+
+    pub(crate) fn record_triage_cache_hit(&mut self) {
+        self.triage_cache_run_metrics.hits = self.triage_cache_run_metrics.hits.saturating_add(1);
+    }
+
+    pub(crate) fn record_triage_cache_miss(&mut self) {
+        self.triage_cache_run_metrics.misses =
+            self.triage_cache_run_metrics.misses.saturating_add(1);
+    }
+
+    pub(crate) fn record_triage_cache_key_unavailable(&mut self) {
+        self.triage_cache_run_metrics.key_unavailable = self
+            .triage_cache_run_metrics
+            .key_unavailable
+            .saturating_add(1);
+    }
+
+    pub(crate) fn triage_cache_metrics(&self) -> &TriageCacheRunMetrics {
+        &self.triage_cache_run_metrics
+    }
+
+    pub(crate) fn triage_cache_run_start_logged(&self) -> bool {
+        self.triage_cache_run_start_logged
+    }
+
+    pub(crate) fn mark_triage_cache_run_started(&mut self) {
+        self.triage_cache_run_start_logged = true;
+    }
+
+    pub(crate) fn finalize_triage_cache_run(&mut self) {
+        self.triage_cache_metadata_snapshot = None;
+        self.triage_cache_run_start_logged = false;
     }
 
     pub(crate) fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {

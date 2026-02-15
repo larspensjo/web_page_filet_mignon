@@ -1,11 +1,13 @@
 //! Harvester core: pure state machine and view-model helpers.
 mod briefing;
+mod cache_utils;
 mod effect;
 mod msg;
 mod source_state;
 mod state;
 mod summary_cache;
 mod triage;
+mod triage_cache;
 mod ui_geometry;
 mod update;
 mod url_age;
@@ -15,6 +17,7 @@ pub use briefing::{
     ArticleSummaryResult, BriefingArticle, BriefingArticleId, BriefingPhase, BriefingResult,
     BriefingSession, BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
+pub use cache_utils::model_ids_compatible;
 pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
 pub use source_state::{SourceInstanceState, SourceStateIndex};
@@ -29,6 +32,7 @@ pub use triage::{
     ArticleTriageResult, ArticleTriageState, TriageArticle, TriageArticleId, TriagePhase,
     TriageSession,
 };
+pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCacheKeyError};
 pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
