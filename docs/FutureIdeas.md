@@ -410,6 +410,25 @@ SuccessCriteria:
 - Briefing output reports included count, excluded low-priority count, and excluded untriaged count.
 - Explainability counts match the triage selection inputs used for the run.
 
+#### [FI-LLM-Briefing-0005] Manual pre-triage review in briefing prereq path
+Status: Candidate
+TopLevel: LLM
+SubLevel: Briefing
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.PreTriageManualFiltering.md
+- SourceSection: Future Extensions
+- Captured: 2026-02-15
+Tags: [llm, briefing, triage, pre-triage]
+Summary: Add full manual pre-triage review support to the briefing-prerequisite triage flow so it matches the standard triage path.
+Rationale: Keeps behavior consistent across triage entry points and avoids bypassing operator review decisions.
+SuccessCriteria:
+- Briefing prerequisite triage enters the same review-capable pre-triage flow as manual triage.
+- Resolved include/exclude decisions are applied before triage work starts in briefing orchestration.
+- Tests cover parity between the standard triage flow and briefing-prereq triage flow.
+
 ### Budgeting
 
 #### [FI-LLM-Budgeting-0001] Priority-weighted token budgets
@@ -942,6 +961,25 @@ SuccessCriteria:
 - Outputs are snapshot-compared with stable, reviewable diffs.
 - The harness report includes per-variant success/failure counts and notable diff categories.
 
+#### [FI-Observability-ReplayDiagnostics-0003] Pre-triage effectiveness metrics
+Status: Candidate
+TopLevel: Observability
+SubLevel: ReplayDiagnostics
+Priority: P2
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.PreTriageManualFiltering.md
+- SourceSection: Future Extensions
+- Captured: 2026-02-15
+Tags: [observability, pre-triage, metrics]
+Summary: Add run-level metrics for pre-triage quality, including filter hit-rate and manual override rates.
+Rationale: Gives feedback on false positives/negatives and helps tune policy thresholds safely.
+SuccessCriteria:
+- Metrics include auto-excluded count, manually re-included count, and manually excluded count.
+- Reports include false-positive override rate and overall filter hit-rate per run.
+- Metrics are emitted in a deterministic summary suitable for regression checks.
+
 ### SourceHealth
 
 #### [FI-Observability-SourceHealth-0006] Source health telemetry
@@ -1083,6 +1121,25 @@ Rationale: Enables per-deployment tuning without recompilation.
 SuccessCriteria:
 - UrlPolicy, SessionQuotas, and LlmQuotas load from config at startup.
 - Config changes are validated and reported on failure.
+
+#### [FI-Security-PolicyConfig-0003] Configurable pre-triage policy profiles
+Status: Candidate
+TopLevel: Security
+SubLevel: PolicyConfig
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.PreTriageManualFiltering.md
+- SourceSection: Future Extensions
+- Captured: 2026-02-15
+Tags: [security, configuration, pre-triage, policy]
+Summary: Externalize pre-triage thresholds and phrase lists into `contexts/pre_triage_filter.toml`, with named profiles such as strict, normal, and relaxed.
+Rationale: Enables safer policy tuning without code edits and keeps filter behavior auditable per deployment.
+SuccessCriteria:
+- Startup loads pre-triage policy settings from a dedicated configuration file.
+- At least three policy profiles are supported and selectable.
+- Invalid policy files fail validation with actionable diagnostics and safe fallback behavior.
 
 ### SourceTrust
 
@@ -1604,6 +1661,44 @@ Rationale: Helps users focus on high-signal items quickly.
 SuccessCriteria:
 - Triage list supports filtering by category and priority.
 - UI displays tag aggregation and priority color cues.
+
+#### [FI-UX-TriageUi-0002] Bulk review actions for pre-triage overrides
+Status: Candidate
+TopLevel: UX
+SubLevel: TriageUi
+Priority: P2
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.PreTriageManualFiltering.md
+- SourceSection: Future Extensions
+- Captured: 2026-02-15
+Tags: [ux, triage, pre-triage, bulk-actions]
+Summary: Add one-click actions to include all review items or exclude all review items during pre-triage review.
+Rationale: Reduces repetitive checkbox operations when many items share the same decision.
+SuccessCriteria:
+- UI offers explicit bulk actions for unresolved review items.
+- Bulk action results are persisted as manual overrides and are fully reversible.
+- Reducer tests verify deterministic behavior for mixed review sets.
+
+#### [FI-UX-TriageUi-0003] Pre-triage reason inspector for selected article
+Status: Candidate
+TopLevel: UX
+SubLevel: TriageUi
+Priority: P2
+Effort: M
+Risk: L
+Origin:
+- SourceDoc: Plan.PreTriageManualFiltering.md
+- SourceSection: Future Extensions
+- Captured: 2026-02-15
+Tags: [ux, triage, pre-triage, explainability]
+Summary: Add a detail panel that explains which pre-triage rules matched for the currently selected article.
+Rationale: Helps operators understand and trust auto-exclude or review decisions before overriding.
+SuccessCriteria:
+- Selecting a job shows matched rule reasons in a stable, deterministic order.
+- The panel reflects auto verdict and manual override state separately.
+- Reason display is available without requiring debug logs.
 
 ### WorkflowAutomation
 
