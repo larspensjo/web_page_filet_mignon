@@ -438,12 +438,17 @@ Origin:
 - SourceDoc: Plan.Rough.RssLlmCuration.SecurityFirst.md
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
+- SourceDoc: Plan.TriageResultPersistence.md
+- SourceSection: Future Extensions / Persistence plan
+- Captured: 2026-02-15
 Tags: [llm, caching, replay]
-Summary: Skip re-triage and re-summarization when content hash and prompt metadata match prior success.
-Rationale: Reduces redundant LLM calls and costs.
+Summary: Skip re-triage and re-summarization when content hash and prompt metadata (model, context, prompt version) match prior success and persist those results to disk so restarts can hydrate the cache.
+Rationale: Reduces redundant LLM calls and costs while allowing later runs to reuse previously triaged articles without re-running the LLM.
 SuccessCriteria:
-- Cache key includes content hash, prompt id/version, and model id.
-- Cache hits bypass LLM calls and reuse stored results.
+- Cache key includes content hash, prompt id/version, model id (with alias variants), and context hash.
+- Cache hits bypass LLM calls and reuse stored triage or summary results after hydrate + logging coverage, including log entries for run start, per-article hit/miss/key-unavailable, and run summary.
+- Persistence writes `.triage_cache.ron` (paired with summary cache storage), and startup hydration uses the persisted cache to skip redundant triage requests.
+Notes: Cache hydration is fire-and-forget; missing or corrupt files log warnings but do not block startup.
 
 #### [FI-LLM-Caching-0002] Incremental re-summarization
 Status: Candidate
