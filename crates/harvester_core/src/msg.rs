@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
+use harvester_engine::llm::types::ModelId;
 use harvester_engine::ExtractedLink;
 
 use crate::prompt_lab::PromptLabStage;
@@ -75,6 +76,8 @@ pub enum Msg {
     RequestLlmCompletion {
         prompt_id: PromptId,
         prompt_version: Option<PromptVersion>,
+        /// Per-run model override; `None` means use the stage/default model.
+        model_override: Option<ModelId>,
         input_content: String,
         context: Vec<(String, String)>,
     },

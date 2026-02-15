@@ -193,6 +193,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::RequestLlmCompletion {
             prompt_id,
             prompt_version,
+            model_override,
             input_content,
             context,
         } => {
@@ -202,6 +203,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 request_id,
                 prompt_id,
                 prompt_version,
+                model_override,
                 input_content,
                 context,
             }]
@@ -742,6 +744,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 request_id,
                 prompt_id,
                 prompt_version,
+                model_override: None,
                 input_content: input,
                 context,
             }]
@@ -827,6 +830,7 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
             request_id,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: None,
+            model_override: None,
             input_content: prepared_text,
             context,
         });
@@ -962,6 +966,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     request_id,
                     prompt_id: PromptId::ArticleSummary,
                     prompt_version: None,
+                    model_override: None,
                     input_content: prepared_text,
                     context,
                 });
@@ -996,6 +1001,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     request_id,
                     prompt_id: PromptId::ArticleSummary,
                     prompt_version: None,
+                    model_override: None,
                     input_content: prepared_text,
                     context,
                 });
@@ -1047,6 +1053,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         request_id,
         prompt_id: PromptId::AggregateBriefing,
         prompt_version: None,
+        model_override: None,
         input_content: collection_text,
         context,
     });
@@ -1368,6 +1375,7 @@ mod tests {
                 request_id: 3,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
+                model_override: None,
                 input_content: "Article A text".to_string(),
                 context: Vec::new(),
             }]
@@ -1417,6 +1425,7 @@ mod tests {
                 request_id: 4,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
+                model_override: None,
                 input_content: "Article B text".to_string(),
                 context: Vec::new(),
             }]
@@ -1443,6 +1452,7 @@ mod tests {
                 request_id: 5,
                 prompt_id: PromptId::AggregateBriefing,
                 prompt_version: None,
+                model_override: None,
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
             }]
@@ -1541,6 +1551,7 @@ mod tests {
                 request_id: 3,
                 prompt_id: PromptId::AggregateBriefing,
                 prompt_version: None,
+                model_override: None,
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
             }]
@@ -1594,6 +1605,7 @@ mod tests {
                 request_id: 4,
                 prompt_id: PromptId::AggregateBriefing,
                 prompt_version: None,
+                model_override: None,
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
             }]

@@ -54,6 +54,7 @@ fn llm_handle_dispatches_completion_event() {
             request_id: 7,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
+            model_override: None,
             input_content: "document text".to_string(),
             context: vec![("key".to_string(), "value".to_string())],
         })
@@ -118,6 +119,7 @@ fn llm_handle_skips_provider_when_cache_hit() {
             request_id: 7,
             prompt_id: PromptId::ArticleSummary,
             prompt_version: Some(2),
+            model_override: None,
             input_content: input_content.to_string(),
             context: Vec::new(),
         })
@@ -166,6 +168,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
             request_id: 7,
             prompt_id: PromptId::ArticleSummary,
             prompt_version: Some(3),
+            model_override: None,
             input_content: input_content.to_string(),
             context: Vec::new(),
         })
@@ -191,6 +194,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
             request_id: 8,
             prompt_id: PromptId::ArticleSummary,
             prompt_version: Some(3),
+            model_override: None,
             input_content: input_content.to_string(),
             context: Vec::new(),
         })
@@ -250,6 +254,7 @@ fn concurrent_requests_never_exceed_cap() {
                 request_id: i as u64 + 1,
                 prompt_id: PromptId::ArticleTriage,
                 prompt_version: Some(1),
+                model_override: None,
                 input_content: format!("document {i}"),
                 context: Vec::new(),
             })

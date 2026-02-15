@@ -200,6 +200,7 @@ fn send_llm_request_with_context(state: AppState) -> (AppState, Vec<Effect>) {
         Msg::RequestLlmCompletion {
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
+            model_override: None,
             input_content: "llm input".to_string(),
             context: vec![("key".to_string(), "value".to_string())],
         },

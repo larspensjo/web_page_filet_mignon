@@ -266,6 +266,7 @@ impl EffectRunner {
                 request_id,
                 prompt_id,
                 prompt_version,
+                model_override,
                 input_content,
                 context,
             } => {
@@ -274,6 +275,7 @@ impl EffectRunner {
                         request_id,
                         prompt_id,
                         prompt_version,
+                        model_override,
                         input_content,
                         context,
                     };

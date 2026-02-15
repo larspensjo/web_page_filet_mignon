@@ -109,6 +109,8 @@ pub enum LlmCommand {
         request_id: u64,
         prompt_id: PromptId,
         prompt_version: Option<PromptVersion>,
+        /// Per-run model override; `None` means use the stage/default model.
+        model_override: Option<ModelId>,
         input_content: String,
         context: Vec<(String, String)>,
     },
@@ -232,6 +234,7 @@ async fn handle_completion_concurrent(
         request_id,
         prompt_id,
         prompt_version,
+        model_override,
         input_content,
         context,
     } = command
@@ -289,6 +292,8 @@ async fn handle_completion_concurrent(
         );
     }
 
+    // model_override will be plumbed into resolve_model in Step 5.
+    let _ = model_override;
     let model = resolve_model(prompt_id, config);
     let (template, version) = match fetch_prompt_template(config, prompt_id, prompt_version) {
         Some(pair) => pair,

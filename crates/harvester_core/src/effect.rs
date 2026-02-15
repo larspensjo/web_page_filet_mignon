@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::types::ModelId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -20,6 +21,8 @@ pub enum Effect {
         request_id: u64,
         prompt_id: PromptId,
         prompt_version: Option<PromptVersion>,
+        /// Per-run model override; `None` means use the stage/default model.
+        model_override: Option<ModelId>,
         input_content: String,
         context: Vec<(String, String)>,
     },
