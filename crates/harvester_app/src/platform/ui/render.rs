@@ -832,10 +832,10 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
 
 fn format_job_row(job: &JobRowView) -> String {
     let filter_prefix = match &job.filter_status {
-        Some(JobFilterStatus::HardExcluded { .. }) => "[FILTERED] ",
+        Some(JobFilterStatus::HardExcluded { .. }) => "[AUTO EXCLUDED] ",
         Some(JobFilterStatus::ReviewNeeded { .. }) => "[REVIEW] ",
         Some(JobFilterStatus::ManuallyExcluded) => "[EXCLUDED] ",
-        Some(JobFilterStatus::ManuallyIncluded) => "[INCLUDED] ",
+        Some(JobFilterStatus::ManuallyIncluded) => "",
         _ => "",
     };
     if job.has_summary {
