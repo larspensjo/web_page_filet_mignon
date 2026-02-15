@@ -278,6 +278,12 @@ Tests after step:
 - **Step 3 override lab**: keep the per-run prompt+model metadata stored to fuel an automated recommender for "cheapest good enough" choices later.
 - **Step 7 compare batches**: show compare batch run groupings as a structured object that can also be serialized/exported (e.g., for Step 9 exports).
 - **Step 8 persistence surface**: let run index entries drive retention metadata or reporting for regulators, the same way the lab persistence layer will.
+- **Provider-reported latency vs. wall-clock**: add a `provider_ms` field alongside `wall_ms` in `LlmRunMetadata` to separate network/processing overhead from total request span. Useful for diagnosing slow providers vs. slow network conditions.
+- **Structured validation error tag**: serialize the `ValidationError` enum variant name alongside the human-readable message in `LlmRunMetadata::validation_error` so tooling can pattern-match on error categories without string parsing. `ValidationError` is already a typed enum in `validation.rs`.
+- **Per-model pricing via config file**: replace hard-coded defaults in `PricingRegistry::with_defaults()` with a versioned config file (checksum-verified, hot-reloadable). Enables pricing updates without a code rebuild.
+- **Token estimator for pre-dispatch cost preview**: utility that predicts token count and estimated cost before dispatching a lab run, using the whitespace estimator already present. Lets the operator see a cost ceiling before committing to a live call.
+- **Trace-ID propagation**: add `trace_id: Option<String>` to `LlmRunMetadata` (with `#[serde(skip_serializing_if = "Option::is_none")]`) for correlation with external observability tools (OpenTelemetry, structured log aggregators).
+- **Session-level metadata summary**: surface total cost and latency breakdown in `LlmUsageTotals` at session end — a single structured log line summarising all runs in a session for offline cost analysis.
 
 ## Final Validation Gate for Full Implementation
 - `cargo build`
