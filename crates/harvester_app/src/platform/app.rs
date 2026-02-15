@@ -508,6 +508,41 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::PromptLabHistoryCleared);
             }
             AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_ADD_CURRENT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareCurrentSettingsCaptured);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_ADD_BASELINE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareBaselineCaptured);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_RESET_DRAFT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareDraftReset);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_START =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareBatchStartRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_CANCEL =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareBatchCancelRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_AUTO_SELECT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareAutoSelectRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_WINNER_CLEAR =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareWinnerCleared);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_APPLY =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabContextApplyRequested);
@@ -1018,6 +1053,44 @@ mod tests {
             rx.recv_timeout(Duration::from_millis(250))
                 .expect("template save"),
             Msg::PromptLabTemplateSaveRequested
+        );
+    }
+
+    #[test]
+    fn prompt_lab_compare_buttons_emit_expected_msgs() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_COMPARE_ADD_CURRENT,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_COMPARE_ADD_BASELINE,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_COMPARE_RESET_DRAFT,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_COMPARE_START,
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("add current"),
+            Msg::PromptLabCompareCurrentSettingsCaptured
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("add baseline"),
+            Msg::PromptLabCompareBaselineCaptured
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("reset"),
+            Msg::PromptLabCompareDraftReset
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("start"),
+            Msg::PromptLabCompareBatchStartRequested
         );
     }
 
