@@ -281,18 +281,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                             match cache_key_result {
                                 Ok(store_key) => {
                                     if let Some(lookup) = lookup_key.as_ref() {
-                                        if lookup != &store_key {
-                                            engine_warn!(
-                                                "[summary-cache] metadata mismatch article={} lookup=(version={},model={},context={}) store=(version={},model={},context={})",
-                                                article_idx,
-                                                lookup.prompt_version,
-                                                lookup.model_id,
-                                                lookup.context_hash,
-                                                store_key.prompt_version,
-                                                store_key.model_id,
-                                                store_key.context_hash,
-                                            );
-                                        }
+                                        log_summary_cache_lookup_mismatch(
+                                            article_idx,
+                                            lookup,
+                                            &store_key,
+                                        );
                                     }
 
                                     let completion_key = build_summary_cache_key(
@@ -303,30 +296,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                         &context,
                                     );
                                     if let Ok(completion_key) = completion_key {
-                                        if completion_key != store_key {
-                                            if summary_cache_model_ids_compatible(
-                                                &store_key.model_id,
-                                                &completion_key.model_id,
-                                            ) {
-                                                engine_info!(
-                                                    "[summary-cache] completion metadata differs by model variant article={} cache_model={} completion_model={}",
-                                                    article_idx,
-                                                    store_key.model_id,
-                                                    completion_key.model_id,
-                                                );
-                                            } else {
-                                                engine_warn!(
-                                                    "[summary-cache] completion metadata mismatch article={} cache=(version={},model={},context={}) completion=(version={},model={},context={})",
-                                                    article_idx,
-                                                    store_key.prompt_version,
-                                                    store_key.model_id,
-                                                    store_key.context_hash,
-                                                    completion_key.prompt_version,
-                                                    completion_key.model_id,
-                                                    completion_key.context_hash,
-                                                );
-                                            }
-                                        }
+                                        log_summary_cache_completion_metadata(
+                                            article_idx,
+                                            &store_key,
+                                            &completion_key,
+                                        );
                                     }
 
                                     state.store_summary_result(
@@ -492,7 +466,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::BriefingPrereqArticlesLoaded { articles } => {
             engine_info!("[briefing-triage] prereq loaded count={}", articles.len());
             if articles.is_empty() {
-                state.briefing_mut().fail("No articles available".to_string());
+                state
+                    .briefing_mut()
+                    .fail("No articles available".to_string());
                 state.clear_briefing_orchestration();
                 state.mark_dirty();
                 return (state, Vec::new());
@@ -982,6 +958,55 @@ fn build_summary_cache_key(
 fn short_hash(hash: &str) -> &str {
     let end = hash.len().min(8);
     &hash[..end]
+}
+
+fn log_summary_cache_lookup_mismatch(
+    article_idx: usize,
+    lookup: &SummaryCacheKey,
+    store_key: &SummaryCacheKey,
+) {
+    if lookup == store_key {
+        return;
+    }
+    engine_warn!(
+        "[summary-cache] metadata mismatch article={} lookup=(version={},model={},context={}) store=(version={},model={},context={})",
+        article_idx,
+        lookup.prompt_version,
+        lookup.model_id,
+        lookup.context_hash,
+        store_key.prompt_version,
+        store_key.model_id,
+        store_key.context_hash,
+    );
+}
+
+fn log_summary_cache_completion_metadata(
+    article_idx: usize,
+    store_key: &SummaryCacheKey,
+    completion_key: &SummaryCacheKey,
+) {
+    if completion_key == store_key {
+        return;
+    }
+    if summary_cache_model_ids_compatible(&store_key.model_id, &completion_key.model_id) {
+        engine_info!(
+            "[summary-cache] completion metadata differs by model variant article={} cache_model={} completion_model={}",
+            article_idx,
+            store_key.model_id,
+            completion_key.model_id,
+        );
+    } else {
+        engine_warn!(
+            "[summary-cache] completion metadata mismatch article={} cache=(version={},model={},context={}) completion=(version={},model={},context={})",
+            article_idx,
+            store_key.prompt_version,
+            store_key.model_id,
+            store_key.context_hash,
+            completion_key.prompt_version,
+            completion_key.model_id,
+            completion_key.context_hash,
+        );
+    }
 }
 
 fn summary_cache_model_ids_compatible(store_model_id: &str, completion_model_id: &str) -> bool {
@@ -1520,10 +1545,7 @@ mod tests {
             "gpt-4o-mini",
             "gpt-4o-mini-2024-07-18",
         ));
-        assert!(!summary_cache_model_ids_compatible(
-            "gpt-4o-mini",
-            "gpt-4o",
-        ));
+        assert!(!summary_cache_model_ids_compatible("gpt-4o-mini", "gpt-4o",));
     }
 
     #[test]

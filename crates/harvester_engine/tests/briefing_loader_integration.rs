@@ -4,8 +4,7 @@ use std::path::Path;
 use harvester_engine::llm::{PromptId, PromptRegistry};
 use harvester_engine::{
     build_markdown_document, compute_prompt_overhead, load_and_prepare_articles,
-    load_and_prepare_articles_filtered,
-    WhitespaceTokenCounter,
+    load_and_prepare_articles_filtered, WhitespaceTokenCounter,
 };
 use tempfile::tempdir;
 
@@ -211,8 +210,20 @@ fn collection_limits_articles_when_budget_tight() {
 fn filtered_loader_includes_only_selected_urls() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
-    write_markdown_file(tmp.path(), "a.md", "https://example.com/a", Some("A"), "body a");
-    write_markdown_file(tmp.path(), "b.md", "https://example.com/b", Some("B"), "body b");
+    write_markdown_file(
+        tmp.path(),
+        "a.md",
+        "https://example.com/a",
+        Some("A"),
+        "body a",
+    );
+    write_markdown_file(
+        tmp.path(),
+        "b.md",
+        "https://example.com/b",
+        Some("B"),
+        "body b",
+    );
 
     let selected = vec!["https://example.com/b".to_string()];
     let (articles, _) =
@@ -226,8 +237,20 @@ fn filtered_loader_includes_only_selected_urls() {
 fn filtered_loader_preserves_caller_order() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
-    write_markdown_file(tmp.path(), "a.md", "https://example.com/a", Some("A"), "body a");
-    write_markdown_file(tmp.path(), "b.md", "https://example.com/b", Some("B"), "body b");
+    write_markdown_file(
+        tmp.path(),
+        "a.md",
+        "https://example.com/a",
+        Some("A"),
+        "body a",
+    );
+    write_markdown_file(
+        tmp.path(),
+        "b.md",
+        "https://example.com/b",
+        Some("B"),
+        "body b",
+    );
 
     let selected = vec![
         "https://example.com/b".to_string(),
@@ -245,7 +268,13 @@ fn filtered_loader_preserves_caller_order() {
 fn filtered_loader_missing_selected_url_is_skipped() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
-    write_markdown_file(tmp.path(), "a.md", "https://example.com/a", Some("A"), "body a");
+    write_markdown_file(
+        tmp.path(),
+        "a.md",
+        "https://example.com/a",
+        Some("A"),
+        "body a",
+    );
 
     let selected = vec![
         "https://example.com/missing".to_string(),
@@ -298,7 +327,13 @@ fn filtered_loader_budget_trimming_drops_tail_only() {
 fn filtered_loader_empty_selection_returns_empty_result() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
-    write_markdown_file(tmp.path(), "a.md", "https://example.com/a", Some("A"), "body a");
+    write_markdown_file(
+        tmp.path(),
+        "a.md",
+        "https://example.com/a",
+        Some("A"),
+        "body a",
+    );
 
     let (articles, collection) =
         load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &[]).unwrap();

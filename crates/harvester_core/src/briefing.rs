@@ -661,8 +661,14 @@ mod tests {
 
     #[test]
     fn corpus_fingerprint_same_articles_different_order_are_equal() {
-        let a = vec![make_loaded("https://a", "h1"), make_loaded("https://b", "h2")];
-        let b = vec![make_loaded("https://b", "h2"), make_loaded("https://a", "h1")];
+        let a = vec![
+            make_loaded("https://a", "h1"),
+            make_loaded("https://b", "h2"),
+        ];
+        let b = vec![
+            make_loaded("https://b", "h2"),
+            make_loaded("https://a", "h1"),
+        ];
         assert_eq!(
             CorpusFingerprint::from_articles(&a),
             CorpusFingerprint::from_articles(&b)

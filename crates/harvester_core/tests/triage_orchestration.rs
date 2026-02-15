@@ -427,7 +427,10 @@ fn triage_and_briefing_can_interleave() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let (state, _) = update(state, Msg::GenerateBriefingClicked);
     let (_state, effects) = update(state, Msg::TriageClicked);
-    assert!(effects.is_empty(), "manual triage must be blocked while briefing owns triage");
+    assert!(
+        effects.is_empty(),
+        "manual triage must be blocked while briefing owns triage"
+    );
 }
 
 #[test]
@@ -468,5 +471,8 @@ fn triage_and_briefing_concurrent_request_ids() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let (state, _) = update(state, Msg::GenerateBriefingClicked);
     let (_state, effects) = update(state, Msg::TriageClicked);
-    assert!(effects.is_empty(), "triage click should no-op during briefing triage ownership");
+    assert!(
+        effects.is_empty(),
+        "triage click should no-op during briefing triage ownership"
+    );
 }
