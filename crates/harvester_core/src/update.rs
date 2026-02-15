@@ -541,16 +541,19 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::BriefingPrereqArticlesLoaded { articles } => {
             engine_info!("[briefing-triage] prereq loaded count={}", articles.len());
-            if articles.is_empty() {
+            let policy = PreTriagePolicy::default();
+            let pre_triage = PreTriageSession::load_articles(articles, &policy);
+            let filtered_articles = pre_triage.resolved_included_articles();
+            if filtered_articles.is_empty() {
                 state
                     .briefing_mut()
-                    .fail("No articles available".to_string());
+                    .fail("No articles available after pre-triage filters".to_string());
                 state.clear_briefing_orchestration();
                 state.mark_dirty();
                 return (state, Vec::new());
             }
-            let prereq_fingerprint = CorpusFingerprint::from_articles(&articles);
-            state.store_briefing_prereq_articles(articles.clone());
+            let prereq_fingerprint = CorpusFingerprint::from_articles(&filtered_articles);
+            state.store_briefing_prereq_articles(filtered_articles.clone());
             let triage_reusable = matches!(state.triage().phase(), TriagePhase::Complete)
                 && CorpusFingerprint::from_triage_results(state.triage()) == prereq_fingerprint;
             let mut effects = Vec::new();
@@ -559,7 +562,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 on_triage_settled_for_briefing(&mut state, &mut effects);
             } else {
                 engine_info!("[briefing-triage] triage rerun");
-                state.triage_mut().reset_with_articles(articles);
+                state.triage_mut().reset_with_articles(filtered_articles);
                 state.triage_mut().transition_to_triaging();
                 state.start_triage_cache_run();
                 state.mark_triage_metadata_ready();
@@ -1602,17 +1605,20 @@ mod tests {
     }
 
     fn loaded_articles() -> (Vec<LoadedArticle>, String) {
+        fn long_text(prefix: &str) -> String {
+            format!("{prefix} {}", std::iter::repeat_n("content", 220).collect::<Vec<_>>().join(" "))
+        }
         let articles = vec![
             LoadedArticle {
                 url: "https://example.com/a".to_string(),
                 source_title: Some("Article A".to_string()),
-                prepared_text: "Article A text".to_string(),
+                prepared_text: long_text("Article A text"),
                 content_hash: "hash-a".to_string(),
             },
             LoadedArticle {
                 url: "https://example.com/b".to_string(),
                 source_title: Some("Article B".to_string()),
-                prepared_text: "Article B text".to_string(),
+                prepared_text: long_text("Article B text"),
                 content_hash: "hash-b".to_string(),
             },
         ];
@@ -1623,7 +1629,10 @@ mod tests {
         let articles = vec![LoadedArticle {
             url: "https://example.com/a".to_string(),
             source_title: Some("Article A".to_string()),
-            prepared_text: "Article A text".to_string(),
+            prepared_text: format!(
+                "Article A text {}",
+                std::iter::repeat_n("content", 220).collect::<Vec<_>>().join(" ")
+            ),
             content_hash: "hash-a".to_string(),
         }];
         (articles, "Collection text".to_string())
@@ -1746,17 +1755,18 @@ mod tests {
             },
         );
 
-        assert_eq!(
-            effects,
-            vec![Effect::RequestLlmCompletion {
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0],
+            Effect::RequestLlmCompletion {
                 request_id: 3,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
                 model_override: None,
-                input_content: "Article A text".to_string(),
-                context: Vec::new(),
-            }]
-        );
+                input_content,
+                context,
+            } if input_content.starts_with("Article A text") && context.is_empty()
+        ));
         assert!(matches!(
             state.briefing().phase(),
             BriefingPhase::Summarizing
@@ -1796,17 +1806,18 @@ mod tests {
             },
         );
 
-        assert_eq!(
-            effects,
-            vec![Effect::RequestLlmCompletion {
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0],
+            Effect::RequestLlmCompletion {
                 request_id: 4,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
                 model_override: None,
-                input_content: "Article B text".to_string(),
-                context: Vec::new(),
-            }]
-        );
+                input_content,
+                context,
+            } if input_content.starts_with("Article B text") && context.is_empty()
+        ));
 
         let (state, effects) = update(
             state,
