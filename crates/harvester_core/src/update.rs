@@ -729,10 +729,23 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let input = state.prompt_lab().input().to_string();
             let request_id = state.allocate_next_llm_request_id();
             let run_id = state.allocate_next_prompt_lab_run_id();
-            let prompt_version = state.active_version_for(prompt_id);
+            // Use the per-run override if set, otherwise fall back to the active version.
+            let prompt_version = state
+                .prompt_lab()
+                .selected_prompt_version()
+                .or_else(|| state.active_version_for(prompt_id));
+            let model_override = state.prompt_lab().selected_model_override().cloned();
             let context = state.context_for(prompt_id).to_vec();
             state.record_pending_llm_request(request_id, prompt_id);
-            state.add_prompt_lab_pending_run(run_id, stage, prompt_id, input.clone(), request_id, None, None);
+            state.add_prompt_lab_pending_run(
+                run_id,
+                stage,
+                prompt_id,
+                input.clone(),
+                request_id,
+                prompt_version,
+                model_override.clone(),
+            );
             state.mark_dirty();
             engine_info!(
                 "[prompt-lab] run requested run_id={} request_id={} stage={:?}",
@@ -744,7 +757,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 request_id,
                 prompt_id,
                 prompt_version,
-                model_override: None,
+                model_override,
                 input_content: input,
                 context,
             }]
