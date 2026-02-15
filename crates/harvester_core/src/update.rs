@@ -13,7 +13,6 @@ use crate::{
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
-use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage};
 
 // Left side is split into a fixed-width input panel plus a resizable jobs panel.
@@ -25,6 +24,7 @@ const MIN_PREVIEW_WIDTH: i32 = 200;
 const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
 
 /// Pure update function: applies a message to state and returns any effects.
+#[allow(clippy::too_many_lines, clippy::cognitive_complexity, clippy::excessive_nesting)]
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let effects = match msg {
         Msg::InputChanged(text) => {
@@ -449,7 +449,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 log_summary_cache_run_summary(&mut state);
                 state.mark_dirty();
             } else if let Some(run_id) = state.prompt_lab().ownership_for(request_id) {
-                let run_id = run_id;
                 let reason_from_result = |r: &LlmResultKind| -> String {
                     match r {
                         LlmResultKind::ValidationFailed { reason, raw_response } => {
@@ -1213,6 +1212,7 @@ mod tests {
 
     use super::*;
     use crate::briefing::{ArticleSummaryState, BriefingPhase, LoadedArticle};
+    use harvester_engine::llm::run_metadata::LlmRunMetadata;
 
     fn init_logging() {
         static INIT: Once = Once::new();
@@ -2144,7 +2144,7 @@ mod tests {
     #[test]
     fn prompt_lab_history_cleared_removes_completed_and_failed() {
         init_logging();
-        use crate::prompt_lab::{PromptLabRunId, PromptLabRunStatus, PromptLabStage};
+        use crate::prompt_lab::PromptLabStage;
         let mut state = AppState::new();
         // Add a completed run manually
         let rid = state.allocate_next_llm_request_id();
@@ -2176,7 +2176,7 @@ mod tests {
         // Open lab, change stage, dispatch a run
         let (state, _) = update(state, Msg::PromptLabOpenRequested);
         let (state, _) = update(state, Msg::PromptLabStageSelected { stage: crate::prompt_lab::PromptLabStage::Summary });
-        let (state, effects) = update(state, Msg::PromptLabInputChanged { text: "article text".to_string() });
+        let (state, _) = update(state, Msg::PromptLabInputChanged { text: "article text".to_string() });
         let (state, effects) = {
             let (s, e) = update(state, Msg::PromptLabRunRequested);
             (s, e)

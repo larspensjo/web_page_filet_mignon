@@ -4,7 +4,7 @@
 //! It is intentionally self-contained — it does not reference `BriefingSession`
 //! or `TriageSession` directly.
 
-use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
 
 // ---------------------------------------------------------------------------
@@ -230,14 +230,10 @@ impl PromptLabState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+    use harvester_engine::llm::prompt::PromptId;
 
     fn make_prompt_id() -> PromptId {
         PromptId::ArticleTriage
-    }
-
-    fn make_prompt_version() -> PromptVersion {
-        1
     }
 
     #[test]

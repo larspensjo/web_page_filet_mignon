@@ -105,7 +105,7 @@ pub struct EffectRunner {
     url_policy: UrlPolicy,
     fetch_settings: FetchSettings,
     llm_handle: Option<LlmHandle>,
-    llm_max_input_chars: Option<usize>,
+    llm_max_input_bytes: Option<usize>,
     prompt_registry: PromptRegistry,
     llm_metadata_models: HashMap<PromptId, String>,
 }
@@ -119,14 +119,14 @@ impl EffectRunner {
     pub fn new_with_llm(
         msg_tx: mpsc::Sender<Msg>,
         llm_handle: LlmHandle,
-        llm_max_input_chars: usize,
+        llm_max_input_bytes: usize,
         prompt_registry: PromptRegistry,
         llm_metadata_models: HashMap<PromptId, String>,
     ) -> Self {
         Self::with_optional_llm(
             msg_tx,
             Some(llm_handle),
-            Some(llm_max_input_chars),
+            Some(llm_max_input_bytes),
             prompt_registry,
             llm_metadata_models,
         )
@@ -135,7 +135,7 @@ impl EffectRunner {
     fn with_optional_llm(
         msg_tx: mpsc::Sender<Msg>,
         llm_handle: Option<LlmHandle>,
-        llm_max_input_chars: Option<usize>,
+        llm_max_input_bytes: Option<usize>,
         prompt_registry: PromptRegistry,
         llm_metadata_models: HashMap<PromptId, String>,
     ) -> Self {
@@ -154,7 +154,7 @@ impl EffectRunner {
             url_policy,
             fetch_settings,
             llm_handle,
-            llm_max_input_chars,
+            llm_max_input_bytes,
             prompt_registry,
             llm_metadata_models,
         };
@@ -314,7 +314,7 @@ impl EffectRunner {
             Effect::LoadArticlesForBriefing { ordered_urls } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
-                let max_input_bytes = self.llm_max_input_chars.unwrap_or(100_000);
+                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
                     match load_and_prepare_articles_filtered(
@@ -352,7 +352,7 @@ impl EffectRunner {
             Effect::LoadArticlesForBriefingPrereq => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
-                let max_input_bytes = self.llm_max_input_chars.unwrap_or(100_000);
+                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
                     match load_and_prepare_articles_for_triage(
@@ -505,7 +505,7 @@ impl EffectRunner {
             Effect::LoadArticlesForTriage => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
-                let max_input_bytes = self.llm_max_input_chars.unwrap_or(100_000);
+                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
                     match load_and_prepare_articles_for_triage(
@@ -747,7 +747,7 @@ impl EffectRunner {
                 }
             }
             Effect::RequestLlmCompletion { input_content, .. } => {
-                if let Some(limit) = self.llm_max_input_chars {
+                if let Some(limit) = self.llm_max_input_bytes {
                     if input_content.len() > limit {
                         return Err(format!(
                             "LLM input too large ({} > {} characters)",
