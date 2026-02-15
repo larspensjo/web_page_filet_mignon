@@ -1003,6 +1003,14 @@ fn llm_error_reason(error: LlmCompletionError) -> String {
         LlmCompletionError::TemplateRenderFailed { detail } => {
             format!("template rendering failed: {}", detail)
         }
+        LlmCompletionError::UnsupportedModel { model, reason } => {
+            format!(
+                "unsupported model {:?}/{}: {}",
+                model.provider(),
+                model.model_name(),
+                reason
+            )
+        }
         LlmCompletionError::ValidationFailed { .. } => unreachable!(),
     }
 }

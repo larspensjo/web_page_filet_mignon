@@ -148,6 +148,13 @@ pub enum LlmCompletionError {
     TemplateRenderFailed {
         detail: String,
     },
+    /// The caller supplied a `model_override` that is not supported by the
+    /// configured provider or is not in the known-model allow-list.
+    /// This is a pre-flight check; `failure_metadata` is always `None`.
+    UnsupportedModel {
+        model: ModelId,
+        reason: String,
+    },
 }
 
 pub enum LlmEvent {
