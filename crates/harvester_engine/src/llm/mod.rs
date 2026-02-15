@@ -19,7 +19,10 @@ pub use handle::{
 };
 pub use mock_provider::{BlockingMockProvider, MockLlmProvider};
 pub use pricing::{ModelPricing, PricingRegistry};
-pub use prompt::{PromptId, PromptRegistry, PromptTemplate, PromptVersion, TemplateVars};
+pub use prompt::{
+    EffectiveTemplate, PromptId, PromptRegistry, PromptTemplate, PromptTemplateOwned, PromptVersion,
+    TemplateSource, TemplateVars, is_draft_version, PROMPT_VERSION_DRAFT,
+};
 pub use prompt_context::{
     load_context_file, validate_context_covers_template, ContextLoadError, ContextMeta,
     PromptContextFile,
