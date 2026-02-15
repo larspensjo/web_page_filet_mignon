@@ -237,6 +237,10 @@ pub enum Msg {
     PromptLabCompareWinnerSelected { run_id: PromptLabRunId },
     PromptLabCompareWinnerCleared,
     PromptLabCompareRunRated { run_id: PromptLabRunId, rating: u8 },
+    PromptLabAdvancedModeSet { enabled: bool },
+    PromptLabCompareSectionToggled,
+    PromptLabContextSectionToggled,
+    PromptLabTemplateSectionToggled,
     PromptLabComparePolicyUpdated {
         require_parse_ok: Option<bool>,
         max_cost_microdollars: Option<Option<u64>>,

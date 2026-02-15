@@ -155,6 +155,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_MODE_ROW,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: PANEL_PROMPT_LAB_STAGE_ROW,
     });
     commands.push(PlatformCommand::CreatePanel {
@@ -175,7 +180,17 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_COMPARE_HEADER_ROW,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: PANEL_PROMPT_LAB_COMPARE_ROW,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW,
     });
     commands.push(PlatformCommand::CreatePanel {
         window_id,
@@ -199,6 +214,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
     });
     commands.push(PlatformCommand::CreatePanel {
@@ -217,6 +237,18 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: LABEL_PROMPT_LAB_STATUS,
         initial_text: String::new(),
         class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_MODE_ROW),
+        control_id: BTN_PROMPT_LAB_MODE_BASIC,
+        text: "[x] Basic".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_MODE_ROW),
+        control_id: BTN_PROMPT_LAB_MODE_ADVANCED,
+        text: "[ ] Advanced".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -283,6 +315,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_HEADER_ROW),
+        control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
+        text: "[ ] Compare".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
         control_id: BTN_COMPARE_ADD_CURRENT,
         text: "Add current settings".to_string(),
@@ -325,6 +363,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW),
+        control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
+        text: "[ ] Context".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_CONTEXT_APPLY,
         text: "Apply".to_string(),
@@ -352,6 +396,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
         text: "Reload".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW),
+        control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
+        text: "[ ] Templates".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -470,6 +520,10 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(build_layout_command(
         window_id,
         initial_left_width,
+        false,
+        false,
+        false,
+        false,
         false,
         false,
         false,
@@ -704,6 +758,10 @@ pub(crate) fn build_layout_command(
     left_panel_width: i32,
     input_panel_visible: bool,
     prompt_lab_visible: bool,
+    prompt_lab_advanced_mode: bool,
+    prompt_lab_compare_section_open: bool,
+    prompt_lab_context_section_open: bool,
+    prompt_lab_template_section_open: bool,
     template_editor_open: bool,
 ) -> PlatformCommand {
     PlatformCommand::DefineLayout {
@@ -712,6 +770,10 @@ pub(crate) fn build_layout_command(
             left_panel_width,
             input_panel_visible,
             prompt_lab_visible,
+            prompt_lab_advanced_mode,
+            prompt_lab_compare_section_open,
+            prompt_lab_context_section_open,
+            prompt_lab_template_section_open,
             template_editor_open,
         ),
     }
@@ -721,6 +783,10 @@ fn build_layout_rules(
     left_panel_width: i32,
     input_panel_visible: bool,
     prompt_lab_visible: bool,
+    prompt_lab_advanced_mode: bool,
+    prompt_lab_compare_section_open: bool,
+    prompt_lab_context_section_open: bool,
+    prompt_lab_template_section_open: bool,
     template_editor_open: bool,
 ) -> Vec<LayoutRule> {
     let input_width = if input_panel_visible {
@@ -730,11 +796,23 @@ fn build_layout_rules(
     };
     let jobs_width = (left_panel_width - input_width).max(0);
     let prompt_lab_height = if prompt_lab_visible {
-        if template_editor_open {
-            750
-        } else {
-            420
+        let mut height = 220;
+        if prompt_lab_advanced_mode {
+            height += 96;
+            if prompt_lab_compare_section_open {
+                height += 32;
+            }
+            if prompt_lab_context_section_open {
+                height += 210;
+            }
+            if prompt_lab_template_section_open {
+                height += 64;
+                if template_editor_open {
+                    height += 244;
+                }
+            }
         }
+        height
     } else {
         56
     };
@@ -928,6 +1006,30 @@ fn build_layout_rules(
     if prompt_lab_visible {
         rules.extend([
             LayoutRule {
+                control_id: PANEL_PROMPT_LAB_MODE_ROW,
+                parent_control_id: Some(PANEL_PROMPT_LAB),
+                dock_style: DockStyle::Top,
+                order: 1,
+                fixed_size: Some(30),
+                margin: (0, 0, 2, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_MODE_BASIC,
+                parent_control_id: Some(PANEL_PROMPT_LAB_MODE_ROW),
+                dock_style: DockStyle::Left,
+                order: 0,
+                fixed_size: Some(90),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_MODE_ADVANCED,
+                parent_control_id: Some(PANEL_PROMPT_LAB_MODE_ROW),
+                dock_style: DockStyle::Fill,
+                order: 1,
+                fixed_size: None,
+                margin: (0, 0, 0, 0),
+            },
+            LayoutRule {
                 control_id: PANEL_PROMPT_LAB_STAGE_ROW,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Top,
@@ -1040,214 +1142,283 @@ fn build_layout_rules(
                 margin: (0, 0, 0, 0),
             },
             LayoutRule {
-                control_id: PANEL_PROMPT_LAB_COMPARE_ROW,
-                parent_control_id: Some(PANEL_PROMPT_LAB),
-                dock_style: DockStyle::Top,
-                order: 6,
-                fixed_size: Some(30),
-                margin: (0, 0, 2, 0),
-            },
-            LayoutRule {
-                control_id: BTN_COMPARE_ADD_CURRENT,
-                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-                dock_style: DockStyle::Left,
-                order: 0,
-                fixed_size: Some(114),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_COMPARE_ADD_BASELINE,
-                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-                dock_style: DockStyle::Left,
-                order: 1,
-                fixed_size: Some(88),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_COMPARE_RESET_DRAFT,
-                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-                dock_style: DockStyle::Left,
-                order: 2,
-                fixed_size: Some(82),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_COMPARE_START,
-                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-                dock_style: DockStyle::Left,
-                order: 3,
-                fixed_size: Some(86),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_COMPARE_CANCEL,
-                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-                dock_style: DockStyle::Left,
-                order: 4,
-                fixed_size: Some(94),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_COMPARE_AUTO_SELECT,
-                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-                dock_style: DockStyle::Left,
-                order: 5,
-                fixed_size: Some(78),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_COMPARE_WINNER_CLEAR,
-                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-                dock_style: DockStyle::Fill,
-                order: 6,
-                fixed_size: None,
-                margin: (0, 0, 0, 0),
-            },
-            LayoutRule {
-                control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
-                parent_control_id: Some(PANEL_PROMPT_LAB),
-                dock_style: DockStyle::Top,
-                order: 7,
-                fixed_size: Some(150),
-                margin: (0, 0, 2, 0),
-            },
-            LayoutRule {
-                control_id: INPUT_PROMPT_LAB_CONTEXT,
-                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ROW),
-                dock_style: DockStyle::Fill,
-                order: 0,
-                fixed_size: None,
-                margin: (4, 4, 4, 4),
-            },
-            LayoutRule {
-                control_id: PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
-                parent_control_id: Some(PANEL_PROMPT_LAB),
-                dock_style: DockStyle::Top,
-                order: 8,
-                fixed_size: Some(32),
-                margin: (0, 0, 2, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_CONTEXT_APPLY,
-                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 0,
-                fixed_size: Some(48),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
-                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 1,
-                fixed_size: Some(74),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_CONTEXT_REVERT,
-                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 2,
-                fixed_size: Some(58),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_CONTEXT_SAVE,
-                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 3,
-                fixed_size: Some(48),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
-                parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-                dock_style: DockStyle::Fill,
-                order: 4,
-                fixed_size: None,
-                margin: (0, 0, 0, 0),
-            },
-            LayoutRule {
-                control_id: LABEL_PROMPT_LAB_CONTEXT_STATUS,
-                parent_control_id: Some(PANEL_PROMPT_LAB),
-                dock_style: DockStyle::Top,
-                order: 9,
-                fixed_size: Some(24),
-                margin: (0, 0, 2, 0),
-            },
-            LayoutRule {
-                control_id: PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
-                parent_control_id: Some(PANEL_PROMPT_LAB),
-                dock_style: DockStyle::Top,
-                order: 10,
-                fixed_size: Some(32),
-                margin: (0, 0, 2, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
-                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 0,
-                fixed_size: Some(50),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY,
-                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 1,
-                fixed_size: Some(50),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
-                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 2,
-                fixed_size: Some(74),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_TEMPLATE_REVERT,
-                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-                dock_style: DockStyle::Left,
-                order: 3,
-                fixed_size: Some(58),
-                margin: (0, 4, 0, 0),
-            },
-            LayoutRule {
-                control_id: BTN_PROMPT_LAB_TEMPLATE_SAVE,
-                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-                dock_style: DockStyle::Fill,
-                order: 4,
-                fixed_size: None,
-                margin: (0, 0, 0, 0),
-            },
-            LayoutRule {
-                control_id: LABEL_PROMPT_LAB_TEMPLATE_STATUS,
-                parent_control_id: Some(PANEL_PROMPT_LAB),
-                dock_style: DockStyle::Top,
-                order: 11,
-                fixed_size: Some(24),
-                margin: (0, 0, 2, 0),
-            },
-            LayoutRule {
                 control_id: LABEL_PROMPT_LAB_METADATA,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Fill,
-                order: 14,
+                order: 30,
                 fixed_size: None,
                 margin: (0, 0, 0, 0),
             },
         ]);
 
-        if template_editor_open {
+        if prompt_lab_advanced_mode {
+            rules.extend([
+                LayoutRule {
+                    control_id: PANEL_PROMPT_LAB_COMPARE_HEADER_ROW,
+                    parent_control_id: Some(PANEL_PROMPT_LAB),
+                    dock_style: DockStyle::Top,
+                    order: 6,
+                    fixed_size: Some(30),
+                    margin: (0, 0, 2, 0),
+                },
+                LayoutRule {
+                    control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
+                    parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_HEADER_ROW),
+                    dock_style: DockStyle::Fill,
+                    order: 0,
+                    fixed_size: None,
+                    margin: (0, 0, 0, 0),
+                },
+            ]);
+            if prompt_lab_compare_section_open {
+                rules.extend([
+                    LayoutRule {
+                        control_id: PANEL_PROMPT_LAB_COMPARE_ROW,
+                        parent_control_id: Some(PANEL_PROMPT_LAB),
+                        dock_style: DockStyle::Top,
+                        order: 7,
+                        fixed_size: Some(30),
+                        margin: (0, 0, 2, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_COMPARE_ADD_CURRENT,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 0,
+                        fixed_size: Some(114),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_COMPARE_ADD_BASELINE,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 1,
+                        fixed_size: Some(88),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_COMPARE_RESET_DRAFT,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 2,
+                        fixed_size: Some(82),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_COMPARE_START,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 3,
+                        fixed_size: Some(86),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_COMPARE_CANCEL,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 4,
+                        fixed_size: Some(94),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_COMPARE_AUTO_SELECT,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 5,
+                        fixed_size: Some(78),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_COMPARE_WINNER_CLEAR,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                        dock_style: DockStyle::Fill,
+                        order: 6,
+                        fixed_size: None,
+                        margin: (0, 0, 0, 0),
+                    },
+                ]);
+            }
+            rules.extend([
+                LayoutRule {
+                    control_id: PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW,
+                    parent_control_id: Some(PANEL_PROMPT_LAB),
+                    dock_style: DockStyle::Top,
+                    order: 8,
+                    fixed_size: Some(30),
+                    margin: (0, 0, 2, 0),
+                },
+                LayoutRule {
+                    control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
+                    parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW),
+                    dock_style: DockStyle::Fill,
+                    order: 0,
+                    fixed_size: None,
+                    margin: (0, 0, 0, 0),
+                },
+            ]);
+            if prompt_lab_context_section_open {
+                rules.extend([
+                    LayoutRule {
+                        control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
+                        parent_control_id: Some(PANEL_PROMPT_LAB),
+                        dock_style: DockStyle::Top,
+                        order: 9,
+                        fixed_size: Some(150),
+                        margin: (0, 0, 2, 0),
+                    },
+                    LayoutRule {
+                        control_id: INPUT_PROMPT_LAB_CONTEXT,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ROW),
+                        dock_style: DockStyle::Fill,
+                        order: 0,
+                        fixed_size: None,
+                        margin: (4, 4, 4, 4),
+                    },
+                    LayoutRule {
+                        control_id: PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
+                        parent_control_id: Some(PANEL_PROMPT_LAB),
+                        dock_style: DockStyle::Top,
+                        order: 10,
+                        fixed_size: Some(32),
+                        margin: (0, 0, 2, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_CONTEXT_APPLY,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 0,
+                        fixed_size: Some(48),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 1,
+                        fixed_size: Some(74),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_CONTEXT_REVERT,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 2,
+                        fixed_size: Some(58),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_CONTEXT_SAVE,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 3,
+                        fixed_size: Some(48),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
+                        dock_style: DockStyle::Fill,
+                        order: 4,
+                        fixed_size: None,
+                        margin: (0, 0, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: LABEL_PROMPT_LAB_CONTEXT_STATUS,
+                        parent_control_id: Some(PANEL_PROMPT_LAB),
+                        dock_style: DockStyle::Top,
+                        order: 11,
+                        fixed_size: Some(24),
+                        margin: (0, 0, 2, 0),
+                    },
+                ]);
+            }
+            rules.extend([
+                LayoutRule {
+                    control_id: PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW,
+                    parent_control_id: Some(PANEL_PROMPT_LAB),
+                    dock_style: DockStyle::Top,
+                    order: 12,
+                    fixed_size: Some(30),
+                    margin: (0, 0, 2, 0),
+                },
+                LayoutRule {
+                    control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
+                    parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW),
+                    dock_style: DockStyle::Fill,
+                    order: 0,
+                    fixed_size: None,
+                    margin: (0, 0, 0, 0),
+                },
+            ]);
+            if prompt_lab_template_section_open {
+                rules.extend([
+                    LayoutRule {
+                        control_id: PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
+                        parent_control_id: Some(PANEL_PROMPT_LAB),
+                        dock_style: DockStyle::Top,
+                        order: 13,
+                        fixed_size: Some(32),
+                        margin: (0, 0, 2, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 0,
+                        fixed_size: Some(50),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 1,
+                        fixed_size: Some(50),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 2,
+                        fixed_size: Some(74),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_TEMPLATE_REVERT,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                        dock_style: DockStyle::Left,
+                        order: 3,
+                        fixed_size: Some(58),
+                        margin: (0, 4, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: BTN_PROMPT_LAB_TEMPLATE_SAVE,
+                        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                        dock_style: DockStyle::Fill,
+                        order: 4,
+                        fixed_size: None,
+                        margin: (0, 0, 0, 0),
+                    },
+                    LayoutRule {
+                        control_id: LABEL_PROMPT_LAB_TEMPLATE_STATUS,
+                        parent_control_id: Some(PANEL_PROMPT_LAB),
+                        dock_style: DockStyle::Top,
+                        order: 14,
+                        fixed_size: Some(24),
+                        margin: (0, 0, 2, 0),
+                    },
+                ]);
+            }
+        }
+
+        if template_editor_open && prompt_lab_advanced_mode && prompt_lab_template_section_open {
             rules.extend([
                 LayoutRule {
                     control_id: PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
                     parent_control_id: Some(PANEL_PROMPT_LAB),
                     dock_style: DockStyle::Top,
-                    order: 12,
+                    order: 15,
                     fixed_size: Some(120),
                     margin: (0, 0, 2, 0),
                 },
@@ -1263,7 +1434,7 @@ fn build_layout_rules(
                     control_id: PANEL_PROMPT_LAB_TEMPLATE_USER_ROW,
                     parent_control_id: Some(PANEL_PROMPT_LAB),
                     dock_style: DockStyle::Top,
-                    order: 13,
+                    order: 16,
                     fixed_size: Some(120),
                     margin: (0, 0, 2, 0),
                 },
@@ -1290,13 +1461,17 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_JOBS,
         PANEL_PREVIEW,
         PANEL_PROMPT_LAB,
+        PANEL_PROMPT_LAB_MODE_ROW,
         PANEL_PROMPT_LAB_STAGE_ROW,
         PANEL_PROMPT_LAB_SOURCE_ROW,
         PANEL_PROMPT_LAB_INPUT_ROW,
         PANEL_PROMPT_LAB_ACTION_ROW,
+        PANEL_PROMPT_LAB_COMPARE_HEADER_ROW,
         PANEL_PROMPT_LAB_COMPARE_ROW,
+        PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW,
         PANEL_PROMPT_LAB_CONTEXT_ROW,
         PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
+        PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW,
         PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
         PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
         PANEL_PROMPT_LAB_TEMPLATE_USER_ROW,
@@ -1392,6 +1567,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::DefaultButton,
     });
     for control_id in [
+        BTN_PROMPT_LAB_MODE_BASIC,
+        BTN_PROMPT_LAB_MODE_ADVANCED,
+        BTN_PROMPT_LAB_SECTION_COMPARE,
+        BTN_PROMPT_LAB_SECTION_CONTEXT,
+        BTN_PROMPT_LAB_SECTION_TEMPLATE,
         BTN_STAGE_TRIAGE,
         BTN_STAGE_SUMMARY,
         BTN_STAGE_BRIEFING,
@@ -1515,7 +1695,7 @@ mod tests {
 
     #[test]
     fn collapsed_layout_height_is_minimal() {
-        let cmd = build_layout_command(WindowId::new(3), 600, true, false, false);
+        let cmd = build_layout_command(WindowId::new(3), 600, true, false, false, false, false, false, false);
         let rules = match cmd {
             PlatformCommand::DefineLayout { rules, .. } => rules,
             _ => panic!("expected DefineLayout"),
@@ -1532,7 +1712,7 @@ mod tests {
 
     #[test]
     fn expanded_layout_includes_all_controls() {
-        let cmd = build_layout_command(WindowId::new(4), 600, true, true, true);
+        let cmd = build_layout_command(WindowId::new(4), 600, true, true, true, true, true, true, true);
         let rules = match cmd {
             PlatformCommand::DefineLayout { rules, .. } => rules,
             _ => panic!("expected DefineLayout"),

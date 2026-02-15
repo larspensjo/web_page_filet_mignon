@@ -447,6 +447,10 @@ pub struct PromptLabState {
     pub(crate) context_overlays: HashMap<PromptId, PromptLabContextDraft>,
     pub(crate) template_drafts: HashMap<PromptId, PromptLabTemplateDraft>,
     pub(crate) template_editor_open: bool,
+    pub(crate) advanced_mode: bool,
+    pub(crate) compare_section_open: bool,
+    pub(crate) context_section_open: bool,
+    pub(crate) template_section_open: bool,
     pub(crate) next_compare_batch_id: u64,
     pub(crate) batches: Vec<PromptLabCompareBatchRecord>,
     pub(crate) active_batch_idx: Option<usize>,
@@ -474,6 +478,10 @@ impl Default for PromptLabState {
             context_overlays: HashMap::new(),
             template_drafts: HashMap::new(),
             template_editor_open: false,
+            advanced_mode: false,
+            compare_section_open: false,
+            context_section_open: false,
+            template_section_open: false,
             next_compare_batch_id: 1,
             batches: Vec::new(),
             active_batch_idx: None,
@@ -969,10 +977,46 @@ impl PromptLabState {
 
     pub(crate) fn set_template_editor_open(&mut self, open: bool) {
         self.template_editor_open = open;
+        if open {
+            self.advanced_mode = true;
+            self.template_section_open = true;
+        }
     }
 
     pub(crate) fn template_editor_open(&self) -> bool {
         self.template_editor_open
+    }
+
+    pub fn set_advanced_mode(&mut self, enabled: bool) {
+        self.advanced_mode = enabled;
+    }
+
+    pub fn advanced_mode(&self) -> bool {
+        self.advanced_mode
+    }
+
+    pub fn toggle_compare_section(&mut self) {
+        self.compare_section_open = !self.compare_section_open;
+    }
+
+    pub fn compare_section_open(&self) -> bool {
+        self.compare_section_open
+    }
+
+    pub fn toggle_context_section(&mut self) {
+        self.context_section_open = !self.context_section_open;
+    }
+
+    pub fn context_section_open(&self) -> bool {
+        self.context_section_open
+    }
+
+    pub fn toggle_template_section(&mut self) {
+        self.template_section_open = !self.template_section_open;
+    }
+
+    pub fn template_section_open(&self) -> bool {
+        self.template_section_open
     }
 
     pub(crate) fn clear_context_overlays(&mut self) {

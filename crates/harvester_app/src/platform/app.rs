@@ -453,6 +453,35 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_MODE_BASIC =>
+            {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabAdvancedModeSet { enabled: false });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_MODE_ADVANCED =>
+            {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabAdvancedModeSet { enabled: true });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_COMPARE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareSectionToggled);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_CONTEXT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabContextSectionToggled);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_TEMPLATE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabTemplateSectionToggled);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_STAGE_TRIAGE =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabStageSelected {
@@ -1091,6 +1120,46 @@ mod tests {
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250)).expect("start"),
             Msg::PromptLabCompareBatchStartRequested
+        );
+    }
+
+    #[test]
+    fn prompt_lab_mode_and_section_buttons_emit_expected_msgs() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_MODE_ADVANCED,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_COMPARE,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_CONTEXT,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_TEMPLATE,
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("advanced"),
+            Msg::PromptLabAdvancedModeSet { enabled: true }
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("toggle compare"),
+            Msg::PromptLabCompareSectionToggled
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("toggle context"),
+            Msg::PromptLabContextSectionToggled
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("toggle template"),
+            Msg::PromptLabTemplateSectionToggled
         );
     }
 

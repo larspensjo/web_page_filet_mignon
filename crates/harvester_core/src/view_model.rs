@@ -125,6 +125,10 @@ pub struct PromptLabRunSummaryView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromptLabView {
     pub visible: bool,
+    pub advanced_mode: bool,
+    pub compare_section_open: bool,
+    pub context_section_open: bool,
+    pub template_section_open: bool,
     pub selected_stage: PromptLabStage,
     pub input_is_set: bool,
     pub is_in_flight: bool,
@@ -219,6 +223,10 @@ impl Default for PromptLabView {
     fn default() -> Self {
         Self {
             visible: false,
+            advanced_mode: false,
+            compare_section_open: false,
+            context_section_open: false,
+            template_section_open: false,
             selected_stage: PromptLabStage::Triage,
             input_is_set: false,
             is_in_flight: false,
@@ -474,6 +482,10 @@ impl PromptLabView {
         let batch_running = state.has_active_batch();
         Self {
             visible: state.is_visible(),
+            advanced_mode: state.advanced_mode(),
+            compare_section_open: state.compare_section_open(),
+            context_section_open: state.context_section_open(),
+            template_section_open: state.template_section_open(),
             selected_stage: state.selected_stage(),
             input_is_set: !state.input().is_empty(),
             is_in_flight,

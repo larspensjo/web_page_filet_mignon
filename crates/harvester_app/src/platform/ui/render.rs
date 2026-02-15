@@ -42,6 +42,10 @@ pub struct TreeRenderState {
     prev_progress_pos: Option<u32>,
     prev_open_browser_enabled: Option<bool>,
     prev_prompt_lab_visible: bool,
+    prev_prompt_lab_advanced_mode: bool,
+    prev_prompt_lab_compare_section_open: bool,
+    prev_prompt_lab_context_section_open: bool,
+    prev_prompt_lab_template_section_open: bool,
     prev_prompt_lab_template_editor_open: bool,
     prev_prompt_lab_status_text: Option<String>,
     prev_prompt_lab_metadata_text: Option<String>,
@@ -79,6 +83,11 @@ pub struct TreeRenderState {
     prev_prompt_lab_compare_cancel_enabled: Option<bool>,
     prev_prompt_lab_compare_auto_select_enabled: Option<bool>,
     prev_prompt_lab_compare_winner_clear_enabled: Option<bool>,
+    prev_prompt_lab_mode_basic_text: Option<String>,
+    prev_prompt_lab_mode_advanced_text: Option<String>,
+    prev_prompt_lab_section_compare_text: Option<String>,
+    prev_prompt_lab_section_context_text: Option<String>,
+    prev_prompt_lab_section_template_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -104,6 +113,10 @@ impl Default for TreeRenderState {
             prev_progress_pos: None,
             prev_open_browser_enabled: None,
             prev_prompt_lab_visible: false,
+            prev_prompt_lab_advanced_mode: false,
+            prev_prompt_lab_compare_section_open: false,
+            prev_prompt_lab_context_section_open: false,
+            prev_prompt_lab_template_section_open: false,
             prev_prompt_lab_template_editor_open: false,
             prev_prompt_lab_status_text: None,
             prev_prompt_lab_metadata_text: None,
@@ -141,6 +154,11 @@ impl Default for TreeRenderState {
             prev_prompt_lab_compare_cancel_enabled: None,
             prev_prompt_lab_compare_auto_select_enabled: None,
             prev_prompt_lab_compare_winner_clear_enabled: None,
+            prev_prompt_lab_mode_basic_text: None,
+            prev_prompt_lab_mode_advanced_text: None,
+            prev_prompt_lab_section_compare_text: None,
+            prev_prompt_lab_section_context_text: None,
+            prev_prompt_lab_section_template_text: None,
         }
     }
 }
@@ -239,6 +257,10 @@ pub fn render(
     let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
         || view.input_panel_visible != tree_state.prev_input_panel_visible
         || view.prompt_lab.visible != tree_state.prev_prompt_lab_visible
+        || view.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
+        || view.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
+        || view.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
+        || view.prompt_lab.template_section_open != tree_state.prev_prompt_lab_template_section_open
         || view.prompt_lab.template_editor_open != tree_state.prev_prompt_lab_template_editor_open;
     if layout_changed {
         engine_debug!(
@@ -253,11 +275,19 @@ pub fn render(
             view.left_panel_width,
             view.input_panel_visible,
             view.prompt_lab.visible,
+            view.prompt_lab.advanced_mode,
+            view.prompt_lab.compare_section_open,
+            view.prompt_lab.context_section_open,
+            view.prompt_lab.template_section_open,
             view.prompt_lab.template_editor_open,
         ));
         tree_state.prev_left_panel_width = view.left_panel_width;
         tree_state.prev_input_panel_visible = view.input_panel_visible;
         tree_state.prev_prompt_lab_visible = view.prompt_lab.visible;
+        tree_state.prev_prompt_lab_advanced_mode = view.prompt_lab.advanced_mode;
+        tree_state.prev_prompt_lab_compare_section_open = view.prompt_lab.compare_section_open;
+        tree_state.prev_prompt_lab_context_section_open = view.prompt_lab.context_section_open;
+        tree_state.prev_prompt_lab_template_section_open = view.prompt_lab.template_section_open;
         tree_state.prev_prompt_lab_template_editor_open = view.prompt_lab.template_editor_open;
     }
 
@@ -367,6 +397,59 @@ pub fn render(
             enabled: open_browser_enabled,
         });
         tree_state.prev_open_browser_enabled = Some(open_browser_enabled);
+    }
+    let mode_basic_text = select_label("Basic", !view.prompt_lab.advanced_mode);
+    if tree_state.prev_prompt_lab_mode_basic_text.as_deref() != Some(mode_basic_text.as_str()) {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_MODE_BASIC,
+            text: mode_basic_text.clone(),
+        });
+        tree_state.prev_prompt_lab_mode_basic_text = Some(mode_basic_text);
+    }
+    let mode_advanced_text = select_label("Advanced", view.prompt_lab.advanced_mode);
+    if tree_state.prev_prompt_lab_mode_advanced_text.as_deref()
+        != Some(mode_advanced_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_MODE_ADVANCED,
+            text: mode_advanced_text.clone(),
+        });
+        tree_state.prev_prompt_lab_mode_advanced_text = Some(mode_advanced_text);
+    }
+    let compare_section_text = select_label("Compare", view.prompt_lab.compare_section_open);
+    if tree_state.prev_prompt_lab_section_compare_text.as_deref()
+        != Some(compare_section_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
+            text: compare_section_text.clone(),
+        });
+        tree_state.prev_prompt_lab_section_compare_text = Some(compare_section_text);
+    }
+    let context_section_text = select_label("Context", view.prompt_lab.context_section_open);
+    if tree_state.prev_prompt_lab_section_context_text.as_deref()
+        != Some(context_section_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
+            text: context_section_text.clone(),
+        });
+        tree_state.prev_prompt_lab_section_context_text = Some(context_section_text);
+    }
+    let template_section_text = select_label("Templates", view.prompt_lab.template_section_open);
+    if tree_state.prev_prompt_lab_section_template_text.as_deref()
+        != Some(template_section_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
+            text: template_section_text.clone(),
+        });
+        tree_state.prev_prompt_lab_section_template_text = Some(template_section_text);
     }
 
     let stage_triage_text = select_label(
@@ -2014,6 +2097,39 @@ mod tests {
                 cmd,
                 PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
                 if *control_id == BTN_COMPARE_START
+            )
+        }));
+    }
+
+    #[test]
+    fn prompt_lab_mode_and_section_labels_reflect_view_state() {
+        let window_id = WindowId::new(33);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.advanced_mode = true;
+        view.prompt_lab.compare_section_open = true;
+        view.prompt_lab.context_section_open = false;
+        view.prompt_lab.template_section_open = true;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == BTN_PROMPT_LAB_MODE_ADVANCED && text.contains("[x]")
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == BTN_PROMPT_LAB_SECTION_COMPARE && text.contains("[x]")
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == BTN_PROMPT_LAB_SECTION_CONTEXT && text.contains("[ ]")
             )
         }));
     }

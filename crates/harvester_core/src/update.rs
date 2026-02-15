@@ -842,6 +842,26 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
+        Msg::PromptLabAdvancedModeSet { enabled } => {
+            state.prompt_lab_mut().set_advanced_mode(enabled);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabCompareSectionToggled => {
+            state.prompt_lab_mut().toggle_compare_section();
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabContextSectionToggled => {
+            state.prompt_lab_mut().toggle_context_section();
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabTemplateSectionToggled => {
+            state.prompt_lab_mut().toggle_template_section();
+            state.mark_dirty();
+            Vec::new()
+        }
         Msg::PromptLabUrlInputChanged { url } => {
             state.prompt_lab_mut().set_url_input(url);
             state.mark_dirty();
