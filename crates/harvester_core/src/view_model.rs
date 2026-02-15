@@ -344,10 +344,10 @@ impl PromptLabView {
         let can_apply_and_rerun = can_run && can_apply_context;
         let can_revert_context = context_dirty || context_applied;
         let template_snapshot = templates.get(&prompt_id);
-        let template_snapshot_description = template_snapshot
-            .map(|snapshot| snapshot.template.description.clone());
-        let template_snapshot_expected_format = template_snapshot
-            .map(|snapshot| snapshot.template.expected_format.clone());
+        let template_snapshot_description =
+            template_snapshot.map(|snapshot| snapshot.template.description.clone());
+        let template_snapshot_expected_format =
+            template_snapshot.map(|snapshot| snapshot.template.expected_format.clone());
         let template_snapshot_source = template_snapshot.map(|snapshot| snapshot.source);
         let template_snapshot_version = template_snapshot.map(|snapshot| snapshot.template.version);
         let template_system_base = template_snapshot
@@ -357,33 +357,39 @@ impl PromptLabView {
             .map(|snapshot| snapshot.template.user_template.clone())
             .unwrap_or_default();
         let template_draft = state.template_draft(prompt_id);
-        let (template_system_draft, template_user_draft, template_validation_errors, template_dirty, template_applied, template_saved_version, template_saved_path) =
-            if let Some(draft) = template_draft {
-                (
-                    draft.system_draft().to_string(),
-                    draft.user_draft().to_string(),
-                    draft
-                        .validation_errors()
-                        .iter()
-                        .map(|err| err.message.clone())
-                        .collect(),
-                    draft.is_dirty(),
-                    draft.is_applied(),
-                    draft.saved_version(),
-                    draft.saved_path()
-                        .map(|path| path.display().to_string()),
-                )
-            } else {
-                (
-                    template_system_base.clone(),
-                    template_user_base.clone(),
-                    Vec::new(),
-                    false,
-                    false,
-                    None,
-                    None,
-                )
-            };
+        let (
+            template_system_draft,
+            template_user_draft,
+            template_validation_errors,
+            template_dirty,
+            template_applied,
+            template_saved_version,
+            template_saved_path,
+        ) = if let Some(draft) = template_draft {
+            (
+                draft.system_draft().to_string(),
+                draft.user_draft().to_string(),
+                draft
+                    .validation_errors()
+                    .iter()
+                    .map(|err| err.message.clone())
+                    .collect(),
+                draft.is_dirty(),
+                draft.is_applied(),
+                draft.saved_version(),
+                draft.saved_path().map(|path| path.display().to_string()),
+            )
+        } else {
+            (
+                template_system_base.clone(),
+                template_user_base.clone(),
+                Vec::new(),
+                false,
+                false,
+                None,
+                None,
+            )
+        };
         Self {
             visible: state.is_visible(),
             selected_stage: state.selected_stage(),

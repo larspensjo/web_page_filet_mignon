@@ -90,11 +90,21 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         };
         let model_map = effective_model_map(&config);
         let handle = LlmHandle::new(config);
-        EffectRunner::new_with_llm(msg_tx.clone(), handle, 100_000, Arc::clone(&registry), model_map)
+        EffectRunner::new_with_llm(
+            msg_tx.clone(),
+            handle,
+            100_000,
+            Arc::clone(&registry),
+            model_map,
+        )
     } else {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
         EffectRunner::new(msg_tx.clone())
     };
+    effect_runner.enqueue(vec![
+        Effect::LoadPromptTemplateFiles,
+        Effect::LoadLlmMetadata,
+    ]);
     {
         let mut guard = shared_state.lock().unwrap();
         let state = std::mem::take(&mut guard.state);
@@ -446,6 +456,7 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(msg.clone());
                 if matches!(msg, Msg::PromptLabOpenRequested) {
                     let _ = self.msg_tx.send(Msg::PromptLabContextEditorOpened);
+                    let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorOpened);
                 }
             }
             AppEvent::ButtonClicked { control_id, .. }
@@ -530,6 +541,33 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::PromptLabContextReloadRequested);
             }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_OPEN =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorOpened);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_APPLY =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabTemplateApplyRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN =>
+            {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabTemplateApplyAndRerunRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_REVERT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabTemplateRevertRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_SAVE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabTemplateSaveRequested);
+            }
             AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ADD_URL => {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
             }
@@ -555,6 +593,20 @@ impl PlatformEventHandler for AppEventHandler {
                 control_id, text, ..
             } if control_id == ui::constants::INPUT_PROMPT_LAB_CONTEXT => {
                 let _ = self.msg_tx.send(Msg::PromptLabContextDraftChanged { text });
+            }
+            AppEvent::InputTextChanged {
+                control_id, text, ..
+            } if control_id == ui::constants::INPUT_PROMPT_LAB_TEMPLATE_SYSTEM => {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabTemplateSystemDraftChanged { text });
+            }
+            AppEvent::InputTextChanged {
+                control_id, text, ..
+            } if control_id == ui::constants::INPUT_PROMPT_LAB_TEMPLATE_USER => {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabTemplateUserDraftChanged { text });
             }
             AppEvent::TreeViewItemSelectionChanged { window_id, item_id }
                 if window_id == self.window_id =>
@@ -920,6 +972,57 @@ mod tests {
     }
 
     #[test]
+    fn prompt_lab_template_buttons_emit_expected_msgs() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_TEMPLATE_OPEN,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_TEMPLATE_APPLY,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_TEMPLATE_REVERT,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_TEMPLATE_SAVE,
+        });
+
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("template open"),
+            Msg::PromptLabTemplateEditorOpened
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("template apply"),
+            Msg::PromptLabTemplateApplyRequested
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("template apply rerun"),
+            Msg::PromptLabTemplateApplyAndRerunRequested
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("template revert"),
+            Msg::PromptLabTemplateRevertRequested
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("template save"),
+            Msg::PromptLabTemplateSaveRequested
+        );
+    }
+
+    #[test]
     fn prompt_lab_toggle_emits_open_then_close() {
         let (mut handler, rx) = test_handler_with_outbound();
         handler.handle_event(AppEvent::ButtonClicked {
@@ -934,6 +1037,11 @@ mod tests {
             rx.recv_timeout(Duration::from_millis(250))
                 .expect("context open"),
             Msg::PromptLabContextEditorOpened
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("template open"),
+            Msg::PromptLabTemplateEditorOpened
         );
 
         {

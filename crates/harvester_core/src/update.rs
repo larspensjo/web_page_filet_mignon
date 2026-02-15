@@ -17,7 +17,9 @@ use crate::{
 };
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::types::ModelId;
-use harvester_engine::llm::{validate_briefing, validate_summary, validate_template, validate_triage};
+use harvester_engine::llm::{
+    validate_briefing, validate_summary, validate_template, validate_triage,
+};
 
 // Left side is split into a fixed-width input panel plus a resizable jobs panel.
 // Minimum width for the left region (PANEL_INPUT + PANEL_JOBS).
@@ -1413,10 +1415,12 @@ fn ensure_prompt_lab_template_draft(state: &mut AppState, prompt_id: PromptId) {
 
 fn template_draft_texts(state: &mut AppState, prompt_id: PromptId) -> Option<(String, String)> {
     ensure_prompt_lab_template_draft(state, prompt_id);
-    state
-        .prompt_lab()
-        .template_draft(prompt_id)
-        .map(|draft| (draft.system_draft().to_string(), draft.user_draft().to_string()))
+    state.prompt_lab().template_draft(prompt_id).map(|draft| {
+        (
+            draft.system_draft().to_string(),
+            draft.user_draft().to_string(),
+        )
+    })
 }
 
 fn apply_prompt_lab_template_draft(state: &mut AppState, prompt_id: PromptId) -> bool {
@@ -1848,21 +1852,21 @@ mod tests {
         (articles, "Collection text".to_string())
     }
 
-fn with_summary_metadata(state: AppState) -> AppState {
-    let mut active_versions = HashMap::new();
-    active_versions.insert(PromptId::ArticleSummary, 1);
-    let mut effective_models = HashMap::new();
-    effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
-    let (state, _) = update(
-        state,
-        Msg::LlmMetadataLoaded {
-            active_versions,
-            effective_models,
-            templates: HashMap::new(),
-        },
-    );
-    state
-}
+    fn with_summary_metadata(state: AppState) -> AppState {
+        let mut active_versions = HashMap::new();
+        active_versions.insert(PromptId::ArticleSummary, 1);
+        let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
+        let (state, _) = update(
+            state,
+            Msg::LlmMetadataLoaded {
+                active_versions,
+                effective_models,
+                templates: HashMap::new(),
+            },
+        );
+        state
+    }
 
     fn summary_json(title: &str) -> String {
         format!("{{\"title\":\"{title}\",\"summary\":\"Summary\",\"key_points\":[\"p1\"]}}")

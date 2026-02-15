@@ -13,7 +13,10 @@ use std::{error::Error as StdError, fmt};
 
 use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::{PromptLabTemplateSnapshot, Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, Stage, StopPolicy};
+use harvester_core::{
+    Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, PromptLabTemplateSnapshot, Stage,
+    StopPolicy,
+};
 use harvester_engine::llm::load_context_file;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PROMPT_VERSION_DRAFT};
 use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
@@ -458,10 +461,9 @@ impl EffectRunner {
                             prompt_id,
                             reason
                         );
-                        let _ = self.msg_tx.send(Msg::PromptLabTemplateSaveFailed {
-                            prompt_id,
-                            reason,
-                        });
+                        let _ = self
+                            .msg_tx
+                            .send(Msg::PromptLabTemplateSaveFailed { prompt_id, reason });
                     }
                 }
             }
@@ -673,52 +675,49 @@ impl EffectRunner {
                 });
             }
             Effect::LoadPromptTemplateFiles => {
-                let registry = self.prompt_registry.clone();
-                thread::spawn(move || {
-                    let prompts_dir = prompt_template_store::prompts_directory();
-                    for entry in prompt_template_store::load_prompt_template_files(&prompts_dir) {
-                        match entry {
-                            Ok((prompt_id, template_file, path)) => {
-                                if template_file.version == PROMPT_VERSION_DRAFT {
-                                    engine_warn!(
-                                        "[prompt-lab-template] skipping draft saved template prompt_id={:?} path={}",
-                                        prompt_id,
-                                        path.display()
-                                    );
-                                    continue;
-                                }
-                                let overlay = PromptTemplateOwned {
-                                    id: prompt_id,
-                                    version: template_file.version,
-                                    system_template: template_file.system_template,
-                                    user_template: template_file.user_template,
-                                    description: template_file.description,
-                                    expected_format: template_file.expected_format,
-                                };
-                                if let Ok(mut guard) = registry.write() {
-                                    guard.register_overlay(overlay);
-                                } else {
-                                    engine_warn!(
-                                        "[prompt-lab-template] register_overlay lock poisoned prompt_id={:?}",
-                                        prompt_id
-                                    );
-                                }
-                                engine_info!(
-                                    "[prompt-lab-template] Loaded saved template prompt_id={:?} version={} path={}",
+                let prompts_dir = prompt_template_store::prompts_directory();
+                for entry in prompt_template_store::load_prompt_template_files(&prompts_dir) {
+                    match entry {
+                        Ok((prompt_id, template_file, path)) => {
+                            if template_file.version == PROMPT_VERSION_DRAFT {
+                                engine_warn!(
+                                    "[prompt-lab-template] skipping draft saved template prompt_id={:?} path={}",
                                     prompt_id,
-                                    template_file.version,
                                     path.display()
                                 );
+                                continue;
                             }
-                            Err(reason) => {
+                            let overlay = PromptTemplateOwned {
+                                id: prompt_id,
+                                version: template_file.version,
+                                system_template: template_file.system_template,
+                                user_template: template_file.user_template,
+                                description: template_file.description,
+                                expected_format: template_file.expected_format,
+                            };
+                            if let Ok(mut guard) = self.prompt_registry.write() {
+                                guard.register_overlay(overlay);
+                            } else {
                                 engine_warn!(
-                                    "[prompt-lab-template] Failed to load saved template: {}",
-                                    reason
+                                    "[prompt-lab-template] register_overlay lock poisoned prompt_id={:?}",
+                                    prompt_id
                                 );
                             }
+                            engine_info!(
+                                "[prompt-lab-template] Loaded saved template prompt_id={:?} version={} path={}",
+                                prompt_id,
+                                template_file.version,
+                                path.display()
+                            );
+                        }
+                        Err(reason) => {
+                            engine_warn!(
+                                "[prompt-lab-template] Failed to load saved template: {}",
+                                reason
+                            );
                         }
                     }
-                });
+                }
             }
             Effect::LoadLlmMetadata => {
                 let msg_tx = self.msg_tx.clone();
@@ -1671,8 +1670,8 @@ mod tests {
                 } => {
                     assert_eq!(received, prompt_id);
                     assert_eq!(version, 1);
-                    let file =
-                        fs::read_to_string(&PathBuf::from(&path)).expect("read saved template file");
+                    let file = fs::read_to_string(&PathBuf::from(&path))
+                        .expect("read saved template file");
                     assert!(file.contains("system {{context}}"));
                     assert!(file.contains("user {{context}}"));
                 }

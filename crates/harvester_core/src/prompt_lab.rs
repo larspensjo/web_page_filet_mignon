@@ -134,8 +134,7 @@ impl PromptLabTemplateDraft {
     }
 
     fn update_dirty(&mut self) {
-        self.dirty =
-            self.system_draft != self.system_base || self.user_draft != self.user_base;
+        self.dirty = self.system_draft != self.system_base || self.user_draft != self.user_base;
     }
 
     fn update_system(&mut self, text: String) {
@@ -778,11 +777,10 @@ impl PromptLabState {
         self.template_drafts.get(&prompt_id)
     }
 
-    pub(crate) fn drop_template_draft(&mut self, prompt_id: PromptId) {
-        self.template_drafts.remove(&prompt_id);
-    }
-
-    pub(crate) fn applied_template_override(&self, prompt_id: PromptId) -> Option<PromptTemplateOwned> {
+    pub(crate) fn applied_template_override(
+        &self,
+        prompt_id: PromptId,
+    ) -> Option<PromptTemplateOwned> {
         self.template_drafts.get(&prompt_id).and_then(|draft| {
             if draft.is_applied() && draft.validation_errors().is_empty() {
                 Some(PromptTemplateOwned {

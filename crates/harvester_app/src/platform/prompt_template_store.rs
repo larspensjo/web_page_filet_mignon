@@ -1,6 +1,6 @@
 use chrono::Utc;
-use harvester_engine::AtomicFileWriter;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::AtomicFileWriter;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,8 +52,8 @@ pub fn save_template_file(
         description: description.to_string(),
         expected_format: expected_format.to_string(),
     };
-    let mut toml_string =
-        toml::to_string(&template_file).map_err(|err| format!("failed to serialize template: {}", err))?;
+    let mut toml_string = toml::to_string(&template_file)
+        .map_err(|err| format!("failed to serialize template: {}", err))?;
     toml_string.push('\n');
     let filename = format!("v{}.toml", version);
     let writer = AtomicFileWriter::new(prompt_dir.clone());
@@ -168,8 +168,13 @@ pub fn load_prompt_template_files(
 }
 
 fn ensure_directory_in_base(base: &Path, target: &Path) -> Result<(), String> {
-    fs::create_dir_all(target)
-        .map_err(|err| format!("failed to create prompt directory '{}': {}", target.display(), err))?;
+    fs::create_dir_all(target).map_err(|err| {
+        format!(
+            "failed to create prompt directory '{}': {}",
+            target.display(),
+            err
+        )
+    })?;
     let canonical_base = canonicalize_path(base)?;
     let canonical_target = canonicalize_path(target)?;
     if !canonical_target.starts_with(&canonical_base) {

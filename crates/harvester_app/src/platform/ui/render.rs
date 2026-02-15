@@ -43,6 +43,7 @@ pub struct TreeRenderState {
     prev_progress_pos: Option<u32>,
     prev_open_browser_enabled: Option<bool>,
     prev_prompt_lab_visible: bool,
+    prev_prompt_lab_template_editor_open: bool,
     prev_prompt_lab_toggle_text: Option<String>,
     prev_prompt_lab_status_text: Option<String>,
     prev_prompt_lab_metadata_text: Option<String>,
@@ -63,6 +64,16 @@ pub struct TreeRenderState {
     prev_prompt_lab_context_apply_rerun_enabled: Option<bool>,
     prev_prompt_lab_context_revert_enabled: Option<bool>,
     prev_prompt_lab_context_save_enabled: Option<bool>,
+    prev_prompt_lab_template_open_text: Option<String>,
+    prev_prompt_lab_template_system_text: Option<String>,
+    prev_prompt_lab_template_user_text: Option<String>,
+    prev_prompt_lab_template_status_text: Option<String>,
+    prev_prompt_lab_template_apply_enabled: Option<bool>,
+    prev_prompt_lab_template_apply_rerun_enabled: Option<bool>,
+    prev_prompt_lab_template_revert_enabled: Option<bool>,
+    prev_prompt_lab_template_save_enabled: Option<bool>,
+    prev_prompt_lab_template_system_enabled: Option<bool>,
+    prev_prompt_lab_template_user_enabled: Option<bool>,
 }
 
 impl Default for TreeRenderState {
@@ -89,6 +100,7 @@ impl Default for TreeRenderState {
             prev_progress_pos: None,
             prev_open_browser_enabled: None,
             prev_prompt_lab_visible: false,
+            prev_prompt_lab_template_editor_open: false,
             prev_prompt_lab_toggle_text: None,
             prev_prompt_lab_status_text: None,
             prev_prompt_lab_metadata_text: None,
@@ -109,6 +121,16 @@ impl Default for TreeRenderState {
             prev_prompt_lab_context_apply_rerun_enabled: None,
             prev_prompt_lab_context_revert_enabled: None,
             prev_prompt_lab_context_save_enabled: None,
+            prev_prompt_lab_template_open_text: None,
+            prev_prompt_lab_template_system_text: None,
+            prev_prompt_lab_template_user_text: None,
+            prev_prompt_lab_template_status_text: None,
+            prev_prompt_lab_template_apply_enabled: None,
+            prev_prompt_lab_template_apply_rerun_enabled: None,
+            prev_prompt_lab_template_revert_enabled: None,
+            prev_prompt_lab_template_save_enabled: None,
+            prev_prompt_lab_template_system_enabled: None,
+            prev_prompt_lab_template_user_enabled: None,
         }
     }
 }
@@ -206,7 +228,8 @@ pub fn render(
     // Check if left_panel_width changed and emit updated layout
     let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
         || view.input_panel_visible != tree_state.prev_input_panel_visible
-        || view.prompt_lab.visible != tree_state.prev_prompt_lab_visible;
+        || view.prompt_lab.visible != tree_state.prev_prompt_lab_visible
+        || view.prompt_lab.template_editor_open != tree_state.prev_prompt_lab_template_editor_open;
     if layout_changed {
         engine_debug!(
             "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}",
@@ -220,10 +243,12 @@ pub fn render(
             view.left_panel_width,
             view.input_panel_visible,
             view.prompt_lab.visible,
+            view.prompt_lab.template_editor_open,
         ));
         tree_state.prev_left_panel_width = view.left_panel_width;
         tree_state.prev_input_panel_visible = view.input_panel_visible;
         tree_state.prev_prompt_lab_visible = view.prompt_lab.visible;
+        tree_state.prev_prompt_lab_template_editor_open = view.prompt_lab.template_editor_open;
     }
 
     let mut status_parts = vec![status_base_text.clone()];
@@ -507,6 +532,102 @@ pub fn render(
         });
         tree_state.prev_prompt_lab_context_save_enabled = Some(view.prompt_lab.can_save_context);
     }
+    let template_open_text = if view.prompt_lab.template_editor_open {
+        "[x] Edit Templates".to_string()
+    } else {
+        "[ ] Edit Templates".to_string()
+    };
+    if tree_state.prev_prompt_lab_template_open_text.as_deref() != Some(template_open_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
+            text: template_open_text.clone(),
+        });
+        tree_state.prev_prompt_lab_template_open_text = Some(template_open_text);
+    }
+    let can_apply_template =
+        view.prompt_lab.template_dirty && view.prompt_lab.template_validation_errors.is_empty();
+    let can_apply_template_and_rerun = can_apply_template && view.prompt_lab.can_run;
+    let can_revert_template = view.prompt_lab.template_dirty || view.prompt_lab.template_applied;
+    if tree_state.prev_prompt_lab_template_apply_enabled != Some(can_apply_template) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY,
+            enabled: can_apply_template,
+        });
+        tree_state.prev_prompt_lab_template_apply_enabled = Some(can_apply_template);
+    }
+    if tree_state.prev_prompt_lab_template_apply_rerun_enabled != Some(can_apply_template_and_rerun)
+    {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
+            enabled: can_apply_template_and_rerun,
+        });
+        tree_state.prev_prompt_lab_template_apply_rerun_enabled =
+            Some(can_apply_template_and_rerun);
+    }
+    if tree_state.prev_prompt_lab_template_revert_enabled != Some(can_revert_template) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_TEMPLATE_REVERT,
+            enabled: can_revert_template,
+        });
+        tree_state.prev_prompt_lab_template_revert_enabled = Some(can_revert_template);
+    }
+    if tree_state.prev_prompt_lab_template_save_enabled != Some(view.prompt_lab.template_applied) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_TEMPLATE_SAVE,
+            enabled: view.prompt_lab.template_applied,
+        });
+        tree_state.prev_prompt_lab_template_save_enabled = Some(view.prompt_lab.template_applied);
+    }
+    if tree_state.prev_prompt_lab_template_system_text.as_deref()
+        != Some(view.prompt_lab.template_system_draft.as_str())
+    {
+        cmds.push(PlatformCommand::SetInputText {
+            window_id,
+            control_id: INPUT_PROMPT_LAB_TEMPLATE_SYSTEM,
+            text: view.prompt_lab.template_system_draft.clone(),
+        });
+        tree_state.prev_prompt_lab_template_system_text =
+            Some(view.prompt_lab.template_system_draft.clone());
+    }
+    if tree_state.prev_prompt_lab_template_user_text.as_deref()
+        != Some(view.prompt_lab.template_user_draft.as_str())
+    {
+        cmds.push(PlatformCommand::SetInputText {
+            window_id,
+            control_id: INPUT_PROMPT_LAB_TEMPLATE_USER,
+            text: view.prompt_lab.template_user_draft.clone(),
+        });
+        tree_state.prev_prompt_lab_template_user_text =
+            Some(view.prompt_lab.template_user_draft.clone());
+    }
+    if tree_state.prev_prompt_lab_template_system_enabled
+        != Some(view.prompt_lab.template_editor_open)
+    {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: INPUT_PROMPT_LAB_TEMPLATE_SYSTEM,
+            enabled: view.prompt_lab.template_editor_open,
+        });
+        tree_state.prev_prompt_lab_template_system_enabled =
+            Some(view.prompt_lab.template_editor_open);
+    }
+    if tree_state.prev_prompt_lab_template_user_enabled
+        != Some(view.prompt_lab.template_editor_open)
+    {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: INPUT_PROMPT_LAB_TEMPLATE_USER,
+            enabled: view.prompt_lab.template_editor_open,
+        });
+        tree_state.prev_prompt_lab_template_user_enabled =
+            Some(view.prompt_lab.template_editor_open);
+    }
 
     if tree_state.prev_prompt_lab_url_input.as_deref() != Some(view.prompt_lab.url_input.as_str()) {
         cmds.push(PlatformCommand::SetInputText {
@@ -559,6 +680,28 @@ pub fn render(
             text: context_status_text.clone(),
         });
         tree_state.prev_prompt_lab_context_status_text = Some(context_status_text);
+    }
+    let template_status_text = if !view.prompt_lab.template_validation_errors.is_empty() {
+        view.prompt_lab.template_validation_errors.join(" • ")
+    } else if let (Some(version), Some(path)) = (
+        view.prompt_lab.template_saved_version,
+        view.prompt_lab.template_saved_path.as_deref(),
+    ) {
+        format!("Saved template v{version} to {path}")
+    } else if view.prompt_lab.template_applied {
+        "Template draft applied".to_string()
+    } else if view.prompt_lab.template_dirty {
+        "Template draft has unapplied changes".to_string()
+    } else {
+        String::new()
+    };
+    if tree_state.prev_prompt_lab_template_status_text != Some(template_status_text.clone()) {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_PROMPT_LAB_TEMPLATE_STATUS,
+            text: template_status_text.clone(),
+        });
+        tree_state.prev_prompt_lab_template_status_text = Some(template_status_text);
     }
 
     let job_items = build_job_tree(view);
@@ -661,9 +804,21 @@ fn prompt_lab_status_text(prompt_lab: &harvester_core::PromptLabView) -> String 
 }
 
 fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> String {
+    let template_source = prompt_lab
+        .template_snapshot_source
+        .map(|source| format!("{source:?}").to_lowercase())
+        .unwrap_or_else(|| "-".to_string());
+    let template_version = prompt_lab
+        .template_snapshot_version
+        .map(|version| version.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let template_description = prompt_lab
+        .template_snapshot_description
+        .as_deref()
+        .unwrap_or("-");
     if let Some(run) = prompt_lab.latest_run.as_ref() {
         return format!(
-            "model={} in={} out={} cost={} wall={}ms parse_ok={} cache={}",
+            "model={} in={} out={} cost={} wall={}ms parse_ok={} cache={} template_source={} template_version={} template_desc={}",
             run.resolved_model.as_deref().unwrap_or("-"),
             run.input_tokens
                 .map(|v| v.to_string())
@@ -680,10 +835,18 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
             run.parse_ok
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "-".to_string()),
-            run.cache_status.as_deref().unwrap_or("-")
+            run.cache_status.as_deref().unwrap_or("-"),
+            template_source,
+            template_version,
+            template_description
         );
     }
-    "model=- in=- out=- cost=- wall=- parse_ok=- cache=-".to_string()
+    format!(
+        "model=- in=- out=- cost=- wall=- parse_ok=- cache=- template_source={} template_version={} template_desc={}",
+        template_source,
+        template_version,
+        template_description
+    )
 }
 
 fn select_label(label: &str, selected: bool) -> String {
@@ -1657,6 +1820,63 @@ mod tests {
                 cmd,
                 PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
                 if *control_id == BTN_PROMPT_LAB_RUN
+            )
+        }));
+    }
+
+    #[test]
+    fn template_apply_button_disabled_when_validation_errors_exist() {
+        let window_id = WindowId::new(15);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.template_editor_open = true;
+        view.prompt_lab.template_dirty = true;
+        view.prompt_lab.template_validation_errors = vec!["unknown var".to_string()];
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+                if *control_id == BTN_PROMPT_LAB_TEMPLATE_APPLY
+            )
+        }));
+    }
+
+    #[test]
+    fn template_save_button_disabled_when_not_applied() {
+        let window_id = WindowId::new(16);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.template_editor_open = true;
+        view.prompt_lab.template_applied = false;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+                if *control_id == BTN_PROMPT_LAB_TEMPLATE_SAVE
+            )
+        }));
+    }
+
+    #[test]
+    fn template_errors_are_rendered_in_template_status_label() {
+        let window_id = WindowId::new(17);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.template_editor_open = true;
+        view.prompt_lab.template_validation_errors = vec![
+            "missing {{context}}".to_string(),
+            "unknown {{foo}}".to_string(),
+        ];
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == LABEL_PROMPT_LAB_TEMPLATE_STATUS
+                    && text.contains("missing {{context}}")
+                    && text.contains("unknown {{foo}}")
             )
         }));
     }

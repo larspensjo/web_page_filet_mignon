@@ -45,10 +45,10 @@ fn format_render_error(field: TemplateField, error: RenderError) -> TemplateVali
                 )
             }
         }
-        RenderError::ExceedsTokenBudget { rendered_len, budget } => format!(
-            "rendered length {} exceeds budget {}",
-            rendered_len, budget
-        ),
+        RenderError::ExceedsTokenBudget {
+            rendered_len,
+            budget,
+        } => format!("rendered length {} exceeds budget {}", rendered_len, budget),
     };
     TemplateValidationError { field, message }
 }

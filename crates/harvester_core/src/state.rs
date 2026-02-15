@@ -1,6 +1,8 @@
 use crate::briefing::BriefingSession;
 use crate::context_hash;
-use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState, PromptLabTemplateSnapshot};
+use crate::prompt_lab::{
+    PromptLabRunId, PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
+};
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };

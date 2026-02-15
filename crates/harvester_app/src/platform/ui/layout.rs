@@ -177,6 +177,21 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
     });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_TEMPLATE_USER_ROW,
+    });
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
@@ -283,6 +298,54 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
         text: "Reload From Disk".to_string(),
     });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
+        text: "Edit Templates".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY,
+        text: "Apply Template".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
+        text: "Apply + Rerun".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_TEMPLATE_REVERT,
+        text: "Revert Template".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+        control_id: BTN_PROMPT_LAB_TEMPLATE_SAVE,
+        text: "Save Template".to_string(),
+    });
+    commands.push(PlatformCommand::CreateInput {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW),
+        control_id: INPUT_PROMPT_LAB_TEMPLATE_SYSTEM,
+        initial_text: String::new(),
+        read_only: false,
+        multiline: true,
+        vertical_scroll: true,
+    });
+    commands.push(PlatformCommand::CreateInput {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_USER_ROW),
+        control_id: INPUT_PROMPT_LAB_TEMPLATE_USER,
+        initial_text: String::new(),
+        read_only: false,
+        multiline: true,
+        vertical_scroll: true,
+    });
     commands.push(PlatformCommand::CreateLabel {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
@@ -294,6 +357,13 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: LABEL_PROMPT_LAB_CONTEXT_STATUS,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: LABEL_PROMPT_LAB_TEMPLATE_STATUS,
         initial_text: String::new(),
         class: LabelClass::Default,
     });
@@ -359,6 +429,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(build_layout_command(
         window_id,
         initial_left_width,
+        false,
         false,
         false,
     ));
@@ -592,10 +663,16 @@ pub(crate) fn build_layout_command(
     left_panel_width: i32,
     input_panel_visible: bool,
     prompt_lab_visible: bool,
+    template_editor_open: bool,
 ) -> PlatformCommand {
     PlatformCommand::DefineLayout {
         window_id,
-        rules: build_layout_rules(left_panel_width, input_panel_visible, prompt_lab_visible),
+        rules: build_layout_rules(
+            left_panel_width,
+            input_panel_visible,
+            prompt_lab_visible,
+            template_editor_open,
+        ),
     }
 }
 
@@ -603,6 +680,7 @@ fn build_layout_rules(
     left_panel_width: i32,
     input_panel_visible: bool,
     prompt_lab_visible: bool,
+    template_editor_open: bool,
 ) -> Vec<LayoutRule> {
     let input_width = if input_panel_visible {
         INPUT_PANEL_FIXED_WIDTH
@@ -610,7 +688,15 @@ fn build_layout_rules(
         0
     };
     let jobs_width = (left_panel_width - input_width).max(0);
-    let prompt_lab_height = if prompt_lab_visible { 420 } else { 56 };
+    let prompt_lab_height = if prompt_lab_visible {
+        if template_editor_open {
+            750
+        } else {
+            420
+        }
+    } else {
+        56
+    };
     let mut rules = vec![
         LayoutRule {
             control_id: PANEL_PROGRESS,
@@ -1009,14 +1095,107 @@ fn build_layout_rules(
                 margin: (0, 0, 2, 0),
             },
             LayoutRule {
+                control_id: PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
+                parent_control_id: Some(PANEL_PROMPT_LAB),
+                dock_style: DockStyle::Top,
+                order: 9,
+                fixed_size: Some(32),
+                margin: (0, 0, 2, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
+                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                dock_style: DockStyle::Left,
+                order: 0,
+                fixed_size: Some(110),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY,
+                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                dock_style: DockStyle::Left,
+                order: 1,
+                fixed_size: Some(110),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
+                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                dock_style: DockStyle::Left,
+                order: 2,
+                fixed_size: Some(120),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_TEMPLATE_REVERT,
+                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                dock_style: DockStyle::Left,
+                order: 3,
+                fixed_size: Some(120),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_PROMPT_LAB_TEMPLATE_SAVE,
+                parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
+                dock_style: DockStyle::Fill,
+                order: 4,
+                fixed_size: None,
+                margin: (0, 0, 0, 0),
+            },
+            LayoutRule {
+                control_id: LABEL_PROMPT_LAB_TEMPLATE_STATUS,
+                parent_control_id: Some(PANEL_PROMPT_LAB),
+                dock_style: DockStyle::Top,
+                order: 10,
+                fixed_size: Some(24),
+                margin: (0, 0, 2, 0),
+            },
+            LayoutRule {
                 control_id: LABEL_PROMPT_LAB_METADATA,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Fill,
-                order: 9,
+                order: 13,
                 fixed_size: None,
                 margin: (0, 0, 0, 0),
             },
         ]);
+
+        if template_editor_open {
+            rules.extend([
+                LayoutRule {
+                    control_id: PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
+                    parent_control_id: Some(PANEL_PROMPT_LAB),
+                    dock_style: DockStyle::Top,
+                    order: 11,
+                    fixed_size: Some(120),
+                    margin: (0, 0, 2, 0),
+                },
+                LayoutRule {
+                    control_id: INPUT_PROMPT_LAB_TEMPLATE_SYSTEM,
+                    parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW),
+                    dock_style: DockStyle::Fill,
+                    order: 0,
+                    fixed_size: None,
+                    margin: (4, 4, 4, 4),
+                },
+                LayoutRule {
+                    control_id: PANEL_PROMPT_LAB_TEMPLATE_USER_ROW,
+                    parent_control_id: Some(PANEL_PROMPT_LAB),
+                    dock_style: DockStyle::Top,
+                    order: 12,
+                    fixed_size: Some(120),
+                    margin: (0, 0, 2, 0),
+                },
+                LayoutRule {
+                    control_id: INPUT_PROMPT_LAB_TEMPLATE_USER,
+                    parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_USER_ROW),
+                    dock_style: DockStyle::Fill,
+                    order: 0,
+                    fixed_size: None,
+                    margin: (4, 4, 4, 4),
+                },
+            ]);
+        }
     }
 
     rules
@@ -1036,6 +1215,9 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_PROMPT_LAB_ACTION_ROW,
         PANEL_PROMPT_LAB_CONTEXT_ROW,
         PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
+        PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
+        PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
+        PANEL_PROMPT_LAB_TEMPLATE_USER_ROW,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
@@ -1153,6 +1335,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_PROMPT_LAB_CONTEXT_REVERT,
         BTN_PROMPT_LAB_CONTEXT_SAVE,
         BTN_PROMPT_LAB_CONTEXT_RELOAD,
+        BTN_PROMPT_LAB_TEMPLATE_OPEN,
+        BTN_PROMPT_LAB_TEMPLATE_APPLY,
+        BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
+        BTN_PROMPT_LAB_TEMPLATE_REVERT,
+        BTN_PROMPT_LAB_TEMPLATE_SAVE,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
@@ -1164,6 +1351,16 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: INPUT_PROMPT_LAB_CONTEXT,
+        style_id: StyleId::DefaultInput,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: INPUT_PROMPT_LAB_TEMPLATE_SYSTEM,
+        style_id: StyleId::DefaultInput,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: INPUT_PROMPT_LAB_TEMPLATE_USER,
         style_id: StyleId::DefaultInput,
     });
 
@@ -1228,7 +1425,7 @@ mod tests {
 
     #[test]
     fn collapsed_layout_height_is_minimal() {
-        let cmd = build_layout_command(WindowId::new(3), 600, true, false);
+        let cmd = build_layout_command(WindowId::new(3), 600, true, false, false);
         let rules = match cmd {
             PlatformCommand::DefineLayout { rules, .. } => rules,
             _ => panic!("expected DefineLayout"),
@@ -1245,7 +1442,7 @@ mod tests {
 
     #[test]
     fn expanded_layout_includes_all_controls() {
-        let cmd = build_layout_command(WindowId::new(4), 600, true, true);
+        let cmd = build_layout_command(WindowId::new(4), 600, true, true, true);
         let rules = match cmd {
             PlatformCommand::DefineLayout { rules, .. } => rules,
             _ => panic!("expected DefineLayout"),

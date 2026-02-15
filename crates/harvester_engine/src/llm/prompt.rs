@@ -431,7 +431,10 @@ mod tests {
             .expect("expected effective template");
 
         assert_eq!(effective.source(), TemplateSource::Overlay);
-        assert_eq!(effective.system_template(), overlay.system_template.as_str());
+        assert_eq!(
+            effective.system_template(),
+            overlay.system_template.as_str()
+        );
         assert_eq!(effective.user_template(), overlay.user_template.as_str());
     }
 
@@ -463,7 +466,10 @@ mod tests {
             .active_effective(base.id)
             .expect("expected active effective template");
         assert_eq!(effective.source(), TemplateSource::Overlay);
-        assert_eq!(effective.system_template(), overlay.system_template.as_str());
+        assert_eq!(
+            effective.system_template(),
+            overlay.system_template.as_str()
+        );
     }
 
     #[test]
