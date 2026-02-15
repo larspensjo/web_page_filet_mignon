@@ -250,9 +250,15 @@ impl AppState {
                 });
             }
         }
-        // Block 2: summary availability (separate loop for clarity)
+        // Block 2: summary availability and headline projection.
         for job_view in &mut jobs {
-            job_view.has_summary = self.briefing.summary_for_url(&job_view.url).is_some();
+            if let Some(summary) = self.briefing.summary_for_url(&job_view.url) {
+                job_view.has_summary = true;
+                job_view.summary_title = Some(summary.title.clone());
+            } else {
+                job_view.has_summary = false;
+                job_view.summary_title = None;
+            }
         }
 
         jobs.sort_by(|a, b| {
@@ -1172,6 +1178,7 @@ impl JobState {
             links,
             triage_annotation: None,
             has_summary: false,
+            summary_title: None,
         }
     }
 
@@ -2281,6 +2288,7 @@ mod tests {
             .find(|j| j.job_id == 10)
             .expect("job 10 exists");
         assert!(job.has_summary);
+        assert_eq!(job.summary_title.as_deref(), Some("My Title"));
     }
 
     #[test]
@@ -2301,6 +2309,7 @@ mod tests {
             .find(|j| j.job_id == 13)
             .expect("job 13 exists");
         assert!(!job.has_summary);
+        assert!(job.summary_title.is_none());
     }
 
     #[test]

@@ -98,6 +98,7 @@ pub struct JobRowView {
     pub links: Vec<LinkRowView>,
     pub triage_annotation: Option<TriageAnnotationView>,
     pub has_summary: bool,
+    pub summary_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

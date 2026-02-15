@@ -466,6 +466,23 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
 }
 
 fn format_job_row(job: &JobRowView) -> String {
+    if job.has_summary {
+        let title = job
+            .summary_title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+            .unwrap_or("(summary available)");
+        let domain = domain_from_url(&job.url);
+        let source = if domain.is_empty() { &job.url } else { &domain };
+        let triage_prefix = job
+            .triage_annotation
+            .as_ref()
+            .map(|annotation| format!("P{} [{}] ", annotation.priority, annotation.category))
+            .unwrap_or_default();
+        return format!("{triage_prefix}{title} — {source}");
+    }
+
     let status = match &job.outcome {
         Some(JobResultKind::Success) => "OK".to_string(),
         Some(JobResultKind::Failed { reason }) => format!("ERR ({})", reason),
@@ -520,6 +537,24 @@ fn stage_label(stage: Stage) -> &'static str {
         Stage::Tokenizing => "Tokenizing",
         Stage::Writing => "Writing",
         Stage::Done => "Done",
+    }
+}
+
+fn domain_from_url(url: &str) -> String {
+    let trimmed = url.trim();
+    let without_scheme = trimmed
+        .find("://")
+        .map(|pos| &trimmed[pos + 3..])
+        .unwrap_or(trimmed);
+    let host = without_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(without_scheme)
+        .trim_end_matches('/');
+    if host.is_empty() {
+        trimmed.to_string()
+    } else {
+        host.to_string()
     }
 }
 
@@ -723,6 +758,7 @@ mod tests {
             links: Vec::new(),
             triage_annotation: None,
             has_summary: false,
+            summary_title: None,
         }
     }
 
@@ -879,6 +915,7 @@ mod tests {
             links: vec![link],
             triage_annotation: None,
             has_summary: false,
+            summary_title: None,
         };
         let view = make_view(vec![job]);
         let commands = render(window_id, &view, &mut tree_state);
@@ -1105,9 +1142,53 @@ mod tests {
         init_logging();
         let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
         job.has_summary = true;
+        job.summary_title = Some("Summary headline".to_string());
         let view = make_view(vec![job]);
         let items = build_job_tree(&view);
         assert_eq!(items[0].style_override, None);
+    }
+
+    #[test]
+    fn format_job_row_prefers_summary_headline_layout_after_summary() {
+        let mut job = make_job(
+            7,
+            "https://example.com/path?q=1",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            Some(123),
+            Some(456),
+        );
+        job.has_summary = true;
+        job.summary_title = Some("Headline from summary".to_string());
+        job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 4,
+            category: "security".to_string(),
+            tags: vec!["tag1".to_string()],
+        });
+
+        let row = format_job_row(&job);
+        assert_eq!(row, "P4 [security] Headline from summary — example.com");
+        assert!(!row.contains("[#7]"));
+        assert!(!row.contains("OK"));
+        assert!(!row.contains("https://example.com/path?q=1"));
+    }
+
+    #[test]
+    fn format_job_row_keeps_legacy_layout_before_summary_exists() {
+        let mut job = make_job(
+            9,
+            "https://example.com/path",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            Some(100),
+            Some(200),
+        );
+        job.has_summary = false;
+        job.summary_title = Some("Should not be used yet".to_string());
+
+        let row = format_job_row(&job);
+        assert!(row.contains("[#9] OK"));
+        assert!(row.contains("https://example.com/path"));
     }
 
     #[test]
