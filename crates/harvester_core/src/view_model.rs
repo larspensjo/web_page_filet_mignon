@@ -518,7 +518,6 @@ impl PromptLabView {
 
 fn compare_batch_view(state: &PromptLabState, batch: &PromptLabCompareBatchRecord) -> PromptLabCompareBatchView {
     let status_label = match batch.status {
-        PromptLabCompareBatchStatus::Draft => "Draft".to_string(),
         PromptLabCompareBatchStatus::Running { dispatched, total } => {
             format!("Running {dispatched}/{total}")
         }
@@ -606,8 +605,8 @@ fn compare_batch_view(state: &PromptLabState, batch: &PromptLabCompareBatchRecor
                 rating,
                 is_manual_winner: batch.selected_run_id.is_some() && batch.selected_run_id == *run_id,
                 is_auto_winner: batch.selected_run_id.is_none()
-                    && batch.auto_selected_run_id.is_some()
-                    && batch.auto_selected_run_id == *run_id,
+                    && batch.effective_winner().is_some()
+                    && batch.effective_winner() == *run_id,
                 rank: None,
             })
         })

@@ -102,7 +102,6 @@ pub struct PromptLabRunRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptLabCompareBatchStatus {
-    Draft,
     Running { dispatched: u32, total: u32 },
     AllComplete,
     PartialFailure,
@@ -1581,7 +1580,7 @@ mod tests {
         );
         state.complete_run(run_2, "{}".to_string(), LlmRunMetadata::stub());
         state.consume_ownership(11);
-        let candidates = vec![
+        let candidates = [
             PromptLabCompareCandidate {
                 candidate_id: 1,
                 stage: PromptLabStage::Triage,

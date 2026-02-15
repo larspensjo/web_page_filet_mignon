@@ -1411,6 +1411,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
 
     (state, effects)
 }
+#[allow(clippy::too_many_arguments)]
 fn dispatch_prompt_lab_run(
     state: &mut AppState,
     stage: PromptLabStage,
