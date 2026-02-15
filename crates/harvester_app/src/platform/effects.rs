@@ -21,7 +21,7 @@ use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, LlmRunMetadata, PromptRegistry},
-    load_and_prepare_articles_filtered, load_and_prepare_articles_for_triage, poll_curated_source,
+    load_and_prepare_articles_filtered, poll_curated_source,
     poll_file_source, poll_rss_source, AtomicFileWriter, Converter, DecodeError, EngineConfig,
     EngineEvent, EngineHandle, Extractor, FetchSettings, LinkExtractingConverter,
     ReadabilityLikeExtractor, RssSeenSet, SourceId, SourceType, UrlPolicy, WhitespaceTokenCounter,
@@ -525,18 +525,19 @@ impl EffectRunner {
                     }
                 });
             }
-            Effect::LoadArticlesForBriefingPrereq => {
+            Effect::LoadArticlesForBriefingPrereq { ordered_urls } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
-                    match load_and_prepare_articles_for_triage(
+                    match load_and_prepare_articles_filtered(
                         &output_dir,
                         max_input_bytes,
                         &registry,
+                        &ordered_urls,
                     ) {
-                        Ok(engine_articles) => {
+                        Ok((engine_articles, _)) => {
                             let articles: Vec<LoadedArticle> = engine_articles
                                 .into_iter()
                                 .map(|article| LoadedArticle {
@@ -674,18 +675,19 @@ impl EffectRunner {
                     let _ = msg_tx;
                 });
             }
-            Effect::LoadArticlesForTriage => {
+            Effect::LoadArticlesForTriage { ordered_urls } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.output_dir.clone();
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
-                    match load_and_prepare_articles_for_triage(
+                    match load_and_prepare_articles_filtered(
                         &output_dir,
                         max_input_bytes,
                         &registry,
+                        &ordered_urls,
                     ) {
-                        Ok(engine_articles) => {
+                        Ok((engine_articles, _)) => {
                             let articles: Vec<LoadedArticle> = engine_articles
                                 .into_iter()
                                 .map(|article| LoadedArticle {
@@ -1517,7 +1519,9 @@ mod tests {
         write_markdown(temp.path(), "a.md", "https://example.com/a");
         let (mut runner, rx) = runner_with_receiver();
         runner.output_dir = temp.path().to_path_buf();
-        runner.enqueue(vec![Effect::LoadArticlesForBriefingPrereq]);
+        runner.enqueue(vec![Effect::LoadArticlesForBriefingPrereq {
+            ordered_urls: vec!["https://example.com/a".to_string()],
+        }]);
 
         let msg = rx
             .recv_timeout(Duration::from_secs(1))

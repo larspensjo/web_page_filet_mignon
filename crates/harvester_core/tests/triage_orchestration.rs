@@ -113,7 +113,9 @@ fn triage_clicked_emits_load_effect() {
         vec![
             Effect::LoadPromptContexts,
             Effect::LoadLlmMetadata,
-            Effect::LoadArticlesForTriage
+            Effect::LoadArticlesForTriage {
+                ordered_urls: vec!["https://one.example".to_string()],
+            }
         ]
     );
     assert!(!state.view().triage_can_start);
@@ -324,7 +326,9 @@ fn triage_rerun_after_complete_starts_fresh() {
         vec![
             Effect::LoadPromptContexts,
             Effect::LoadLlmMetadata,
-            Effect::LoadArticlesForTriage
+            Effect::LoadArticlesForTriage {
+                ordered_urls: vec!["https://one.example".to_string()],
+            }
         ]
     );
     assert!(!state.view().triage_can_start);

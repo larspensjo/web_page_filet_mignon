@@ -516,6 +516,19 @@ impl AppState {
             .any(|job| matches!(job.stage, Stage::Done))
     }
 
+    pub(crate) fn ordered_completed_job_urls(&self) -> Vec<String> {
+        self.jobs
+            .iter()
+            .filter_map(|(_, job)| {
+                if job.stage == Stage::Done && job.outcome == Some(JobResultKind::Success) {
+                    Some(job.url.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Returns the current dirty flag and clears it in one step.
     pub fn consume_dirty(&mut self) -> bool {
         let was_dirty = self.dirty;

@@ -12,8 +12,12 @@ pub enum Effect {
     LoadArticlesForBriefing {
         ordered_urls: Vec<String>,
     },
-    LoadArticlesForBriefingPrereq,
-    LoadArticlesForTriage,
+    LoadArticlesForBriefingPrereq {
+        ordered_urls: Vec<String>,
+    },
+    LoadArticlesForTriage {
+        ordered_urls: Vec<String>,
+    },
     LoadPromptContexts,
     SavePromptContextFile {
         prompt_id: PromptId,

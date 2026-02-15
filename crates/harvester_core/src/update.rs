@@ -531,10 +531,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.set_briefing(BriefingSession::new_waiting_for_triage(None));
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] generate requested");
+            let ordered_urls = state.ordered_completed_job_urls();
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefingPrereq,
+                Effect::LoadArticlesForBriefingPrereq { ordered_urls },
             ]
         }
         Msg::BriefingPrereqArticlesLoaded { articles } => {
@@ -607,12 +608,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if !state.triage().can_start() {
                 return (state, Vec::new());
             }
+            let ordered_urls = state.ordered_completed_job_urls();
             state.set_triage(TriageSession::new_loading(None));
             engine_info!("[triage] triage requested");
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForTriage,
+                Effect::LoadArticlesForTriage { ordered_urls },
             ]
         }
         Msg::TriageArticlesLoaded { articles } => {
@@ -1668,7 +1670,9 @@ mod tests {
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefingPrereq
+                Effect::LoadArticlesForBriefingPrereq {
+                    ordered_urls: Vec::new(),
+                }
             ]
         );
         assert_eq!(state.briefing().phase(), &BriefingPhase::WaitingForTriage);
@@ -1897,7 +1901,9 @@ mod tests {
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefingPrereq
+                Effect::LoadArticlesForBriefingPrereq {
+                    ordered_urls: Vec::new(),
+                }
             ]
         );
         let state = with_summary_metadata(state);
@@ -2060,7 +2066,13 @@ mod tests {
         init_logging();
         let state = AppState::new();
         let (_state, effects) = update(state, Msg::TriageClicked);
-        assert!(effects.contains(&Effect::LoadArticlesForTriage));
+        assert!(effects.iter().any(|effect| {
+            matches!(
+                effect,
+                Effect::LoadArticlesForTriage { ordered_urls }
+                    if ordered_urls.is_empty()
+            )
+        }));
         assert!(effects.contains(&Effect::LoadLlmMetadata));
         assert!(effects.contains(&Effect::LoadPromptContexts));
     }
