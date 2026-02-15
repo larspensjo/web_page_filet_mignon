@@ -288,6 +288,7 @@ impl EffectRunner {
                             result: LlmResultKind::Failed {
                                 reason: "LLM worker unavailable".to_string(),
                             },
+                            metadata: None,
                         });
                     } else {
                         engine_info!(
@@ -306,6 +307,7 @@ impl EffectRunner {
                         result: LlmResultKind::Failed {
                             reason: "LLM not configured".to_string(),
                         },
+                        metadata: None,
                     });
                 }
             }
@@ -829,34 +831,45 @@ impl EffectRunner {
 fn map_llm_event(event: LlmEvent) -> Msg {
     match event {
         LlmEvent::Completed { request_id, result } => {
-            let result_kind = match result {
-                Ok(outcome) => LlmResultKind::Success {
-                    output_json: outcome.output_json,
-                    input_tokens: outcome.metadata.input_tokens,
-                    output_tokens: outcome.metadata.output_tokens,
-                    prompt_version: outcome.metadata.prompt_version,
-                    model_id: outcome.metadata.resolved_model.clone(),
-                },
+            let (result_kind, metadata) = match result {
+                Ok(outcome) => {
+                    let kind = LlmResultKind::Success {
+                        output_json: outcome.output_json,
+                        input_tokens: outcome.metadata.input_tokens,
+                        output_tokens: outcome.metadata.output_tokens,
+                        prompt_version: outcome.metadata.prompt_version,
+                        model_id: outcome.metadata.resolved_model.clone(),
+                    };
+                    (kind, Some(outcome.metadata))
+                }
                 Err(LlmCompletionError::ValidationFailed {
                     reason,
                     raw_response,
                     ..
-                }) => LlmResultKind::ValidationFailed {
-                    reason,
-                    raw_response,
-                },
-                Err(LlmCompletionError::QuotaExhausted { description, .. }) => {
+                }) => (
+                    LlmResultKind::ValidationFailed {
+                        reason,
+                        raw_response,
+                    },
+                    None,
+                ),
+                Err(LlmCompletionError::QuotaExhausted { description, .. }) => (
                     LlmResultKind::QuotaExhausted {
                         reason: description,
-                    }
-                }
-                Err(error) => LlmResultKind::Failed {
-                    reason: llm_error_reason(error),
-                },
+                    },
+                    None,
+                ),
+                Err(error) => (
+                    LlmResultKind::Failed {
+                        reason: llm_error_reason(error),
+                    },
+                    None,
+                ),
             };
             Msg::LlmCompleted {
                 request_id,
                 result: result_kind,
+                metadata,
             }
         }
     }

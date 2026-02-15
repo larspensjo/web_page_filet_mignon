@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::ExtractedLink;
 
 use crate::prompt_lab::PromptLabStage;
@@ -81,6 +82,9 @@ pub enum Msg {
     LlmCompleted {
         request_id: u64,
         result: LlmResultKind,
+        /// Full run metadata. `None` only for pre-flight errors that fire
+        /// before timing/model info is available (e.g. `PromptNotFound`).
+        metadata: Option<LlmRunMetadata>,
     },
     /// User requested generation of a briefing.
     GenerateBriefingClicked,

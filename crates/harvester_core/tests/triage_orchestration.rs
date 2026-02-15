@@ -191,6 +191,7 @@ fn triage_completion_advances_to_next_article() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_success(5),
+            metadata: None,
         },
     );
     let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
@@ -199,6 +200,7 @@ fn triage_completion_advances_to_next_article() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_success(4),
+            metadata: None,
         },
     );
     assert_eq!(request_id, 2);
@@ -213,6 +215,7 @@ fn triage_all_completed_transitions_to_complete() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_success(5),
+            metadata: None,
         },
     );
     let (state, effects) = update(
@@ -220,6 +223,7 @@ fn triage_all_completed_transitions_to_complete() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_success(4),
+            metadata: None,
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
@@ -237,6 +241,7 @@ fn triage_all_failed_transitions_to_failed() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_failure("bad"),
+            metadata: None,
         },
     );
     let (state, effects) = update(
@@ -244,6 +249,7 @@ fn triage_all_failed_transitions_to_failed() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_failure("still bad"),
+            metadata: None,
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
@@ -260,6 +266,7 @@ fn triage_partial_failure_still_completes() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_success(5),
+            metadata: None,
         },
     );
     let (state, effects) = update(
@@ -267,6 +274,7 @@ fn triage_partial_failure_still_completes() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_failure("bad"),
+            metadata: None,
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
@@ -283,6 +291,7 @@ fn triage_quota_exhaustion_fails_remaining() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_quota(),
+            metadata: None,
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
@@ -298,6 +307,7 @@ fn triage_rerun_after_complete_starts_fresh() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_success(5),
+            metadata: None,
         },
     );
     let (state, _) = update(
@@ -305,6 +315,7 @@ fn triage_rerun_after_complete_starts_fresh() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_success(4),
+            metadata: None,
         },
     );
     let (state, effects) = update(state, Msg::TriageClicked);
@@ -328,6 +339,7 @@ fn view_model_annotates_jobs_with_triage() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_success(5),
+            metadata: None,
         },
     );
     let (state, _) = update(
@@ -335,6 +347,7 @@ fn view_model_annotates_jobs_with_triage() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_success(4),
+            metadata: None,
         },
     );
     let view = state.view();
@@ -357,6 +370,7 @@ fn view_model_sorts_by_priority() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_success(2),
+            metadata: None,
         },
     );
     let (state, _) = update(
@@ -364,6 +378,7 @@ fn view_model_sorts_by_priority() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_success(5),
+            metadata: None,
         },
     );
     let view = state.view();
@@ -388,6 +403,7 @@ fn view_model_equal_priority_sorted_by_job_id() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_success(4),
+            metadata: None,
         },
     );
     let (state, _) = update(
@@ -395,6 +411,7 @@ fn view_model_equal_priority_sorted_by_job_id() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_success(4),
+            metadata: None,
         },
     );
     let view = state.view();
@@ -418,6 +435,7 @@ fn view_model_stale_triage_url_ignored() {
         Msg::LlmCompleted {
             request_id: 1,
             result: triage_success(5),
+            metadata: None,
         },
     );
     let (state, _) = update(
@@ -425,6 +443,7 @@ fn view_model_stale_triage_url_ignored() {
         Msg::LlmCompleted {
             request_id: 2,
             result: triage_success(4),
+            metadata: None,
         },
     );
     let view = state.view();

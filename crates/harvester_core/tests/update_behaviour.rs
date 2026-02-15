@@ -245,6 +245,7 @@ fn llm_completed_success_updates_state() {
                 prompt_version: 1,
                 model_id: "test-model".to_string(),
             },
+            metadata: None,
         },
     );
     assert!(effects.is_empty());
@@ -268,6 +269,7 @@ fn llm_completed_unknown_request_is_ignored() {
             result: LlmResultKind::Failed {
                 reason: "not found".to_string(),
             },
+            metadata: None,
         },
     );
     assert!(effects.is_empty());

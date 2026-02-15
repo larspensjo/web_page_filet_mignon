@@ -205,7 +205,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 context,
             }]
         }
-        Msg::LlmCompleted { request_id, result } => {
+        Msg::LlmCompleted { request_id, result, .. } => {
             let new_state = match &result {
                 LlmResultKind::Success {
                     output_json,
@@ -1310,6 +1310,7 @@ mod tests {
                         prompt_version: 1,
                         model_id: "test-model".to_string(),
                     },
+                    metadata: None,
                 },
             );
             state = next_state;
@@ -1405,6 +1406,7 @@ mod tests {
                     prompt_version: 1,
                     model_id: "test-model".to_string(),
                 },
+                metadata: None,
             },
         );
 
@@ -1430,6 +1432,7 @@ mod tests {
                     prompt_version: 1,
                     model_id: "test-model".to_string(),
                 },
+                metadata: None,
             },
         );
 
@@ -1455,6 +1458,7 @@ mod tests {
                     prompt_version: 1,
                     model_id: "test-model".to_string(),
                 },
+                metadata: None,
             },
         );
 
@@ -1489,6 +1493,7 @@ mod tests {
                     prompt_version: 77,
                     model_id: "test-model-2024-07-18".to_string(),
                 },
+                metadata: None,
             },
         );
 
@@ -1526,6 +1531,7 @@ mod tests {
                     prompt_version: 88,
                     model_id: "test-model-2024-07-18".to_string(),
                 },
+                metadata: None,
             },
         );
         assert_eq!(
@@ -1549,6 +1555,7 @@ mod tests {
                     prompt_version: 1,
                     model_id: "test-model".to_string(),
                 },
+                metadata: None,
             },
         );
 
@@ -1711,6 +1718,7 @@ mod tests {
                 prompt_version: 1,
                 model_id: "test-model".to_string(),
             },
+            metadata: None,
         }
     }
 
@@ -1885,6 +1893,7 @@ mod tests {
                 result: LlmResultKind::QuotaExhausted {
                     reason: "too many calls".to_string(),
                 },
+                metadata: None,
             },
         );
         assert_eq!(state.triage().failed_count(), 3); // 1 from quota + 2 pending
@@ -1921,6 +1930,7 @@ mod tests {
                     prompt_version: 1,
                     model_id: "test-model".to_string(),
                 },
+                metadata: None,
             },
         );
         let has_aggregate = effects.iter().any(|e| {
@@ -1950,6 +1960,7 @@ mod tests {
                     prompt_version: 1,
                     model_id: "test-model".to_string(),
                 },
+                metadata: None,
             },
         );
         let has_aggregate = effects.iter().any(|e| {
@@ -2080,6 +2091,7 @@ mod tests {
                 prompt_version: 1,
                 model_id: "model-x".to_string(),
             },
+            metadata: None,
         });
         assert!(effects.is_empty());
         use crate::prompt_lab::PromptLabRunStatus;
@@ -2101,6 +2113,7 @@ mod tests {
                 reason: "bad json".to_string(),
                 raw_response: "garbage".to_string(),
             },
+            metadata: None,
         });
         use crate::prompt_lab::PromptLabRunStatus;
         assert!(matches!(
@@ -2118,6 +2131,7 @@ mod tests {
         let (state, _) = update(state, Msg::LlmCompleted {
             request_id,
             result: LlmResultKind::QuotaExhausted { reason: "over limit".to_string() },
+            metadata: None,
         });
         use crate::prompt_lab::PromptLabRunStatus;
         assert!(matches!(
@@ -2180,6 +2194,7 @@ mod tests {
                 prompt_version: 1,
                 model_id: "m".to_string(),
             },
+            metadata: None,
         });
 
         assert_eq!(state.briefing().clone(), briefing_before, "briefing must be unchanged");
@@ -2201,6 +2216,7 @@ mod tests {
         let (state, _) = update(state, Msg::LlmCompleted {
             request_id,
             result: LlmResultKind::Failed { reason: "timeout".to_string() },
+            metadata: None,
         });
 
         assert_eq!(state.triage().clone(), triage_before, "triage must be unchanged");
@@ -2252,6 +2268,7 @@ mod tests {
                 prompt_version: 1,
                 model_id: "m".to_string(),
             },
+            metadata: None,
         });
         assert_eq!(state.triage().completed_count(), triage_completed_before, "triage completed count must not change");
         assert!(matches!(
@@ -2287,6 +2304,7 @@ mod tests {
         let (mut state, _) = update(state, Msg::LlmCompleted {
             request_id: lab_id1,
             result: LlmResultKind::Failed { reason: "done".to_string() },
+            metadata: None,
         });
         state.set_prompt_lab_input("text2".to_string());
         let (_, e2) = update(state, Msg::PromptLabRunRequested);
