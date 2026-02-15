@@ -123,6 +123,7 @@ pub struct LlmCompletionResult {
 }
 
 /// Typed error categories surfaced by the worker.
+#[derive(Debug)]
 pub enum LlmCompletionError {
     ProviderError(LlmError),
     ValidationFailed {

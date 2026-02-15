@@ -5,9 +5,9 @@ use tempfile::tempdir;
 
 use harvester_engine::llm::provider::LlmProvider;
 use harvester_engine::llm::{
-    content_hash, BlockingMockProvider, LlmCommand, LlmConfig, LlmEvent, LlmHandle, LlmQuotas,
-    MockLlmProvider, ModelId, PricingRegistry, PromptId, PromptRegistry, ProviderKind,
-    ReplayProvider, ReplayRecord, TokenUsage,
+    content_hash, BlockingMockProvider, LlmCommand, LlmCompletionError, LlmConfig, LlmEvent,
+    LlmHandle, LlmQuotas, MockLlmProvider, ModelId, PricingRegistry, PromptId, PromptRegistry,
+    ProviderKind, ReplayProvider, ReplayRecord, TokenUsage,
 };
 
 fn make_config(
@@ -286,4 +286,254 @@ fn concurrent_requests_never_exceed_cap() {
         provider.peak_in_flight(),
         cap
     );
+}
+
+// -----------------------------------------------------------------------
+// Step 3 — Model override tests
+// -----------------------------------------------------------------------
+
+fn recv_event(handle: &LlmHandle) -> LlmEvent {
+    handle
+        .event_receiver()
+        .lock()
+        .expect("lock receiver")
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("should receive event within 5s")
+}
+
+#[test]
+fn override_model_wins_over_stage_and_default() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+    provider.queue_json_success(
+        r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#,
+    );
+
+    let registry = PromptRegistry::with_defaults();
+    let dir = tempdir().unwrap();
+    let mut config = make_config(provider_trait, registry, &dir);
+    // Stage model set to something different
+    config.triage_model = Some(ModelId::new(ProviderKind::OpenAi, "stage-model"));
+    let override_model = ModelId::new(ProviderKind::OpenAi, "mock");
+
+    let handle = LlmHandle::new(config);
+    handle
+        .send(LlmCommand::Complete {
+            request_id: 1,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: Some(override_model.clone()),
+            input_content: "document".to_string(),
+            context: vec![],
+        })
+        .unwrap();
+
+    recv_event(&handle);
+    // The override model should have been sent to the provider (not the stage model).
+    let requests = provider.recorded_requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].model(),
+        &override_model,
+        "override model should be sent to provider"
+    );
+}
+
+#[test]
+fn stage_model_wins_over_default_when_override_is_none() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+    provider.queue_json_success(
+        r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#,
+    );
+
+    let registry = PromptRegistry::with_defaults();
+    let dir = tempdir().unwrap();
+    let mut config = make_config(provider_trait, registry, &dir);
+    config.triage_model = Some(ModelId::new(ProviderKind::OpenAi, "stage-specific"));
+    // Pricing for "stage-specific" so allow-list is satisfied; but here we send None override
+    config.pricing.insert("stage-specific", harvester_engine::llm::ModelPricing::zero());
+
+    let handle = LlmHandle::new(config);
+    handle
+        .send(LlmCommand::Complete {
+            request_id: 1,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: None,
+            input_content: "document".to_string(),
+            context: vec![],
+        })
+        .unwrap();
+
+    recv_event(&handle);
+    // The stage model should have been sent to the provider (not the default).
+    let requests = provider.recorded_requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].model().model_name(),
+        "stage-specific",
+        "stage model should win when override is None"
+    );
+}
+
+#[test]
+fn unsupported_model_wrong_provider_fires_before_provider_call() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+    let registry = PromptRegistry::with_defaults();
+    let dir = tempdir().unwrap();
+    let config = make_config(provider_trait, registry, &dir);
+    // default_model is OpenAi, but we try to send Anthropic
+    let bad_model = ModelId::new(ProviderKind::Anthropic, "claude-opus");
+
+    let handle = LlmHandle::new(config);
+    handle
+        .send(LlmCommand::Complete {
+            request_id: 1,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: Some(bad_model.clone()),
+            input_content: "document".to_string(),
+            context: vec![],
+        })
+        .unwrap();
+
+    match recv_event(&handle) {
+        LlmEvent::Completed { result, .. } => {
+            assert!(
+                matches!(result, Err(LlmCompletionError::UnsupportedModel { .. })),
+                "wrong provider should yield UnsupportedModel"
+            );
+        }
+    }
+    assert_eq!(
+        provider.recorded_requests().len(),
+        0,
+        "provider must not be called for wrong-provider override"
+    );
+}
+
+#[test]
+fn unsupported_model_unknown_name_fires_before_provider_call() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+    let registry = PromptRegistry::with_defaults();
+    let dir = tempdir().unwrap();
+    let config = make_config(provider_trait, registry, &dir);
+    // Right provider but unknown name
+    let bad_model = ModelId::new(ProviderKind::OpenAi, "totally-unknown-model-xyz");
+
+    let handle = LlmHandle::new(config);
+    handle
+        .send(LlmCommand::Complete {
+            request_id: 1,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: Some(bad_model.clone()),
+            input_content: "document".to_string(),
+            context: vec![],
+        })
+        .unwrap();
+
+    match recv_event(&handle) {
+        LlmEvent::Completed { result, .. } => {
+            assert!(
+                matches!(result, Err(LlmCompletionError::UnsupportedModel { .. })),
+                "unknown name should yield UnsupportedModel"
+            );
+        }
+    }
+    assert_eq!(
+        provider.recorded_requests().len(),
+        0,
+        "provider must not be called for unknown-name override"
+    );
+}
+
+#[test]
+fn valid_override_cache_miss_records_override_in_metadata() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+    provider.queue_json_success(
+        r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#,
+    );
+
+    let registry = PromptRegistry::with_defaults();
+    let dir = tempdir().unwrap();
+    let config = make_config(provider_trait, registry, &dir);
+    // "mock" is the default model name, so it's in the allow-list
+    let override_model = ModelId::new(ProviderKind::OpenAi, "mock");
+
+    let handle = LlmHandle::new(config);
+    handle
+        .send(LlmCommand::Complete {
+            request_id: 1,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: Some(override_model),
+            input_content: "document".to_string(),
+            context: vec![],
+        })
+        .unwrap();
+
+    match recv_event(&handle) {
+        LlmEvent::Completed { result, .. } => {
+            let metadata = result.expect("should succeed").metadata;
+            assert_eq!(metadata.resolved_model, "mock");
+        }
+    }
+}
+
+#[test]
+fn valid_override_cache_hit_records_override_in_metadata() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+    let registry = PromptRegistry::with_defaults();
+    let dir = tempdir().unwrap();
+
+    let input_content = "cached content for override test";
+    let mut replay_provider = ReplayProvider::new();
+    replay_provider.insert(ReplayRecord {
+        request_id: "cached-session".to_string(),
+        input_content_hash: content_hash(input_content),
+        prompt_id: PromptId::ArticleTriage,
+        prompt_version: 1,
+        model_id: "openai::mock".to_string(),
+        timestamp_utc: "2026-02-08T00:00:00Z".to_string(),
+        rendered_system_message: "".to_string(),
+        rendered_user_message: "".to_string(),
+        raw_response: r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#
+            .to_string(),
+        usage: TokenUsage::new(1, 2),
+        validated_output: Some(json!({"category":"news","priority":3,"tags":["a"],"rationale":"ok"})),
+        validation_error: None,
+        cost_microdollars: 0,
+        wall_ms: 0,
+        cache_status: "miss".to_string(),
+    });
+    let replay_cache = Arc::new(RwLock::new(replay_provider));
+    let mut config = make_config(provider_trait, registry, &dir);
+    config.replay_cache = Some(replay_cache);
+
+    let override_model = ModelId::new(ProviderKind::OpenAi, "mock");
+    let handle = LlmHandle::new(config);
+    handle
+        .send(LlmCommand::Complete {
+            request_id: 1,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: Some(override_model),
+            input_content: input_content.to_string(),
+            context: vec![],
+        })
+        .unwrap();
+
+    match recv_event(&handle) {
+        LlmEvent::Completed { result, .. } => {
+            let metadata = result.expect("cache hit should succeed").metadata;
+            assert_eq!(metadata.resolved_model, "mock");
+        }
+    }
+    assert_eq!(provider.recorded_requests().len(), 0, "cache hit must skip provider");
 }

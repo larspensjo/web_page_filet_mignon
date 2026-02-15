@@ -1319,4 +1319,94 @@ mod tests {
             other => panic!("unexpected message: {:?}", other),
         }
     }
+
+    // --- Step 3: map_llm_event failure metadata propagation tests ---
+
+    fn make_failure_metadata() -> harvester_engine::llm::LlmFailureMetadata {
+        use harvester_engine::llm::run_metadata::LlmFailureMetadata;
+        use harvester_engine::llm::prompt::PromptId;
+        LlmFailureMetadata {
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: 1,
+            resolved_model: Some("gpt-4o-mini".to_string()),
+            input_bytes: 100,
+            wall_ms: Some(200),
+            timestamp_utc: "2026-02-15T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn map_llm_event_validation_failed_with_metadata_propagates_it() {
+        let failure_metadata = make_failure_metadata();
+        let event = LlmEvent::Completed {
+            request_id: 1,
+            result: Err(LlmCompletionError::ValidationFailed {
+                reason: "bad json".to_string(),
+                raw_response: "{}".to_string(),
+                failure_metadata: Some(failure_metadata),
+            }),
+        };
+        let msg = map_llm_event(event);
+        if let Msg::LlmCompleted { metadata, .. } = msg {
+            assert!(metadata.is_some(), "ValidationFailed with metadata should propagate it");
+            assert!(!metadata.unwrap().parse_ok);
+        } else {
+            panic!("expected LlmCompleted");
+        }
+    }
+
+    #[test]
+    fn map_llm_event_quota_exhausted_with_metadata_propagates_it() {
+        let failure_metadata = make_failure_metadata();
+        let event = LlmEvent::Completed {
+            request_id: 1,
+            result: Err(LlmCompletionError::QuotaExhausted {
+                description: "rate limited".to_string(),
+                failure_metadata: Some(failure_metadata),
+            }),
+        };
+        let msg = map_llm_event(event);
+        if let Msg::LlmCompleted { metadata, .. } = msg {
+            assert!(metadata.is_some(), "QuotaExhausted with metadata should propagate it");
+        } else {
+            panic!("expected LlmCompleted");
+        }
+    }
+
+    #[test]
+    fn map_llm_event_persistence_failed_with_metadata_propagates_it() {
+        let failure_metadata = make_failure_metadata();
+        let event = LlmEvent::Completed {
+            request_id: 1,
+            result: Err(LlmCompletionError::PersistenceFailed {
+                detail: "disk full".to_string(),
+                failure_metadata: Some(failure_metadata),
+            }),
+        };
+        let msg = map_llm_event(event);
+        if let Msg::LlmCompleted { metadata, .. } = msg {
+            assert!(metadata.is_some(), "PersistenceFailed with metadata should propagate it");
+        } else {
+            panic!("expected LlmCompleted");
+        }
+    }
+
+    #[test]
+    fn map_llm_event_unsupported_model_has_none_metadata() {
+        use harvester_engine::llm::types::{ModelId, ProviderKind};
+        let event = LlmEvent::Completed {
+            request_id: 1,
+            result: Err(LlmCompletionError::UnsupportedModel {
+                model: ModelId::new(ProviderKind::OpenAi, "bad-model"),
+                reason: "unknown".to_string(),
+            }),
+        };
+        let msg = map_llm_event(event);
+        if let Msg::LlmCompleted { metadata, result, .. } = msg {
+            assert!(metadata.is_none(), "UnsupportedModel is pre-flight so metadata=None");
+            assert!(matches!(result, LlmResultKind::Failed { .. }));
+        } else {
+            panic!("expected LlmCompleted");
+        }
+    }
 }

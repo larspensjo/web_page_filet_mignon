@@ -2340,4 +2340,90 @@ mod tests {
         let unique: std::collections::HashSet<u64> = all_ids.iter().copied().collect();
         assert_eq!(unique.len(), all_ids.len(), "all request_ids must be distinct");
     }
+
+    // --- Step 3 per-run override tests ---
+
+    #[test]
+    fn prompt_lab_run_with_model_override_emits_effect_containing_it() {
+        init_logging();
+        use harvester_engine::llm::{ModelId, ProviderKind};
+        let mut state = AppState::new();
+        state.set_prompt_lab_input("some text".to_string());
+        let override_model = ModelId::new(ProviderKind::OpenAi, "gpt-4o");
+        state.prompt_lab_mut().set_model_override(Some(override_model.clone()));
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert_eq!(effects.len(), 1);
+        if let Effect::RequestLlmCompletion { model_override, .. } = &effects[0] {
+            assert_eq!(model_override.as_ref(), Some(&override_model));
+        } else {
+            panic!("expected RequestLlmCompletion effect");
+        }
+        // Run record should store it too
+        let run = state.prompt_lab().latest_run().unwrap();
+        assert_eq!(run.model_override.as_ref(), Some(&override_model));
+    }
+
+    #[test]
+    fn prompt_lab_run_with_prompt_version_override_emits_effect_containing_it() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_prompt_lab_input("some text".to_string());
+        state.prompt_lab_mut().set_prompt_version_override(Some(42));
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert_eq!(effects.len(), 1);
+        if let Effect::RequestLlmCompletion { prompt_version, .. } = &effects[0] {
+            assert_eq!(*prompt_version, Some(42));
+        } else {
+            panic!("expected RequestLlmCompletion effect");
+        }
+        let run = state.prompt_lab().latest_run().unwrap();
+        assert_eq!(run.prompt_version_used, Some(42));
+    }
+
+    #[test]
+    fn prompt_lab_run_record_stores_dispatched_override_values() {
+        init_logging();
+        use harvester_engine::llm::{ModelId, ProviderKind};
+        let mut state = AppState::new();
+        state.set_prompt_lab_input("some text".to_string());
+        let override_model = ModelId::new(ProviderKind::OpenAi, "gpt-4o");
+        state.prompt_lab_mut().set_model_override(Some(override_model.clone()));
+        state.prompt_lab_mut().set_prompt_version_override(Some(7));
+        let (state, _) = update(state, Msg::PromptLabRunRequested);
+        let run = state.prompt_lab().latest_run().unwrap();
+        assert_eq!(run.model_override.as_ref(), Some(&override_model));
+        assert_eq!(run.prompt_version_used, Some(7));
+    }
+
+    #[test]
+    fn prompt_lab_run_none_overrides_behaves_as_before() {
+        init_logging();
+        let mut state = AppState::new();
+        state.set_prompt_lab_input("some text".to_string());
+        // No overrides set — defaults are None
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert_eq!(effects.len(), 1);
+        if let Effect::RequestLlmCompletion { model_override, .. } = &effects[0] {
+            assert!(model_override.is_none(), "model_override should be None when not set");
+        } else {
+            panic!("expected RequestLlmCompletion effect");
+        }
+        let run = state.prompt_lab().latest_run().unwrap();
+        assert!(run.model_override.is_none());
+        assert!(run.prompt_version_used.is_none());
+    }
+
+    #[test]
+    fn production_dispatch_paths_emit_none_model_override() {
+        init_logging();
+        // Triage path
+        let (_, effects) = update(
+            AppState::new(),
+            Msg::TriageArticlesLoaded { articles: loaded_triage_articles(1) },
+        );
+        let llm_effect = effects.iter().find(|e| matches!(e, Effect::RequestLlmCompletion { .. }));
+        if let Some(Effect::RequestLlmCompletion { model_override, .. }) = llm_effect {
+            assert!(model_override.is_none(), "triage path must emit None override");
+        }
+    }
 }

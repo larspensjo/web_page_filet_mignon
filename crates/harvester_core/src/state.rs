@@ -1232,6 +1232,10 @@ impl AppState {
         &self.prompt_lab
     }
 
+    pub(crate) fn prompt_lab_mut(&mut self) -> &mut PromptLabState {
+        &mut self.prompt_lab
+    }
+
     pub(crate) fn open_prompt_lab(&mut self) {
         self.prompt_lab.open();
         self.dirty = true;
