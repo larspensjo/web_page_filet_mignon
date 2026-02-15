@@ -1,10 +1,11 @@
 use crate::briefing::BriefingSession;
 use crate::context_hash;
-use crate::prompt_lab::{
-    PromptLabRunId, PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
-};
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
+};
+use crate::prompt_lab::{
+    PromptLabRunId, PromptLabRunOverrides, PromptLabStage, PromptLabState,
+    PromptLabTemplateSnapshot,
 };
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
@@ -13,8 +14,7 @@ use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobFilterStatus, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView,
-    TriageAnnotationView,
-    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
+    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
@@ -260,6 +260,17 @@ pub struct AppState {
     prompt_lab_next_resolve_id: u64,
 }
 
+pub(crate) struct PromptLabPendingRunRegistration {
+    pub run_id: PromptLabRunId,
+    pub stage: PromptLabStage,
+    pub prompt_id: PromptId,
+    pub input_snapshot: String,
+    pub request_id: u64,
+    pub overrides: PromptLabRunOverrides,
+    pub compare_batch_id: Option<crate::prompt_lab::PromptLabCompareBatchId>,
+    pub compare_candidate_id: Option<u64>,
+}
+
 pub struct IngestResult {
     pub effects: Vec<Effect>,
     pub enqueued: usize,
@@ -445,7 +456,10 @@ impl AppState {
             triage_can_start: (!self.briefing_orchestration.is_requested())
                 && self.triage.can_start()
                 && matches!(self.pre_triage.phase(), PreTriagePhase::ReadyToTriage),
-            triage_progress: self.triage.progress_text().or_else(|| self.pre_triage_progress_text()),
+            triage_progress: self
+                .triage
+                .progress_text()
+                .or_else(|| self.pre_triage_progress_text()),
             poll_sources_enabled: matches!(
                 self.session,
                 SessionState::Idle | SessionState::Running
@@ -1453,31 +1467,21 @@ impl AppState {
         id
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn add_prompt_lab_pending_run(
         &mut self,
-        run_id: PromptLabRunId,
-        stage: PromptLabStage,
-        prompt_id: PromptId,
-        input_snapshot: String,
-        request_id: u64,
-        prompt_version_used: Option<harvester_engine::llm::prompt::PromptVersion>,
-        model_override: Option<harvester_engine::llm::types::ModelId>,
-        compare_batch_id: Option<crate::prompt_lab::PromptLabCompareBatchId>,
-        compare_candidate_id: Option<u64>,
+        registration: PromptLabPendingRunRegistration,
     ) {
         self.prompt_lab.add_pending_run(
-            run_id,
-            stage,
-            prompt_id,
-            input_snapshot,
-            request_id,
-            prompt_version_used,
-            model_override,
+            registration.run_id,
+            registration.stage,
+            registration.prompt_id,
+            registration.input_snapshot,
+            registration.request_id,
+            registration.overrides,
         );
-        if let Some(record) = self.prompt_lab.run_by_id_mut(run_id) {
-            record.compare_batch_id = compare_batch_id;
-            record.compare_candidate_id = compare_candidate_id;
+        if let Some(record) = self.prompt_lab.run_by_id_mut(registration.run_id) {
+            record.compare_batch_id = registration.compare_batch_id;
+            record.compare_candidate_id = registration.compare_candidate_id;
         }
     }
 
@@ -2868,32 +2872,30 @@ mod tests {
         // Add a pending run
         let req_id = state.allocate_next_llm_request_id();
         let run_id = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(
+        state.add_prompt_lab_pending_run(PromptLabPendingRunRegistration {
             run_id,
-            crate::prompt_lab::PromptLabStage::Triage,
-            PromptId::ArticleTriage,
-            "input".to_string(),
-            req_id,
-            None,
-            None,
-            None,
-            None,
-        );
+            stage: crate::prompt_lab::PromptLabStage::Triage,
+            prompt_id: PromptId::ArticleTriage,
+            input_snapshot: "input".to_string(),
+            request_id: req_id,
+            overrides: PromptLabRunOverrides::default(),
+            compare_batch_id: None,
+            compare_candidate_id: None,
+        });
 
         // Add a completed run
         let req_id2 = state.allocate_next_llm_request_id();
         let run_id2 = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(
-            run_id2,
-            crate::prompt_lab::PromptLabStage::Triage,
-            PromptId::ArticleTriage,
-            "input2".to_string(),
-            req_id2,
-            None,
-            None,
-            None,
-            None,
-        );
+        state.add_prompt_lab_pending_run(PromptLabPendingRunRegistration {
+            run_id: run_id2,
+            stage: crate::prompt_lab::PromptLabStage::Triage,
+            prompt_id: PromptId::ArticleTriage,
+            input_snapshot: "input2".to_string(),
+            request_id: req_id2,
+            overrides: PromptLabRunOverrides::default(),
+            compare_batch_id: None,
+            compare_candidate_id: None,
+        });
         state.complete_prompt_lab_run(
             run_id2,
             "{}".to_string(),

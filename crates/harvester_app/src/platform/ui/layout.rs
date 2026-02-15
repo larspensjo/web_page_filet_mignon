@@ -12,6 +12,24 @@ const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
 const MENU_ACTION_ARCHIVE: MenuActionId = MenuActionId(2);
 const MENU_ACTION_PROMPT_LAB: MenuActionId = MenuActionId(3);
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PromptLabLayoutConfig {
+    pub visible: bool,
+    pub advanced_mode: bool,
+    pub compare_section_open: bool,
+    pub context_section_open: bool,
+    pub template_section_open: bool,
+    pub run_details_section_open: bool,
+    pub template_editor_open: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LayoutConfig {
+    pub left_panel_width: i32,
+    pub input_panel_visible: bool,
+    pub prompt_lab: PromptLabLayoutConfig,
+}
+
 #[allow(clippy::vec_init_then_push)]
 pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     let mut commands = Vec::new();
@@ -518,15 +536,19 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
 
     commands.push(build_layout_command(
         window_id,
-        initial_left_width,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
+        LayoutConfig {
+            left_panel_width: initial_left_width,
+            input_panel_visible: false,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: false,
+                advanced_mode: false,
+                compare_section_open: false,
+                context_section_open: false,
+                template_section_open: false,
+                run_details_section_open: false,
+                template_editor_open: false,
+            },
+        },
     ));
 
     commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
@@ -753,30 +775,13 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     });
 }
 
-pub(crate) fn build_layout_command(
-    window_id: WindowId,
-    left_panel_width: i32,
-    input_panel_visible: bool,
-    prompt_lab_visible: bool,
-    prompt_lab_advanced_mode: bool,
-    prompt_lab_compare_section_open: bool,
-    prompt_lab_context_section_open: bool,
-    prompt_lab_template_section_open: bool,
-    prompt_lab_run_details_section_open: bool,
-    template_editor_open: bool,
-) -> PlatformCommand {
+pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) -> PlatformCommand {
     PlatformCommand::DefineLayout {
         window_id,
         rules: build_layout_rules(
-            left_panel_width,
-            input_panel_visible,
-            prompt_lab_visible,
-            prompt_lab_advanced_mode,
-            prompt_lab_compare_section_open,
-            prompt_lab_context_section_open,
-            prompt_lab_template_section_open,
-            prompt_lab_run_details_section_open,
-            template_editor_open,
+            config.left_panel_width,
+            config.input_panel_visible,
+            config.prompt_lab,
         ),
     }
 }
@@ -784,13 +789,7 @@ pub(crate) fn build_layout_command(
 fn build_layout_rules(
     left_panel_width: i32,
     input_panel_visible: bool,
-    prompt_lab_visible: bool,
-    prompt_lab_advanced_mode: bool,
-    prompt_lab_compare_section_open: bool,
-    prompt_lab_context_section_open: bool,
-    prompt_lab_template_section_open: bool,
-    prompt_lab_run_details_section_open: bool,
-    template_editor_open: bool,
+    prompt_lab: PromptLabLayoutConfig,
 ) -> Vec<LayoutRule> {
     let input_width = if input_panel_visible {
         INPUT_PANEL_FIXED_WIDTH
@@ -798,24 +797,24 @@ fn build_layout_rules(
         0
     };
     let jobs_width = (left_panel_width - input_width).max(0);
-    let prompt_lab_height = if prompt_lab_visible {
+    let prompt_lab_height = if prompt_lab.visible {
         let mut height = 220;
-        if prompt_lab_advanced_mode {
+        if prompt_lab.advanced_mode {
             height += 96;
-            if prompt_lab_compare_section_open {
+            if prompt_lab.compare_section_open {
                 height += 32;
             }
-            if prompt_lab_context_section_open {
+            if prompt_lab.context_section_open {
                 height += 210;
             }
-            if prompt_lab_template_section_open {
+            if prompt_lab.template_section_open {
                 height += 64;
-                if template_editor_open {
+                if prompt_lab.template_editor_open {
                     height += 244;
                 }
             }
             height += 28;
-            if prompt_lab_run_details_section_open {
+            if prompt_lab.run_details_section_open {
                 height += 42;
             }
         }
@@ -1010,7 +1009,7 @@ fn build_layout_rules(
         },
     ];
 
-    if prompt_lab_visible {
+    if prompt_lab.visible {
         rules.extend([
             LayoutRule {
                 control_id: PANEL_PROMPT_LAB_MODE_ROW,
@@ -1134,7 +1133,7 @@ fn build_layout_rules(
             },
         ]);
 
-        if prompt_lab_advanced_mode {
+        if prompt_lab.advanced_mode {
             rules.extend([
                 LayoutRule {
                     control_id: PANEL_PROMPT_LAB_COMPARE_HEADER_ROW,
@@ -1153,7 +1152,7 @@ fn build_layout_rules(
                     margin: (0, 0, 0, 0),
                 },
             ]);
-            if prompt_lab_compare_section_open {
+            if prompt_lab.compare_section_open {
                 rules.extend([
                     LayoutRule {
                         control_id: PANEL_PROMPT_LAB_COMPARE_ROW,
@@ -1306,7 +1305,7 @@ fn build_layout_rules(
                     margin: (0, 0, 0, 0),
                 },
             ]);
-            if prompt_lab_context_section_open {
+            if prompt_lab.context_section_open {
                 rules.extend([
                     LayoutRule {
                         control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
@@ -1435,7 +1434,7 @@ fn build_layout_rules(
                     margin: (0, 0, 0, 0),
                 },
             ]);
-            if prompt_lab_template_section_open {
+            if prompt_lab.template_section_open {
                 rules.extend([
                     LayoutRule {
                         control_id: PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
@@ -1530,7 +1529,7 @@ fn build_layout_rules(
                 fixed_size: None,
                 margin: (0, 0, 0, 0),
             });
-            if prompt_lab_run_details_section_open {
+            if prompt_lab.run_details_section_open {
                 rules.push(LayoutRule {
                     control_id: LABEL_PROMPT_LAB_METADATA,
                     parent_control_id: Some(PANEL_PROMPT_LAB),
@@ -1658,7 +1657,10 @@ fn build_layout_rules(
             ]);
         }
 
-        if template_editor_open && prompt_lab_advanced_mode && prompt_lab_template_section_open {
+        if prompt_lab.template_editor_open
+            && prompt_lab.advanced_mode
+            && prompt_lab.template_section_open
+        {
             rules.extend([
                 LayoutRule {
                     control_id: PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
@@ -1941,15 +1943,19 @@ mod tests {
     fn collapsed_layout_height_is_minimal() {
         let cmd = build_layout_command(
             WindowId::new(3),
-            600,
-            true,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
-            false,
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
         );
         let rules = match cmd {
             PlatformCommand::DefineLayout { rules, .. } => rules,
@@ -1969,15 +1975,19 @@ mod tests {
     fn expanded_layout_includes_all_controls() {
         let cmd = build_layout_command(
             WindowId::new(4),
-            600,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
-            true,
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: true,
+                    advanced_mode: true,
+                    compare_section_open: true,
+                    context_section_open: true,
+                    template_section_open: true,
+                    run_details_section_open: true,
+                    template_editor_open: true,
+                },
+            },
         );
         let rules = match cmd {
             PlatformCommand::DefineLayout { rules, .. } => rules,

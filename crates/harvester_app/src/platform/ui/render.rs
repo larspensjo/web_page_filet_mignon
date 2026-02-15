@@ -8,7 +8,7 @@ use harvester_core::{
 use harvester_engine::LinkKind;
 
 use super::constants::*;
-use super::layout::build_layout_command;
+use super::layout::{build_layout_command, LayoutConfig, PromptLabLayoutConfig};
 use super::markdown_to_rtf::{convert_markdown_to_rtf, RTF_TRUNCATE_MARKER};
 use super::tree_item_ids::{
     job_tree_item_id, link_tree_item_id, links_folder_tree_item_id, links_show_more_tree_item_id,
@@ -254,7 +254,8 @@ pub fn render(
         || view.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
         || view.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
         || view.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
-        || view.prompt_lab.template_section_open != tree_state.prev_prompt_lab_template_section_open
+        || view.prompt_lab.template_section_open
+            != tree_state.prev_prompt_lab_template_section_open
         || view.prompt_lab.template_editor_open != tree_state.prev_prompt_lab_template_editor_open;
     if layout_changed {
         engine_debug!(
@@ -266,15 +267,19 @@ pub fn render(
         );
         cmds.push(build_layout_command(
             window_id,
-            view.left_panel_width,
-            view.input_panel_visible,
-            view.prompt_lab.visible,
-            view.prompt_lab.advanced_mode,
-            view.prompt_lab.compare_section_open,
-            view.prompt_lab.context_section_open,
-            view.prompt_lab.template_section_open,
-            view.prompt_lab.run_details_section_open,
-            view.prompt_lab.template_editor_open,
+            LayoutConfig {
+                left_panel_width: view.left_panel_width,
+                input_panel_visible: view.input_panel_visible,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: view.prompt_lab.visible,
+                    advanced_mode: view.prompt_lab.advanced_mode,
+                    compare_section_open: view.prompt_lab.compare_section_open,
+                    context_section_open: view.prompt_lab.context_section_open,
+                    template_section_open: view.prompt_lab.template_section_open,
+                    run_details_section_open: view.prompt_lab.run_details_section_open,
+                    template_editor_open: view.prompt_lab.template_editor_open,
+                },
+            },
         ));
         tree_state.prev_left_panel_width = view.left_panel_width;
         tree_state.prev_input_panel_visible = view.input_panel_visible;
@@ -403,8 +408,7 @@ pub fn render(
         tree_state.prev_prompt_lab_mode_basic_text = Some(mode_basic_text);
     }
     let mode_advanced_text = select_label("Advanced", view.prompt_lab.advanced_mode);
-    if tree_state.prev_prompt_lab_mode_advanced_text.as_deref()
-        != Some(mode_advanced_text.as_str())
+    if tree_state.prev_prompt_lab_mode_advanced_text.as_deref() != Some(mode_advanced_text.as_str())
     {
         cmds.push(PlatformCommand::SetControlText {
             window_id,
@@ -448,7 +452,9 @@ pub fn render(
     }
     let run_details_section_text =
         select_label("Run details", view.prompt_lab.run_details_section_open);
-    if tree_state.prev_prompt_lab_section_run_details_text.as_deref()
+    if tree_state
+        .prev_prompt_lab_section_run_details_text
+        .as_deref()
         != Some(run_details_section_text.as_str())
     {
         cmds.push(PlatformCommand::SetControlText {

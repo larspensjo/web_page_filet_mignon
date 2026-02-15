@@ -56,55 +56,56 @@ pub struct LlmRunMetadata {
     pub timestamp_utc: String,
 }
 
+pub struct LlmRunMetadataInit {
+    pub prompt_id: PromptId,
+    pub prompt_version: PromptVersion,
+    pub resolved_model: String,
+    pub input_bytes: usize,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub cost_microdollars: u64,
+    pub wall_ms: u64,
+    pub parse_ok: bool,
+    pub validation_error: Option<String>,
+    pub cache_status: CacheStatus,
+    pub timestamp_utc: String,
+}
+
 impl LlmRunMetadata {
     /// Smart constructor — all fields validated at build time.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        prompt_id: PromptId,
-        prompt_version: PromptVersion,
-        resolved_model: String,
-        input_bytes: usize,
-        input_tokens: u32,
-        output_tokens: u32,
-        cost_microdollars: u64,
-        wall_ms: u64,
-        parse_ok: bool,
-        validation_error: Option<String>,
-        cache_status: CacheStatus,
-        timestamp_utc: String,
-    ) -> Self {
+    pub fn new(init: LlmRunMetadataInit) -> Self {
         Self {
-            prompt_id,
-            prompt_version,
-            resolved_model,
-            input_bytes,
-            input_tokens,
-            output_tokens,
-            cost_microdollars,
-            wall_ms,
-            parse_ok,
-            validation_error,
-            cache_status,
-            timestamp_utc,
+            prompt_id: init.prompt_id,
+            prompt_version: init.prompt_version,
+            resolved_model: init.resolved_model,
+            input_bytes: init.input_bytes,
+            input_tokens: init.input_tokens,
+            output_tokens: init.output_tokens,
+            cost_microdollars: init.cost_microdollars,
+            wall_ms: init.wall_ms,
+            parse_ok: init.parse_ok,
+            validation_error: init.validation_error,
+            cache_status: init.cache_status,
+            timestamp_utc: init.timestamp_utc,
         }
     }
 
     /// Test/stub helper — returns a valid instance with sensible defaults.
     pub fn stub() -> Self {
-        Self::new(
-            PromptId::ArticleTriage,
-            1,
-            "gpt-4o-mini".to_string(),
-            100,
-            10,
-            20,
-            300,
-            50,
-            true,
-            None,
-            CacheStatus::Miss,
-            "2026-01-01T00:00:00Z".to_string(),
-        )
+        Self::new(LlmRunMetadataInit {
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: 1,
+            resolved_model: "gpt-4o-mini".to_string(),
+            input_bytes: 100,
+            input_tokens: 10,
+            output_tokens: 20,
+            cost_microdollars: 300,
+            wall_ms: 50,
+            parse_ok: true,
+            validation_error: None,
+            cache_status: CacheStatus::Miss,
+            timestamp_utc: "2026-01-01T00:00:00Z".to_string(),
+        })
     }
 
     /// Test/stub helper — returns a stub with specified overrides.

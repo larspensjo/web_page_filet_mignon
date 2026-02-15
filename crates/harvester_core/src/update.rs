@@ -10,7 +10,9 @@ use crate::{
     },
     calc_left_width, context_hash,
     pre_triage_filter::{PreTriagePhase, PreTriagePolicy, PreTriageSession},
-    prompt_lab::{prompt_id_for_stage, PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage},
+    prompt_lab::{
+        prompt_id_for_stage, PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage,
+    },
     triage::{ArticleTriageResult, TriagePhase, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
@@ -566,7 +568,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                             state
                                 .prompt_lab()
                                 .run_by_id(candidate_run_id)
-                                .map(|run| !matches!(run.status, PromptLabRunStatus::Pending { .. }))
+                                .map(|run| {
+                                    !matches!(run.status, PromptLabRunStatus::Pending { .. })
+                                })
                                 .unwrap_or(false)
                         });
                     if all_dispatched && all_terminal {
@@ -578,7 +582,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 state
                                     .prompt_lab()
                                     .run_by_id(candidate_run_id)
-                                    .map(|run| matches!(run.status, PromptLabRunStatus::Failed { .. }))
+                                    .map(|run| {
+                                        matches!(run.status, PromptLabRunStatus::Failed { .. })
+                                    })
                                     .unwrap_or(false)
                             });
                         let final_status = if has_failed {
@@ -699,9 +705,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             if !state.triage_metadata_ready() {
                 state.mark_triage_metadata_pending();
-                engine_warn!(
-                    "[triage-cache] metadata not ready; loading metadata before dispatch"
-                );
+                engine_warn!("[triage-cache] metadata not ready; loading metadata before dispatch");
                 return (
                     state,
                     vec![Effect::LoadPromptContexts, Effect::LoadLlmMetadata],
@@ -988,13 +992,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             let effects = dispatch_prompt_lab_run(
                 &mut state,
-                stage,
-                prompt_id,
-                input,
-                prompt_version,
-                model_override,
-                None,
-                None,
+                PromptLabDispatchRequest {
+                    stage,
+                    prompt_id,
+                    input_snapshot: input,
+                    prompt_version,
+                    model_override,
+                    compare_batch_id: None,
+                    compare_candidate_id: None,
+                },
             );
             return (state, effects);
         }
@@ -1152,13 +1158,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             let effects = dispatch_prompt_lab_run(
                 &mut state,
-                stage,
-                prompt_id,
-                input,
-                prompt_version,
-                model_override,
-                None,
-                None,
+                PromptLabDispatchRequest {
+                    stage,
+                    prompt_id,
+                    input_snapshot: input,
+                    prompt_version,
+                    model_override,
+                    compare_batch_id: None,
+                    compare_candidate_id: None,
+                },
             );
             return (state, effects);
         }
@@ -1249,13 +1257,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let model_override = state.prompt_lab().selected_model_override().cloned();
             let effects = dispatch_prompt_lab_run(
                 &mut state,
-                stage,
-                prompt_id,
-                input,
-                prompt_version,
-                model_override,
-                None,
-                None,
+                PromptLabDispatchRequest {
+                    stage,
+                    prompt_id,
+                    input_snapshot: input,
+                    prompt_version,
+                    model_override,
+                    compare_batch_id: None,
+                    compare_candidate_id: None,
+                },
             );
             return (state, effects);
         }
@@ -1277,13 +1287,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let model_override = latest.model_override.clone();
             let effects = dispatch_prompt_lab_run(
                 &mut state,
-                stage,
-                prompt_id,
-                input_snapshot,
-                prompt_version,
-                model_override,
-                None,
-                None,
+                PromptLabDispatchRequest {
+                    stage,
+                    prompt_id,
+                    input_snapshot,
+                    prompt_version,
+                    model_override,
+                    compare_batch_id: None,
+                    compare_candidate_id: None,
+                },
             );
             return (state, effects);
         }
@@ -1313,10 +1325,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::PromptLabCompareCandidateRemoved { candidate_id } => {
-            if state
-                .prompt_lab_mut()
-                .remove_draft_candidate(candidate_id)
-            {
+            if state.prompt_lab_mut().remove_draft_candidate(candidate_id) {
                 state.mark_dirty();
             }
             Vec::new()
@@ -1383,7 +1392,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if let Some(run) = state.prompt_lab_mut().run_by_id_mut(run_id) {
                 run.operator_rating = Some(rating);
                 if let Some(batch_id) = run.compare_batch_id {
-                    state.prompt_lab_mut().recompute_auto_select_for_batch(batch_id);
+                    state
+                        .prompt_lab_mut()
+                        .recompute_auto_select_for_batch(batch_id);
                 }
                 state.mark_dirty();
             }
@@ -1415,8 +1426,14 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::PromptLabCompareAutoSelectRequested => {
-            if let Some(batch_id) = state.prompt_lab().active_batch().map(|batch| batch.batch_id) {
-                state.prompt_lab_mut().recompute_auto_select_for_batch(batch_id);
+            if let Some(batch_id) = state
+                .prompt_lab()
+                .active_batch()
+                .map(|batch| batch.batch_id)
+            {
+                state
+                    .prompt_lab_mut()
+                    .recompute_auto_select_for_batch(batch_id);
                 state.mark_dirty();
             }
             Vec::new()
@@ -1438,17 +1455,20 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
 
     (state, effects)
 }
-#[allow(clippy::too_many_arguments)]
+
 fn dispatch_prompt_lab_run(
     state: &mut AppState,
-    stage: PromptLabStage,
-    prompt_id: PromptId,
-    input_snapshot: String,
-    prompt_version: Option<PromptVersion>,
-    model_override: Option<ModelId>,
-    compare_batch_id: Option<crate::prompt_lab::PromptLabCompareBatchId>,
-    compare_candidate_id: Option<u64>,
+    dispatch: PromptLabDispatchRequest,
 ) -> Vec<Effect> {
+    let PromptLabDispatchRequest {
+        stage,
+        prompt_id,
+        input_snapshot,
+        prompt_version,
+        model_override,
+        compare_batch_id,
+        compare_candidate_id,
+    } = dispatch;
     let request_id = state.allocate_next_llm_request_id();
     let run_id = state.allocate_next_prompt_lab_run_id();
     let context = state
@@ -1459,17 +1479,19 @@ fn dispatch_prompt_lab_run(
     let pending_prompt_version = prompt_version;
     let pending_model_override = model_override.clone();
     state.record_pending_llm_request(request_id, prompt_id);
-    state.add_prompt_lab_pending_run(
+    state.add_prompt_lab_pending_run(crate::state::PromptLabPendingRunRegistration {
         run_id,
         stage,
         prompt_id,
-        input_snapshot.clone(),
+        input_snapshot: input_snapshot.clone(),
         request_id,
-        pending_prompt_version,
-        pending_model_override,
+        overrides: crate::prompt_lab::PromptLabRunOverrides {
+            prompt_version_used: pending_prompt_version,
+            model_override: pending_model_override,
+        },
         compare_batch_id,
         compare_candidate_id,
-    );
+    });
     state.mark_dirty();
     engine_info!(
         "[prompt-lab] run requested run_id={} request_id={} stage={:?}",
@@ -1486,6 +1508,16 @@ fn dispatch_prompt_lab_run(
         context,
         template_override: state.prompt_lab().applied_template_override(prompt_id),
     }]
+}
+
+struct PromptLabDispatchRequest {
+    stage: PromptLabStage,
+    prompt_id: PromptId,
+    input_snapshot: String,
+    prompt_version: Option<PromptVersion>,
+    model_override: Option<ModelId>,
+    compare_batch_id: Option<crate::prompt_lab::PromptLabCompareBatchId>,
+    compare_candidate_id: Option<u64>,
 }
 
 fn dispatch_next_compare_candidate(
@@ -1507,13 +1539,15 @@ fn dispatch_next_compare_candidate(
     let input_snapshot = batch.input_snapshot.clone();
     let effects = dispatch_prompt_lab_run(
         state,
-        candidate.stage,
-        candidate.prompt_id,
-        input_snapshot,
-        candidate.prompt_version,
-        candidate.model_override.clone(),
-        Some(batch_id),
-        Some(candidate.candidate_id),
+        PromptLabDispatchRequest {
+            stage: candidate.stage,
+            prompt_id: candidate.prompt_id,
+            input_snapshot,
+            prompt_version: candidate.prompt_version,
+            model_override: candidate.model_override.clone(),
+            compare_batch_id: Some(batch_id),
+            compare_candidate_id: Some(candidate.candidate_id),
+        },
     );
     if let Some(run_id) = state.prompt_lab().latest_run().map(|run| run.run_id) {
         state
@@ -2076,7 +2110,12 @@ mod tests {
 
     fn loaded_articles() -> (Vec<LoadedArticle>, String) {
         fn long_text(prefix: &str) -> String {
-            format!("{prefix} {}", std::iter::repeat_n("content", 220).collect::<Vec<_>>().join(" "))
+            format!(
+                "{prefix} {}",
+                std::iter::repeat_n("content", 220)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
         }
         let articles = vec![
             LoadedArticle {
@@ -2101,7 +2140,9 @@ mod tests {
             source_title: Some("Article A".to_string()),
             prepared_text: format!(
                 "Article A text {}",
-                std::iter::repeat_n("content", 220).collect::<Vec<_>>().join(" ")
+                std::iter::repeat_n("content", 220)
+                    .collect::<Vec<_>>()
+                    .join(" ")
             ),
             content_hash: "hash-a".to_string(),
         }];
@@ -2608,7 +2649,10 @@ mod tests {
         }
     }
 
-    fn start_triage_for_test(state: AppState, articles: Vec<LoadedArticle>) -> (AppState, Vec<Effect>) {
+    fn start_triage_for_test(
+        state: AppState,
+        articles: Vec<LoadedArticle>,
+    ) -> (AppState, Vec<Effect>) {
         let mut active_versions = std::collections::HashMap::new();
         active_versions.insert(PromptId::ArticleTriage, 1);
         let mut effective_models = std::collections::HashMap::new();
@@ -3112,11 +3156,9 @@ mod tests {
             state.prompt_lab().url_input(),
             "https://example.com/article"
         );
-        assert!(
-            effects
-                .iter()
-                .any(|effect| matches!(effect, Effect::ResolvePromptLabInputFromUrl { .. }))
-        );
+        assert!(effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ResolvePromptLabInputFromUrl { .. })));
     }
 
     #[test]
@@ -3313,17 +3355,16 @@ mod tests {
         // Add a completed run manually
         let rid = state.allocate_next_llm_request_id();
         let run = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(
-            run,
-            PromptLabStage::Triage,
-            PromptId::ArticleTriage,
-            "x".to_string(),
-            rid,
-            None,
-            None,
-            None,
-            None,
-        );
+        state.add_prompt_lab_pending_run(crate::state::PromptLabPendingRunRegistration {
+            run_id: run,
+            stage: PromptLabStage::Triage,
+            prompt_id: PromptId::ArticleTriage,
+            input_snapshot: "x".to_string(),
+            request_id: rid,
+            overrides: crate::prompt_lab::PromptLabRunOverrides::default(),
+            compare_batch_id: None,
+            compare_candidate_id: None,
+        });
         state.complete_prompt_lab_run(run, "{}".to_string(), LlmRunMetadata::stub());
         state.consume_prompt_lab_ownership(rid);
         assert_eq!(state.prompt_lab().run_count(), 1);
@@ -3697,13 +3738,15 @@ mod tests {
         assert!(state.prompt_lab_mut().apply_context_draft(prompt_id));
         let effects = dispatch_prompt_lab_run(
             &mut state,
-            PromptLabStage::Triage,
-            prompt_id,
-            "input".to_string(),
-            None,
-            None,
-            None,
-            None,
+            PromptLabDispatchRequest {
+                stage: PromptLabStage::Triage,
+                prompt_id,
+                input_snapshot: "input".to_string(),
+                prompt_version: None,
+                model_override: None,
+                compare_batch_id: None,
+                compare_candidate_id: None,
+            },
         );
         assert_eq!(effects.len(), 1);
         if let Effect::RequestLlmCompletion { context, .. } = &effects[0] {
@@ -3724,13 +3767,15 @@ mod tests {
         // Do not apply any overlay.
         let effects = dispatch_prompt_lab_run(
             &mut state,
-            PromptLabStage::Triage,
-            prompt_id,
-            "input".to_string(),
-            None,
-            None,
-            None,
-            None,
+            PromptLabDispatchRequest {
+                stage: PromptLabStage::Triage,
+                prompt_id,
+                input_snapshot: "input".to_string(),
+                prompt_version: None,
+                model_override: None,
+                compare_batch_id: None,
+                compare_candidate_id: None,
+            },
         );
         assert_eq!(effects.len(), 1);
         if let Effect::RequestLlmCompletion { context, .. } = &effects[0] {

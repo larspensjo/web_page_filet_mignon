@@ -2,9 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::{
-    ArticleFilterKey, CompletedJobSnapshot, LinkSnapshotRecord, ManualDecision,
-};
+use harvester_core::{ArticleFilterKey, CompletedJobSnapshot, LinkSnapshotRecord, ManualDecision};
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
 

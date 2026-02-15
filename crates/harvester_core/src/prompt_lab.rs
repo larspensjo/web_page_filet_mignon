@@ -100,6 +100,12 @@ pub struct PromptLabRunRecord {
     pub operator_rating: Option<u8>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PromptLabRunOverrides {
+    pub prompt_version_used: Option<PromptVersion>,
+    pub model_override: Option<ModelId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PromptLabCompareBatchStatus {
     Running { dispatched: u32, total: u32 },
@@ -636,7 +642,6 @@ impl PromptLabState {
     }
 
     /// Register a new pending run record.
-    #[allow(clippy::too_many_arguments)]
     pub fn add_pending_run(
         &mut self,
         run_id: PromptLabRunId,
@@ -644,8 +649,7 @@ impl PromptLabState {
         prompt_id: PromptId,
         input_snapshot: String,
         request_id: u64,
-        prompt_version_used: Option<PromptVersion>,
-        model_override: Option<ModelId>,
+        overrides: PromptLabRunOverrides,
     ) {
         let record = PromptLabRunRecord {
             run_id,
@@ -653,8 +657,8 @@ impl PromptLabState {
             prompt_id,
             input_snapshot,
             status: PromptLabRunStatus::Pending { request_id },
-            prompt_version_used,
-            model_override,
+            prompt_version_used: overrides.prompt_version_used,
+            model_override: overrides.model_override,
             compare_batch_id: None,
             compare_candidate_id: None,
             operator_rating: None,
@@ -744,7 +748,10 @@ impl PromptLabState {
             .unwrap_or(false)
     }
 
-    pub fn add_draft_candidate_from_current(&mut self, label: Option<String>) -> Result<u64, String> {
+    pub fn add_draft_candidate_from_current(
+        &mut self,
+        label: Option<String>,
+    ) -> Result<u64, String> {
         if self.has_active_batch() {
             return Err("batch already running".to_string());
         }
@@ -790,7 +797,10 @@ impl PromptLabState {
         Ok(candidate_id)
     }
 
-    pub fn freeze_batch(&mut self, input_snapshot: String) -> Result<PromptLabCompareBatchId, String> {
+    pub fn freeze_batch(
+        &mut self,
+        input_snapshot: String,
+    ) -> Result<PromptLabCompareBatchId, String> {
         if self.draft_candidates.len() < 2 {
             return Err("compare needs at least two candidates".to_string());
         }
@@ -895,7 +905,11 @@ impl PromptLabState {
         updated
     }
 
-    pub fn set_batch_status(&mut self, batch_id: PromptLabCompareBatchId, status: PromptLabCompareBatchStatus) -> bool {
+    pub fn set_batch_status(
+        &mut self,
+        batch_id: PromptLabCompareBatchId,
+        status: PromptLabCompareBatchStatus,
+    ) -> bool {
         if let Some(batch) = self.batches.iter_mut().find(|b| b.batch_id == batch_id) {
             batch.status = status;
             return true;
@@ -926,7 +940,10 @@ impl PromptLabState {
             .filter_map(|(candidate_id, run_id)| {
                 let run_id = (*run_id)?;
                 let run = self.run_by_id(run_id)?;
-                let candidate = batch.candidates.iter().find(|c| c.candidate_id == *candidate_id)?;
+                let candidate = batch
+                    .candidates
+                    .iter()
+                    .find(|c| c.candidate_id == *candidate_id)?;
                 Some((run_id, run, candidate))
             });
         let (winner, warning) = cheap_enough_select(scored, &policy);
@@ -1161,7 +1178,13 @@ impl PromptLabState {
 }
 
 pub fn cheap_enough_select<'a>(
-    candidates: impl Iterator<Item = (PromptLabRunId, &'a PromptLabRunRecord, &'a PromptLabCompareCandidate)>,
+    candidates: impl Iterator<
+        Item = (
+            PromptLabRunId,
+            &'a PromptLabRunRecord,
+            &'a PromptLabCompareCandidate,
+        ),
+    >,
     policy: &PromptLabComparePolicy,
 ) -> (Option<PromptLabRunId>, Option<String>) {
     let rows = candidates.collect::<Vec<_>>();
@@ -1204,7 +1227,9 @@ pub fn cheap_enough_select<'a>(
     let cost_ok = parse_ok
         .into_iter()
         .filter(|(_, run, _)| match policy.max_cost_microdollars {
-            Some(limit) => run_metadata(run).map(|m| m.cost_microdollars <= limit).unwrap_or(false),
+            Some(limit) => run_metadata(run)
+                .map(|m| m.cost_microdollars <= limit)
+                .unwrap_or(false),
             None => true,
         })
         .collect::<Vec<_>>();
@@ -1214,7 +1239,9 @@ pub fn cheap_enough_select<'a>(
     let mut wall_ok = cost_ok
         .into_iter()
         .filter(|(_, run, _)| match policy.max_wall_ms {
-            Some(limit) => run_metadata(run).map(|m| m.wall_ms <= limit).unwrap_or(false),
+            Some(limit) => run_metadata(run)
+                .map(|m| m.wall_ms <= limit)
+                .unwrap_or(false),
             None => true,
         })
         .collect::<Vec<_>>();
@@ -1301,8 +1328,7 @@ mod tests {
             make_prompt_id(),
             "hello".to_string(),
             42,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         let r = s.latest_run().unwrap();
         assert!(matches!(
@@ -1322,8 +1348,7 @@ mod tests {
             make_prompt_id(),
             "x".to_string(),
             10,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         s.complete_run(run_id, "{}".to_string(), LlmRunMetadata::stub());
         let r = s.latest_run().unwrap();
@@ -1340,8 +1365,7 @@ mod tests {
             make_prompt_id(),
             "x".to_string(),
             10,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         s.fail_run(run_id, "something broke".to_string(), None);
         let r = s.latest_run().unwrap();
@@ -1358,8 +1382,7 @@ mod tests {
             make_prompt_id(),
             "x".to_string(),
             10,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         s.complete_run(run_id, "{}".to_string(), LlmRunMetadata::stub());
         // Calling complete_run again on a Completed record is a no-op.
@@ -1382,8 +1405,7 @@ mod tests {
             make_prompt_id(),
             "a".to_string(),
             10,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         s.complete_run(r1, "{}".to_string(), LlmRunMetadata::stub());
         s.consume_ownership(10);
@@ -1395,8 +1417,7 @@ mod tests {
             make_prompt_id(),
             "b".to_string(),
             11,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         s.fail_run(r2, "err".to_string(), None);
         s.consume_ownership(11);
@@ -1408,8 +1429,7 @@ mod tests {
             make_prompt_id(),
             "c".to_string(),
             12,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
 
         s.clear_history();
@@ -1439,8 +1459,7 @@ mod tests {
             make_prompt_id(),
             "x".to_string(),
             10,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         s.consume_ownership(10);
         assert!(s.ownership_for(10).is_none());
@@ -1499,8 +1518,7 @@ mod tests {
             make_prompt_id(),
             "x".to_string(),
             10,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         s.fail_run(run_id, "oops".to_string(), Some(metadata.clone()));
         let record = s.latest_run().unwrap();
@@ -1617,8 +1635,7 @@ mod tests {
             PromptId::ArticleTriage,
             "in".to_string(),
             10,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         state.complete_run(run_1, "{}".to_string(), LlmRunMetadata::stub());
         state.consume_ownership(10);
@@ -1629,8 +1646,7 @@ mod tests {
             PromptId::ArticleTriage,
             "in".to_string(),
             11,
-            None,
-            None,
+            PromptLabRunOverrides::default(),
         );
         state.complete_run(run_2, "{}".to_string(), LlmRunMetadata::stub());
         state.consume_ownership(11);

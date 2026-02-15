@@ -675,8 +675,7 @@ mod tests {
             PromptId::ArticleTriage,
             "input".to_string(),
             1,
-            None,
-            None,
+            crate::prompt_lab::PromptLabRunOverrides::default(),
         );
         run_id
     }
@@ -726,7 +725,10 @@ mod tests {
         let contexts = HashMap::new();
         let view = PromptLabView::from_state(&state, &contexts, &HashMap::new(), false);
         assert!(!view.can_run);
-        assert_eq!(view.run_disabled_reason, Some("Enter URL and resolve input"));
+        assert_eq!(
+            view.run_disabled_reason,
+            Some("Enter URL and resolve input")
+        );
     }
 
     #[test]
@@ -746,7 +748,10 @@ mod tests {
         let contexts = HashMap::new();
         let view = PromptLabView::from_state(&state, &contexts, &HashMap::new(), false);
         assert!(!view.can_run);
-        assert_eq!(view.run_disabled_reason, Some("Enter URL and resolve input"));
+        assert_eq!(
+            view.run_disabled_reason,
+            Some("Enter URL and resolve input")
+        );
     }
 
     #[test]

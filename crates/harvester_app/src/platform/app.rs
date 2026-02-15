@@ -518,7 +518,9 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_COMPARE_ADD_CURRENT =>
             {
-                let _ = self.msg_tx.send(Msg::PromptLabCompareCurrentSettingsCaptured);
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabCompareCurrentSettingsCaptured);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_COMPARE_ADD_BASELINE =>
@@ -1052,7 +1054,8 @@ mod tests {
             control_id: ui::constants::BTN_COMPARE_START,
         });
         assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("add current"),
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("add current"),
             Msg::PromptLabCompareCurrentSettingsCaptured
         );
         assert_eq!(
@@ -1094,7 +1097,8 @@ mod tests {
             control_id: ui::constants::BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
         });
         assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("advanced"),
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("advanced"),
             Msg::PromptLabAdvancedModeSet { enabled: true }
         );
         assert_eq!(

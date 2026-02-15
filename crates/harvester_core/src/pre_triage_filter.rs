@@ -135,16 +135,22 @@ impl PreTriagePolicy {
             reasons.push(FilterReason::PaywallShellTitle);
         }
 
-        let hard_exclude = reasons
-            .iter()
-            .any(|r| matches!(r, FilterReason::BlockedHost | FilterReason::VerySmallContent | FilterReason::PaywallShellTitle));
+        let hard_exclude = reasons.iter().any(|r| {
+            matches!(
+                r,
+                FilterReason::BlockedHost
+                    | FilterReason::VerySmallContent
+                    | FilterReason::PaywallShellTitle
+            )
+        });
         if hard_exclude {
             reasons.sort_unstable_by_key(|reason| reason.sort_key());
             reasons.dedup();
             return (AutoVerdict::HardExclude, reasons);
         }
 
-        if (self.review_word_count_min..self.review_word_count_max_exclusive).contains(&word_count) {
+        if (self.review_word_count_min..self.review_word_count_max_exclusive).contains(&word_count)
+        {
             reasons.push(FilterReason::SmallMediumContent);
         }
         if boilerplate_hits >= self.review_boilerplate_hits {
@@ -298,7 +304,11 @@ impl PreTriageSession {
     pub fn manual_overrides(&self) -> HashMap<ArticleFilterKey, ManualDecision> {
         self.entries
             .iter()
-            .filter_map(|entry| entry.manual_decision.map(|decision| (entry.key.clone(), decision)))
+            .filter_map(|entry| {
+                entry
+                    .manual_decision
+                    .map(|decision| (entry.key.clone(), decision))
+            })
             .collect()
     }
 
@@ -441,8 +451,11 @@ mod tests {
     #[test]
     fn youtube_host_is_hard_excluded() {
         let policy = PreTriagePolicy::default();
-        let (verdict, reasons) =
-            policy.evaluate(&article("https://youtube.com/watch?v=1", None, "long enough body text"));
+        let (verdict, reasons) = policy.evaluate(&article(
+            "https://youtube.com/watch?v=1",
+            None,
+            "long enough body text",
+        ));
         assert_eq!(verdict, AutoVerdict::HardExclude);
         assert!(reasons.contains(&FilterReason::BlockedHost));
     }
@@ -489,8 +502,10 @@ mod tests {
     #[test]
     fn manual_include_overrides_hard_exclude() {
         let policy = PreTriagePolicy::default();
-        let mut session =
-            PreTriageSession::load_articles(vec![article("https://youtube.com/watch?v=1", None, "x")], &policy);
+        let mut session = PreTriageSession::load_articles(
+            vec![article("https://youtube.com/watch?v=1", None, "x")],
+            &policy,
+        );
         let key = session.entries()[0].key.clone();
         session.phase = PreTriagePhase::Reviewing;
         assert!(session
@@ -506,9 +521,13 @@ mod tests {
     #[test]
     fn manual_exclude_overrides_auto_include() {
         let policy = PreTriagePolicy::default();
-        let body = std::iter::repeat_n("word", 300).collect::<Vec<_>>().join(" ");
-        let mut session =
-            PreTriageSession::load_articles(vec![article("https://example.com", None, &body)], &policy);
+        let body = std::iter::repeat_n("word", 300)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut session = PreTriageSession::load_articles(
+            vec![article("https://example.com", None, &body)],
+            &policy,
+        );
         session.phase = PreTriagePhase::Reviewing;
         let key = session.entries()[0].key.clone();
         assert!(session
@@ -539,17 +558,23 @@ mod tests {
     #[test]
     fn policy_with_no_review_entries_fast_paths_to_ready() {
         let policy = PreTriagePolicy::default();
-        let body = std::iter::repeat_n("word", 300).collect::<Vec<_>>().join(" ");
-        let session =
-            PreTriageSession::load_articles(vec![article("https://example.com", None, &body)], &policy);
+        let body = std::iter::repeat_n("word", 300)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let session = PreTriageSession::load_articles(
+            vec![article("https://example.com", None, &body)],
+            &policy,
+        );
         assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
     }
 
     #[test]
     fn zero_included_articles_produces_failed_phase() {
         let policy = PreTriagePolicy::default();
-        let session =
-            PreTriageSession::load_articles(vec![article("https://youtube.com/watch?v=1", None, "x")], &policy);
+        let session = PreTriageSession::load_articles(
+            vec![article("https://youtube.com/watch?v=1", None, "x")],
+            &policy,
+        );
         assert!(matches!(session.phase(), PreTriagePhase::Failed { .. }));
     }
 
@@ -559,8 +584,10 @@ mod tests {
         let body = std::iter::repeat_n("contentword", 100)
             .collect::<Vec<_>>()
             .join(" ");
-        let mut session =
-            PreTriageSession::load_articles(vec![article("https://example.com", None, &body)], &policy);
+        let mut session = PreTriageSession::load_articles(
+            vec![article("https://example.com", None, &body)],
+            &policy,
+        );
         session.phase = PreTriagePhase::ReadyToTriage;
         let before = session.corpus_fingerprint();
         let key = session.entries()[0].key.clone();
