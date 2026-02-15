@@ -1,5 +1,5 @@
-use std::sync::Once;
 use std::collections::HashMap;
+use std::sync::Once;
 
 use harvester_core::{update, AppState, Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg};
 use harvester_engine::llm::prompt::PromptId;
@@ -145,6 +145,7 @@ fn with_triage_metadata_ready(state: AppState) -> AppState {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
+            templates: HashMap::new(),
         },
     );
     state
@@ -349,11 +350,9 @@ fn triage_rerun_after_complete_reuses_cache_when_available() {
         },
     );
     let (state, effects) = update(state, Msg::TriageClicked);
-    assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::RequestLlmCompletion { .. }))
-    );
+    assert!(!effects
+        .iter()
+        .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
     assert!(state.view().triage_can_start);
 }
 

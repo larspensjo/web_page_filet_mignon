@@ -10,8 +10,10 @@ use crate::{
     },
     calc_left_width, context_hash,
     pre_triage_filter::{PreTriagePhase, PreTriagePolicy, PreTriageSession},
-    prompt_lab::{prompt_id_for_stage, PromptLabInputSource, PromptLabRunStatus, PromptLabStage},
-    triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession},
+    prompt_lab::{
+        prompt_id_for_stage, PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage,
+    },
+    triage::{ArticleTriageResult, TriagePhase, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
@@ -170,7 +172,24 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::JobSelected { job_id } => {
             state.select_job(job_id);
-            Vec::new()
+            let Some(url) = state.selected_job_url() else {
+                return (state, Vec::new());
+            };
+            let url_changed = state.prompt_lab().url_input() != url;
+            if url_changed {
+                state.prompt_lab_mut().set_url_input(url.clone());
+                state.mark_dirty();
+            }
+            let should_resolve = state.prompt_lab().pending_resolve_id().is_none()
+                && (url_changed || state.prompt_lab().resolved_url_snapshot().is_none());
+            if should_resolve {
+                let resolve_id = state.allocate_next_prompt_lab_resolve_id();
+                state.prompt_lab_mut().begin_url_resolution(resolve_id);
+                state.mark_dirty();
+                vec![Effect::ResolvePromptLabInputFromUrl { resolve_id, url }]
+            } else {
+                Vec::new()
+            }
         }
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
@@ -525,6 +544,65 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     }
                 }
                 state.consume_prompt_lab_ownership(request_id);
+                let compare_batch_id = state
+                    .prompt_lab()
+                    .run_by_id(run_id)
+                    .and_then(|run| run.compare_batch_id);
+                if let Some(batch_id) = compare_batch_id {
+                    let Some(batch) = state
+                        .prompt_lab()
+                        .batches()
+                        .iter()
+                        .find(|batch| batch.batch_id == batch_id)
+                        .cloned()
+                    else {
+                        state.mark_dirty();
+                        return (state, effects);
+                    };
+                    let all_dispatched = batch.pending_candidate_count() == 0;
+                    let all_terminal = batch
+                        .candidate_run_ids
+                        .iter()
+                        .filter_map(|(_, maybe_run)| *maybe_run)
+                        .all(|candidate_run_id| {
+                            state
+                                .prompt_lab()
+                                .run_by_id(candidate_run_id)
+                                .map(|run| {
+                                    !matches!(run.status, PromptLabRunStatus::Pending { .. })
+                                })
+                                .unwrap_or(false)
+                        });
+                    if all_dispatched && all_terminal {
+                        let has_failed = batch
+                            .candidate_run_ids
+                            .iter()
+                            .filter_map(|(_, maybe_run)| *maybe_run)
+                            .any(|candidate_run_id| {
+                                state
+                                    .prompt_lab()
+                                    .run_by_id(candidate_run_id)
+                                    .map(|run| {
+                                        matches!(run.status, PromptLabRunStatus::Failed { .. })
+                                    })
+                                    .unwrap_or(false)
+                            });
+                        let final_status = if has_failed {
+                            PromptLabCompareBatchStatus::PartialFailure
+                        } else {
+                            PromptLabCompareBatchStatus::AllComplete
+                        };
+                        state
+                            .prompt_lab_mut()
+                            .set_batch_status(batch_id, final_status);
+                        state
+                            .prompt_lab_mut()
+                            .recompute_auto_select_for_batch(batch_id);
+                        state.prompt_lab_mut().clear_active_batch_if(batch_id);
+                    } else {
+                        effects.extend(dispatch_next_compare_candidate(&mut state, batch_id));
+                    }
+                }
                 state.mark_dirty();
             }
             effects
@@ -627,9 +705,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             if !state.triage_metadata_ready() {
                 state.mark_triage_metadata_pending();
-                engine_warn!(
-                    "[triage-cache] metadata not ready; loading metadata before dispatch"
-                );
+                engine_warn!("[triage-cache] metadata not ready; loading metadata before dispatch");
                 return (
                     state,
                     vec![Effect::LoadPromptContexts, Effect::LoadLlmMetadata],
@@ -784,6 +860,31 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
+        Msg::PromptLabAdvancedModeSet { enabled } => {
+            state.prompt_lab_mut().set_advanced_mode(enabled);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabCompareSectionToggled => {
+            state.prompt_lab_mut().toggle_compare_section();
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabContextSectionToggled => {
+            state.prompt_lab_mut().toggle_context_section();
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabTemplateSectionToggled => {
+            state.prompt_lab_mut().toggle_template_section();
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabRunDetailsSectionToggled => {
+            state.prompt_lab_mut().toggle_run_details_section();
+            state.mark_dirty();
+            Vec::new()
+        }
         Msg::PromptLabUrlInputChanged { url } => {
             state.prompt_lab_mut().set_url_input(url);
             state.mark_dirty();
@@ -875,13 +976,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
             }
-            let snapshot = match state.prompt_lab().selected_input_source() {
-                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
-                PromptLabInputSource::TypeUrl => state
-                    .prompt_lab()
-                    .resolved_url_snapshot()
-                    .map(ToOwned::to_owned),
-            };
+            let snapshot = state
+                .prompt_lab()
+                .resolved_url_snapshot()
+                .map(ToOwned::to_owned);
             let input = match snapshot {
                 Some(text) => text,
                 None => return (state, Vec::new()),
@@ -894,11 +992,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             let effects = dispatch_prompt_lab_run(
                 &mut state,
-                stage,
-                prompt_id,
-                input,
-                prompt_version,
-                model_override,
+                PromptLabDispatchRequest {
+                    stage,
+                    prompt_id,
+                    input_snapshot: input,
+                    prompt_version,
+                    model_override,
+                    compare_batch_id: None,
+                    compare_candidate_id: None,
+                },
             );
             return (state, effects);
         }
@@ -1040,13 +1142,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
             }
-            let snapshot = match state.prompt_lab().selected_input_source() {
-                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
-                PromptLabInputSource::TypeUrl => state
-                    .prompt_lab()
-                    .resolved_url_snapshot()
-                    .map(ToOwned::to_owned),
-            };
+            let snapshot = state
+                .prompt_lab()
+                .resolved_url_snapshot()
+                .map(ToOwned::to_owned);
             let input = match snapshot {
                 Some(text) => text,
                 None => return (state, Vec::new()),
@@ -1059,11 +1158,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             let effects = dispatch_prompt_lab_run(
                 &mut state,
-                stage,
-                prompt_id,
-                input,
-                prompt_version,
-                model_override,
+                PromptLabDispatchRequest {
+                    stage,
+                    prompt_id,
+                    input_snapshot: input,
+                    prompt_version,
+                    model_override,
+                    compare_batch_id: None,
+                    compare_candidate_id: None,
+                },
             );
             return (state, effects);
         }
@@ -1137,13 +1240,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
             }
-            let snapshot = match state.prompt_lab().selected_input_source() {
-                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
-                PromptLabInputSource::TypeUrl => state
-                    .prompt_lab()
-                    .resolved_url_snapshot()
-                    .map(ToOwned::to_owned),
-            };
+            let snapshot = state
+                .prompt_lab()
+                .resolved_url_snapshot()
+                .map(ToOwned::to_owned);
             let input = match snapshot {
                 Some(text) => text,
                 None => return (state, Vec::new()),
@@ -1157,11 +1257,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let model_override = state.prompt_lab().selected_model_override().cloned();
             let effects = dispatch_prompt_lab_run(
                 &mut state,
-                stage,
-                prompt_id,
-                input,
-                prompt_version,
-                model_override,
+                PromptLabDispatchRequest {
+                    stage,
+                    prompt_id,
+                    input_snapshot: input,
+                    prompt_version,
+                    model_override,
+                    compare_batch_id: None,
+                    compare_candidate_id: None,
+                },
             );
             return (state, effects);
         }
@@ -1183,11 +1287,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let model_override = latest.model_override.clone();
             let effects = dispatch_prompt_lab_run(
                 &mut state,
-                stage,
-                prompt_id,
-                input_snapshot,
-                prompt_version,
-                model_override,
+                PromptLabDispatchRequest {
+                    stage,
+                    prompt_id,
+                    input_snapshot,
+                    prompt_version,
+                    model_override,
+                    compare_batch_id: None,
+                    compare_candidate_id: None,
+                },
             );
             return (state, effects);
         }
@@ -1195,19 +1303,172 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.clear_prompt_lab_history();
             Vec::new()
         }
+        Msg::PromptLabCompareDraftReset => {
+            state.prompt_lab_mut().clear_draft_candidates();
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabCompareCurrentSettingsCaptured => {
+            if state
+                .prompt_lab_mut()
+                .add_draft_candidate_from_current(None)
+                .is_ok()
+            {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabCompareBaselineCaptured => {
+            if state.prompt_lab_mut().add_baseline_candidate(None).is_ok() {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabCompareCandidateRemoved { candidate_id } => {
+            if state.prompt_lab_mut().remove_draft_candidate(candidate_id) {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabCompareCandidateLabelChanged {
+            candidate_id,
+            label,
+        } => {
+            if state
+                .prompt_lab_mut()
+                .rename_draft_candidate(candidate_id, label)
+            {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabCompareBatchStartRequested | Msg::PromptLabCompareBatchConfirmedStart => {
+            if state.prompt_lab().has_in_flight_run() {
+                return (state, Vec::new());
+            }
+            let snapshot = state
+                .prompt_lab()
+                .resolved_url_snapshot()
+                .map(ToOwned::to_owned);
+            let input = match snapshot {
+                Some(text) => text,
+                None => return (state, Vec::new()),
+            };
+            let batch_id = match state.prompt_lab_mut().freeze_batch(input.clone()) {
+                Ok(batch_id) => batch_id,
+                Err(_) => return (state, Vec::new()),
+            };
+            let effects = dispatch_next_compare_candidate(&mut state, batch_id);
+            state.mark_dirty();
+            effects
+        }
+        Msg::PromptLabCompareBatchCancelRequested => {
+            if let Some(batch) = state.prompt_lab_mut().active_batch_mut() {
+                batch.status = PromptLabCompareBatchStatus::Cancelled;
+                let batch_id = batch.batch_id;
+                state.prompt_lab_mut().clear_active_batch_if(batch_id);
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabCompareWinnerSelected { run_id } => {
+            if let Some(batch) = state.prompt_lab_mut().active_batch_mut() {
+                batch.selected_run_id = Some(run_id);
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabCompareWinnerCleared => {
+            if let Some(batch) = state.prompt_lab_mut().active_batch_mut() {
+                batch.selected_run_id = None;
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabCompareRunRated { run_id, rating } => {
+            if !(1..=5).contains(&rating) {
+                return (state, Vec::new());
+            }
+            if let Some(run) = state.prompt_lab_mut().run_by_id_mut(run_id) {
+                run.operator_rating = Some(rating);
+                if let Some(batch_id) = run.compare_batch_id {
+                    state
+                        .prompt_lab_mut()
+                        .recompute_auto_select_for_batch(batch_id);
+                }
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabComparePolicyUpdated {
+            require_parse_ok,
+            max_cost_microdollars,
+            max_wall_ms,
+            rating_beats_cost,
+        } => {
+            let lab = state.prompt_lab_mut();
+            if let Some(value) = require_parse_ok {
+                lab.compare_policy.require_parse_ok = value;
+            }
+            if let Some(value) = max_cost_microdollars {
+                lab.compare_policy.max_cost_microdollars = value;
+            }
+            if let Some(value) = max_wall_ms {
+                lab.compare_policy.max_wall_ms = value;
+            }
+            if let Some(value) = rating_beats_cost {
+                lab.compare_policy.rating_beats_cost = value;
+            }
+            if let Some(batch_id) = lab.active_batch().map(|batch| batch.batch_id) {
+                lab.recompute_auto_select_for_batch(batch_id);
+            }
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabCompareAutoSelectRequested => {
+            if let Some(batch_id) = state
+                .prompt_lab()
+                .active_batch()
+                .map(|batch| batch.batch_id)
+            {
+                state
+                    .prompt_lab_mut()
+                    .recompute_auto_select_for_batch(batch_id);
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PromptLabCompareBatchSetWarning { batch_id, warning } => {
+            if let Some(batch) = state
+                .prompt_lab_mut()
+                .batches
+                .iter_mut()
+                .find(|batch| batch.batch_id == batch_id)
+            {
+                batch.warning = warning;
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 
     (state, effects)
 }
+
 fn dispatch_prompt_lab_run(
     state: &mut AppState,
-    stage: PromptLabStage,
-    prompt_id: PromptId,
-    input_snapshot: String,
-    prompt_version: Option<PromptVersion>,
-    model_override: Option<ModelId>,
+    dispatch: PromptLabDispatchRequest,
 ) -> Vec<Effect> {
+    let PromptLabDispatchRequest {
+        stage,
+        prompt_id,
+        input_snapshot,
+        prompt_version,
+        model_override,
+        compare_batch_id,
+        compare_candidate_id,
+    } = dispatch;
     let request_id = state.allocate_next_llm_request_id();
     let run_id = state.allocate_next_prompt_lab_run_id();
     let context = state
@@ -1218,15 +1479,19 @@ fn dispatch_prompt_lab_run(
     let pending_prompt_version = prompt_version;
     let pending_model_override = model_override.clone();
     state.record_pending_llm_request(request_id, prompt_id);
-    state.add_prompt_lab_pending_run(
+    state.add_prompt_lab_pending_run(crate::state::PromptLabPendingRunRegistration {
         run_id,
         stage,
         prompt_id,
-        input_snapshot.clone(),
+        input_snapshot: input_snapshot.clone(),
         request_id,
-        pending_prompt_version,
-        pending_model_override,
-    );
+        overrides: crate::prompt_lab::PromptLabRunOverrides {
+            prompt_version_used: pending_prompt_version,
+            model_override: pending_model_override,
+        },
+        compare_batch_id,
+        compare_candidate_id,
+    });
     state.mark_dirty();
     engine_info!(
         "[prompt-lab] run requested run_id={} request_id={} stage={:?}",
@@ -1245,26 +1510,51 @@ fn dispatch_prompt_lab_run(
     }]
 }
 
-fn triage_snapshot_for_prompt_lab(state: &AppState) -> Option<String> {
-    if let Some(job_id) = state.selected_job_id() {
-        if let Some(url) = state.job_url(job_id) {
-            if let Some(article) = state.triage().articles().iter().find(|article| {
-                article.url == url
-                    && matches!(article.triage_state, ArticleTriageState::Completed { .. })
-            }) {
-                return Some(article.prepared_text.clone());
-            }
-        }
-    }
-    state
-        .triage()
-        .articles()
+struct PromptLabDispatchRequest {
+    stage: PromptLabStage,
+    prompt_id: PromptId,
+    input_snapshot: String,
+    prompt_version: Option<PromptVersion>,
+    model_override: Option<ModelId>,
+    compare_batch_id: Option<crate::prompt_lab::PromptLabCompareBatchId>,
+    compare_candidate_id: Option<u64>,
+}
+
+fn dispatch_next_compare_candidate(
+    state: &mut AppState,
+    batch_id: crate::prompt_lab::PromptLabCompareBatchId,
+) -> Vec<Effect> {
+    let Some(batch) = state
+        .prompt_lab()
+        .batches()
         .iter()
-        .rev()
-        .find_map(|article| match &article.triage_state {
-            ArticleTriageState::Completed { .. } => Some(article.prepared_text.clone()),
-            _ => None,
-        })
+        .find(|batch| batch.batch_id == batch_id)
+        .cloned()
+    else {
+        return Vec::new();
+    };
+    let Some(candidate) = batch.next_undispatched_candidate().cloned() else {
+        return Vec::new();
+    };
+    let input_snapshot = batch.input_snapshot.clone();
+    let effects = dispatch_prompt_lab_run(
+        state,
+        PromptLabDispatchRequest {
+            stage: candidate.stage,
+            prompt_id: candidate.prompt_id,
+            input_snapshot,
+            prompt_version: candidate.prompt_version,
+            model_override: candidate.model_override.clone(),
+            compare_batch_id: Some(batch_id),
+            compare_candidate_id: Some(candidate.candidate_id),
+        },
+    );
+    if let Some(run_id) = state.prompt_lab().latest_run().map(|run| run.run_id) {
+        state
+            .prompt_lab_mut()
+            .record_compare_dispatch(batch_id, candidate.candidate_id, run_id);
+    }
+    effects
 }
 
 fn parse_urls(raw: &str) -> Vec<String> {
@@ -1820,7 +2110,12 @@ mod tests {
 
     fn loaded_articles() -> (Vec<LoadedArticle>, String) {
         fn long_text(prefix: &str) -> String {
-            format!("{prefix} {}", std::iter::repeat_n("content", 220).collect::<Vec<_>>().join(" "))
+            format!(
+                "{prefix} {}",
+                std::iter::repeat_n("content", 220)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            )
         }
         let articles = vec![
             LoadedArticle {
@@ -1845,7 +2140,9 @@ mod tests {
             source_title: Some("Article A".to_string()),
             prepared_text: format!(
                 "Article A text {}",
-                std::iter::repeat_n("content", 220).collect::<Vec<_>>().join(" ")
+                std::iter::repeat_n("content", 220)
+                    .collect::<Vec<_>>()
+                    .join(" ")
             ),
             content_hash: "hash-a".to_string(),
         }];
@@ -2352,7 +2649,10 @@ mod tests {
         }
     }
 
-    fn start_triage_for_test(state: AppState, articles: Vec<LoadedArticle>) -> (AppState, Vec<Effect>) {
+    fn start_triage_for_test(
+        state: AppState,
+        articles: Vec<LoadedArticle>,
+    ) -> (AppState, Vec<Effect>) {
         let mut active_versions = std::collections::HashMap::new();
         active_versions.insert(PromptId::ArticleTriage, 1);
         let mut effective_models = std::collections::HashMap::new();
@@ -2706,12 +3006,12 @@ mod tests {
         let (state, _) = update(
             state,
             Msg::PromptLabInputSourceSelected {
-                source: PromptLabInputSource::TypeUrl,
+                source: crate::prompt_lab::PromptLabInputSource::TypeUrl,
             },
         );
         assert_eq!(
             state.prompt_lab().selected_input_source(),
-            PromptLabInputSource::TypeUrl
+            crate::prompt_lab::PromptLabInputSource::TypeUrl
         );
         assert!(state.view().dirty);
     }
@@ -2794,12 +3094,80 @@ mod tests {
     }
 
     #[test]
+    fn run_requested_uses_resolved_snapshot_after_job_selection() {
+        init_logging();
+        let (state, _) = update(
+            AppState::new(),
+            Msg::InputChanged("https://example.com/article/".to_string()),
+        );
+        let (mut state, _) = update(state, Msg::UrlsSubmitted);
+
+        state.triage_mut().set_articles(vec![LoadedArticle {
+            url: "https://example.com/article".to_string(),
+            source_title: Some("Example".to_string()),
+            prepared_text: "selected article prepared text".to_string(),
+            content_hash: "hash-selected".to_string(),
+        }]);
+        state.triage_mut().transition_to_triaging();
+        state.triage_mut().complete_article(
+            0,
+            crate::triage::ArticleTriageResult {
+                category: "news".to_string(),
+                priority: 3,
+                tags: vec!["tag".to_string()],
+                rationale: "ok".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+
+        let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+        let resolve_id = match effects.first() {
+            Some(Effect::ResolvePromptLabInputFromUrl { resolve_id, .. }) => *resolve_id,
+            other => panic!("expected resolve effect, got {other:?}"),
+        };
+        let (state, _) = update(
+            state,
+            Msg::PromptLabInputResolved {
+                resolve_id,
+                result: Ok("selected article prepared text".to_string()),
+            },
+        );
+        let (_state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            Effect::RequestLlmCompletion { input_content, .. } => {
+                assert_eq!(input_content, "selected article prepared text");
+            }
+            other => panic!("expected RequestLlmCompletion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn job_selected_populates_prompt_lab_url_and_requests_resolve() {
+        init_logging();
+        let (state, _) = update(
+            AppState::new(),
+            Msg::InputChanged("https://example.com/article".to_string()),
+        );
+        let (state, _) = update(state, Msg::UrlsSubmitted);
+        let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+        assert_eq!(
+            state.prompt_lab().url_input(),
+            "https://example.com/article"
+        );
+        assert!(effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::ResolvePromptLabInputFromUrl { .. })));
+    }
+
+    #[test]
     fn run_requested_typeurl_no_op_when_snapshot_not_resolved() {
         init_logging();
         let (state, _effects) = update(
             AppState::new(),
             Msg::PromptLabInputSourceSelected {
-                source: PromptLabInputSource::TypeUrl,
+                source: crate::prompt_lab::PromptLabInputSource::TypeUrl,
             },
         );
         let (state, _) = update(
@@ -2877,7 +3245,7 @@ mod tests {
     fn prepare_type_url_snapshot(state: &mut AppState, snapshot: &str) {
         state
             .prompt_lab_mut()
-            .select_input_source(PromptLabInputSource::TypeUrl);
+            .select_input_source(crate::prompt_lab::PromptLabInputSource::TypeUrl);
         state
             .prompt_lab_mut()
             .set_url_input("https://example.com".to_string());
@@ -2987,15 +3355,16 @@ mod tests {
         // Add a completed run manually
         let rid = state.allocate_next_llm_request_id();
         let run = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(
-            run,
-            PromptLabStage::Triage,
-            PromptId::ArticleTriage,
-            "x".to_string(),
-            rid,
-            None,
-            None,
-        );
+        state.add_prompt_lab_pending_run(crate::state::PromptLabPendingRunRegistration {
+            run_id: run,
+            stage: PromptLabStage::Triage,
+            prompt_id: PromptId::ArticleTriage,
+            input_snapshot: "x".to_string(),
+            request_id: rid,
+            overrides: crate::prompt_lab::PromptLabRunOverrides::default(),
+            compare_batch_id: None,
+            compare_candidate_id: None,
+        });
         state.complete_prompt_lab_run(run, "{}".to_string(), LlmRunMetadata::stub());
         state.consume_prompt_lab_ownership(rid);
         assert_eq!(state.prompt_lab().run_count(), 1);
@@ -3369,11 +3738,15 @@ mod tests {
         assert!(state.prompt_lab_mut().apply_context_draft(prompt_id));
         let effects = dispatch_prompt_lab_run(
             &mut state,
-            PromptLabStage::Triage,
-            prompt_id,
-            "input".to_string(),
-            None,
-            None,
+            PromptLabDispatchRequest {
+                stage: PromptLabStage::Triage,
+                prompt_id,
+                input_snapshot: "input".to_string(),
+                prompt_version: None,
+                model_override: None,
+                compare_batch_id: None,
+                compare_candidate_id: None,
+            },
         );
         assert_eq!(effects.len(), 1);
         if let Effect::RequestLlmCompletion { context, .. } = &effects[0] {
@@ -3394,11 +3767,15 @@ mod tests {
         // Do not apply any overlay.
         let effects = dispatch_prompt_lab_run(
             &mut state,
-            PromptLabStage::Triage,
-            prompt_id,
-            "input".to_string(),
-            None,
-            None,
+            PromptLabDispatchRequest {
+                stage: PromptLabStage::Triage,
+                prompt_id,
+                input_snapshot: "input".to_string(),
+                prompt_version: None,
+                model_override: None,
+                compare_batch_id: None,
+                compare_candidate_id: None,
+            },
         );
         assert_eq!(effects.len(), 1);
         if let Effect::RequestLlmCompletion { context, .. } = &effects[0] {
@@ -3439,5 +3816,53 @@ mod tests {
         } else {
             panic!("expected SavePromptContextFile effect");
         }
+    }
+
+    #[test]
+    fn prompt_lab_compare_start_dispatches_first_candidate() {
+        init_logging();
+        let mut state = AppState::new();
+        prepare_type_url_snapshot(&mut state, "compare input");
+        let (state, _) = update(state, Msg::PromptLabCompareCurrentSettingsCaptured);
+        let (state, _) = update(state, Msg::PromptLabCompareBaselineCaptured);
+        let (_state, effects) = update(state, Msg::PromptLabCompareBatchStartRequested);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::RequestLlmCompletion { .. }));
+    }
+
+    #[test]
+    fn prompt_lab_compare_completion_advances_to_next_candidate() {
+        init_logging();
+        let mut state = AppState::new();
+        prepare_type_url_snapshot(&mut state, "compare input");
+        let (state, _) = update(state, Msg::PromptLabCompareCurrentSettingsCaptured);
+        let (state, _) = update(state, Msg::PromptLabCompareBaselineCaptured);
+        let (state, effects) = update(state, Msg::PromptLabCompareBatchStartRequested);
+        let first_request_id = effects
+            .iter()
+            .find_map(|effect| {
+                if let Effect::RequestLlmCompletion { request_id, .. } = effect {
+                    Some(*request_id)
+                } else {
+                    None
+                }
+            })
+            .expect("first request id");
+        let (_state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: first_request_id,
+                result: LlmResultKind::Success {
+                    output_json: triage_json(),
+                    input_tokens: 5,
+                    output_tokens: 3,
+                    prompt_version: 1,
+                    model_id: "m".to_string(),
+                },
+                metadata: Some(LlmRunMetadata::stub()),
+            },
+        );
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(effects[0], Effect::RequestLlmCompletion { .. }));
     }
 }

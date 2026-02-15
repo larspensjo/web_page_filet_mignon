@@ -6,7 +6,10 @@ use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::types::ModelId;
 use harvester_engine::ExtractedLink;
 
-use crate::prompt_lab::{PromptLabInputSource, PromptLabStage, PromptLabTemplateSnapshot};
+use crate::prompt_lab::{
+    PromptLabCompareBatchId, PromptLabInputSource, PromptLabRunId, PromptLabStage,
+    PromptLabTemplateSnapshot,
+};
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
@@ -68,11 +71,17 @@ pub enum Msg {
         link_index: u32,
     },
     /// User selected a job from the tree view.
-    JobSelected { job_id: crate::JobId },
+    JobSelected {
+        job_id: crate::JobId,
+    },
     /// User dragged the splitter to resize the left panels.
-    SplitterMoved { desired_left_width_px: i32 },
+    SplitterMoved {
+        desired_left_width_px: i32,
+    },
     /// Window was resized.
-    WindowResized { window_width: i32 },
+    WindowResized {
+        window_width: i32,
+    },
     /// Fallback for placeholder wiring.
     NoOp,
     /// User requested an LLM completion.
@@ -123,21 +132,33 @@ pub enum Msg {
         collection_text: String,
     },
     /// Loader failed.
-    ArticlesLoadFailed { reason: String },
+    ArticlesLoadFailed {
+        reason: String,
+    },
     /// Triage-specific articles prepared by the loader.
-    TriageArticlesLoaded { articles: Vec<LoadedArticle> },
+    TriageArticlesLoaded {
+        articles: Vec<LoadedArticle>,
+    },
     /// Loader failed for triage.
-    TriageArticlesLoadFailed { reason: String },
+    TriageArticlesLoadFailed {
+        reason: String,
+    },
     /// Briefing prerequisite articles prepared by the loader.
-    BriefingPrereqArticlesLoaded { articles: Vec<LoadedArticle> },
+    BriefingPrereqArticlesLoaded {
+        articles: Vec<LoadedArticle>,
+    },
     /// Loader failed for briefing prerequisites.
-    BriefingPrereqLoadFailed { reason: String },
+    BriefingPrereqLoadFailed {
+        reason: String,
+    },
     /// Prompt contexts loaded from disk.
     PromptContextsLoaded {
         contexts: HashMap<PromptId, Vec<(String, String)>>,
     },
     /// Prompt contexts failed to load.
-    PromptContextsLoadFailed { reason: String },
+    PromptContextsLoadFailed {
+        reason: String,
+    },
     /// LLM metadata (active prompt versions and effective models) loaded.
     LlmMetadataLoaded {
         active_versions: std::collections::HashMap<PromptId, PromptVersion>,
@@ -145,9 +166,13 @@ pub enum Msg {
         templates: std::collections::HashMap<PromptId, PromptLabTemplateSnapshot>,
     },
     /// Summary cache hydrated from persisted store at startup.
-    SummaryCacheHydrated { cache: crate::SummaryCache },
+    SummaryCacheHydrated {
+        cache: crate::SummaryCache,
+    },
     /// Triage cache hydrated from persisted store at startup.
-    TriageCacheHydrated { cache: crate::TriageCache },
+    TriageCacheHydrated {
+        cache: crate::TriageCache,
+    },
     /// Pre-triage manual overrides hydrated from persisted store at startup.
     PreTriageOverridesHydrated {
         overrides: HashMap<ArticleFilterKey, ManualDecision>,
@@ -159,13 +184,21 @@ pub enum Msg {
     /// User requested to close the Prompt Lab panel.
     PromptLabCloseRequested,
     /// User selected a different stage in the Prompt Lab.
-    PromptLabStageSelected { stage: PromptLabStage },
+    PromptLabStageSelected {
+        stage: PromptLabStage,
+    },
     /// User selected a different input source for Prompt Lab.
-    PromptLabInputSourceSelected { source: PromptLabInputSource },
+    PromptLabInputSourceSelected {
+        source: PromptLabInputSource,
+    },
     /// User edited the Prompt Lab input text.
-    PromptLabInputChanged { text: String },
+    PromptLabInputChanged {
+        text: String,
+    },
     /// User edited the URL input used for TypeUrl runs.
-    PromptLabUrlInputChanged { url: String },
+    PromptLabUrlInputChanged {
+        url: String,
+    },
     /// User requested the TypeUrl resolver to fetch the URL content.
     PromptLabResolveRequested,
     /// Background effect finished resolving the URL input.
@@ -176,7 +209,9 @@ pub enum Msg {
     /// User opened the Prompt Lab context editor.
     PromptLabContextEditorOpened,
     /// User changed the context draft text.
-    PromptLabContextDraftChanged { text: String },
+    PromptLabContextDraftChanged {
+        text: String,
+    },
     /// User requested the draft to be applied.
     PromptLabContextApplyRequested,
     /// User requested apply and rerun.
@@ -194,13 +229,20 @@ pub enum Msg {
         version: u64,
     },
     /// Save effect failed.
-    PromptLabContextSaveFailed { prompt_id: PromptId, reason: String },
+    PromptLabContextSaveFailed {
+        prompt_id: PromptId,
+        reason: String,
+    },
     /// User opened the Prompt Lab template editor.
     PromptLabTemplateEditorOpened,
     /// User changed the system template draft text.
-    PromptLabTemplateSystemDraftChanged { text: String },
+    PromptLabTemplateSystemDraftChanged {
+        text: String,
+    },
     /// User changed the user template draft text.
-    PromptLabTemplateUserDraftChanged { text: String },
+    PromptLabTemplateUserDraftChanged {
+        text: String,
+    },
     /// User requested the template draft to be validated/applied.
     PromptLabTemplateApplyRequested,
     /// User requested to apply the template draft and rerun immediately.
@@ -216,13 +258,55 @@ pub enum Msg {
         path: String,
     },
     /// Template save effect failed.
-    PromptLabTemplateSaveFailed { prompt_id: PromptId, reason: String },
+    PromptLabTemplateSaveFailed {
+        prompt_id: PromptId,
+        reason: String,
+    },
     /// User requested a Prompt Lab LLM run with the current input and stage.
     PromptLabRunRequested,
     /// User requested rerunning using the latest completed/final run parameters.
     PromptLabRerunRequested,
     /// User requested to clear completed/failed runs from Prompt Lab history.
     PromptLabHistoryCleared,
+    PromptLabCompareDraftReset,
+    PromptLabCompareCurrentSettingsCaptured,
+    PromptLabCompareBaselineCaptured,
+    PromptLabCompareCandidateRemoved {
+        candidate_id: u64,
+    },
+    PromptLabCompareCandidateLabelChanged {
+        candidate_id: u64,
+        label: String,
+    },
+    PromptLabCompareBatchStartRequested,
+    PromptLabCompareBatchConfirmedStart,
+    PromptLabCompareBatchCancelRequested,
+    PromptLabCompareWinnerSelected {
+        run_id: PromptLabRunId,
+    },
+    PromptLabCompareWinnerCleared,
+    PromptLabCompareRunRated {
+        run_id: PromptLabRunId,
+        rating: u8,
+    },
+    PromptLabAdvancedModeSet {
+        enabled: bool,
+    },
+    PromptLabCompareSectionToggled,
+    PromptLabContextSectionToggled,
+    PromptLabTemplateSectionToggled,
+    PromptLabRunDetailsSectionToggled,
+    PromptLabComparePolicyUpdated {
+        require_parse_ok: Option<bool>,
+        max_cost_microdollars: Option<Option<u64>>,
+        max_wall_ms: Option<Option<u64>>,
+        rating_beats_cost: Option<bool>,
+    },
+    PromptLabCompareAutoSelectRequested,
+    PromptLabCompareBatchSetWarning {
+        batch_id: PromptLabCompareBatchId,
+        warning: Option<String>,
+    },
 }
 
 /// Result payload returned by the LLM worker.

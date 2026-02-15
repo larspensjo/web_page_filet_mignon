@@ -24,10 +24,10 @@ use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
     llm::{LlmCommand, LlmCompletionError, LlmEvent, LlmHandle, LlmRunMetadata, PromptRegistry},
-    load_and_prepare_articles_filtered, poll_curated_source,
-    poll_file_source, poll_rss_source, AtomicFileWriter, Converter, DecodeError, EngineConfig,
-    EngineEvent, EngineHandle, Extractor, FetchSettings, LinkExtractingConverter,
-    ReadabilityLikeExtractor, RssSeenSet, SourceId, SourceType, UrlPolicy, WhitespaceTokenCounter,
+    load_and_prepare_articles_filtered, poll_curated_source, poll_file_source, poll_rss_source,
+    AtomicFileWriter, Converter, DecodeError, EngineConfig, EngineEvent, EngineHandle, Extractor,
+    FetchSettings, LinkExtractingConverter, ReadabilityLikeExtractor, RssSeenSet, SourceId,
+    SourceType, UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
@@ -595,10 +595,11 @@ impl EffectRunner {
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
+                    let guard = registry.read().unwrap();
                     match load_and_prepare_articles_filtered(
                         &output_dir,
                         max_input_bytes,
-                        &registry,
+                        &guard,
                         &ordered_urls,
                     ) {
                         Ok((engine_articles, _)) => {
@@ -815,10 +816,11 @@ impl EffectRunner {
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
+                    let guard = registry.read().unwrap();
                     match load_and_prepare_articles_filtered(
                         &output_dir,
                         max_input_bytes,
-                        &registry,
+                        &guard,
                         &ordered_urls,
                     ) {
                         Ok((engine_articles, _)) => {

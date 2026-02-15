@@ -4,8 +4,8 @@ mod cache_utils;
 mod context_draft;
 mod effect;
 mod msg;
-mod prompt_lab;
 mod pre_triage_filter;
+mod prompt_lab;
 mod source_state;
 mod state;
 mod summary_cache;
@@ -24,13 +24,13 @@ pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
 pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
-pub use prompt_lab::{
-    PromptLabInputSource, PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage,
-    PromptLabTemplateSnapshot,
-};
 pub use pre_triage_filter::{
     ArticleFilterEntry, ArticleFilterKey, AutoVerdict, FilterReason, ManualDecision,
     PreTriagePhase, PreTriagePolicy, PreTriageSession,
+};
+pub use prompt_lab::{
+    PromptLabInputSource, PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage,
+    PromptLabTemplateSnapshot,
 };
 pub use source_state::{SourceInstanceState, SourceStateIndex};
 pub use state::{
@@ -48,7 +48,9 @@ pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCach
 pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
-    AppViewModel, JobFilterStatus, JobRowView, LinkRowView, PreviewHeaderView, PromptLabRunSummaryView,
-    PromptLabView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH,
-    DEFAULT_WINDOW_WIDTH, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
+    AppViewModel, JobFilterStatus, JobRowView, LinkRowView, PreviewHeaderView,
+    PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
+    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, TriageAnnotationView,
+    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
+    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };

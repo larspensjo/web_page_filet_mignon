@@ -18,7 +18,7 @@ use crate::llm::{
     },
     quota::{LlmQuotaTracker, LlmQuotas},
     replay::{content_hash, persist_replay_record, ReplayProvider, ReplayRecord},
-    run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata},
+    run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata, LlmRunMetadataInit},
     types::{ChatMessage, ChatRole, LlmError, LlmRequest, ModelId, ProviderKind},
     validation::{validate_briefing, validate_summary, validate_triage, ValidationError},
 };
@@ -420,20 +420,20 @@ async fn handle_completion_concurrent(
                     .and_then(|value| serde_json::to_string(value).ok())
                     .unwrap_or_else(|| record.raw_response.clone());
 
-                let metadata = LlmRunMetadata::new(
+                let metadata = LlmRunMetadata::new(LlmRunMetadataInit {
                     prompt_id,
-                    version,
-                    model.model_name().to_string(),
+                    prompt_version: version,
+                    resolved_model: model.model_name().to_string(),
                     input_bytes,
-                    record.usage.input_tokens,
-                    record.usage.output_tokens,
-                    record.cost_microdollars,
+                    input_tokens: record.usage.input_tokens,
+                    output_tokens: record.usage.output_tokens,
+                    cost_microdollars: record.cost_microdollars,
                     wall_ms,
-                    true,
-                    None,
-                    CacheStatus::HitValidated,
-                    record.timestamp_utc.clone(),
-                );
+                    parse_ok: true,
+                    validation_error: None,
+                    cache_status: CacheStatus::HitValidated,
+                    timestamp_utc: record.timestamp_utc.clone(),
+                });
                 engine_info!(
                     "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=hit_validated",
                     request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,
@@ -619,20 +619,20 @@ async fn handle_completion_concurrent(
                 guard.insert(success_record.clone());
             }
 
-            let metadata = LlmRunMetadata::new(
+            let metadata = LlmRunMetadata::new(LlmRunMetadataInit {
                 prompt_id,
-                version,
-                response.model_id().model_name().to_string(),
+                prompt_version: version,
+                resolved_model: response.model_id().model_name().to_string(),
                 input_bytes,
-                usage.input_tokens,
-                usage.output_tokens,
-                cost,
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cost_microdollars: cost,
                 wall_ms,
-                true,
-                None,
-                CacheStatus::Miss,
-                timestamp_utc.clone(),
-            );
+                parse_ok: true,
+                validation_error: None,
+                cache_status: CacheStatus::Miss,
+                timestamp_utc: timestamp_utc.clone(),
+            });
             engine_info!(
                 "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=miss",
                 request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,

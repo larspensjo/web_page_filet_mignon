@@ -12,8 +12,7 @@ use commanductui::{
 };
 use harvester_core::{
     update, AppState, AppViewModel, Effect, JobFilterStatus, JobResultKind, LinkDownloadState,
-    ManualDecision, Msg,
-    PromptLabInputSource, PromptLabStage,
+    ManualDecision, Msg, PromptLabStage,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -416,7 +415,6 @@ impl AppEventHandler {
         let _ = self.msg_tx.send(msg.clone());
         if matches!(msg, Msg::PromptLabOpenRequested) {
             let _ = self.msg_tx.send(Msg::PromptLabContextEditorOpened);
-            let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorOpened);
         }
     }
 }
@@ -453,6 +451,40 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_MODE_BASIC =>
+            {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabAdvancedModeSet { enabled: false });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_MODE_ADVANCED =>
+            {
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabAdvancedModeSet { enabled: true });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_COMPARE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareSectionToggled);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_CONTEXT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabContextSectionToggled);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_TEMPLATE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabTemplateSectionToggled);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_RUN_DETAILS =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabRunDetailsSectionToggled);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_STAGE_TRIAGE =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabStageSelected {
@@ -474,20 +506,6 @@ impl PlatformEventHandler for AppEventHandler {
                 });
             }
             AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_SOURCE_FROM_TRIAGE =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabInputSourceSelected {
-                    source: PromptLabInputSource::FromTriageArticles,
-                });
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_SOURCE_TYPE_URL =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabInputSourceSelected {
-                    source: PromptLabInputSource::TypeUrl,
-                });
-            }
-            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_RESOLVE =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabResolveRequested);
@@ -498,14 +516,41 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::PromptLabRunRequested);
             }
             AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_RERUN =>
+                if control_id == ui::constants::BTN_COMPARE_ADD_CURRENT =>
             {
-                let _ = self.msg_tx.send(Msg::PromptLabRerunRequested);
+                let _ = self
+                    .msg_tx
+                    .send(Msg::PromptLabCompareCurrentSettingsCaptured);
             }
             AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_CLEAR =>
+                if control_id == ui::constants::BTN_COMPARE_ADD_BASELINE =>
             {
-                let _ = self.msg_tx.send(Msg::PromptLabHistoryCleared);
+                let _ = self.msg_tx.send(Msg::PromptLabCompareBaselineCaptured);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_RESET_DRAFT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareDraftReset);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_START =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareBatchStartRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_CANCEL =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareBatchCancelRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_AUTO_SELECT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareAutoSelectRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_COMPARE_WINNER_CLEAR =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabCompareWinnerCleared);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_APPLY =>
@@ -899,22 +944,6 @@ mod tests {
     }
 
     #[test]
-    fn prompt_lab_source_button_emits_source_selected_msg() {
-        let (mut handler, rx) = test_handler_with_outbound();
-        handler.handle_event(AppEvent::ButtonClicked {
-            window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_SOURCE_TYPE_URL,
-        });
-        let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
-        assert_eq!(
-            msg,
-            Msg::PromptLabInputSourceSelected {
-                source: PromptLabInputSource::TypeUrl
-            }
-        );
-    }
-
-    #[test]
     fn prompt_lab_url_input_emits_url_changed_msg() {
         let (mut handler, rx) = test_handler_with_outbound();
         handler.handle_event(AppEvent::InputTextChanged {
@@ -942,14 +971,6 @@ mod tests {
             window_id: WindowId::new(1),
             control_id: ui::constants::BTN_PROMPT_LAB_RUN,
         });
-        handler.handle_event(AppEvent::ButtonClicked {
-            window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_RERUN,
-        });
-        handler.handle_event(AppEvent::ButtonClicked {
-            window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_CLEAR,
-        });
 
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250))
@@ -959,14 +980,6 @@ mod tests {
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250)).expect("run"),
             Msg::PromptLabRunRequested
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("rerun"),
-            Msg::PromptLabRerunRequested
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("clear"),
-            Msg::PromptLabHistoryCleared
         );
     }
 
@@ -1022,6 +1035,95 @@ mod tests {
     }
 
     #[test]
+    fn prompt_lab_compare_buttons_emit_expected_msgs() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_COMPARE_ADD_CURRENT,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_COMPARE_ADD_BASELINE,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_COMPARE_RESET_DRAFT,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_COMPARE_START,
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("add current"),
+            Msg::PromptLabCompareCurrentSettingsCaptured
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("add baseline"),
+            Msg::PromptLabCompareBaselineCaptured
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("reset"),
+            Msg::PromptLabCompareDraftReset
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("start"),
+            Msg::PromptLabCompareBatchStartRequested
+        );
+    }
+
+    #[test]
+    fn prompt_lab_mode_and_section_buttons_emit_expected_msgs() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_MODE_ADVANCED,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_COMPARE,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_CONTEXT,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_TEMPLATE,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("advanced"),
+            Msg::PromptLabAdvancedModeSet { enabled: true }
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("toggle compare"),
+            Msg::PromptLabCompareSectionToggled
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("toggle context"),
+            Msg::PromptLabContextSectionToggled
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("toggle template"),
+            Msg::PromptLabTemplateSectionToggled
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("toggle run details"),
+            Msg::PromptLabRunDetailsSectionToggled
+        );
+    }
+
+    #[test]
     fn prompt_lab_menu_action_emits_open_then_close() {
         let (mut handler, rx) = test_handler_with_outbound();
         handler.handle_event(AppEvent::MenuActionClicked {
@@ -1041,11 +1143,6 @@ mod tests {
             rx.recv_timeout(Duration::from_millis(250))
                 .expect("context open"),
             Msg::PromptLabContextEditorOpened
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250))
-                .expect("template open"),
-            Msg::PromptLabTemplateEditorOpened
         );
 
         {

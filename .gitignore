@@ -18,6 +18,7 @@ target
 /lcov.info
 /incoming_urls.txt
 /sources.ron
+/target_codex/
 # /contexts/
 /.rss_seen_guids.ron
 /testResults.xml
