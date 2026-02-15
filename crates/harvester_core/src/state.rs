@@ -3,7 +3,8 @@ use crate::context_hash;
 use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState};
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
-use crate::triage::{ArticleTriageState, TriageSession};
+use crate::triage::{ArticleTriageResult, ArticleTriageState, TriageSession};
+use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TriageAnnotationView,
