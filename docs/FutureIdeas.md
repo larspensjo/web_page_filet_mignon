@@ -429,6 +429,45 @@ SuccessCriteria:
 - Resolved include/exclude decisions are applied before triage work starts in briefing orchestration.
 - Tests cover parity between the standard triage flow and briefing-prereq triage flow.
 
+#### [FI-LLM-Briefing-0006] Typed briefing preview document model
+Status: Candidate
+TopLevel: LLM
+SubLevel: Briefing
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.BriefingPreviewPresentationUpgrade.md
+- SourceSection: Optional Extensions (Next Iteration)
+- Captured: 2026-02-15
+Tags: [llm, briefing, formatting, architecture]
+Summary: Introduce a typed `BriefingPreviewDocument` intermediary instead of assembling preview output with ad-hoc string concatenation.
+Rationale: Reduces formatting fragility, improves correctness-by-construction, and makes structured export/render transforms easier to test.
+SuccessCriteria:
+- Preview formatting is generated from a typed document model with explicit sections.
+- Existing briefing preview output parity is preserved for current scenarios.
+- Unit tests validate section assembly without relying on monolithic string snapshots.
+Related: [FI-Storage-ExportArtifacts-0001]
+
+#### [FI-LLM-Briefing-0007] Configurable theme ordering in briefing preview
+Status: Candidate
+TopLevel: LLM
+SubLevel: Briefing
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.BriefingPreviewPresentationUpgrade.md
+- SourceSection: Optional Extensions (Next Iteration)
+- Captured: 2026-02-15
+Tags: [llm, briefing, ordering, ux]
+Summary: Add selectable theme ordering modes for briefing presentation, such as model order or impact-weighted order.
+Rationale: Improves scanability during high-volume sessions while preserving deterministic output.
+SuccessCriteria:
+- Briefing preview supports at least two deterministic theme ordering modes.
+- Selected ordering mode is visible in run metadata or UI state.
+- Ordering behavior is covered by unit tests.
+
 ### Budgeting
 
 #### [FI-LLM-Budgeting-0001] Priority-weighted token budgets
@@ -916,6 +955,25 @@ Rationale: Faster diagnosis of rendering defects and easier reproduction of cont
 SuccessCriteria:
 - Conversion and truncation events emit structured logs with stable category tags.
 - A debug mode can persist the last generated RTF payload to a temporary file for troubleshooting.
+
+#### [FI-Observability-PreviewRendering-0002] Preview truncation telemetry in status bar
+Status: Candidate
+TopLevel: Observability
+SubLevel: PreviewRendering
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.BriefingPreviewPresentationUpgrade.md
+- SourceSection: Optional Extensions (Next Iteration)
+- Captured: 2026-02-15
+Tags: [observability, preview, truncation, ui]
+Summary: Surface viewer and briefing truncation events in the UI status area, including how much content was truncated.
+Rationale: Makes truncation visible during normal operation so operators can switch to full/raw artifacts when needed.
+SuccessCriteria:
+- Status UI indicates when preview content is truncated.
+- Telemetry includes original length, displayed length, and truncation reason.
+- Truncation status is deterministic and test-covered.
 
 ### ReplayDiagnostics
 
@@ -1544,6 +1602,44 @@ SuccessCriteria:
 - Blockquotes and horizontal rules render with distinct visual treatment.
 - Nested list indentation scales with depth while remaining stable for deep inputs.
 Related: [FI-UX-PreviewRich-0001]
+
+#### [FI-UX-PreviewRich-0004] Copy briefing preview as markdown
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewRich
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.BriefingPreviewPresentationUpgrade.md
+- SourceSection: Optional Extensions (Next Iteration)
+- Captured: 2026-02-15
+Tags: [ux, preview, clipboard, markdown]
+Summary: Add a dedicated action to copy the briefing preview content as markdown to the clipboard.
+Rationale: Supports quick sharing and reuse of briefing output without exporting files.
+SuccessCriteria:
+- UI exposes a copy-as-markdown action in briefing preview context.
+- Copied content preserves markdown section structure used by preview formatting.
+- Action outcome is visible to the user (success/failure feedback).
+
+#### [FI-UX-PreviewRich-0005] Per-section collapse controls for briefing preview
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewRich
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.BriefingPreviewPresentationUpgrade.md
+- SourceSection: Optional Extensions (Next Iteration)
+- Captured: 2026-02-15
+Tags: [ux, preview, briefing, navigation]
+Summary: Add per-section collapse/expand controls for major briefing sections such as Executive Summary, Themes, and Session Info.
+Rationale: Improves readability and navigation in long briefings by letting users focus on one section at a time.
+SuccessCriteria:
+- Users can independently collapse and expand major briefing sections.
+- Collapsed state is reflected consistently in preview rendering.
+- Section collapse behavior is deterministic and covered by UI tests.
 
 ### PreviewSearch
 
