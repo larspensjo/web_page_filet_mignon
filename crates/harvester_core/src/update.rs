@@ -8,6 +8,7 @@ use crate::{
         CorpusFingerprint,
     },
     calc_left_width, context_hash,
+    pre_triage_filter::{PreTriagePhase, PreTriagePolicy, PreTriageSession},
     prompt_lab::{prompt_id_for_stage, PromptLabInputSource, PromptLabRunStatus, PromptLabStage},
     triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
@@ -605,11 +606,20 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 engine_info!("[briefing-triage] interleave blocked: briefing owns triage");
                 return (state, Vec::new());
             }
+            if matches!(state.pre_triage().phase(), PreTriagePhase::LoadingArticles) {
+                return (state, Vec::new());
+            }
+            if matches!(
+                state.pre_triage().phase(),
+                PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+            ) {
+                return update(state, Msg::PreTriageApplyClicked);
+            }
             if !state.triage().can_start() {
                 return (state, Vec::new());
             }
             let ordered_urls = state.ordered_completed_job_urls();
-            state.set_triage(TriageSession::new_loading(None));
+            state.set_pre_triage(PreTriageSession::new_loading());
             engine_info!("[triage] triage requested");
             vec![
                 Effect::LoadPromptContexts,
@@ -618,24 +628,46 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             ]
         }
         Msg::TriageArticlesLoaded { articles } => {
-            if articles.is_empty() {
-                state
-                    .triage_mut()
-                    .fail("no completed articles found".to_string());
-                state.mark_dirty();
-                return (state, Vec::new());
+            let policy = PreTriagePolicy::default();
+            let mut pre_triage = PreTriageSession::load_articles(articles, &policy);
+            let job_url_pairs = state
+                .view()
+                .jobs
+                .iter()
+                .map(|job| (job.job_id, job.url.clone()))
+                .collect::<Vec<_>>();
+            pre_triage.bind_job_ids(&job_url_pairs);
+            let phase = pre_triage.phase().clone();
+            state.set_pre_triage(pre_triage);
+            match phase {
+                PreTriagePhase::ReadyToTriage => start_triage_from_pretriage(&mut state),
+                PreTriagePhase::Reviewing => {
+                    state.mark_dirty();
+                    Vec::new()
+                }
+                PreTriagePhase::Failed { reason } => {
+                    state.triage_mut().fail(reason);
+                    state.mark_dirty();
+                    Vec::new()
+                }
+                PreTriagePhase::LoadingArticles | PreTriagePhase::Idle => Vec::new(),
             }
-            state.triage_mut().set_articles(articles);
-            state.triage_mut().transition_to_triaging();
-            state.mark_dirty();
-            state.start_triage_cache_run();
-            state.mark_triage_metadata_ready();
-            let mut effects = Vec::new();
-            dispatch_next_triage_step(&mut state, &mut effects);
-            effects
         }
         Msg::TriageArticlesLoadFailed { reason } => {
             state.triage_mut().fail(reason);
+            state.pre_triage_mut().reset();
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PreTriageDecisionSet { key, decision } => {
+            if state.pre_triage_mut().set_manual_decision(&key, decision).is_ok() {
+                state.mark_dirty();
+            }
+            Vec::new()
+        }
+        Msg::PreTriageApplyClicked => start_triage_from_pretriage(&mut state),
+        Msg::PreTriageResetClicked => {
+            state.pre_triage_mut().reset();
             state.mark_dirty();
             Vec::new()
         }
@@ -1095,6 +1127,27 @@ fn parse_urls(raw: &str) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(ToOwned::to_owned)
         .collect()
+}
+
+fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
+    let included = state.pre_triage().resolved_included_articles();
+    if included.is_empty() {
+        state
+            .triage_mut()
+            .fail("no completed articles found".to_string());
+        state.mark_dirty();
+        return Vec::new();
+    }
+    state.set_triage(TriageSession::new_loading(None));
+    state.triage_mut().set_articles(included);
+    state.triage_mut().transition_to_triaging();
+    state.pre_triage_mut().reset();
+    state.mark_dirty();
+    state.start_triage_cache_run();
+    state.mark_triage_metadata_ready();
+    let mut effects = Vec::new();
+    dispatch_next_triage_step(state, &mut effects);
+    effects
 }
 
 fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
@@ -2037,7 +2090,9 @@ mod tests {
             .map(|i| LoadedArticle {
                 url: format!("https://example.com/{i}"),
                 source_title: None,
-                prepared_text: format!("Article {i} text"),
+                prepared_text: std::iter::repeat_n(format!("article-{i}-content"), 220)
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 content_hash: format!("hash-{i}"),
             })
             .collect()

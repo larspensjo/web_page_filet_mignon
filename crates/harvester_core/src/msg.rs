@@ -9,6 +9,7 @@ use harvester_engine::ExtractedLink;
 use crate::prompt_lab::{PromptLabInputSource, PromptLabStage};
 
 use crate::briefing::LoadedArticle;
+use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
@@ -93,6 +94,12 @@ pub enum Msg {
     GenerateBriefingClicked,
     /// User requested triage.
     TriageClicked,
+    PreTriageDecisionSet {
+        key: ArticleFilterKey,
+        decision: ManualDecision,
+    },
+    PreTriageApplyClicked,
+    PreTriageResetClicked,
     /// User requested polling all configured sources.
     PollSourcesClicked,
     /// Polling completed for a source.

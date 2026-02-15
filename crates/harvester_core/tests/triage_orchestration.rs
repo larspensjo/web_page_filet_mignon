@@ -50,7 +50,9 @@ fn sample_articles(urls: &[&str]) -> Vec<LoadedArticle> {
         .map(|url| LoadedArticle {
             url: url.to_string(),
             source_title: None,
-            prepared_text: format!("prepared {}", url),
+            prepared_text: std::iter::repeat_n("prepared-content", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
             content_hash: format!("{url}-hash"),
         })
         .collect()

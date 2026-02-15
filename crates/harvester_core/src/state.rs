@@ -1,7 +1,7 @@
 use crate::briefing::BriefingSession;
 use crate::context_hash;
 use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState};
-use crate::pre_triage_filter::PreTriageSession;
+use crate::pre_triage_filter::{PreTriagePhase, PreTriageSession};
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
 use crate::triage::{ArticleTriageResult, ArticleTriageState, TriageSession};
@@ -385,10 +385,16 @@ impl AppState {
             briefing_can_start: self.briefing.can_start(),
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
-            triage_can_start: self.triage.can_start()
-                && self.has_completed_jobs()
-                && !self.briefing_orchestration.is_requested(),
-            triage_progress: self.triage.progress_text(),
+            triage_can_start: (!self.briefing_orchestration.is_requested())
+                && (matches!(
+                    self.pre_triage.phase(),
+                    PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+                ) || (matches!(
+                    self.pre_triage.phase(),
+                    PreTriagePhase::Idle | PreTriagePhase::Failed { .. }
+                ) && self.triage.can_start()
+                    && self.has_completed_jobs())),
+            triage_progress: self.triage.progress_text().or_else(|| self.pre_triage_progress_text()),
             poll_sources_enabled: matches!(
                 self.session,
                 SessionState::Idle | SessionState::Running
@@ -466,6 +472,33 @@ impl AppState {
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
         self.pre_triage = pre_triage;
         self.dirty = true;
+    }
+
+    fn pre_triage_progress_text(&self) -> Option<String> {
+        let total = self.pre_triage.entries().len();
+        if total == 0 {
+            return None;
+        }
+        let include = self.pre_triage.resolved_included_articles().len();
+        let review = self
+            .pre_triage
+            .entries()
+            .iter()
+            .filter(|entry| {
+                matches!(entry.auto_verdict, crate::AutoVerdict::Review)
+                    && entry.manual_decision.is_none()
+            })
+            .count();
+        let filtered = total.saturating_sub(include + review);
+        match self.pre_triage.phase() {
+            PreTriagePhase::LoadingArticles => Some("Pre-triage loading...".to_string()),
+            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage => Some(format!(
+                "Pre-triage: {} include, {} review, {} filtered",
+                include, review, filtered
+            )),
+            PreTriagePhase::Failed { reason } => Some(format!("Pre-triage failed: {reason}")),
+            PreTriagePhase::Idle => None,
+        }
     }
 
     #[allow(dead_code)]

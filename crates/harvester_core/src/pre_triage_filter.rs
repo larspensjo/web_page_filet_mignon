@@ -176,6 +176,7 @@ pub struct PreTriageSession {
     phase: PreTriagePhase,
     entries: Vec<ArticleFilterEntry>,
     job_key_by_id: HashMap<JobId, ArticleFilterKey>,
+    loaded_by_url: HashMap<String, LoadedArticle>,
 }
 
 impl Default for PreTriageSession {
@@ -184,6 +185,7 @@ impl Default for PreTriageSession {
             phase: PreTriagePhase::Idle,
             entries: Vec::new(),
             job_key_by_id: HashMap::new(),
+            loaded_by_url: HashMap::new(),
         }
     }
 }
@@ -216,7 +218,7 @@ impl PreTriageSession {
 
     pub fn load_articles(articles: Vec<LoadedArticle>, policy: &PreTriagePolicy) -> Self {
         let entries: Vec<ArticleFilterEntry> = articles
-            .into_iter()
+            .iter()
             .map(|article| {
                 let key = ArticleFilterKey {
                     content_hash: stable_hash_u64(&article.content_hash),
@@ -225,7 +227,7 @@ impl PreTriageSession {
                 let (auto_verdict, reasons) = policy.evaluate(&article);
                 ArticleFilterEntry {
                     key,
-                    source_title: article.source_title,
+                    source_title: article.source_title.clone(),
                     auto_verdict,
                     reasons,
                     manual_decision: None,
@@ -236,6 +238,10 @@ impl PreTriageSession {
             phase: PreTriagePhase::Idle,
             entries,
             job_key_by_id: HashMap::new(),
+            loaded_by_url: articles
+                .into_iter()
+                .map(|article| (article.url.clone(), article))
+                .collect(),
         };
         session.phase = session.derive_phase_after_load();
         session
@@ -270,6 +276,13 @@ impl PreTriageSession {
             return Vec::new();
         }
         self.resolved_included_urls_internal()
+    }
+
+    pub fn resolved_included_articles(&self) -> Vec<LoadedArticle> {
+        self.resolved_included_urls_internal()
+            .into_iter()
+            .filter_map(|url| self.loaded_by_url.get(&url).cloned())
+            .collect()
     }
 
     pub fn corpus_fingerprint(&self) -> u64 {
