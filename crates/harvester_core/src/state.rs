@@ -1,6 +1,7 @@
 use crate::briefing::BriefingSession;
 use crate::context_hash;
 use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState};
+use crate::pre_triage_filter::PreTriageSession;
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
 use crate::triage::{ArticleTriageResult, ArticleTriageState, TriageSession};
@@ -204,6 +205,7 @@ pub struct AppState {
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
     triage: TriageSession,
+    pre_triage: PreTriageSession,
     source_states: SourceStateIndex,
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
@@ -248,6 +250,7 @@ impl Default for AppState {
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
             triage: TriageSession::default(),
+            pre_triage: PreTriageSession::default(),
             source_states: SourceStateIndex::default(),
             prompt_contexts: HashMap::new(),
             active_prompt_versions: HashMap::new(),
@@ -449,6 +452,19 @@ impl AppState {
 
     pub(crate) fn set_triage(&mut self, triage: TriageSession) {
         self.triage = triage;
+        self.dirty = true;
+    }
+
+    pub(crate) fn pre_triage(&self) -> &PreTriageSession {
+        &self.pre_triage
+    }
+
+    pub(crate) fn pre_triage_mut(&mut self) -> &mut PreTriageSession {
+        &mut self.pre_triage
+    }
+
+    pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
+        self.pre_triage = pre_triage;
         self.dirty = true;
     }
 
