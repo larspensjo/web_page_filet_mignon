@@ -105,17 +105,19 @@ impl LlmHandle {
     }
 }
 
+pub struct LlmCompletionCommand {
+    pub request_id: u64,
+    pub prompt_id: PromptId,
+    pub prompt_version: Option<PromptVersion>,
+    /// Per-run model override; `None` means use the stage/default model.
+    pub model_override: Option<ModelId>,
+    pub input_content: String,
+    pub context: Vec<(String, String)>,
+    pub template_override: Option<PromptTemplateOwned>,
+}
+
 pub enum LlmCommand {
-    Complete {
-        request_id: u64,
-        prompt_id: PromptId,
-        prompt_version: Option<PromptVersion>,
-        /// Per-run model override; `None` means use the stage/default model.
-        model_override: Option<ModelId>,
-        input_content: String,
-        context: Vec<(String, String)>,
-        template_override: Option<PromptTemplateOwned>,
-    },
+    Complete(Box<LlmCompletionCommand>),
     Stop,
 }
 
@@ -240,7 +242,10 @@ async fn handle_completion_concurrent(
     quota_tracker: &Mutex<LlmQuotaTracker>,
     event_tx: &mpsc::Sender<LlmEvent>,
 ) {
-    let LlmCommand::Complete {
+    let LlmCommand::Complete(command) = command else {
+        return;
+    };
+    let LlmCompletionCommand {
         request_id,
         prompt_id,
         prompt_version,
@@ -248,10 +253,7 @@ async fn handle_completion_concurrent(
         input_content,
         context,
         template_override,
-    } = command
-    else {
-        return;
-    };
+    } = *command;
 
     // Capture wall clock before any work so the full span is covered.
     let start_at = Instant::now();

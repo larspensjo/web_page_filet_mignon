@@ -227,7 +227,7 @@ impl EffectRunner {
                     match load_and_prepare_articles_filtered(
                         &output_dir,
                         max_input_bytes,
-                        &*guard,
+                        &guard,
                         std::slice::from_ref(&url),
                     ) {
                         Ok((mut articles, _collection_text)) => {
@@ -505,15 +505,17 @@ impl EffectRunner {
                 template_override,
             } => {
                 if let Some(handle) = &self.llm_handle {
-                    let cmd = LlmCommand::Complete {
-                        request_id,
-                        prompt_id,
-                        prompt_version,
-                        model_override,
-                        input_content,
-                        context,
-                        template_override,
-                    };
+                    let cmd = LlmCommand::Complete(Box::new(
+                        harvester_engine::llm::LlmCompletionCommand {
+                            request_id,
+                            prompt_id,
+                            prompt_version,
+                            model_override,
+                            input_content,
+                            context,
+                            template_override,
+                        },
+                    ));
                     if let Err(err) = handle.send(cmd) {
                         engine_warn!(
                             "LLM completion request failed to dispatch: request_id={} error={:?}",
@@ -558,7 +560,7 @@ impl EffectRunner {
                     match load_and_prepare_articles_filtered(
                         &output_dir,
                         max_input_bytes,
-                        &*guard,
+                        &guard,
                         &ordered_urls,
                     ) {
                         Ok((articles, collection_text)) => {
@@ -1670,8 +1672,8 @@ mod tests {
                 } => {
                     assert_eq!(received, prompt_id);
                     assert_eq!(version, 1);
-                    let file = fs::read_to_string(&PathBuf::from(&path))
-                        .expect("read saved template file");
+                    let file =
+                        fs::read_to_string(PathBuf::from(&path)).expect("read saved template file");
                     assert!(file.contains("system {{context}}"));
                     assert!(file.contains("user {{context}}"));
                 }

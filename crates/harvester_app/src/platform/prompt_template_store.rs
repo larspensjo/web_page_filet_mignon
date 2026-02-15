@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 pub const PROMPT_TEMPLATE_SCHEMA_VERSION: u32 = 1;
+pub type LoadedPromptTemplate = Result<(PromptId, PromptTemplateFile, PathBuf), String>;
 
 /// File format for saved prompt templates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,9 +64,7 @@ pub fn save_template_file(
     Ok((version, path))
 }
 
-pub fn load_prompt_template_files(
-    base_dir: &Path,
-) -> Vec<Result<(PromptId, PromptTemplateFile, PathBuf), String>> {
+pub fn load_prompt_template_files(base_dir: &Path) -> Vec<LoadedPromptTemplate> {
     let mut results = Vec::new();
     let base_canonical = match canonicalize_path(base_dir) {
         Ok(path) => path,

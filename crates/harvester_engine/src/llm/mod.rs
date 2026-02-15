@@ -16,7 +16,8 @@ pub mod validation;
 
 pub use dto::{AggregateBriefing, ArticleSummary, BriefingTheme, TriagePriority, TriageResult};
 pub use handle::{
-    LlmCommand, LlmCompletionError, LlmCompletionResult, LlmConfig, LlmEvent, LlmHandle,
+    LlmCommand, LlmCompletionCommand, LlmCompletionError, LlmCompletionResult, LlmConfig, LlmEvent,
+    LlmHandle,
 };
 pub use mock_provider::{BlockingMockProvider, MockLlmProvider};
 pub use pricing::{ModelPricing, PricingRegistry};

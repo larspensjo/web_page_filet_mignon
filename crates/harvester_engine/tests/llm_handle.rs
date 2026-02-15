@@ -5,9 +5,9 @@ use tempfile::tempdir;
 
 use harvester_engine::llm::provider::LlmProvider;
 use harvester_engine::llm::{
-    content_hash, BlockingMockProvider, LlmCommand, LlmCompletionError, LlmConfig, LlmEvent,
-    LlmHandle, LlmQuotas, MockLlmProvider, ModelId, PricingRegistry, PromptId, PromptRegistry,
-    ProviderKind, ReplayProvider, ReplayRecord, TokenUsage,
+    content_hash, BlockingMockProvider, LlmCommand, LlmCompletionCommand, LlmCompletionError,
+    LlmConfig, LlmEvent, LlmHandle, LlmQuotas, MockLlmProvider, ModelId, PricingRegistry, PromptId,
+    PromptRegistry, ProviderKind, ReplayProvider, ReplayRecord, TokenUsage,
 };
 
 fn make_config(
@@ -54,7 +54,7 @@ fn llm_handle_dispatches_completion_event() {
 
     let handle = LlmHandle::new(config);
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 7,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
@@ -62,7 +62,7 @@ fn llm_handle_dispatches_completion_event() {
             input_content: "document text".to_string(),
             context: vec![("key".to_string(), "value".to_string())],
             template_override: None,
-        })
+        })))
         .expect("LLM command should dispatch");
 
     let event = handle
@@ -120,7 +120,7 @@ fn llm_handle_skips_provider_when_cache_hit() {
 
     let handle = LlmHandle::new(config);
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 7,
             prompt_id: PromptId::ArticleSummary,
             prompt_version: Some(2),
@@ -128,7 +128,7 @@ fn llm_handle_skips_provider_when_cache_hit() {
             input_content: input_content.to_string(),
             context: Vec::new(),
             template_override: None,
-        })
+        })))
         .expect("LLM command should dispatch");
 
     let event = handle
@@ -170,7 +170,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
     let input_content = "fresh document";
 
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 7,
             prompt_id: PromptId::ArticleSummary,
             prompt_version: Some(3),
@@ -178,7 +178,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
             input_content: input_content.to_string(),
             context: Vec::new(),
             template_override: None,
-        })
+        })))
         .expect("LLM command should dispatch");
 
     let first_event = handle
@@ -197,7 +197,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
     assert_eq!(provider.recorded_requests().len(), 1);
 
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 8,
             prompt_id: PromptId::ArticleSummary,
             prompt_version: Some(3),
@@ -205,7 +205,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
             input_content: input_content.to_string(),
             context: Vec::new(),
             template_override: None,
-        })
+        })))
         .expect("LLM command should dispatch");
 
     let second_event = handle
@@ -261,7 +261,7 @@ fn concurrent_requests_never_exceed_cap() {
     // Send all requests.
     for i in 0..total_requests {
         handle
-            .send(LlmCommand::Complete {
+            .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
                 request_id: i as u64 + 1,
                 prompt_id: PromptId::ArticleTriage,
                 prompt_version: Some(1),
@@ -269,7 +269,7 @@ fn concurrent_requests_never_exceed_cap() {
                 input_content: format!("document {i}"),
                 context: Vec::new(),
                 template_override: None,
-            })
+            })))
             .expect("send should succeed");
     }
 
@@ -329,7 +329,7 @@ fn override_model_wins_over_stage_and_default() {
 
     let handle = LlmHandle::new(config);
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 1,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
@@ -337,7 +337,7 @@ fn override_model_wins_over_stage_and_default() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
-        })
+        })))
         .unwrap();
 
     recv_event(&handle);
@@ -370,7 +370,7 @@ fn stage_model_wins_over_default_when_override_is_none() {
 
     let handle = LlmHandle::new(config);
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 1,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
@@ -378,7 +378,7 @@ fn stage_model_wins_over_default_when_override_is_none() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
-        })
+        })))
         .unwrap();
 
     recv_event(&handle);
@@ -404,7 +404,7 @@ fn unsupported_model_wrong_provider_fires_before_provider_call() {
 
     let handle = LlmHandle::new(config);
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 1,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
@@ -412,7 +412,7 @@ fn unsupported_model_wrong_provider_fires_before_provider_call() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
-        })
+        })))
         .unwrap();
 
     match recv_event(&handle) {
@@ -442,7 +442,7 @@ fn unsupported_model_unknown_name_fires_before_provider_call() {
 
     let handle = LlmHandle::new(config);
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 1,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
@@ -450,7 +450,7 @@ fn unsupported_model_unknown_name_fires_before_provider_call() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
-        })
+        })))
         .unwrap();
 
     match recv_event(&handle) {
@@ -483,7 +483,7 @@ fn valid_override_cache_miss_records_override_in_metadata() {
 
     let handle = LlmHandle::new(config);
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 1,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
@@ -491,7 +491,7 @@ fn valid_override_cache_miss_records_override_in_metadata() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
-        })
+        })))
         .unwrap();
 
     match recv_event(&handle) {
@@ -538,7 +538,7 @@ fn valid_override_cache_hit_records_override_in_metadata() {
     let override_model = ModelId::new(ProviderKind::OpenAi, "mock");
     let handle = LlmHandle::new(config);
     handle
-        .send(LlmCommand::Complete {
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 1,
             prompt_id: PromptId::ArticleTriage,
             prompt_version: Some(1),
@@ -546,7 +546,7 @@ fn valid_override_cache_hit_records_override_in_metadata() {
             input_content: input_content.to_string(),
             context: vec![],
             template_override: None,
-        })
+        })))
         .unwrap();
 
     match recv_event(&handle) {
