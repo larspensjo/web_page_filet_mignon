@@ -1,6 +1,7 @@
 use crate::prompt_lab::{
-    prompt_id_for_stage, PromptLabInputSource, PromptLabRunId, PromptLabRunStatus, PromptLabStage,
-    PromptLabState, PromptLabTemplateSnapshot,
+    prompt_id_for_stage, PromptLabCompareBatchRecord, PromptLabCompareBatchStatus,
+    PromptLabInputSource, PromptLabRunId, PromptLabRunStatus, PromptLabStage, PromptLabState,
+    PromptLabTemplateSnapshot,
 };
 use crate::pre_triage_filter::FilterReason;
 use crate::state::LinkDownloadState;
@@ -158,6 +159,60 @@ pub struct PromptLabView {
     pub template_applied: bool,
     pub template_saved_version: Option<PromptVersion>,
     pub template_saved_path: Option<String>,
+    pub draft_candidates: Vec<PromptLabCompareCandidateView>,
+    pub active_batch: Option<PromptLabCompareBatchView>,
+    pub can_add_candidate: bool,
+    pub can_reset_draft: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabCompareCandidateView {
+    pub candidate_id: u64,
+    pub label: String,
+    pub stage_label: String,
+    pub model_label: String,
+    pub prompt_version_label: String,
+    pub has_context_override: bool,
+    pub has_template_override: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabCompareRowView {
+    pub candidate_id: u64,
+    pub label: String,
+    pub run_id: Option<PromptLabRunId>,
+    pub status_label: String,
+    pub model_label: String,
+    pub cost_label: String,
+    pub wall_label: String,
+    pub tokens_label: String,
+    pub parse_ok: Option<bool>,
+    pub rating: Option<u8>,
+    pub is_manual_winner: bool,
+    pub is_auto_winner: bool,
+    pub rank: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabComparePolicyView {
+    pub require_parse_ok: bool,
+    pub max_cost_label: String,
+    pub max_wall_label: String,
+    pub rating_beats_cost: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PromptLabCompareBatchView {
+    pub batch_id_label: String,
+    pub status_label: String,
+    pub warning: Option<String>,
+    pub auto_select_warning: Option<String>,
+    pub rows: Vec<PromptLabCompareRowView>,
+    pub policy: PromptLabComparePolicyView,
+    pub can_start: bool,
+    pub can_cancel: bool,
+    pub can_auto_select: bool,
+    pub pending_confirmation: bool,
 }
 
 impl Default for PromptLabView {
@@ -198,6 +253,10 @@ impl Default for PromptLabView {
             template_applied: false,
             template_saved_version: None,
             template_saved_path: None,
+            draft_candidates: Vec::new(),
+            active_batch: None,
+            can_add_candidate: true,
+            can_reset_draft: false,
         }
     }
 }
@@ -390,6 +449,29 @@ impl PromptLabView {
                 None,
             )
         };
+        let draft_candidates = state
+            .draft_candidates()
+            .iter()
+            .map(|candidate| PromptLabCompareCandidateView {
+                candidate_id: candidate.candidate_id,
+                label: candidate.label.clone(),
+                stage_label: format!("{:?}", candidate.stage),
+                model_label: candidate
+                    .model_override
+                    .as_ref()
+                    .map(|model| model.model_name().to_string())
+                    .unwrap_or_else(|| "default".to_string()),
+                prompt_version_label: candidate
+                    .prompt_version
+                    .map_or_else(|| "active".to_string(), |version| version.to_string()),
+                has_context_override: !candidate.context_snapshot.is_empty(),
+                has_template_override: candidate.template_snapshot.is_some(),
+            })
+            .collect::<Vec<_>>();
+        let active_batch = state
+            .active_batch()
+            .map(|batch| compare_batch_view(state, batch));
+        let batch_running = state.has_active_batch();
         Self {
             visible: state.is_visible(),
             selected_stage: state.selected_stage(),
@@ -426,7 +508,133 @@ impl PromptLabView {
             template_applied,
             template_saved_version,
             template_saved_path,
+            draft_candidates,
+            active_batch,
+            can_add_candidate: !batch_running,
+            can_reset_draft: !batch_running && !state.draft_candidates().is_empty(),
         }
+    }
+}
+
+fn compare_batch_view(state: &PromptLabState, batch: &PromptLabCompareBatchRecord) -> PromptLabCompareBatchView {
+    let status_label = match batch.status {
+        PromptLabCompareBatchStatus::Draft => "Draft".to_string(),
+        PromptLabCompareBatchStatus::Running { dispatched, total } => {
+            format!("Running {dispatched}/{total}")
+        }
+        PromptLabCompareBatchStatus::AllComplete => "AllComplete".to_string(),
+        PromptLabCompareBatchStatus::PartialFailure => "PartialFailure".to_string(),
+        PromptLabCompareBatchStatus::Cancelled => "Cancelled".to_string(),
+    };
+    let rows = batch
+        .candidate_run_ids
+        .iter()
+        .filter_map(|(candidate_id, run_id)| {
+            let candidate = batch.candidates.iter().find(|candidate| candidate.candidate_id == *candidate_id)?;
+            let run = run_id.and_then(|run_id| state.run_by_id(run_id));
+            let (status_label, cost_label, wall_label, tokens_label, parse_ok, rating, model_label) =
+                if let Some(run) = run {
+                    match &run.status {
+                        PromptLabRunStatus::Pending { .. } => (
+                            "running".to_string(),
+                            "—".to_string(),
+                            "—".to_string(),
+                            "—".to_string(),
+                            None,
+                            run.operator_rating,
+                            run.model_override
+                                .as_ref()
+                                .map(|model| model.model_name().to_string())
+                                .unwrap_or_else(|| "default".to_string()),
+                        ),
+                        PromptLabRunStatus::Completed { metadata, .. } => (
+                            "ok".to_string(),
+                            format!("${:.6}", metadata.cost_microdollars as f64 / 1_000_000.0),
+                            format!("{} ms", metadata.wall_ms),
+                            format!("{}/{}", metadata.input_tokens, metadata.output_tokens),
+                            Some(metadata.parse_ok),
+                            run.operator_rating,
+                            metadata.resolved_model.clone(),
+                        ),
+                        PromptLabRunStatus::Failed { metadata, .. } => (
+                            "failed".to_string(),
+                            metadata
+                                .as_ref()
+                                .map(|meta| format!("${:.6}", meta.cost_microdollars as f64 / 1_000_000.0))
+                                .unwrap_or_else(|| "—".to_string()),
+                            metadata
+                                .as_ref()
+                                .map(|meta| format!("{} ms", meta.wall_ms))
+                                .unwrap_or_else(|| "—".to_string()),
+                            metadata
+                                .as_ref()
+                                .map(|meta| format!("{}/{}", meta.input_tokens, meta.output_tokens))
+                                .unwrap_or_else(|| "—".to_string()),
+                            metadata.as_ref().map(|meta| meta.parse_ok),
+                            run.operator_rating,
+                            run.model_override
+                                .as_ref()
+                                .map(|model| model.model_name().to_string())
+                                .unwrap_or_else(|| "default".to_string()),
+                        ),
+                    }
+                } else {
+                    (
+                        "pending".to_string(),
+                        "—".to_string(),
+                        "—".to_string(),
+                        "—".to_string(),
+                        None,
+                        None,
+                        candidate
+                            .model_override
+                            .as_ref()
+                            .map(|model| model.model_name().to_string())
+                            .unwrap_or_else(|| "default".to_string()),
+                    )
+                };
+            Some(PromptLabCompareRowView {
+                candidate_id: *candidate_id,
+                label: candidate.label.clone(),
+                run_id: *run_id,
+                status_label,
+                model_label,
+                cost_label,
+                wall_label,
+                tokens_label,
+                parse_ok,
+                rating,
+                is_manual_winner: batch.selected_run_id.is_some() && batch.selected_run_id == *run_id,
+                is_auto_winner: batch.selected_run_id.is_none()
+                    && batch.auto_selected_run_id.is_some()
+                    && batch.auto_selected_run_id == *run_id,
+                rank: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    let policy = PromptLabComparePolicyView {
+        require_parse_ok: batch.policy.require_parse_ok,
+        max_cost_label: batch
+            .policy
+            .max_cost_microdollars
+            .map_or_else(|| "Any".to_string(), |value| value.to_string()),
+        max_wall_label: batch
+            .policy
+            .max_wall_ms
+            .map_or_else(|| "Any".to_string(), |value| value.to_string()),
+        rating_beats_cost: batch.policy.rating_beats_cost,
+    };
+    PromptLabCompareBatchView {
+        batch_id_label: batch.batch_id.0.to_string(),
+        status_label,
+        warning: batch.warning.clone(),
+        auto_select_warning: batch.auto_select_warning.clone(),
+        rows,
+        policy,
+        can_start: false,
+        can_cancel: matches!(batch.status, PromptLabCompareBatchStatus::Running { .. }),
+        can_auto_select: true,
+        pending_confirmation: false,
     }
 }
 
