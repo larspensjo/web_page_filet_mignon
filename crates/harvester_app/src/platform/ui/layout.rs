@@ -286,7 +286,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
-        text: "Apply + Rerun".to_string(),
+        text: "Apply+Run".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -298,43 +298,43 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_CONTEXT_SAVE,
-        text: "Save to Disk".to_string(),
+        text: "Save".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
-        text: "Reload From Disk".to_string(),
+        text: "Reload".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
-        text: "Edit Templates".to_string(),
+        text: "Edit".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY,
-        text: "Apply Template".to_string(),
+        text: "Apply".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
-        text: "Apply + Rerun".to_string(),
+        text: "Apply+Run".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_TEMPLATE_REVERT,
-        text: "Revert Template".to_string(),
+        text: "Revert".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_TEMPLATE_SAVE,
-        text: "Save Template".to_string(),
+        text: "Save".to_string(),
     });
     commands.push(PlatformCommand::CreateInput {
         window_id,
@@ -1021,7 +1021,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
                 dock_style: DockStyle::Left,
                 order: 0,
-                fixed_size: Some(64),
+                fixed_size: Some(48),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1029,7 +1029,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
                 dock_style: DockStyle::Left,
                 order: 1,
-                fixed_size: Some(120),
+                fixed_size: Some(74),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1037,7 +1037,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
                 dock_style: DockStyle::Left,
                 order: 2,
-                fixed_size: Some(64),
+                fixed_size: Some(58),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1045,7 +1045,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
                 dock_style: DockStyle::Left,
                 order: 3,
-                fixed_size: Some(110),
+                fixed_size: Some(48),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1077,7 +1077,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
                 dock_style: DockStyle::Left,
                 order: 0,
-                fixed_size: Some(110),
+                fixed_size: Some(50),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1085,7 +1085,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
                 dock_style: DockStyle::Left,
                 order: 1,
-                fixed_size: Some(110),
+                fixed_size: Some(50),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1093,7 +1093,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
                 dock_style: DockStyle::Left,
                 order: 2,
-                fixed_size: Some(120),
+                fixed_size: Some(74),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {
@@ -1101,7 +1101,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
                 dock_style: DockStyle::Left,
                 order: 3,
-                fixed_size: Some(120),
+                fixed_size: Some(58),
                 margin: (0, 4, 0, 0),
             },
             LayoutRule {

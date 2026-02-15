@@ -2237,7 +2237,10 @@ mod tests {
         );
 
         assert!(effects.is_empty());
-        assert_eq!(state.left_panel_width(), 360);
+        assert_eq!(
+            state.left_panel_width(),
+            INPUT_PANEL_FIXED_WIDTH + MIN_JOBS_PANEL_WIDTH
+        );
     }
 
     fn make_state_with_summarized_job_for_update() -> AppState {

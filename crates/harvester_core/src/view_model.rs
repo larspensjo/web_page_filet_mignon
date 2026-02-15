@@ -10,7 +10,7 @@ use harvester_engine::LinkKind;
 use std::collections::HashMap;
 
 pub const TOKEN_LIMIT: u64 = 200_000;
-pub const INPUT_PANEL_FIXED_WIDTH: i32 = 160;
+pub const INPUT_PANEL_FIXED_WIDTH: i32 = 350;
 pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -31,8 +31,8 @@ pub struct PreviewHeaderView {
     pub nav_heavy: bool,
 }
 
-// Default left panel width when the input panel is shown (PANEL_INPUT + PANEL_JOBS = 160 + 440)
-pub const DEFAULT_LEFT_PANEL_WIDTH: i32 = 600;
+// Default left panel width when the input panel is shown (PANEL_INPUT + PANEL_JOBS = 240 + 440)
+pub const DEFAULT_LEFT_PANEL_WIDTH: i32 = 680;
 pub const DEFAULT_JOBS_PANEL_WIDTH: i32 = DEFAULT_LEFT_PANEL_WIDTH - INPUT_PANEL_FIXED_WIDTH;
 // Default window width
 pub const DEFAULT_WINDOW_WIDTH: i32 = 960;

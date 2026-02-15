@@ -1653,8 +1653,8 @@ mod tests {
             .and_then(|rule| rule.fixed_size)
             .expect("PANEL_JOBS fixed size");
 
-        assert_eq!(input_width, 160);
-        assert_eq!(jobs_width, 760 - 160);
+        assert_eq!(input_width, harvester_core::INPUT_PANEL_FIXED_WIDTH);
+        assert_eq!(jobs_width, 760 - harvester_core::INPUT_PANEL_FIXED_WIDTH);
     }
 
     #[test]
