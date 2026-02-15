@@ -862,6 +862,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
+        Msg::PromptLabRunDetailsSectionToggled => {
+            state.prompt_lab_mut().toggle_run_details_section();
+            state.mark_dirty();
+            Vec::new()
+        }
         Msg::PromptLabUrlInputChanged { url } => {
             state.prompt_lab_mut().set_url_input(url);
             state.mark_dirty();

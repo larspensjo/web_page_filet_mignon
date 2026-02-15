@@ -241,6 +241,7 @@ pub enum Msg {
     PromptLabCompareSectionToggled,
     PromptLabContextSectionToggled,
     PromptLabTemplateSectionToggled,
+    PromptLabRunDetailsSectionToggled,
     PromptLabComparePolicyUpdated {
         require_parse_ok: Option<bool>,
         max_cost_microdollars: Option<Option<u64>>,

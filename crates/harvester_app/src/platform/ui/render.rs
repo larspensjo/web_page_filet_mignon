@@ -88,6 +88,7 @@ pub struct TreeRenderState {
     prev_prompt_lab_section_compare_text: Option<String>,
     prev_prompt_lab_section_context_text: Option<String>,
     prev_prompt_lab_section_template_text: Option<String>,
+    prev_prompt_lab_section_run_details_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -159,6 +160,7 @@ impl Default for TreeRenderState {
             prev_prompt_lab_section_compare_text: None,
             prev_prompt_lab_section_context_text: None,
             prev_prompt_lab_section_template_text: None,
+            prev_prompt_lab_section_run_details_text: None,
         }
     }
 }
@@ -279,6 +281,7 @@ pub fn render(
             view.prompt_lab.compare_section_open,
             view.prompt_lab.context_section_open,
             view.prompt_lab.template_section_open,
+            view.prompt_lab.run_details_section_open,
             view.prompt_lab.template_editor_open,
         ));
         tree_state.prev_left_panel_width = view.left_panel_width;
@@ -450,6 +453,18 @@ pub fn render(
             text: template_section_text.clone(),
         });
         tree_state.prev_prompt_lab_section_template_text = Some(template_section_text);
+    }
+    let run_details_section_text =
+        select_label("Run details", view.prompt_lab.run_details_section_open);
+    if tree_state.prev_prompt_lab_section_run_details_text.as_deref()
+        != Some(run_details_section_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+            text: run_details_section_text.clone(),
+        });
+        tree_state.prev_prompt_lab_section_run_details_text = Some(run_details_section_text);
     }
 
     let stage_triage_text = select_label(
@@ -2110,6 +2125,7 @@ mod tests {
         view.prompt_lab.compare_section_open = true;
         view.prompt_lab.context_section_open = false;
         view.prompt_lab.template_section_open = true;
+        view.prompt_lab.run_details_section_open = true;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2130,6 +2146,13 @@ mod tests {
                 cmd,
                 PlatformCommand::SetControlText { control_id, text, .. }
                 if *control_id == BTN_PROMPT_LAB_SECTION_CONTEXT && text.contains("[ ]")
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == BTN_PROMPT_LAB_SECTION_RUN_DETAILS && text.contains("[x]")
             )
         }));
     }

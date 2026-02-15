@@ -451,6 +451,7 @@ pub struct PromptLabState {
     pub(crate) compare_section_open: bool,
     pub(crate) context_section_open: bool,
     pub(crate) template_section_open: bool,
+    pub(crate) run_details_section_open: bool,
     pub(crate) next_compare_batch_id: u64,
     pub(crate) batches: Vec<PromptLabCompareBatchRecord>,
     pub(crate) active_batch_idx: Option<usize>,
@@ -482,6 +483,7 @@ impl Default for PromptLabState {
             compare_section_open: false,
             context_section_open: false,
             template_section_open: false,
+            run_details_section_open: false,
             next_compare_batch_id: 1,
             batches: Vec::new(),
             active_batch_idx: None,
@@ -1017,6 +1019,14 @@ impl PromptLabState {
 
     pub fn template_section_open(&self) -> bool {
         self.template_section_open
+    }
+
+    pub fn toggle_run_details_section(&mut self) {
+        self.run_details_section_open = !self.run_details_section_open;
+    }
+
+    pub fn run_details_section_open(&self) -> bool {
+        self.run_details_section_open
     }
 
     pub(crate) fn clear_context_overlays(&mut self) {

@@ -416,7 +416,6 @@ impl AppEventHandler {
         let _ = self.msg_tx.send(msg.clone());
         if matches!(msg, Msg::PromptLabOpenRequested) {
             let _ = self.msg_tx.send(Msg::PromptLabContextEditorOpened);
-            let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorOpened);
         }
     }
 }
@@ -480,6 +479,11 @@ impl PlatformEventHandler for AppEventHandler {
                 if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_TEMPLATE =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabTemplateSectionToggled);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_RUN_DETAILS =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabRunDetailsSectionToggled);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_STAGE_TRIAGE =>
@@ -1142,6 +1146,10 @@ mod tests {
             window_id: WindowId::new(1),
             control_id: ui::constants::BTN_PROMPT_LAB_SECTION_TEMPLATE,
         });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+        });
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250)).expect("advanced"),
             Msg::PromptLabAdvancedModeSet { enabled: true }
@@ -1160,6 +1168,11 @@ mod tests {
             rx.recv_timeout(Duration::from_millis(250))
                 .expect("toggle template"),
             Msg::PromptLabTemplateSectionToggled
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("toggle run details"),
+            Msg::PromptLabRunDetailsSectionToggled
         );
     }
 
@@ -1183,11 +1196,6 @@ mod tests {
             rx.recv_timeout(Duration::from_millis(250))
                 .expect("context open"),
             Msg::PromptLabContextEditorOpened
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250))
-                .expect("template open"),
-            Msg::PromptLabTemplateEditorOpened
         );
 
         {
