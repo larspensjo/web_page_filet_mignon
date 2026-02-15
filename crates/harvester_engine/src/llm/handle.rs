@@ -410,6 +410,12 @@ async fn handle_completion_concurrent(
     let cost = config
         .pricing
         .cost_microdollars(response.model_id().model_name(), &usage);
+    if cost == 0 && !config.pricing.is_empty() {
+        engine_warn!(
+            "[llm-run] WARN missing pricing model={}",
+            response.model_id().model_name()
+        );
+    }
 
     // Post-call: record actual token/cost usage and check token/cost limits.
     {

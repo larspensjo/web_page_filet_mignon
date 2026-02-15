@@ -67,6 +67,10 @@ impl PricingRegistry {
         self.prices.get(model_name)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.prices.is_empty()
+    }
+
     pub fn cost_microdollars(&self, model_name: &str, usage: &TokenUsage) -> u64 {
         self.get(model_name)
             .map(|pricing| pricing.cost_microdollars(usage))
