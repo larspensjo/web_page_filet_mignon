@@ -1264,9 +1264,18 @@ impl AppState {
         prompt_id: PromptId,
         input_snapshot: String,
         request_id: u64,
+        prompt_version_used: Option<harvester_engine::llm::prompt::PromptVersion>,
+        model_override: Option<harvester_engine::llm::types::ModelId>,
     ) {
-        self.prompt_lab
-            .add_pending_run(run_id, stage, prompt_id, input_snapshot, request_id);
+        self.prompt_lab.add_pending_run(
+            run_id,
+            stage,
+            prompt_id,
+            input_snapshot,
+            request_id,
+            prompt_version_used,
+            model_override,
+        );
     }
 
     pub(crate) fn complete_prompt_lab_run(
@@ -2634,18 +2643,12 @@ mod tests {
         // Add a pending run
         let req_id = state.allocate_next_llm_request_id();
         let run_id = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(
-            run_id,
-            crate::prompt_lab::PromptLabStage::Triage,
-            PromptId::ArticleTriage,
-            "input".to_string(),
-            req_id,
-        );
+        state.add_prompt_lab_pending_run(run_id, crate::prompt_lab::PromptLabStage::Triage, PromptId::ArticleTriage, "input".to_string(), req_id, None, None);
 
         // Add a completed run
         let req_id2 = state.allocate_next_llm_request_id();
         let run_id2 = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(run_id2, crate::prompt_lab::PromptLabStage::Triage, PromptId::ArticleTriage, "input2".to_string(), req_id2);
+        state.add_prompt_lab_pending_run(run_id2, crate::prompt_lab::PromptLabStage::Triage, PromptId::ArticleTriage, "input2".to_string(), req_id2, None, None);
         state.complete_prompt_lab_run(run_id2, "{}".to_string(), harvester_engine::llm::run_metadata::LlmRunMetadata::stub());
         state.consume_prompt_lab_ownership(req_id2);
 

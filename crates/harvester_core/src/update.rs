@@ -732,7 +732,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let prompt_version = state.active_version_for(prompt_id);
             let context = state.context_for(prompt_id).to_vec();
             state.record_pending_llm_request(request_id, prompt_id);
-            state.add_prompt_lab_pending_run(run_id, stage, prompt_id, input.clone(), request_id);
+            state.add_prompt_lab_pending_run(run_id, stage, prompt_id, input.clone(), request_id, None, None);
             state.mark_dirty();
             engine_info!(
                 "[prompt-lab] run requested run_id={} request_id={} stage={:?}",
@@ -2161,7 +2161,7 @@ mod tests {
         // Add a completed run manually
         let rid = state.allocate_next_llm_request_id();
         let run = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(run, PromptLabStage::Triage, PromptId::ArticleTriage, "x".to_string(), rid);
+        state.add_prompt_lab_pending_run(run, PromptLabStage::Triage, PromptId::ArticleTriage, "x".to_string(), rid, None, None);
         state.complete_prompt_lab_run(run, "{}".to_string(), LlmRunMetadata::stub());
         state.consume_prompt_lab_ownership(rid);
         assert_eq!(state.prompt_lab().run_count(), 1);
