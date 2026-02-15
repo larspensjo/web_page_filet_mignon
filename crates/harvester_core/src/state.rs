@@ -3,8 +3,7 @@ use crate::context_hash;
 use crate::prompt_lab::{PromptLabRunId, PromptLabStage, PromptLabState};
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
-use crate::triage::{ArticleTriageResult, TriageSession};
-use crate::triage_cache::{TriageCache, TriageCacheKey};
+use crate::triage::{ArticleTriageState, TriageSession};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView, TriageAnnotationView,
@@ -224,6 +223,7 @@ pub struct AppState {
     summary_max_in_flight: usize,
     prompt_lab: PromptLabState,
     next_prompt_lab_run_id: u64,
+    prompt_lab_next_resolve_id: u64,
 }
 
 pub struct IngestResult {
@@ -265,6 +265,7 @@ impl Default for AppState {
             summary_max_in_flight: 1,
             prompt_lab: PromptLabState::default(),
             next_prompt_lab_run_id: 1,
+            prompt_lab_next_resolve_id: 1,
         }
     }
 }
@@ -362,6 +363,11 @@ impl AppState {
                     nav_heavy: quality.nav_heavy(),
                 }
             });
+        let triage_articles_available = self
+            .triage()
+            .articles()
+            .iter()
+            .any(|article| matches!(article.triage_state, ArticleTriageState::Completed { .. }));
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -388,7 +394,10 @@ impl AppState {
             input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),
             selected_url,
-            prompt_lab: crate::view_model::PromptLabView::from_state(&self.prompt_lab),
+            prompt_lab: crate::view_model::PromptLabView::from_state(
+                &self.prompt_lab,
+                triage_articles_available,
+            ),
         }
     }
 
@@ -525,6 +534,14 @@ impl AppState {
                     .collect(),
             })
             .collect()
+    }
+
+    pub(crate) fn job_url(&self, job_id: JobId) -> Option<&str> {
+        self.jobs.get(&job_id).map(|job| job.url.as_str())
+    }
+
+    pub(crate) fn selected_job_id(&self) -> Option<JobId> {
+        self.ui.selected_job_id()
     }
 
     #[allow(dead_code)]
@@ -1263,6 +1280,12 @@ impl AppState {
         id
     }
 
+    pub(crate) fn allocate_next_prompt_lab_resolve_id(&mut self) -> u64 {
+        let id = self.prompt_lab_next_resolve_id;
+        self.prompt_lab_next_resolve_id = self.prompt_lab_next_resolve_id.saturating_add(1);
+        id
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn add_prompt_lab_pending_run(
         &mut self,
@@ -1294,8 +1317,13 @@ impl AppState {
         self.prompt_lab.complete_run(run_id, output_json, metadata);
     }
 
-    pub(crate) fn fail_prompt_lab_run(&mut self, run_id: PromptLabRunId, reason: String) {
-        self.prompt_lab.fail_run(run_id, reason);
+    pub(crate) fn fail_prompt_lab_run(
+        &mut self,
+        run_id: PromptLabRunId,
+        reason: String,
+        metadata: Option<LlmRunMetadata>,
+    ) {
+        self.prompt_lab.fail_run(run_id, reason, metadata);
     }
 
     pub(crate) fn consume_prompt_lab_ownership(&mut self, request_id: u64) {

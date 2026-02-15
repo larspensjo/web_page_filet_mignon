@@ -26,6 +26,10 @@ pub enum Effect {
         input_content: String,
         context: Vec<(String, String)>,
     },
+    ResolvePromptLabInputFromUrl {
+        resolve_id: u64,
+        url: String,
+    },
     StartSession,
     StopFinish {
         policy: StopPolicy,

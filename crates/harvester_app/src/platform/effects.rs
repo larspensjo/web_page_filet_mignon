@@ -194,6 +194,49 @@ impl EffectRunner {
                 engine_info!("Archive requested: enqueue export job");
                 self.engine.request_export();
             }
+            Effect::ResolvePromptLabInputFromUrl { resolve_id, url } => {
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.output_dir.clone();
+                let registry = self.prompt_registry.clone();
+                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
+                let url = url.clone();
+                thread::spawn(move || {
+                    engine_info!(
+                        "[prompt-lab] resolve requested resolve_id={} url={}",
+                        resolve_id,
+                        url
+                    );
+                    match load_and_prepare_articles_filtered(
+                        &output_dir,
+                        max_input_bytes,
+                        &registry,
+                        &[url.clone()],
+                    ) {
+                        Ok((mut articles, _collection_text)) => {
+                            if let Some(article) = articles.pop() {
+                                let _ = msg_tx.send(Msg::PromptLabInputResolved {
+                                    resolve_id,
+                                    result: Ok(article.prepared_text),
+                                });
+                            } else {
+                                let reason = "article missing after resolution".to_string();
+                                engine_warn!("[prompt-lab] resolve failed: {}", reason);
+                                let _ = msg_tx.send(Msg::PromptLabInputResolved {
+                                    resolve_id,
+                                    result: Err(reason),
+                                });
+                            }
+                        }
+                        Err(reason) => {
+                            engine_warn!("[prompt-lab] resolve failed: {}", reason);
+                            let _ = msg_tx.send(Msg::PromptLabInputResolved {
+                                resolve_id,
+                                result: Err(reason),
+                            });
+                        }
+                    }
+                });
+            }
             Effect::DownloadLinkedPage {
                 job_id,
                 link_index,
@@ -1422,6 +1465,57 @@ mod tests {
             assert!(matches!(result, LlmResultKind::Failed { .. }));
         } else {
             panic!("expected LlmCompleted");
+        }
+    }
+
+    #[test]
+    fn resolve_effect_success_emits_ok_msg() {
+        let temp = tempdir().expect("tempdir");
+        write_markdown(temp.path(), "a.md", "https://example.com/a");
+        let (mut runner, rx) = runner_with_receiver();
+        runner.output_dir = temp.path().to_path_buf();
+        runner.enqueue(vec![Effect::ResolvePromptLabInputFromUrl {
+            resolve_id: 7,
+            url: "https://example.com/a".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("expected prompt lab resolve msg");
+        match msg {
+            Msg::PromptLabInputResolved {
+                resolve_id,
+                result: Ok(snapshot),
+            } => {
+                assert_eq!(resolve_id, 7);
+                assert!(!snapshot.is_empty());
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolve_effect_failure_emits_err_msg() {
+        let temp = tempdir().expect("tempdir");
+        let (mut runner, rx) = runner_with_receiver();
+        runner.output_dir = temp.path().to_path_buf();
+        runner.enqueue(vec![Effect::ResolvePromptLabInputFromUrl {
+            resolve_id: 8,
+            url: "https://example.com/missing".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("expected prompt lab resolve msg");
+        match msg {
+            Msg::PromptLabInputResolved {
+                resolve_id,
+                result: Err(reason),
+            } => {
+                assert_eq!(resolve_id, 8);
+                assert!(!reason.is_empty());
+            }
+            other => panic!("unexpected message: {:?}", other),
         }
     }
 }

@@ -21,7 +21,9 @@ pub use briefing::{
 pub use cache_utils::model_ids_compatible;
 pub use effect::{Effect, StopPolicy};
 pub use msg::{LlmResultKind, Msg};
-pub use prompt_lab::{PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage};
+pub use prompt_lab::{
+    PromptLabInputSource, PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage,
+};
 pub use source_state::{SourceInstanceState, SourceStateIndex};
 pub use state::{
     normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind,

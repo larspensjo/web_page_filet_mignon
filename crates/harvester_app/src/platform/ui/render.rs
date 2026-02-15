@@ -2,8 +2,8 @@ use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
 use engine_logging::{engine_debug, engine_warn};
 use harvester_core::{
-    AppViewModel, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView, SessionState,
-    Stage, DEFAULT_JOBS_PANEL_WIDTH,
+    AppViewModel, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView,
+    PromptLabInputSource, PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::LinkKind;
 
@@ -42,6 +42,21 @@ pub struct TreeRenderState {
     prev_progress_range: Option<(u32, u32)>,
     prev_progress_pos: Option<u32>,
     prev_open_browser_enabled: Option<bool>,
+    prev_prompt_lab_visible: bool,
+    prev_prompt_lab_toggle_text: Option<String>,
+    prev_prompt_lab_status_text: Option<String>,
+    prev_prompt_lab_metadata_text: Option<String>,
+    prev_prompt_lab_url_input: Option<String>,
+    prev_prompt_lab_run_enabled: Option<bool>,
+    prev_prompt_lab_rerun_enabled: Option<bool>,
+    prev_prompt_lab_resolve_enabled: Option<bool>,
+    prev_prompt_lab_url_enabled: Option<bool>,
+    prev_prompt_lab_clear_enabled: Option<bool>,
+    prev_prompt_lab_stage_triage_text: Option<String>,
+    prev_prompt_lab_stage_summary_text: Option<String>,
+    prev_prompt_lab_stage_briefing_text: Option<String>,
+    prev_prompt_lab_source_triage_text: Option<String>,
+    prev_prompt_lab_source_url_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -67,6 +82,21 @@ impl Default for TreeRenderState {
             prev_progress_range: None,
             prev_progress_pos: None,
             prev_open_browser_enabled: None,
+            prev_prompt_lab_visible: false,
+            prev_prompt_lab_toggle_text: None,
+            prev_prompt_lab_status_text: None,
+            prev_prompt_lab_metadata_text: None,
+            prev_prompt_lab_url_input: None,
+            prev_prompt_lab_run_enabled: None,
+            prev_prompt_lab_rerun_enabled: None,
+            prev_prompt_lab_resolve_enabled: None,
+            prev_prompt_lab_url_enabled: None,
+            prev_prompt_lab_clear_enabled: None,
+            prev_prompt_lab_stage_triage_text: None,
+            prev_prompt_lab_stage_summary_text: None,
+            prev_prompt_lab_stage_briefing_text: None,
+            prev_prompt_lab_source_triage_text: None,
+            prev_prompt_lab_source_url_text: None,
         }
     }
 }
@@ -163,7 +193,8 @@ pub fn render(
 
     // Check if left_panel_width changed and emit updated layout
     let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
-        || view.input_panel_visible != tree_state.prev_input_panel_visible;
+        || view.input_panel_visible != tree_state.prev_input_panel_visible
+        || view.prompt_lab.visible != tree_state.prev_prompt_lab_visible;
     if layout_changed {
         engine_debug!(
             "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}",
@@ -176,9 +207,11 @@ pub fn render(
             window_id,
             view.left_panel_width,
             view.input_panel_visible,
+            view.prompt_lab.visible,
         ));
         tree_state.prev_left_panel_width = view.left_panel_width;
         tree_state.prev_input_panel_visible = view.input_panel_visible;
+        tree_state.prev_prompt_lab_visible = view.prompt_lab.visible;
     }
 
     let mut status_parts = vec![status_base_text.clone()];
@@ -299,10 +332,164 @@ pub fn render(
         tree_state.prev_open_browser_enabled = Some(open_browser_enabled);
     }
 
+    let toggle_text = if view.prompt_lab.visible {
+        "Prompt Lab [open]"
+    } else {
+        "Prompt Lab [closed]"
+    }
+    .to_string();
+    if tree_state.prev_prompt_lab_toggle_text.as_deref() != Some(toggle_text.as_str()) {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_TOGGLE,
+            text: toggle_text.clone(),
+        });
+        tree_state.prev_prompt_lab_toggle_text = Some(toggle_text);
+    }
+
+    let stage_triage_text = select_label(
+        "Triage",
+        view.prompt_lab.selected_stage == PromptLabStage::Triage,
+    );
+    if tree_state.prev_prompt_lab_stage_triage_text.as_deref() != Some(stage_triage_text.as_str()) {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_STAGE_TRIAGE,
+            text: stage_triage_text.clone(),
+        });
+        tree_state.prev_prompt_lab_stage_triage_text = Some(stage_triage_text);
+    }
+    let stage_summary_text = select_label(
+        "Summary",
+        view.prompt_lab.selected_stage == PromptLabStage::Summary,
+    );
+    if tree_state.prev_prompt_lab_stage_summary_text.as_deref() != Some(stage_summary_text.as_str()) {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_STAGE_SUMMARY,
+            text: stage_summary_text.clone(),
+        });
+        tree_state.prev_prompt_lab_stage_summary_text = Some(stage_summary_text);
+    }
+    let stage_briefing_text = select_label(
+        "Briefing",
+        view.prompt_lab.selected_stage == PromptLabStage::Briefing,
+    );
+    if tree_state.prev_prompt_lab_stage_briefing_text.as_deref()
+        != Some(stage_briefing_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_STAGE_BRIEFING,
+            text: stage_briefing_text.clone(),
+        });
+        tree_state.prev_prompt_lab_stage_briefing_text = Some(stage_briefing_text);
+    }
+
+    let source_from_triage_text = select_label(
+        "From triage",
+        view.prompt_lab.selected_input_source == PromptLabInputSource::FromTriageArticles,
+    );
+    if tree_state.prev_prompt_lab_source_triage_text.as_deref()
+        != Some(source_from_triage_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_SOURCE_FROM_TRIAGE,
+            text: source_from_triage_text.clone(),
+        });
+        tree_state.prev_prompt_lab_source_triage_text = Some(source_from_triage_text);
+    }
+    let source_type_url_text = select_label(
+        "Type URL",
+        view.prompt_lab.selected_input_source == PromptLabInputSource::TypeUrl,
+    );
+    if tree_state.prev_prompt_lab_source_url_text.as_deref() != Some(source_type_url_text.as_str())
+    {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_SOURCE_TYPE_URL,
+            text: source_type_url_text.clone(),
+        });
+        tree_state.prev_prompt_lab_source_url_text = Some(source_type_url_text);
+    }
+
+    if tree_state.prev_prompt_lab_run_enabled != Some(view.prompt_lab.can_run) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_RUN,
+            enabled: view.prompt_lab.can_run,
+        });
+        tree_state.prev_prompt_lab_run_enabled = Some(view.prompt_lab.can_run);
+    }
+    if tree_state.prev_prompt_lab_rerun_enabled != Some(view.prompt_lab.can_rerun) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_RERUN,
+            enabled: view.prompt_lab.can_rerun,
+        });
+        tree_state.prev_prompt_lab_rerun_enabled = Some(view.prompt_lab.can_rerun);
+    }
+    let type_url_selected = view.prompt_lab.selected_input_source == PromptLabInputSource::TypeUrl;
+    let resolve_enabled = type_url_selected && !view.prompt_lab.resolve_pending;
+    if tree_state.prev_prompt_lab_resolve_enabled != Some(resolve_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_RESOLVE,
+            enabled: resolve_enabled,
+        });
+        tree_state.prev_prompt_lab_resolve_enabled = Some(resolve_enabled);
+    }
+    if tree_state.prev_prompt_lab_url_enabled != Some(type_url_selected) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: INPUT_PROMPT_LAB_URL,
+            enabled: type_url_selected,
+        });
+        tree_state.prev_prompt_lab_url_enabled = Some(type_url_selected);
+    }
+    let clear_enabled = view.prompt_lab.run_count > 0;
+    if tree_state.prev_prompt_lab_clear_enabled != Some(clear_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_PROMPT_LAB_CLEAR,
+            enabled: clear_enabled,
+        });
+        tree_state.prev_prompt_lab_clear_enabled = Some(clear_enabled);
+    }
+
+    if tree_state.prev_prompt_lab_url_input.as_deref() != Some(view.prompt_lab.url_input.as_str()) {
+        cmds.push(PlatformCommand::SetInputText {
+            window_id,
+            control_id: INPUT_PROMPT_LAB_URL,
+            text: view.prompt_lab.url_input.clone(),
+        });
+        tree_state.prev_prompt_lab_url_input = Some(view.prompt_lab.url_input.clone());
+    }
+
+    let status_text = prompt_lab_status_text(&view.prompt_lab);
+    if tree_state.prev_prompt_lab_status_text.as_deref() != Some(status_text.as_str()) {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_PROMPT_LAB_STATUS,
+            text: status_text.clone(),
+        });
+        tree_state.prev_prompt_lab_status_text = Some(status_text);
+    }
+    let metadata_text = prompt_lab_metadata_text(&view.prompt_lab);
+    if tree_state.prev_prompt_lab_metadata_text.as_deref() != Some(metadata_text.as_str()) {
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_PROMPT_LAB_METADATA,
+            text: metadata_text.clone(),
+        });
+        tree_state.prev_prompt_lab_metadata_text = Some(metadata_text);
+    }
+
     let job_items = build_job_tree(view);
     append_tree_commands(window_id, job_items, tree_state, &mut cmds);
 
-    let preview_markdown = view.preview_text.as_deref().unwrap_or_default();
+    let (preview_markdown, preview_header_text) = prompt_lab_preview_override(view);
     let preview_text_changed = match tree_state.prev_preview_text.as_deref() {
         Some(prev) => prev != preview_markdown,
         None => true,
@@ -331,11 +518,12 @@ pub fn render(
         tree_state.prev_preview_text = Some(preview_markdown.to_string());
     }
 
-    let header_text = view
-        .preview_header
-        .as_ref()
-        .map(format_preview_header)
-        .unwrap_or_else(|| "(no selection)".to_string());
+    let header_text = preview_header_text.unwrap_or_else(|| {
+        view.preview_header
+            .as_ref()
+            .map(format_preview_header)
+            .unwrap_or_else(|| "(no selection)".to_string())
+    });
     let header_text_changed = match tree_state.prev_header_text.as_deref() {
         Some(prev) => prev != header_text,
         None => true,
@@ -350,6 +538,93 @@ pub fn render(
     }
 
     cmds
+}
+
+fn prompt_lab_preview_override(view: &AppViewModel) -> (&str, Option<String>) {
+    if view.prompt_lab.visible {
+        if let Some(run) = view.prompt_lab.latest_run.as_ref() {
+            if run.status_label == "completed" {
+                let header = format!(
+                    "Prompt Lab - {}{}",
+                    prompt_lab_stage_label(run.stage),
+                    run.resolved_model
+                        .as_ref()
+                        .map(|model| format!(" ({model})"))
+                        .unwrap_or_default()
+                );
+                if let Some(output) = run.output_json.as_deref() {
+                    return (output, Some(header));
+                }
+            }
+        }
+    }
+    (view.preview_text.as_deref().unwrap_or_default(), None)
+}
+
+fn prompt_lab_status_text(prompt_lab: &harvester_core::PromptLabView) -> String {
+    if prompt_lab.is_in_flight {
+        return "Prompt Lab: Running...".to_string();
+    }
+    if let Some(reason) = prompt_lab.run_disabled_reason {
+        if !prompt_lab.can_run {
+            return format!("Prompt Lab: {reason}");
+        }
+    }
+    if let Some(err) = prompt_lab.latest_validation_error.as_deref() {
+        return format!("Prompt Lab validation: {err}");
+    }
+    if prompt_lab.url_resolve_failed {
+        return "Prompt Lab: URL resolve failed".to_string();
+    }
+    if let Some(run) = prompt_lab.latest_run.as_ref() {
+        if let Some(reason) = run.failure_reason.as_deref() {
+            return format!("Prompt Lab failed: {reason}");
+        }
+        return format!("Prompt Lab: latest run {}", run.status_label);
+    }
+    "Prompt Lab ready".to_string()
+}
+
+fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> String {
+    if let Some(run) = prompt_lab.latest_run.as_ref() {
+        return format!(
+            "model={} in={} out={} cost={} wall={}ms parse_ok={} cache={}",
+            run.resolved_model.as_deref().unwrap_or("-"),
+            run.input_tokens
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            run.output_tokens
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            run.cost_microdollars
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            run.wall_ms
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            run.parse_ok
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            run.cache_status.as_deref().unwrap_or("-")
+        );
+    }
+    "model=- in=- out=- cost=- wall=- parse_ok=- cache=-".to_string()
+}
+
+fn select_label(label: &str, selected: bool) -> String {
+    if selected {
+        format!("[x] {label}")
+    } else {
+        format!("[ ] {label}")
+    }
+}
+
+fn prompt_lab_stage_label(stage: PromptLabStage) -> &'static str {
+    match stage {
+        PromptLabStage::Triage => "Triage",
+        PromptLabStage::Summary => "Summary",
+        PromptLabStage::Briefing => "Briefing",
+    }
 }
 
 fn append_tree_commands(
@@ -728,7 +1003,7 @@ fn truncate_markdown_for_preview(text: &str) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harvester_core::LinkRowView;
+    use harvester_core::{LinkRowView, PromptLabRunId, PromptLabRunSummaryView, PromptLabView};
     use harvester_core::Stage;
     use std::path::PathBuf;
     use std::sync::Once;
@@ -778,6 +1053,27 @@ mod tests {
             job_count: jobs.len(),
             jobs,
             ..AppViewModel::default()
+        }
+    }
+
+    fn completed_prompt_lab_view() -> PromptLabView {
+        PromptLabView {
+            visible: true,
+            latest_run: Some(PromptLabRunSummaryView {
+                run_id: PromptLabRunId(1),
+                stage: PromptLabStage::Summary,
+                status_label: "completed",
+                output_json: Some("{\"ok\":true}".to_string()),
+                failure_reason: None,
+                input_tokens: Some(10),
+                output_tokens: Some(20),
+                cost_microdollars: Some(30),
+                wall_ms: Some(40),
+                resolved_model: Some("gpt-4o-mini".to_string()),
+                parse_ok: Some(true),
+                cache_status: Some("miss".to_string()),
+            }),
+            ..PromptLabView::default()
         }
     }
 
@@ -1247,5 +1543,101 @@ mod tests {
             !changed,
             "BUTTON_OPEN_BROWSER state should not change on second render"
         );
+    }
+
+    #[test]
+    fn run_button_disabled_when_can_run_false() {
+        let window_id = WindowId::new(10);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.can_run = false;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+                if *control_id == BTN_PROMPT_LAB_RUN
+            )
+        }));
+    }
+
+    #[test]
+    fn rerun_button_enabled_with_completed_run() {
+        let window_id = WindowId::new(11);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.can_rerun = true;
+        view.prompt_lab.latest_run = completed_prompt_lab_view().latest_run;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+                if *control_id == BTN_PROMPT_LAB_RERUN
+            )
+        }));
+    }
+
+    #[test]
+    fn resolve_button_enabled_only_in_typeurl_mode() {
+        let window_id = WindowId::new(12);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.selected_input_source = PromptLabInputSource::FromTriageArticles;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+                if *control_id == BTN_PROMPT_LAB_RESOLVE
+            )
+        }));
+
+        view.prompt_lab.selected_input_source = PromptLabInputSource::TypeUrl;
+        view.prompt_lab.resolve_pending = false;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+                if *control_id == BTN_PROMPT_LAB_RESOLVE
+            )
+        }));
+    }
+
+    #[test]
+    fn preview_override_emitted_when_lab_run_completed() {
+        let window_id = WindowId::new(13);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab = completed_prompt_lab_view();
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetRichEditContent { rtf_text, .. }
+                if rtf_text.contains("ok")
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == LABEL_PREVIEW_HEADER && text.contains("Prompt Lab")
+            )
+        }));
+    }
+
+    #[test]
+    fn render_idempotent_on_unchanged_prompt_lab_view() {
+        let window_id = WindowId::new(14);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab = completed_prompt_lab_view();
+        let _ = render(window_id, &view, &mut tree_state);
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(!cmds
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::SetRichEditContent { .. })));
     }
 }

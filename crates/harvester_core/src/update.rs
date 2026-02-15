@@ -1,4 +1,5 @@
 use engine_logging::{engine_info, engine_warn};
+use std::borrow::ToOwned;
 
 use crate::state::TriageCacheLookupResult;
 use crate::{
@@ -7,12 +8,13 @@ use crate::{
         CorpusFingerprint,
     },
     calc_left_width, context_hash,
-    prompt_lab::PromptLabStage,
-    triage::{ArticleTriageResult, TriagePhase, TriageSession},
+    prompt_lab::{PromptLabInputSource, PromptLabRunStatus, PromptLabStage},
+    triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession},
     AppState, Effect, LlmRequestState, LlmResultKind, Msg, SessionState, StopPolicy,
     SummaryCacheKey, SummaryCacheKeyError, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::types::ModelId;
 use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage};
 
 // Left side is split into a fixed-width input panel plus a resizable jobs panel.
@@ -474,6 +476,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         LlmResultKind::Success { .. } => String::new(),
                     }
                 };
+                let metadata_for_failure = metadata.clone();
                 match &result {
                     LlmResultKind::Success {
                         output_json,
@@ -497,7 +500,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 "[prompt-lab] run completed but metadata missing run_id={} request_id={}",
                                 run_id.0, request_id
                             );
-                            state.fail_prompt_lab_run(run_id, "metadata missing".to_string());
+                            state.fail_prompt_lab_run(
+                                run_id,
+                                "metadata missing".to_string(),
+                                None,
+                            );
                         }
                     }
                     _ => {
@@ -508,7 +515,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                             request_id,
                             reason
                         );
-                        state.fail_prompt_lab_run(run_id, reason);
+                        state.fail_prompt_lab_run(run_id, reason, metadata_for_failure);
                     }
                 }
                 state.consume_prompt_lab_ownership(request_id);
@@ -729,56 +736,98 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.select_prompt_lab_stage(stage);
             Vec::new()
         }
+        Msg::PromptLabInputSourceSelected { source } => {
+            state.prompt_lab_mut().select_input_source(source);
+            state.mark_dirty();
+            Vec::new()
+        }
         Msg::PromptLabInputChanged { text } => {
             state.set_prompt_lab_input(text);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabUrlInputChanged { url } => {
+            state.prompt_lab_mut().set_url_input(url);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabResolveRequested => {
+            let url = state.prompt_lab().url_input().to_owned();
+            let has_pending = state.prompt_lab().pending_resolve_id().is_some();
+            if url.is_empty() || has_pending {
+                return (state, Vec::new());
+            }
+            let resolve_id = state.allocate_next_prompt_lab_resolve_id();
+            state.prompt_lab_mut().begin_url_resolution(resolve_id);
+            state.mark_dirty();
+            vec![Effect::ResolvePromptLabInputFromUrl { resolve_id, url }]
+        }
+        Msg::PromptLabInputResolved { resolve_id, result } => {
+            if state
+                .prompt_lab_mut()
+                .finish_url_resolution(resolve_id, result)
+            {
+                state.mark_dirty();
+            }
             Vec::new()
         }
         Msg::PromptLabRunRequested => {
-            // Guard: one run at a time
             if state.prompt_lab().has_in_flight_run() {
                 return (state, Vec::new());
             }
-            // Guard: input must not be empty
-            if state.prompt_lab().input().is_empty() {
-                return (state, Vec::new());
-            }
+            let snapshot = match state.prompt_lab().selected_input_source() {
+                PromptLabInputSource::FromTriageArticles => triage_snapshot_for_prompt_lab(&state),
+                PromptLabInputSource::TypeUrl => state
+                    .prompt_lab()
+                    .resolved_url_snapshot()
+                    .map(ToOwned::to_owned),
+            };
+            let input = match snapshot {
+                Some(text) => text,
+                None => return (state, Vec::new()),
+            };
             let stage = state.prompt_lab().selected_stage();
             let prompt_id = prompt_id_for_stage(stage);
-            let input = state.prompt_lab().input().to_string();
-            let request_id = state.allocate_next_llm_request_id();
-            let run_id = state.allocate_next_prompt_lab_run_id();
-            // Use the per-run override if set, otherwise fall back to the active version.
             let prompt_version = state
                 .prompt_lab()
                 .selected_prompt_version()
                 .or_else(|| state.active_version_for(prompt_id));
             let model_override = state.prompt_lab().selected_model_override().cloned();
-            let context = state.context_for(prompt_id).to_vec();
-            state.record_pending_llm_request(request_id, prompt_id);
-            state.add_prompt_lab_pending_run(
-                run_id,
+            let effects = dispatch_prompt_lab_run(
+                &mut state,
                 stage,
                 prompt_id,
-                input.clone(),
-                request_id,
-                prompt_version,
-                model_override.clone(),
-            );
-            state.mark_dirty();
-            engine_info!(
-                "[prompt-lab] run requested run_id={} request_id={} stage={:?}",
-                run_id.0,
-                request_id,
-                stage
-            );
-            vec![Effect::RequestLlmCompletion {
-                request_id,
-                prompt_id,
+                input,
                 prompt_version,
                 model_override,
-                input_content: input,
-                context,
-            }]
+            );
+            return (state, effects);
+        }
+        Msg::PromptLabRerunRequested => {
+            if state.prompt_lab().has_in_flight_run() {
+                return (state, Vec::new());
+            }
+            let latest = match state.prompt_lab().latest_run() {
+                Some(run) => run,
+                None => return (state, Vec::new()),
+            };
+            if matches!(latest.status, PromptLabRunStatus::Pending { .. }) {
+                return (state, Vec::new());
+            }
+            let stage = latest.stage;
+            let prompt_id = latest.prompt_id;
+            let input_snapshot = latest.input_snapshot.clone();
+            let prompt_version = latest.prompt_version_used;
+            let model_override = latest.model_override.clone();
+            let effects = dispatch_prompt_lab_run(
+                &mut state,
+                stage,
+                prompt_id,
+                input_snapshot,
+                prompt_version,
+                model_override,
+            );
+            return (state, effects);
         }
         Msg::PromptLabHistoryCleared => {
             state.clear_prompt_lab_history();
@@ -796,6 +845,71 @@ fn prompt_id_for_stage(stage: PromptLabStage) -> PromptId {
         PromptLabStage::Summary => PromptId::ArticleSummary,
         PromptLabStage::Briefing => PromptId::AggregateBriefing,
     }
+}
+
+fn dispatch_prompt_lab_run(
+    state: &mut AppState,
+    stage: PromptLabStage,
+    prompt_id: PromptId,
+    input_snapshot: String,
+    prompt_version: Option<PromptVersion>,
+    model_override: Option<ModelId>,
+) -> Vec<Effect> {
+    let request_id = state.allocate_next_llm_request_id();
+    let run_id = state.allocate_next_prompt_lab_run_id();
+    let context = state.context_for(prompt_id).to_vec();
+    let pending_prompt_version = prompt_version.clone();
+    let pending_model_override = model_override.clone();
+    state.record_pending_llm_request(request_id, prompt_id);
+    state.add_prompt_lab_pending_run(
+        run_id,
+        stage,
+        prompt_id,
+        input_snapshot.clone(),
+        request_id,
+        pending_prompt_version,
+        pending_model_override,
+    );
+    state.mark_dirty();
+    engine_info!(
+        "[prompt-lab] run requested run_id={} request_id={} stage={:?}",
+        run_id.0,
+        request_id,
+        stage
+    );
+    vec![Effect::RequestLlmCompletion {
+        request_id,
+        prompt_id,
+        prompt_version,
+        model_override,
+        input_content: input_snapshot,
+        context,
+    }]
+}
+
+fn triage_snapshot_for_prompt_lab(state: &AppState) -> Option<String> {
+    if let Some(job_id) = state.selected_job_id() {
+        if let Some(url) = state.job_url(job_id) {
+            if let Some(article) = state
+                .triage()
+                .articles()
+                .iter()
+                .find(|article| article.url == url
+                    && matches!(article.triage_state, ArticleTriageState::Completed { .. }))
+            {
+                return Some(article.prepared_text.clone());
+            }
+        }
+    }
+    state
+        .triage()
+        .articles()
+        .iter()
+        .rev()
+        .find_map(|article| match &article.triage_state {
+            ArticleTriageState::Completed { .. } => Some(article.prepared_text.clone()),
+            _ => None,
+        })
 }
 
 fn parse_urls(raw: &str) -> Vec<String> {
@@ -2077,10 +2191,23 @@ mod tests {
     }
 
     #[test]
+    fn prompt_lab_input_changed_sets_dirty() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = update(
+            state,
+            Msg::PromptLabInputChanged {
+                text: "dirty text".to_string(),
+            },
+        );
+        assert!(state.view().dirty);
+    }
+
+    #[test]
     fn prompt_lab_run_requested_with_nonempty_input_emits_effect_and_creates_pending_run() {
         init_logging();
         let mut state = AppState::new();
-        state.set_prompt_lab_input("some article text".to_string());
+        prepare_type_url_snapshot(&mut state, "some article text");
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         assert_eq!(effects.len(), 1);
         assert!(matches!(effects[0], Effect::RequestLlmCompletion { .. }));
@@ -2107,26 +2234,206 @@ mod tests {
     fn prompt_lab_run_requested_while_in_flight_emits_no_effects() {
         init_logging();
         let mut state = AppState::new();
-        state.set_prompt_lab_input("text".to_string());
+        prepare_type_url_snapshot(&mut state, "text");
         // Dispatch first run
         let (mut state, _) = update(state, Msg::PromptLabRunRequested);
         assert!(state.prompt_lab().has_in_flight_run());
         // Change input and try again — should be blocked
-        state.set_prompt_lab_input("different text".to_string());
+        prepare_type_url_snapshot(&mut state, "different text");
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         assert!(effects.is_empty());
         assert_eq!(state.prompt_lab().run_count(), 1);
+    }
+
+    #[test]
+    fn input_source_selection_updates_state_and_dirty() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = update(
+            state,
+            Msg::PromptLabInputSourceSelected {
+                source: PromptLabInputSource::TypeUrl,
+            },
+        );
+        assert_eq!(
+            state.prompt_lab().selected_input_source(),
+            PromptLabInputSource::TypeUrl
+        );
+        assert!(state.view().dirty);
+    }
+
+    #[test]
+    fn url_input_change_marks_dirty() {
+        init_logging();
+        let (state, _) = update(
+            AppState::new(),
+            Msg::PromptLabUrlInputChanged {
+                url: "https://example.com".to_string(),
+            },
+        );
+        assert_eq!(state.prompt_lab().url_input(), "https://example.com");
+        assert!(state.view().dirty);
+    }
+
+    #[test]
+    fn resolve_requested_emits_effect() {
+        init_logging();
+        let mut state = AppState::new();
+        state.prompt_lab_mut()
+            .set_url_input("https://example.com".to_string());
+        let (state, effects) = update(state, Msg::PromptLabResolveRequested);
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(
+            &effects[0],
+            Effect::ResolvePromptLabInputFromUrl { .. }
+        ));
+        assert!(state.prompt_lab().pending_resolve_id().is_some());
+    }
+
+    #[test]
+    fn resolve_requested_no_op_when_url_empty() {
+        init_logging();
+        let (state, effects) = update(AppState::new(), Msg::PromptLabResolveRequested);
+        assert!(effects.is_empty());
+        assert!(state.prompt_lab().pending_resolve_id().is_none());
+    }
+
+    #[test]
+    fn input_resolved_stores_snapshot_and_marks_dirty() {
+        init_logging();
+        let mut state = AppState::new();
+        state.prompt_lab_mut().begin_url_resolution(1);
+        let (state, _) = update(
+            state,
+            Msg::PromptLabInputResolved {
+                resolve_id: 1,
+                result: Ok("snapshot".to_string()),
+            },
+        );
+        assert_eq!(state.prompt_lab().resolved_url_snapshot(), Some("snapshot"));
+        assert!(state.view().dirty);
+    }
+
+    #[test]
+    fn stale_input_resolved_ignored() {
+        init_logging();
+        let mut state = AppState::new();
+        state.prompt_lab_mut().begin_url_resolution(7);
+        let (state, _) = update(
+            state,
+            Msg::PromptLabInputResolved {
+                resolve_id: 8,
+                result: Ok("ignored".to_string()),
+            },
+        );
+        assert_eq!(state.prompt_lab().pending_resolve_id(), Some(7));
+        assert!(state.prompt_lab().resolved_url_snapshot().is_none());
+        assert!(!state.view().dirty);
+    }
+
+    #[test]
+    fn run_requested_fromtriage_no_op_when_no_triage_articles() {
+        init_logging();
+        let (_state, effects) = update(AppState::new(), Msg::PromptLabRunRequested);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn run_requested_typeurl_no_op_when_snapshot_not_resolved() {
+        init_logging();
+        let (state, _effects) = update(
+            AppState::new(),
+            Msg::PromptLabInputSourceSelected {
+                source: PromptLabInputSource::TypeUrl,
+            },
+        );
+        let (state, _) = update(
+            state,
+            Msg::PromptLabUrlInputChanged {
+                url: "https://example.com".to_string(),
+            },
+        );
+        let (state, effects) = update(state, Msg::PromptLabRunRequested);
+        assert!(effects.is_empty());
+        assert!(state.prompt_lab().resolved_url_snapshot().is_none());
+    }
+
+    #[test]
+    fn rerun_dispatches_same_parameters_as_original_run() {
+        init_logging();
+        let state = AppState::new();
+        let (state, request_id) = dispatch_lab_run(state);
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::Success {
+                    output_json: "{}".to_string(),
+                    input_tokens: 5,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "model".to_string(),
+                },
+                metadata: Some(LlmRunMetadata::stub()),
+            },
+        );
+        let (_state, effects) = update(state, Msg::PromptLabRerunRequested);
+        assert_eq!(effects.len(), 1);
+        if let Effect::RequestLlmCompletion { input_content, .. } = &effects[0] {
+            assert_eq!(input_content, "article content");
+        } else {
+            panic!("expected RequestLlmCompletion");
+        }
+    }
+
+    #[test]
+    fn rerun_blocked_when_in_flight() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = dispatch_lab_run(state);
+        let (_state, effects) = update(state, Msg::PromptLabRerunRequested);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn prompt_lab_lifecycle_leaves_triage_session_unchanged() {
+        init_logging();
+        let mut state = AppState::new();
+        let triage_phase = state.triage().phase().clone();
+        prepare_type_url_snapshot(&mut state, "content");
+        let (state, _) = update(state, Msg::PromptLabRunRequested);
+        assert_eq!(state.triage().phase(), &triage_phase);
+    }
+
+    #[test]
+    fn prompt_lab_lifecycle_leaves_briefing_session_unchanged() {
+        init_logging();
+        let mut state = AppState::new();
+        let briefing_phase = state.briefing().phase().clone();
+        prepare_type_url_snapshot(&mut state, "content");
+        let (state, _) = update(state, Msg::PromptLabRunRequested);
+        assert_eq!(state.briefing().phase(), &briefing_phase);
     }
 
     // ------------------------------------------------------------------
     // Substep D: LlmCompleted → Prompt Lab routing tests
     // ------------------------------------------------------------------
 
+    fn prepare_type_url_snapshot(state: &mut AppState, snapshot: &str) {
+        state.prompt_lab_mut().select_input_source(PromptLabInputSource::TypeUrl);
+        state
+            .prompt_lab_mut()
+            .set_url_input("https://example.com".to_string());
+        let resolve_id = state.allocate_next_prompt_lab_resolve_id();
+        state.prompt_lab_mut().begin_url_resolution(resolve_id);
+        state.prompt_lab_mut()
+            .finish_url_resolution(resolve_id, Ok(snapshot.to_string()));
+    }
+
     fn dispatch_lab_run(state: AppState) -> (AppState, u64) {
         let mut state = state;
-        state.set_prompt_lab_input("article content".to_string());
+        prepare_type_url_snapshot(&mut state, "article content");
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
-        // Extract the request_id from the emitted effect
         let request_id = effects
             .iter()
             .find_map(|e| {
@@ -2262,12 +2569,13 @@ mod tests {
                 stage: crate::prompt_lab::PromptLabStage::Summary,
             },
         );
-        let (state, _) = update(
+        let (mut state, _) = update(
             state,
             Msg::PromptLabInputChanged {
                 text: "article text".to_string(),
             },
         );
+        prepare_type_url_snapshot(&mut state, "article text");
         let (state, effects) = {
             let (s, e) = update(state, Msg::PromptLabRunRequested);
             (s, e)
@@ -2314,7 +2622,7 @@ mod tests {
         let triage_before = state.triage().clone();
 
         let (mut state, _) = update(state, Msg::PromptLabOpenRequested);
-        state.set_prompt_lab_input("article text".to_string());
+        prepare_type_url_snapshot(&mut state, "article text");
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         let request_id = effects
             .iter()
@@ -2373,7 +2681,7 @@ mod tests {
             .expect("triage request");
 
         // Dispatch lab run → lab request_id = 2
-        state.set_prompt_lab_input("article text".to_string());
+        prepare_type_url_snapshot(&mut state, "article text");
         let (state, lab_effects) = update(state, Msg::PromptLabRunRequested);
         let lab_req_id = lab_effects
             .iter()
@@ -2455,7 +2763,7 @@ mod tests {
         assert_eq!(triage_ids.len(), 3);
 
         // 2 lab runs
-        state.set_prompt_lab_input("text1".to_string());
+        prepare_type_url_snapshot(&mut state, "text1");
         let (state, e1) = update(state, Msg::PromptLabRunRequested);
         let lab_id1 = e1
             .iter()
@@ -2479,7 +2787,7 @@ mod tests {
                 metadata: None,
             },
         );
-        state.set_prompt_lab_input("text2".to_string());
+        prepare_type_url_snapshot(&mut state, "text2");
         let (_, e2) = update(state, Msg::PromptLabRunRequested);
         let lab_id2 = e2
             .iter()
@@ -2508,7 +2816,7 @@ mod tests {
         init_logging();
         use harvester_engine::llm::{ModelId, ProviderKind};
         let mut state = AppState::new();
-        state.set_prompt_lab_input("some text".to_string());
+        prepare_type_url_snapshot(&mut state, "some text");
         let override_model = ModelId::new(ProviderKind::OpenAi, "gpt-4o");
         state
             .prompt_lab_mut()
@@ -2529,7 +2837,7 @@ mod tests {
     fn prompt_lab_run_with_prompt_version_override_emits_effect_containing_it() {
         init_logging();
         let mut state = AppState::new();
-        state.set_prompt_lab_input("some text".to_string());
+        prepare_type_url_snapshot(&mut state, "some text");
         state.prompt_lab_mut().set_prompt_version_override(Some(42));
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         assert_eq!(effects.len(), 1);
@@ -2547,7 +2855,7 @@ mod tests {
         init_logging();
         use harvester_engine::llm::{ModelId, ProviderKind};
         let mut state = AppState::new();
-        state.set_prompt_lab_input("some text".to_string());
+        prepare_type_url_snapshot(&mut state, "some text");
         let override_model = ModelId::new(ProviderKind::OpenAi, "gpt-4o");
         state
             .prompt_lab_mut()
@@ -2563,7 +2871,7 @@ mod tests {
     fn prompt_lab_run_none_overrides_behaves_as_before() {
         init_logging();
         let mut state = AppState::new();
-        state.set_prompt_lab_input("some text".to_string());
+        prepare_type_url_snapshot(&mut state, "some text");
         // No overrides set — defaults are None
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         assert_eq!(effects.len(), 1);

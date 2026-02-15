@@ -44,7 +44,19 @@ pub enum PromptLabRunStatus {
     },
     Failed {
         reason: String,
+        metadata: Option<LlmRunMetadata>,
     },
+}
+
+// ---------------------------------------------------------------------------
+// Input source
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PromptLabInputSource {
+    #[default]
+    FromTriageArticles,
+    TypeUrl,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +88,11 @@ pub struct PromptLabState {
     pub(crate) selected_stage: PromptLabStage,
     /// Current text in the input buffer.
     pub(crate) input: String,
+    pub(crate) selected_input_source: PromptLabInputSource,
+    pub(crate) url_input: String,
+    pub(crate) resolved_url_snapshot: Option<String>,
+    pub(crate) pending_resolve_id: Option<u64>,
+    pub(crate) last_resolve_failed: bool,
     /// Insertion-ordered run history. Uses Vec for simplicity (no IndexMap dependency).
     pub(crate) runs: Vec<(PromptLabRunId, PromptLabRunRecord)>,
     /// Maps LLM `request_id` → `PromptLabRunId` for completion routing.
@@ -93,6 +110,11 @@ impl Default for PromptLabState {
             visible: false,
             selected_stage: PromptLabStage::Triage,
             input: String::new(),
+            selected_input_source: PromptLabInputSource::default(),
+            url_input: String::new(),
+            resolved_url_snapshot: None,
+            pending_resolve_id: None,
+            last_resolve_failed: false,
             runs: Vec::new(),
             ownership: std::collections::HashMap::new(),
             latest_run_id: None,
@@ -141,6 +163,68 @@ impl PromptLabState {
 
     pub fn input(&self) -> &str {
         &self.input
+    }
+
+    pub fn select_input_source(&mut self, source: PromptLabInputSource) {
+        self.selected_input_source = source;
+        self.resolved_url_snapshot = None;
+        self.pending_resolve_id = None;
+        self.last_resolve_failed = false;
+    }
+
+    pub fn selected_input_source(&self) -> PromptLabInputSource {
+        self.selected_input_source
+    }
+
+    pub fn url_input(&self) -> &str {
+        &self.url_input
+    }
+
+    pub fn resolved_url_snapshot(&self) -> Option<&str> {
+        self.resolved_url_snapshot.as_deref()
+    }
+
+    pub fn pending_resolve_id(&self) -> Option<u64> {
+        self.pending_resolve_id
+    }
+
+    #[allow(dead_code)]
+    pub fn last_resolve_failed(&self) -> bool {
+        self.last_resolve_failed
+    }
+
+    pub fn set_url_input(&mut self, url: String) {
+        self.url_input = url;
+        self.resolved_url_snapshot = None;
+        self.pending_resolve_id = None;
+        self.last_resolve_failed = false;
+    }
+
+    pub fn begin_url_resolution(&mut self, resolve_id: u64) {
+        self.pending_resolve_id = Some(resolve_id);
+        self.last_resolve_failed = false;
+    }
+
+    pub fn finish_url_resolution(
+        &mut self,
+        resolve_id: u64,
+        result: Result<String, String>,
+    ) -> bool {
+        if self.pending_resolve_id != Some(resolve_id) {
+            return false;
+        }
+        self.pending_resolve_id = None;
+        match result {
+            Ok(snapshot) => {
+                self.resolved_url_snapshot = Some(snapshot);
+                self.last_resolve_failed = false;
+            }
+            Err(_) => {
+                self.resolved_url_snapshot = None;
+                self.last_resolve_failed = true;
+            }
+        }
+        true
     }
 
     // ------------------------------------------------------------------
@@ -230,10 +314,15 @@ impl PromptLabState {
     }
 
     /// Transition the run to `Failed`. No-ops if the run is not `Pending`.
-    pub fn fail_run(&mut self, run_id: PromptLabRunId, reason: String) {
+    pub fn fail_run(
+        &mut self,
+        run_id: PromptLabRunId,
+        reason: String,
+        metadata: Option<LlmRunMetadata>,
+    ) {
         if let Some((_, record)) = self.runs.iter_mut().find(|(id, _)| *id == run_id) {
             if matches!(record.status, PromptLabRunStatus::Pending { .. }) {
-                record.status = PromptLabRunStatus::Failed { reason };
+                record.status = PromptLabRunStatus::Failed { reason, metadata };
             }
         }
     }
@@ -272,6 +361,7 @@ impl PromptLabState {
 mod tests {
     use super::*;
     use harvester_engine::llm::prompt::PromptId;
+    use harvester_engine::llm::run_metadata::LlmRunMetadata;
 
     fn make_prompt_id() -> PromptId {
         PromptId::ArticleTriage
@@ -354,7 +444,7 @@ mod tests {
             None,
             None,
         );
-        s.fail_run(run_id, "something broke".to_string());
+        s.fail_run(run_id, "something broke".to_string(), None);
         let r = s.latest_run().unwrap();
         assert!(matches!(r.status, PromptLabRunStatus::Failed { .. }));
     }
@@ -409,7 +499,7 @@ mod tests {
             None,
             None,
         );
-        s.fail_run(r2, "err".to_string());
+        s.fail_run(r2, "err".to_string(), None);
         s.consume_ownership(11);
         // Add a still-pending run
         let r3 = PromptLabRunId(3);
@@ -457,5 +547,72 @@ mod tests {
         assert!(s.ownership_for(10).is_none());
         // has_in_flight is now false
         assert!(!s.has_in_flight_run());
+    }
+
+    #[test]
+    fn url_input_change_invalidates_snapshot() {
+        let mut s = PromptLabState::default();
+        s.resolved_url_snapshot = Some("cached".to_string());
+        s.pending_resolve_id = Some(5);
+        s.last_resolve_failed = true;
+        s.set_url_input("https://example.com".to_string());
+        assert_eq!(s.url_input(), "https://example.com");
+        assert!(s.resolved_url_snapshot().is_none());
+        assert!(s.pending_resolve_id().is_none());
+        assert!(!s.last_resolve_failed());
+    }
+
+    #[test]
+    fn stale_resolve_ignored() {
+        let mut s = PromptLabState::default();
+        s.begin_url_resolution(7);
+        assert!(!s.finish_url_resolution(
+            8,
+            Ok("ignored".to_string())
+        ));
+        // Pending ID should remain intact
+        assert_eq!(s.pending_resolve_id(), Some(7));
+        assert!(s.resolved_url_snapshot().is_none());
+    }
+
+    #[test]
+    fn finish_resolve_with_matching_id_stores_snapshot() {
+        let mut s = PromptLabState::default();
+        s.begin_url_resolution(42);
+        assert!(s.finish_url_resolution(
+            42,
+            Ok("snapshot".to_string())
+        ));
+        assert_eq!(s.resolved_url_snapshot(), Some("snapshot"));
+        assert!(s.pending_resolve_id().is_none());
+        assert!(!s.last_resolve_failed());
+
+        s.begin_url_resolution(99);
+        assert!(s.finish_url_resolution(99, Err("boom".to_string())));
+        assert!(s.resolved_url_snapshot().is_none());
+        assert!(s.last_resolve_failed());
+    }
+
+    #[test]
+    fn prompt_lab_failed_run_preserves_metadata() {
+        let mut s = PromptLabState::default();
+        let run_id = PromptLabRunId(1);
+        let metadata = LlmRunMetadata::stub();
+        s.add_pending_run(
+            run_id,
+            PromptLabStage::Triage,
+            make_prompt_id(),
+            "x".to_string(),
+            10,
+            None,
+            None,
+        );
+        s.fail_run(run_id, "oops".to_string(), Some(metadata.clone()));
+        let record = s.latest_run().unwrap();
+        if let PromptLabRunStatus::Failed { metadata: stored, .. } = &record.status {
+            assert_eq!(stored.as_ref(), Some(&metadata));
+        } else {
+            panic!("expected Failed status");
+        }
     }
 }

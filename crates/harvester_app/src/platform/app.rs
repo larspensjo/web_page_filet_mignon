@@ -12,6 +12,7 @@ use commanductui::{
 };
 use harvester_core::{
     update, AppState, AppViewModel, Effect, JobResultKind, LinkDownloadState, Msg,
+    PromptLabInputSource, PromptLabStage,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -340,6 +341,19 @@ impl AppEventHandler {
             &mut self.tree_render_state,
         ));
     }
+
+    fn prompt_lab_toggle_msg(&self) -> Msg {
+        let visible = self
+            .shared
+            .lock()
+            .map(|guard| guard.state.view().prompt_lab.visible)
+            .unwrap_or(false);
+        if visible {
+            Msg::PromptLabCloseRequested
+        } else {
+            Msg::PromptLabOpenRequested
+        }
+    }
 }
 
 impl PlatformEventHandler for AppEventHandler {
@@ -383,6 +397,66 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
             }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_TOGGLE =>
+            {
+                let _ = self.msg_tx.send(self.prompt_lab_toggle_msg());
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_STAGE_TRIAGE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabStageSelected {
+                    stage: PromptLabStage::Triage,
+                });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_STAGE_SUMMARY =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabStageSelected {
+                    stage: PromptLabStage::Summary,
+                });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_STAGE_BRIEFING =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabStageSelected {
+                    stage: PromptLabStage::Briefing,
+                });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_SOURCE_FROM_TRIAGE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabInputSourceSelected {
+                    source: PromptLabInputSource::FromTriageArticles,
+                });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_SOURCE_TYPE_URL =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabInputSourceSelected {
+                    source: PromptLabInputSource::TypeUrl,
+                });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_RESOLVE =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabResolveRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_RUN =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabRunRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_RERUN =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabRerunRequested);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_CLEAR =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabHistoryCleared);
+            }
             AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ADD_URL => {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
             }
@@ -396,6 +470,11 @@ impl PlatformEventHandler for AppEventHandler {
                 );
                 let _ = self.msg_tx.send(Msg::InputChanged(text));
                 let _ = self.msg_tx.send(Msg::UrlsSubmitted);
+            }
+            AppEvent::InputTextChanged {
+                control_id, text, ..
+            } if control_id == ui::constants::INPUT_PROMPT_LAB_URL => {
+                let _ = self.msg_tx.send(Msg::PromptLabUrlInputChanged { url: text });
             }
             AppEvent::TreeViewItemSelectionChanged { window_id, item_id }
                 if window_id == self.window_id =>
@@ -502,12 +581,12 @@ impl UiStateProvider for AppUiStateProvider {
 mod tests {
     use super::ui::tree_item_ids::link_tree_item_id;
     use super::*;
-    use commanductui::types::TreeItemMarkerKind;
-    use commanductui::WindowId;
+    use commanductui::types::{TreeItemMarkerKind, WindowId};
+    use commanductui::AppEvent;
     use harvester_core::{AppState, JobResultKind};
     use harvester_engine::{ExtractedLink, LinkKind};
     use std::path::PathBuf;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{mpsc, Arc, Mutex};
 
     fn shared_state_with_single_link() -> Arc<Mutex<SharedState>> {
         let state = AppState::new();
@@ -534,6 +613,25 @@ mod tests {
         let mut guard = shared.lock().unwrap();
         let (state, _) = update(std::mem::take(&mut guard.state), msg);
         guard.state = state;
+    }
+
+    fn test_handler_with_outbound() -> (AppEventHandler, mpsc::Receiver<Msg>) {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        let (in_tx, in_rx) = mpsc::channel();
+        let _ = in_tx;
+        let (out_tx, out_rx) = mpsc::channel();
+        let effect_runner = EffectRunner::new(out_tx.clone());
+        let output_dir = std::env::temp_dir();
+        let handler = AppEventHandler::new(
+            WindowId::new(1),
+            shared,
+            in_rx,
+            out_tx,
+            effect_runner,
+            ui::render::TreeRenderState::new(),
+            output_dir,
+        );
+        (handler, out_rx)
     }
 
     #[test]
@@ -624,5 +722,119 @@ mod tests {
             MAX_LLM_CONCURRENT_REQUESTS
         );
         assert_eq!(parse_llm_max_concurrency_requests(Some(" 2 ")), 2);
+    }
+
+    #[test]
+    fn prompt_lab_stage_button_emits_stage_selected_msg() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_STAGE_SUMMARY,
+        });
+        let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
+        assert_eq!(
+            msg,
+            Msg::PromptLabStageSelected {
+                stage: PromptLabStage::Summary
+            }
+        );
+    }
+
+    #[test]
+    fn prompt_lab_source_button_emits_source_selected_msg() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_SOURCE_TYPE_URL,
+        });
+        let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
+        assert_eq!(
+            msg,
+            Msg::PromptLabInputSourceSelected {
+                source: PromptLabInputSource::TypeUrl
+            }
+        );
+    }
+
+    #[test]
+    fn prompt_lab_url_input_emits_url_changed_msg() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::InputTextChanged {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_PROMPT_LAB_URL,
+            text: "https://example.com".to_string(),
+        });
+        let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
+        assert_eq!(
+            msg,
+            Msg::PromptLabUrlInputChanged {
+                url: "https://example.com".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn prompt_lab_action_buttons_emit_expected_msgs() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_RESOLVE,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_RUN,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_RERUN,
+        });
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_CLEAR,
+        });
+
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("resolve"),
+            Msg::PromptLabResolveRequested
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("run"),
+            Msg::PromptLabRunRequested
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("rerun"),
+            Msg::PromptLabRerunRequested
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("clear"),
+            Msg::PromptLabHistoryCleared
+        );
+    }
+
+    #[test]
+    fn prompt_lab_toggle_emits_open_then_close() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_TOGGLE,
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("open"),
+            Msg::PromptLabOpenRequested
+        );
+
+        {
+            let mut guard = handler.shared.lock().expect("shared lock");
+            let (state, _) = update(std::mem::take(&mut guard.state), Msg::PromptLabOpenRequested);
+            guard.state = state;
+        }
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BTN_PROMPT_LAB_TOGGLE,
+        });
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250)).expect("close"),
+            Msg::PromptLabCloseRequested
+        );
     }
 }

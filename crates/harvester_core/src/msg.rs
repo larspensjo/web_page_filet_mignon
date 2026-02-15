@@ -6,7 +6,7 @@ use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::types::ModelId;
 use harvester_engine::ExtractedLink;
 
-use crate::prompt_lab::PromptLabStage;
+use crate::prompt_lab::{PromptLabInputSource, PromptLabStage};
 
 use crate::briefing::LoadedArticle;
 
@@ -145,10 +145,23 @@ pub enum Msg {
     PromptLabCloseRequested,
     /// User selected a different stage in the Prompt Lab.
     PromptLabStageSelected { stage: PromptLabStage },
+    /// User selected a different input source for Prompt Lab.
+    PromptLabInputSourceSelected { source: PromptLabInputSource },
     /// User edited the Prompt Lab input text.
     PromptLabInputChanged { text: String },
+    /// User edited the URL input used for TypeUrl runs.
+    PromptLabUrlInputChanged { url: String },
+    /// User requested the TypeUrl resolver to fetch the URL content.
+    PromptLabResolveRequested,
+    /// Background effect finished resolving the URL input.
+    PromptLabInputResolved {
+        resolve_id: u64,
+        result: Result<String, String>,
+    },
     /// User requested a Prompt Lab LLM run with the current input and stage.
     PromptLabRunRequested,
+    /// User requested rerunning using the latest completed/final run parameters.
+    PromptLabRerunRequested,
     /// User requested to clear completed/failed runs from Prompt Lab history.
     PromptLabHistoryCleared,
 }
