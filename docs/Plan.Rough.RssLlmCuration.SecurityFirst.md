@@ -286,3 +286,25 @@ More automation, but higher complexity and security requirements.
 - Phases 3–4 are the first user-visible wins (briefing + prioritization).
 - Phases 5–7 expand automation stepwise (controlled URL sources → RSS → scheduling).
 - Phase 8 is explicitly optional and should be treated as a separate decision point.
+
+## Harvested Future Ideas (from Step 7 Prompt Lab Compare Mode)
+Source: `docs/Plan.Step7.PromptLab.CompareModeCheapEnoughSelectionLoop.md`
+
+### Future Extensions Enabled by Step 7
+- **Bounded parallel batch dispatch**: replace sequential-only with `max_in_flight_compare: u32` guard on the ownership map; the ownership map already supports multiple entries.
+- **Batch export to JSON**: `PromptLabCompareBatchRecord` serializes naturally; add `Effect::PersistPromptLabCompareBatch` in a persistence step.
+- **A/B template diff view**: reuse frozen `template_snapshot` fields from candidates to render side-by-side diff between two selected candidates' templates.
+- **Pre-dispatch cost estimate**: before `freeze_batch`, surface estimated cost per candidate using whitespace token estimation.
+- **Automated quality gate**: after auto-select, if cheapest candidate still fails quality thresholds, surface a structured recommendation.
+- **Session-level cost summary**: after batch completion, emit a structured log line with total cost and latency across all candidates.
+- **Pause/resume**: store `paused: bool` on batch; reduce sequential advance to no-op while paused; add resume action to emit next effect.
+- **Candidate reorder**: allow operator to set execution priority within draft before freeze.
+
+### Future Nice Ideas (Post-Step)
+- Promote `auto_selected_run_id` directly into a single-run rerun after compare, so winner testing can continue without rebuilding a batch.
+- Show cumulative cost bar across all batch candidates for at-a-glance spend awareness.
+- "Clone batch as draft": take a completed batch's candidates and re-create them as a new draft for iteration.
+- Diff view between any two batch run outputs (not just templates): highlight JSON field differences line-by-line.
+- Persist batch records to disk so compare history survives restarts.
+- Operator notes per batch (`note: Option<String>`) stored in batch record for recall.
+- Structured export: batch result as Markdown table for sharing outside the app.

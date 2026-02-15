@@ -1,9 +1,9 @@
+use crate::pre_triage_filter::FilterReason;
 use crate::prompt_lab::{
     prompt_id_for_stage, PromptLabCompareBatchRecord, PromptLabCompareBatchStatus,
     PromptLabInputSource, PromptLabRunId, PromptLabRunStatus, PromptLabStage, PromptLabState,
     PromptLabTemplateSnapshot,
 };
-use crate::pre_triage_filter::FilterReason;
 use crate::state::LinkDownloadState;
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
@@ -11,7 +11,7 @@ use harvester_engine::LinkKind;
 use std::collections::HashMap;
 
 pub const TOKEN_LIMIT: u64 = 200_000;
-pub const INPUT_PANEL_FIXED_WIDTH: i32 = 350;
+pub const INPUT_PANEL_FIXED_WIDTH: i32 = 500;
 pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -516,7 +516,10 @@ impl PromptLabView {
     }
 }
 
-fn compare_batch_view(state: &PromptLabState, batch: &PromptLabCompareBatchRecord) -> PromptLabCompareBatchView {
+fn compare_batch_view(
+    state: &PromptLabState,
+    batch: &PromptLabCompareBatchRecord,
+) -> PromptLabCompareBatchView {
     let status_label = match batch.status {
         PromptLabCompareBatchStatus::Running { dispatched, total } => {
             format!("Running {dispatched}/{total}")
@@ -525,14 +528,25 @@ fn compare_batch_view(state: &PromptLabState, batch: &PromptLabCompareBatchRecor
         PromptLabCompareBatchStatus::PartialFailure => "PartialFailure".to_string(),
         PromptLabCompareBatchStatus::Cancelled => "Cancelled".to_string(),
     };
-    let rows = batch
-        .candidate_run_ids
-        .iter()
-        .filter_map(|(candidate_id, run_id)| {
-            let candidate = batch.candidates.iter().find(|candidate| candidate.candidate_id == *candidate_id)?;
-            let run = run_id.and_then(|run_id| state.run_by_id(run_id));
-            let (status_label, cost_label, wall_label, tokens_label, parse_ok, rating, model_label) =
-                if let Some(run) = run {
+    let rows =
+        batch
+            .candidate_run_ids
+            .iter()
+            .filter_map(|(candidate_id, run_id)| {
+                let candidate = batch
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.candidate_id == *candidate_id)?;
+                let run = run_id.and_then(|run_id| state.run_by_id(run_id));
+                let (
+                    status_label,
+                    cost_label,
+                    wall_label,
+                    tokens_label,
+                    parse_ok,
+                    rating,
+                    model_label,
+                ) = if let Some(run) = run {
                     match &run.status {
                         PromptLabRunStatus::Pending { .. } => (
                             "running".to_string(),
@@ -559,7 +573,9 @@ fn compare_batch_view(state: &PromptLabState, batch: &PromptLabCompareBatchRecor
                             "failed".to_string(),
                             metadata
                                 .as_ref()
-                                .map(|meta| format!("${:.6}", meta.cost_microdollars as f64 / 1_000_000.0))
+                                .map(|meta| {
+                                    format!("${:.6}", meta.cost_microdollars as f64 / 1_000_000.0)
+                                })
                                 .unwrap_or_else(|| "—".to_string()),
                             metadata
                                 .as_ref()
@@ -592,25 +608,26 @@ fn compare_batch_view(state: &PromptLabState, batch: &PromptLabCompareBatchRecor
                             .unwrap_or_else(|| "default".to_string()),
                     )
                 };
-            Some(PromptLabCompareRowView {
-                candidate_id: *candidate_id,
-                label: candidate.label.clone(),
-                run_id: *run_id,
-                status_label,
-                model_label,
-                cost_label,
-                wall_label,
-                tokens_label,
-                parse_ok,
-                rating,
-                is_manual_winner: batch.selected_run_id.is_some() && batch.selected_run_id == *run_id,
-                is_auto_winner: batch.selected_run_id.is_none()
-                    && batch.effective_winner().is_some()
-                    && batch.effective_winner() == *run_id,
-                rank: None,
+                Some(PromptLabCompareRowView {
+                    candidate_id: *candidate_id,
+                    label: candidate.label.clone(),
+                    run_id: *run_id,
+                    status_label,
+                    model_label,
+                    cost_label,
+                    wall_label,
+                    tokens_label,
+                    parse_ok,
+                    rating,
+                    is_manual_winner: batch.selected_run_id.is_some()
+                        && batch.selected_run_id == *run_id,
+                    is_auto_winner: batch.selected_run_id.is_none()
+                        && batch.effective_winner().is_some()
+                        && batch.effective_winner() == *run_id,
+                    rank: None,
+                })
             })
-        })
-        .collect::<Vec<_>>();
+            .collect::<Vec<_>>();
     let policy = PromptLabComparePolicyView {
         require_parse_ok: batch.policy.require_parse_ok,
         max_cost_label: batch

@@ -48,6 +48,7 @@ pub const BTN_PROMPT_LAB_TEMPLATE_APPLY: ControlId = ControlId::new(2119);
 pub const BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN: ControlId = ControlId::new(2120);
 pub const BTN_PROMPT_LAB_TEMPLATE_REVERT: ControlId = ControlId::new(2121);
 pub const BTN_PROMPT_LAB_TEMPLATE_SAVE: ControlId = ControlId::new(2122);
+pub const PANEL_PROMPT_LAB_COMPARE_ROW: ControlId = ControlId::new(2123);
 pub const LABEL_STATUS: ControlId = ControlId::new(3001);
 pub const LABEL_INPUT_HINT: ControlId = ControlId::new(3002);
 pub const LABEL_TOKEN_PROGRESS: ControlId = ControlId::new(3003);

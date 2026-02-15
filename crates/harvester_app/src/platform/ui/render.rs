@@ -72,6 +72,13 @@ pub struct TreeRenderState {
     prev_prompt_lab_template_save_enabled: Option<bool>,
     prev_prompt_lab_template_system_enabled: Option<bool>,
     prev_prompt_lab_template_user_enabled: Option<bool>,
+    prev_prompt_lab_compare_add_current_enabled: Option<bool>,
+    prev_prompt_lab_compare_add_baseline_enabled: Option<bool>,
+    prev_prompt_lab_compare_reset_draft_enabled: Option<bool>,
+    prev_prompt_lab_compare_start_enabled: Option<bool>,
+    prev_prompt_lab_compare_cancel_enabled: Option<bool>,
+    prev_prompt_lab_compare_auto_select_enabled: Option<bool>,
+    prev_prompt_lab_compare_winner_clear_enabled: Option<bool>,
 }
 
 impl Default for TreeRenderState {
@@ -127,6 +134,13 @@ impl Default for TreeRenderState {
             prev_prompt_lab_template_save_enabled: None,
             prev_prompt_lab_template_system_enabled: None,
             prev_prompt_lab_template_user_enabled: None,
+            prev_prompt_lab_compare_add_current_enabled: None,
+            prev_prompt_lab_compare_add_baseline_enabled: None,
+            prev_prompt_lab_compare_reset_draft_enabled: None,
+            prev_prompt_lab_compare_start_enabled: None,
+            prev_prompt_lab_compare_cancel_enabled: None,
+            prev_prompt_lab_compare_auto_select_enabled: None,
+            prev_prompt_lab_compare_winner_clear_enabled: None,
         }
     }
 }
@@ -465,6 +479,91 @@ pub fn render(
             enabled: clear_enabled,
         });
         tree_state.prev_prompt_lab_clear_enabled = Some(clear_enabled);
+    }
+    let compare_add_enabled = view.prompt_lab.can_add_candidate;
+    if tree_state.prev_prompt_lab_compare_add_current_enabled != Some(compare_add_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_COMPARE_ADD_CURRENT,
+            enabled: compare_add_enabled,
+        });
+        tree_state.prev_prompt_lab_compare_add_current_enabled = Some(compare_add_enabled);
+    }
+    if tree_state.prev_prompt_lab_compare_add_baseline_enabled != Some(compare_add_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_COMPARE_ADD_BASELINE,
+            enabled: compare_add_enabled,
+        });
+        tree_state.prev_prompt_lab_compare_add_baseline_enabled = Some(compare_add_enabled);
+    }
+    let compare_reset_enabled = view.prompt_lab.can_reset_draft;
+    if tree_state.prev_prompt_lab_compare_reset_draft_enabled != Some(compare_reset_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_COMPARE_RESET_DRAFT,
+            enabled: compare_reset_enabled,
+        });
+        tree_state.prev_prompt_lab_compare_reset_draft_enabled = Some(compare_reset_enabled);
+    }
+    let compare_start_enabled =
+        view.prompt_lab.active_batch.is_none() && view.prompt_lab.draft_candidates.len() >= 2;
+    if tree_state.prev_prompt_lab_compare_start_enabled != Some(compare_start_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_COMPARE_START,
+            enabled: compare_start_enabled,
+        });
+        tree_state.prev_prompt_lab_compare_start_enabled = Some(compare_start_enabled);
+    }
+    let compare_cancel_enabled = view
+        .prompt_lab
+        .active_batch
+        .as_ref()
+        .map(|batch| batch.can_cancel)
+        .unwrap_or(false);
+    if tree_state.prev_prompt_lab_compare_cancel_enabled != Some(compare_cancel_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_COMPARE_CANCEL,
+            enabled: compare_cancel_enabled,
+        });
+        tree_state.prev_prompt_lab_compare_cancel_enabled = Some(compare_cancel_enabled);
+    }
+    let compare_auto_select_enabled = view
+        .prompt_lab
+        .active_batch
+        .as_ref()
+        .map(|batch| batch.can_auto_select)
+        .unwrap_or(false);
+    if tree_state.prev_prompt_lab_compare_auto_select_enabled != Some(compare_auto_select_enabled) {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_COMPARE_AUTO_SELECT,
+            enabled: compare_auto_select_enabled,
+        });
+        tree_state.prev_prompt_lab_compare_auto_select_enabled = Some(compare_auto_select_enabled);
+    }
+    let compare_winner_clear_enabled = view
+        .prompt_lab
+        .active_batch
+        .as_ref()
+        .map(|batch| {
+            batch
+                .rows
+                .iter()
+                .any(|row| row.is_manual_winner || row.is_auto_winner)
+        })
+        .unwrap_or(false);
+    if tree_state.prev_prompt_lab_compare_winner_clear_enabled != Some(compare_winner_clear_enabled)
+    {
+        cmds.push(PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BTN_COMPARE_WINNER_CLEAR,
+            enabled: compare_winner_clear_enabled,
+        });
+        tree_state.prev_prompt_lab_compare_winner_clear_enabled =
+            Some(compare_winner_clear_enabled);
     }
     if tree_state.prev_prompt_lab_context_apply_enabled != Some(view.prompt_lab.can_apply_context) {
         cmds.push(PlatformCommand::SetControlEnabled {
@@ -1865,6 +1964,56 @@ mod tests {
                 cmd,
                 PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
                 if *control_id == BTN_PROMPT_LAB_RERUN
+            )
+        }));
+    }
+
+    #[test]
+    fn compare_start_disabled_by_default() {
+        let window_id = WindowId::new(18);
+        let mut tree_state = TreeRenderState::new();
+        let view = make_view(vec![]);
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+                if *control_id == BTN_COMPARE_START
+            )
+        }));
+    }
+
+    #[test]
+    fn compare_start_enabled_when_two_draft_candidates() {
+        let window_id = WindowId::new(19);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.draft_candidates = vec![
+            harvester_core::PromptLabCompareCandidateView {
+                candidate_id: 1,
+                label: "c1".to_string(),
+                stage_label: "Triage".to_string(),
+                model_label: "default".to_string(),
+                prompt_version_label: "active".to_string(),
+                has_context_override: false,
+                has_template_override: false,
+            },
+            harvester_core::PromptLabCompareCandidateView {
+                candidate_id: 2,
+                label: "c2".to_string(),
+                stage_label: "Triage".to_string(),
+                model_label: "default".to_string(),
+                prompt_version_label: "active".to_string(),
+                has_context_override: false,
+                has_template_override: false,
+            },
+        ];
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+                if *control_id == BTN_COMPARE_START
             )
         }));
     }

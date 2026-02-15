@@ -175,6 +175,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB),
+        control_id: PANEL_PROMPT_LAB_COMPARE_ROW,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB),
         control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
     });
     commands.push(PlatformCommand::CreateInput {
@@ -275,6 +280,48 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_PROMPT_LAB_ACTION_ROW),
         control_id: BTN_PROMPT_LAB_CLEAR,
         text: "Clear".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+        control_id: BTN_COMPARE_ADD_CURRENT,
+        text: "Add current settings".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+        control_id: BTN_COMPARE_ADD_BASELINE,
+        text: "Add baseline".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+        control_id: BTN_COMPARE_RESET_DRAFT,
+        text: "Reset draft".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+        control_id: BTN_COMPARE_START,
+        text: "Start compare".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+        control_id: BTN_COMPARE_CANCEL,
+        text: "Cancel compare".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+        control_id: BTN_COMPARE_AUTO_SELECT,
+        text: "Auto-select".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+        control_id: BTN_COMPARE_WINNER_CLEAR,
+        text: "Clear winner".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -993,10 +1040,74 @@ fn build_layout_rules(
                 margin: (0, 0, 0, 0),
             },
             LayoutRule {
-                control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
+                control_id: PANEL_PROMPT_LAB_COMPARE_ROW,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Top,
                 order: 6,
+                fixed_size: Some(30),
+                margin: (0, 0, 2, 0),
+            },
+            LayoutRule {
+                control_id: BTN_COMPARE_ADD_CURRENT,
+                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                dock_style: DockStyle::Left,
+                order: 0,
+                fixed_size: Some(114),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_COMPARE_ADD_BASELINE,
+                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                dock_style: DockStyle::Left,
+                order: 1,
+                fixed_size: Some(88),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_COMPARE_RESET_DRAFT,
+                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                dock_style: DockStyle::Left,
+                order: 2,
+                fixed_size: Some(82),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_COMPARE_START,
+                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                dock_style: DockStyle::Left,
+                order: 3,
+                fixed_size: Some(86),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_COMPARE_CANCEL,
+                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                dock_style: DockStyle::Left,
+                order: 4,
+                fixed_size: Some(94),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_COMPARE_AUTO_SELECT,
+                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                dock_style: DockStyle::Left,
+                order: 5,
+                fixed_size: Some(78),
+                margin: (0, 4, 0, 0),
+            },
+            LayoutRule {
+                control_id: BTN_COMPARE_WINNER_CLEAR,
+                parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
+                dock_style: DockStyle::Fill,
+                order: 6,
+                fixed_size: None,
+                margin: (0, 0, 0, 0),
+            },
+            LayoutRule {
+                control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
+                parent_control_id: Some(PANEL_PROMPT_LAB),
+                dock_style: DockStyle::Top,
+                order: 7,
                 fixed_size: Some(150),
                 margin: (0, 0, 2, 0),
             },
@@ -1012,7 +1123,7 @@ fn build_layout_rules(
                 control_id: PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Top,
-                order: 7,
+                order: 8,
                 fixed_size: Some(32),
                 margin: (0, 0, 2, 0),
             },
@@ -1060,7 +1171,7 @@ fn build_layout_rules(
                 control_id: LABEL_PROMPT_LAB_CONTEXT_STATUS,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Top,
-                order: 8,
+                order: 9,
                 fixed_size: Some(24),
                 margin: (0, 0, 2, 0),
             },
@@ -1068,7 +1179,7 @@ fn build_layout_rules(
                 control_id: PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Top,
-                order: 9,
+                order: 10,
                 fixed_size: Some(32),
                 margin: (0, 0, 2, 0),
             },
@@ -1116,7 +1227,7 @@ fn build_layout_rules(
                 control_id: LABEL_PROMPT_LAB_TEMPLATE_STATUS,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Top,
-                order: 10,
+                order: 11,
                 fixed_size: Some(24),
                 margin: (0, 0, 2, 0),
             },
@@ -1124,7 +1235,7 @@ fn build_layout_rules(
                 control_id: LABEL_PROMPT_LAB_METADATA,
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Fill,
-                order: 13,
+                order: 14,
                 fixed_size: None,
                 margin: (0, 0, 0, 0),
             },
@@ -1136,7 +1247,7 @@ fn build_layout_rules(
                     control_id: PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
                     parent_control_id: Some(PANEL_PROMPT_LAB),
                     dock_style: DockStyle::Top,
-                    order: 11,
+                    order: 12,
                     fixed_size: Some(120),
                     margin: (0, 0, 2, 0),
                 },
@@ -1152,7 +1263,7 @@ fn build_layout_rules(
                     control_id: PANEL_PROMPT_LAB_TEMPLATE_USER_ROW,
                     parent_control_id: Some(PANEL_PROMPT_LAB),
                     dock_style: DockStyle::Top,
-                    order: 12,
+                    order: 13,
                     fixed_size: Some(120),
                     margin: (0, 0, 2, 0),
                 },
@@ -1183,6 +1294,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_PROMPT_LAB_SOURCE_ROW,
         PANEL_PROMPT_LAB_INPUT_ROW,
         PANEL_PROMPT_LAB_ACTION_ROW,
+        PANEL_PROMPT_LAB_COMPARE_ROW,
         PANEL_PROMPT_LAB_CONTEXT_ROW,
         PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW,
         PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
@@ -1299,6 +1411,13 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
         BTN_PROMPT_LAB_TEMPLATE_REVERT,
         BTN_PROMPT_LAB_TEMPLATE_SAVE,
+        BTN_COMPARE_ADD_CURRENT,
+        BTN_COMPARE_ADD_BASELINE,
+        BTN_COMPARE_RESET_DRAFT,
+        BTN_COMPARE_START,
+        BTN_COMPARE_CANCEL,
+        BTN_COMPARE_AUTO_SELECT,
+        BTN_COMPARE_WINNER_CLEAR,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
@@ -1378,6 +1497,18 @@ mod tests {
             matches!(
                 cmd,
                 PlatformCommand::CreateInput { control_id, .. } if *control_id == INPUT_PROMPT_LAB_URL
+            )
+        }));
+        assert!(commands.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::CreateButton { control_id, .. } if *control_id == BTN_COMPARE_ADD_CURRENT
+            )
+        }));
+        assert!(commands.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::CreateButton { control_id, .. } if *control_id == BTN_COMPARE_START
             )
         }));
     }
