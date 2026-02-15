@@ -832,19 +832,20 @@ fn map_llm_event(event: LlmEvent) -> Msg {
             let result_kind = match result {
                 Ok(outcome) => LlmResultKind::Success {
                     output_json: outcome.output_json,
-                    input_tokens: outcome.usage.input_tokens,
-                    output_tokens: outcome.usage.output_tokens,
-                    prompt_version: outcome.prompt_version,
-                    model_id: outcome.model_id.model_name().to_string(),
+                    input_tokens: outcome.metadata.input_tokens,
+                    output_tokens: outcome.metadata.output_tokens,
+                    prompt_version: outcome.metadata.prompt_version,
+                    model_id: outcome.metadata.resolved_model.clone(),
                 },
                 Err(LlmCompletionError::ValidationFailed {
                     reason,
                     raw_response,
+                    ..
                 }) => LlmResultKind::ValidationFailed {
                     reason,
                     raw_response,
                 },
-                Err(LlmCompletionError::QuotaExhausted { description }) => {
+                Err(LlmCompletionError::QuotaExhausted { description, .. }) => {
                     LlmResultKind::QuotaExhausted {
                         reason: description,
                     }
@@ -974,11 +975,11 @@ fn fetch_feed(
 fn llm_error_reason(error: LlmCompletionError) -> String {
     match error {
         LlmCompletionError::ProviderError(err) => err.to_string(),
-        LlmCompletionError::QuotaExhausted { description } => description,
+        LlmCompletionError::QuotaExhausted { description, .. } => description,
         LlmCompletionError::PromptNotFound { prompt_id } => {
             format!("prompt {:?} not found", prompt_id)
         }
-        LlmCompletionError::PersistenceFailed { detail } => {
+        LlmCompletionError::PersistenceFailed { detail, .. } => {
             format!("replay persistence failed: {}", detail)
         }
         LlmCompletionError::InputTooLarge { size, limit } => {

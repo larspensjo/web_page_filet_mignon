@@ -10,6 +10,31 @@ use harvester_engine::llm::{
     ReplayProvider, ReplayRecord, TokenUsage,
 };
 
+fn make_config(
+    provider_trait: Arc<dyn LlmProvider>,
+    registry: PromptRegistry,
+    dir: &tempfile::TempDir,
+) -> LlmConfig {
+    LlmConfig {
+        provider: provider_trait,
+        default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
+        triage_model: None,
+        summary_model: None,
+        briefing_model: None,
+        registry,
+        quotas: LlmQuotas::default(),
+        output_dir: dir.path().to_path_buf(),
+        pricing: PricingRegistry::new(),
+        max_input_bytes: 10_000,
+        #[allow(deprecated)]
+        max_input_chars: 0,
+        timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
+        session_id: "test-session".to_string(),
+        replay_cache: None,
+        max_concurrent_requests: 1,
+    }
+}
+
 #[test]
 fn llm_handle_dispatches_completion_event() {
     let provider = Arc::new(MockLlmProvider::new());
@@ -21,22 +46,7 @@ fn llm_handle_dispatches_completion_event() {
     let registry = PromptRegistry::with_defaults();
     let dir = tempdir().unwrap();
 
-    let config = LlmConfig {
-        provider: provider_trait,
-        default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
-        triage_model: None,
-        summary_model: None,
-        briefing_model: None,
-        registry,
-        quotas: LlmQuotas::default(),
-        output_dir: dir.path().to_path_buf(),
-        pricing: PricingRegistry::new(),
-        max_input_chars: 10_000,
-        timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
-        session_id: "test-session".to_string(),
-        replay_cache: None,
-        max_concurrent_requests: 1,
-    };
+    let config = make_config(provider_trait, registry, &dir);
 
     let handle = LlmHandle::new(config);
     handle
@@ -60,10 +70,10 @@ fn llm_handle_dispatches_completion_event() {
         LlmEvent::Completed { request_id, result } => {
             assert_eq!(request_id, 7);
             if let Ok(completion) = result {
-                assert_eq!(completion.prompt_id, PromptId::ArticleTriage);
-                assert_eq!(completion.prompt_version, 1);
-                assert_eq!(completion.usage.input_tokens, 0);
-                assert_eq!(completion.usage.output_tokens, 0);
+                assert_eq!(completion.metadata.prompt_id, PromptId::ArticleTriage);
+                assert_eq!(completion.metadata.prompt_version, 1);
+                assert_eq!(completion.metadata.input_tokens, 0);
+                assert_eq!(completion.metadata.output_tokens, 0);
             } else {
                 panic!("LLM completion failed unexpectedly");
             }
@@ -97,22 +107,8 @@ fn llm_handle_skips_provider_when_cache_hit() {
     });
     let replay_cache = Arc::new(RwLock::new(replay_provider));
 
-    let config = LlmConfig {
-        provider: provider_trait,
-        default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
-        triage_model: None,
-        summary_model: None,
-        briefing_model: None,
-        registry: registry.clone(),
-        quotas: LlmQuotas::default(),
-        output_dir: dir.path().to_path_buf(),
-        pricing: PricingRegistry::new(),
-        max_input_chars: 10_000,
-        timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
-        session_id: "test-session".to_string(),
-        replay_cache: Some(replay_cache.clone()),
-        max_concurrent_requests: 1,
-    };
+    let mut config = make_config(provider_trait, registry, &dir);
+    config.replay_cache = Some(replay_cache.clone());
 
     let handle = LlmHandle::new(config);
     handle
@@ -136,8 +132,8 @@ fn llm_handle_skips_provider_when_cache_hit() {
         LlmEvent::Completed { request_id, result } => {
             assert_eq!(request_id, 7);
             if let Ok(completion) = result {
-                assert_eq!(completion.prompt_id, PromptId::ArticleSummary);
-                assert_eq!(completion.prompt_version, 2);
+                assert_eq!(completion.metadata.prompt_id, PromptId::ArticleSummary);
+                assert_eq!(completion.metadata.prompt_version, 2);
                 assert_eq!(completion.output_json, r#"{"title":"cached"}"#.to_string());
             } else {
                 panic!("cached completion failed");
@@ -157,22 +153,8 @@ fn llm_handle_inserts_cache_after_successful_response() {
     let dir = tempdir().unwrap();
     let replay_cache = Arc::new(RwLock::new(ReplayProvider::new()));
 
-    let config = LlmConfig {
-        provider: provider_trait,
-        default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
-        triage_model: None,
-        summary_model: None,
-        briefing_model: None,
-        registry: registry.clone(),
-        quotas: LlmQuotas::default(),
-        output_dir: dir.path().to_path_buf(),
-        pricing: PricingRegistry::new(),
-        max_input_chars: 10_000,
-        timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
-        session_id: "test-session".to_string(),
-        replay_cache: Some(Arc::clone(&replay_cache)),
-        max_concurrent_requests: 1,
-    };
+    let mut config = make_config(provider_trait, registry.clone(), &dir);
+    config.replay_cache = Some(Arc::clone(&replay_cache));
 
     let handle = LlmHandle::new(config);
     let input_content = "fresh document";
@@ -254,22 +236,8 @@ fn concurrent_requests_never_exceed_cap() {
     let registry = PromptRegistry::with_defaults();
     let dir = tempdir().unwrap();
 
-    let config = LlmConfig {
-        provider: provider_trait,
-        default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
-        triage_model: None,
-        summary_model: None,
-        briefing_model: None,
-        registry,
-        quotas: LlmQuotas::default(),
-        output_dir: dir.path().to_path_buf(),
-        pricing: PricingRegistry::new(),
-        max_input_chars: 10_000,
-        timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
-        session_id: "test-session".to_string(),
-        replay_cache: None,
-        max_concurrent_requests: cap,
-    };
+    let mut config = make_config(provider_trait, registry, &dir);
+    config.max_concurrent_requests = cap;
 
     let handle = LlmHandle::new(config);
 

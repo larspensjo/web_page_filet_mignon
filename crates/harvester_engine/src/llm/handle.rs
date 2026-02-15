@@ -17,7 +17,8 @@ use crate::llm::{
     },
     quota::{LlmQuotaTracker, LlmQuotas},
     replay::{content_hash, persist_replay_record, ReplayProvider, ReplayRecord},
-    types::{ChatMessage, ChatRole, LlmError, LlmRequest, ModelId, ProviderKind, TokenUsage},
+    run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata},
+    types::{ChatMessage, ChatRole, LlmError, LlmRequest, ModelId, ProviderKind},
     validation::{validate_briefing, validate_summary, validate_triage, ValidationError},
 };
 
@@ -32,6 +33,10 @@ pub struct LlmConfig {
     pub quotas: LlmQuotas,
     pub output_dir: PathBuf,
     pub pricing: PricingRegistry,
+    /// Maximum byte length of the input content passed to the worker.
+    pub max_input_bytes: usize,
+    /// Deprecated alias for `max_input_bytes`. Will be removed in a future release.
+    #[deprecated(note = "use max_input_bytes")]
     pub max_input_chars: usize,
     pub timestamp_utc: Arc<dyn Fn() -> String + Send + Sync>,
     pub session_id: String,
@@ -43,6 +48,16 @@ pub struct LlmConfig {
 impl LlmConfig {
     pub fn replay_output_dir(&self) -> PathBuf {
         self.output_dir.join("llm_results")
+    }
+
+    /// Effective byte limit, resolving the deprecated `max_input_chars` alias.
+    fn effective_max_input_bytes(&self) -> usize {
+        #[allow(deprecated)]
+        if self.max_input_bytes != 0 {
+            self.max_input_bytes
+        } else {
+            self.max_input_chars
+        }
     }
 }
 
@@ -102,10 +117,7 @@ pub enum LlmCommand {
 
 pub struct LlmCompletionResult {
     pub output_json: String,
-    pub usage: TokenUsage,
-    pub model_id: ModelId,
-    pub prompt_id: PromptId,
-    pub prompt_version: PromptVersion,
+    pub metadata: LlmRunMetadata,
 }
 
 /// Typed error categories surfaced by the worker.
@@ -114,15 +126,18 @@ pub enum LlmCompletionError {
     ValidationFailed {
         reason: String,
         raw_response: String,
+        failure_metadata: Option<LlmFailureMetadata>,
     },
     QuotaExhausted {
         description: String,
+        failure_metadata: Option<LlmFailureMetadata>,
     },
     PromptNotFound {
         prompt_id: PromptId,
     },
     PersistenceFailed {
         detail: String,
+        failure_metadata: Option<LlmFailureMetadata>,
     },
     InputTooLarge {
         size: usize,
@@ -224,11 +239,16 @@ async fn handle_completion_concurrent(
         return;
     };
 
-    let input_len = input_content.len();
-    if input_len > config.max_input_chars {
+    // Capture wall clock before any work so the full span is covered.
+    let start_at = Instant::now();
+    let timestamp_utc = (config.timestamp_utc)();
+
+    let input_bytes = input_content.len();
+    let max_bytes = config.effective_max_input_bytes();
+    if input_bytes > max_bytes {
         let err = LlmCompletionError::InputTooLarge {
-            size: input_len,
-            limit: config.max_input_chars,
+            size: input_bytes,
+            limit: max_bytes,
         };
         let _ = event_tx.send(LlmEvent::Completed {
             request_id,
@@ -238,10 +258,10 @@ async fn handle_completion_concurrent(
     }
 
     engine_info!(
-        "[llm-dispatch] request_id={} prompt_id={:?} chars={}",
+        "[llm-dispatch] request_id={} prompt_id={:?} bytes={}",
         request_id,
         prompt_id,
-        input_len
+        input_bytes
     );
 
     // Pre-call quota reservation: atomically check and reserve call slot.
@@ -257,6 +277,7 @@ async fn handle_completion_concurrent(
                 request_id,
                 result: Err(LlmCompletionError::QuotaExhausted {
                     description: failure.to_string(),
+                    failure_metadata: None,
                 }),
             });
             return;
@@ -339,6 +360,7 @@ async fn handle_completion_concurrent(
         let guard = cache.read().unwrap();
         if let Some(record) = guard.lookup(&input_hash, prompt_id, version) {
             if record.validated_output.is_some() {
+                let wall_ms = start_at.elapsed().as_millis() as u64;
                 engine_info!(
                     "[llm-replay] cache hit request_id={} hash={}",
                     request_id,
@@ -349,13 +371,28 @@ async fn handle_completion_concurrent(
                     .as_ref()
                     .and_then(|value| serde_json::to_string(value).ok())
                     .unwrap_or_else(|| record.raw_response.clone());
-                let result = LlmCompletionResult {
-                    output_json,
-                    usage: record.usage,
-                    model_id: model.clone(),
+
+                let metadata = LlmRunMetadata::new(
                     prompt_id,
-                    prompt_version: version,
-                };
+                    version,
+                    model.model_name().to_string(),
+                    input_bytes,
+                    record.usage.input_tokens,
+                    record.usage.output_tokens,
+                    record.cost_microdollars,
+                    wall_ms,
+                    true,
+                    None,
+                    CacheStatus::HitValidated,
+                    record.timestamp_utc.clone(),
+                );
+                engine_info!(
+                    "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=hit_validated",
+                    request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,
+                    metadata.input_bytes, metadata.input_tokens, metadata.output_tokens,
+                    metadata.cost_microdollars, metadata.wall_ms
+                );
+                let result = LlmCompletionResult { output_json, metadata };
                 let _ = event_tx.send(LlmEvent::Completed {
                     request_id,
                     result: Ok(result),
@@ -380,9 +417,8 @@ async fn handle_completion_concurrent(
         model.model_name()
     );
 
-    let start_at = Instant::now();
     let run_result = config.provider.complete(&request).await;
-    let duration_ms = start_at.elapsed().as_millis();
+    let wall_ms = start_at.elapsed().as_millis() as u64;
 
     if let Err(err) = run_result {
         engine_warn!(
@@ -391,20 +427,23 @@ async fn handle_completion_concurrent(
             err
         );
         quota_tracker.lock().unwrap().release_call();
+        let failure_metadata = LlmFailureMetadata {
+            prompt_id,
+            prompt_version: version,
+            resolved_model: Some(model.model_name().to_string()),
+            input_bytes,
+            wall_ms: Some(wall_ms),
+            timestamp_utc: timestamp_utc.clone(),
+        };
         let _ = event_tx.send(LlmEvent::Completed {
             request_id,
             result: Err(LlmCompletionError::ProviderError(err)),
         });
+        drop(failure_metadata); // metadata available if needed in future
         return;
     }
 
     let response = run_result.unwrap();
-    engine_info!(
-        "[llm-worker] request_id={} model={} duration_ms={}",
-        request_id,
-        response.model_id().model_name(),
-        duration_ms
-    );
 
     let usage = response.usage();
     let cost = config
@@ -431,10 +470,19 @@ async fn handle_completion_concurrent(
                 request_id,
                 failure
             );
+            let failure_metadata = LlmFailureMetadata {
+                prompt_id,
+                prompt_version: version,
+                resolved_model: Some(response.model_id().model_name().to_string()),
+                input_bytes,
+                wall_ms: Some(wall_ms),
+                timestamp_utc: timestamp_utc.clone(),
+            };
             let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Err(LlmCompletionError::QuotaExhausted {
                     description: failure.to_string(),
+                    failure_metadata: Some(failure_metadata),
                 }),
             });
             return;
@@ -459,7 +507,7 @@ async fn handle_completion_concurrent(
         prompt_id,
         prompt_version: version,
         model_id: format_model_identifier(response.model_id()),
-        timestamp_utc: (config.timestamp_utc)(),
+        timestamp_utc: timestamp_utc.clone(),
         rendered_system_message: system_message.clone(),
         rendered_user_message: user_message.clone(),
         raw_response: raw_response.clone(),
@@ -495,10 +543,19 @@ async fn handle_completion_concurrent(
                     request_id,
                     err
                 );
+                let failure_metadata = LlmFailureMetadata {
+                    prompt_id,
+                    prompt_version: version,
+                    resolved_model: Some(response.model_id().model_name().to_string()),
+                    input_bytes,
+                    wall_ms: Some(wall_ms),
+                    timestamp_utc: timestamp_utc.clone(),
+                };
                 let _ = event_tx.send(LlmEvent::Completed {
                     request_id,
                     result: Err(LlmCompletionError::PersistenceFailed {
                         detail: err.to_string(),
+                        failure_metadata: Some(failure_metadata),
                     }),
                 });
                 return;
@@ -509,12 +566,30 @@ async fn handle_completion_concurrent(
                 guard.insert(success_record.clone());
             }
 
+            let metadata = LlmRunMetadata::new(
+                prompt_id,
+                version,
+                response.model_id().model_name().to_string(),
+                input_bytes,
+                usage.input_tokens,
+                usage.output_tokens,
+                cost,
+                wall_ms,
+                true,
+                None,
+                CacheStatus::Miss,
+                timestamp_utc.clone(),
+            );
+            engine_info!(
+                "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=miss",
+                request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,
+                metadata.input_bytes, metadata.input_tokens, metadata.output_tokens,
+                metadata.cost_microdollars, metadata.wall_ms
+            );
+
             let result = LlmCompletionResult {
                 output_json: validated_output_json,
-                usage,
-                model_id: response.model_id().clone(),
-                prompt_id,
-                prompt_version: version,
+                metadata,
             };
 
             let _ = event_tx.send(LlmEvent::Completed {
@@ -542,20 +617,38 @@ async fn handle_completion_concurrent(
                     request_id,
                     err
                 );
+                let failure_metadata = LlmFailureMetadata {
+                    prompt_id,
+                    prompt_version: version,
+                    resolved_model: Some(response.model_id().model_name().to_string()),
+                    input_bytes,
+                    wall_ms: Some(wall_ms),
+                    timestamp_utc: timestamp_utc.clone(),
+                };
                 let _ = event_tx.send(LlmEvent::Completed {
                     request_id,
                     result: Err(LlmCompletionError::PersistenceFailed {
                         detail: err.to_string(),
+                        failure_metadata: Some(failure_metadata),
                     }),
                 });
                 return;
             }
 
+            let failure_metadata = LlmFailureMetadata {
+                prompt_id,
+                prompt_version: version,
+                resolved_model: Some(response.model_id().model_name().to_string()),
+                input_bytes,
+                wall_ms: Some(wall_ms),
+                timestamp_utc: timestamp_utc.clone(),
+            };
             let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
                 result: Err(LlmCompletionError::ValidationFailed {
                     reason,
                     raw_response,
+                    failure_metadata: Some(failure_metadata),
                 }),
             });
         }

@@ -77,7 +77,9 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             quotas: LlmQuotas::default(),
             output_dir: output_dir.clone(),
             pricing: PricingRegistry::with_defaults(),
-            max_input_chars: 100_000,
+            max_input_bytes: 100_000,
+            #[allow(deprecated)]
+            max_input_chars: 0,
             timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
             session_id: format!("session-{}", Utc::now().format("%Y%m%d-%H%M%S")),
             replay_cache: None,
