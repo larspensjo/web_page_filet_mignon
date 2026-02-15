@@ -26,6 +26,16 @@ This plan is intentionally rough and step-oriented. Each step has a clear goal a
 - `FI-Storage-ReplayPrivacy-0001` and `FI-Storage-ReplayRetention-0001`: safe long-term storage controls.
 - `FI-LLM-Providers-0001`: future provider expansion.
 
+# Future Ideas Revisited
+- Stage-aware default source policy (Summary defaults to the selected article, etc.).
+- “Use selected job” quick action to seed Prompt Lab input directly from a job.
+- Remember the last source mode and URL per stage to speed repeated experimentation.
+- Token/cost estimate before dispatch so operators see the ceiling before running.
+- Export the latest Prompt Lab output (copy/download) for offline review.
+- Lightweight diff view between latest and previous runs for quick comparison.
+- Stream Prompt Lab output incrementally for faster visibility.
+- Promote `ValidationFailed` to a first-class `PromptLabRunStatus` variant (beyond annotating `Failed`).
+
 ## Blockers and Early Decisions
 
 ### B1 — Runtime prompt template editing
