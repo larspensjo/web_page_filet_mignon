@@ -278,6 +278,12 @@ pub fn render(
                     template_section_open: view.prompt_lab.template_section_open,
                     run_details_section_open: view.prompt_lab.run_details_section_open,
                     template_editor_open: view.prompt_lab.template_editor_open,
+                    model_catalog: view
+                        .prompt_lab
+                        .model_catalog
+                        .iter()
+                        .map(|m| m.model_name().to_string())
+                        .collect(),
                 },
             },
         ));
