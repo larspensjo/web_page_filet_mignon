@@ -355,7 +355,8 @@ fn filtered_loader_matches_www_and_eu_host_variants() {
         "body",
     );
 
-    let selected = vec!["https://www.detroitnews.com/story/business/2026/02/14/example/".to_string()];
+    let selected =
+        vec!["https://www.detroitnews.com/story/business/2026/02/14/example/".to_string()];
     let (articles, _) =
         load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected).unwrap();
 

@@ -267,7 +267,9 @@ fn url_lookup_aliases(url: &str) -> Vec<String> {
         let host_without_prefix = if let Some(stripped) = lowered.strip_prefix("www.") {
             Some(stripped.to_string())
         } else {
-            lowered.strip_prefix("eu.").map(|stripped| stripped.to_string())
+            lowered
+                .strip_prefix("eu.")
+                .map(|stripped| stripped.to_string())
         };
 
         if let Some(alias_host) = host_without_prefix {
