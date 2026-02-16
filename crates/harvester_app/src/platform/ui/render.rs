@@ -1,10 +1,11 @@
-use commanductui::types::{ControlId, TreeItemDescriptor, TreeItemId};
+use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
 use engine_logging::{engine_debug, engine_warn};
 use harvester_core::{
     AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView,
     PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
 };
+use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
 
 use super::constants::*;
@@ -18,6 +19,34 @@ use std::collections::HashMap;
 const MAX_VIEWER_CHARS: usize = 64 * 1024;
 #[allow(dead_code)]
 const VIEWER_TRUNCATE_MARKER: &str = "[display truncated]";
+
+/// Helper: Convert optional ModelId to combo box selection index.
+/// Returns 0 for None (default), or index+1 for a specific model in the catalog.
+pub(crate) fn model_to_combo_index(
+    selected: Option<&ModelId>,
+    catalog: &[ModelId],
+) -> Option<usize> {
+    match selected {
+        None => Some(0),
+        Some(model) => catalog
+            .iter()
+            .position(|m| m == model)
+            .map(|idx| idx + 1),
+    }
+}
+
+/// Helper: Convert combo box selection index to optional ModelId.
+/// Returns None for index 0 (default), or the model at (index-1) in the catalog.
+pub(crate) fn combo_index_to_model(
+    index: usize,
+    catalog: &[ModelId],
+) -> Option<ModelId> {
+    if index == 0 {
+        None
+    } else {
+        catalog.get(index - 1).cloned()
+    }
+}
 
 #[derive(Debug)]
 pub struct TreeRenderState {
@@ -85,7 +114,7 @@ pub struct TreeRenderState {
     prev_prompt_lab_section_context_text: Option<String>,
     prev_prompt_lab_section_template_text: Option<String>,
     prev_prompt_lab_section_run_details_text: Option<String>,
-    prev_prompt_lab_model_catalog: Vec<String>,
+    prev_prompt_lab_model_catalog: Vec<ModelId>,
     prev_prompt_lab_selected_model: Option<String>,
 }
 
@@ -282,12 +311,6 @@ pub fn render(
                     template_section_open: view.prompt_lab.template_section_open,
                     run_details_section_open: view.prompt_lab.run_details_section_open,
                     template_editor_open: view.prompt_lab.template_editor_open,
-                    model_catalog: view
-                        .prompt_lab
-                        .model_catalog
-                        .iter()
-                        .map(|m| m.model_name().to_string())
-                        .collect(),
                 },
             },
         ));
@@ -515,40 +538,36 @@ pub fn render(
         tree_state.prev_prompt_lab_stage_briefing_text = Some(stage_briefing_text);
     }
 
-    // Model selector button text updates
-    let model_catalog = view
-        .prompt_lab
-        .model_catalog
-        .iter()
-        .map(|m| m.model_name().to_string())
-        .collect::<Vec<_>>();
-    let selected_model = view.prompt_lab.selected_model_override.as_ref().map(|m| m.model_name().to_string());
+    // Model selector combo box updates
+    let model_catalog = &view.prompt_lab.model_catalog;
+    let selected_model = view.prompt_lab.selected_model_override.as_ref();
 
-    if tree_state.prev_prompt_lab_model_catalog != model_catalog || tree_state.prev_prompt_lab_selected_model != selected_model {
-        // Update Default button
-        let default_text = select_label("Default", selected_model.is_none());
-        cmds.push(PlatformCommand::SetControlText {
+    // Check if catalog changed -> update combo items
+    if tree_state.prev_prompt_lab_model_catalog != *model_catalog {
+        let mut items = vec!["Default".to_string()];
+        items.extend(
+            model_catalog
+                .iter()
+                .map(|m| m.model_name().to_string())
+        );
+        cmds.push(PlatformCommand::SetComboBoxItems {
             window_id,
-            control_id: BTN_PROMPT_LAB_MODEL_DEFAULT,
-            text: default_text,
+            control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
+            items,
         });
+        tree_state.prev_prompt_lab_model_catalog = model_catalog.clone();
+    }
 
-        // Update slot buttons
-        for slot_idx in 0..PROMPT_LAB_MODEL_SLOT_COUNT {
-            if slot_idx < model_catalog.len() {
-                let model_name = &model_catalog[slot_idx];
-                let is_selected = selected_model.as_ref() == Some(model_name);
-                let button_text = select_label(model_name, is_selected);
-                cmds.push(PlatformCommand::SetControlText {
-                    window_id,
-                    control_id: ControlId::new(BTN_PROMPT_LAB_MODEL_SLOT_0.raw() + slot_idx as i32),
-                    text: button_text,
-                });
-            }
-        }
-
-        tree_state.prev_prompt_lab_model_catalog = model_catalog;
-        tree_state.prev_prompt_lab_selected_model = selected_model;
+    // Check if selected model changed -> update combo selection
+    let selected_model_str = selected_model.map(|m| m.model_name().to_string());
+    if tree_state.prev_prompt_lab_selected_model != selected_model_str {
+        let index = model_to_combo_index(selected_model, model_catalog);
+        cmds.push(PlatformCommand::SetComboBoxSelection {
+            window_id,
+            control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
+            selected_index: index,
+        });
+        tree_state.prev_prompt_lab_selected_model = selected_model_str;
     }
 
     if tree_state.prev_prompt_lab_run_enabled != Some(view.prompt_lab.can_run) {

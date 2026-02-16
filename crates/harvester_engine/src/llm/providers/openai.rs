@@ -337,26 +337,29 @@ fn is_dated_snapshot(id: &str) -> bool {
     }
 
     let last = parts[parts.len() - 1];
-    
+
     // Check for MMDD format (e.g., gpt-4-0613)
     if last.len() == 4 && last.chars().all(|c| c.is_ascii_digit()) {
         return true;
     }
-    
+
     // Check for YYYY-MM-DD format (e.g., gpt-4-turbo-2024-08-06)
     if parts.len() >= 3 {
         let year = parts[parts.len() - 3];
         let month = parts[parts.len() - 2];
         let day = last;
-        
-        if year.len() == 4 && year.chars().all(|c| c.is_ascii_digit())
-            && month.len() == 2 && month.chars().all(|c| c.is_ascii_digit())
-            && day.len() == 2 && day.chars().all(|c| c.is_ascii_digit())
+
+        if year.len() == 4
+            && year.chars().all(|c| c.is_ascii_digit())
+            && month.len() == 2
+            && month.chars().all(|c| c.is_ascii_digit())
+            && day.len() == 2
+            && day.chars().all(|c| c.is_ascii_digit())
         {
             return true;
         }
     }
-    
+
     false
 }
 

@@ -1,5 +1,5 @@
 use commanductui::types::{
-    ControlId, DockStyle, LabelClass, LayoutRule, MenuActionId, MenuItemConfig,
+    DockStyle, LabelClass, LayoutRule, MenuActionId, MenuItemConfig,
     SplitterOrientation,
 };
 use commanductui::{
@@ -22,7 +22,6 @@ pub(crate) struct PromptLabLayoutConfig {
     pub template_section_open: bool,
     pub run_details_section_open: bool,
     pub template_editor_open: bool,
-    pub model_catalog: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -280,21 +279,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_PROMPT_LAB_MODE_ADVANCED,
         text: "[ ] Advanced".to_string(),
     });
-    // Model selector buttons
-    commands.push(PlatformCommand::CreateButton {
+    // Model selector combo box
+    commands.push(PlatformCommand::CreateComboBox {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_MODEL_ROW),
-        control_id: BTN_PROMPT_LAB_MODEL_DEFAULT,
-        text: "[x] Default".to_string(),
+        control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
     });
-    for slot_idx in 0..PROMPT_LAB_MODEL_SLOT_COUNT {
-        commands.push(PlatformCommand::CreateButton {
-            window_id,
-            parent_control_id: Some(PANEL_PROMPT_LAB_MODEL_ROW),
-            control_id: ControlId::new(BTN_PROMPT_LAB_MODEL_SLOT_0.raw() + slot_idx as i32),
-            text: String::new(),
-        });
-    }
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_STAGE_ROW),
@@ -569,7 +559,6 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
                 template_section_open: false,
                 run_details_section_open: false,
                 template_editor_open: false,
-                model_catalog: Vec::new(),
             },
         },
     ));
@@ -1071,28 +1060,14 @@ fn build_layout_rules(
                 margin: (0, 0, 2, 0),
             },
             LayoutRule {
-                control_id: BTN_PROMPT_LAB_MODEL_DEFAULT,
+                control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
                 parent_control_id: Some(PANEL_PROMPT_LAB_MODEL_ROW),
-                dock_style: DockStyle::Left,
+                dock_style: DockStyle::Fill,
                 order: 0,
-                fixed_size: Some(110),
+                fixed_size: None,
                 margin: (0, 4, 0, 0),
             },
         ]);
-
-        // Add layout rules for model slot buttons
-        for slot_idx in 0..PROMPT_LAB_MODEL_SLOT_COUNT {
-            let slot_control_id = ControlId::new(BTN_PROMPT_LAB_MODEL_SLOT_0.raw() + slot_idx as i32);
-            let is_visible = slot_idx < prompt_lab.model_catalog.len();
-            rules.push(LayoutRule {
-                control_id: slot_control_id,
-                parent_control_id: Some(PANEL_PROMPT_LAB_MODEL_ROW),
-                dock_style: DockStyle::Left,
-                order: (slot_idx + 1) as u32,
-                fixed_size: if is_visible { Some(110) } else { Some(0) },
-                margin: (0, 4, 0, 0),
-            });
-        }
 
         rules.extend([
             LayoutRule {
@@ -1846,6 +1821,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
+        control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
+        style_id: StyleId::ComboBox,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
         control_id: VIEWER_PREVIEW,
         style_id: StyleId::ViewerReadable,
     });
@@ -2014,7 +1994,6 @@ mod tests {
                     template_section_open: false,
                     run_details_section_open: false,
                     template_editor_open: false,
-                    model_catalog: Vec::new(),
                 },
             },
         );
@@ -2047,7 +2026,6 @@ mod tests {
                     template_section_open: true,
                     run_details_section_open: true,
                     template_editor_open: true,
-                    model_catalog: Vec::new(),
                 },
             },
         );
