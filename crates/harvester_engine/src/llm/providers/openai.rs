@@ -212,6 +212,12 @@ impl LlmProvider for OpenAiProvider {
                     && !id_lower.contains("dall-e")
                     && !id_lower.contains("tts")
                     && !id_lower.contains("text-embedding")
+                    && !id_lower.contains("audio")
+                    && !id_lower.contains("realtime")
+                    && !id_lower.contains("transcribe")
+                    && !id_lower.contains("search")
+                    && !id_lower.contains("instruct")
+                    && !is_dated_snapshot(id)
             })
             .collect();
 
@@ -318,4 +324,80 @@ pub(crate) struct OpenAiModelsResponse {
 #[derive(Deserialize)]
 pub(crate) struct OpenAiModel {
     id: String,
+}
+
+/// Detects dated snapshot model IDs like gpt-4-0613 or gpt-4-turbo-2024-08-06.
+/// These are typically older frozen versions that should be filtered out
+/// in favor of the latest rolling versions.
+fn is_dated_snapshot(id: &str) -> bool {
+    // Pattern: ends with -MMDD or -YYYY-MM-DD
+    let parts: Vec<&str> = id.split('-').collect();
+    if parts.len() < 2 {
+        return false;
+    }
+
+    let last = parts[parts.len() - 1];
+    
+    // Check for MMDD format (e.g., gpt-4-0613)
+    if last.len() == 4 && last.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    
+    // Check for YYYY-MM-DD format (e.g., gpt-4-turbo-2024-08-06)
+    if parts.len() >= 3 {
+        let year = parts[parts.len() - 3];
+        let month = parts[parts.len() - 2];
+        let day = last;
+        
+        if year.len() == 4 && year.chars().all(|c| c.is_ascii_digit())
+            && month.len() == 2 && month.chars().all(|c| c.is_ascii_digit())
+            && day.len() == 2 && day.chars().all(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dated_snapshot_detects_mmdd_format() {
+        assert!(is_dated_snapshot("gpt-4-0613"));
+        assert!(is_dated_snapshot("gpt-3.5-turbo-1106"));
+        assert!(is_dated_snapshot("o1-preview-0912"));
+    }
+
+    #[test]
+    fn dated_snapshot_detects_yyyy_mm_dd_format() {
+        assert!(is_dated_snapshot("gpt-4-turbo-2024-08-06"));
+        assert!(is_dated_snapshot("gpt-4-2024-01-25"));
+        assert!(is_dated_snapshot("o3-mini-2025-02-14"));
+    }
+
+    #[test]
+    fn dated_snapshot_rejects_current_rolling_versions() {
+        assert!(!is_dated_snapshot("gpt-4"));
+        assert!(!is_dated_snapshot("gpt-4-turbo"));
+        assert!(!is_dated_snapshot("gpt-3.5-turbo"));
+        assert!(!is_dated_snapshot("o1-preview"));
+        assert!(!is_dated_snapshot("o1-mini"));
+    }
+
+    #[test]
+    fn dated_snapshot_rejects_non_date_suffixes() {
+        assert!(!is_dated_snapshot("gpt-4-vision"));
+        assert!(!is_dated_snapshot("gpt-4-32k"));
+        assert!(!is_dated_snapshot("text-embedding-ada"));
+    }
+
+    #[test]
+    fn dated_snapshot_handles_edge_cases() {
+        assert!(!is_dated_snapshot(""));
+        assert!(!is_dated_snapshot("gpt"));
+        assert!(!is_dated_snapshot("123"));
+    }
 }
