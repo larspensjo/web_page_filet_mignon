@@ -1416,6 +1416,7 @@ mod tests {
             has_summary: false,
             summary_title: None,
             filter_status: None,
+            has_analysis: false,
         }
     }
 
@@ -1595,6 +1596,7 @@ mod tests {
             has_summary: false,
             summary_title: None,
             filter_status: None,
+            has_analysis: false,
         };
         let view = make_view(vec![job]);
         let commands = render(window_id, &view, &mut tree_state);

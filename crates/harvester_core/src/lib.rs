@@ -5,6 +5,7 @@ mod context_draft;
 mod effect;
 mod msg;
 mod pre_triage_filter;
+mod preview;
 mod prompt_lab;
 mod source_state;
 mod state;
@@ -28,6 +29,7 @@ pub use pre_triage_filter::{
     ArticleFilterEntry, ArticleFilterKey, AutoVerdict, FilterReason, ManualDecision,
     PreTriagePhase, PreTriagePolicy, PreTriageSession,
 };
+pub use preview::PreviewContentKind;
 pub use prompt_lab::{
     PromptLabInputSource, PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage,
     PromptLabTemplateSnapshot,

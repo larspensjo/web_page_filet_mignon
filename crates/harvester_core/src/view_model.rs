@@ -1,4 +1,5 @@
 use crate::pre_triage_filter::FilterReason;
+use crate::preview::PreviewContentKind;
 use crate::prompt_lab::{
     prompt_id_for_stage, PromptLabCompareBatchRecord, PromptLabCompareBatchStatus,
     PromptLabInputSource, PromptLabRunId, PromptLabRunStatus, PromptLabStage, PromptLabState,
@@ -50,6 +51,7 @@ pub struct AppViewModel {
     pub token_limit: u64,
     pub preview_text: Option<String>,
     pub preview_header: Option<PreviewHeaderView>,
+    pub preview_source: Option<PreviewContentKind>,
     pub briefing_can_start: bool,
     pub briefing_progress: Option<String>,
     pub briefing_preview: Option<String>,
@@ -81,6 +83,7 @@ impl Default for AppViewModel {
             token_limit: TOKEN_LIMIT,
             preview_text: None,
             preview_header: None,
+            preview_source: None,
             briefing_can_start: true,
             briefing_progress: None,
             briefing_preview: None,
@@ -812,6 +815,7 @@ pub struct JobRowView {
     pub has_summary: bool,
     pub summary_title: Option<String>,
     pub filter_status: Option<JobFilterStatus>,
+    pub has_analysis: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

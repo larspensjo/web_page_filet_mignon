@@ -312,6 +312,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 .briefing_mut()
                                 .complete_article(article_idx, summary_result.clone());
 
+                            // Refresh preview if this article is currently selected
+                            state.refresh_selected_preview();
+
                             let cache_key_result = match lookup_key.clone() {
                                 Some(key) => Ok(key),
                                 None => build_summary_cache_key(
@@ -424,6 +427,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 .triage_mut()
                                 .complete_article(article_idx, result.clone());
                             state.store_triage_result(&content_hash, result);
+
+                            // Refresh preview if this article is currently selected
+                            state.refresh_selected_preview();
                         }
                         Err(err) => {
                             state
@@ -726,6 +732,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             pre_triage.bind_job_ids(&job_url_pairs);
             pre_triage.apply_manual_overrides(state.pre_triage_manual_overrides());
             state.set_pre_triage(pre_triage);
+            state.refresh_selected_preview();
             state.mark_dirty();
             Vec::new()
         }
@@ -1617,6 +1624,7 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
                 state.record_triage_cache_hit();
                 engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
                 state.triage_mut().complete_article(next_idx, result);
+                state.refresh_selected_preview();
                 state.mark_dirty();
                 continue;
             }
@@ -1817,6 +1825,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     );
                     state.briefing_mut().complete_article(next_idx, result);
                     state.briefing_mut().set_article_cache_key(next_idx, None);
+                    state.refresh_selected_preview();
                     state.mark_dirty();
                     // Cache hit: slot not consumed, continue filling.
                     continue;

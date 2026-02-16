@@ -3,6 +3,7 @@ use crate::context_hash;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
+use crate::preview::{self, PreviewContentKind};
 use crate::prompt_lab::{
     PromptLabRunId, PromptLabRunOverrides, PromptLabStage, PromptLabState,
     PromptLabTemplateSnapshot,
@@ -376,6 +377,18 @@ impl AppState {
             }
         }
 
+        // Block 3: has_analysis — true if summary, triage, or exclusion data exists
+        for job_view in &mut jobs {
+            job_view.has_analysis = job_view.has_summary
+                || job_view.triage_annotation.is_some()
+                || matches!(
+                    job_view.filter_status,
+                    Some(JobFilterStatus::HardExcluded { .. })
+                        | Some(JobFilterStatus::ReviewNeeded { .. })
+                        | Some(JobFilterStatus::ManuallyExcluded)
+                );
+        }
+
         jobs.sort_by(|a, b| {
             let p_a = a
                 .triage_annotation
@@ -390,18 +403,15 @@ impl AppState {
             p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
         });
 
-        // Derive selected_url — only expose when summary is available
+        // Derive selected_url — expose for any selected job
         let selected_url = self
             .ui
             .selected_job_id()
             .and_then(|job_id| self.jobs.get(&job_id))
-            .and_then(|job| {
-                self.briefing.summary_for_url(&job.url)?;
-                Some(job.url.clone())
-            });
+            .map(|job| job.url.clone());
         let briefing_preview = self.briefing.format_preview();
         let preview_text = match self.ui.preview_mode() {
-            PreviewMode::SelectedJobSummary => self.ui.preview_content().map(ToOwned::to_owned),
+            PreviewMode::SelectedJob => self.ui.preview_content().map(ToOwned::to_owned),
             PreviewMode::Briefing => briefing_preview
                 .clone()
                 .or_else(|| self.ui.preview_content().map(ToOwned::to_owned)),
@@ -439,6 +449,7 @@ impl AppState {
                     .map(|_| ())
             })
             .is_some();
+        let preview_source = self.ui.preview.content_kind();
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -450,6 +461,7 @@ impl AppState {
             token_limit: TOKEN_LIMIT,
             preview_text,
             preview_header,
+            preview_source,
             briefing_can_start: self.briefing.can_start(),
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
@@ -1077,23 +1089,95 @@ impl AppState {
         self.dirty = true;
     }
 
+    /// Resolve the best available preview content for a given URL.
+    ///
+    /// Follows strict priority order:
+    /// 1. Summary (if available)
+    /// 2. Triage result (if summary missing but triage completed)
+    /// 3. Exclusion reasons (if filtered/excluded in pre-triage)
+    /// 4. Fallback message (if nothing else available)
+    ///
+    /// Returns (PreviewContentKind, formatted content).
+    fn resolve_best_preview(&self, url: &str) -> (PreviewContentKind, String) {
+        // Priority 1: Summary
+        if let Some(summary) = self.briefing.summary_for_url(url) {
+            return (
+                PreviewContentKind::Summary,
+                preview::format_summary_for_preview(summary),
+            );
+        }
+
+        // Priority 2: Triage
+        if let Some(triage_result) = self.triage.result_for_url(url) {
+            return (
+                PreviewContentKind::Triage,
+                preview::format_triage_for_preview(triage_result),
+            );
+        }
+
+        // Priority 3: Exclusion reasons
+        if let Some(entry) = self.pre_triage.entry_for_url(url) {
+            // Only show exclusion preview if article was excluded or needs review
+            use crate::pre_triage_filter::{AutoVerdict, ManualDecision};
+            let is_excluded = matches!(
+                (entry.auto_verdict, entry.manual_decision),
+                (AutoVerdict::HardExclude, None)
+                    | (AutoVerdict::Review, None)
+                    | (_, Some(ManualDecision::Exclude))
+            );
+            if is_excluded {
+                return (
+                    PreviewContentKind::Exclusion,
+                    preview::format_exclusion_for_preview(entry),
+                );
+            }
+        }
+
+        // Priority 4: Fallback
+        (
+            PreviewContentKind::Fallback,
+            preview::format_fallback_preview(),
+        )
+    }
+
+    /// Refresh the preview for the currently selected job, if any.
+    ///
+    /// Re-runs resolve_best_preview and updates the UI state if the content changed.
+    /// This is called after triage/summary completion to ensure the preview stays current.
+    pub(crate) fn refresh_selected_preview(&mut self) {
+        let Some(selected_job_id) = self.ui.selected_job_id() else {
+            return;
+        };
+        let Some(job) = self.jobs.get(&selected_job_id) else {
+            return;
+        };
+
+        let (kind, content) = self.resolve_best_preview(&job.url);
+        let changed = self.ui.select_job(selected_job_id, Some((&content, kind)));
+        if changed {
+            engine_logging::engine_info!(
+                "[preview] Preview upgraded for job {} (url={})",
+                selected_job_id,
+                job.url
+            );
+            self.dirty = true;
+        }
+    }
+
     pub(crate) fn select_job(&mut self, job_id: JobId) {
         let Some(job) = self.jobs.get(&job_id) else {
             return;
         };
 
-        let content = match self.briefing.summary_for_url(&job.url) {
-            Some(summary) => format_summary_for_preview(summary),
-            None => "No summary available \u{2014} run Briefing first.".to_string(),
-        };
+        let (kind, content) = self.resolve_best_preview(&job.url);
 
-        let changed = self.ui.select_job(job_id, Some(&content));
+        let changed = self.ui.select_job(job_id, Some((&content, kind)));
         if changed {
-            self.ui.set_preview_mode(PreviewMode::SelectedJobSummary);
+            self.ui.set_preview_mode(PreviewMode::SelectedJob);
             self.dirty = true;
         } else {
             // Even if preview content is same, ensure mode is set correctly
-            self.ui.set_preview_mode(PreviewMode::SelectedJobSummary);
+            self.ui.set_preview_mode(PreviewMode::SelectedJob);
         }
     }
 
@@ -1365,8 +1449,7 @@ impl AppState {
             false
         };
         if job_updated && self.ui.selected_job_id() == Some(job_id) {
-            let preview_content = self.jobs.get(&job_id).and_then(|job| job.content_preview());
-            self.ui.select_job(job_id, preview_content);
+            self.refresh_selected_preview();
         }
         if job_updated {
             self.dirty = true;
@@ -1541,23 +1624,6 @@ fn normalize_extracted_link(link: &str) -> String {
     }
 }
 
-fn format_summary_for_preview(summary: &crate::briefing::ArticleSummaryResult) -> String {
-    use std::fmt::Write;
-    let mut out = String::new();
-    let _ = writeln!(out, "# {}", summary.title);
-    out.push('\n');
-    let _ = writeln!(out, "{}", summary.summary);
-    if !summary.key_points.is_empty() {
-        out.push('\n');
-        let _ = writeln!(out, "## Key Points");
-        out.push('\n');
-        for point in &summary.key_points {
-            let _ = writeln!(out, "  - {}", point);
-        }
-    }
-    out
-}
-
 fn domain_from_url(url: &str) -> String {
     let trimmed = url.trim();
     let without_scheme = trimmed
@@ -1638,6 +1704,7 @@ impl JobState {
             has_summary: false,
             summary_title: None,
             filter_status: None,
+            has_analysis: false,
         }
     }
 
@@ -1856,6 +1923,7 @@ enum PreviewState {
     Available {
         job_id: JobId,
         content: String,
+        kind: PreviewContentKind,
     },
     InProgress {
         job_id: JobId,
@@ -1884,13 +1952,20 @@ impl PreviewState {
             PreviewState::Empty | PreviewState::Unavailable { .. } => None,
         }
     }
+
+    fn content_kind(&self) -> Option<PreviewContentKind> {
+        match self {
+            PreviewState::Available { kind, .. } => Some(*kind),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum PreviewMode {
     #[default]
     Briefing,
-    SelectedJobSummary,
+    SelectedJob,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1935,11 +2010,12 @@ impl UiState {
         self.preview.job_id()
     }
 
-    fn select_job(&mut self, job_id: JobId, content: Option<&str>) -> bool {
+    fn select_job(&mut self, job_id: JobId, content: Option<(&str, PreviewContentKind)>) -> bool {
         let next_state = match content {
-            Some(text) => PreviewState::Available {
+            Some((text, kind)) => PreviewState::Available {
                 job_id,
                 content: text.to_owned(),
+                kind,
             },
             None => PreviewState::Unavailable { job_id },
         };
@@ -2079,12 +2155,12 @@ mod tests {
         );
         let (state, _) = update(state, Msg::JobSelected { job_id: 3 });
         let view = state.view();
-        // No briefing session, so shows placeholder
+        // No briefing session, so shows fallback message
         assert!(view
             .preview_text
             .as_deref()
             .unwrap_or("")
-            .contains("No summary available"));
+            .contains("No Analysis Available Yet"));
         assert_eq!(view.preview_header.as_ref().unwrap().domain, "example.com");
     }
 
@@ -2101,12 +2177,12 @@ mod tests {
         );
         let (state, _) = update(state, Msg::JobSelected { job_id: 4 });
         let view = state.view();
-        // No briefing, so shows placeholder text (not None)
+        // No briefing, so shows fallback message text (not None)
         assert!(view
             .preview_text
             .as_deref()
             .unwrap_or("")
-            .contains("No summary available"));
+            .contains("No Analysis Available Yet"));
         let header = view.preview_header.expect("header should exist");
         assert_eq!(header.domain, "sub.example.net");
         assert_eq!(header.stage, Stage::Downloading);
@@ -2233,7 +2309,11 @@ mod tests {
         );
 
         let view = state.view();
-        assert_eq!(view.preview_text, Some("final".to_string()));
+        // With no summary or triage, shows fallback message
+        assert!(view
+            .preview_text
+            .unwrap()
+            .contains("No Analysis Available Yet"));
         let header = view.preview_header.expect("header present");
         assert_eq!(header.stage, Stage::Done);
     }
@@ -2658,7 +2738,7 @@ mod tests {
         state.select_job(11);
         let view = state.view();
         let text = view.preview_text.unwrap_or_default();
-        assert!(text.contains("No summary available"));
+        assert!(text.contains("No Analysis Available Yet"));
     }
 
     #[test]
@@ -2700,7 +2780,7 @@ mod tests {
             input_tokens: 0,
             output_tokens: 0,
         };
-        let formatted = format_summary_for_preview(&result);
+        let formatted = preview::format_summary_for_preview(&result);
         assert!(formatted.contains("Test Title"));
         assert!(formatted.contains("Test summary body"));
         assert!(formatted.contains("KP1"));
@@ -2718,7 +2798,7 @@ mod tests {
             input_tokens: 0,
             output_tokens: 0,
         };
-        let formatted = format_summary_for_preview(&result);
+        let formatted = preview::format_summary_for_preview(&result);
         assert!(formatted.contains("Title Only"));
         assert!(formatted.contains("Summary only"));
         assert!(!formatted.contains("Key Points"));
@@ -2811,7 +2891,11 @@ mod tests {
         );
         state.select_job(14);
         let view = state.view();
-        assert!(view.selected_url.is_none());
+        // Phase 3: selected_url is now available for any selected job
+        assert_eq!(
+            view.selected_url,
+            Some("https://unsummarized.example".to_string())
+        );
     }
 
     #[test]
@@ -2908,5 +2992,149 @@ mod tests {
         // Pending run survives
         assert_eq!(state.prompt_lab().run_count(), 1);
         assert!(state.prompt_lab().ownership_for(req_id).is_some());
+    }
+
+    #[test]
+    fn resolve_preview_prefers_summary_over_triage() {
+        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+        use crate::triage::ArticleTriageResult;
+
+        let mut state = AppState::new();
+        let url = "https://test.example/article";
+
+        // Add both summary and triage result
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(
+            vec![LoadedArticle {
+                url: url.to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash".to_string(),
+            }],
+            "collection".to_string(),
+        );
+        briefing.transition_to_summarizing();
+        briefing.start_article(0, 1);
+        briefing.complete_article(
+            0,
+            ArticleSummaryResult {
+                title: "Test Summary".to_string(),
+                summary: "Summary text".to_string(),
+                key_points: vec![],
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        state.set_briefing(briefing);
+
+        let mut triage = crate::triage::TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash".to_string(),
+        }]);
+        triage.transition_to_triaging();
+        triage.start_article(0, 1);
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "Security".to_string(),
+                priority: 7,
+                tags: vec![],
+                rationale: "Test rationale".to_string(),
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        state.set_triage(triage);
+
+        let (kind, content) = state.resolve_best_preview(url);
+        assert_eq!(kind, PreviewContentKind::Summary);
+        assert!(content.contains("Test Summary"));
+    }
+
+    #[test]
+    fn resolve_preview_uses_triage_when_summary_missing() {
+        use crate::briefing::LoadedArticle;
+        use crate::triage::ArticleTriageResult;
+
+        let mut state = AppState::new();
+        let url = "https://test.example/article";
+
+        // Add only triage result, no summary
+        let mut triage = crate::triage::TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash".to_string(),
+        }]);
+        triage.transition_to_triaging();
+        triage.start_article(0, 1);
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "Security".to_string(),
+                priority: 7,
+                tags: vec!["test-tag".to_string()],
+                rationale: "Test rationale".to_string(),
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        state.set_triage(triage);
+
+        let (kind, content) = state.resolve_best_preview(url);
+        assert_eq!(kind, PreviewContentKind::Triage);
+        assert!(content.contains("Triage Assessment"));
+        assert!(content.contains("7/10"));
+        assert!(content.contains("Test rationale"));
+    }
+
+    #[test]
+    fn resolve_preview_uses_fallback_when_nothing_available() {
+        let state = AppState::new();
+        let url = "https://test.example/article";
+
+        let (kind, content) = state.resolve_best_preview(url);
+        assert_eq!(kind, PreviewContentKind::Fallback);
+        assert!(content.contains("No Analysis Available Yet"));
+    }
+
+    #[test]
+    fn resolve_preview_returns_correct_kind() {
+        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+
+        let mut state = AppState::new();
+        let url = "https://test.example/article";
+
+        // Test with summary
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(
+            vec![LoadedArticle {
+                url: url.to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash".to_string(),
+            }],
+            "collection".to_string(),
+        );
+        briefing.transition_to_summarizing();
+        briefing.start_article(0, 1);
+        briefing.complete_article(
+            0,
+            ArticleSummaryResult {
+                title: "Test".to_string(),
+                summary: "Summary".to_string(),
+                key_points: vec![],
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        state.set_briefing(briefing);
+
+        let (kind, _) = state.resolve_best_preview(url);
+        assert_eq!(kind, PreviewContentKind::Summary);
     }
 }
