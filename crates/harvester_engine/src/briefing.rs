@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs, path::Path, sync::Arc};
 
 use engine_logging::{engine_info, engine_warn};
+use url::Url;
 
 use crate::content_prep::{
     compute_prompt_overhead, derive_clean_text, truncate_to_budget, BoilerplatePolicy, CleanText,
@@ -230,6 +231,54 @@ fn prepare_loaded_articles_and_collection(
     Ok((loaded_articles, collection_text))
 }
 
+fn normalized_url_lookup_key(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Ok(mut parsed) = Url::parse(trimmed) {
+        parsed.set_fragment(None);
+        if let Some(port) = parsed.port() {
+            let normalized_port = match (parsed.scheme(), port) {
+                ("http", 80) | ("https", 443) => None,
+                _ => Some(port),
+            };
+            let _ = parsed.set_port(normalized_port);
+        }
+        return parsed.to_string().trim_end_matches('/').to_string();
+    }
+
+    trimmed.to_lowercase().trim_end_matches('/').to_string()
+}
+
+fn url_lookup_aliases(url: &str) -> Vec<String> {
+    let key = normalized_url_lookup_key(url);
+    if key.is_empty() {
+        return vec![key];
+    }
+
+    let mut aliases = vec![key.clone()];
+    if let Ok(mut parsed) = Url::parse(&key) {
+        let Some(host) = parsed.host_str() else {
+            return aliases;
+        };
+        let lowered = host.to_lowercase();
+        let host_without_prefix = if let Some(stripped) = lowered.strip_prefix("www.") {
+            Some(stripped.to_string())
+        } else {
+            lowered.strip_prefix("eu.").map(|stripped| stripped.to_string())
+        };
+
+        if let Some(alias_host) = host_without_prefix {
+            let _ = parsed.set_host(Some(&alias_host));
+            aliases.push(parsed.to_string().trim_end_matches('/').to_string());
+        }
+    }
+
+    aliases
+}
+
 pub fn load_and_prepare_articles_filtered(
     output_dir: &Path,
     max_input_bytes: usize,
@@ -241,14 +290,23 @@ pub fn load_and_prepare_articles_filtered(
     }
 
     let packages = scan_and_prepare_articles(output_dir)?;
-    let indexed: HashMap<String, ArticlePackage> = packages
-        .into_iter()
-        .map(|package| (package.url.clone(), package))
-        .collect();
+    let mut indexed: HashMap<String, ArticlePackage> = HashMap::with_capacity(packages.len());
+    for package in packages {
+        for key in url_lookup_aliases(&package.url) {
+            indexed.entry(key).or_insert_with(|| ArticlePackage {
+                url: package.url.clone(),
+                source_title: package.source_title.clone(),
+                clean_text: package.clean_text.clone(),
+            });
+        }
+    }
 
     let mut selected_packages = Vec::with_capacity(ordered_urls.len());
     for url in ordered_urls {
-        match indexed.get(url) {
+        let matched = url_lookup_aliases(url)
+            .into_iter()
+            .find_map(|key| indexed.get(&key));
+        match matched {
             Some(package) => selected_packages.push(ArticlePackage {
                 url: package.url.clone(),
                 source_title: package.source_title.clone(),

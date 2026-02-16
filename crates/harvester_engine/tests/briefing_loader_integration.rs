@@ -341,3 +341,44 @@ fn filtered_loader_empty_selection_returns_empty_result() {
     assert!(articles.is_empty());
     assert!(collection.is_empty());
 }
+
+#[test]
+fn filtered_loader_matches_www_and_eu_host_variants() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    let article_url = "https://eu.detroitnews.com/story/business/2026/02/14/example/";
+    write_markdown_file(
+        tmp.path(),
+        "detroit.md",
+        article_url,
+        Some("Detroit"),
+        "body",
+    );
+
+    let selected = vec!["https://www.detroitnews.com/story/business/2026/02/14/example/".to_string()];
+    let (articles, _) =
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected).unwrap();
+
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, article_url);
+}
+
+#[test]
+fn filtered_loader_matches_normalized_url_shape() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    write_markdown_file(
+        tmp.path(),
+        "a.md",
+        "https://example.com/news/item",
+        Some("Item"),
+        "body",
+    );
+
+    let selected = vec!["HTTPS://EXAMPLE.COM:443/news/item/".to_string()];
+    let (articles, _) =
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected).unwrap();
+
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, "https://example.com/news/item");
+}
