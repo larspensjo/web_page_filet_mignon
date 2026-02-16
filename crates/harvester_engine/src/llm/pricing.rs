@@ -71,6 +71,10 @@ impl PricingRegistry {
         self.prices.is_empty()
     }
 
+    pub fn model_names(&self) -> Vec<&str> {
+        self.prices.keys().map(|s| s.as_str()).collect()
+    }
+
     pub fn cost_microdollars(&self, model_name: &str, usage: &TokenUsage) -> u64 {
         self.get(model_name)
             .map(|pricing| pricing.cost_microdollars(usage))

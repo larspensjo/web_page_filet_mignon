@@ -165,6 +165,58 @@ impl LlmProvider for OpenAiProvider {
     fn provider_name(&self) -> &str {
         "openai"
     }
+
+    async fn list_models(&self) -> Result<Vec<String>, LlmError> {
+        let url = format!("{}/models", self.base_url.trim_end_matches('/'));
+
+        let response = self
+            .client
+            .get(&url)
+            .header(header::AUTHORIZATION, format!("Bearer {}", self.api_key))
+            .send()
+            .await
+            .map_err(Self::map_reqwest_error)?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let headers = response.headers().clone();
+            let body_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<body read failed>".to_string());
+            return Err(Self::map_status_code(status, &headers, body_text));
+        }
+
+        let bytes = response.bytes().await.map_err(Self::map_reqwest_error)?;
+
+        let parsed: OpenAiModelsResponse =
+            serde_json::from_slice(&bytes).map_err(|err| LlmError::InvalidResponse {
+                detail: format!("models response parse failure: {err}"),
+            })?;
+
+        // Filter to chat-completion models using prefix allow-list
+        let chat_models: Vec<String> = parsed
+            .data
+            .into_iter()
+            .map(|model| model.id)
+            .filter(|id| {
+                let id_lower = id.to_lowercase();
+                id_lower.starts_with("gpt-")
+                    || id_lower.starts_with("o1-")
+                    || id_lower.starts_with("o3-")
+                    || id_lower.starts_with("o4-")
+            })
+            .filter(|id| {
+                let id_lower = id.to_lowercase();
+                !id_lower.contains("whisper")
+                    && !id_lower.contains("dall-e")
+                    && !id_lower.contains("tts")
+                    && !id_lower.contains("text-embedding")
+            })
+            .collect();
+
+        Ok(chat_models)
+    }
 }
 
 #[derive(Serialize)]
@@ -256,4 +308,14 @@ pub(crate) struct OpenAiUsage {
     prompt_tokens: Option<u32>,
     #[serde(rename = "completion_tokens")]
     completion_tokens: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct OpenAiModelsResponse {
+    data: Vec<OpenAiModel>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct OpenAiModel {
+    id: String,
 }

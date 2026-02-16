@@ -80,6 +80,19 @@ pub enum PromptLabInputSource {
 }
 
 // ---------------------------------------------------------------------------
+// Model catalog
+// ---------------------------------------------------------------------------
+
+/// Source of the model catalog for Prompt Lab model selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModelCatalogSource {
+    #[default]
+    NotLoaded,
+    Remote,
+    LocalFallback,
+}
+
+// ---------------------------------------------------------------------------
 // Run record
 // ---------------------------------------------------------------------------
 
@@ -450,6 +463,10 @@ pub struct PromptLabState {
     pub(crate) selected_prompt_version: Option<PromptVersion>,
     /// Per-run model override (`None` = use stage/default model).
     pub(crate) selected_model_override: Option<ModelId>,
+    /// Catalog of available models for override selection.
+    pub(crate) model_catalog: Vec<ModelId>,
+    /// Source of the model catalog (remote discovery or local fallback).
+    pub(crate) catalog_source: ModelCatalogSource,
     pub(crate) context_overlays: HashMap<PromptId, PromptLabContextDraft>,
     pub(crate) template_drafts: HashMap<PromptId, PromptLabTemplateDraft>,
     pub(crate) template_editor_open: bool,
@@ -482,6 +499,8 @@ impl Default for PromptLabState {
             latest_run_id: None,
             selected_prompt_version: None,
             selected_model_override: None,
+            model_catalog: Vec::new(),
+            catalog_source: ModelCatalogSource::default(),
             context_overlays: HashMap::new(),
             template_drafts: HashMap::new(),
             template_editor_open: false,
@@ -618,6 +637,21 @@ impl PromptLabState {
         self.selected_model_override = model;
     }
 
+    /// Sets the model override after validating it against the catalog.
+    /// Logs a warning and rejects the override if the model is not in the catalog.
+    pub fn set_model_override_checked(&mut self, model: Option<ModelId>) {
+        if let Some(ref m) = model {
+            if !self.model_catalog.iter().any(|cat_m| cat_m == m) {
+                engine_logging::engine_warn!(
+                    "[prompt-lab-model] attempted to set model override to {:?} which is not in catalog",
+                    m
+                );
+                return;
+            }
+        }
+        self.selected_model_override = model;
+    }
+
     #[allow(dead_code)]
     pub fn clear_overrides(&mut self) {
         self.selected_prompt_version = None;
@@ -630,6 +664,32 @@ impl PromptLabState {
 
     pub fn selected_model_override(&self) -> Option<&ModelId> {
         self.selected_model_override.as_ref()
+    }
+
+    pub fn model_catalog(&self) -> &[ModelId] {
+        &self.model_catalog
+    }
+
+    pub fn catalog_source(&self) -> ModelCatalogSource {
+        self.catalog_source
+    }
+
+    /// Sets the model catalog and source.
+    /// If the current selection is not in the new catalog, it is cleared with a warning.
+    pub fn set_model_catalog(&mut self, models: Vec<ModelId>, source: ModelCatalogSource) {
+        self.model_catalog = models;
+        self.catalog_source = source;
+
+        // Clear stale selection
+        if let Some(ref current) = self.selected_model_override {
+            if !self.model_catalog.iter().any(|m| m == current) {
+                engine_logging::engine_warn!(
+                    "[prompt-lab-model] cleared stale model override {:?} after catalog refresh",
+                    current
+                );
+                self.selected_model_override = None;
+            }
+        }
     }
 
     // ------------------------------------------------------------------

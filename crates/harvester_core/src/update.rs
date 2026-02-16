@@ -45,7 +45,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::StartupHydrationRequested => {
             state.mark_triage_metadata_pending();
-            vec![Effect::LoadPromptContexts, Effect::LoadLlmMetadata]
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadLlmMetadata,
+                Effect::LoadPromptLabModelCatalog,
+            ]
         }
         Msg::UrlsSubmitted => {
             let raw = state.input_buffer().to_owned();
@@ -869,6 +873,16 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::PromptLabAdvancedModeSet { enabled } => {
             state.prompt_lab_mut().set_advanced_mode(enabled);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabModelCatalogLoaded { models, source } => {
+            state.prompt_lab_mut().set_model_catalog(models, source);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::PromptLabModelOverrideSet { model } => {
+            state.prompt_lab_mut().set_model_override_checked(model);
             state.mark_dirty();
             Vec::new()
         }

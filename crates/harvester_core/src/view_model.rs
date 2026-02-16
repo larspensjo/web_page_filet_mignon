@@ -1,13 +1,14 @@
 use crate::pre_triage_filter::FilterReason;
 use crate::preview::PreviewContentKind;
 use crate::prompt_lab::{
-    prompt_id_for_stage, PromptLabCompareBatchRecord, PromptLabCompareBatchStatus,
-    PromptLabInputSource, PromptLabRunId, PromptLabRunStatus, PromptLabStage, PromptLabState,
-    PromptLabTemplateSnapshot,
+    prompt_id_for_stage, ModelCatalogSource, PromptLabCompareBatchRecord,
+    PromptLabCompareBatchStatus, PromptLabInputSource, PromptLabRunId, PromptLabRunStatus,
+    PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::LinkDownloadState;
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
+use harvester_engine::llm::types::ModelId;
 use harvester_engine::LinkKind;
 use std::collections::HashMap;
 
@@ -171,6 +172,9 @@ pub struct PromptLabView {
     pub active_batch: Option<PromptLabCompareBatchView>,
     pub can_add_candidate: bool,
     pub can_reset_draft: bool,
+    pub selected_model_override: Option<ModelId>,
+    pub model_catalog: Vec<ModelId>,
+    pub model_catalog_source: ModelCatalogSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,6 +274,9 @@ impl Default for PromptLabView {
             active_batch: None,
             can_add_candidate: true,
             can_reset_draft: false,
+            selected_model_override: None,
+            model_catalog: Vec::new(),
+            model_catalog_source: ModelCatalogSource::default(),
         }
     }
 }
@@ -521,6 +528,9 @@ impl PromptLabView {
             active_batch,
             can_add_candidate: !batch_running,
             can_reset_draft: !batch_running && !state.draft_candidates().is_empty(),
+            selected_model_override: state.selected_model_override().cloned(),
+            model_catalog: state.model_catalog().to_vec(),
+            model_catalog_source: state.catalog_source(),
         }
     }
 }

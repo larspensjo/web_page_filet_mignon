@@ -292,6 +292,13 @@ pub enum Msg {
     PromptLabAdvancedModeSet {
         enabled: bool,
     },
+    PromptLabModelCatalogLoaded {
+        models: Vec<ModelId>,
+        source: crate::prompt_lab::ModelCatalogSource,
+    },
+    PromptLabModelOverrideSet {
+        model: Option<ModelId>,
+    },
     PromptLabCompareSectionToggled,
     PromptLabContextSectionToggled,
     PromptLabTemplateSectionToggled,

@@ -67,7 +67,9 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     let output_dir = effects::default_output_dir();
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let effect_runner = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-        let provider = Arc::new(OpenAiProvider::new(api_key));
+        let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
+            Arc::new(OpenAiProvider::new(api_key));
+        let provider_clone = Arc::clone(&provider);
         let mut registry = PromptRegistry::new();
         register_defaults(&mut registry);
         let registry = Arc::new(RwLock::new(registry));
@@ -97,6 +99,8 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             100_000,
             Arc::clone(&registry),
             model_map,
+            provider_clone,
+            ProviderKind::OpenAi,
         )
     } else {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");

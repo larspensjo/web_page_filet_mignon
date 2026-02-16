@@ -47,6 +47,7 @@ pub enum Effect {
         resolve_id: u64,
         url: String,
     },
+    LoadPromptLabModelCatalog,
     StartSession,
     StopFinish {
         policy: StopPolicy,

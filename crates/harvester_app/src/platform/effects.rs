@@ -125,12 +125,14 @@ pub struct EffectRunner {
     llm_max_input_bytes: Option<usize>,
     prompt_registry: Arc<RwLock<PromptRegistry>>,
     llm_metadata_models: HashMap<PromptId, String>,
+    llm_provider: Option<Arc<dyn harvester_engine::llm::provider::LlmProvider>>,
+    llm_default_provider: Option<harvester_engine::llm::types::ProviderKind>,
 }
 
 impl EffectRunner {
     pub fn new(msg_tx: mpsc::Sender<Msg>) -> Self {
         let registry = Arc::new(RwLock::new(PromptRegistry::with_defaults()));
-        Self::with_optional_llm(msg_tx, None, None, registry, HashMap::new())
+        Self::with_optional_llm(msg_tx, None, None, registry, HashMap::new(), None, None)
     }
 
     pub fn new_with_llm(
@@ -139,6 +141,8 @@ impl EffectRunner {
         llm_max_input_bytes: usize,
         prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
+        llm_provider: Arc<dyn harvester_engine::llm::provider::LlmProvider>,
+        llm_default_provider: harvester_engine::llm::types::ProviderKind,
     ) -> Self {
         Self::with_optional_llm(
             msg_tx,
@@ -146,6 +150,8 @@ impl EffectRunner {
             Some(llm_max_input_bytes),
             prompt_registry,
             llm_metadata_models,
+            Some(llm_provider),
+            Some(llm_default_provider),
         )
     }
 
@@ -155,6 +161,8 @@ impl EffectRunner {
         llm_max_input_bytes: Option<usize>,
         prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
+        llm_provider: Option<Arc<dyn harvester_engine::llm::provider::LlmProvider>>,
+        llm_default_provider: Option<harvester_engine::llm::types::ProviderKind>,
     ) -> Self {
         let output_dir = default_output_dir();
 
@@ -174,6 +182,8 @@ impl EffectRunner {
             llm_max_input_bytes,
             prompt_registry,
             llm_metadata_models,
+            llm_provider,
+            llm_default_provider,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -253,6 +263,69 @@ impl EffectRunner {
                             });
                         }
                     }
+                });
+            }
+            Effect::LoadPromptLabModelCatalog => {
+                let msg_tx = self.msg_tx.clone();
+                let provider = self.llm_provider.clone();
+                let default_provider_kind = self.llm_default_provider;
+
+                thread::spawn(move || {
+                    use harvester_core::ModelCatalogSource;
+                    use harvester_engine::llm::types::ModelId;
+
+                    engine_info!("[prompt-lab-model] loading model catalog");
+
+                    let (models, source) = if let (Some(provider), Some(provider_kind)) =
+                        (provider, default_provider_kind)
+                    {
+                        // Try remote discovery using a new tokio runtime
+                        match tokio::runtime::Runtime::new() {
+                            Ok(runtime) => {
+                                match runtime.block_on(provider.list_models()) {
+                                    Ok(mut model_names) => {
+                                        engine_info!(
+                                            "[prompt-lab-model] remote discovery succeeded: {} models found",
+                                            model_names.len()
+                                        );
+
+                                        // Deduplicate and sort
+                                        model_names.sort();
+                                        model_names.dedup();
+
+                                        // Convert to ModelId with configured provider
+                                        let models: Vec<ModelId> = model_names
+                                            .into_iter()
+                                            .map(|name| ModelId::new(provider_kind, name))
+                                            .collect();
+
+                                        (models, ModelCatalogSource::Remote)
+                                    }
+                                    Err(err) => {
+                                        engine_warn!(
+                                            "[prompt-lab-model] remote discovery failed: {}; falling back to local",
+                                            err
+                                        );
+                                        // Fallback to local - for now, just empty catalog
+                                        // In a full implementation, we'd call local_dispatchable_model_names
+                                        (Vec::new(), ModelCatalogSource::LocalFallback)
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                engine_warn!(
+                                    "[prompt-lab-model] failed to create runtime: {}; falling back to local",
+                                    err
+                                );
+                                (Vec::new(), ModelCatalogSource::LocalFallback)
+                            }
+                        }
+                    } else {
+                        engine_warn!("[prompt-lab-model] LLM not configured; empty catalog");
+                        (Vec::new(), ModelCatalogSource::LocalFallback)
+                    };
+
+                    let _ = msg_tx.send(Msg::PromptLabModelCatalogLoaded { models, source });
                 });
             }
             Effect::DownloadLinkedPage {

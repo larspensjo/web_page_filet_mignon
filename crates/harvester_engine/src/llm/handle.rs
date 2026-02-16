@@ -307,7 +307,7 @@ async fn handle_completion_concurrent(
 
     // Validate the model override (if any) before doing any further work.
     if let Some(ref override_model) = model_override {
-        if let Err(err) = validate_model_override(override_model, config) {
+        if let Err(err) = validate_model_override(override_model, config, None) {
             quota_tracker.lock().unwrap().release_call();
             let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
@@ -741,17 +741,41 @@ fn resolve_model(
     }
 }
 
+/// Returns the set of model names the engine will accept as overrides
+/// from local config alone (stage models + pricing registry keys).
+pub fn local_dispatchable_model_names(config: &LlmConfig) -> Vec<String> {
+    let mut names = std::collections::HashSet::new();
+    names.insert(config.default_model.model_name().to_string());
+    if let Some(m) = &config.triage_model {
+        names.insert(m.model_name().to_string());
+    }
+    if let Some(m) = &config.summary_model {
+        names.insert(m.model_name().to_string());
+    }
+    if let Some(m) = &config.briefing_model {
+        names.insert(m.model_name().to_string());
+    }
+    for key in config.pricing.model_names() {
+        names.insert(key.to_string());
+    }
+    let mut result: Vec<String> = names.into_iter().collect();
+    result.sort();
+    result
+}
+
 /// Validate a model override before use.
 ///
 /// Checks (in order):
 /// 1. Provider must match `config.default_model.provider()` (proxy for the configured provider).
-/// 2. Model name must be in the allow-list built from config models and the pricing registry.
+/// 2. Model name must be in the allow-list built from config models and the pricing registry,
+///    or in the optional extra_catalog parameter (for remote-discovered models).
 ///
 /// Returns `Err(LlmCompletionError::UnsupportedModel)` on validation failure.
 #[allow(clippy::result_large_err)]
 fn validate_model_override(
     override_model: &ModelId,
     config: &LlmConfig,
+    extra_catalog: Option<&[ModelId]>,
 ) -> Result<(), LlmCompletionError> {
     let configured_provider = config.default_model.provider();
 
@@ -773,7 +797,7 @@ fn validate_model_override(
         });
     }
 
-    // Check 2: model name must be in the allow-list.
+    // Check 2: model name must be in the allow-list (local or extra catalog).
     let mut allow_list: std::collections::HashSet<&str> = std::collections::HashSet::new();
     allow_list.insert(config.default_model.model_name());
     if let Some(m) = &config.triage_model {
@@ -785,12 +809,19 @@ fn validate_model_override(
     if let Some(m) = &config.briefing_model {
         allow_list.insert(m.model_name());
     }
-    // Also include pricing registry keys (bare model-name strings).
-    // This set is built inline; a formal catalog will replace it in a later step.
 
-    if !allow_list.contains(override_model.model_name())
-        && config.pricing.get(override_model.model_name()).is_none()
-    {
+    let in_local_allow_list = allow_list.contains(override_model.model_name())
+        || config.pricing.get(override_model.model_name()).is_some();
+
+    let in_extra_catalog = extra_catalog
+        .map(|catalog| {
+            catalog
+                .iter()
+                .any(|m| m.model_name() == override_model.model_name())
+        })
+        .unwrap_or(false);
+
+    if !in_local_allow_list && !in_extra_catalog {
         engine_warn!(
             "[llm-dispatch] unsupported model override: unknown model name={} provider={:?}",
             override_model.model_name(),

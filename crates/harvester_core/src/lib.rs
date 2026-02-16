@@ -31,8 +31,8 @@ pub use pre_triage_filter::{
 };
 pub use preview::PreviewContentKind;
 pub use prompt_lab::{
-    PromptLabInputSource, PromptLabRunId, PromptLabRunRecord, PromptLabRunStatus, PromptLabStage,
-    PromptLabTemplateSnapshot,
+    ModelCatalogSource, PromptLabInputSource, PromptLabRunId, PromptLabRunRecord,
+    PromptLabRunStatus, PromptLabStage, PromptLabTemplateSnapshot,
 };
 pub use source_state::{SourceInstanceState, SourceStateIndex};
 pub use state::{
