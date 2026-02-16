@@ -1,6 +1,5 @@
 use commanductui::types::{
-    DockStyle, LabelClass, LayoutRule, MenuActionId, MenuItemConfig,
-    SplitterOrientation,
+    DockStyle, LabelClass, LayoutRule, MenuActionId, MenuItemConfig, SplitterOrientation,
 };
 use commanductui::{
     Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
@@ -768,6 +767,23 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 r: 0x40,
                 g: 0x44,
                 b: 0x4B,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ComboBox,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1A,
+                g: 0x1D,
+                b: 0x22,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
             }),
             ..Default::default()
         },
@@ -1977,6 +1993,41 @@ mod tests {
                 PlatformCommand::CreateButton { control_id, .. } if *control_id == BTN_COMPARE_START
             )
         }));
+        assert!(
+            commands.iter().any(|cmd| matches!(
+                cmd,
+                PlatformCommand::CreateComboBox { control_id, .. }
+                    if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR
+            )),
+            "model selector combo box should be created"
+        );
+    }
+
+    #[test]
+    fn combo_box_style_is_defined() {
+        let commands = initial_commands(WindowId::new(2));
+        assert!(
+            commands.iter().any(|cmd| matches!(
+                cmd,
+                PlatformCommand::DefineStyle { style_id, .. }
+                    if *style_id == StyleId::ComboBox
+            )),
+            "StyleId::ComboBox must be defined to avoid runtime warning"
+        );
+    }
+
+    #[test]
+    fn combo_box_style_is_applied_to_model_selector() {
+        let commands = initial_commands(WindowId::new(2));
+        assert!(
+            commands.iter().any(|cmd| matches!(
+                cmd,
+                PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
+                    if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR
+                       && *style_id == StyleId::ComboBox
+            )),
+            "model selector combo box should have ComboBox style applied"
+        );
     }
 
     #[test]

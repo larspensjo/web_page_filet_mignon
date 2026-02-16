@@ -28,19 +28,13 @@ pub(crate) fn model_to_combo_index(
 ) -> Option<usize> {
     match selected {
         None => Some(0),
-        Some(model) => catalog
-            .iter()
-            .position(|m| m == model)
-            .map(|idx| idx + 1),
+        Some(model) => catalog.iter().position(|m| m == model).map(|idx| idx + 1),
     }
 }
 
 /// Helper: Convert combo box selection index to optional ModelId.
 /// Returns None for index 0 (default), or the model at (index-1) in the catalog.
-pub(crate) fn combo_index_to_model(
-    index: usize,
-    catalog: &[ModelId],
-) -> Option<ModelId> {
+pub(crate) fn combo_index_to_model(index: usize, catalog: &[ModelId]) -> Option<ModelId> {
     if index == 0 {
         None
     } else {
@@ -545,11 +539,7 @@ pub fn render(
     // Check if catalog changed -> update combo items
     if tree_state.prev_prompt_lab_model_catalog != *model_catalog {
         let mut items = vec!["Default".to_string()];
-        items.extend(
-            model_catalog
-                .iter()
-                .map(|m| m.model_name().to_string())
-        );
+        items.extend(model_catalog.iter().map(|m| m.model_name().to_string()));
         cmds.push(PlatformCommand::SetComboBoxItems {
             window_id,
             control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,

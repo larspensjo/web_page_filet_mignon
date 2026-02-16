@@ -1,28 +1,30 @@
-2026-02-16T16:01:13.6443368Z [INFO] harvester_app::platform::app: Logger initialized. Starting harvester_app...
-2026-02-16T16:01:13.6556395Z [INFO] harvester_app::platform::app: [llm-concurrency] configured max_concurrent_requests=3
-2026-02-16T16:01:13.6583053Z [INFO] harvester_app::platform::effects: [llm-metadata] metadata prepared (versions=3, models=3 templates=3)
-2026-02-16T16:01:13.658573Z [INFO] harvester_app::platform::effects: [prompt-lab-model] loading model catalog
-2026-02-16T16:01:13.6588148Z [INFO] harvester_app::platform::effects: [llm-metadata] metadata prepared (versions=3, models=3 templates=3)
-2026-02-16T16:01:13.6601534Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleTriage' v1 (schema v1, updated: 2026-02-12)
-2026-02-16T16:01:13.661203Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleSummary' v1 (schema v1, updated: 2026-02-12)
-2026-02-16T16:01:13.6622806Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'AggregateBriefing' v1 (schema v1, updated: 2026-02-12)
-2026-02-16T16:01:13.6627971Z [INFO] harvester_app::platform::persistence: Loaded persisted completed jobs from "C:\\Users\\lpensjo\\src\\web_page_filet_mignon\\output\\.harvester_state.ron"
-2026-02-16T16:01:13.6683609Z [INFO] harvester_app::platform::summary_cache_store: [summary-cache] No persisted cache found at "C:\\Users\\lpensjo\\src\\web_page_filet_mignon\\output\\.summary_cache.ron"
-2026-02-16T16:01:13.6690599Z [INFO] harvester_app::platform::triage_cache_store: [triage-cache] No persisted cache found at "C:\\Users\\lpensjo\\src\\web_page_filet_mignon\\output\\.triage_cache.ron"
-2026-02-16T16:01:13.6701934Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://allwork.space/2026/02/ai-is-shrinking-ceo-tenures-and-raising-the-bar-for-who-gets-to-stay/ original_bytes=558 clean_bytes=273 hash=8504fb0e
-2026-02-16T16:01:13.6741272Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://t2conline.com/ai-stock-turmoil-what-the-anthropic-shockwave-means-for-businesses-worldwide/ original_bytes=22422 clean_bytes=22036 hash=5cd8afee
-2026-02-16T16:01:13.6747591Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/apple-siri-bet-ai-models-commodities-google-gemini-2026-1 original_bytes=350 clean_bytes=66 hash=7b459ffc
-2026-02-16T16:01:13.6753828Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://aibusiness.com/generative-ai/how-ai-is-reducing-the-administrative-burden-in-sales original_bytes=464 clean_bytes=209 hash=cee0332a
-2026-02-16T16:01:13.6773023Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://futurism.com/artificial-intelligence/microsoft-ai-efforts-faceplanting original_bytes=5259 clean_bytes=5025 hash=792fc20e
-2026-02-16T16:01:13.6793361Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/technology/palantir-ceo-suggests-ai-bolsters-civil-liberties-warns-europe-falling-behind-us-china original_bytes=5642 clean_bytes=5178 hash=4db3b71e
-2026-02-16T16:01:13.6813476Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://techcrunch.com/2026/01/22/quadric-rides-the-shift-from-cloud-ai-to-on-device-inference-and-its-paying-off/ original_bytes=9063 clean_bytes=8645 hash=1f2c3558
-2026-02-16T16:01:13.682976Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/01/20/servicenow-openai-ai-software-saas.html original_bytes=5300 clean_bytes=4944 hash=1183d5c9
-2026-02-16T16:01:13.6848622Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-23/silicon-valley-leaders-highlight-concrete-returns-as-ai-anxiety-grows original_bytes=6652 clean_bytes=6238 hash=34f3767e
-2026-02-16T16:01:13.6865697Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/us-china-collaboration-neurips-papers/ original_bytes=4615 clean_bytes=4360 hash=1bcb0c37
-2026-02-16T16:01:13.6881197Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-21/youtube-says-battling-ai-slop-is-top-priority original_bytes=3491 clean_bytes=3121 hash=b581f9fc
-2026-02-16T16:01:13.6892837Z [INFO] harvester_app::platform::effects: [triage-loader] prepared 11 article(s)
-2026-02-16T16:01:14.0259797Z [INFO] harvester_core::update: [LlmMetadata] Loaded 3 active version(s)
-2026-02-16T16:01:14.0277292Z [INFO] harvester_core::update: [LlmMetadata] Loaded 3 active version(s)
-2026-02-16T16:01:14.0292448Z [INFO] harvester_core::update: [PromptContext] Loaded 3 context(s)
-2026-02-16T16:01:14.5101334Z [INFO] harvester_app::platform::effects: [prompt-lab-model] remote discovery succeeded: 33 models found: gpt-3.5-turbo, gpt-3.5-turbo-16k, gpt-4, gpt-4-0125-preview, gpt-4-1106-preview, gpt-4-turbo, gpt-4-turbo-preview, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, gpt-4o, gpt-4o-mini, gpt-5, gpt-5-chat-latest, gpt-5-codex, gpt-5-mini, gpt-5-nano, gpt-5-pro, gpt-5.1, gpt-5.1-chat-latest, gpt-5.1-codex, gpt-5.1-codex-max, gpt-5.1-codex-mini, gpt-5.2, gpt-5.2-chat-latest, gpt-5.2-codex, gpt-5.2-pro, gpt-image-1, gpt-image-1-mini, gpt-image-1.5, o1-pro, o3-mini, o4-mini
-2026-02-16T16:01:24.2260089Z [INFO] harvester_app::platform::effects: [llm-shutdown] stopping llm worker
+2026-02-16T16:30:18.0822908Z [INFO] harvester_app::platform::app: Logger initialized. Starting harvester_app...
+2026-02-16T16:30:18.093096Z [INFO] harvester_app::platform::app: [llm-concurrency] configured max_concurrent_requests=3
+2026-02-16T16:30:18.0957645Z [INFO] harvester_app::platform::effects: [llm-metadata] metadata prepared (versions=3, models=3 templates=3)
+2026-02-16T16:30:18.0963436Z [INFO] harvester_app::platform::effects: [llm-metadata] metadata prepared (versions=3, models=3 templates=3)
+2026-02-16T16:30:18.0965413Z [INFO] harvester_app::platform::effects: [prompt-lab-model] loading model catalog
+2026-02-16T16:30:18.0974413Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleTriage' v1 (schema v1, updated: 2026-02-12)
+2026-02-16T16:30:18.0984681Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'ArticleSummary' v1 (schema v1, updated: 2026-02-12)
+2026-02-16T16:30:18.0994598Z [INFO] harvester_engine::llm::prompt_context: [PromptContext] Loaded context for 'AggregateBriefing' v1 (schema v1, updated: 2026-02-12)
+2026-02-16T16:30:18.1002019Z [INFO] harvester_app::platform::persistence: Loaded persisted completed jobs from "C:\\Users\\lpensjo\\src\\web_page_filet_mignon\\output\\.harvester_state.ron"
+2026-02-16T16:30:18.105656Z [INFO] harvester_app::platform::summary_cache_store: [summary-cache] No persisted cache found at "C:\\Users\\lpensjo\\src\\web_page_filet_mignon\\output\\.summary_cache.ron"
+2026-02-16T16:30:18.1063528Z [INFO] harvester_app::platform::triage_cache_store: [triage-cache] No persisted cache found at "C:\\Users\\lpensjo\\src\\web_page_filet_mignon\\output\\.triage_cache.ron"
+2026-02-16T16:30:18.1084715Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://allwork.space/2026/02/ai-is-shrinking-ceo-tenures-and-raising-the-bar-for-who-gets-to-stay/ original_bytes=558 clean_bytes=273 hash=8504fb0e
+2026-02-16T16:30:18.1124233Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://t2conline.com/ai-stock-turmoil-what-the-anthropic-shockwave-means-for-businesses-worldwide/ original_bytes=22422 clean_bytes=22036 hash=5cd8afee
+2026-02-16T16:30:18.1130941Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.businessinsider.com/apple-siri-bet-ai-models-commodities-google-gemini-2026-1 original_bytes=350 clean_bytes=66 hash=7b459ffc
+2026-02-16T16:30:18.1138578Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://aibusiness.com/generative-ai/how-ai-is-reducing-the-administrative-burden-in-sales original_bytes=464 clean_bytes=209 hash=cee0332a
+2026-02-16T16:30:18.1157167Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://futurism.com/artificial-intelligence/microsoft-ai-efforts-faceplanting original_bytes=5259 clean_bytes=5025 hash=792fc20e
+2026-02-16T16:30:18.1176721Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.foxbusiness.com/technology/palantir-ceo-suggests-ai-bolsters-civil-liberties-warns-europe-falling-behind-us-china original_bytes=5642 clean_bytes=5178 hash=4db3b71e
+2026-02-16T16:30:18.1197408Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://techcrunch.com/2026/01/22/quadric-rides-the-shift-from-cloud-ai-to-on-device-inference-and-its-paying-off/ original_bytes=9063 clean_bytes=8645 hash=1f2c3558
+2026-02-16T16:30:18.121488Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.cnbc.com/2026/01/20/servicenow-openai-ai-software-saas.html original_bytes=5300 clean_bytes=4944 hash=1183d5c9
+2026-02-16T16:30:18.1235085Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-23/silicon-valley-leaders-highlight-concrete-returns-as-ai-anxiety-grows original_bytes=6652 clean_bytes=6238 hash=34f3767e
+2026-02-16T16:30:18.1251772Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.wired.com/story/us-china-collaboration-neurips-papers/ original_bytes=4615 clean_bytes=4360 hash=1bcb0c37
+2026-02-16T16:30:18.1266015Z [INFO] harvester_engine::content_prep::derive: [content-prep] url=https://www.latimes.com/business/story/2026-01-21/youtube-says-battling-ai-slop-is-top-priority original_bytes=3491 clean_bytes=3121 hash=b581f9fc
+2026-02-16T16:30:18.1277212Z [INFO] harvester_app::platform::effects: [triage-loader] prepared 11 article(s)
+2026-02-16T16:30:18.373961Z [INFO] harvester_core::update: [LlmMetadata] Loaded 3 active version(s)
+2026-02-16T16:30:18.3762536Z [INFO] harvester_core::update: [LlmMetadata] Loaded 3 active version(s)
+2026-02-16T16:30:18.3780709Z [INFO] harvester_core::update: [PromptContext] Loaded 3 context(s)
+2026-02-16T16:30:19.3405179Z [INFO] harvester_app::platform::effects: [prompt-lab-model] remote discovery succeeded: 33 models found: gpt-3.5-turbo, gpt-3.5-turbo-16k, gpt-4, gpt-4-0125-preview, gpt-4-1106-preview, gpt-4-turbo, gpt-4-turbo-preview, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, gpt-4o, gpt-4o-mini, gpt-5, gpt-5-chat-latest, gpt-5-codex, gpt-5-mini, gpt-5-nano, gpt-5-pro, gpt-5.1, gpt-5.1-chat-latest, gpt-5.1-codex, gpt-5.1-codex-max, gpt-5.1-codex-mini, gpt-5.2, gpt-5.2-chat-latest, gpt-5.2-codex, gpt-5.2-pro, gpt-image-1, gpt-image-1-mini, gpt-image-1.5, o1-pro, o3-mini, o4-mini
+2026-02-16T16:30:23.2480189Z [INFO] harvester_core::update: [prompt-lab-context] PromptLabContextEditorOpened prompt_id=ArticleTriage
+2026-02-16T16:30:29.1857665Z [WARN] commanductui::window_common: [Paint] Missing ControlKind for ControlID 1000 in WinID WindowId(1); using fallback
+2026-02-16T16:30:36.9238217Z [INFO] harvester_app::platform::effects: [llm-shutdown] stopping llm worker
