@@ -1379,6 +1379,50 @@ Summary: Load preview content from disk when jobs are restored without in-memory
 Rationale: Enables preview after app restart without re-running jobs.
 SuccessCriteria:
 - Selecting a restored job loads its preview file with a size limit.
+- Preview loading is async and does not block UI.
+
+#### [FI-Storage-PreviewLoading-0002] Extended cut reason tracking with ExclusionRecord
+Status: Candidate
+TopLevel: Storage
+SubLevel: PreviewLoading
+Priority: P3
+Effort: L
+Risk: H
+Origin:
+- SourceDoc: Plan.PreviewBestAvailableInfo.md
+- SourceSection: Phase 4 — Extended Cut Reason Tracking (Future, Optional)
+- Captured: 2026-02-16
+Tags: [storage, exclusion, architecture, state]
+Summary: Add per-URL ExclusionRecord to track cut reasons that are not derivable from existing sessions, such as budget-trimmed articles.
+Rationale: Most cut reasons can be derived at read time from existing state, but budget trimming is not currently tracked. Adding this enables complete exclusion history.
+SuccessCriteria:
+- ExclusionRecord is emitted as actions at decision points, not direct mutation.
+- Pre-triage session remains authoritative; ExclusionRecord does not duplicate existing data.
+- Budget-trimmed articles can be identified and explained in preview.
+Notes: High risk due to potential shadow state creation. Only pursue if genuinely needed for missing categories. Most cut reasons are derivable: pre-triage exclusion from pre_triage.entry_for_url(), below triage cutoff from result priority, missing from corpus from briefing.articles().
+Related: [FI-Storage-PreviewLoading-0003]
+
+#### [FI-Storage-PreviewLoading-0003] Unified exclusion taxonomy with ExclusionTimeline
+Status: Candidate
+TopLevel: Storage
+SubLevel: PreviewLoading
+Priority: P3
+Effort: XL
+Risk: H
+Origin:
+- SourceDoc: Plan.PreviewBestAvailableInfo.md
+- SourceSection: Future Extensions — Unified exclusion taxonomy (Phase 4 evolution)
+- Captured: 2026-02-16
+Tags: [storage, exclusion, architecture, observability]
+Summary: If all cut reasons eventually get tracked, introduce a single ExclusionTimeline per URL that shows the complete decision history across all filtering stages.
+Rationale: Provides comprehensive audit trail of why articles were excluded at each decision point. Useful for debugging filter policies and understanding curation outcomes.
+SuccessCriteria:
+- Each URL has an optional ExclusionTimeline tracking all exclusion events.
+- Timeline includes timestamps, stage (pre-triage/triage/briefing), reason, and decision source.
+- Timeline is derivable from existing state where possible, avoiding duplication.
+- Preview can display full exclusion history for debugging.
+Notes: This is an evolution of FI-Storage-PreviewLoading-0002. Only pursue if comprehensive exclusion tracking proves valuable for operations or compliance.
+Related: [FI-Storage-PreviewLoading-0002]
 - Missing files are handled gracefully with an informative message.
 
 ### ReplayPrivacy
@@ -1506,7 +1550,7 @@ SuccessCriteria:
 ### PreviewIndicators
 
 #### [FI-UX-PreviewIndicators-0001] Heuristic preview quality indicators
-Status: Candidate
+Status: Partially Implemented
 TopLevel: UX
 SubLevel: PreviewIndicators
 Priority: P3
@@ -1516,12 +1560,14 @@ Origin:
 - SourceDoc: Plan.MarkdownPreviewPane.md
 - SourceSection: FutureHeuristicSignalsV2
 - Captured: 2026-02-12
+- PartiallyImplemented: 2026-02-16 (BestPreview commit)
 Tags: [UX, preview, quality]
 Summary: Add heuristic indicators (stub, paywall, cookie wall, duplicate) in the preview header.
 Rationale: Speeds keep/skip decisions without reading full content.
 SuccessCriteria:
 - Header displays indicators derived from deterministic heuristics.
 - Indicators are logged and test-covered.
+Notes: The preview_source field now indicates content type (Summary/Triage/Exclusion/Fallback) which provides basic provenance. Full heuristic indicators (stub, paywall, etc.) remain unimplemented.
 
 ### PreviewOutline
 
@@ -1544,9 +1590,47 @@ SuccessCriteria:
 - Outline list is populated from extracted heading metadata.
 - Clicking an outline entry navigates the Rich Edit preview to the target section.
 
+#### [FI-UX-PreviewOutline-0002] Keyboard navigation updates preview immediately
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewOutline
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.PreviewBestAvailableInfo.md
+- SourceSection: Future Extensions
+- Captured: 2026-02-16
+Tags: [UX, preview, navigation, keyboard]
+Summary: Arrow key navigation in the tree should update the preview pane immediately without requiring a click.
+Rationale: Improves keyboard-driven workflow efficiency.
+SuccessCriteria:
+- Arrow keys that change tree selection trigger preview refresh immediately.
+- Preview updates are synchronous with selection changes.
+- Keyboard navigation performance is acceptable for typical workload sizes.
+
 ### PreviewRich
 
-#### [FI-UX-PreviewRich-0001] Raw/rich preview mode toggle
+#### [FI-UX-PreviewRich-0001] Preview diff on re-triage
+Status: Candidate
+TopLevel: UX
+SubLevel: PreviewRich
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.PreviewBestAvailableInfo.md
+- SourceSection: Future Extensions
+- Captured: 2026-02-16
+Tags: [UX, preview, triage, diff]
+Summary: Show what changed when an article is re-triaged, including priority delta and rationale changes.
+Rationale: Helps operators understand triage stability and model behavior changes over time.
+SuccessCriteria:
+- Re-triaged articles display a diff indicator in the preview.
+- Diff shows old vs new priority and highlights changed rationale text.
+- Diff rendering is deterministic and testable.
+
+#### [FI-UX-PreviewRich-0002] Raw/rich preview mode toggle
 Status: Candidate
 TopLevel: UX
 SubLevel: PreviewRich
@@ -1776,25 +1860,6 @@ SuccessCriteria:
 - UI offers explicit bulk actions for unresolved review items.
 - Bulk action results are persisted as manual overrides and are fully reversible.
 - Reducer tests verify deterministic behavior for mixed review sets.
-
-#### [FI-UX-TriageUi-0003] Pre-triage reason inspector for selected article
-Status: Candidate
-TopLevel: UX
-SubLevel: TriageUi
-Priority: P2
-Effort: M
-Risk: L
-Origin:
-- SourceDoc: Plan.PreTriageManualFiltering.md
-- SourceSection: Future Extensions
-- Captured: 2026-02-15
-Tags: [ux, triage, pre-triage, explainability]
-Summary: Add a detail panel that explains which pre-triage rules matched for the currently selected article.
-Rationale: Helps operators understand and trust auto-exclude or review decisions before overriding.
-SuccessCriteria:
-- Selecting a job shows matched rule reasons in a stable, deterministic order.
-- The panel reflects auto verdict and manual override state separately.
-- Reason display is available without requiring debug logs.
 
 ### WorkflowAutomation
 
