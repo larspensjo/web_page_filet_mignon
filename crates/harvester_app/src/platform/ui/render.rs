@@ -537,7 +537,7 @@ pub fn render(
         for slot_idx in 0..PROMPT_LAB_MODEL_SLOT_COUNT {
             if slot_idx < model_catalog.len() {
                 let model_name = &model_catalog[slot_idx];
-                let is_selected = selected_model.as_ref().map_or(false, |s| s == model_name);
+                let is_selected = selected_model.as_ref() == Some(model_name);
                 let button_text = select_label(model_name, is_selected);
                 cmds.push(PlatformCommand::SetControlText {
                     window_id,
