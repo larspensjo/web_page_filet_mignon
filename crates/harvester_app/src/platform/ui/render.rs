@@ -1,4 +1,4 @@
-use commanductui::types::{TreeItemDescriptor, TreeItemId};
+use commanductui::types::{ControlId, TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
 use engine_logging::{engine_debug, engine_warn};
 use harvester_core::{
@@ -85,6 +85,8 @@ pub struct TreeRenderState {
     prev_prompt_lab_section_context_text: Option<String>,
     prev_prompt_lab_section_template_text: Option<String>,
     prev_prompt_lab_section_run_details_text: Option<String>,
+    prev_prompt_lab_model_catalog: Vec<String>,
+    prev_prompt_lab_selected_model: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -153,6 +155,8 @@ impl Default for TreeRenderState {
             prev_prompt_lab_section_context_text: None,
             prev_prompt_lab_section_template_text: None,
             prev_prompt_lab_section_run_details_text: None,
+            prev_prompt_lab_model_catalog: Vec::new(),
+            prev_prompt_lab_selected_model: None,
         }
     }
 }
@@ -509,6 +513,42 @@ pub fn render(
             text: stage_briefing_text.clone(),
         });
         tree_state.prev_prompt_lab_stage_briefing_text = Some(stage_briefing_text);
+    }
+
+    // Model selector button text updates
+    let model_catalog = view
+        .prompt_lab
+        .model_catalog
+        .iter()
+        .map(|m| m.model_name().to_string())
+        .collect::<Vec<_>>();
+    let selected_model = view.prompt_lab.selected_model_override.as_ref().map(|m| m.model_name().to_string());
+
+    if tree_state.prev_prompt_lab_model_catalog != model_catalog || tree_state.prev_prompt_lab_selected_model != selected_model {
+        // Update Default button
+        let default_text = select_label("Default", selected_model.is_none());
+        cmds.push(PlatformCommand::SetControlText {
+            window_id,
+            control_id: BTN_PROMPT_LAB_MODEL_DEFAULT,
+            text: default_text,
+        });
+
+        // Update slot buttons
+        for slot_idx in 0..PROMPT_LAB_MODEL_SLOT_COUNT {
+            if slot_idx < model_catalog.len() {
+                let model_name = &model_catalog[slot_idx];
+                let is_selected = selected_model.as_ref().map_or(false, |s| s == model_name);
+                let button_text = select_label(model_name, is_selected);
+                cmds.push(PlatformCommand::SetControlText {
+                    window_id,
+                    control_id: ControlId::new(BTN_PROMPT_LAB_MODEL_SLOT_0.raw() + slot_idx as i32),
+                    text: button_text,
+                });
+            }
+        }
+
+        tree_state.prev_prompt_lab_model_catalog = model_catalog;
+        tree_state.prev_prompt_lab_selected_model = selected_model;
     }
 
     if tree_state.prev_prompt_lab_run_enabled != Some(view.prompt_lab.can_run) {

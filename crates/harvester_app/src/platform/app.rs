@@ -510,6 +510,26 @@ impl PlatformEventHandler for AppEventHandler {
                 });
             }
             AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BTN_PROMPT_LAB_MODEL_DEFAULT =>
+            {
+                let _ = self.msg_tx.send(Msg::PromptLabModelOverrideSet {
+                    model: None,
+                });
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id.raw() >= ui::constants::BTN_PROMPT_LAB_MODEL_SLOT_0.raw()
+                    && control_id.raw() < ui::constants::BTN_PROMPT_LAB_MODEL_SLOT_0.raw() + ui::constants::PROMPT_LAB_MODEL_SLOT_COUNT as i32 =>
+            {
+                let slot_idx = (control_id.raw() - ui::constants::BTN_PROMPT_LAB_MODEL_SLOT_0.raw()) as usize;
+                let guard = self.shared.lock().unwrap();
+                let view = guard.state.view();
+                if let Some(model_id) = view.prompt_lab.model_catalog.get(slot_idx).cloned() {
+                    let _ = self.msg_tx.send(Msg::PromptLabModelOverrideSet {
+                        model: Some(model_id),
+                    });
+                }
+            }
+            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_RESOLVE =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabResolveRequested);
