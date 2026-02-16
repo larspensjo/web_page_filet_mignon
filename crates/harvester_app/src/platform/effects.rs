@@ -284,14 +284,15 @@ impl EffectRunner {
                             Ok(runtime) => {
                                 match runtime.block_on(provider.list_models()) {
                                     Ok(mut model_names) => {
-                                        engine_info!(
-                                            "[prompt-lab-model] remote discovery succeeded: {} models found",
-                                            model_names.len()
-                                        );
-
                                         // Deduplicate and sort
                                         model_names.sort();
                                         model_names.dedup();
+
+                                        engine_info!(
+                                            "[prompt-lab-model] remote discovery succeeded: {} models found: {}",
+                                            model_names.len(),
+                                            model_names.join(", ")
+                                        );
 
                                         // Convert to ModelId with configured provider
                                         let models: Vec<ModelId> = model_names
