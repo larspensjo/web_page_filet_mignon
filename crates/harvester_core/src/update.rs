@@ -877,6 +877,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::PromptLabModelCatalogLoaded { models, source } => {
+            let sample = models
+                .iter()
+                .take(5)
+                .map(|m| m.model_name().to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            engine_info!(
+                "[prompt-lab-model] reducer received catalog source={:?} count={} sample=[{}]",
+                source,
+                models.len(),
+                sample
+            );
             state.prompt_lab_mut().set_model_catalog(models, source);
             state.mark_dirty();
             Vec::new()

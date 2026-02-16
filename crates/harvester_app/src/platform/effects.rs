@@ -20,6 +20,7 @@ use harvester_core::{
 use harvester_engine::llm::load_context_file;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PROMPT_VERSION_DRAFT};
 use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
+use harvester_engine::llm::types::{ModelId, ProviderKind};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     is_confined_to,
@@ -36,6 +37,24 @@ use url::Url;
 const MAX_FEED_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const FEED_ACCEPT_HEADER: &str =
     "application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml";
+
+fn build_local_model_catalog(
+    provider_kind: Option<ProviderKind>,
+    effective_models: &HashMap<PromptId, String>,
+) -> Vec<ModelId> {
+    let Some(provider_kind) = provider_kind else {
+        return Vec::new();
+    };
+
+    let mut names: Vec<String> = effective_models.values().cloned().collect();
+    names.sort();
+    names.dedup();
+
+    names
+        .into_iter()
+        .map(|name| ModelId::new(provider_kind, name))
+        .collect()
+}
 
 pub(crate) fn default_output_dir() -> std::path::PathBuf {
     std::env::current_dir()
@@ -269,12 +288,15 @@ impl EffectRunner {
                 let msg_tx = self.msg_tx.clone();
                 let provider = self.llm_provider.clone();
                 let default_provider_kind = self.llm_default_provider;
+                let effective_models = self.llm_metadata_models.clone();
 
                 thread::spawn(move || {
                     use harvester_core::ModelCatalogSource;
-                    use harvester_engine::llm::types::ModelId;
 
                     engine_info!("[prompt-lab-model] loading model catalog");
+
+                    let local_fallback_models =
+                        build_local_model_catalog(default_provider_kind, &effective_models);
 
                     let (models, source) = if let (Some(provider), Some(provider_kind)) =
                         (provider, default_provider_kind)
@@ -307,9 +329,10 @@ impl EffectRunner {
                                             "[prompt-lab-model] remote discovery failed: {}; falling back to local",
                                             err
                                         );
-                                        // Fallback to local - for now, just empty catalog
-                                        // In a full implementation, we'd call local_dispatchable_model_names
-                                        (Vec::new(), ModelCatalogSource::LocalFallback)
+                                        (
+                                            local_fallback_models.clone(),
+                                            ModelCatalogSource::LocalFallback,
+                                        )
                                     }
                                 }
                             }
@@ -318,13 +341,31 @@ impl EffectRunner {
                                     "[prompt-lab-model] failed to create runtime: {}; falling back to local",
                                     err
                                 );
-                                (Vec::new(), ModelCatalogSource::LocalFallback)
+                                (
+                                    local_fallback_models.clone(),
+                                    ModelCatalogSource::LocalFallback,
+                                )
                             }
                         }
                     } else {
-                        engine_warn!("[prompt-lab-model] LLM not configured; empty catalog");
-                        (Vec::new(), ModelCatalogSource::LocalFallback)
+                        engine_warn!(
+                            "[prompt-lab-model] LLM provider unavailable; using local fallback catalog"
+                        );
+                        (local_fallback_models, ModelCatalogSource::LocalFallback)
                     };
+
+                    let sample = models
+                        .iter()
+                        .take(5)
+                        .map(|m| m.model_name().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    engine_info!(
+                        "[prompt-lab-model] dispatching catalog loaded source={:?} count={} sample=[{}]",
+                        source,
+                        models.len(),
+                        sample
+                    );
 
                     let _ = msg_tx.send(Msg::PromptLabModelCatalogLoaded { models, source });
                 });
@@ -1538,10 +1579,37 @@ fn map_stage(stage: harvester_engine::Stage) -> Stage {
 mod tests {
     use super::*;
     use harvester_engine::llm::load_context_file;
+    use harvester_engine::llm::types::ProviderKind;
     use std::fs;
     use std::sync::mpsc;
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[test]
+    fn build_local_model_catalog_uses_effective_models_with_dedup_and_sort() {
+        let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "gpt-4o-mini".to_string());
+        effective_models.insert(PromptId::ArticleSummary, "o3-mini".to_string());
+        effective_models.insert(PromptId::AggregateBriefing, "gpt-4o-mini".to_string());
+
+        let models = build_local_model_catalog(Some(ProviderKind::OpenAi), &effective_models);
+        let names: Vec<_> = models.iter().map(|m| m.model_name().to_string()).collect();
+
+        assert_eq!(
+            names,
+            vec!["gpt-4o-mini".to_string(), "o3-mini".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_local_model_catalog_returns_empty_without_provider_kind() {
+        let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "gpt-4o-mini".to_string());
+
+        let models = build_local_model_catalog(None, &effective_models);
+
+        assert!(models.is_empty());
+    }
 
     #[test]
     fn download_link_page_rejects_disallowed_scheme_before_request() {

@@ -677,6 +677,18 @@ impl PromptLabState {
     /// Sets the model catalog and source.
     /// If the current selection is not in the new catalog, it is cleared with a warning.
     pub fn set_model_catalog(&mut self, models: Vec<ModelId>, source: ModelCatalogSource) {
+        let sample = models
+            .iter()
+            .take(5)
+            .map(|m| m.model_name().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        engine_logging::engine_info!(
+            "[prompt-lab-model] state set_model_catalog source={:?} count={} sample=[{}]",
+            source,
+            models.len(),
+            sample
+        );
         self.model_catalog = models;
         self.catalog_source = source;
 

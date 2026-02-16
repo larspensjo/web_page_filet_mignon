@@ -1,6 +1,6 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
-use engine_logging::{engine_debug, engine_warn};
+use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView,
     PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
@@ -108,7 +108,7 @@ pub struct TreeRenderState {
     prev_prompt_lab_section_context_text: Option<String>,
     prev_prompt_lab_section_template_text: Option<String>,
     prev_prompt_lab_section_run_details_text: Option<String>,
-    prev_prompt_lab_model_catalog: Vec<ModelId>,
+    prev_prompt_lab_model_catalog: Option<Vec<ModelId>>,
     prev_prompt_lab_selected_model: Option<String>,
 }
 
@@ -178,7 +178,7 @@ impl Default for TreeRenderState {
             prev_prompt_lab_section_context_text: None,
             prev_prompt_lab_section_template_text: None,
             prev_prompt_lab_section_run_details_text: None,
-            prev_prompt_lab_model_catalog: Vec::new(),
+            prev_prompt_lab_model_catalog: None,
             prev_prompt_lab_selected_model: None,
         }
     }
@@ -308,6 +308,12 @@ pub fn render(
                 },
             },
         ));
+        // When prompt lab transitions to visible, reset combo box cached state
+        // so SetComboBoxItems/Selection are re-sent to the now-existing control.
+        if view.prompt_lab.visible && !tree_state.prev_prompt_lab_visible {
+            tree_state.prev_prompt_lab_model_catalog = None;
+            tree_state.prev_prompt_lab_selected_model = None;
+        }
         tree_state.prev_left_panel_width = view.left_panel_width;
         tree_state.prev_input_panel_visible = view.input_panel_visible;
         tree_state.prev_prompt_lab_visible = view.prompt_lab.visible;
@@ -537,7 +543,12 @@ pub fn render(
     let selected_model = view.prompt_lab.selected_model_override.as_ref();
 
     // Check if catalog changed -> update combo items
-    if tree_state.prev_prompt_lab_model_catalog != *model_catalog {
+    if tree_state.prev_prompt_lab_model_catalog.as_deref() != Some(model_catalog.as_slice()) {
+        engine_info!(
+            "[prompt-lab-model] render updating combo items source={:?} count={}",
+            view.prompt_lab.model_catalog_source,
+            model_catalog.len()
+        );
         let mut items = vec!["Default".to_string()];
         items.extend(model_catalog.iter().map(|m| m.model_name().to_string()));
         cmds.push(PlatformCommand::SetComboBoxItems {
@@ -545,19 +556,28 @@ pub fn render(
             control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
             items,
         });
-        tree_state.prev_prompt_lab_model_catalog = model_catalog.clone();
+        tree_state.prev_prompt_lab_model_catalog = Some(model_catalog.clone());
     }
 
-    // Check if selected model changed -> update combo selection
-    let selected_model_str = selected_model.map(|m| m.model_name().to_string());
-    if tree_state.prev_prompt_lab_selected_model != selected_model_str {
+    // Check if selected model changed -> update combo selection.
+    // Use a stable key so initial "None" still emits a default-selection command.
+    let selected_model_key = selected_model
+        .map(|m| m.model_name().to_string())
+        .unwrap_or_else(|| "__DEFAULT__".to_string());
+    if tree_state.prev_prompt_lab_selected_model.as_deref() != Some(selected_model_key.as_str()) {
         let index = model_to_combo_index(selected_model, model_catalog);
+        engine_info!(
+            "[prompt-lab-model] render updating combo selection key={} index={:?} catalog_count={}",
+            selected_model_key,
+            index,
+            model_catalog.len()
+        );
         cmds.push(PlatformCommand::SetComboBoxSelection {
             window_id,
             control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
             selected_index: index,
         });
-        tree_state.prev_prompt_lab_selected_model = selected_model_str;
+        tree_state.prev_prompt_lab_selected_model = Some(selected_model_key);
     }
 
     if tree_state.prev_prompt_lab_run_enabled != Some(view.prompt_lab.can_run) {
@@ -2145,6 +2165,55 @@ mod tests {
                 cmd,
                 PlatformCommand::SetControlText { control_id, text, .. }
                 if *control_id == BTN_PROMPT_LAB_SECTION_RUN_DETAILS && text.contains("[x]")
+            )
+        }));
+    }
+
+    #[test]
+    fn prompt_lab_model_selector_defaults_to_index_zero_on_first_render() {
+        let window_id = WindowId::new(34);
+        let mut tree_state = TreeRenderState::new();
+        let view = make_view(vec![]);
+
+        let cmds = render(window_id, &view, &mut tree_state);
+
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetComboBoxSelection {
+                    control_id,
+                    selected_index: Some(0),
+                    ..
+                } if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR
+            )
+        }));
+    }
+
+    #[test]
+    fn prompt_lab_model_selector_emits_catalog_items() {
+        let window_id = WindowId::new(35);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.model_catalog = vec![
+            ModelId::new(harvester_engine::llm::ProviderKind::OpenAi, "gpt-4o-mini"),
+            ModelId::new(harvester_engine::llm::ProviderKind::OpenAi, "o3-mini"),
+        ];
+
+        let cmds = render(window_id, &view, &mut tree_state);
+
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetComboBoxItems {
+                    control_id,
+                    items,
+                    ..
+                } if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR
+                    && items == &vec![
+                        "Default".to_string(),
+                        "gpt-4o-mini".to_string(),
+                        "o3-mini".to_string(),
+                    ]
             )
         }));
     }
