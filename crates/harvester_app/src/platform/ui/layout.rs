@@ -1761,6 +1761,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_PREVIEW,
         PANEL_PROMPT_LAB,
         PANEL_PROMPT_LAB_MODE_ROW,
+        PANEL_PROMPT_LAB_MODEL_ROW,
         PANEL_PROMPT_LAB_STAGE_ROW,
         PANEL_PROMPT_LAB_SOURCE_ROW,
         PANEL_PROMPT_LAB_INPUT_ROW,
