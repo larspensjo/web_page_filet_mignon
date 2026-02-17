@@ -1,172 +1,80 @@
-# Plan: Prompt Lab ComboBox Model Selector Hardening
+# Plan: Prompt Lab ComboBox Model Selector Hardening (Revised)
 
 ## Goal
-Prevent recurrence of two classes of failures:
+Make Prompt Lab model selection reliably visible and usable across lifecycle transitions and Win32 layout/theming edge cases, with clear diagnostics and regression tests.
 
-1. Render cache suppresses required ComboBox state re-send after visibility/control lifecycle transitions.
-2. Native dropdown geometry becomes invalid for visibility/usability despite model data being present.
+## Current State (Verified in Source)
+1. Render now resets model-selector cache on Prompt Lab hidden -> visible, forcing `SetComboBoxItems` and `SetComboBoxSelection` replay (`crates/harvester_app/src/platform/ui/render.rs`).
+2. ComboBox creation applies `CB_SETMINVISIBLE` and logs result (`src/CommanDuctUI/src/controls/combobox_handler.rs`).
+3. Layout currently enforces a hard-coded native ComboBox minimum height (`COMBOBOX_DROPDOWN_NATIVE_MIN_HEIGHT_PX = 260`) (`src/CommanDuctUI/src/window_common.rs`).
+4. `CBN_DROPDOWN` / `CBN_CLOSEUP` are logged, but no runtime invariant check/self-heal exists (`src/CommanDuctUI/src/window_common.rs`).
+5. Existing tests cover first-render default selection and catalog emission, but do not yet lock in hide/show replay behavior for this bug class (`crates/harvester_app/src/platform/ui/render.rs` tests).
 
-## Scope
-- Prompt Lab model selector in Advanced mode.
-- Render/update/effect/presentation pipeline and native Win32 ComboBox behavior.
-- No redesign of Prompt Lab business logic.
+## Key Gaps
+1. Geometry policy still relies on hard-coded values (`260`, `min_visible_items = 12`) instead of runtime metrics.
+2. No explicit unit test for visibility transition replay of combo items/selection.
+3. No invariant/self-heal path when dropdown geometry is still invalid at open-time.
+4. Logging in platform ComboBox path uses `log::*`; application uses `engine_logging`. Keep this mixed boundary intentional and documented, since `CommanDuctUI` is a submodule.
 
-## Non-Goals
-- Full theming redesign of all Win32 controls.
-- New data provider behaviors beyond current catalog loading.
+## Architecture Guidance
+1. Keep app UDF intact: state changes remain `Msg -> update -> state -> render -> PlatformCommand`.
+2. Keep geometry enforcement in platform layer: it is a native control concern and should not mutate app state.
+3. Avoid introducing an app-level epoch unless needed. Current control lifecycle appears create-once + hide/show; start with targeted replay tests and geometry hardening first.
 
----
+## Hardening Plan
+### Step 1 - Lock In Existing Replay Behavior
+1. Add render unit test: Prompt Lab hidden -> visible with unchanged catalog/selection still emits `SetComboBoxItems` and `SetComboBoxSelection`.
+2. Add render unit test: unchanged visible state remains idempotent (no extra combo commands after second render).
 
-## Lessons Learned (Root Causes)
+### Step 2 - Replace Hard-Coded Geometry Policy
+1. Introduce a small geometry policy helper in `CommanDuctUI` that computes effective dropdown constraints from runtime data when available.
+2. Keep conservative fallback values only when metrics are unavailable.
+3. Route both creation-time (`CB_SETMINVISIBLE`) and layout-time minimum-height logic through the same helper to avoid drift.
 
-1. Data pipeline correctness was necessary but insufficient. Logs proved models were loaded and inserted, but UI remained unusable due to native geometry.
-2. Cached render state can hide lifecycle bugs. Recreated/re-shown controls may need explicit state replay even if model state did not change.
-3. Win32 ComboBox requires explicit geometry/theming guardrails; default behavior is sensitive to style/layout interactions.
+### Step 3 - Add Runtime Invariant + One-Shot Self-Heal
+1. On `CBN_DROPDOWN`, validate current dropdown usability invariants (item count, measurable geometry, minimum visible rows intent).
+2. If invalid, reapply geometry policy once and log warning with context (`window_id`, `control_id`, measured values, item count).
+3. Guard against repeated churn with one-shot-per-open-cycle behavior.
 
----
+### Step 4 - Telemetry Contract Tightening
+1. Keep `[prompt-lab-model]` render logs for source/count and selection index.
+2. Add concise platform warning log category for geometry correction path.
+3. Keep logs at `info/warn` boundaries only; no per-message spam.
 
-## Hardening Design
-
-### A) Render Cache Robustness via UI Epoch
-
-Introduce a Prompt Lab UI epoch (monotonic integer) that invalidates control-specific cache snapshots.
-
-- Increment epoch on:
-  - Prompt Lab visibility transitions.
-  - Prompt Lab layout mode transitions (Basic/Advanced) when control tree differs.
-  - Any control recreation event for model selector.
-- In render cache, pair model selector cache with epoch:
-  - `prev_prompt_lab_model_catalog: Option<(u64, Vec<ModelId>)>`
-  - `prev_prompt_lab_selected_model: Option<(u64, String)>`
-- If epoch mismatch, force emission of:
-  - `SetComboBoxItems`
-  - `SetComboBoxSelection`
-
-Expected property: cache never suppresses first required state push for a fresh/recreated control.
-
-### B) Deterministic “Ensure Selector State” Command Path
-
-Add explicit idempotent command flow after combo creation.
-
-- New app-level intent: ensure model selector state is applied.
-- Trigger on create/recreate and Prompt Lab open.
-- Handler emits full state (items + selection) irrespective of prior cache values.
-- Keep reducer pure: emit effect/request; platform executes side-effect.
-
-Expected property: state replay does not rely on incidental render ordering.
-
-### C) Native Geometry Policy (Dynamic, Not Hard-Coded)
-
-Replace fixed minimum assumptions with runtime-derived sizing.
-
-- Compute target dropdown height from runtime metrics:
-  - item height (from control/font metrics)
-  - desired visible rows
-  - borders/padding
-- Apply via supported Win32 message/style path (`CB_SETMINVISIBLE` plus layout constraints).
-- Keep a conservative lower bound as fallback only.
-
-Expected property: dropdown remains visible across DPI/theme/font variations.
-
-### D) Runtime Invariants + Self-Heal
-
-On `CBN_DROPDOWN` and selected layout transitions:
-
-- Verify invariants:
-  - native combo height >= required minimum
-  - item count visible path consistent with expected min rows
-- If violated:
-  - reapply geometry once
-  - log warning with context (`window_id`, `control_id`, measured metrics)
-
-Expected property: transient native misconfiguration is corrected automatically.
-
-### E) Telemetry Contract (Action → Reducer → State → Render → Native)
-
-Keep structured logs at boundaries for model selector only:
-
-- catalog load source/count sample
-- reducer catalog set
-- render command emission (items + selection + epoch)
-- native item count confirmation
-- dropdown open with measured geometry
-
-Expected property: quick diagnosis without ad-hoc instrumentation.
-
----
-
-## Implementation Steps
-
-### Step 1 — Epoch-based cache invalidation
-- Add epoch field and transition updates.
-- Update render cache keys to include epoch.
-- Add tests for hide/show and mode transitions.
-
-### Step 2 — Ensure-state command path
-- Add explicit ensure command/intent and invoke on combo create/open.
-- Keep idempotent behavior in platform layer.
-- Add tests for recreate/reopen replay.
-
-### Step 3 — Dynamic geometry
-- Implement runtime metric-based dropdown sizing.
-- Preserve fallback lower bound.
-- Add unit tests for computed sizing policy.
-
-### Step 4 — Invariant checks and self-heal
-- Add `CBN_DROPDOWN` checks and one-shot correction.
-- Add warning telemetry with measurement values.
-- Add tests/mocks for correction trigger conditions.
-
-### Step 5 — Verification and cleanup
-- Remove temporary debug-only logs if redundant.
-- Run workspace build/tests.
-- Run strict lint as final gate.
-
----
+### Step 5 - Validate End-to-End
+1. `cargo build`
+2. Run targeted tests for render/platform modules.
+3. Final gate: `cargo clippy --all-targets -- -D warnings`
 
 ## Test Plan
+### Render Unit Tests
+1. Hidden -> visible replay emits `SetComboBoxItems`.
+2. Hidden -> visible replay emits `SetComboBoxSelection`.
+3. Visible unchanged second render emits no combo churn.
 
-### Reducer/Render Unit Tests
-1. Prompt Lab hidden→visible re-emits model selector items/selection.
-2. Advanced mode transition with control recreation re-emits selector state.
-3. Epoch unchanged remains idempotent (no command churn).
+### Platform Unit Tests
+1. Geometry helper returns runtime-based result when metrics exist.
+2. Geometry helper falls back safely when metrics unavailable.
+3. Dropdown invariant check triggers one-shot correction on invalid geometry.
 
-### Platform/Native Unit Tests
-1. Geometry calculator produces valid height from runtime metrics.
-2. Fallback lower bound applies when metrics unavailable.
-3. Invariant checker flags invalid geometry and schedules one-shot correction.
-
-### Integration/Manual Validation
-1. Remote catalog success path: dropdown shows all models.
-2. Local fallback path: dropdown shows deduped configured models.
-3. Reopen Prompt Lab repeatedly: selector remains populated and selectable.
-4. DPI/theme variation spot-check: dropdown remains visible and usable.
-
----
+### Integration/Manual
+1. Remote catalog load: models visible and selectable.
+2. Local fallback catalog: deduped entries visible.
+3. Reopen Prompt Lab repeatedly: selector remains populated and usable.
+4. DPI/theme spot-check (100%/150% at minimum): dropdown remains visible and scrollable.
 
 ## Acceptance Criteria
+1. No regression: selector items/selection replay on Prompt Lab reopen is test-locked.
+2. Geometry logic is centralized, runtime-aware, and fallback-safe.
+3. Dropdown-open invariant checks can self-heal at least one known invalid geometry scenario.
+4. Observability is sufficient to diagnose failures without ad-hoc instrumentation.
 
-1. Model selector never appears empty when catalog has entries.
-2. Reopen/recreate transitions reliably preserve selector usability.
-3. Dropdown geometry is consistently visible across tested DPI/theme settings.
-4. No paint/event churn regressions from hardening changes.
-5. Tests covering lifecycle replay and geometry invariants are present and passing.
+## Blockers / Decisions Needed
+1. Define exact runtime metrics source for row-height policy (Win32 API choice and compatibility baseline).
+2. Decide whether to keep any hard minimum constants as safety rails and where to document them.
+3. Confirm whether geometry self-heal should remain platform-local only (recommended) or emit a diagnostic app event.
 
----
-
-## Risks and Mitigations
-
-1. Risk: over-emission of commands causing UI churn.
-   - Mitigation: epoch-scoped invalidation + idempotent command handlers.
-2. Risk: geometry logic differs across Windows versions.
-   - Mitigation: runtime measurement + fallback policy + invariant self-heal.
-3. Risk: additional logs increase noise.
-   - Mitigation: keep at info/warn boundaries only; avoid hot-path spam.
-
----
-
-## Deliverables
-
-1. Code changes for epoch, ensure-state path, dynamic geometry, and invariant checks.
-2. New/updated tests in render and platform layers.
-3. This plan document and brief post-implementation notes linked from architecture docs.
+## Future Extensions
+1. Add a lightweight platform capability probe and branch behavior for older Windows builds.
+2. Add an automated UI smoke test that opens Prompt Lab, expands dropdown, and verifies non-zero visible rows.
+3. Generalize ComboBox hardening helper so future ComboBoxes inherit the same resilience by default.
