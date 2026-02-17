@@ -259,20 +259,6 @@ fn run_dispatch_loop(
             return Ok(classify_cycle_outcome(&obs));
         }
 
-        // Check for settlement
-        let obs = state.batch_observation();
-        if should_settle_cycle(&obs) {
-            engine_info!(
-                "[batch] Cycle settled after {} iterations: jobs={}/{}, triage={}/{}",
-                iterations,
-                obs.jobs_done,
-                obs.jobs_total,
-                obs.triage_completed,
-                obs.triage_total
-            );
-            return Ok(classify_cycle_outcome(&obs));
-        }
-
         // Receive message with timeout
         match msg_rx.recv_timeout(timeout) {
             Ok(msg) => {
@@ -290,11 +276,26 @@ fn run_dispatch_loop(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 // No message available, continue loop
-                continue;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 return Err("Message channel disconnected unexpectedly".to_string());
             }
+        }
+
+        // Check for settlement after processing available work.
+        // This prevents an immediate idle-state exit before queued actions
+        // (like PollSourcesClicked) have been reduced.
+        let obs = state.batch_observation();
+        if should_settle_cycle(&obs) {
+            engine_info!(
+                "[batch] Cycle settled after {} iterations: jobs={}/{}, triage={}/{}",
+                iterations,
+                obs.jobs_done,
+                obs.jobs_total,
+                obs.triage_completed,
+                obs.triage_total
+            );
+            return Ok(classify_cycle_outcome(&obs));
         }
     }
 }
@@ -560,6 +561,38 @@ mod tests {
         };
 
         assert!(!should_settle_cycle(&obs));
+    }
+
+    #[test]
+    fn test_dispatch_loop_reduces_queued_poll_before_settling() {
+        engine_logging::initialize_for_tests();
+        let temp_dir = TempDir::new().unwrap();
+        let output_dir = temp_dir.path().join("output");
+        std::fs::create_dir_all(&output_dir).unwrap();
+
+        let sources_path = temp_dir.path().join("sources.ron");
+        std::fs::write(&sources_path, "SourceRegistry(sources: [])").unwrap();
+
+        let runtime_paths = RuntimePaths::new(
+            output_dir,
+            sources_path,
+            temp_dir.path().join("contexts"),
+            temp_dir.path().join("prompts"),
+        );
+
+        let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
+        let mut state = AppState::new();
+        let effect_runner =
+            EffectRunner::new(runtime_paths, msg_tx.clone(), Box::new(NoOpPlatformHandler));
+        let shutdown_flag = Arc::new(AtomicBool::new(false));
+
+        msg_tx.send(Msg::PollSourcesClicked).unwrap();
+
+        let outcome = run_dispatch_loop(&mut state, &msg_rx, &effect_runner, &shutdown_flag)
+            .expect("dispatch loop should complete");
+        assert_eq!(outcome, CycleOutcome::Success);
+
+        assert!(matches!(msg_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
     }
 
     #[test]
