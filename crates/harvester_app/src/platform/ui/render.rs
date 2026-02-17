@@ -2219,6 +2219,65 @@ mod tests {
     }
 
     #[test]
+    fn prompt_lab_model_selector_replays_on_hidden_to_visible_transition() {
+        let window_id = WindowId::new(36);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.visible = true;
+        view.prompt_lab.model_catalog = vec![ModelId::new(
+            harvester_engine::llm::ProviderKind::OpenAi,
+            "gpt-4o-mini",
+        )];
+
+        let initial_cmds = render(window_id, &view, &mut tree_state);
+        assert!(initial_cmds.iter().any(|cmd| {
+            matches!(cmd, PlatformCommand::SetComboBoxItems { control_id, .. }
+                if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
+        }));
+        assert!(initial_cmds.iter().any(|cmd| {
+            matches!(cmd, PlatformCommand::SetComboBoxSelection { control_id, .. }
+                if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
+        }));
+
+        view.prompt_lab.visible = false;
+        let _ = render(window_id, &view, &mut tree_state);
+
+        view.prompt_lab.visible = true;
+        let reopen_cmds = render(window_id, &view, &mut tree_state);
+        assert!(reopen_cmds.iter().any(|cmd| {
+            matches!(cmd, PlatformCommand::SetComboBoxItems { control_id, .. }
+                if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
+        }));
+        assert!(reopen_cmds.iter().any(|cmd| {
+            matches!(cmd, PlatformCommand::SetComboBoxSelection { control_id, .. }
+                if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
+        }));
+    }
+
+    #[test]
+    fn prompt_lab_model_selector_unchanged_visible_state_is_idempotent() {
+        let window_id = WindowId::new(37);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.visible = true;
+        view.prompt_lab.model_catalog = vec![ModelId::new(
+            harvester_engine::llm::ProviderKind::OpenAi,
+            "gpt-4o-mini",
+        )];
+
+        let _ = render(window_id, &view, &mut tree_state);
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(!cmds.iter().any(|cmd| {
+            matches!(cmd, PlatformCommand::SetComboBoxItems { control_id, .. }
+                if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
+        }));
+        assert!(!cmds.iter().any(|cmd| {
+            matches!(cmd, PlatformCommand::SetComboBoxSelection { control_id, .. }
+                if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
+        }));
+    }
+
+    #[test]
     fn resolve_button_enabled_when_not_pending() {
         let window_id = WindowId::new(12);
         let mut tree_state = TreeRenderState::new();
