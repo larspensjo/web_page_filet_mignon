@@ -323,8 +323,237 @@ fn install_signal_handler(shutdown_flag: Arc<AtomicBool>) {
     }
 }
 
-fn run_dry_run(_paths: &RuntimePaths, _args: &Args) -> Result<i32, String> {
-    // TODO: Implement dry-run mode
-    println!("[dry-run] Not yet implemented");
+fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
+    engine_info!("[dry-run] Starting dry-run mode: single poll, no downloads/triage");
+
+    // Hydrate state (read-only)
+    engine_info!(
+        "[dry-run] Loading completed jobs from {:?}",
+        paths.state_path
+    );
+    let completed_jobs = load_completed_jobs(&paths.state_path);
+    engine_info!("[dry-run] Loaded {} completed jobs", completed_jobs.len());
+
+    // Initialize state
+    let (msg_tx, msg_rx) = mpsc::channel();
+    let mut state = AppState::new();
+    state.set_triage_max_in_flight(args.llm_concurrency);
+    state.set_summary_max_in_flight(args.llm_concurrency);
+
+    // Restore completed jobs
+    if !completed_jobs.is_empty() {
+        let restore_msg = Msg::RestoreCompletedJobs(completed_jobs);
+        let (new_state, _effects) = update(state, restore_msg);
+        state = new_state;
+    }
+
+    // Create effect runner
+    let platform_handler = Box::new(NoOpPlatformHandler);
+    let effect_runner = EffectRunner::new(paths.clone(), msg_tx.clone(), platform_handler);
+
+    // Dispatch poll
+    engine_info!("[dry-run] Dispatching poll");
+    msg_tx
+        .send(Msg::PollSourcesClicked)
+        .map_err(|e| format!("Failed to send poll message: {}", e))?;
+
+    // Run dispatch loop until settlement (read-only, no signal handling needed)
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let outcome = run_dispatch_loop(&mut state, &msg_rx, &effect_runner, &shutdown_flag)?;
+
+    // Print summary
+    let obs = state.batch_observation();
+    println!("\n=== Dry-Run Summary ===");
+    println!("Outcome: {:?}", outcome);
+    println!(
+        "Jobs: {} total, {} done, {} failed",
+        obs.jobs_total, obs.jobs_done, obs.jobs_failed
+    );
+    println!(
+        "Triage: {} total, {} completed, {} failed, {} pending",
+        obs.triage_total, obs.triage_completed, obs.triage_failed, obs.triage_pending
+    );
+    println!("Session state: {:?}", obs.session_state);
+    println!("======================\n");
+
+    engine_info!("[dry-run] Dry-run complete (no state modifications)");
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn create_test_args(dry_run: bool, temp_dir: &TempDir) -> Args {
+        Args {
+            output_dir: temp_dir.path().to_path_buf(),
+            sources: PathBuf::from("test_sources.json"),
+            contexts_dir: PathBuf::from("contexts"),
+            prompts_dir: PathBuf::from("prompts"),
+            dry_run,
+            allow_unsupported_sources: false,
+            llm_concurrency: 1,
+            poll_interval: 1,
+            force_unlock: false,
+        }
+    }
+
+    #[test]
+    fn test_dry_run_exits_successfully_without_api_key() {
+        engine_logging::initialize_for_tests();
+        let temp_dir = TempDir::new().unwrap();
+        let args = create_test_args(true, &temp_dir);
+
+        // Create empty sources file to avoid validation errors
+        let sources_path = temp_dir.path().join("test_sources.json");
+        std::fs::write(&sources_path, r#"{"sources": []}"#).unwrap();
+
+        let runtime_paths = RuntimePaths::new(
+            args.output_dir.clone(),
+            sources_path,
+            args.contexts_dir.clone(),
+            args.prompts_dir.clone(),
+        );
+
+        // Dry-run should succeed even without OPENAI_API_KEY
+        let result = run_dry_run(&runtime_paths, &args);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_dry_run_does_not_modify_state_files() {
+        engine_logging::initialize_for_tests();
+        let temp_dir = TempDir::new().unwrap();
+        let args = create_test_args(true, &temp_dir);
+
+        let sources_path = temp_dir.path().join("test_sources.json");
+        std::fs::write(&sources_path, r#"{"sources": []}"#).unwrap();
+
+        let runtime_paths = RuntimePaths::new(
+            args.output_dir.clone(),
+            sources_path,
+            args.contexts_dir.clone(),
+            args.prompts_dir.clone(),
+        );
+
+        let state_path = &runtime_paths.state_path;
+
+        // Ensure state file does not exist initially
+        assert!(!state_path.exists());
+
+        // Run dry-run
+        let result = run_dry_run(&runtime_paths, &args);
+        assert!(result.is_ok());
+
+        // State file should still not exist (no writes)
+        assert!(!state_path.exists());
+    }
+
+    #[test]
+    fn test_should_settle_cycle_when_idle() {
+        let obs = BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 0,
+            jobs_done: 0,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 0,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 0,
+        };
+
+        assert!(should_settle_cycle(&obs));
+    }
+
+    #[test]
+    fn test_should_not_settle_when_poll_in_progress() {
+        let obs = BatchObservation {
+            poll_in_progress: true,
+            session_state: harvester_core::SessionState::Running,
+            jobs_total: 0,
+            jobs_done: 0,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 0,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 0,
+        };
+
+        assert!(!should_settle_cycle(&obs));
+    }
+
+    #[test]
+    fn test_classify_outcome_success() {
+        let obs = BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 5,
+            jobs_done: 5,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
+            triage_phase: harvester_core::TriagePhase::Complete,
+            triage_total: 5,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 5,
+            triage_failed: 0,
+        };
+
+        assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::Success);
+    }
+
+    #[test]
+    fn test_classify_outcome_partial_failure() {
+        let obs = BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 5,
+            jobs_done: 3,
+            jobs_failed: 2,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
+            triage_phase: harvester_core::TriagePhase::Complete,
+            triage_total: 5,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 3,
+            triage_failed: 2,
+        };
+
+        assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::PartialFailure);
+    }
+
+    #[test]
+    fn test_classify_outcome_total_failure() {
+        let obs = BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 5,
+            jobs_done: 0,
+            jobs_failed: 5,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
+            triage_phase: harvester_core::TriagePhase::Complete,
+            triage_total: 5,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 5,
+        };
+
+        assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::TotalFailure);
+    }
 }
