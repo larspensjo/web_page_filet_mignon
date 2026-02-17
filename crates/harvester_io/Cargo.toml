@@ -1,0 +1,27 @@
+[package]
+name = "harvester_io"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+harvester_core = { path = "../harvester_core" }
+harvester_engine = { path = "../harvester_engine" }
+engine_logging = { path = "../engine_logging" }
+log.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+toml.workspace = true
+chrono = { version = "0.4", features = ["clock"] }
+ron = "0.12.0"
+reqwest = { version = "0.13.1", default-features = false, features = ["rustls", "blocking"] }
+url = "2"
+pulldown-cmark = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6"

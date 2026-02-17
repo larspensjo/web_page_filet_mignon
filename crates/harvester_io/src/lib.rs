@@ -1,0 +1,22 @@
+//! Harvester IO: shared runtime paths, effect execution, and persistence.
+
+mod runtime_paths;
+mod source_loader;
+mod seen_set_store;
+mod summary_cache_store;
+mod triage_cache_store;
+mod prompt_template_store;
+mod persistence;
+mod effect_runner;
+
+pub use runtime_paths::RuntimePaths;
+pub use source_loader::load_sources;
+pub use seen_set_store::{load_seen_set, persist_seen_set};
+pub use summary_cache_store::{load_summary_cache, persist_summary_cache};
+pub use triage_cache_store::{load_triage_cache, persist_triage_cache};
+pub use prompt_template_store::{load_prompt_templates, save_prompt_template};
+pub use persistence::{
+    load_completed_jobs, load_pre_triage_overrides, persist_completed_jobs,
+    persist_pre_triage_overrides,
+};
+pub use effect_runner::{EffectRunner, PlatformEffectHandler, NoOpPlatformHandler};

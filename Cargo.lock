@@ -42,6 +42,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f0e0fee31ef5ed1ba1316088939cea399010ed7731dba877ed44aeb407a75ea"
+
+[[package]]
 name = "assert-json-diff"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -753,6 +759,29 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
+ "toml",
+ "url",
+ "wiremock",
+]
+
+[[package]]
+name = "harvester_io"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "engine_logging",
+ "harvester_core",
+ "harvester_engine",
+ "log",
+ "pulldown-cmark",
+ "reqwest",
+ "ron",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
  "toml",
  "url",
  "wiremock",
