@@ -16,7 +16,7 @@ use crate::llm::{
         is_draft_version, render_template, PromptId, PromptRegistry, PromptTemplateOwned,
         PromptVersion, TemplateVars,
     },
-    quota::{LlmQuotaTracker, LlmQuotas},
+    quota::{LlmQuotaTracker, LlmQuotas, LlmUsageTotals},
     replay::{content_hash, persist_replay_record, ReplayProvider, ReplayRecord},
     run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata, LlmRunMetadataInit},
     types::{ChatMessage, ChatRole, LlmError, LlmRequest, ModelId, ProviderKind},
@@ -96,6 +96,16 @@ impl LlmHandle {
         Arc::clone(&self.event_rx)
     }
 
+    /// Retrieve a snapshot of current LLM usage totals (calls, tokens, cost).
+    /// Returns immutable copy; blocks briefly to query the worker thread.
+    pub fn usage_totals(&self) -> Option<LlmUsageTotals> {
+        let (response_tx, response_rx) = mpsc::channel();
+        self.cmd_tx
+            .send(LlmCommand::GetUsageTotals { response_tx })
+            .ok()?;
+        response_rx.recv().ok()
+    }
+
     /// Send a stop signal and drop the sender, causing the worker thread to drain all
     /// in-flight requests and shut down cleanly.
     pub fn drain_and_stop(self) {
@@ -118,6 +128,9 @@ pub struct LlmCompletionCommand {
 
 pub enum LlmCommand {
     Complete(Box<LlmCompletionCommand>),
+    GetUsageTotals {
+        response_tx: mpsc::Sender<LlmUsageTotals>,
+    },
     Stop,
 }
 
@@ -183,24 +196,29 @@ fn worker_loop(
     let mut join_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
 
     for cmd in &cmd_rx {
-        if let LlmCommand::Stop = cmd {
-            break;
+        match cmd {
+            LlmCommand::Stop => break,
+            LlmCommand::GetUsageTotals { response_tx } => {
+                let totals = quota_tracker.lock().unwrap().totals();
+                let _ = response_tx.send(totals);
+            }
+            LlmCommand::Complete(_) => {
+                // Acquire a semaphore permit synchronously, bounding concurrency.
+                let permit = runtime
+                    .block_on(semaphore.clone().acquire_owned())
+                    .expect("semaphore closed");
+
+                let quota = quota_tracker.clone();
+                let cfg = config.clone();
+                let ev_tx = event_tx.clone();
+
+                let handle = runtime.spawn(async move {
+                    let _permit = permit; // held for the lifetime of this request
+                    handle_completion_concurrent(cmd, &cfg, &quota, &ev_tx).await;
+                });
+                join_handles.push(handle);
+            }
         }
-
-        // Acquire a semaphore permit synchronously, bounding concurrency.
-        let permit = runtime
-            .block_on(semaphore.clone().acquire_owned())
-            .expect("semaphore closed");
-
-        let quota = quota_tracker.clone();
-        let cfg = config.clone();
-        let ev_tx = event_tx.clone();
-
-        let handle = runtime.spawn(async move {
-            let _permit = permit; // held for the lifetime of this request
-            handle_completion_concurrent(cmd, &cfg, &quota, &ev_tx).await;
-        });
-        join_handles.push(handle);
     }
 
     wait_for_inflight_tasks(&runtime, join_handles);

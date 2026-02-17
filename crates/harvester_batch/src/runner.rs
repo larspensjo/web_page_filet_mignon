@@ -138,9 +138,14 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Outer cycle loop - poll repeatedly until shutdown
     let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
     let mut cycle_count = 0;
+    let mut total_cycles = 0;
+    let mut successful_cycles = 0;
+    let mut partial_failure_cycles = 0;
+    let mut total_failure_cycles = 0;
 
     loop {
         cycle_count += 1;
+        total_cycles += 1;
         engine_info!("[batch] === Starting cycle {} ===", cycle_count);
 
         // Start the cycle by dispatching poll
@@ -151,6 +156,13 @@ pub fn run(args: Args) -> Result<i32, String> {
 
         // Run dispatch loop until settled
         let outcome = run_dispatch_loop(&mut state, &msg_rx, &effect_runner, &shutdown_flag)?;
+
+        // Track outcome statistics
+        match outcome {
+            CycleOutcome::Success => successful_cycles += 1,
+            CycleOutcome::PartialFailure => partial_failure_cycles += 1,
+            CycleOutcome::TotalFailure => total_failure_cycles += 1,
+        }
 
         // Print cycle summary
         let obs = state.batch_observation();
@@ -185,9 +197,25 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     let completed_jobs = state.completed_jobs_snapshot();
     persist_completed_jobs(&paths.state_path, &completed_jobs);
+
+    // Print final summary
+    print_final_summary(
+        total_cycles,
+        successful_cycles,
+        partial_failure_cycles,
+        total_failure_cycles,
+    );
+
     engine_info!("[batch] Shutdown complete");
 
-    Ok(0)
+    // Determine exit code based on outcomes
+    let exit_code = if partial_failure_cycles > 0 || total_failure_cycles > 0 {
+        1 // Partial: work completed with some failures
+    } else {
+        0 // Success: all cycles successful
+    };
+
+    Ok(exit_code)
 }
 
 /// Runs the inner dispatch loop until settlement or error.
@@ -273,6 +301,23 @@ fn print_cycle_summary(cycle: usize, outcome: &CycleOutcome, obs: &BatchObservat
     println!("========================\n");
 }
 
+/// Prints the final summary when batch runner exits.
+fn print_final_summary(
+    total_cycles: usize,
+    successful: usize,
+    partial_failures: usize,
+    total_failures: usize,
+) {
+    println!("\n╔═══════════════════════════════════════╗");
+    println!("║        BATCH RUN FINAL SUMMARY        ║");
+    println!("╚═══════════════════════════════════════╝");
+    println!("Total cycles:      {}", total_cycles);
+    println!("  Successful:      {}", successful);
+    println!("  Partial failure: {}", partial_failures);
+    println!("  Total failure:   {}", total_failures);
+    println!("═══════════════════════════════════════\n");
+}
+
 /// Sleeps for the specified duration, checking shutdown flag periodically.
 /// Returns true if shutdown was requested during sleep.
 fn sleep_interruptible(duration: Duration, shutdown_flag: &Arc<AtomicBool>) -> bool {
@@ -321,6 +366,15 @@ fn install_signal_handler(shutdown_flag: Arc<AtomicBool>) {
         })
         .expect("Error setting signal handler");
     }
+}
+
+/// Converts microdollars to a human-readable dollar string with exact rounding.
+/// Examples: 0 -> "$0.00", 1234567 -> "$1.23", 50 -> "$0.00", 5000 -> "$0.01"
+fn microdollars_to_display(microdollars: u64) -> String {
+    let cents = (microdollars + 5000) / 10000; // Round to nearest cent
+    let dollars = cents / 100;
+    let remaining_cents = cents % 100;
+    format!("${}.{:02}", dollars, remaining_cents)
 }
 
 fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
@@ -555,5 +609,50 @@ mod tests {
         };
 
         assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::TotalFailure);
+    }
+
+    #[test]
+    fn test_microdollars_to_display_zero() {
+        assert_eq!(microdollars_to_display(0), "$0.00");
+    }
+
+    #[test]
+    fn test_microdollars_to_display_rounds_down() {
+        // 50 microdollars = $0.000050 -> rounds to $0.00
+        assert_eq!(microdollars_to_display(50), "$0.00");
+        // 4999 microdollars = $0.004999 -> rounds to $0.00
+        assert_eq!(microdollars_to_display(4999), "$0.00");
+    }
+
+    #[test]
+    fn test_microdollars_to_display_rounds_up() {
+        // 5000 microdollars = $0.005000 -> rounds to $0.01
+        assert_eq!(microdollars_to_display(5000), "$0.01");
+        // 15000 microdollars = $0.015000 -> rounds to $0.02
+        assert_eq!(microdollars_to_display(15000), "$0.02");
+    }
+
+    #[test]
+    fn test_microdollars_to_display_exact_cents() {
+        // 10000 microdollars = $0.01
+        assert_eq!(microdollars_to_display(10000), "$0.01");
+        // 1000000 microdollars = $1.00
+        assert_eq!(microdollars_to_display(1000000), "$1.00");
+    }
+
+    #[test]
+    fn test_microdollars_to_display_typical_values() {
+        // 1234567 microdollars = $1.234567 -> rounds to $1.23
+        assert_eq!(microdollars_to_display(1234567), "$1.23");
+        // 5678901 microdollars = $5.678901 -> rounds to $5.68
+        assert_eq!(microdollars_to_display(5678901), "$5.68");
+    }
+
+    #[test]
+    fn test_microdollars_to_display_large_values() {
+        // 123456789 microdollars = $123.456789 -> rounds to $123.46
+        assert_eq!(microdollars_to_display(123456789), "$123.46");
+        // 1000000000 microdollars = $1000.00
+        assert_eq!(microdollars_to_display(1000000000), "$1000.00");
     }
 }
