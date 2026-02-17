@@ -1268,8 +1268,8 @@ mod tests {
             } => {
                 assert_eq!(received, prompt_id);
                 assert_eq!(version, 1);
-                let saved = load_context_file(&std::path::PathBuf::from(&path))
-                    .expect("load saved");
+                let saved =
+                    load_context_file(&std::path::PathBuf::from(&path)).expect("load saved");
                 assert_eq!(saved.variables.get("foo").map(String::as_str), Some("bar"));
             }
             other => panic!("unexpected message: {:?}", other),
