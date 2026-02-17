@@ -3,9 +3,12 @@ use crate::lock;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, Msg};
 use harvester_io::{
-    load_completed_jobs, load_sources, EffectRunner, NoOpPlatformHandler, RuntimePaths,
+    load_completed_jobs, load_sources, persist_completed_jobs, EffectRunner, NoOpPlatformHandler,
+    RuntimePaths,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,7 +67,10 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
 
     // Validate source configuration
-    engine_info!("[batch] Loading source registry from {:?}", paths.sources_path);
+    engine_info!(
+        "[batch] Loading source registry from {:?}",
+        paths.sources_path
+    );
     let source_registry = load_sources(&paths.sources_path);
 
     if !args.allow_unsupported_sources {
@@ -125,15 +131,61 @@ pub fn run(args: Args) -> Result<i32, String> {
     let platform_handler = Box::new(NoOpPlatformHandler);
     let effect_runner = EffectRunner::new(paths.clone(), msg_tx.clone(), platform_handler);
 
-    // TODO: Implement outer cycle loop (D3)
-    // For now, run a single dispatch cycle
-    engine_info!("[batch] Running single dispatch cycle");
-    let outcome = run_dispatch_loop(&mut state, &msg_rx, &effect_runner)?;
-    engine_info!("[batch] Cycle complete with outcome: {:?}", outcome);
+    // Install signal handler for graceful shutdown
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    install_signal_handler(Arc::clone(&shutdown_flag));
 
-    // Clean shutdown
+    // Outer cycle loop - poll repeatedly until shutdown
+    let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
+    let mut cycle_count = 0;
+
+    loop {
+        cycle_count += 1;
+        engine_info!("[batch] === Starting cycle {} ===", cycle_count);
+
+        // Start the cycle by dispatching poll
+        engine_info!("[batch] Dispatching poll sources");
+        msg_tx
+            .send(Msg::PollSourcesClicked)
+            .map_err(|e| format!("Failed to dispatch poll: {}", e))?;
+
+        // Run dispatch loop until settled
+        let outcome = run_dispatch_loop(&mut state, &msg_rx, &effect_runner, &shutdown_flag)?;
+
+        // Print cycle summary
+        let obs = state.batch_observation();
+        print_cycle_summary(cycle_count, &outcome, &obs);
+
+        // Persist state
+        engine_info!("[batch] Persisting state");
+        let completed_jobs = state.completed_jobs_snapshot();
+        persist_completed_jobs(&paths.state_path, &completed_jobs);
+
+        // Check for shutdown signal
+        if shutdown_flag.load(Ordering::Relaxed) {
+            engine_info!("[batch] Shutdown signal received, exiting");
+            break;
+        }
+
+        // Sleep interruptibly before next cycle
+        engine_info!(
+            "[batch] Sleeping for {} minutes before next cycle",
+            args.poll_interval
+        );
+        if sleep_interruptible(poll_interval, &shutdown_flag) {
+            engine_info!("[batch] Shutdown during sleep, exiting");
+            break;
+        }
+    }
+
+    // Graceful shutdown
+    engine_info!("[batch] Graceful shutdown: draining effects and persisting final state");
     drop(effect_runner);
     drop(msg_rx);
+
+    let completed_jobs = state.completed_jobs_snapshot();
+    persist_completed_jobs(&paths.state_path, &completed_jobs);
+    engine_info!("[batch] Shutdown complete");
 
     Ok(0)
 }
@@ -144,6 +196,7 @@ fn run_dispatch_loop(
     state: &mut AppState,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_runner: &EffectRunner,
+    shutdown_flag: &Arc<AtomicBool>,
 ) -> Result<CycleOutcome, String> {
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
@@ -156,6 +209,13 @@ fn run_dispatch_loop(
                 "Dispatch loop exceeded maximum iterations ({})",
                 MAX_ITERATIONS
             ));
+        }
+
+        // Check for shutdown signal
+        if shutdown_flag.load(Ordering::Relaxed) {
+            engine_info!("[batch] Shutdown signal detected in dispatch loop");
+            let obs = state.batch_observation();
+            return Ok(classify_cycle_outcome(&obs));
         }
 
         // Check for settlement
@@ -195,6 +255,71 @@ fn run_dispatch_loop(
                 return Err("Message channel disconnected unexpectedly".to_string());
             }
         }
+    }
+}
+
+/// Prints a summary of the completed cycle.
+fn print_cycle_summary(cycle: usize, outcome: &CycleOutcome, obs: &BatchObservation) {
+    println!("\n=== Cycle {} Summary ===", cycle);
+    println!("Outcome: {:?}", outcome);
+    println!(
+        "Jobs: {} total, {} done, {} failed, {} in-flight",
+        obs.jobs_total, obs.jobs_done, obs.jobs_failed, obs.jobs_in_flight
+    );
+    println!(
+        "Triage: {} total, {} completed, {} failed, {} pending",
+        obs.triage_total, obs.triage_completed, obs.triage_failed, obs.triage_pending
+    );
+    println!("========================\n");
+}
+
+/// Sleeps for the specified duration, checking shutdown flag periodically.
+/// Returns true if shutdown was requested during sleep.
+fn sleep_interruptible(duration: Duration, shutdown_flag: &Arc<AtomicBool>) -> bool {
+    let check_interval = Duration::from_millis(500);
+    let mut remaining = duration;
+
+    while remaining > Duration::ZERO {
+        if shutdown_flag.load(Ordering::Relaxed) {
+            return true;
+        }
+
+        let sleep_time = remaining.min(check_interval);
+        std::thread::sleep(sleep_time);
+        remaining = remaining.saturating_sub(sleep_time);
+    }
+
+    false
+}
+
+/// Installs a signal handler for SIGINT/SIGTERM to set the shutdown flag.
+fn install_signal_handler(shutdown_flag: Arc<AtomicBool>) {
+    #[cfg(unix)]
+    {
+        use std::sync::Mutex;
+        static HANDLER_INSTALLED: Mutex<bool> = Mutex::new(false);
+
+        let mut installed = HANDLER_INSTALLED.lock().unwrap();
+        if *installed {
+            return;
+        }
+
+        ctrlc::set_handler(move || {
+            engine_info!("[batch] Received shutdown signal (SIGINT/SIGTERM)");
+            shutdown_flag.store(true, Ordering::Relaxed);
+        })
+        .expect("Error setting signal handler");
+
+        *installed = true;
+    }
+
+    #[cfg(windows)]
+    {
+        ctrlc::set_handler(move || {
+            engine_info!("[batch] Received shutdown signal (Ctrl-C)");
+            shutdown_flag.store(true, Ordering::Relaxed);
+        })
+        .expect("Error setting signal handler");
     }
 }
 
