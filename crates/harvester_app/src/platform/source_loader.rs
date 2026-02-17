@@ -14,6 +14,7 @@ pub fn default_source_config_path() -> PathBuf {
 }
 
 /// Load the source registry, returning empty registry when the file is missing or invalid.
+#[allow(dead_code)]
 pub fn load_source_registry(path: &Path) -> SourceRegistry {
     let config_dir = path.parent().unwrap_or_else(|| Path::new("."));
     match load_source_registry_from_path(path, config_dir) {
@@ -28,6 +29,7 @@ pub fn load_source_registry(path: &Path) -> SourceRegistry {
     }
 }
 
+#[allow(dead_code)]
 pub fn load_source_registry_from_path(
     path: &Path,
     config_dir: &Path,

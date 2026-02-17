@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 pub const PROMPT_TEMPLATE_SCHEMA_VERSION: u32 = 1;
+#[allow(dead_code)]
 pub type LoadedPromptTemplate = Result<(PromptId, PromptTemplateFile, PathBuf), String>;
 
 /// File format for saved prompt templates.
@@ -23,6 +24,7 @@ pub struct PromptTemplateFile {
 }
 
 impl PromptTemplateFile {
+    #[allow(dead_code)]
     fn is_valid_schema(&self) -> bool {
         self.schema_version == PROMPT_TEMPLATE_SCHEMA_VERSION
     }
@@ -32,6 +34,7 @@ pub fn prompts_directory() -> PathBuf {
     PathBuf::from("prompts")
 }
 
+#[allow(dead_code)]
 pub fn save_template_file(
     prompt_id: PromptId,
     system_template: &str,
@@ -64,6 +67,7 @@ pub fn save_template_file(
     Ok((version, path))
 }
 
+#[allow(dead_code)]
 pub fn load_prompt_template_files(base_dir: &Path) -> Vec<LoadedPromptTemplate> {
     let mut results = Vec::new();
     let base_canonical = match canonicalize_path(base_dir) {
@@ -166,6 +170,7 @@ pub fn load_prompt_template_files(base_dir: &Path) -> Vec<LoadedPromptTemplate> 
     results
 }
 
+#[allow(dead_code)]
 fn ensure_directory_in_base(base: &Path, target: &Path) -> Result<(), String> {
     fs::create_dir_all(target).map_err(|err| {
         format!(
@@ -185,12 +190,13 @@ fn ensure_directory_in_base(base: &Path, target: &Path) -> Result<(), String> {
     }
     Ok(())
 }
-
+#[allow(dead_code)]
 fn canonicalize_path(path: &Path) -> Result<PathBuf, String> {
     path.canonicalize()
         .map_err(|err| format!("failed to canonicalize '{}': {}", path.display(), err))
 }
 
+#[allow(dead_code)]
 fn next_template_version(prompt_dir: &Path) -> Result<PromptVersion, String> {
     let mut max_version = 0;
     if prompt_dir.exists() {

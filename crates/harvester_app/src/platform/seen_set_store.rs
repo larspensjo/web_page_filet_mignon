@@ -15,6 +15,7 @@ pub(crate) fn default_seen_set_path() -> PathBuf {
 }
 
 /// Load the seen-set from disk. Missing/corrupt files yield an empty set.
+#[allow(dead_code)]
 pub(crate) fn load_seen_set(path: &Path) -> RssSeenSet {
     match fs::read_to_string(path) {
         Ok(contents) => match ron::from_str::<RssSeenSet>(&contents) {
@@ -36,6 +37,7 @@ pub(crate) fn load_seen_set(path: &Path) -> RssSeenSet {
 }
 
 /// Save the seen-set atomically. Returns IO error on failure.
+#[allow(dead_code)]
 pub(crate) fn save_seen_set(set: &RssSeenSet, path: &Path) -> io::Result<()> {
     let pretty = PrettyConfig::new();
     let content = ron::ser::to_string_pretty(set, pretty)

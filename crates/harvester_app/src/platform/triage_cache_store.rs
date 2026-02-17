@@ -134,6 +134,7 @@ pub(crate) fn load_triage_cache(path: &Path) -> TriageCache {
     cache
 }
 
+#[allow(dead_code)]
 pub(crate) fn save_triage_cache(cache: &TriageCache, path: &Path) -> Result<(), PersistError> {
     if let Some(parent) = path.parent() {
         ensure_output_dir(parent)?;

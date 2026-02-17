@@ -133,6 +133,7 @@ pub(crate) fn load_summary_cache(path: &Path) -> SummaryCache {
 }
 
 /// Save the summary cache to disk
+#[allow(dead_code)]
 pub(crate) fn save_summary_cache(
     cache: &SummaryCache,
     path: &Path,

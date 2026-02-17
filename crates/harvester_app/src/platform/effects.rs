@@ -1,9 +1,6 @@
 use super::{prompt_template_store, source_loader};
 use std::path::PathBuf;
 
-// Re-export the shared EffectRunner for use by the app
-pub use harvester_io::EffectRunner;
-
 /// Default output directory based on current working directory.
 /// Used for backward compatibility with existing app behavior.
 pub(crate) fn default_output_dir() -> PathBuf {
