@@ -1,5 +1,6 @@
 //! Harvester IO: shared runtime paths, effect execution, and persistence.
 
+mod effect_helpers;
 mod effect_runner;
 mod persistence;
 mod prompt_template_store;
