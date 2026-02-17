@@ -5,6 +5,7 @@ Some instructions here doesn't hold for the CommanDuctUI submodule.
 * Build with "cargo build".
 * At the end of complete plan implementation, test with "cargo clippy --all-targets -- -D warnings". Don't do that for itermediary steps as there will be warnings from unused entities.
 *
+* Maintain an engineering diary in `docs/EngineeringDiary.md` (see "Engineering Diary" section below).
 
 ## Bugs
 * Is there a lessons learned here? A design issue? Lack of robustness? That is, I want to find similar problems and prevent future problems of the same type.
@@ -72,3 +73,30 @@ It is fine to update these, if changes are required. If a change is done:
 * Increase the version number in the submodule Cargo.toml
 * Update CHANGELOG documents, if they exist.
 * If the changes are breaking, make that clear.
+
+## Engineering Diary
+Use this project diary as long-term memory for AI-assisted coding.
+
+* Diary file path: `docs/EngineeringDiary.md`
+* Update the diary in the same change when any of the following happens:
+* A noteworthy implementation is completed.
+* A bug is fixed.
+* A non-trivial architectural, API, or workflow decision is made.
+* Keep entries short and high-signal; avoid transcript-style logs.
+* Every bug-fix entry must include a "Lessons Learned" line and a "Prevention" line.
+* Link to concrete artifacts when available (file paths, test names, commit hashes).
+* Prefer append-only history; do not rewrite old entries except for factual corrections.
+* If a change is too small to be noteworthy, no diary entry is required.
+
+Recommended entry format:
+
+```md
+## YYYY-MM-DD - Short title
+Type: Implementation | Bug Fix | Decision
+Context: Why this change happened.
+Change: What was implemented/changed.
+Evidence: Tests, logs, or validation performed.
+Lessons Learned: (required for Bug Fix)
+Prevention: (required for Bug Fix) How we reduce recurrence.
+Refs: path/to/file.rs, test_name, commit abc1234
+```
