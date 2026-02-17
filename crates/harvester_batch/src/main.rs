@@ -10,7 +10,7 @@ use std::process;
 
 fn main() {
     let args = Args::parse();
-    
+
     // Initialize logging
     if args.dry_run {
         // In dry-run mode, log to file only (no console spam)

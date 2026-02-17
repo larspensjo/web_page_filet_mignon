@@ -1,12 +1,12 @@
 use crate::cli::Args;
 use crate::lock;
-use engine_logging::{engine_info};
+use engine_logging::engine_info;
 use harvester_io::RuntimePaths;
 
 /// Run the batch orchestration loop
 pub fn run(args: Args) -> Result<i32, String> {
     engine_info!("[batch] Initializing runtime paths");
-    
+
     let paths = RuntimePaths::new(
         args.output_dir.clone(),
         args.sources.clone(),

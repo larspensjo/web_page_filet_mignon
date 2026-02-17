@@ -61,7 +61,7 @@ impl Args {
     fn clamp_values(&mut self) {
         // Clamp llm_concurrency to valid range
         self.llm_concurrency = self.llm_concurrency.clamp(1, 10);
-        
+
         // Clamp poll_interval to valid range (1 minute to 24 hours)
         self.poll_interval = self.poll_interval.clamp(1, 1440);
     }

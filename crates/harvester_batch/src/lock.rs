@@ -40,7 +40,7 @@ pub fn acquire_lock(output_dir: &Path, force: bool) -> Result<LockGuard, String>
     if lock_path.exists() && !force {
         let metadata_str = fs::read_to_string(&lock_path)
             .unwrap_or_else(|_| String::from("(unable to read lock file)"));
-        
+
         match serde_json::from_str::<LockMetadata>(&metadata_str) {
             Ok(meta) => {
                 return Err(format!(
@@ -106,7 +106,7 @@ fn generate_owner_token() -> String {
         .unwrap()
         .as_nanos()
         .hash(&mut hasher);
-    
+
     format!("{:016x}", hasher.finish())
 }
 
@@ -119,7 +119,7 @@ mod tests {
     fn acquire_lock_succeeds_when_no_lock_exists() {
         let dir = tempdir().unwrap();
         let guard = acquire_lock(dir.path(), false).expect("should acquire");
-        
+
         // Lock file should exist
         let lock_path = dir.path().join(LOCK_FILENAME);
         assert!(lock_path.exists());
@@ -130,7 +130,7 @@ mod tests {
         assert_eq!(meta.pid, std::process::id());
 
         drop(guard);
-        
+
         // Lock file should be removed after drop
         assert!(!lock_path.exists());
     }
@@ -148,7 +148,7 @@ mod tests {
     fn force_unlock_removes_existing_lock() {
         let dir = tempdir().unwrap();
         let guard1 = acquire_lock(dir.path(), false).expect("first acquire");
-        
+
         // Manually drop first guard to release it
         drop(guard1);
 
@@ -168,7 +168,7 @@ mod tests {
         let token1 = generate_owner_token();
         std::thread::sleep(std::time::Duration::from_millis(10));
         let token2 = generate_owner_token();
-        
+
         // Tokens should be different because time changes
         assert_ne!(token1, token2);
     }
