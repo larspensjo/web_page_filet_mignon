@@ -62,8 +62,16 @@ pub(crate) fn default_output_dir() -> std::path::PathBuf {
         .join("output")
 }
 
-fn contexts_directory() -> PathBuf {
+pub(crate) fn contexts_directory() -> PathBuf {
     PathBuf::from("contexts")
+}
+
+pub(crate) fn default_source_config_path() -> PathBuf {
+    source_loader::default_source_config_path()
+}
+
+pub(crate) fn prompts_directory() -> PathBuf {
+    prompt_template_store::prompts_directory()
 }
 
 fn prompt_context_filename(prompt_id: PromptId) -> &'static str {

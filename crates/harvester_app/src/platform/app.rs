@@ -23,9 +23,10 @@ use harvester_engine::llm::{
     LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
     ProviderKind,
 };
+use harvester_io::{EffectRunner, RuntimePaths};
 
-use super::effects::EffectRunner;
 use super::logging::{self, LogDestination};
+use super::Win32PlatformHandler;
 use super::ui;
 use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::{effects, persistence};
@@ -65,6 +66,13 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     );
 
     let output_dir = effects::default_output_dir();
+    let paths = RuntimePaths::new(
+        output_dir.clone(),
+        effects::default_source_config_path(),
+        effects::contexts_directory(),
+        effects::prompts_directory(),
+    );
+    let platform_handler = Box::new(Win32PlatformHandler);
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let effect_runner = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
         let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
@@ -94,6 +102,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         let model_map = effective_model_map(&config);
         let handle = LlmHandle::new(config);
         EffectRunner::new_with_llm(
+            paths,
             msg_tx.clone(),
             handle,
             100_000,
@@ -101,10 +110,11 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             model_map,
             provider_clone,
             ProviderKind::OpenAi,
+            platform_handler,
         )
     } else {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
-        EffectRunner::new(msg_tx.clone())
+        EffectRunner::new(paths, msg_tx.clone(), platform_handler)
     };
     effect_runner.enqueue(vec![
         Effect::LoadPromptTemplateFiles,
@@ -837,8 +847,15 @@ mod tests {
         let (in_tx, in_rx) = mpsc::channel();
         let _ = in_tx;
         let (out_tx, out_rx) = mpsc::channel();
-        let effect_runner = EffectRunner::new(out_tx.clone());
         let output_dir = std::env::temp_dir();
+        let paths = RuntimePaths::new(
+            output_dir.clone(),
+            output_dir.join("sources.ron"),
+            output_dir.join("contexts"),
+            output_dir.join("prompts"),
+        );
+        let platform_handler = Box::new(Win32PlatformHandler);
+        let effect_runner = EffectRunner::new(paths, out_tx.clone(), platform_handler);
         let handler = AppEventHandler::new(
             WindowId::new(1),
             shared,
