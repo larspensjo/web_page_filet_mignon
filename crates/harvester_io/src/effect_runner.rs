@@ -955,6 +955,21 @@ impl EffectRunner {
                     extracted_links: Vec::new(),
                 });
             }
+            Effect::DownloadLinkedPage {
+                job_id, link_index, ..
+            } => {
+                let _ = self.msg_tx.send(Msg::LinkDownloadFailed {
+                    job_id,
+                    link_index,
+                    error: reason,
+                });
+            }
+            Effect::DeleteLinkedPage {
+                job_id, link_index, ..
+            } => {
+                // DeleteLinkedPage always sends LinkDeleted even on rejection (path confinement check happens here)
+                let _ = self.msg_tx.send(Msg::LinkDeleted { job_id, link_index });
+            }
             _ => {
                 // For other effects, log the rejection without sending a message
             }
@@ -1056,5 +1071,467 @@ impl Drop for EffectRunner {
     fn drop(&mut self) {
         engine_info!("[effect] EffectRunner dropped, stopping engine");
         self.engine.stop(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harvester_engine::llm::load_context_file;
+    use harvester_engine::llm::types::ProviderKind;
+    use harvester_engine::llm::{LlmCompletionError, LlmEvent};
+    use std::fs;
+    use std::path::Path;
+    use std::sync::mpsc;
+    use std::time::Duration;
+    use tempfile::tempdir;
+
+    fn make_test_runtime_paths(base: &Path) -> RuntimePaths {
+        RuntimePaths {
+            output_dir: base.to_path_buf(),
+            contexts_dir: base.join("contexts"),
+            prompts_dir: base.join("prompts"),
+            sources_path: base.join("sources.ron"),
+            seen_set_path: base.join("seen_set.ron"),
+            summary_cache_path: base.join("summary_cache.ron"),
+            triage_cache_path: base.join("triage_cache.ron"),
+            state_path: base.join("state.json"),
+        }
+    }
+
+    fn runner_with_receiver(base: &Path) -> (EffectRunner, mpsc::Receiver<Msg>) {
+        let (tx, rx) = mpsc::channel();
+        let paths = make_test_runtime_paths(base);
+        let platform_handler = Box::new(NoOpPlatformHandler);
+        (EffectRunner::new(paths, tx, platform_handler), rx)
+    }
+
+    fn write_markdown(dir: &Path, filename: &str, url: &str) {
+        use harvester_engine::{build_markdown_document, WhitespaceTokenCounter};
+        let counter = WhitespaceTokenCounter;
+        let (_, markdown) = build_markdown_document(
+            url,
+            Some("Title"),
+            "utf-8",
+            "2026-02-14T00:00:00Z",
+            "body",
+            &counter,
+        );
+        fs::write(dir.join(filename), markdown).expect("write markdown");
+    }
+
+    #[test]
+    fn build_local_model_catalog_uses_effective_models_with_dedup_and_sort() {
+        let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "gpt-4o-mini".to_string());
+        effective_models.insert(PromptId::ArticleSummary, "o3-mini".to_string());
+        effective_models.insert(PromptId::AggregateBriefing, "gpt-4o-mini".to_string());
+
+        let models = build_local_model_catalog(Some(ProviderKind::OpenAi), &effective_models);
+        let names: Vec<_> = models.iter().map(|m| m.model_name().to_string()).collect();
+
+        assert_eq!(
+            names,
+            vec!["gpt-4o-mini".to_string(), "o3-mini".to_string()]
+        );
+    }
+
+    #[test]
+    fn build_local_model_catalog_returns_empty_without_provider_kind() {
+        let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "gpt-4o-mini".to_string());
+
+        let models = build_local_model_catalog(None, &effective_models);
+
+        assert!(models.is_empty());
+    }
+
+    #[test]
+    fn download_link_page_rejects_disallowed_scheme_before_request() {
+        let temp = tempdir().expect("tempdir");
+        let fetch_settings = FetchSettings::default();
+        let policy = UrlPolicy::default();
+        let err = download_link_page("file:///etc/passwd", temp.path(), &policy, &fetch_settings)
+            .unwrap_err();
+
+        assert!(
+            err.contains("url policy violation"),
+            "expected url policy error, got '{}'",
+            err
+        );
+    }
+
+    #[test]
+    fn enqueue_url_effect_is_rejected_by_url_policy() {
+        let temp = tempdir().expect("tempdir");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        let job_id = 42;
+        runner.enqueue(vec![Effect::EnqueueUrl {
+            job_id,
+            url: "file:///etc/passwd".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected job done msg");
+
+        match msg {
+            Msg::JobDone {
+                job_id: received,
+                result: JobResultKind::Failed { reason },
+                ..
+            } => {
+                assert_eq!(received, job_id);
+                assert!(reason.contains("url policy"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn download_link_page_effect_is_rejected_by_authorization() {
+        let temp = tempdir().expect("tempdir");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        let job_id = 7;
+        let link_index = 1;
+        runner.enqueue(vec![Effect::DownloadLinkedPage {
+            job_id,
+            link_index,
+            url: "file:///tmp/secret".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected link download failed msg");
+
+        match msg {
+            Msg::LinkDownloadFailed {
+                job_id: received,
+                link_index: received_index,
+                error,
+            } => {
+                assert_eq!(received, job_id);
+                assert_eq!(received_index, link_index);
+                assert!(error.contains("url policy"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn delete_linked_page_effect_is_rejected_on_unsafe_path() {
+        let temp = tempdir().expect("tempdir");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        let job_id = 11;
+        let link_index = 3;
+        runner.enqueue(vec![Effect::DeleteLinkedPage {
+            job_id,
+            link_index,
+            path: std::path::PathBuf::from("../outside.md"),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected link deleted msg");
+
+        match msg {
+            Msg::LinkDeleted {
+                job_id: received,
+                link_index: received_index,
+            } => {
+                assert_eq!(received, job_id);
+                assert_eq!(received_index, link_index);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn save_prompt_context_file_writes_file_and_dispatches_saved_msg() {
+        let temp = tempdir().expect("tempdir");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        let prompt_id = PromptId::ArticleTriage;
+        runner.enqueue(vec![Effect::SavePromptContextFile {
+            prompt_id,
+            context_pairs: vec![("foo".into(), "bar".into())],
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected context saved msg");
+
+        match msg {
+            Msg::PromptLabContextSaved {
+                prompt_id: received,
+                path,
+                version,
+            } => {
+                assert_eq!(received, prompt_id);
+                assert_eq!(version, 1);
+                let saved = load_context_file(&std::path::PathBuf::from(&path))
+                    .expect("load saved");
+                assert_eq!(saved.variables.get("foo").map(String::as_str), Some("bar"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn save_prompt_context_file_reports_failure_when_existing_file_invalid() {
+        let temp = tempdir().expect("tempdir");
+        let contexts_dir = temp.path().join("contexts");
+        fs::create_dir_all(&contexts_dir).expect("create contexts dir");
+        fs::write(contexts_dir.join("article_triage.toml"), "bad toml")
+            .expect("write invalid file");
+
+        let (runner, rx) = runner_with_receiver(temp.path());
+        runner.enqueue(vec![Effect::SavePromptContextFile {
+            prompt_id: PromptId::ArticleTriage,
+            context_pairs: vec![("foo".into(), "bar".into())],
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected save failed msg");
+
+        match msg {
+            Msg::PromptLabContextSaveFailed { prompt_id, reason } => {
+                assert_eq!(prompt_id, PromptId::ArticleTriage);
+                assert!(reason.contains("failed to read existing context"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn save_prompt_template_file_writes_file_and_dispatches_saved_msg() {
+        let temp = tempdir().expect("tempdir");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        let prompt_id = PromptId::ArticleTriage;
+        runner.enqueue(vec![Effect::SavePromptTemplateFile {
+            prompt_id,
+            system_template: "system {{context}}".to_string(),
+            user_template: "user {{context}}".to_string(),
+            description: "desc".to_string(),
+            expected_format: "json".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected template saved msg");
+
+        match msg {
+            Msg::PromptLabTemplateSaved {
+                prompt_id: received,
+                version,
+                path,
+            } => {
+                assert_eq!(received, prompt_id);
+                assert_eq!(version, 1);
+                let file = fs::read_to_string(std::path::PathBuf::from(&path))
+                    .expect("read saved template file");
+                assert!(file.contains("system {{context}}"));
+                assert!(file.contains("user {{context}}"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn load_articles_for_briefing_prereq_dispatches_loaded_message() {
+        let temp = tempdir().expect("tempdir");
+        write_markdown(temp.path(), "a.md", "https://example.com/a");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        runner.enqueue(vec![Effect::LoadArticlesForBriefingPrereq {
+            ordered_urls: vec!["https://example.com/a".to_string()],
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected prereq loaded message");
+        match msg {
+            Msg::BriefingPrereqArticlesLoaded { articles } => {
+                assert_eq!(articles.len(), 1);
+                assert_eq!(articles[0].url, "https://example.com/a");
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn load_articles_for_briefing_with_empty_ordered_urls_dispatches_empty_articles_loaded() {
+        let temp = tempdir().expect("tempdir");
+        write_markdown(temp.path(), "a.md", "https://example.com/a");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        runner.enqueue(vec![Effect::LoadArticlesForBriefing {
+            ordered_urls: Vec::new(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected articles loaded message");
+        match msg {
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            } => {
+                assert!(articles.is_empty());
+                assert!(collection_text.is_empty());
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    // --- map_llm_event failure metadata propagation tests ---
+
+    fn make_failure_metadata() -> harvester_engine::llm::run_metadata::LlmFailureMetadata {
+        use harvester_engine::llm::run_metadata::LlmFailureMetadata;
+        LlmFailureMetadata {
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: 1,
+            resolved_model: Some("gpt-4o-mini".to_string()),
+            input_bytes: 100,
+            wall_ms: Some(200),
+            timestamp_utc: "2026-02-15T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn map_llm_event_validation_failed_with_metadata_propagates_it() {
+        let failure_metadata = make_failure_metadata();
+        let event = LlmEvent::Completed {
+            request_id: 1,
+            result: Err(LlmCompletionError::ValidationFailed {
+                reason: "bad json".to_string(),
+                raw_response: "{}".to_string(),
+                failure_metadata: Some(failure_metadata),
+            }),
+        };
+        let msg = map_llm_event(event);
+        if let Msg::LlmCompleted { metadata, .. } = msg {
+            assert!(
+                metadata.is_some(),
+                "ValidationFailed with metadata should propagate it"
+            );
+            assert!(!metadata.unwrap().parse_ok);
+        } else {
+            panic!("expected LlmCompleted");
+        }
+    }
+
+    #[test]
+    fn map_llm_event_quota_exhausted_with_metadata_propagates_it() {
+        let failure_metadata = make_failure_metadata();
+        let event = LlmEvent::Completed {
+            request_id: 1,
+            result: Err(LlmCompletionError::QuotaExhausted {
+                description: "rate limited".to_string(),
+                failure_metadata: Some(failure_metadata),
+            }),
+        };
+        let msg = map_llm_event(event);
+        if let Msg::LlmCompleted { metadata, .. } = msg {
+            assert!(
+                metadata.is_some(),
+                "QuotaExhausted with metadata should propagate it"
+            );
+        } else {
+            panic!("expected LlmCompleted");
+        }
+    }
+
+    #[test]
+    fn map_llm_event_persistence_failed_with_metadata_propagates_it() {
+        let failure_metadata = make_failure_metadata();
+        let event = LlmEvent::Completed {
+            request_id: 1,
+            result: Err(LlmCompletionError::PersistenceFailed {
+                detail: "disk full".to_string(),
+                failure_metadata: Some(failure_metadata),
+            }),
+        };
+        let msg = map_llm_event(event);
+        if let Msg::LlmCompleted { metadata, .. } = msg {
+            assert!(
+                metadata.is_some(),
+                "PersistenceFailed with metadata should propagate it"
+            );
+        } else {
+            panic!("expected LlmCompleted");
+        }
+    }
+
+    #[test]
+    fn map_llm_event_unsupported_model_has_none_metadata() {
+        use harvester_engine::llm::types::{ModelId, ProviderKind};
+        let event = LlmEvent::Completed {
+            request_id: 1,
+            result: Err(LlmCompletionError::UnsupportedModel {
+                model: ModelId::new(ProviderKind::OpenAi, "bad-model"),
+                reason: "unknown".to_string(),
+            }),
+        };
+        let msg = map_llm_event(event);
+        if let Msg::LlmCompleted {
+            metadata, result, ..
+        } = msg
+        {
+            assert!(
+                metadata.is_none(),
+                "UnsupportedModel is pre-flight so metadata=None"
+            );
+            assert!(matches!(result, LlmResultKind::Failed { .. }));
+        } else {
+            panic!("expected LlmCompleted");
+        }
+    }
+
+    #[test]
+    fn resolve_effect_success_emits_ok_msg() {
+        let temp = tempdir().expect("tempdir");
+        write_markdown(temp.path(), "a.md", "https://example.com/a");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        runner.enqueue(vec![Effect::ResolvePromptLabInputFromUrl {
+            resolve_id: 7,
+            url: "https://example.com/a".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("expected prompt lab resolve msg");
+        match msg {
+            Msg::PromptLabInputResolved {
+                resolve_id,
+                result: Ok(snapshot),
+            } => {
+                assert_eq!(resolve_id, 7);
+                assert!(!snapshot.is_empty());
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resolve_effect_failure_emits_err_msg() {
+        let temp = tempdir().expect("tempdir");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        runner.enqueue(vec![Effect::ResolvePromptLabInputFromUrl {
+            resolve_id: 8,
+            url: "https://example.com/missing".to_string(),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("expected prompt lab resolve msg");
+        match msg {
+            Msg::PromptLabInputResolved {
+                resolve_id,
+                result: Err(reason),
+            } => {
+                assert_eq!(resolve_id, 8);
+                assert!(!reason.is_empty());
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
     }
 }
