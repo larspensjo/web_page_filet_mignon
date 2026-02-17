@@ -802,6 +802,7 @@ dependencies = [
  "engine_logging",
  "harvester_core",
  "harvester_engine",
+ "harvester_io",
  "log",
  "pulldown-cmark",
  "reqwest",

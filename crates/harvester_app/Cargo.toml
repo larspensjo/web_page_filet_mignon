@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 harvester_core = { path = "../harvester_core" }
 harvester_engine = { path = "../harvester_engine" }
+harvester_io = { path = "../harvester_io" }
 engine_logging = { path = "../engine_logging" }
 commanductui = { path = "../../src/CommanDuctUI" }
 log.workspace = true
