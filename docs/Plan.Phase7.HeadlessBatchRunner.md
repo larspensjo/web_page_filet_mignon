@@ -27,9 +27,11 @@ To keep strict unidirectional data flow, the batch runner should not mutate stat
 
 ### 2.1 In scope
 - New headless batch binary runnable from Task Scheduler.
-- One run performs: Poll sources -> Download pipeline settles -> Pre-triage + Triage.
+- Runs in a repeating cycle: Poll sources -> Download pipeline settles -> Pre-triage + Triage -> wait for next poll interval. Continues until interrupted (Ctrl+C).
 - No briefing generation in this phase.
+- `--dry-run` mode: poll + ingestion accounting only, no downloads/triage.
 - Deterministic exit codes and structured end-of-run summary.
+- Per-run cost reporting (tokens + microdollar cost from existing `LlmQuotaTracker`).
 - Single-run lock to prevent overlap.
 
 ### 2.2 Out of scope
@@ -164,12 +166,9 @@ Required behavior:
 - `--llm-concurrency <n>` default `3`, clamp `[1,10]`
 - `--force-unlock` optional
 - `--allow-unsupported-sources` optional
-- `OPENAI_API_KEY` required for triage stage
-
-Nice-to-have in same phase:
-- `--dry-run` (poll + ingestion accounting only, no downloads/triage)
-
-If `--dry-run` lands, mark `FI-Ingestion-SourceDryRun-0006` as completed.
+- `--dry-run` optional (poll + ingestion accounting only, no downloads/triage)
+- `--poll-interval <minutes>` default `15`, clamp `[1, 1440]` — wait time between end of one cycle and start of next poll
+- `OPENAI_API_KEY` required for triage stage (not required for `--dry-run`)
 
 ### Part 5: Lock implementation
 
@@ -192,21 +191,46 @@ Release:
 
 ### Part 6: Batch runner orchestration loop
 
-Main loop responsibilities:
-1. Init logging.
+Startup:
+1. Init logging (file-only if `--dry-run`, see Part 7).
 2. Parse CLI and build `RuntimePaths`.
 3. Acquire lock.
-4. Build reducer state and effect runner (same LLM bootstrap model as app).
-5. Hydrate persisted artifacts (completed jobs, summary/triage cache, pre-triage overrides, prompt files, metadata).
-6. Dispatch `Msg::PollSourcesClicked`.
-7. Loop until terminal condition, processing messages through `update` and executing emitted effects.
-8. Determine final run status and exit code.
+4. Register signal handler (Ctrl+C / `SIGINT` / `SIGTERM`). Sets a shared shutdown flag.
+5. Build reducer state and effect runner (same LLM bootstrap model as app).
+6. Hydrate persisted artifacts (completed jobs, summary/triage cache, pre-triage overrides, prompt files, metadata).
 
-Terminal conditions:
-- Poll done and no successful completed jobs -> success (nothing to triage).
-- Triage phase complete with zero failures -> success.
-- Triage phase complete with partial failures -> partial.
-- Fatal runtime/setup errors -> fatal.
+Main loop (repeating cycles):
+7. Dispatch `Msg::PollSourcesClicked`.
+8. Process messages through `update` and execute emitted effects until cycle settles (poll done -> downloads done -> triage done for this batch).
+   - In `--dry-run` mode: stop after first poll settles. Do not dispatch download or triage. Print progress per Part 7 and exit.
+   - After each triage completion: print progress line to stdout (see Part 7).
+9. Print cycle summary (items found, triaged, cumulative cost).
+10. Check shutdown flag. If set, break to shutdown.
+11. Sleep for `--poll-interval` minutes (interruptible — if shutdown signal arrives during sleep, wake immediately and break).
+12. Go to step 7.
+
+Shutdown:
+13. Stop dispatching new work. Wait briefly (30s drain timeout) for in-flight LLM calls to complete.
+14. Persist state (same artifacts as step 6 hydration).
+15. Read `LlmQuotaTracker` snapshot, print final summary (Part 8), exit.
+
+Loop mechanism:
+- Event-driven: each inner iteration awaits the next `Msg` from effect completion via channel. No busy-polling.
+- Between cycles, sleep is interruptible by the shutdown signal.
+
+Graceful shutdown (Ctrl+C):
+- Expected stop mechanism for long runs. Not treated as an error.
+- In-flight LLM calls get a 30s drain window; after that, abandon and persist what we have.
+
+Cycle settlement detection:
+- After each `update`, check `batch_observation()` snapshot.
+- A cycle is settled when: poll is complete, no downloads in flight, and triage queue is empty (all items triaged or failed).
+- If a poll finds zero new items, the cycle settles immediately; the runner still waits for the next interval (new items may appear later).
+
+Terminal conditions (per cycle):
+- Cycle settled with zero failures -> cycle success.
+- Cycle settled with partial failures -> cycle partial.
+- Fatal runtime/setup errors -> exit immediately.
 
 State observation API recommendation:
 - Prefer a single public snapshot method for batch orchestration instead of exposing many internals.
@@ -216,26 +240,77 @@ State observation API recommendation:
   - job settlement counts
   - pre-triage phase
   - triage phase and counts
+- Expose `LlmQuotaTracker` snapshot (cumulative calls, input/output tokens, cost_microdollars) for end-of-run reporting.
 
 This keeps encapsulation stronger than promoting multiple `pub(crate)` getters.
 
-### Part 7: Exit codes and summaries
+### Part 7: Console output modes
+
+The batch runner has two output personalities depending on `--dry-run`:
+
+**Normal mode (no `--dry-run`):**
+- `engine_logging` writes to `engine.log` as usual.
+- Console (stderr) receives engine log output at the configured level.
+- Periodic progress lines printed to stdout (not from logging framework):
+  - After each triage completion: `[batch] 5/18 triaged | llm_calls=5 cost=$0.035 elapsed=12m`
+  - After each cycle settles: `[batch] cycle #2 done | new_items=8 triaged=8 | cumulative: llm_calls=24 cost=$0.142 elapsed=1h32m`
+  - During inter-cycle sleep: no output (quiet).
+- Final summary line printed to stdout on exit (see Part 8).
+
+**Dry-run mode (`--dry-run`):**
+- `engine_logging` still writes to `engine.log` (full detail preserved).
+- Console log output is suppressed (no engine log lines on stderr).
+- Instead, a compact progress stream is printed to stdout:
+  - Phase transitions: `[dry-run] polling 3 sources...`, `[dry-run] poll complete`.
+  - Per-source one-liner: `[dry-run] source "HN" found 12 new items (4 previously seen)`.
+  - Final accounting summary (see Part 8).
+- The goal is a quick-glance confirmation that something happened, not a debug trace.
+
+Implementation:
+- Configure `engine_logging` with a file-only appender when `--dry-run` is active (no stderr layer).
+- Progress lines are direct `println!` from the orchestration loop, not from the logging framework.
+- Progress is driven by observing state transitions via `AppState::batch_observation()` between loop iterations.
+
+### Part 8: Exit codes, summaries, and cost reporting
 
 Exit codes:
-- `0`: full success (or nothing eligible to triage)
-- `1`: partial completion (some failures, outputs persisted)
+- `0`: all completed work succeeded (or nothing eligible to triage)
+- `1`: partial completion (some failures among completed work, outputs persisted)
 - `2`: fatal (startup/lock/config/API key)
 
-Always emit final one-line summary, for example:
-- `[batch] completed duration=42.1s jobs_total=18 jobs_success=15 triage_completed=12 triage_failed=3 exit_code=1`
+On graceful shutdown via signal (Ctrl+C): use `0` if all completed work succeeded, `1` if there were partial failures. The signal itself is not an error — it is the expected way to stop a long run.
+
+Always emit final summary to stdout, on both natural cycle exit and signal-interrupted shutdown. The summary includes cost information sourced from the existing `LlmQuotaTracker` (which already accumulates per-request `input_tokens`, `output_tokens`, and `cost_microdollars` via `ModelPricing`).
+
+Normal mode example:
+- `[batch] finished cycles=3 elapsed=3h12m jobs_total=54 jobs_success=48 triage_completed=45 triage_failed=3 llm_calls=45 input_tokens=148200 output_tokens=10800 cost=$0.2531 exit_code=1`
+
+Dry-run mode example:
+```
+[dry-run] summary
+  sources polled:    3
+  new items found:  12
+  previously seen:   4
+  eligible:          8  (would proceed to download + triage)
+  duration:        1.2s
+  llm_calls:         0
+  cost:          $0.00
+```
+
+Cost formatting:
+- Use `LlmQuotaTracker::snapshot()` (or equivalent read method) at end of run to get accumulated totals.
+- Display cost as `$X.XXXX` (4 decimal places, converted from microdollars: `cost_microdollars / 1_000_000`).
+- Token counts displayed as plain integers.
+- This requires no OpenAI admin API key — all data comes from per-request `usage` fields already captured in the response handling path (`handle.rs`).
 
 ## 6) Testing Strategy
 
 ### 6.1 Unit tests (required)
 - `lock.rs`: acquire/reject/force-unlock/release.
-- CLI parsing and clamp rules.
+- CLI parsing and clamp rules (including `--dry-run`, `--poll-interval`).
 - batch run-state classifier (full/partial/fatal) as pure function.
 - `RuntimePaths` derivation tests (no cwd leakage).
+- cost formatting: microdollars to `$X.XXXX` string conversion.
 
 ### 6.2 Core reducer tests (required additions)
 Add or extend reducer tests that lock in batch-critical behavior:
@@ -248,6 +323,10 @@ Add or extend reducer tests that lock in batch-critical behavior:
 - lock contention scenario with second process.
 - run with unsupported script source and verify configured behavior.
 - cache/state persistence is readable by `harvester_app` startup path.
+- `--dry-run` produces no LLM calls, exits 0 after first poll, and prints progress to stdout.
+- `--dry-run` still creates `engine.log` with expected content.
+- graceful shutdown: send SIGINT during run, verify drain + summary + clean exit.
+- repeating cycle: verify second poll dispatches after interval elapses.
 
 ## 7) Verification Commands
 
@@ -262,14 +341,16 @@ Run in order:
 
 Manual verification:
 - `cargo run -p harvester_batch -- --output-dir output --sources sources.ron`
+- `cargo run -p harvester_batch -- --output-dir output --sources sources.ron --dry-run` (confirm clean progress output, no log spam, engine.log still written).
 - verify lock behavior via two concurrent invocations.
 - verify non-zero exit codes for partial/fatal scenarios.
+- verify cost line in final summary after a real triage run.
 - open GUI and confirm triage/cache/state hydration parity.
 
 ## 8) Future Ideas Mapping
 
 ### Close when Phase 7 completes
-- `FI-Ingestion-SourceDryRun-0006` (only if `--dry-run` is implemented in this phase).
+- `FI-Ingestion-SourceDryRun-0006` (`--dry-run` is now in scope).
 
 ### Not closed by this phase
 - `FI-Ingestion-Scheduling-0004`: this phase is scheduler-ready, not per-source interval scheduling.
