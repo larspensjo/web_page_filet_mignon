@@ -73,6 +73,7 @@ impl EffectRunner {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_llm(
         paths: RuntimePaths,
         msg_tx: mpsc::Sender<Msg>,

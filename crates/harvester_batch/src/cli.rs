@@ -46,18 +46,22 @@ pub struct Args {
 }
 
 impl Args {
+    /// Parse command-line arguments with automatic clamping of values.
     pub fn parse() -> Self {
         let mut args = <Args as Parser>::parse();
         args.clamp_values();
         args
     }
 
+    /// Parse arguments from a slice (used for testing).
+    #[cfg(test)]
     pub fn parse_from(args: &[&str]) -> Self {
         let mut parsed = <Args as Parser>::parse_from(args);
         parsed.clamp_values();
         parsed
     }
 
+    /// Clamp configuration values to valid ranges.
     fn clamp_values(&mut self) {
         // Clamp llm_concurrency to valid range
         self.llm_concurrency = self.llm_concurrency.clamp(1, 10);

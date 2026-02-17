@@ -47,7 +47,20 @@ fn classify_cycle_outcome(obs: &BatchObservation) -> CycleOutcome {
     }
 }
 
-/// Run the batch orchestration loop
+/// Run the batch orchestration loop.
+///
+/// Executes repeated poll cycles until shutdown signal received or error occurs.
+/// Returns exit code: 0 (success), 1 (partial failure), or 2 (fatal error via Err).
+///
+/// # Arguments
+/// * `args` - Parsed command-line arguments specifying paths, intervals, and flags
+///
+/// # Behavior
+/// - Acquires exclusive lock on output directory
+/// - Polls sources at configured intervals
+/// - Persists state after each cycle
+/// - Handles SIGINT/SIGTERM gracefully
+/// - Dry-run mode: single poll, read-only, no persistence
 pub fn run(args: Args) -> Result<i32, String> {
     engine_info!("[batch] Initializing runtime paths");
 
@@ -370,6 +383,7 @@ fn install_signal_handler(shutdown_flag: Arc<AtomicBool>) {
 
 /// Converts microdollars to a human-readable dollar string with exact rounding.
 /// Examples: 0 -> "$0.00", 1234567 -> "$1.23", 50 -> "$0.00", 5000 -> "$0.01"
+#[cfg(test)]
 fn microdollars_to_display(microdollars: u64) -> String {
     let cents = (microdollars + 5000) / 10000; // Round to nearest cent
     let dollars = cents / 100;
