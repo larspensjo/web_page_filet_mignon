@@ -10,13 +10,17 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | Architecture | DownloadPipeline | Unify ingestion download paths                    |
 | Architecture | DtoBoundaries    | Explicit DTO mappings at crate seams             |
 | Architecture | SessionInvariants| Enforce lifecycle invariants in state            |
+| Architecture | BatchOrchestration | Batch runner modes and external scheduler support |
+| Architecture | PersistenceEffects | Reducer-emitted persistence for strict UDF       |
 | Architecture | TrustTypes       | Typed wrappers for trusted/untrusted data        |
+| Architecture | UiFramework      | Reusable UI control primitives and message routing |
 | Ingestion  | AuthenticatedFetch | Cookie/session-backed authenticated ingestion    |
 | Ingestion  | FeedDiscovery      | Find feed URLs from website pages                |
 | Ingestion  | OpmlImport         | Import feeds from OPML collections               |
 | Ingestion  | PdfPipeline        | Ingest and preview PDF content                   |
 | Ingestion  | RssTriage          | Pre-filter feed items before download            |
 | Ingestion  | Scheduling         | Scheduled polling configuration                  |
+| Ingestion  | ScriptSources      | Runtime support for script-defined ingestion sources |
 | Ingestion  | SourceCursoring    | Incremental source read positions                |
 | Ingestion  | SourceDryRun       | Validate sources without enqueueing              |
 | Ingestion  | SourcePreview      | Preview new items before enqueue                 |
@@ -36,6 +40,7 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | Observability | PreviewRendering | Markdown/RTF preview diagnostics and telemetry  |
 | Observability | ReplayDiagnostics | Quality and cost diagnostics                     |
 | Observability | SourceHealth    | Per-source health metrics and backoff            |
+| Performance | IoThroughput     | Non-LLM IO effect concurrency and pooling        |
 | Performance | LlmProcessing    | Throughput for LLM workloads                     |
 | Performance | Polling          | Parallel source polling and throughput           |
 | Security  | KeyManagement       | Secure API key handling                          |
@@ -64,6 +69,27 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | UX        | WorkflowAutomation  | One-click multi-step workflows                   |
 
 ## Architecture
+
+### BatchOrchestration
+
+#### [FI-Architecture-BatchOrchestration-0006] Idempotent single-cycle mode for external schedulers
+Status: Candidate
+TopLevel: Architecture
+SubLevel: BatchOrchestration
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Phase7.EffectRunnerRefactoring.md
+- SourceSection: Future extensions (post-Phase 7)
+- Captured: 2026-02-17
+Tags: [batch, scheduling, idempotent, architecture]
+Summary: Add an optional idempotent single-cycle mode to the batch runner so external schedulers (cron, systemd timers) can trigger one poll-triage-brief cycle and exit.
+Rationale: Enables integration with standard OS schedulers without requiring the batch runner to manage its own repeating loop.
+SuccessCriteria:
+- A CLI flag activates single-cycle mode that exits after one complete cycle.
+- Single-cycle mode is idempotent: re-running with identical inputs produces no duplicate work.
+- Exit code reflects cycle outcome (success, partial, fatal).
 
 ### DownloadPipeline
 
@@ -105,6 +131,30 @@ SuccessCriteria:
 - DTO conversions are centralized in mapping helpers.
 - Cross-crate boundaries no longer share internal DTO types directly.
 
+### PersistenceEffects
+
+#### [FI-Architecture-PersistenceEffects-0005] Reducer-emitted persistence effects
+Status: Candidate
+TopLevel: Architecture
+SubLevel: PersistenceEffects
+Priority: P1
+Effort: L
+Risk: M
+Origin:
+- SourceDoc: Plan.Phase7.EffectRunnerRefactoring.md
+- SourceSection: Future extensions (post-Phase 7)
+- Captured: 2026-02-17
+- SourceDoc: Plan.Phase7.HeadlessBatchRunner.md
+- SourceSection: Blocker C: Persistence side-channel in app driver
+- Captured: 2026-02-17
+Tags: [architecture, persistence, udf, reducer]
+Summary: Replace the persistence side-channel with reducer-emitted persistence effects so all IO flows through the standard effect pipeline.
+Rationale: Enforces strict unidirectional data flow compliance by removing the last IO path that bypasses the reducer-effect loop.
+SuccessCriteria:
+- All persistence writes are triggered by effects emitted from the reducer.
+- No direct file writes occur outside the effect runner.
+- Existing persistence behavior is preserved with full test coverage.
+
 ### SessionInvariants
 
 #### [FI-Architecture-SessionInvariants-0003] Enforce session lifecycle invariants
@@ -144,6 +194,47 @@ Rationale: Makes illegal states unrepresentable and prevents unsafe usage by con
 SuccessCriteria:
 - Untrusted content can only be unwrapped through the content preparation pipeline.
 - LLM outputs require a validated wrapper before use in reducers.
+
+### UiFramework
+
+#### [FI-Architecture-UiFramework-0007] Typed selection mapping helpers for UI controls
+Status: Candidate
+TopLevel: Architecture
+SubLevel: UiFramework
+Priority: P2
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.ComboBoxAndRadioButton.md
+- SourceSection: Future ideas
+- Captured: 2026-02-17
+Tags: [ui, architecture, types, correctness]
+Summary: Add reusable typed helpers for selection controls to map UI indices to domain values and back without duplicated offset math.
+Rationale: Reduces off-by-one bugs and duplicated `index <-> value` logic when controls include synthetic items like `Default`.
+SuccessCriteria:
+- Shared helpers cover both `domain -> combo index` and `combo index -> domain` mapping.
+- Prompt Lab model selection uses shared helpers instead of inline offset logic.
+- Unit tests cover empty catalogs, default-item offsets, and out-of-range indices.
+
+#### [FI-Architecture-UiFramework-0008] Strategy map for `WM_CTLCOLOR*` paint routing
+Status: Candidate
+TopLevel: Architecture
+SubLevel: UiFramework
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.ComboBoxAndRadioButton.md
+- SourceSection: Future ideas
+- Captured: 2026-02-17
+Tags: [ui, painting, routing, architecture]
+Summary: Centralize `WM_CTLCOLOR*` handling in a message-plus-kind strategy table so new controls can register paint behavior consistently.
+Rationale: Avoids fragile per-control branching and reduces routing mistakes for auxiliary HWND cases like combo dropdown listboxes.
+SuccessCriteria:
+- Paint routing is driven by a single strategy map keyed by message type and control role.
+- Combo/listbox, edit, static, and button routes are covered by strategy entries.
+- Adding a new control style requires only strategy registration plus tests.
+Notes: A future enhancement may maintain reverse HWND mapping for auxiliary child HWNDs to improve routing precision.
 
 ## Ingestion
 
@@ -262,12 +353,37 @@ Origin:
 - SourceDoc: Plan.Phase6.RssIngestion.md
 - SourceSection: Future Extensions (Scheduling)
 - Captured: 2026-02-12
+- SourceDoc: Plan.Phase7.HeadlessBatchRunner.md
+- SourceSection: Future Ideas Mapping (Not closed by this phase)
+- Captured: 2026-02-17
 Tags: [polling, scheduling]
 Summary: Add `poll_interval_minutes` to source config and poll automatically based on last-run time.
 Rationale: Enables continuous ingestion without manual polling.
 SuccessCriteria:
 - Sources with a configured interval are polled on schedule without user action.
 - Manual polling still works and resets the last-polled timestamp.
+
+### ScriptSources
+
+#### [FI-Ingestion-ScriptSources-0001] Runtime implementation for script sources
+Status: Candidate
+TopLevel: Ingestion
+SubLevel: ScriptSources
+Priority: P2
+Effort: M
+Risk: H
+Origin:
+- SourceDoc: Plan.Phase7.HeadlessBatchRunner.md
+- SourceSection: Blocker B: Script sources are not implemented
+- Captured: 2026-02-17
+Tags: [ingestion, scripting, sources, security]
+Summary: Implement runtime polling support for `SourceType::Script` so script-defined sources can produce ingestion items instead of always failing.
+Rationale: Eliminates a known functionality gap and removes the need for skip-or-fail behavior flags when script sources are configured.
+SuccessCriteria:
+- Script sources execute with a defined contract (input/output format, timeout, and error handling).
+- Successful script runs emit discovered items into the same ingestion pipeline as file/RSS sources.
+- Failures are reported with actionable diagnostics and do not crash the batch runner.
+Notes: Implementation should include explicit execution guardrails and policy controls because script execution has elevated security risk.
 
 ### SourceCursoring
 
@@ -302,6 +418,9 @@ Origin:
 - SourceDoc: Plan.Rough.RssLlmCuration.SecurityFirst.md
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
+- SourceDoc: Plan.Phase7.HeadlessBatchRunner.md
+- SourceSection: Future Ideas Mapping (Close when Phase 7 completes)
+- Captured: 2026-02-17
 Tags: [ingestion, validation, tooling]
 Summary: Add a dry-run mode that validates and reports items without enqueueing jobs.
 Rationale: Allows safe testing of new source configurations.
@@ -790,6 +909,25 @@ SuccessCriteria:
 - Anthropic and Google adapters implement the same provider trait as OpenAI.
 - Provider selection is configurable without code changes.
 
+#### [FI-LLM-Providers-0002] Provider capability metadata for model filtering
+Status: Candidate
+TopLevel: LLM
+SubLevel: Providers
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.ComboBoxAndRadioButton.md
+- SourceSection: Future ideas
+- Captured: 2026-02-17
+Tags: [llm, providers, metadata, prompt-lab]
+Summary: Extend model discovery with provider capability metadata (for example `chat`, `vision`, `audio`, `realtime`) and drive Prompt Lab filtering from capabilities instead of string patterns.
+Rationale: Makes model filtering more robust and provider-agnostic than name-based allow/deny heuristics.
+SuccessCriteria:
+- Provider model listing includes capability tags in a normalized structure.
+- Prompt Lab model filtering uses capability requirements rather than hard-coded name patterns.
+- Unknown capabilities degrade safely with deterministic fallback behavior.
+
 ### Replay
 
 #### [FI-LLM-Replay-0001] Offline re-validation of saved outputs
@@ -1051,6 +1189,9 @@ Origin:
 - SourceDoc: Plan.Phase6.RssIngestion.md
 - SourceSection: Future Extensions (Source health telemetry)
 - Captured: 2026-02-12
+- SourceDoc: Plan.Phase7.EffectRunnerRefactoring.md
+- SourceSection: Future extensions (post-Phase 7)
+- Captured: 2026-02-17
 Tags: [telemetry, health, rss]
 Summary: Track per-source success/failure counts, latency, and last item count.
 Rationale: Improves visibility into ingestion reliability and performance.
@@ -1077,6 +1218,27 @@ SuccessCriteria:
 - Successful polls reset the failure streak and reduce backoff.
 
 ## Performance
+
+### IoThroughput
+
+#### [FI-Performance-IoThroughput-0003] Bounded worker pools for non-LLM IO effects
+Status: Candidate
+TopLevel: Performance
+SubLevel: IoThroughput
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.Phase7.EffectRunnerRefactoring.md
+- SourceSection: Future extensions (post-Phase 7)
+- Captured: 2026-02-17
+Tags: [performance, concurrency, io, effect-runner]
+Summary: Add bounded worker pools for non-LLM IO effects (downloads, file writes, feed fetches) to reduce per-effect thread spawning churn in the shared effect runner.
+Rationale: Improves resource efficiency and predictability under sustained batch workloads with many concurrent IO effects.
+SuccessCriteria:
+- Non-LLM IO effects are dispatched through a bounded worker pool with a configurable concurrency limit.
+- Thread spawning per effect is eliminated in favor of pool reuse.
+- Pool saturation is observable via logging or metrics.
 
 ### LlmProcessing
 
@@ -1320,6 +1482,26 @@ SuccessCriteria:
 - Export pipeline can emit multi-part artifacts with per-part token counts and stable ordering.
 - No chunk exceeds the configured token ceiling.
 - A manifest maps chunk files back to original documents and ordering.
+
+#### [FI-Storage-ExportArtifacts-0003] Per-cycle machine-readable artifact export
+Status: Candidate
+TopLevel: Storage
+SubLevel: ExportArtifacts
+Priority: P2
+Effort: M
+Risk: L
+Origin:
+- SourceDoc: Plan.Phase7.EffectRunnerRefactoring.md
+- SourceSection: Future extensions (post-Phase 7)
+- Captured: 2026-02-17
+Tags: [batch, export, json, observability]
+Summary: Emit a machine-readable JSON summary after each batch cycle containing poll results, triage outcomes, and briefing metadata.
+Rationale: Enables external tooling, dashboards, and compliance pipelines to consume cycle results without parsing logs.
+SuccessCriteria:
+- Each completed cycle writes a structured JSON artifact to the output directory.
+- Artifact includes poll counts, triage decision counts, and briefing metadata.
+- Artifact schema is stable and documented.
+Related: [FI-Storage-ExportArtifacts-0001]
 
 ### NormalizationVersioning
 
