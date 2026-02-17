@@ -36,8 +36,9 @@ pub use prompt_lab::{
 };
 pub use source_state::{SourceInstanceState, SourceStateIndex};
 pub use state::{
-    normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId, JobResultKind,
-    LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex, SessionState, Stage,
+    normalize_url_for_dedupe, AppState, BatchObservation, CompletedJobSnapshot, JobId,
+    JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
+    SessionState, Stage,
 };
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,

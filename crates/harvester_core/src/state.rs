@@ -10,7 +10,7 @@ use crate::prompt_lab::{
 };
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
-use crate::triage::{ArticleTriageResult, ArticleTriageState, TriageSession};
+use crate::triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession};
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
@@ -220,6 +220,38 @@ pub struct CompletedJobSnapshot {
 /// Maximum allowed value for any per-flow in-flight limit.
 pub const MAX_IN_FLIGHT_LIMIT: usize = 10;
 
+/// Snapshot of batch processing state for headless runners.
+/// Provides observable metrics without UI dependencies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchObservation {
+    /// True if work is actively being polled/processed.
+    pub poll_in_progress: bool,
+    /// Current session state.
+    pub session_state: SessionState,
+    /// Total number of jobs.
+    pub jobs_total: usize,
+    /// Number of jobs in Done stage.
+    pub jobs_done: usize,
+    /// Number of jobs that failed.
+    pub jobs_failed: usize,
+    /// Number of jobs with in-flight LLM requests.
+    pub jobs_in_flight: usize,
+    /// Pre-triage phase status.
+    pub pre_triage_phase: PreTriagePhase,
+    /// Triage phase status.
+    pub triage_phase: TriagePhase,
+    /// Total articles loaded for triage.
+    pub triage_total: usize,
+    /// Articles awaiting triage.
+    pub triage_pending: usize,
+    /// Articles currently being triaged.
+    pub triage_in_flight: usize,
+    /// Articles with triage complete.
+    pub triage_completed: usize,
+    /// Articles that failed triage.
+    pub triage_failed: usize,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
     session: SessionState,
@@ -341,6 +373,56 @@ impl AppState {
 
     pub fn summary_max_in_flight(&self) -> usize {
         self.summary_max_in_flight
+    }
+
+    /// Returns a snapshot of batch processing state for headless monitoring.
+    /// Provides metrics without UI dependencies.
+    pub fn batch_observation(&self) -> BatchObservation {
+        // Count jobs by state
+        let jobs_total = self.jobs.len();
+        let mut jobs_done = 0;
+        let mut jobs_failed = 0;
+        let mut jobs_in_flight = 0;
+
+        for job in self.jobs.values() {
+            match job.stage {
+                Stage::Done => jobs_done += 1,
+                Stage::Downloading | Stage::Sanitizing | Stage::Converting | Stage::Tokenizing => {
+                    // Check if this job has an in-flight LLM request
+                    if self
+                        .llm_requests
+                        .values()
+                        .any(|req| matches!(req, LlmRequestState::Pending { .. }))
+                    {
+                        jobs_in_flight += 1;
+                    }
+                }
+                _ => {}
+            }
+            if let Some(JobResultKind::Failed { .. }) = job.outcome {
+                jobs_failed += 1;
+            }
+        }
+
+        // Triage metrics
+        let (triage_total, triage_pending, triage_in_flight, triage_completed, triage_failed) =
+            self.triage.observation_counts();
+
+        BatchObservation {
+            poll_in_progress: matches!(self.session, SessionState::Running),
+            session_state: self.session,
+            jobs_total,
+            jobs_done,
+            jobs_failed,
+            jobs_in_flight,
+            pre_triage_phase: self.pre_triage.phase().clone(),
+            triage_phase: self.triage.phase().clone(),
+            triage_total,
+            triage_pending,
+            triage_in_flight,
+            triage_completed,
+            triage_failed,
+        }
     }
 
     pub fn view(&self) -> AppViewModel {

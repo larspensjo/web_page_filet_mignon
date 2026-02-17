@@ -199,6 +199,18 @@ impl TriageSession {
         self.phase = TriagePhase::Failed { reason };
     }
 
+    /// Returns tuple of (total, pending, in_flight, completed, failed) counts.
+    /// Used for batch observation without exposing internal structure.
+    pub fn observation_counts(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.total(),
+            self.pending_count(),
+            self.in_progress_count(),
+            self.completed_count(),
+            self.failed_count(),
+        )
+    }
+
     pub fn complete(&mut self) {
         self.phase = TriagePhase::Complete;
     }
