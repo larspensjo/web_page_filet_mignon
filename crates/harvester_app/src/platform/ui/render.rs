@@ -476,32 +476,38 @@ pub fn render(
         });
         tree_state.prev_prompt_lab_stage_briefing_checked = Some(stage_briefing_checked);
     }
-    if tree_state.prev_prompt_lab_section_compare_checked != Some(view.prompt_lab.compare_section_open)
+    if tree_state.prev_prompt_lab_section_compare_checked
+        != Some(view.prompt_lab.compare_section_open)
     {
         cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
             checked: view.prompt_lab.compare_section_open,
         });
-        tree_state.prev_prompt_lab_section_compare_checked = Some(view.prompt_lab.compare_section_open);
+        tree_state.prev_prompt_lab_section_compare_checked =
+            Some(view.prompt_lab.compare_section_open);
     }
-    if tree_state.prev_prompt_lab_section_context_checked != Some(view.prompt_lab.context_section_open)
+    if tree_state.prev_prompt_lab_section_context_checked
+        != Some(view.prompt_lab.context_section_open)
     {
         cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
             checked: view.prompt_lab.context_section_open,
         });
-        tree_state.prev_prompt_lab_section_context_checked = Some(view.prompt_lab.context_section_open);
+        tree_state.prev_prompt_lab_section_context_checked =
+            Some(view.prompt_lab.context_section_open);
     }
-    if tree_state.prev_prompt_lab_section_template_checked != Some(view.prompt_lab.template_section_open)
+    if tree_state.prev_prompt_lab_section_template_checked
+        != Some(view.prompt_lab.template_section_open)
     {
         cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
             checked: view.prompt_lab.template_section_open,
         });
-        tree_state.prev_prompt_lab_section_template_checked = Some(view.prompt_lab.template_section_open);
+        tree_state.prev_prompt_lab_section_template_checked =
+            Some(view.prompt_lab.template_section_open);
     }
     if tree_state.prev_prompt_lab_section_run_details_checked
         != Some(view.prompt_lab.run_details_section_open)

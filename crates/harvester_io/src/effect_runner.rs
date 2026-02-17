@@ -146,7 +146,12 @@ impl EffectRunner {
     fn execute_effect(&self, effect: Effect) {
         match effect {
             Effect::EnqueueUrl { job_id, url } => {
-                engine_info!("EnqueueUrl job_id={} url_len={} url={}", job_id, url.len(), url);
+                engine_info!(
+                    "EnqueueUrl job_id={} url_len={} url={}",
+                    job_id,
+                    url.len(),
+                    url
+                );
                 self.engine.enqueue(job_id, url);
             }
             Effect::StartSession => {
@@ -169,7 +174,11 @@ impl EffectRunner {
                 let registry = self.prompt_registry.clone();
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 thread::spawn(move || {
-                    engine_info!("[prompt-lab] resolve requested resolve_id={} url={}", resolve_id, url);
+                    engine_info!(
+                        "[prompt-lab] resolve requested resolve_id={} url={}",
+                        resolve_id,
+                        url
+                    );
                     let guard = registry.read().unwrap();
                     match load_and_prepare_articles_filtered(
                         &output_dir,
@@ -231,7 +240,12 @@ impl EffectRunner {
 
                                     let models: Vec<_> = model_names
                                         .into_iter()
-                                        .map(|name| harvester_engine::llm::types::ModelId::new(provider_kind, name))
+                                        .map(|name| {
+                                            harvester_engine::llm::types::ModelId::new(
+                                                provider_kind,
+                                                name,
+                                            )
+                                        })
                                         .collect();
                                     (models, harvester_core::ModelCatalogSource::Remote)
                                 }
@@ -240,16 +254,28 @@ impl EffectRunner {
                                         "[prompt-lab-model] remote discovery failed: {}",
                                         err
                                     );
-                                    (local_fallback_models, harvester_core::ModelCatalogSource::LocalFallback)
+                                    (
+                                        local_fallback_models,
+                                        harvester_core::ModelCatalogSource::LocalFallback,
+                                    )
                                 }
                             },
                             Err(err) => {
-                                engine_warn!("[prompt-lab-model] tokio runtime creation failed: {}", err);
-                                (local_fallback_models, harvester_core::ModelCatalogSource::LocalFallback)
+                                engine_warn!(
+                                    "[prompt-lab-model] tokio runtime creation failed: {}",
+                                    err
+                                );
+                                (
+                                    local_fallback_models,
+                                    harvester_core::ModelCatalogSource::LocalFallback,
+                                )
                             }
                         }
                     } else {
-                        (local_fallback_models, harvester_core::ModelCatalogSource::LocalFallback)
+                        (
+                            local_fallback_models,
+                            harvester_core::ModelCatalogSource::LocalFallback,
+                        )
                     };
 
                     let _ = msg_tx.send(Msg::PromptLabModelCatalogLoaded { models, source });
@@ -328,7 +354,11 @@ impl EffectRunner {
                 thread::spawn(move || {
                     if let Err(err) = fs::create_dir_all(&contexts_dir) {
                         let reason = format!("failed to create contexts directory: {}", err);
-                        engine_error!("[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}", reason, prompt_id);
+                        engine_error!(
+                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                            reason,
+                            prompt_id
+                        );
                         let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
                         return;
                     }
@@ -341,8 +371,13 @@ impl EffectRunner {
                             Ok(file) => file.meta,
                             Err(err) => {
                                 let reason = format!("failed to read existing context: {}", err);
-                                engine_error!("[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}", reason, prompt_id);
-                                let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
+                                engine_error!(
+                                    "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                                    reason,
+                                    prompt_id
+                                );
+                                let _ = msg_tx
+                                    .send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
                                 return;
                             }
                         }
@@ -366,14 +401,22 @@ impl EffectRunner {
                     context_pairs.sort_by(|a, b| a.0.cmp(&b.0));
                     let variables = context_pairs.into_iter().collect::<HashMap<_, _>>();
 
-                    let ctx_file = PromptContextFile { meta: meta.clone(), variables };
+                    let ctx_file = PromptContextFile {
+                        meta: meta.clone(),
+                        variables,
+                    };
 
                     let mut toml_string = match toml::to_string(&ctx_file) {
                         Ok(serialized) => serialized,
                         Err(err) => {
                             let reason = format!("failed to serialize context: {}", err);
-                            engine_error!("[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}", reason, prompt_id);
-                            let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
+                            engine_error!(
+                                "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                                reason,
+                                prompt_id
+                            );
+                            let _ =
+                                msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
                             return;
                         }
                     };
@@ -382,19 +425,31 @@ impl EffectRunner {
                     let tmp_path = path.with_extension("toml.tmp");
                     if let Err(err) = fs::write(&tmp_path, toml_string) {
                         let reason = format!("failed to write temp file: {}", err);
-                        engine_error!("[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}", reason, prompt_id);
+                        engine_error!(
+                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                            reason,
+                            prompt_id
+                        );
                         let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
                         return;
                     }
 
                     if let Err(err) = fs::rename(&tmp_path, &path) {
                         let reason = format!("failed to rename temp file: {}", err);
-                        engine_error!("[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}", reason, prompt_id);
+                        engine_error!(
+                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
+                            reason,
+                            prompt_id
+                        );
                         let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
                         return;
                     }
 
-                    engine_info!("[prompt-lab-context] Saved context for {:?} to {:?}", prompt_id, path);
+                    engine_info!(
+                        "[prompt-lab-context] Saved context for {:?} to {:?}",
+                        prompt_id,
+                        path
+                    );
                     let _ = msg_tx.send(Msg::PromptLabContextSaved {
                         prompt_id,
                         path: path.display().to_string(),
@@ -413,7 +468,14 @@ impl EffectRunner {
                 let registry = self.prompt_registry.clone();
                 let msg_tx = self.msg_tx.clone();
                 thread::spawn(move || {
-                    match crate::save_prompt_template(&prompts_dir, prompt_id, &system_template, &user_template, &description, &expected_format) {
+                    match crate::save_prompt_template(
+                        &prompts_dir,
+                        prompt_id,
+                        &system_template,
+                        &user_template,
+                        &description,
+                        &expected_format,
+                    ) {
                         Ok((version, path)) => {
                             let overlay = PromptTemplateOwned {
                                 id: prompt_id,
@@ -435,7 +497,8 @@ impl EffectRunner {
                         }
                         Err(reason) => {
                             engine_error!("[prompt-lab-template] SavePromptTemplateFile failed prompt_id={:?} reason={}", prompt_id, reason);
-                            let _ = msg_tx.send(Msg::PromptLabTemplateSaveFailed { prompt_id, reason });
+                            let _ =
+                                msg_tx.send(Msg::PromptLabTemplateSaveFailed { prompt_id, reason });
                         }
                     }
                 });
@@ -462,7 +525,11 @@ impl EffectRunner {
                         },
                     ));
                     if let Err(err) = handle.send(cmd) {
-                        engine_warn!("LLM completion request failed to dispatch: request_id={} error={:?}", request_id, err);
+                        engine_warn!(
+                            "LLM completion request failed to dispatch: request_id={} error={:?}",
+                            request_id,
+                            err
+                        );
                         let _ = self.msg_tx.send(Msg::LlmCompleted {
                             request_id,
                             result: LlmResultKind::Failed {
@@ -471,10 +538,17 @@ impl EffectRunner {
                             metadata: None,
                         });
                     } else {
-                        engine_info!("[llm-dispatch] request_id={} prompt_id={:?}", request_id, prompt_id);
+                        engine_info!(
+                            "[llm-dispatch] request_id={} prompt_id={:?}",
+                            request_id,
+                            prompt_id
+                        );
                     }
                 } else {
-                    engine_warn!("LLM completion requested without handle: request_id={}", request_id);
+                    engine_warn!(
+                        "LLM completion requested without handle: request_id={}",
+                        request_id
+                    );
                     let _ = self.msg_tx.send(Msg::LlmCompleted {
                         request_id,
                         result: LlmResultKind::Failed {
@@ -491,7 +565,12 @@ impl EffectRunner {
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
                     let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(&output_dir, max_input_bytes, &guard, &ordered_urls) {
+                    match load_and_prepare_articles_filtered(
+                        &output_dir,
+                        max_input_bytes,
+                        &guard,
+                        &ordered_urls,
+                    ) {
                         Ok((articles, collection_text)) => {
                             let loaded_articles: Vec<LoadedArticle> = articles
                                 .into_iter()
@@ -502,7 +581,10 @@ impl EffectRunner {
                                     content_hash: article.content_hash,
                                 })
                                 .collect();
-                            engine_info!("[briefing-loader] prepared {} article(s)", loaded_articles.len());
+                            engine_info!(
+                                "[briefing-loader] prepared {} article(s)",
+                                loaded_articles.len()
+                            );
                             let _ = msg_tx.send(Msg::ArticlesLoaded {
                                 articles: loaded_articles,
                                 collection_text,
@@ -522,7 +604,12 @@ impl EffectRunner {
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
                     let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(&output_dir, max_input_bytes, &guard, &ordered_urls) {
+                    match load_and_prepare_articles_filtered(
+                        &output_dir,
+                        max_input_bytes,
+                        &guard,
+                        &ordered_urls,
+                    ) {
                         Ok((engine_articles, _)) => {
                             let articles: Vec<LoadedArticle> = engine_articles
                                 .into_iter()
@@ -548,7 +635,12 @@ impl EffectRunner {
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
                     let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(&output_dir, max_input_bytes, &guard, &ordered_urls) {
+                    match load_and_prepare_articles_filtered(
+                        &output_dir,
+                        max_input_bytes,
+                        &guard,
+                        &ordered_urls,
+                    ) {
                         Ok((engine_articles, _)) => {
                             let articles: Vec<LoadedArticle> = engine_articles
                                 .into_iter()
@@ -572,7 +664,10 @@ impl EffectRunner {
                 let contexts_dir = self.paths.contexts_dir.clone();
                 thread::spawn(move || {
                     if !contexts_dir.exists() {
-                        engine_warn!("[PromptContext] contexts directory not found at {:?}", contexts_dir);
+                        engine_warn!(
+                            "[PromptContext] contexts directory not found at {:?}",
+                            contexts_dir
+                        );
                         let _ = msg_tx.send(Msg::PromptContextsLoaded {
                             contexts: HashMap::new(),
                         });
@@ -617,7 +712,10 @@ impl EffectRunner {
                         let loaded_template = match entry {
                             Ok(lt) => lt,
                             Err(reason) => {
-                                engine_warn!("[prompt-lab-template] Failed to load saved template: {}", reason);
+                                engine_warn!(
+                                    "[prompt-lab-template] Failed to load saved template: {}",
+                                    reason
+                                );
                                 continue;
                             }
                         };
@@ -699,7 +797,11 @@ impl EffectRunner {
                             engine_info!("[summary-cache] Persisted cache to {:?}", path);
                         }
                         Err(err) => {
-                            engine_warn!("[summary-cache] Failed to persist cache to {:?}: {}", path, err);
+                            engine_warn!(
+                                "[summary-cache] Failed to persist cache to {:?}: {}",
+                                path,
+                                err
+                            );
                         }
                     }
                     // Fire-and-forget, no message sent
@@ -715,7 +817,11 @@ impl EffectRunner {
                             engine_info!("[triage-cache] Persisted cache to {:?}", path);
                         }
                         Err(err) => {
-                            engine_warn!("[triage-cache] Failed to persist cache to {:?}: {}", path, err);
+                            engine_warn!(
+                                "[triage-cache] Failed to persist cache to {:?}: {}",
+                                path,
+                                err
+                            );
                         }
                     }
                     // Fire-and-forget, no message sent
@@ -796,8 +902,8 @@ impl EffectRunner {
     fn validate_effect(&self, effect: &Effect) -> Result<(), String> {
         match effect {
             Effect::EnqueueUrl { url, .. } => {
-                let parsed = url::Url::parse(url)
-                    .map_err(|err| format!("invalid url {}: {}", url, err))?;
+                let parsed =
+                    url::Url::parse(url).map_err(|err| format!("invalid url {}: {}", url, err))?;
                 self.url_policy
                     .check(&parsed)
                     .map_err(|violation| format!("url policy violation: {}", violation))?;
@@ -806,9 +912,9 @@ impl EffectRunner {
             Effect::DownloadLinkedPage { url, .. } => {
                 let parsed = url::Url::parse(url)
                     .map_err(|err| format!("invalid linked page url {}: {}", url, err))?;
-                self.url_policy
-                    .check(&parsed)
-                    .map_err(|violation| format!("linked page url policy violation: {}", violation))?;
+                self.url_policy.check(&parsed).map_err(|violation| {
+                    format!("linked page url policy violation: {}", violation)
+                })?;
                 Ok(())
             }
             Effect::DeleteLinkedPage { path, .. } => {
@@ -887,7 +993,11 @@ impl EffectRunner {
                         config.max_urls_per_poll,
                     ) {
                         Ok(result) => {
-                            engine_info!("[file-poll] {} => {} URL(s)", source_id, result.urls.len());
+                            engine_info!(
+                                "[file-poll] {} => {} URL(s)",
+                                source_id,
+                                result.urls.len()
+                            );
                             let _ = msg_tx.send(Msg::SourcePollCompleted {
                                 source_id,
                                 urls: result.urls,
@@ -902,12 +1012,13 @@ impl EffectRunner {
                         }
                     },
                     SourceType::CuratedList { urls } => {
-                        let result = poll_curated_source(
-                            source_id.clone(),
-                            &urls,
-                            config.max_urls_per_poll,
+                        let result =
+                            poll_curated_source(source_id.clone(), &urls, config.max_urls_per_poll);
+                        engine_info!(
+                            "[curated-poll] {} => {} URL(s)",
+                            source_id,
+                            result.urls.len()
                         );
-                        engine_info!("[curated-poll] {} => {} URL(s)", source_id, result.urls.len());
                         let _ = msg_tx.send(Msg::SourcePollCompleted {
                             source_id,
                             urls: result.urls,

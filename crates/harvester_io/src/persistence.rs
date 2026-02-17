@@ -42,7 +42,11 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
             return Vec::new();
         }
         Err(err) => {
-            engine_warn!("Failed to read persisted state from {:?}: {}", state_path, err);
+            engine_warn!(
+                "Failed to read persisted state from {:?}: {}",
+                state_path,
+                err
+            );
             return Vec::new();
         }
     };
@@ -50,7 +54,11 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
     let state: PersistedState = match ron::from_str(&content) {
         Ok(state) => state,
         Err(err) => {
-            engine_warn!("Failed to parse persisted state from {:?}: {}", state_path, err);
+            engine_warn!(
+                "Failed to parse persisted state from {:?}: {}",
+                state_path,
+                err
+            );
             return Vec::new();
         }
     };
@@ -86,14 +94,22 @@ pub fn load_pre_triage_overrides(
             return std::collections::HashMap::new();
         }
         Err(err) => {
-            engine_warn!("Failed to read persisted state from {:?}: {}", state_path, err);
+            engine_warn!(
+                "Failed to read persisted state from {:?}: {}",
+                state_path,
+                err
+            );
             return std::collections::HashMap::new();
         }
     };
     let state: PersistedState = match ron::from_str(&content) {
         Ok(state) => state,
         Err(err) => {
-            engine_warn!("Failed to parse persisted state from {:?}: {}", state_path, err);
+            engine_warn!(
+                "Failed to parse persisted state from {:?}: {}",
+                state_path,
+                err
+            );
             return std::collections::HashMap::new();
         }
     };
