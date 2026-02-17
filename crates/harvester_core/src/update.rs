@@ -637,6 +637,26 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Effect::LoadArticlesForBriefingPrereq { ordered_urls },
             ]
         }
+        Msg::PrepareSummariesClicked => {
+            if !state.briefing().can_start() {
+                return (state, Vec::new());
+            }
+            if state.triage().is_active() {
+                engine_info!("[briefing-triage] summary-prep blocked: triage in progress");
+                return (state, Vec::new());
+            }
+            state.request_summary_preparation();
+            state.set_briefing(BriefingSession::new_waiting_for_triage(None));
+            state.revert_preview_to_briefing();
+            engine_info!("[briefing-triage] summary-prep requested");
+            let ordered_urls = state.ordered_completed_job_urls();
+            vec![
+                Effect::LoadPromptContexts,
+                Effect::LoadPromptTemplateFiles,
+                Effect::LoadLlmMetadata,
+                Effect::LoadArticlesForBriefingPrereq { ordered_urls },
+            ]
+        }
         Msg::BriefingPrereqArticlesLoaded { articles } => {
             engine_info!("[briefing-triage] prereq loaded count={}", articles.len());
             let policy = PreTriagePolicy::default();
@@ -1937,6 +1957,18 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         state
             .briefing_mut()
             .fail("all article summaries failed".to_string());
+        state.mark_dirty();
+        log_summary_cache_run_summary(state);
+        effects.push(Effect::PersistSummaryCache {
+            cache: state.summary_cache().clone(),
+        });
+        return;
+    }
+
+    if state.briefing_orchestration_skip_aggregate() {
+        state.briefing_mut().complete_without_briefing();
+        state.revert_preview_to_briefing();
+        state.clear_briefing_orchestration();
         state.mark_dirty();
         log_summary_cache_run_summary(state);
         effects.push(Effect::PersistSummaryCache {

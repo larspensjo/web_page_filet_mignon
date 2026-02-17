@@ -84,6 +84,7 @@ pub(crate) enum TriageCacheLookupResult<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct BriefingOrchestration {
     requested: bool,
+    skip_aggregate_briefing: bool,
     priority_cutoff_exclusive: u8,
     prereq_articles: Option<Vec<crate::briefing::LoadedArticle>>,
 }
@@ -92,6 +93,7 @@ impl Default for BriefingOrchestration {
     fn default() -> Self {
         Self {
             requested: false,
+            skip_aggregate_briefing: false,
             priority_cutoff_exclusive: 1,
             prereq_articles: None,
         }
@@ -99,8 +101,9 @@ impl Default for BriefingOrchestration {
 }
 
 impl BriefingOrchestration {
-    fn request(&mut self) {
+    fn request(&mut self, skip_aggregate_briefing: bool) {
         self.requested = true;
+        self.skip_aggregate_briefing = skip_aggregate_briefing;
     }
 
     fn store_prereq(&mut self, articles: Vec<crate::briefing::LoadedArticle>) {
@@ -113,6 +116,7 @@ impl BriefingOrchestration {
 
     fn clear(&mut self) {
         self.requested = false;
+        self.skip_aggregate_briefing = false;
         self.prereq_articles = None;
     }
 
@@ -129,6 +133,10 @@ impl BriefingOrchestration {
 
     fn clear_request(&mut self) {
         self.requested = false;
+    }
+
+    fn skip_aggregate_briefing(&self) -> bool {
+        self.skip_aggregate_briefing
     }
 }
 
@@ -238,6 +246,14 @@ pub struct BatchObservation {
     pub jobs_in_flight: usize,
     /// Pre-triage phase status.
     pub pre_triage_phase: PreTriagePhase,
+    /// Total articles loaded into pre-triage.
+    pub pre_triage_total: usize,
+    /// Articles currently included by pre-triage decisions.
+    pub pre_triage_included: usize,
+    /// Articles still requiring manual review.
+    pub pre_triage_review: usize,
+    /// Articles filtered out by pre-triage.
+    pub pre_triage_filtered: usize,
     /// Triage phase status.
     pub triage_phase: TriagePhase,
     /// Total articles loaded for triage.
@@ -250,6 +266,28 @@ pub struct BatchObservation {
     pub triage_completed: usize,
     /// Articles that failed triage.
     pub triage_failed: usize,
+    /// Total articles in summary preparation session.
+    pub summary_total: usize,
+    /// Articles awaiting summary generation.
+    pub summary_pending: usize,
+    /// Articles currently being summarized.
+    pub summary_in_flight: usize,
+    /// Articles with summary complete.
+    pub summary_completed: usize,
+    /// Articles that failed summary generation.
+    pub summary_failed: usize,
+    /// Triage cache hits during the latest triage cache run.
+    pub triage_cache_hits: usize,
+    /// Triage cache misses during the latest triage cache run.
+    pub triage_cache_misses: usize,
+    /// Triage cache key-unavailable count during the latest triage cache run.
+    pub triage_cache_key_unavailable: usize,
+    /// Summary cache hits during the latest summary cache run.
+    pub summary_cache_hits: usize,
+    /// Summary cache misses during the latest summary cache run.
+    pub summary_cache_misses: usize,
+    /// Summary cache key-unavailable count during the latest summary cache run.
+    pub summary_cache_key_unavailable: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -398,6 +436,24 @@ impl AppState {
         // Triage metrics
         let (triage_total, triage_pending, triage_in_flight, triage_completed, triage_failed) =
             self.triage.observation_counts();
+        let pre_triage_total = self.pre_triage.entries().len();
+        let pre_triage_included = self.pre_triage.resolved_included_articles().len();
+        let pre_triage_review = self
+            .pre_triage
+            .entries()
+            .iter()
+            .filter(|entry| {
+                matches!(entry.auto_verdict, crate::AutoVerdict::Review)
+                    && entry.manual_decision.is_none()
+            })
+            .count();
+        let pre_triage_filtered =
+            pre_triage_total.saturating_sub(pre_triage_included + pre_triage_review);
+        let summary_total = self.briefing.articles().len();
+        let summary_pending = self.briefing.pending_count();
+        let summary_in_flight = self.briefing.in_progress_count();
+        let summary_completed = self.briefing.completed_summary_count();
+        let summary_failed = self.briefing.failed_summary_count();
 
         BatchObservation {
             poll_in_progress: self.source_states.is_poll_in_progress(),
@@ -407,12 +463,28 @@ impl AppState {
             jobs_failed,
             jobs_in_flight,
             pre_triage_phase: self.pre_triage.phase().clone(),
+            pre_triage_total,
+            pre_triage_included,
+            pre_triage_review,
+            pre_triage_filtered,
             triage_phase: self.triage.phase().clone(),
             triage_total,
             triage_pending,
             triage_in_flight,
             triage_completed,
             triage_failed,
+            summary_total,
+            summary_pending,
+            summary_in_flight,
+            summary_completed,
+            summary_failed,
+            triage_cache_hits: self.triage_cache_run_metrics.hits() as usize,
+            triage_cache_misses: self.triage_cache_run_metrics.misses() as usize,
+            triage_cache_key_unavailable: self.triage_cache_run_metrics.key_unavailable()
+                as usize,
+            summary_cache_hits: self.summary_cache_metrics.hits(),
+            summary_cache_misses: self.summary_cache_metrics.misses(),
+            summary_cache_key_unavailable: self.summary_cache_metrics.key_unavailable(),
         }
     }
 
@@ -933,7 +1005,11 @@ impl AppState {
     }
 
     pub(crate) fn request_briefing_orchestration(&mut self) {
-        self.briefing_orchestration.request();
+        self.briefing_orchestration.request(false);
+    }
+
+    pub(crate) fn request_summary_preparation(&mut self) {
+        self.briefing_orchestration.request(true);
     }
 
     pub(crate) fn store_briefing_prereq_articles(
@@ -959,6 +1035,10 @@ impl AppState {
 
     pub(crate) fn briefing_triage_policy(&self) -> crate::briefing::TriageSelectionPolicy {
         self.briefing_orchestration.policy()
+    }
+
+    pub(crate) fn briefing_orchestration_skip_aggregate(&self) -> bool {
+        self.briefing_orchestration.skip_aggregate_briefing()
     }
 
     /// Get an immutable reference to the summary cache.

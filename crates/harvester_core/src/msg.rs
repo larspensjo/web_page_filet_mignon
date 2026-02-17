@@ -104,6 +104,8 @@ pub enum Msg {
     },
     /// User requested generation of a briefing.
     GenerateBriefingClicked,
+    /// Headless batch flow: run triage + per-article summaries but skip aggregate briefing.
+    PrepareSummariesClicked,
     /// User requested triage.
     TriageClicked,
     PreTriageDecisionSet {
