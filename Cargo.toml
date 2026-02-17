@@ -4,6 +4,7 @@ members = [
     "crates/harvester_core",
     "crates/harvester_engine",
     "crates/harvester_io",
+    "crates/harvester_batch",
     "crates/engine_logging",
 ]
 resolver = "2"

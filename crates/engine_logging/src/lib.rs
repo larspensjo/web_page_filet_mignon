@@ -86,3 +86,51 @@ pub fn initialize_for_tests() {
         ColorChoice::Auto,
     )]);
 }
+
+/// Initializes logging for production use: both terminal and file output.
+///
+/// Logs to both stderr and `./engine.log` in the current working directory.
+/// This safely no-ops if another logger has already been initialized.
+pub fn initialize() {
+    use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
+    use std::fs::OpenOptions;
+
+    let level = log::LevelFilter::Info;
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("engine.log")
+        .expect("Failed to open engine.log");
+
+    // Ignore the error if a logger was already set.
+    let _ = CombinedLogger::init(vec![
+        TermLogger::new(
+            level,
+            Config::default(),
+            TerminalMode::Stderr,
+            ColorChoice::Auto,
+        ),
+        WriteLogger::new(level, Config::default(), log_file),
+    ]);
+}
+
+/// Initializes file-only logging (no console output) for dry-run mode.
+///
+/// Logs only to `./engine.log` in the current working directory.
+/// This safely no-ops if another logger has already been initialized.
+pub fn initialize_file_only() {
+    use simplelog::{CombinedLogger, Config, WriteLogger};
+    use std::fs::OpenOptions;
+
+    let level = log::LevelFilter::Info;
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("engine.log")
+        .expect("Failed to open engine.log");
+
+    // Ignore the error if a logger was already set.
+    let _ = CombinedLogger::init(vec![WriteLogger::new(level, Config::default(), log_file)]);
+}

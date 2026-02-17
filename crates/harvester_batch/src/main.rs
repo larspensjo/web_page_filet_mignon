@@ -1,0 +1,38 @@
+//! Harvester batch runner - headless CLI for scheduled execution
+
+mod cli;
+mod lock;
+mod runner;
+
+use cli::Args;
+use engine_logging::{engine_error, engine_info};
+use std::process;
+
+fn main() {
+    let args = Args::parse();
+    
+    // Initialize logging
+    if args.dry_run {
+        // In dry-run mode, log to file only (no console spam)
+        engine_logging::initialize_file_only();
+    } else {
+        // Normal mode: log to both console and file
+        engine_logging::initialize();
+    }
+
+    engine_info!("[batch] Starting harvester_batch");
+    engine_info!("[batch] output_dir: {:?}", args.output_dir);
+    engine_info!("[batch] sources: {:?}", args.sources);
+    engine_info!("[batch] dry_run: {}", args.dry_run);
+
+    let exit_code = match runner::run(args) {
+        Ok(code) => code,
+        Err(err) => {
+            engine_error!("[batch] Fatal error: {}", err);
+            2
+        }
+    };
+
+    engine_info!("[batch] Exiting with code {}", exit_code);
+    process::exit(exit_code);
+}
