@@ -11,14 +11,8 @@ use std::process;
 fn main() {
     let args = Args::parse();
 
-    // Initialize logging
-    if args.dry_run {
-        // In dry-run mode, log to file only (no console spam)
-        engine_logging::initialize_file_only();
-    } else {
-        // Normal mode: log to both console and file
-        engine_logging::initialize();
-    }
+    // Batch mode is file-only to keep stderr/stdout clean during scheduled runs.
+    engine_logging::initialize_file_only();
 
     engine_info!("[batch] Starting harvester_batch");
     engine_info!("[batch] output_dir: {:?}", args.output_dir);

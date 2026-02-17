@@ -378,29 +378,20 @@ impl AppState {
     /// Returns a snapshot of batch processing state for headless monitoring.
     /// Provides metrics without UI dependencies.
     pub fn batch_observation(&self) -> BatchObservation {
-        // Count jobs by state
+        // Count jobs by outcome visibility for batch settling:
+        // - in-flight includes queued and actively processing jobs (no final outcome yet)
+        // - done counts successful completions
+        // - failed counts terminal failures
         let jobs_total = self.jobs.len();
         let mut jobs_done = 0;
         let mut jobs_failed = 0;
         let mut jobs_in_flight = 0;
 
         for job in self.jobs.values() {
-            match job.stage {
-                Stage::Done => jobs_done += 1,
-                Stage::Downloading | Stage::Sanitizing | Stage::Converting | Stage::Tokenizing => {
-                    // Check if this job has an in-flight LLM request
-                    if self
-                        .llm_requests
-                        .values()
-                        .any(|req| matches!(req, LlmRequestState::Pending { .. }))
-                    {
-                        jobs_in_flight += 1;
-                    }
-                }
-                _ => {}
-            }
-            if let Some(JobResultKind::Failed { .. }) = job.outcome {
-                jobs_failed += 1;
+            match job.outcome.as_ref() {
+                Some(JobResultKind::Success) => jobs_done += 1,
+                Some(JobResultKind::Failed { .. }) => jobs_failed += 1,
+                None => jobs_in_flight += 1,
             }
         }
 
@@ -409,7 +400,7 @@ impl AppState {
             self.triage.observation_counts();
 
         BatchObservation {
-            poll_in_progress: matches!(self.session, SessionState::Running),
+            poll_in_progress: self.source_states.is_poll_in_progress(),
             session_state: self.session,
             jobs_total,
             jobs_done,
@@ -2197,6 +2188,58 @@ mod tests {
         );
         let job = state.jobs.get(&1).expect("job exists");
         assert_eq!(job.content_preview(), Some("preview content"));
+    }
+
+    #[test]
+    fn batch_observation_poll_in_progress_tracks_source_poll_state() {
+        let mut state = AppState::new();
+        assert!(!state.batch_observation().poll_in_progress);
+
+        assert!(state.start_poll());
+        assert!(state.batch_observation().poll_in_progress);
+
+        state.end_poll();
+        assert!(!state.batch_observation().poll_in_progress);
+    }
+
+    #[test]
+    fn batch_observation_counts_queued_jobs_as_in_flight() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            1,
+            JobState {
+                url: "https://queued.example".to_string(),
+                stage: Stage::Queued,
+                outcome: None,
+                ..Default::default()
+            },
+        );
+        state.jobs.insert(
+            2,
+            JobState {
+                url: "https://done.example".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+        state.jobs.insert(
+            3,
+            JobState {
+                url: "https://failed.example".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Failed {
+                    reason: "boom".to_string(),
+                }),
+                ..Default::default()
+            },
+        );
+
+        let obs = state.batch_observation();
+        assert_eq!(obs.jobs_total, 3);
+        assert_eq!(obs.jobs_in_flight, 1);
+        assert_eq!(obs.jobs_done, 1);
+        assert_eq!(obs.jobs_failed, 1);
     }
 
     #[test]

@@ -22,6 +22,17 @@ use crate::{
     deterministic_filename, EngineEvent, FailureKind, JobId, JobOutcome, JobProgress, Stage,
 };
 
+const MAX_LOG_URL_LEN: usize = 96;
+
+fn truncate_url_for_log(url: &str) -> String {
+    if url.chars().count() <= MAX_LOG_URL_LEN {
+        return url.to_string();
+    }
+    let mut short: String = url.chars().take(MAX_LOG_URL_LEN).collect();
+    short.push_str("...");
+    short
+}
+
 #[derive(Clone)]
 pub struct EngineConfig {
     pub fetch_settings: FetchSettings,
@@ -236,7 +247,7 @@ async fn run_job(
     config: Arc<EngineConfig>,
     cancel_token: CancellationToken,
 ) -> Result<(u64, u32), FailureKind> {
-    engine_info!("Job {} starting: {}", job_id, url);
+    engine_info!("Job {} starting: {}", job_id, truncate_url_for_log(&url));
     let sink = ChannelProgressSink::new(event_tx.clone());
 
     let fetch_result = fetcher.fetch(job_id, &url, &sink, &cancel_token).await;

@@ -6,7 +6,8 @@ use harvester_core::{ArticleFilterKey, CompletedJobSnapshot, LinkSnapshotRecord,
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
 
-const STATE_FILENAME: &str = ".harvester_state.ron";
+const STATE_FILENAME: &str = ".harvester_state.json";
+const LEGACY_STATE_FILENAME: &str = ".harvester_state.ron";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedJob {
@@ -38,14 +39,32 @@ struct PersistedPreTriageOverride {
 }
 
 pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot> {
-    let path = output_dir.join(STATE_FILENAME);
-    let content = match fs::read_to_string(&path) {
-        Ok(text) => text,
+    let primary_path = output_dir.join(STATE_FILENAME);
+    let legacy_path = output_dir.join(LEGACY_STATE_FILENAME);
+    let (path, content) = match fs::read_to_string(&primary_path) {
+        Ok(text) => (primary_path, text),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Vec::new();
+            match fs::read_to_string(&legacy_path) {
+                Ok(text) => (legacy_path, text),
+                Err(legacy_err) if legacy_err.kind() == std::io::ErrorKind::NotFound => {
+                    return Vec::new();
+                }
+                Err(legacy_err) => {
+                    engine_warn!(
+                        "Failed to read persisted state from {:?}: {}",
+                        legacy_path,
+                        legacy_err
+                    );
+                    return Vec::new();
+                }
+            }
         }
         Err(err) => {
-            engine_warn!("Failed to read persisted state from {:?}: {}", path, err);
+            engine_warn!(
+                "Failed to read persisted state from {:?}: {}",
+                primary_path,
+                err
+            );
             return Vec::new();
         }
     };
@@ -83,17 +102,36 @@ pub(crate) fn load_completed_jobs(output_dir: &Path) -> Vec<CompletedJobSnapshot
 pub(crate) fn load_pre_triage_overrides(
     output_dir: &Path,
 ) -> std::collections::HashMap<ArticleFilterKey, ManualDecision> {
-    let path = output_dir.join(STATE_FILENAME);
-    let content = match fs::read_to_string(&path) {
-        Ok(text) => text,
+    let primary_path = output_dir.join(STATE_FILENAME);
+    let legacy_path = output_dir.join(LEGACY_STATE_FILENAME);
+    let (path, content) = match fs::read_to_string(&primary_path) {
+        Ok(text) => (primary_path, text),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return std::collections::HashMap::new();
+            match fs::read_to_string(&legacy_path) {
+                Ok(text) => (legacy_path, text),
+                Err(legacy_err) if legacy_err.kind() == std::io::ErrorKind::NotFound => {
+                    return std::collections::HashMap::new();
+                }
+                Err(legacy_err) => {
+                    engine_warn!(
+                        "Failed to read persisted state from {:?}: {}",
+                        legacy_path,
+                        legacy_err
+                    );
+                    return std::collections::HashMap::new();
+                }
+            }
         }
         Err(err) => {
-            engine_warn!("Failed to read persisted state from {:?}: {}", path, err);
+            engine_warn!(
+                "Failed to read persisted state from {:?}: {}",
+                primary_path,
+                err
+            );
             return std::collections::HashMap::new();
         }
     };
+
     let state: PersistedState = match ron::from_str(&content) {
         Ok(state) => state,
         Err(err) => {
@@ -218,6 +256,11 @@ mod tests {
         fs::write(&path, content).expect("write state");
     }
 
+    fn write_legacy_state(dir: &Path, content: &str) {
+        let path = dir.join(LEGACY_STATE_FILENAME);
+        fs::write(&path, content).expect("write legacy state");
+    }
+
     #[test]
     fn load_state_without_links_still_parses_snapshot() {
         let temp = tempdir().expect("tempdir");
@@ -238,6 +281,27 @@ mod tests {
         let snapshot = load_completed_jobs(temp.path());
         assert_eq!(snapshot.len(), 1);
         assert!(snapshot[0].links.is_empty());
+    }
+
+    #[test]
+    fn load_state_falls_back_to_legacy_filename() {
+        let temp = tempdir().expect("tempdir");
+        let content = r#"
+(
+  completed: [
+    (
+      url: "https://legacy.example.com",
+      tokens: Some(5u32),
+      bytes: Some(10u64),
+    ),
+  ],
+)
+"#;
+
+        write_legacy_state(temp.path(), content);
+        let snapshot = load_completed_jobs(temp.path());
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].url, "https://legacy.example.com");
     }
 
     #[test]

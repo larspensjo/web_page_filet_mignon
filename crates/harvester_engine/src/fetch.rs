@@ -19,6 +19,17 @@ use crate::{
     UrlPolicy,
 };
 
+const MAX_LOG_URL_LEN: usize = 96;
+
+fn truncate_url_for_log(url: &str) -> String {
+    if url.chars().count() <= MAX_LOG_URL_LEN {
+        return url.to_string();
+    }
+    let mut short: String = url.chars().take(MAX_LOG_URL_LEN).collect();
+    short.push_str("...");
+    short
+}
+
 #[derive(Debug, Clone)]
 pub struct RetrySettings {
     pub max_retries: usize,
@@ -262,7 +273,7 @@ impl ReqwestFetcher {
             "[fetch] Fetch start job_id={} url_len={} url={}",
             job_id,
             url.len(),
-            url
+            truncate_url_for_log(url)
         );
 
         let mut bytes = Vec::new();

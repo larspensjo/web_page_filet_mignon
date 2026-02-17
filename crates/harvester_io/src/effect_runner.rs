@@ -23,6 +23,17 @@ use crate::effect_helpers::{
 };
 use crate::{load_seen_set, load_sources, RuntimePaths};
 
+const MAX_LOG_URL_LEN: usize = 96;
+
+fn truncate_url_for_log(url: &str) -> String {
+    if url.chars().count() <= MAX_LOG_URL_LEN {
+        return url.to_string();
+    }
+    let mut short: String = url.chars().take(MAX_LOG_URL_LEN).collect();
+    short.push_str("...");
+    short
+}
+
 /// Trait for platform-specific effect handling (e.g., opening URLs in browser)
 pub trait PlatformEffectHandler: Send + Sync {
     fn open_url(&self, url: &str);
@@ -151,7 +162,7 @@ impl EffectRunner {
                     "EnqueueUrl job_id={} url_len={} url={}",
                     job_id,
                     url.len(),
-                    url
+                    truncate_url_for_log(&url)
                 );
                 self.engine.enqueue(job_id, url);
             }

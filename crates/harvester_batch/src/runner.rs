@@ -47,6 +47,86 @@ fn classify_cycle_outcome(obs: &BatchObservation) -> CycleOutcome {
     }
 }
 
+const MAX_BATCH_MSG_LOG_LEN: usize = 240;
+
+fn truncate_for_log(input: &str, max_len: usize) -> String {
+    if input.chars().count() <= max_len {
+        return input.to_string();
+    }
+    let mut truncated: String = input.chars().take(max_len).collect();
+    truncated.push_str("...");
+    truncated
+}
+
+fn summarize_batch_msg(msg: &Msg) -> String {
+    match msg {
+        Msg::PollSourcesClicked => "PollSourcesClicked".to_string(),
+        Msg::AllSourcesPollEnded => "AllSourcesPollEnded".to_string(),
+        Msg::SourcePollCompleted { source_id, urls } => {
+            format!(
+                "SourcePollCompleted {{ source_id: {}, urls: {} }}",
+                source_id,
+                urls.len()
+            )
+        }
+        Msg::JobProgress {
+            job_id,
+            stage,
+            tokens,
+            bytes,
+            ..
+        } => format!(
+            "JobProgress {{ job_id: {}, stage: {:?}, bytes: {:?}, tokens: {:?} }}",
+            job_id, stage, bytes, tokens
+        ),
+        Msg::JobDone { job_id, result, .. } => {
+            let result_label = match result {
+                harvester_core::JobResultKind::Success => "Success".to_string(),
+                harvester_core::JobResultKind::Failed { reason } => {
+                    format!("Failed({})", truncate_for_log(reason, 80))
+                }
+            };
+            format!(
+                "JobDone {{ job_id: {}, result: {} }}",
+                job_id, result_label
+            )
+        }
+        Msg::TriageArticlesLoaded { articles } => {
+            format!("TriageArticlesLoaded {{ articles: {} }}", articles.len())
+        }
+        Msg::ArticlesLoaded { articles, .. } => {
+            format!("ArticlesLoaded {{ articles: {} }}", articles.len())
+        }
+        Msg::BriefingPrereqArticlesLoaded { articles } => {
+            format!("BriefingPrereqArticlesLoaded {{ articles: {} }}", articles.len())
+        }
+        Msg::PromptContextsLoaded { contexts } => {
+            format!("PromptContextsLoaded {{ prompts: {} }}", contexts.len())
+        }
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+            templates,
+        } => format!(
+            "LlmMetadataLoaded {{ active_versions: {}, effective_models: {}, templates: {} }}",
+            active_versions.len(),
+            effective_models.len(),
+            templates.len()
+        ),
+        _ => truncate_for_log(&format!("{:?}", msg), MAX_BATCH_MSG_LOG_LEN),
+    }
+}
+
+fn should_log_batch_msg(msg: &Msg) -> bool {
+    !matches!(
+        msg,
+        Msg::JobProgress {
+            stage: harvester_core::Stage::Downloading,
+            ..
+        }
+    )
+}
+
 /// Run the batch orchestration loop.
 ///
 /// Executes repeated poll cycles until shutdown signal received or error occurs.
@@ -262,7 +342,9 @@ fn run_dispatch_loop(
         // Receive message with timeout
         match msg_rx.recv_timeout(timeout) {
             Ok(msg) => {
-                engine_info!("[batch] Processing message: {:?}", msg);
+                if should_log_batch_msg(&msg) {
+                    engine_info!("[batch] Processing message: {}", summarize_batch_msg(&msg));
+                }
 
                 // Update state
                 let (new_state, effects) = update(state.clone(), msg);
@@ -561,6 +643,45 @@ mod tests {
         };
 
         assert!(!should_settle_cycle(&obs));
+    }
+
+    #[test]
+    fn test_summarize_batch_msg_compacts_large_payloads() {
+        let msg = Msg::TriageArticlesLoaded {
+            articles: Vec::new(),
+        };
+        assert_eq!(
+            summarize_batch_msg(&msg),
+            "TriageArticlesLoaded { articles: 0 }"
+        );
+    }
+
+    #[test]
+    fn test_truncate_for_log_appends_ellipsis() {
+        let input = "abcdefghijklmnopqrstuvwxyz";
+        let output = truncate_for_log(input, 10);
+        assert_eq!(output, "abcdefghij...");
+    }
+
+    #[test]
+    fn test_should_log_batch_msg_filters_downloading_progress() {
+        let downloading = Msg::JobProgress {
+            job_id: 1,
+            stage: harvester_core::Stage::Downloading,
+            tokens: None,
+            bytes: Some(4096),
+            content_preview: None,
+        };
+        assert!(!should_log_batch_msg(&downloading));
+
+        let tokenizing = Msg::JobProgress {
+            job_id: 1,
+            stage: harvester_core::Stage::Tokenizing,
+            tokens: Some(10),
+            bytes: None,
+            content_preview: None,
+        };
+        assert!(should_log_batch_msg(&tokenizing));
     }
 
     #[test]
