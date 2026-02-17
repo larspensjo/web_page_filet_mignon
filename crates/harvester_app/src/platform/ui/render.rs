@@ -66,6 +66,11 @@ pub struct TreeRenderState {
     prev_open_browser_enabled: Option<bool>,
     prev_prompt_lab_visible: bool,
     prev_prompt_lab_advanced_mode: bool,
+    prev_prompt_lab_mode_basic_checked: Option<bool>,
+    prev_prompt_lab_mode_advanced_checked: Option<bool>,
+    prev_prompt_lab_stage_triage_checked: Option<bool>,
+    prev_prompt_lab_stage_summary_checked: Option<bool>,
+    prev_prompt_lab_stage_briefing_checked: Option<bool>,
     prev_prompt_lab_compare_section_open: bool,
     prev_prompt_lab_context_section_open: bool,
     prev_prompt_lab_template_section_open: bool,
@@ -76,9 +81,6 @@ pub struct TreeRenderState {
     prev_prompt_lab_run_enabled: Option<bool>,
     prev_prompt_lab_resolve_enabled: Option<bool>,
     prev_prompt_lab_url_enabled: Option<bool>,
-    prev_prompt_lab_stage_triage_text: Option<String>,
-    prev_prompt_lab_stage_summary_text: Option<String>,
-    prev_prompt_lab_stage_briefing_text: Option<String>,
     prev_prompt_lab_context_text: Option<String>,
     prev_prompt_lab_context_status_text: Option<String>,
     prev_prompt_lab_context_apply_enabled: Option<bool>,
@@ -102,12 +104,10 @@ pub struct TreeRenderState {
     prev_prompt_lab_compare_cancel_enabled: Option<bool>,
     prev_prompt_lab_compare_auto_select_enabled: Option<bool>,
     prev_prompt_lab_compare_winner_clear_enabled: Option<bool>,
-    prev_prompt_lab_mode_basic_text: Option<String>,
-    prev_prompt_lab_mode_advanced_text: Option<String>,
-    prev_prompt_lab_section_compare_text: Option<String>,
-    prev_prompt_lab_section_context_text: Option<String>,
-    prev_prompt_lab_section_template_text: Option<String>,
-    prev_prompt_lab_section_run_details_text: Option<String>,
+    prev_prompt_lab_section_compare_checked: Option<bool>,
+    prev_prompt_lab_section_context_checked: Option<bool>,
+    prev_prompt_lab_section_template_checked: Option<bool>,
+    prev_prompt_lab_section_run_details_checked: Option<bool>,
     prev_prompt_lab_model_catalog: Option<Vec<ModelId>>,
     prev_prompt_lab_selected_model: Option<String>,
 }
@@ -136,6 +136,11 @@ impl Default for TreeRenderState {
             prev_open_browser_enabled: None,
             prev_prompt_lab_visible: false,
             prev_prompt_lab_advanced_mode: false,
+            prev_prompt_lab_mode_basic_checked: None,
+            prev_prompt_lab_mode_advanced_checked: None,
+            prev_prompt_lab_stage_triage_checked: None,
+            prev_prompt_lab_stage_summary_checked: None,
+            prev_prompt_lab_stage_briefing_checked: None,
             prev_prompt_lab_compare_section_open: false,
             prev_prompt_lab_context_section_open: false,
             prev_prompt_lab_template_section_open: false,
@@ -146,9 +151,6 @@ impl Default for TreeRenderState {
             prev_prompt_lab_run_enabled: None,
             prev_prompt_lab_resolve_enabled: None,
             prev_prompt_lab_url_enabled: None,
-            prev_prompt_lab_stage_triage_text: None,
-            prev_prompt_lab_stage_summary_text: None,
-            prev_prompt_lab_stage_briefing_text: None,
             prev_prompt_lab_context_text: None,
             prev_prompt_lab_context_status_text: None,
             prev_prompt_lab_context_apply_enabled: None,
@@ -172,12 +174,10 @@ impl Default for TreeRenderState {
             prev_prompt_lab_compare_cancel_enabled: None,
             prev_prompt_lab_compare_auto_select_enabled: None,
             prev_prompt_lab_compare_winner_clear_enabled: None,
-            prev_prompt_lab_mode_basic_text: None,
-            prev_prompt_lab_mode_advanced_text: None,
-            prev_prompt_lab_section_compare_text: None,
-            prev_prompt_lab_section_context_text: None,
-            prev_prompt_lab_section_template_text: None,
-            prev_prompt_lab_section_run_details_text: None,
+            prev_prompt_lab_section_compare_checked: None,
+            prev_prompt_lab_section_context_checked: None,
+            prev_prompt_lab_section_template_checked: None,
+            prev_prompt_lab_section_run_details_checked: None,
             prev_prompt_lab_model_catalog: None,
             prev_prompt_lab_selected_model: None,
         }
@@ -431,111 +431,88 @@ pub fn render(
         });
         tree_state.prev_open_browser_enabled = Some(open_browser_enabled);
     }
-    let mode_basic_text = select_label("Basic", !view.prompt_lab.advanced_mode);
-    if tree_state.prev_prompt_lab_mode_basic_text.as_deref() != Some(mode_basic_text.as_str()) {
-        cmds.push(PlatformCommand::SetControlText {
+    let mode_basic_checked = !view.prompt_lab.advanced_mode;
+    if tree_state.prev_prompt_lab_mode_basic_checked != Some(mode_basic_checked) {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_PROMPT_LAB_MODE_BASIC,
-            text: mode_basic_text.clone(),
+            checked: mode_basic_checked,
         });
-        tree_state.prev_prompt_lab_mode_basic_text = Some(mode_basic_text);
+        tree_state.prev_prompt_lab_mode_basic_checked = Some(mode_basic_checked);
     }
-    let mode_advanced_text = select_label("Advanced", view.prompt_lab.advanced_mode);
-    if tree_state.prev_prompt_lab_mode_advanced_text.as_deref() != Some(mode_advanced_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
+    let mode_advanced_checked = view.prompt_lab.advanced_mode;
+    if tree_state.prev_prompt_lab_mode_advanced_checked != Some(mode_advanced_checked) {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_PROMPT_LAB_MODE_ADVANCED,
-            text: mode_advanced_text.clone(),
+            checked: mode_advanced_checked,
         });
-        tree_state.prev_prompt_lab_mode_advanced_text = Some(mode_advanced_text);
+        tree_state.prev_prompt_lab_mode_advanced_checked = Some(mode_advanced_checked);
     }
-    let compare_section_text = select_label("Compare", view.prompt_lab.compare_section_open);
-    if tree_state.prev_prompt_lab_section_compare_text.as_deref()
-        != Some(compare_section_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
-            window_id,
-            control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
-            text: compare_section_text.clone(),
-        });
-        tree_state.prev_prompt_lab_section_compare_text = Some(compare_section_text);
-    }
-    let context_section_text = select_label("Context", view.prompt_lab.context_section_open);
-    if tree_state.prev_prompt_lab_section_context_text.as_deref()
-        != Some(context_section_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
-            window_id,
-            control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
-            text: context_section_text.clone(),
-        });
-        tree_state.prev_prompt_lab_section_context_text = Some(context_section_text);
-    }
-    let template_section_text = select_label("Templates", view.prompt_lab.template_section_open);
-    if tree_state.prev_prompt_lab_section_template_text.as_deref()
-        != Some(template_section_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
-            window_id,
-            control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
-            text: template_section_text.clone(),
-        });
-        tree_state.prev_prompt_lab_section_template_text = Some(template_section_text);
-    }
-    let run_details_section_text =
-        select_label("Run details", view.prompt_lab.run_details_section_open);
-    if tree_state
-        .prev_prompt_lab_section_run_details_text
-        .as_deref()
-        != Some(run_details_section_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
-            window_id,
-            control_id: BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
-            text: run_details_section_text.clone(),
-        });
-        tree_state.prev_prompt_lab_section_run_details_text = Some(run_details_section_text);
-    }
-
-    let stage_triage_text = select_label(
-        "Triage",
-        view.prompt_lab.selected_stage == PromptLabStage::Triage,
-    );
-    if tree_state.prev_prompt_lab_stage_triage_text.as_deref() != Some(stage_triage_text.as_str()) {
-        cmds.push(PlatformCommand::SetControlText {
+    let stage_triage_checked = view.prompt_lab.selected_stage == PromptLabStage::Triage;
+    if tree_state.prev_prompt_lab_stage_triage_checked != Some(stage_triage_checked) {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_STAGE_TRIAGE,
-            text: stage_triage_text.clone(),
+            checked: stage_triage_checked,
         });
-        tree_state.prev_prompt_lab_stage_triage_text = Some(stage_triage_text);
+        tree_state.prev_prompt_lab_stage_triage_checked = Some(stage_triage_checked);
     }
-    let stage_summary_text = select_label(
-        "Summary",
-        view.prompt_lab.selected_stage == PromptLabStage::Summary,
-    );
-    if tree_state.prev_prompt_lab_stage_summary_text.as_deref() != Some(stage_summary_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
+    let stage_summary_checked = view.prompt_lab.selected_stage == PromptLabStage::Summary;
+    if tree_state.prev_prompt_lab_stage_summary_checked != Some(stage_summary_checked) {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_STAGE_SUMMARY,
-            text: stage_summary_text.clone(),
+            checked: stage_summary_checked,
         });
-        tree_state.prev_prompt_lab_stage_summary_text = Some(stage_summary_text);
+        tree_state.prev_prompt_lab_stage_summary_checked = Some(stage_summary_checked);
     }
-    let stage_briefing_text = select_label(
-        "Briefing",
-        view.prompt_lab.selected_stage == PromptLabStage::Briefing,
-    );
-    if tree_state.prev_prompt_lab_stage_briefing_text.as_deref()
-        != Some(stage_briefing_text.as_str())
-    {
-        cmds.push(PlatformCommand::SetControlText {
+    let stage_briefing_checked = view.prompt_lab.selected_stage == PromptLabStage::Briefing;
+    if tree_state.prev_prompt_lab_stage_briefing_checked != Some(stage_briefing_checked) {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_STAGE_BRIEFING,
-            text: stage_briefing_text.clone(),
+            checked: stage_briefing_checked,
         });
-        tree_state.prev_prompt_lab_stage_briefing_text = Some(stage_briefing_text);
+        tree_state.prev_prompt_lab_stage_briefing_checked = Some(stage_briefing_checked);
+    }
+    if tree_state.prev_prompt_lab_section_compare_checked != Some(view.prompt_lab.compare_section_open)
+    {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            window_id,
+            control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
+            checked: view.prompt_lab.compare_section_open,
+        });
+        tree_state.prev_prompt_lab_section_compare_checked = Some(view.prompt_lab.compare_section_open);
+    }
+    if tree_state.prev_prompt_lab_section_context_checked != Some(view.prompt_lab.context_section_open)
+    {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            window_id,
+            control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
+            checked: view.prompt_lab.context_section_open,
+        });
+        tree_state.prev_prompt_lab_section_context_checked = Some(view.prompt_lab.context_section_open);
+    }
+    if tree_state.prev_prompt_lab_section_template_checked != Some(view.prompt_lab.template_section_open)
+    {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            window_id,
+            control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
+            checked: view.prompt_lab.template_section_open,
+        });
+        tree_state.prev_prompt_lab_section_template_checked = Some(view.prompt_lab.template_section_open);
+    }
+    if tree_state.prev_prompt_lab_section_run_details_checked
+        != Some(view.prompt_lab.run_details_section_open)
+    {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            window_id,
+            control_id: BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+            checked: view.prompt_lab.run_details_section_open,
+        });
+        tree_state.prev_prompt_lab_section_run_details_checked =
+            Some(view.prompt_lab.run_details_section_open);
     }
 
     // Model selector combo box updates
@@ -1042,14 +1019,6 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
         template_version,
         template_description
     )
-}
-
-fn select_label(label: &str, selected: bool) -> String {
-    if selected {
-        format!("[x] {label}")
-    } else {
-        format!("[ ] {label}")
-    }
 }
 
 fn prompt_lab_stage_label(stage: PromptLabStage) -> &'static str {
@@ -2129,11 +2098,10 @@ mod tests {
     }
 
     #[test]
-    fn prompt_lab_mode_and_section_labels_reflect_view_state() {
+    fn prompt_lab_section_radio_states_reflect_view_state() {
         let window_id = WindowId::new(33);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.advanced_mode = true;
         view.prompt_lab.compare_section_open = true;
         view.prompt_lab.context_section_open = false;
         view.prompt_lab.template_section_open = true;
@@ -2142,29 +2110,53 @@ mod tests {
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetControlText { control_id, text, .. }
-                if *control_id == BTN_PROMPT_LAB_MODE_ADVANCED && text.contains("[x]")
+                PlatformCommand::SetRadioButtonChecked { control_id, checked: true, .. }
+                if *control_id == BTN_PROMPT_LAB_SECTION_COMPARE
             )
         }));
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetControlText { control_id, text, .. }
-                if *control_id == BTN_PROMPT_LAB_SECTION_COMPARE && text.contains("[x]")
+                PlatformCommand::SetRadioButtonChecked { control_id, checked: false, .. }
+                if *control_id == BTN_PROMPT_LAB_SECTION_CONTEXT
             )
         }));
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetControlText { control_id, text, .. }
-                if *control_id == BTN_PROMPT_LAB_SECTION_CONTEXT && text.contains("[ ]")
+                PlatformCommand::SetRadioButtonChecked { control_id, checked: true, .. }
+                if *control_id == BTN_PROMPT_LAB_SECTION_RUN_DETAILS
+            )
+        }));
+    }
+
+    #[test]
+    fn prompt_lab_mode_and_stage_radio_states_reflect_view_state() {
+        let window_id = WindowId::new(38);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.prompt_lab.advanced_mode = true;
+        view.prompt_lab.selected_stage = PromptLabStage::Summary;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetRadioButtonChecked { control_id, checked: true, .. }
+                if *control_id == BTN_PROMPT_LAB_MODE_ADVANCED
             )
         }));
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetControlText { control_id, text, .. }
-                if *control_id == BTN_PROMPT_LAB_SECTION_RUN_DETAILS && text.contains("[x]")
+                PlatformCommand::SetRadioButtonChecked { control_id, checked: false, .. }
+                if *control_id == BTN_PROMPT_LAB_MODE_BASIC
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetRadioButtonChecked { control_id, checked: true, .. }
+                if *control_id == BTN_STAGE_SUMMARY
             )
         }));
     }

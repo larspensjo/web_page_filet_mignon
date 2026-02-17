@@ -266,17 +266,19 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         initial_text: String::new(),
         class: LabelClass::Default,
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_MODE_ROW),
         control_id: BTN_PROMPT_LAB_MODE_BASIC,
-        text: "[x] Basic".to_string(),
+        text: "Basic".to_string(),
+        group_start: true,
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_MODE_ROW),
         control_id: BTN_PROMPT_LAB_MODE_ADVANCED,
-        text: "[ ] Advanced".to_string(),
+        text: "Advanced".to_string(),
+        group_start: false,
     });
     // Model selector combo box
     commands.push(PlatformCommand::CreateComboBox {
@@ -284,23 +286,26 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_PROMPT_LAB_MODEL_ROW),
         control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_STAGE_ROW),
         control_id: BTN_STAGE_TRIAGE,
         text: "Triage".to_string(),
+        group_start: true,
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_STAGE_ROW),
         control_id: BTN_STAGE_SUMMARY,
         text: "Summary".to_string(),
+        group_start: false,
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_STAGE_ROW),
         control_id: BTN_STAGE_BRIEFING,
         text: "Briefing".to_string(),
+        group_start: false,
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -335,11 +340,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_PROMPT_LAB_RUN,
         text: "Run".to_string(),
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_HEADER_ROW),
         control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
-        text: "[ ] Compare".to_string(),
+        text: "Compare".to_string(),
+        group_start: true,
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -383,11 +389,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_COMPARE_WINNER_CLEAR,
         text: "Clear winner".to_string(),
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW),
         control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
-        text: "[ ] Context".to_string(),
+        text: "Context".to_string(),
+        group_start: true,
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -419,17 +426,19 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
         text: "Reload".to_string(),
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW),
         control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
-        text: "[ ] Templates".to_string(),
+        text: "Templates".to_string(),
+        group_start: true,
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateRadioButton {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_RUN_DETAILS_HEADER_ROW),
         control_id: BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
-        text: "[ ] Run details".to_string(),
+        text: "Run details".to_string(),
+        group_start: true,
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -668,6 +677,23 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
 
     commands.push(PlatformCommand::DefineStyle {
         style_id: StyleId::DefaultButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::RadioButton,
         style: ControlStyle {
             background_color: Some(Color {
                 r: 0x2E,
@@ -1873,15 +1899,6 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::DefaultButton,
     });
     for control_id in [
-        BTN_PROMPT_LAB_MODE_BASIC,
-        BTN_PROMPT_LAB_MODE_ADVANCED,
-        BTN_PROMPT_LAB_SECTION_COMPARE,
-        BTN_PROMPT_LAB_SECTION_CONTEXT,
-        BTN_PROMPT_LAB_SECTION_TEMPLATE,
-        BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
-        BTN_STAGE_TRIAGE,
-        BTN_STAGE_SUMMARY,
-        BTN_STAGE_BRIEFING,
         BTN_PROMPT_LAB_RESOLVE,
         BTN_PROMPT_LAB_RUN,
         BTN_PROMPT_LAB_CONTEXT_APPLY,
@@ -1906,6 +1923,24 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
             window_id,
             control_id,
             style_id: StyleId::DefaultButton,
+        });
+    }
+
+    for control_id in [
+        BTN_PROMPT_LAB_MODE_BASIC,
+        BTN_PROMPT_LAB_MODE_ADVANCED,
+        BTN_STAGE_TRIAGE,
+        BTN_STAGE_SUMMARY,
+        BTN_STAGE_BRIEFING,
+        BTN_PROMPT_LAB_SECTION_COMPARE,
+        BTN_PROMPT_LAB_SECTION_CONTEXT,
+        BTN_PROMPT_LAB_SECTION_TEMPLATE,
+        BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+    ] {
+        commands.push(PlatformCommand::ApplyStyleToControl {
+            window_id,
+            control_id,
+            style_id: StyleId::RadioButton,
         });
     }
 
@@ -2002,6 +2037,11 @@ mod tests {
             )),
             "model selector combo box should be created"
         );
+        assert!(commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::CreateRadioButton { control_id, .. }
+                if *control_id == BTN_PROMPT_LAB_SECTION_COMPARE
+        )));
     }
 
     #[test]
