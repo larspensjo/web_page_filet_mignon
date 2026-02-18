@@ -307,3 +307,10 @@ Evidence: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/project-s
 Lessons Learned: Hard-coded project topology in reporting tooling quickly drifts from workspace reality and silently under-reports.
 Prevention: Derive crate inventory from workspace metadata and keep a regression test that cross-checks script output against `cargo metadata`.
 Refs: scripts/project-stats.ps1, scripts/tests/project-stats.Tests.ps1
+
+## 2026-02-18 - Token usage display architecture decision
+Type: Decision
+Context: A draft plan for per-model token usage proposed binary-local accumulators and render-state mutation, which conflicts with the project's unidirectional data flow constraints and risks inconsistent behavior.
+Change: Locked direction to reducer-owned per-model usage tracking in `harvester_core`, consumed read-only by both `harvester_app` and `harvester_batch`; replay cache hits are excluded from session consumption totals to avoid overcounting.
+Evidence: Revised planning document with implementation/testing details and blockers.
+Refs: docs/Plan.TokenUsageDisplay.md, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/handle.rs
