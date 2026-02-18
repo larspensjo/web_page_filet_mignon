@@ -308,6 +308,13 @@ Lessons Learned: Hard-coded project topology in reporting tooling quickly drifts
 Prevention: Derive crate inventory from workspace metadata and keep a regression test that cross-checks script output against `cargo metadata`.
 Refs: scripts/project-stats.ps1, scripts/tests/project-stats.Tests.ps1
 
+## 2026-02-18 - Per-model LLM token usage visibility in app and batch
+Type: Implementation
+Context: Operators need session-scoped visibility into LLM token usage by resolved model in both GUI and headless batch flows, using the existing `Msg::LlmCompleted` pipeline without introducing side-channels.
+Change: `harvester_core` gained a reducer-owned per-model usage ledger (`BTreeMap<String,(u64,u64)>` in `AppState`, updated in `update()` for `CacheStatus::Miss` completions only, exposed via `AppViewModel.llm_usage_by_model`). `harvester_batch` prints compact per-model lines after each cycle row. `harvester_app` extends the footer status bar with the same snapshot. No local accumulators in either binary.
+Evidence: `cargo nextest run -p harvester_core` (274/274), `cargo nextest run -p harvester_batch` (30/30), `cargo nextest run -p harvester_app` (81/81), `cargo build --workspace` clean.
+Refs: crates/harvester_core/src/state.rs, crates/harvester_core/src/update.rs, crates/harvester_core/src/view_model.rs, crates/harvester_core/tests/llm_usage.rs, crates/harvester_batch/src/runner.rs, crates/harvester_app/src/platform/ui/render.rs
+
 ## 2026-02-18 - Token usage display architecture decision
 Type: Decision
 Context: A draft plan for per-model token usage proposed binary-local accumulators and render-state mutation, which conflicts with the project's unidirectional data flow constraints and risks inconsistent behavior.

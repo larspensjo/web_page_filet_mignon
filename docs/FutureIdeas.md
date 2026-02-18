@@ -992,7 +992,7 @@ SuccessCriteria:
 ### TokenCounting
 
 #### [FI-LLM-TokenCounting-0001] Accurate token counting and UI visibility
-Status: Candidate
+Status: Partially Implemented
 TopLevel: LLM
 SubLevel: TokenCounting
 Priority: P2
