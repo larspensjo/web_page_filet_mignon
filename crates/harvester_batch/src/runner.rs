@@ -2,7 +2,7 @@ use crate::cli::Args;
 use crate::lock;
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{update, AppState, BatchObservation, Msg};
+use harvester_core::{update, AppState, BatchObservation, LlmModelUsageView, Msg};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
@@ -414,6 +414,9 @@ pub fn run(args: Args) -> Result<i32, String> {
             print_cycle_table_header();
         }
         print_cycle_summary(cycle_count, &outcome, &obs);
+        for line in format_llm_usage_lines(&state.llm_usage_rows()) {
+            println!("{}", line);
+        }
 
         // Persist state
         engine_info!("[batch] Persisting state");
@@ -572,6 +575,31 @@ fn maybe_dispatch_batch_ai_orchestration(state: &AppState) -> Option<Msg> {
     }
 
     None
+}
+
+/// Formats a token count as a compact human-readable string (e.g. 12K, 1.2M).
+fn format_compact_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{}K", n / 1_000)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Formats per-model usage rows as indented display lines.
+fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
+    rows.iter()
+        .map(|r| {
+            format!(
+                "  {}: in={} out={}",
+                r.model,
+                format_compact_tokens(r.input_tokens),
+                format_compact_tokens(r.output_tokens)
+            )
+        })
+        .collect()
 }
 
 fn print_cycle_table_header() {
@@ -1139,5 +1167,42 @@ mod tests {
         assert_eq!(microdollars_to_display(123456789), "$123.46");
         // 1000000000 microdollars = $1000.00
         assert_eq!(microdollars_to_display(1000000000), "$1000.00");
+    }
+
+    #[test]
+    fn format_compact_tokens_thresholds() {
+        assert_eq!(format_compact_tokens(0), "0");
+        assert_eq!(format_compact_tokens(999), "999");
+        assert_eq!(format_compact_tokens(1_000), "1K");
+        assert_eq!(format_compact_tokens(12_345), "12K");
+        assert_eq!(format_compact_tokens(999_999), "999K");
+        assert_eq!(format_compact_tokens(1_000_000), "1.0M");
+        assert_eq!(format_compact_tokens(1_234_567), "1.2M");
+    }
+
+    #[test]
+    fn format_llm_usage_lines_sorted_and_stable() {
+        let rows = vec![
+            LlmModelUsageView {
+                model: "gpt-4o-mini".to_string(),
+                input_tokens: 12_345,
+                output_tokens: 3_100,
+            },
+            LlmModelUsageView {
+                model: "gpt-4o".to_string(),
+                input_tokens: 500,
+                output_tokens: 80,
+            },
+        ];
+        let lines = format_llm_usage_lines(&rows);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "  gpt-4o-mini: in=12K out=3K");
+        assert_eq!(lines[1], "  gpt-4o: in=500 out=80");
+    }
+
+    #[test]
+    fn format_llm_usage_lines_empty_returns_empty() {
+        let lines = format_llm_usage_lines(&[]);
+        assert!(lines.is_empty());
     }
 }
