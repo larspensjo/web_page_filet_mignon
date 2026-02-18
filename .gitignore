@@ -14,7 +14,7 @@ target
 **/mutants.out*/
 
 /.claude/
-/output/
+/output*/
 /lcov.info
 /incoming_urls.txt
 /sources.ron
@@ -22,6 +22,7 @@ target
 # /contexts/
 /.rss_seen_guids.ron
 /testResults.xml
+/*.log
 
 # Coverage analysis outputs
 /tests/coverage_reports/*.json

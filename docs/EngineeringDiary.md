@@ -289,3 +289,12 @@ Period: 2026-02-16 to 2026-02-17
 StartCommit: `07923490`
 Context: Make Prompt Lab model selection reliably visible and usable across lifecycle transitions and Win32 layout/theming edge cases, with clear diagnostics and regression tests.
 Refs: docs/Plan.ComboBoxModelSelectorHardening.md
+
+## 2026-02-18 - Unified persistence paths
+Type: Bug Fix
+Context: `harvester_batch` was saving caches/state with `.json` names while `harvester_app` expected `.ron`, so the GUI never picked up batch-generated caches.
+Change: Updated `RuntimePaths` to produce `.ron` files, removed the app-local cache persistence modules, and redirected the UI to `harvester_io`’s load/save APIs; added regression tests to ensure the same path is used end-to-end.
+Evidence: `cargo test -p harvester_io runtime_paths::tests`
+Lessons Learned: Allowing multiple codepaths to own file naming leads to silent divergence of persisted data.
+Prevention: Centralize filenames/formats in `harvester_io::RuntimePaths` and cover the shared persistence API with regression tests.
+Refs: crates/harvester_io/src/runtime_paths.rs, crates/harvester_app/src/platform/app.rs, cargo test -p harvester_io runtime_paths::tests

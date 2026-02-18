@@ -480,8 +480,7 @@ impl AppState {
             summary_failed,
             triage_cache_hits: self.triage_cache_run_metrics.hits() as usize,
             triage_cache_misses: self.triage_cache_run_metrics.misses() as usize,
-            triage_cache_key_unavailable: self.triage_cache_run_metrics.key_unavailable()
-                as usize,
+            triage_cache_key_unavailable: self.triage_cache_run_metrics.key_unavailable() as usize,
             summary_cache_hits: self.summary_cache_metrics.hits(),
             summary_cache_misses: self.summary_cache_metrics.misses(),
             summary_cache_key_unavailable: self.summary_cache_metrics.key_unavailable(),

@@ -23,13 +23,16 @@ use harvester_engine::llm::{
     LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
     ProviderKind,
 };
-use harvester_io::{EffectRunner, RuntimePaths};
+use harvester_io::{
+    load_completed_jobs, load_pre_triage_overrides, load_summary_cache, load_triage_cache,
+    persist_completed_jobs, persist_pre_triage_overrides, EffectRunner, RuntimePaths,
+};
 
+use super::effects;
 use super::logging::{self, LogDestination};
 use super::ui;
 use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::Win32PlatformHandler;
-use super::{effects, persistence};
 
 const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
 const MENU_ACTION_ARCHIVE: MenuActionId = MenuActionId(2);
@@ -102,7 +105,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         let model_map = effective_model_map(&config);
         let handle = LlmHandle::new(config);
         EffectRunner::new_with_llm(
-            paths,
+            paths.clone(),
             msg_tx.clone(),
             handle,
             100_000,
@@ -114,7 +117,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         )
     } else {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
-        EffectRunner::new(paths, msg_tx.clone(), platform_handler)
+        EffectRunner::new(paths.clone(), msg_tx.clone(), platform_handler)
     };
     effect_runner.enqueue(vec![
         Effect::LoadPromptTemplateFiles,
@@ -130,7 +133,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         guard.state = state;
     }
     {
-        let completed = persistence::load_completed_jobs(&output_dir);
+        let completed = load_completed_jobs(&paths.state_path);
         if !completed.is_empty() {
             let mut guard = shared_state.lock().unwrap();
             let state = std::mem::take(&mut guard.state);
@@ -144,10 +147,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
 
     // Hydrate summary cache from persistent store
     {
-        use super::summary_cache_store::{default_summary_cache_path, load_summary_cache};
-
-        let path = default_summary_cache_path();
-        let cache = load_summary_cache(&path);
+        let cache = load_summary_cache(&paths.summary_cache_path);
         if !cache.is_empty() {
             let mut guard = shared_state.lock().unwrap();
             let state = std::mem::take(&mut guard.state);
@@ -160,10 +160,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     }
 
     {
-        use super::triage_cache_store::{default_triage_cache_path, load_triage_cache};
-
-        let path = default_triage_cache_path();
-        let cache = load_triage_cache(&path);
+        let cache = load_triage_cache(&paths.triage_cache_path);
         if !cache.is_empty() {
             let mut guard = shared_state.lock().unwrap();
             let state = std::mem::take(&mut guard.state);
@@ -175,7 +172,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         }
     }
     {
-        let overrides = persistence::load_pre_triage_overrides(&output_dir);
+        let overrides = load_pre_triage_overrides(&paths.state_path);
         if !overrides.is_empty() {
             let mut guard = shared_state.lock().unwrap();
             let state = std::mem::take(&mut guard.state);
@@ -204,7 +201,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             msg_tx.clone(),
             effect_runner,
             tree_render_state,
-            output_dir,
+            paths.state_path.clone(),
         )));
     let ui_state_provider: Arc<Mutex<dyn UiStateProvider>> =
         Arc::new(Mutex::new(AppUiStateProvider::new(shared_state)));
@@ -287,7 +284,7 @@ struct AppEventHandler {
     msg_tx: mpsc::Sender<Msg>,
     effect_runner: EffectRunner,
     tree_render_state: ui::render::TreeRenderState,
-    output_dir: std::path::PathBuf,
+    state_path: std::path::PathBuf,
 }
 
 fn job_id_for_item(item_id: commanductui::TreeItemId) -> Option<harvester_core::JobId> {
@@ -307,7 +304,7 @@ impl AppEventHandler {
         msg_tx: mpsc::Sender<Msg>,
         effect_runner: EffectRunner,
         tree_render_state: ui::render::TreeRenderState,
-        output_dir: std::path::PathBuf,
+        state_path: std::path::PathBuf,
     ) -> Self {
         Self {
             window_id,
@@ -317,7 +314,7 @@ impl AppEventHandler {
             msg_tx,
             effect_runner,
             tree_render_state,
-            output_dir,
+            state_path,
         }
     }
 
@@ -368,16 +365,17 @@ impl AppEventHandler {
             let was_dirty = state.consume_dirty();
             guard.state = state;
             self.effect_runner.enqueue(effects);
+            let state_path = self.state_path.clone();
             match (completed_snapshot, pre_triage_overrides) {
                 (Some(snapshot), Some(overrides)) => {
-                    persistence::save_state(&self.output_dir, &snapshot, &overrides);
+                    persist_completed_jobs(&state_path, &snapshot);
+                    persist_pre_triage_overrides(&state_path, &overrides);
                 }
                 (Some(snapshot), None) => {
-                    persistence::save_completed_jobs(&self.output_dir, &snapshot);
+                    persist_completed_jobs(&state_path, &snapshot);
                 }
                 (None, Some(overrides)) => {
-                    let snapshot = guard.state.completed_jobs_snapshot();
-                    persistence::save_state(&self.output_dir, &snapshot, &overrides);
+                    persist_pre_triage_overrides(&state_path, &overrides);
                 }
                 (None, None) => {}
             }
@@ -855,7 +853,7 @@ mod tests {
             output_dir.join("prompts"),
         );
         let platform_handler = Box::new(Win32PlatformHandler);
-        let effect_runner = EffectRunner::new(paths, out_tx.clone(), platform_handler);
+        let effect_runner = EffectRunner::new(paths.clone(), out_tx.clone(), platform_handler);
         let handler = AppEventHandler::new(
             WindowId::new(1),
             shared,
@@ -863,7 +861,7 @@ mod tests {
             out_tx,
             effect_runner,
             ui::render::TreeRenderState::new(),
-            output_dir,
+            paths.state_path.clone(),
         );
         (handler, out_rx)
     }
