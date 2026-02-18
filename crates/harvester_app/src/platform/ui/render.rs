@@ -2,8 +2,8 @@ use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState, PreviewHeaderView,
-    PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
+    AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState, LlmModelUsageView,
+    PreviewHeaderView, PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
@@ -19,6 +19,43 @@ use std::collections::HashMap;
 const MAX_VIEWER_CHARS: usize = 64 * 1024;
 #[allow(dead_code)]
 const VIEWER_TRUNCATE_MARKER: &str = "[display truncated]";
+/// Maximum number of models shown individually in the status bar before collapsing.
+const MAX_STATUS_BAR_MODELS: usize = 2;
+
+fn format_compact_tokens(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{}K", n / 1_000)
+    } else {
+        n.to_string()
+    }
+}
+
+/// Builds the LLM usage segment for the status bar, or None if no usage recorded.
+/// Shows up to MAX_STATUS_BAR_MODELS models individually; collapses the rest.
+fn format_llm_usage_status(rows: &[LlmModelUsageView]) -> Option<String> {
+    if rows.is_empty() {
+        return None;
+    }
+    let visible = rows.len().min(MAX_STATUS_BAR_MODELS);
+    let mut parts: Vec<String> = rows[..visible]
+        .iter()
+        .map(|r| {
+            format!(
+                "{}: in={} out={}",
+                r.model,
+                format_compact_tokens(r.input_tokens),
+                format_compact_tokens(r.output_tokens)
+            )
+        })
+        .collect();
+    let hidden = rows.len() - visible;
+    if hidden > 0 {
+        parts.push(format!("+{} models", hidden));
+    }
+    Some(parts.join(", "))
+}
 
 /// Helper: Convert optional ModelId to combo box selection index.
 /// Returns 0 for None (default), or index+1 for a specific model in the catalog.
@@ -330,6 +367,9 @@ pub fn render(
     }
     if let Some(progress) = view.triage_progress.as_deref() {
         status_parts.push(progress.to_string());
+    }
+    if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
+        status_parts.push(usage);
     }
     let status_text = status_parts.join(" | ");
 
@@ -2335,5 +2375,50 @@ mod tests {
         assert!(!cmds
             .iter()
             .any(|cmd| matches!(cmd, PlatformCommand::SetRichEditContent { .. })));
+    }
+
+    #[test]
+    fn status_bar_omits_llm_usage_when_empty() {
+        assert_eq!(format_llm_usage_status(&[]), None);
+    }
+
+    #[test]
+    fn status_bar_includes_llm_usage_segment() {
+        let rows = vec![LlmModelUsageView {
+            model: "gpt-4o-mini".to_string(),
+            input_tokens: 12_000,
+            output_tokens: 3_000,
+        }];
+        let result = format_llm_usage_status(&rows);
+        assert_eq!(
+            result,
+            Some("gpt-4o-mini: in=12K out=3K".to_string())
+        );
+    }
+
+    #[test]
+    fn status_bar_collapses_when_model_count_exceeds_limit() {
+        let rows = vec![
+            LlmModelUsageView {
+                model: "alpha".to_string(),
+                input_tokens: 1_000,
+                output_tokens: 500,
+            },
+            LlmModelUsageView {
+                model: "beta".to_string(),
+                input_tokens: 2_000,
+                output_tokens: 1_000,
+            },
+            LlmModelUsageView {
+                model: "gamma".to_string(),
+                input_tokens: 3_000,
+                output_tokens: 1_500,
+            },
+        ];
+        let result = format_llm_usage_status(&rows).expect("Some");
+        assert!(result.contains("alpha: in=1K out=500"));
+        assert!(result.contains("beta: in=2K out=1K"));
+        assert!(result.contains("+1 models"));
+        assert!(!result.contains("gamma"));
     }
 }
