@@ -1,5 +1,6 @@
 use crate::cli::Args;
 use crate::lock;
+use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, Msg};
 use harvester_engine::llm::prompt::PromptId;
@@ -9,8 +10,8 @@ use harvester_engine::llm::{
     ProviderKind,
 };
 use harvester_io::{
-    load_completed_jobs, load_sources, load_summary_cache, load_triage_cache, persist_completed_jobs,
-    EffectRunner, NoOpPlatformHandler, RuntimePaths,
+    load_completed_jobs, load_sources, load_summary_cache, load_triage_cache,
+    persist_completed_jobs, EffectRunner, NoOpPlatformHandler, RuntimePaths,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,7 +19,6 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
-use chrono::Utc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CycleOutcome {
@@ -186,10 +186,7 @@ fn summarize_batch_msg(msg: &Msg) -> String {
                     format!("Failed({})", truncate_for_log(reason, 80))
                 }
             };
-            format!(
-                "JobDone {{ job_id: {}, result: {} }}",
-                job_id, result_label
-            )
+            format!("JobDone {{ job_id: {}, result: {} }}", job_id, result_label)
         }
         Msg::TriageArticlesLoaded { articles } => {
             format!("TriageArticlesLoaded {{ articles: {} }}", articles.len())
@@ -198,7 +195,10 @@ fn summarize_batch_msg(msg: &Msg) -> String {
             format!("ArticlesLoaded {{ articles: {} }}", articles.len())
         }
         Msg::BriefingPrereqArticlesLoaded { articles } => {
-            format!("BriefingPrereqArticlesLoaded {{ articles: {} }}", articles.len())
+            format!(
+                "BriefingPrereqArticlesLoaded {{ articles: {} }}",
+                articles.len()
+            )
         }
         Msg::PromptContextsLoaded { contexts } => {
             format!("PromptContextsLoaded {{ prompts: {} }}", contexts.len())
@@ -322,8 +322,12 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Build EffectRunner (with optional LLM support based on OPENAI_API_KEY)
     engine_info!("[batch] Building EffectRunner");
     let platform_handler = Box::new(NoOpPlatformHandler);
-    let effect_runner =
-        build_effect_runner(&paths, msg_tx.clone(), args.llm_concurrency, platform_handler);
+    let effect_runner = build_effect_runner(
+        &paths,
+        msg_tx.clone(),
+        args.llm_concurrency,
+        platform_handler,
+    );
     effect_runner.enqueue(vec![
         harvester_core::Effect::LoadPromptTemplateFiles,
         harvester_core::Effect::LoadLlmMetadata,
@@ -339,7 +343,12 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Hydrate persistent caches for triage/summary reuse.
     let summary_cache = load_summary_cache(&paths.summary_cache_path);
     if !summary_cache.is_empty() {
-        let (new_state, effects) = update(state, Msg::SummaryCacheHydrated { cache: summary_cache });
+        let (new_state, effects) = update(
+            state,
+            Msg::SummaryCacheHydrated {
+                cache: summary_cache,
+            },
+        );
         state = new_state;
         if !effects.is_empty() {
             effect_runner.enqueue(effects);
@@ -347,7 +356,12 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
     let triage_cache = load_triage_cache(&paths.triage_cache_path);
     if !triage_cache.is_empty() {
-        let (new_state, effects) = update(state, Msg::TriageCacheHydrated { cache: triage_cache });
+        let (new_state, effects) = update(
+            state,
+            Msg::TriageCacheHydrated {
+                cache: triage_cache,
+            },
+        );
         state = new_state;
         if !effects.is_empty() {
             effect_runner.enqueue(effects);
@@ -538,12 +552,13 @@ fn run_dispatch_loop(
 fn maybe_dispatch_batch_ai_orchestration(state: &AppState) -> Option<Msg> {
     let obs = state.batch_observation();
 
-    if matches!(obs.pre_triage_phase, harvester_core::PreTriagePhase::ReadyToTriage)
-        && !matches!(
-            obs.triage_phase,
-            harvester_core::TriagePhase::LoadingArticles | harvester_core::TriagePhase::Triaging
-        )
-        && obs.pre_triage_included > 0
+    if matches!(
+        obs.pre_triage_phase,
+        harvester_core::PreTriagePhase::ReadyToTriage
+    ) && !matches!(
+        obs.triage_phase,
+        harvester_core::TriagePhase::LoadingArticles | harvester_core::TriagePhase::Triaging
+    ) && obs.pre_triage_included > 0
         && obs.triage_total < obs.pre_triage_included
     {
         return Some(Msg::TriageClicked);
@@ -967,7 +982,7 @@ mod tests {
             &shutdown_flag,
             true,
         )
-            .expect("dispatch loop should complete");
+        .expect("dispatch loop should complete");
         assert_eq!(outcome, CycleOutcome::Success);
 
         assert!(matches!(msg_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
