@@ -88,15 +88,29 @@ Use this project diary as long-term memory for AI-assisted coding.
 * Prefer append-only history; do not rewrite old entries except for factual corrections.
 * If a change is too small to be noteworthy, no diary entry is required.
 
+### Capturing diary entries at plan creation
+
+Every new plan document must include a **draft diary entry** (at the top or in a dedicated section) with at least `Context` and `Change` fields pre-filled. At plan-creation time the motivation and goals are freshest — this is the golden opportunity to document *why* the work is being done. The `Change` field can be written as the intended outcome; it will be confirmed or adjusted when the plan is completed and the diary entry is finalized.
+
+### What to record in diary entries
+
+* **Context** — the motivation, goal, or problem being solved. Focus on *why*, not *how*. This is the most valuable part; without it, history becomes a meaningless list of changes.
+* **Change** — name the **subsystems or crates affected** (e.g., "harvester_engine, harvester_core"), not individual files. Keep it to one or two sentences. File-level detail belongs in commit messages, not the diary.
+* **Bug fixes** — only record a diary entry when the fix reveals an **insight that changes how you would design or review code in the future**. Ask: *"Would knowing this prevent a whole category of future bugs?"* If yes, document the lesson. If it was a simple typo, wrong variable, or misreading of docs, skip the diary entry.
+
+### When a plan is completed and deleted
+
+Before deleting a completed plan file, finalize its draft diary entry: confirm the `Change` field reflects what was actually built, add `Evidence`, and copy the entry into `docs/EngineeringDiary.md`. This can be coodinated with the extraction of future ideas.
+
 Recommended entry format:
 
 ```md
 ## YYYY-MM-DD - Short title
 Type: Implementation | Bug Fix | Decision
 Context: Why this change happened.
-Change: What was implemented/changed.
+Change: What was implemented/changed (name subsystems, not files).
 Evidence: Tests, logs, or validation performed.
-Lessons Learned: (required for Bug Fix)
+Lessons Learned: (required for Bug Fix, only when insightful)
 Prevention: (required for Bug Fix) How we reduce recurrence.
-Refs: path/to/file.rs, test_name, commit abc1234
+Refs: crate/module names, test_name, commit abc1234
 ```
