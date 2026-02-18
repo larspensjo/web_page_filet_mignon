@@ -69,18 +69,62 @@ function Count-RustTests {
     return $totalTests
 }
 
+function Get-WorkspaceCrates {
+    $workspaceCargoToml = Join-Path $projectRoot "Cargo.toml"
+    if (-not (Test-Path $workspaceCargoToml)) {
+        return @()
+    }
+
+    $workspaceContent = Get-Content $workspaceCargoToml -Raw -ErrorAction Stop
+    if ($workspaceContent -notmatch '(?s)\[workspace\](.*?)(\r?\n\[|$)') {
+        return @()
+    }
+
+    $workspaceSection = $matches[1]
+    if ($workspaceSection -notmatch '(?s)members\s*=\s*\[(.*?)\]') {
+        return @()
+    }
+
+    $membersSection = $matches[1]
+    $memberMatches = [regex]::Matches($membersSection, '"([^"]+)"')
+    $crates = @()
+
+    foreach ($memberMatch in $memberMatches) {
+        $relativeMemberPath = $memberMatch.Groups[1].Value.Replace('/', '\')
+        $cratePath = Join-Path $projectRoot $relativeMemberPath
+        if (-not (Test-Path $cratePath)) {
+            continue
+        }
+
+        $crateCargoToml = Join-Path $cratePath "Cargo.toml"
+        $crateName = Split-Path $cratePath -Leaf
+        if (Test-Path $crateCargoToml) {
+            $crateCargoContent = Get-Content $crateCargoToml -Raw -ErrorAction SilentlyContinue
+            if ($crateCargoContent -match '(?s)\[package\](.*?)(\r?\n\[|$)') {
+                $packageSection = $matches[1]
+                if ($packageSection -match '(?m)^\s*name\s*=\s*"([^"]+)"') {
+                    $crateName = $matches[1]
+                }
+            }
+        }
+
+        $crates += @{
+            Name = $crateName
+            CratePath = $cratePath
+        }
+    }
+
+    return $crates
+}
+
 function Get-RustStats {
-    $modules = @(
-        @{Name="harvester_app"; Path="crates\harvester_app\src"},
-        @{Name="harvester_core"; Path="crates\harvester_core\src"},
-        @{Name="harvester_engine"; Path="crates\harvester_engine\src"},
-        @{Name="engine_logging"; Path="crates\engine_logging\src"}
-    )
+    $modules = Get-WorkspaceCrates
 
     $stats = @{}
 
     foreach ($module in $modules) {
-        $modulePath = Join-Path $projectRoot $module.Path
+        $modulePath = Join-Path $module.CratePath "src"
+        $testsPath = Join-Path $module.CratePath "tests"
         $allFiles = @()
 
         # Collect source files
@@ -88,13 +132,9 @@ function Get-RustStats {
             $allFiles += Get-ChildItem -Path $modulePath -Filter "*.rs" -Recurse -File
         }
 
-        # Also check for tests directory at crate level (e.g., crates/harvester_core/tests)
-        if ($module.Path -like "crates\*") {
-            $cratePath = Split-Path (Split-Path $modulePath -Parent) -Parent
-            $testsPath = Join-Path $cratePath "tests"
-            if (Test-Path $testsPath) {
-                $allFiles += Get-ChildItem -Path $testsPath -Filter "*.rs" -Recurse -File
-            }
+        # Also check for integration tests directory at crate level.
+        if (Test-Path $testsPath) {
+            $allFiles += Get-ChildItem -Path $testsPath -Filter "*.rs" -Recurse -File
         }
 
         if ($allFiles.Count -gt 0) {
@@ -363,32 +403,37 @@ function Show-StatisticsReport {
     Write-Host ""
 }
 
-# --- Main Execution ---
+function Invoke-ProjectStatsReport {
+    try {
+        if (-not (Test-Path $projectRoot)) {
+            throw "Project root not found: $projectRoot"
+        }
 
-try {
-    if (-not (Test-Path $projectRoot)) {
-        throw "Project root not found: $projectRoot"
+        # Collect all statistics
+        Write-Host "Collecting project statistics..." -ForegroundColor Yellow
+
+        $rustStats = Get-RustStats
+        $submoduleStats = Get-SubmoduleStats
+        $powerShellStats = Get-PowerShellStats
+        $docStats = Get-DocumentationStats
+        $dependencyCount = Get-DependencyCount
+
+        # Display formatted report
+        Show-StatisticsReport `
+            -RustStats $rustStats `
+            -SubmoduleStats $submoduleStats `
+            -PowerShellStats $powerShellStats `
+            -DocStats $docStats `
+            -DependencyCount $dependencyCount
+
+    } catch {
+        Write-Host $("ERROR: {0}" -f $_) -ForegroundColor Red
+        Write-Host $_.ScriptStackTrace -ForegroundColor Red
+        exit 1
     }
+}
 
-    # Collect all statistics
-    Write-Host "Collecting project statistics..." -ForegroundColor Yellow
-
-    $rustStats = Get-RustStats
-    $submoduleStats = Get-SubmoduleStats
-    $powerShellStats = Get-PowerShellStats
-    $docStats = Get-DocumentationStats
-    $dependencyCount = Get-DependencyCount
-
-    # Display formatted report
-    Show-StatisticsReport `
-        -RustStats $rustStats `
-        -SubmoduleStats $submoduleStats `
-        -PowerShellStats $powerShellStats `
-        -DocStats $docStats `
-        -DependencyCount $dependencyCount
-
-} catch {
-    Write-Host $("ERROR: {0}" -f $_) -ForegroundColor Red
-    Write-Host $_.ScriptStackTrace -ForegroundColor Red
-    exit 1
+# Run report when invoked directly, but not when dot-sourced for tests.
+if ($MyInvocation.InvocationName -ne '.') {
+    Invoke-ProjectStatsReport
 }

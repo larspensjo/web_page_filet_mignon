@@ -36,3 +36,12 @@ Evidence: `cargo test -p harvester_io runtime_paths::tests`
 Lessons Learned: Allowing multiple codepaths to own file naming leads to silent divergence of persisted data.
 Prevention: Centralize filenames/formats in `harvester_io::RuntimePaths` and cover the shared persistence API with regression tests.
 Refs: crates/harvester_io/src/runtime_paths.rs, crates/harvester_app/src/platform/app.rs, cargo test -p harvester_io runtime_paths::tests
+
+## 2026-02-18 - Fix workspace crate coverage in project stats
+Type: Bug Fix
+Context: `scripts/project-stats.ps1` hard-coded four crates, so newly added workspace crates were omitted from the Rust section and totals.
+Change: Replaced hard-coded crate enumeration with workspace-driven discovery from root `Cargo.toml`, fixed crate-level `tests/` lookup to use each crate root, and added a Pester regression test that compares reported crates with `cargo metadata`.
+Evidence: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/project-stats.ps1`; `Invoke-Pester -Path scripts/tests/project-stats.Tests.ps1`; `cargo build`; `cargo clippy --all-targets -- -D warnings`
+Lessons Learned: Hard-coded project topology in reporting tooling quickly drifts from workspace reality and silently under-reports.
+Prevention: Derive crate inventory from workspace metadata and keep a regression test that cross-checks script output against `cargo metadata`.
+Refs: scripts/project-stats.ps1, scripts/tests/project-stats.Tests.ps1
