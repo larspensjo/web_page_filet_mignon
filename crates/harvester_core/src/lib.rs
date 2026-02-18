@@ -51,7 +51,7 @@ pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCach
 pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
-    AppViewModel, JobFilterStatus, JobRowView, LinkRowView, PreviewHeaderView,
+    AppViewModel, JobFilterStatus, JobRowView, LinkRowView, LlmModelUsageView, PreviewHeaderView,
     PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
     PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, TriageAnnotationView,
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,

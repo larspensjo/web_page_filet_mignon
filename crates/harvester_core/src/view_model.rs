@@ -13,6 +13,15 @@ use harvester_engine::LinkKind;
 use std::collections::HashMap;
 
 pub const TOKEN_LIMIT: u64 = 200_000;
+
+/// Per-model LLM token usage snapshot for rendering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LlmModelUsageView {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 pub const INPUT_PANEL_FIXED_WIDTH: i32 = 500;
 pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
 
@@ -69,6 +78,8 @@ pub struct AppViewModel {
     pub selected_url: Option<String>,
     pub prompt_lab: PromptLabView,
     pub is_pre_triage_reviewing: bool,
+    /// Per-model LLM token usage, sorted alphabetically by model name. Only Miss runs counted.
+    pub llm_usage_by_model: Vec<LlmModelUsageView>,
 }
 
 impl Default for AppViewModel {
@@ -97,6 +108,7 @@ impl Default for AppViewModel {
             selected_url: None,
             prompt_lab: PromptLabView::default(),
             is_pre_triage_reviewing: false,
+            llm_usage_by_model: Vec::new(),
         }
     }
 }

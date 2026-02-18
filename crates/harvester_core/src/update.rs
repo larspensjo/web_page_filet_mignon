@@ -281,6 +281,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             } else {
                 engine_warn!("LLM completion for unknown request_id {request_id}");
             }
+            if let Some(m) = metadata.as_ref() {
+                state.record_llm_usage_from_metadata(m);
+            }
             let mut effects = Vec::new();
             if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
                 match &result {

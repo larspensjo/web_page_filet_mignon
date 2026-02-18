@@ -329,6 +329,8 @@ pub struct AppState {
     prompt_lab: PromptLabState,
     next_prompt_lab_run_id: u64,
     prompt_lab_next_resolve_id: u64,
+    /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
+    llm_usage_by_model: BTreeMap<String, (u64, u64)>,
 }
 
 pub(crate) struct PromptLabPendingRunRegistration {
@@ -386,6 +388,7 @@ impl Default for AppState {
             next_prompt_lab_run_id: 1,
             prompt_lab_next_resolve_id: 1,
             prompt_lab_templates: default_prompt_template_snapshots(),
+            llm_usage_by_model: BTreeMap::new(),
         }
     }
 }
@@ -631,6 +634,7 @@ impl AppState {
                 selected_triage_article_available,
             ),
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
+            llm_usage_by_model: self.llm_usage_rows(),
         }
     }
 
@@ -642,6 +646,36 @@ impl AppState {
         let id = self.next_llm_request_id;
         self.next_llm_request_id = self.next_llm_request_id.saturating_add(1);
         id
+    }
+
+    /// Records LLM token usage from a completed run.
+    /// Only CacheStatus::Miss runs are counted; empty or whitespace-only model names are ignored.
+    pub fn record_llm_usage_from_metadata(&mut self, metadata: &LlmRunMetadata) {
+        use harvester_engine::llm::run_metadata::CacheStatus;
+        if metadata.cache_status != CacheStatus::Miss {
+            return;
+        }
+        let model = metadata.resolved_model.trim();
+        if model.is_empty() {
+            return;
+        }
+        let entry = self.llm_usage_by_model.entry(model.to_string()).or_default();
+        entry.0 = entry.0.saturating_add(u64::from(metadata.input_tokens));
+        entry.1 = entry.1.saturating_add(u64::from(metadata.output_tokens));
+    }
+
+    /// Returns a sorted (alphabetical) snapshot of per-model token usage for rendering.
+    pub fn llm_usage_rows(&self) -> Vec<crate::view_model::LlmModelUsageView> {
+        self.llm_usage_by_model
+            .iter()
+            .map(|(model, &(input_tokens, output_tokens))| {
+                crate::view_model::LlmModelUsageView {
+                    model: model.clone(),
+                    input_tokens,
+                    output_tokens,
+                }
+            })
+            .collect()
     }
 
     pub fn record_pending_llm_request(&mut self, request_id: u64, prompt_id: PromptId) {
