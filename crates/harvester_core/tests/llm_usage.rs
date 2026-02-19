@@ -122,9 +122,10 @@ fn llm_usage_saturates_at_u64_max() {
         ));
     }
     let rows = state.llm_usage_rows();
-    // Values must be ≤ u64::MAX and must not have panicked
-    assert!(rows[0].input_tokens <= u64::MAX);
-    assert!(rows[0].output_tokens <= u64::MAX);
+    // Values must accumulate without overflow/panic for large u32 inputs.
+    let expected = u64::from(u32::MAX) * 3;
+    assert_eq!(rows[0].input_tokens, expected);
+    assert_eq!(rows[0].output_tokens, expected);
 }
 
 #[test]
