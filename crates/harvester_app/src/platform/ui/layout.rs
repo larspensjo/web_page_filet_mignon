@@ -30,6 +30,37 @@ pub(crate) struct LayoutConfig {
     pub prompt_lab: PromptLabLayoutConfig,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PromptLabVisibility {
+    visible: bool,
+    show_advanced: bool,
+    show_compare_row: bool,
+    show_context_row: bool,
+    show_template_row: bool,
+    show_template_editor_rows: bool,
+    show_run_details_row: bool,
+}
+
+fn compute_prompt_lab_visibility(prompt_lab: &PromptLabLayoutConfig) -> PromptLabVisibility {
+    let visible = prompt_lab.visible;
+    let show_advanced = visible && prompt_lab.advanced_mode;
+    let show_compare_row = show_advanced && prompt_lab.compare_section_open;
+    let show_context_row = show_advanced && prompt_lab.context_section_open;
+    let show_template_row = show_advanced && prompt_lab.template_section_open;
+    let show_template_editor_rows = show_template_row && prompt_lab.template_editor_open;
+    let show_run_details_row = show_advanced && prompt_lab.run_details_section_open;
+
+    PromptLabVisibility {
+        visible,
+        show_advanced,
+        show_compare_row,
+        show_context_row,
+        show_template_row,
+        show_template_editor_rows,
+        show_run_details_row,
+    }
+}
+
 #[allow(clippy::vec_init_then_push)]
 pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     let mut commands = Vec::new();
@@ -845,30 +876,31 @@ fn build_layout_rules(
     input_panel_visible: bool,
     prompt_lab: PromptLabLayoutConfig,
 ) -> Vec<LayoutRule> {
+    let visibility = compute_prompt_lab_visibility(&prompt_lab);
     let input_width = if input_panel_visible {
         INPUT_PANEL_FIXED_WIDTH
     } else {
         0
     };
     let jobs_width = (left_panel_width - input_width).max(0);
-    let prompt_lab_height = if prompt_lab.visible {
+    let prompt_lab_height = if visibility.visible {
         let mut height = 220;
-        if prompt_lab.advanced_mode {
+        if visibility.show_advanced {
             height += 96;
-            if prompt_lab.compare_section_open {
+            if visibility.show_compare_row {
                 height += 32;
             }
-            if prompt_lab.context_section_open {
+            if visibility.show_context_row {
                 height += 210;
             }
-            if prompt_lab.template_section_open {
+            if visibility.show_template_row {
                 height += 64;
-                if prompt_lab.template_editor_open {
-                    height += 244;
-                }
+            }
+            if visibility.show_template_editor_rows {
+                height += 244;
             }
             height += 28;
-            if prompt_lab.run_details_section_open {
+            if visibility.show_run_details_row {
                 height += 42;
             }
         }
@@ -1063,7 +1095,7 @@ fn build_layout_rules(
         },
     ];
 
-    if prompt_lab.visible {
+    if visibility.visible {
         rules.extend([
             LayoutRule {
                 control_id: PANEL_PROMPT_LAB_MODE_ROW,
@@ -1094,7 +1126,7 @@ fn build_layout_rules(
                 parent_control_id: Some(PANEL_PROMPT_LAB),
                 dock_style: DockStyle::Top,
                 order: 2,
-                fixed_size: if prompt_lab.advanced_mode {
+                fixed_size: if visibility.show_advanced {
                     Some(26)
                 } else {
                     Some(0)
@@ -1210,7 +1242,7 @@ fn build_layout_rules(
             },
         ]);
 
-        if prompt_lab.advanced_mode {
+        if visibility.show_advanced {
             rules.extend([
                 LayoutRule {
                     control_id: PANEL_PROMPT_LAB_COMPARE_HEADER_ROW,
@@ -1229,7 +1261,7 @@ fn build_layout_rules(
                     margin: (0, 0, 0, 0),
                 },
             ]);
-            if prompt_lab.compare_section_open {
+            if visibility.show_compare_row {
                 rules.extend([
                     LayoutRule {
                         control_id: PANEL_PROMPT_LAB_COMPARE_ROW,
@@ -1382,7 +1414,7 @@ fn build_layout_rules(
                     margin: (0, 0, 0, 0),
                 },
             ]);
-            if prompt_lab.context_section_open {
+            if visibility.show_context_row {
                 rules.extend([
                     LayoutRule {
                         control_id: PANEL_PROMPT_LAB_CONTEXT_ROW,
@@ -1511,7 +1543,7 @@ fn build_layout_rules(
                     margin: (0, 0, 0, 0),
                 },
             ]);
-            if prompt_lab.template_section_open {
+            if visibility.show_template_row {
                 rules.extend([
                     LayoutRule {
                         control_id: PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW,
@@ -1606,7 +1638,7 @@ fn build_layout_rules(
                 fixed_size: None,
                 margin: (0, 0, 0, 0),
             });
-            if prompt_lab.run_details_section_open {
+            if visibility.show_run_details_row {
                 rules.push(LayoutRule {
                     control_id: LABEL_PROMPT_LAB_METADATA,
                     parent_control_id: Some(PANEL_PROMPT_LAB),
@@ -1734,10 +1766,7 @@ fn build_layout_rules(
             ]);
         }
 
-        if prompt_lab.template_editor_open
-            && prompt_lab.advanced_mode
-            && prompt_lab.template_section_open
-        {
+        if visibility.show_template_editor_rows {
             rules.extend([
                 LayoutRule {
                     control_id: PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
@@ -2230,5 +2259,57 @@ mod tests {
             .find(|r| r.control_id == BTN_PROMPT_LAB_TEMPLATE_OPEN)
             .expect("template toggle button rule");
         assert_eq!(toggle_button.fixed_size, Some(120));
+    }
+
+    #[test]
+    fn template_editor_visibility_matrix_enforces_row_sizes() {
+        for advanced_mode in [false, true] {
+            for template_section_open in [false, true] {
+                for template_editor_open in [false, true] {
+                    let cmd = build_layout_command(
+                        WindowId::new(7),
+                        LayoutConfig {
+                            left_panel_width: 600,
+                            input_panel_visible: true,
+                            prompt_lab: PromptLabLayoutConfig {
+                                visible: true,
+                                advanced_mode,
+                                compare_section_open: false,
+                                context_section_open: false,
+                                template_section_open,
+                                run_details_section_open: false,
+                                template_editor_open,
+                            },
+                        },
+                    );
+                    let rules = match cmd {
+                        PlatformCommand::DefineLayout { rules, .. } => rules,
+                        _ => panic!("expected DefineLayout"),
+                    };
+
+                    let expected_editor_rows =
+                        advanced_mode && template_section_open && template_editor_open;
+                    let expected_size = if expected_editor_rows { Some(120) } else { Some(0) };
+
+                    let system_row = rules
+                        .iter()
+                        .find(|r| r.control_id == PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW)
+                        .expect("template system row rule");
+                    let user_row = rules
+                        .iter()
+                        .find(|r| r.control_id == PANEL_PROMPT_LAB_TEMPLATE_USER_ROW)
+                        .expect("template user row rule");
+
+                    assert_eq!(
+                        system_row.fixed_size, expected_size,
+                        "system row mismatch: advanced_mode={advanced_mode} template_section_open={template_section_open} template_editor_open={template_editor_open}"
+                    );
+                    assert_eq!(
+                        user_row.fixed_size, expected_size,
+                        "user row mismatch: advanced_mode={advanced_mode} template_section_open={template_section_open} template_editor_open={template_editor_open}"
+                    );
+                }
+            }
+        }
     }
 }

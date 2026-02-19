@@ -520,6 +520,12 @@ impl Default for PromptLabState {
 }
 
 impl PromptLabState {
+    fn normalize_visibility_invariants(&mut self) {
+        if !self.visible || !self.advanced_mode || !self.template_section_open {
+            self.template_editor_open = false;
+        }
+    }
+
     // ------------------------------------------------------------------
     // Visibility
     // ------------------------------------------------------------------
@@ -530,6 +536,7 @@ impl PromptLabState {
 
     pub fn close(&mut self) {
         self.visible = false;
+        self.normalize_visibility_invariants();
     }
 
     pub fn is_visible(&self) -> bool {
@@ -1067,11 +1074,12 @@ impl PromptLabState {
     }
 
     pub(crate) fn set_template_editor_open(&mut self, open: bool) {
-        self.template_editor_open = open;
         if open {
             self.advanced_mode = true;
             self.template_section_open = true;
         }
+        self.template_editor_open = open;
+        self.normalize_visibility_invariants();
     }
 
     pub(crate) fn template_editor_open(&self) -> bool {
@@ -1080,6 +1088,7 @@ impl PromptLabState {
 
     pub fn set_advanced_mode(&mut self, enabled: bool) {
         self.advanced_mode = enabled;
+        self.normalize_visibility_invariants();
     }
 
     pub fn advanced_mode(&self) -> bool {
@@ -1104,6 +1113,7 @@ impl PromptLabState {
 
     pub fn toggle_template_section(&mut self) {
         self.template_section_open = !self.template_section_open;
+        self.normalize_visibility_invariants();
     }
 
     pub fn template_section_open(&self) -> bool {
@@ -1381,6 +1391,38 @@ mod tests {
         assert!(s.is_visible());
         s.close();
         assert!(!s.is_visible());
+    }
+
+    #[test]
+    fn close_resets_template_editor_open_invariant() {
+        let mut s = PromptLabState::default();
+        s.open();
+        s.set_template_editor_open(true);
+        assert!(s.template_editor_open());
+        s.close();
+        assert!(!s.template_editor_open());
+    }
+
+    #[test]
+    fn disabling_advanced_mode_closes_template_editor() {
+        let mut s = PromptLabState::default();
+        s.open();
+        s.set_template_editor_open(true);
+        assert!(s.template_editor_open());
+        s.set_advanced_mode(false);
+        assert!(!s.template_editor_open());
+    }
+
+    #[test]
+    fn closing_template_section_closes_template_editor() {
+        let mut s = PromptLabState::default();
+        s.open();
+        s.set_template_editor_open(true);
+        assert!(s.template_editor_open());
+        assert!(s.template_section_open());
+        s.toggle_template_section();
+        assert!(!s.template_section_open());
+        assert!(!s.template_editor_open());
     }
 
     #[test]
