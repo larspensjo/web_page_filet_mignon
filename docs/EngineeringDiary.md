@@ -321,3 +321,12 @@ Context: A draft plan for per-model token usage proposed binary-local accumulato
 Change: Locked direction to reducer-owned per-model usage tracking in `harvester_core`, consumed read-only by both `harvester_app` and `harvester_batch`; replay cache hits are excluded from session consumption totals to avoid overcounting.
 Evidence: Revised planning document with implementation/testing details and blockers.
 Refs: docs/Plan.TokenUsageDisplay.md, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/handle.rs
+
+## 2026-02-19 - Prompt Lab templates section layout collapse/width fix
+Type: Bug Fix
+Context: In Prompt Lab advanced mode with Templates open, the template toggle button label was truncated and a stray white template input field could remain visible even when the template editor was not opened.
+Change: Updated `harvester_app` Prompt Lab layout rules to allocate sufficient width for the template toggle button and to explicitly collapse template editor rows whenever the editor is closed, preventing stale multiline input controls from rendering.
+Evidence: `cargo test -p harvester_app platform::ui::layout::tests::template_editor_rows_are_collapsed_when_editor_is_closed -- --nocapture`; `cargo test -p harvester_app platform::ui::layout::tests::template_toggle_button_width_fits_state_text -- --nocapture`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
+Lessons Learned: In docked Win32 layouts, every conditional branch must explicitly size hidden rows; relying on previous layout state causes stale controls to leak into the visible UI.
+Prevention: Add regression tests for collapsed/expanded states per section and keep explicit zero-size rules for non-visible rows in each layout state branch.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_core/tests/llm_usage.rs

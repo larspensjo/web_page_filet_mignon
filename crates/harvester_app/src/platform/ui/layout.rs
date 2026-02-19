@@ -1526,7 +1526,7 @@ fn build_layout_rules(
                         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
                         dock_style: DockStyle::Left,
                         order: 0,
-                        fixed_size: Some(50),
+                        fixed_size: Some(120),
                         margin: (0, 4, 0, 0),
                     },
                     LayoutRule {
@@ -1770,6 +1770,26 @@ fn build_layout_rules(
                     order: 0,
                     fixed_size: None,
                     margin: (4, 4, 4, 4),
+                },
+            ]);
+        } else {
+            // Always collapse template editor rows unless the editor is explicitly open.
+            rules.extend([
+                LayoutRule {
+                    control_id: PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW,
+                    parent_control_id: Some(PANEL_PROMPT_LAB),
+                    dock_style: DockStyle::Top,
+                    order: 16,
+                    fixed_size: Some(0),
+                    margin: (0, 0, 0, 0),
+                },
+                LayoutRule {
+                    control_id: PANEL_PROMPT_LAB_TEMPLATE_USER_ROW,
+                    parent_control_id: Some(PANEL_PROMPT_LAB),
+                    dock_style: DockStyle::Top,
+                    order: 17,
+                    fixed_size: Some(0),
+                    margin: (0, 0, 0, 0),
                 },
             ]);
         }
@@ -2146,5 +2166,69 @@ mod tests {
         assert!(rules
             .iter()
             .any(|r| r.control_id == LABEL_PROMPT_LAB_CONTEXT_STATUS));
+    }
+
+    #[test]
+    fn template_editor_rows_are_collapsed_when_editor_is_closed() {
+        let cmd = build_layout_command(
+            WindowId::new(5),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: true,
+                    advanced_mode: true,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: true,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        let system_row = rules
+            .iter()
+            .find(|r| r.control_id == PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW)
+            .expect("template system row rule");
+        assert_eq!(system_row.fixed_size, Some(0));
+
+        let user_row = rules
+            .iter()
+            .find(|r| r.control_id == PANEL_PROMPT_LAB_TEMPLATE_USER_ROW)
+            .expect("template user row rule");
+        assert_eq!(user_row.fixed_size, Some(0));
+    }
+
+    #[test]
+    fn template_toggle_button_width_fits_state_text() {
+        let cmd = build_layout_command(
+            WindowId::new(6),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: true,
+                    advanced_mode: true,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: true,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        let toggle_button = rules
+            .iter()
+            .find(|r| r.control_id == BTN_PROMPT_LAB_TEMPLATE_OPEN)
+            .expect("template toggle button rule");
+        assert_eq!(toggle_button.fixed_size, Some(120));
     }
 }
