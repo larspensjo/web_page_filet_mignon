@@ -1153,11 +1153,16 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             Vec::new()
         }
-        Msg::PromptLabTemplateEditorOpened => {
+        Msg::PromptLabTemplateEditorToggled => {
+            let currently_open = state.prompt_lab().template_editor_open();
             let stage = state.prompt_lab().selected_stage();
             let prompt_id = prompt_id_for_stage(stage);
-            state.prompt_lab_mut().set_template_editor_open(true);
-            ensure_prompt_lab_template_draft(&mut state, prompt_id);
+            state
+                .prompt_lab_mut()
+                .set_template_editor_open(!currently_open);
+            if !currently_open {
+                ensure_prompt_lab_template_draft(&mut state, prompt_id);
+            }
             state.mark_dirty();
             Vec::new()
         }

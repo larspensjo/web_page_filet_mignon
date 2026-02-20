@@ -235,8 +235,8 @@ pub enum Msg {
         prompt_id: PromptId,
         reason: String,
     },
-    /// User opened the Prompt Lab template editor.
-    PromptLabTemplateEditorOpened,
+    /// User toggled the Prompt Lab template editor open/closed.
+    PromptLabTemplateEditorToggled,
     /// User changed the system template draft text.
     PromptLabTemplateSystemDraftChanged {
         text: String,

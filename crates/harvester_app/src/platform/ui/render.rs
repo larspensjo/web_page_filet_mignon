@@ -124,7 +124,7 @@ pub struct TreeRenderState {
     prev_prompt_lab_context_apply_rerun_enabled: Option<bool>,
     prev_prompt_lab_context_revert_enabled: Option<bool>,
     prev_prompt_lab_context_save_enabled: Option<bool>,
-    prev_prompt_lab_template_open_text: Option<String>,
+    prev_prompt_lab_template_open_checked: Option<bool>,
     prev_prompt_lab_template_system_text: Option<String>,
     prev_prompt_lab_template_user_text: Option<String>,
     prev_prompt_lab_template_status_text: Option<String>,
@@ -194,7 +194,7 @@ impl Default for TreeRenderState {
             prev_prompt_lab_context_apply_rerun_enabled: None,
             prev_prompt_lab_context_revert_enabled: None,
             prev_prompt_lab_context_save_enabled: None,
-            prev_prompt_lab_template_open_text: None,
+            prev_prompt_lab_template_open_checked: None,
             prev_prompt_lab_template_system_text: None,
             prev_prompt_lab_template_user_text: None,
             prev_prompt_lab_template_status_text: None,
@@ -750,19 +750,16 @@ pub fn render(
         });
         tree_state.prev_prompt_lab_context_save_enabled = Some(view.prompt_lab.can_save_context);
     }
-    let template_open_text = if view.prompt_lab.template_editor_open {
-        "[x] Edit Templates".to_string()
-    } else {
-        "[ ] Edit Templates".to_string()
-    };
-    if tree_state.prev_prompt_lab_template_open_text.as_deref() != Some(template_open_text.as_str())
+    if tree_state.prev_prompt_lab_template_open_checked
+        != Some(view.prompt_lab.template_editor_open)
     {
-        cmds.push(PlatformCommand::SetControlText {
+        cmds.push(PlatformCommand::SetCheckBoxChecked {
             window_id,
-            control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
-            text: template_open_text.clone(),
+            control_id: CHK_PROMPT_LAB_TEMPLATE_OPEN,
+            checked: view.prompt_lab.template_editor_open,
         });
-        tree_state.prev_prompt_lab_template_open_text = Some(template_open_text);
+        tree_state.prev_prompt_lab_template_open_checked =
+            Some(view.prompt_lab.template_editor_open);
     }
     let can_apply_template =
         view.prompt_lab.template_dirty && view.prompt_lab.template_validation_errors.is_empty();

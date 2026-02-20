@@ -601,10 +601,10 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::PromptLabContextReloadRequested);
             }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_OPEN =>
+            AppEvent::CheckBoxToggled { control_id, .. }
+                if control_id == ui::constants::CHK_PROMPT_LAB_TEMPLATE_OPEN =>
             {
-                let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorOpened);
+                let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorToggled);
             }
             AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_APPLY =>
@@ -1015,9 +1015,9 @@ mod tests {
     #[test]
     fn prompt_lab_template_buttons_emit_expected_msgs() {
         let (mut handler, rx) = test_handler_with_outbound();
-        handler.handle_event(AppEvent::ButtonClicked {
+        handler.handle_event(AppEvent::CheckBoxToggled {
             window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_TEMPLATE_OPEN,
+            control_id: ui::constants::CHK_PROMPT_LAB_TEMPLATE_OPEN,
         });
         handler.handle_event(AppEvent::ButtonClicked {
             window_id: WindowId::new(1),
@@ -1039,7 +1039,7 @@ mod tests {
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250))
                 .expect("template open"),
-            Msg::PromptLabTemplateEditorOpened
+            Msg::PromptLabTemplateEditorToggled
         );
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250))

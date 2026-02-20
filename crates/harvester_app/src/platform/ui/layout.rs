@@ -500,11 +500,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
         text: "Run details".to_string(),
     });
-    commands.push(PlatformCommand::CreateButton {
+    commands.push(PlatformCommand::CreateCheckBox {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
-        text: "Edit".to_string(),
+        control_id: CHK_PROMPT_LAB_TEMPLATE_OPEN,
+        text: "Edit Templates".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -1571,7 +1571,7 @@ fn build_layout_rules(
                         margin: (0, 0, 2, 0),
                     },
                     LayoutRule {
-                        control_id: BTN_PROMPT_LAB_TEMPLATE_OPEN,
+                        control_id: CHK_PROMPT_LAB_TEMPLATE_OPEN,
                         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
                         dock_style: DockStyle::Left,
                         order: 0,
@@ -1854,7 +1854,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_PROMPT_LAB_CONTEXT_REVERT,
         BTN_PROMPT_LAB_CONTEXT_SAVE,
         BTN_PROMPT_LAB_CONTEXT_RELOAD,
-        BTN_PROMPT_LAB_TEMPLATE_OPEN,
+        CHK_PROMPT_LAB_TEMPLATE_OPEN,
         BTN_PROMPT_LAB_TEMPLATE_APPLY,
         BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
         BTN_PROMPT_LAB_TEMPLATE_REVERT,
@@ -2233,7 +2233,7 @@ mod tests {
         };
         let toggle_button = rules
             .iter()
-            .find(|r| r.control_id == BTN_PROMPT_LAB_TEMPLATE_OPEN)
+            .find(|r| r.control_id == CHK_PROMPT_LAB_TEMPLATE_OPEN)
             .expect("template toggle button rule");
         assert_eq!(
             toggle_button.fixed_size,
