@@ -2390,10 +2390,7 @@ mod tests {
             output_tokens: 3_000,
         }];
         let result = format_llm_usage_status(&rows);
-        assert_eq!(
-            result,
-            Some("gpt-4o-mini: in=12K out=3K".to_string())
-        );
+        assert_eq!(result, Some("gpt-4o-mini: in=12K out=3K".to_string()));
     }
 
     #[test]

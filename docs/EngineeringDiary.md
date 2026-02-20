@@ -14,7 +14,6 @@ How to use:
 Type: Implementation | Bug Fix | Decision
 Context: Why this change happened.
 Change: What was implemented/changed.
-Evidence: Tests, logs, or validation performed.
 Lessons Learned: (required for Bug Fix)
 Prevention: (required for Bug Fix)
 Refs: path/to/file.rs, test_name, commit abc1234
@@ -23,7 +22,6 @@ Refs: path/to/file.rs, test_name, commit abc1234
 Type: Decision
 Context: Need persistent memory across AI-assisted sessions.
 Change: Added explicit diary workflow in AGENTS.md and created this file.
-Evidence: AGENTS.md updated with Engineering Diary rules and template.
 Refs: AGENTS.md, docs/EngineeringDiary.md
 
 ## 2026-01-21 - Plan.Main.md
@@ -294,7 +292,6 @@ Refs: docs/Plan.ComboBoxModelSelectorHardening.md
 Type: Bug Fix
 Context: `harvester_batch` was saving caches/state with `.json` names while `harvester_app` expected `.ron`, so the GUI never picked up batch-generated caches.
 Change: Updated `RuntimePaths` to produce `.ron` files, removed the app-local cache persistence modules, and redirected the UI to `harvester_io`’s load/save APIs; added regression tests to ensure the same path is used end-to-end.
-Evidence: `cargo test -p harvester_io runtime_paths::tests`
 Lessons Learned: Allowing multiple codepaths to own file naming leads to silent divergence of persisted data.
 Prevention: Centralize filenames/formats in `harvester_io::RuntimePaths` and cover the shared persistence API with regression tests.
 Refs: crates/harvester_io/src/runtime_paths.rs, crates/harvester_app/src/platform/app.rs, cargo test -p harvester_io runtime_paths::tests
@@ -303,7 +300,6 @@ Refs: crates/harvester_io/src/runtime_paths.rs, crates/harvester_app/src/platfor
 Type: Bug Fix
 Context: `scripts/project-stats.ps1` hard-coded four crates, so newly added workspace crates were omitted from the Rust section and totals.
 Change: Replaced hard-coded crate enumeration with workspace-driven discovery from root `Cargo.toml`, fixed crate-level `tests/` lookup to use each crate root, and added a Pester regression test that compares reported crates with `cargo metadata`.
-Evidence: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/project-stats.ps1`; `Invoke-Pester -Path scripts/tests/project-stats.Tests.ps1`; `cargo build`; `cargo clippy --all-targets -- -D warnings`
 Lessons Learned: Hard-coded project topology in reporting tooling quickly drifts from workspace reality and silently under-reports.
 Prevention: Derive crate inventory from workspace metadata and keep a regression test that cross-checks script output against `cargo metadata`.
 Refs: scripts/project-stats.ps1, scripts/tests/project-stats.Tests.ps1
@@ -312,14 +308,12 @@ Refs: scripts/project-stats.ps1, scripts/tests/project-stats.Tests.ps1
 Type: Implementation
 Context: Operators need session-scoped visibility into LLM token usage by resolved model in both GUI and headless batch flows, using the existing `Msg::LlmCompleted` pipeline without introducing side-channels.
 Change: `harvester_core` gained a reducer-owned per-model usage ledger (`BTreeMap<String,(u64,u64)>` in `AppState`, updated in `update()` for `CacheStatus::Miss` completions only, exposed via `AppViewModel.llm_usage_by_model`). `harvester_batch` prints compact per-model lines after each cycle row. `harvester_app` extends the footer status bar with the same snapshot. No local accumulators in either binary.
-Evidence: `cargo nextest run -p harvester_core` (274/274), `cargo nextest run -p harvester_batch` (30/30), `cargo nextest run -p harvester_app` (81/81), `cargo build --workspace` clean.
 Refs: crates/harvester_core/src/state.rs, crates/harvester_core/src/update.rs, crates/harvester_core/src/view_model.rs, crates/harvester_core/tests/llm_usage.rs, crates/harvester_batch/src/runner.rs, crates/harvester_app/src/platform/ui/render.rs
 
 ## 2026-02-18 - Token usage display architecture decision
 Type: Decision
 Context: A draft plan for per-model token usage proposed binary-local accumulators and render-state mutation, which conflicts with the project's unidirectional data flow constraints and risks inconsistent behavior.
 Change: Locked direction to reducer-owned per-model usage tracking in `harvester_core`, consumed read-only by both `harvester_app` and `harvester_batch`; replay cache hits are excluded from session consumption totals to avoid overcounting.
-Evidence: Revised planning document with implementation/testing details and blockers.
 Refs: docs/Plan.TokenUsageDisplay.md, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/handle.rs
 
 ## 2026-02-19 - Prompt Lab templates section layout collapse/width fix

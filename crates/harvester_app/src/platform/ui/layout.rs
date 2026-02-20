@@ -1,6 +1,5 @@
 use commanductui::types::{
-    ControlId, DockStyle, LabelClass, LayoutRule, MenuActionId, MenuItemConfig,
-    SplitterOrientation,
+    ControlId, DockStyle, LabelClass, LayoutRule, MenuActionId, MenuItemConfig, SplitterOrientation,
 };
 use commanductui::{
     Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
@@ -80,7 +79,11 @@ fn compute_prompt_lab_visibility(prompt_lab: &PromptLabLayoutConfig) -> PromptLa
     }
 }
 
-fn collapsed_top_rule(control_id: ControlId, parent_control_id: ControlId, order: u32) -> LayoutRule {
+fn collapsed_top_rule(
+    control_id: ControlId,
+    parent_control_id: ControlId,
+    order: u32,
+) -> LayoutRule {
     LayoutRule {
         control_id,
         parent_control_id: Some(parent_control_id),
@@ -1667,7 +1670,11 @@ fn build_layout_rules(
                 collapsed_top_rule(LABEL_PROMPT_LAB_TEMPLATE_STATUS, PANEL_PROMPT_LAB, 15),
                 collapsed_top_rule(PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW, PANEL_PROMPT_LAB, 16),
                 collapsed_top_rule(PANEL_PROMPT_LAB_TEMPLATE_USER_ROW, PANEL_PROMPT_LAB, 17),
-                collapsed_top_rule(PANEL_PROMPT_LAB_RUN_DETAILS_HEADER_ROW, PANEL_PROMPT_LAB, 18),
+                collapsed_top_rule(
+                    PANEL_PROMPT_LAB_RUN_DETAILS_HEADER_ROW,
+                    PANEL_PROMPT_LAB,
+                    18,
+                ),
                 collapsed_top_rule(LABEL_PROMPT_LAB_METADATA, PANEL_PROMPT_LAB, 19),
             ]);
         }
@@ -2059,7 +2066,11 @@ mod tests {
                 PlatformCommand::DefineStyle { style_id, .. } => {
                     defined.insert(*style_id);
                 }
-                PlatformCommand::ApplyStyleToControl { style_id, control_id, .. } => {
+                PlatformCommand::ApplyStyleToControl {
+                    style_id,
+                    control_id,
+                    ..
+                } => {
                     assert!(
                         defined.contains(style_id),
                         "StyleId::{style_id:?} is applied to control {} but was never defined with DefineStyle — \

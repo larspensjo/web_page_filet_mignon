@@ -659,7 +659,10 @@ impl AppState {
         if model.is_empty() {
             return;
         }
-        let entry = self.llm_usage_by_model.entry(model.to_string()).or_default();
+        let entry = self
+            .llm_usage_by_model
+            .entry(model.to_string())
+            .or_default();
         entry.0 = entry.0.saturating_add(u64::from(metadata.input_tokens));
         entry.1 = entry.1.saturating_add(u64::from(metadata.output_tokens));
     }
@@ -668,13 +671,13 @@ impl AppState {
     pub fn llm_usage_rows(&self) -> Vec<crate::view_model::LlmModelUsageView> {
         self.llm_usage_by_model
             .iter()
-            .map(|(model, &(input_tokens, output_tokens))| {
-                crate::view_model::LlmModelUsageView {
+            .map(
+                |(model, &(input_tokens, output_tokens))| crate::view_model::LlmModelUsageView {
                     model: model.clone(),
                     input_tokens,
                     output_tokens,
-                }
-            })
+                },
+            )
             .collect()
     }
 
