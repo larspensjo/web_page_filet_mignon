@@ -765,6 +765,22 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
             ..Default::default()
         },
     });
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::CheckBox,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
 
     commands.push(PlatformCommand::DefineStyle {
         style_id: StyleId::TreeView,
@@ -2014,6 +2030,46 @@ mod tests {
             )),
             "StyleId::ComboBox must be defined to avoid runtime warning"
         );
+    }
+
+    #[test]
+    fn checkbox_style_is_defined() {
+        let commands = initial_commands(WindowId::new(2));
+        assert!(
+            commands.iter().any(|cmd| matches!(
+                cmd,
+                PlatformCommand::DefineStyle { style_id, .. }
+                    if *style_id == StyleId::CheckBox
+            )),
+            "StyleId::CheckBox must be defined so WM_CTLCOLOR returns the dark-theme brush"
+        );
+    }
+
+    /// General regression guard: every StyleId that appears in an ApplyStyleToControl command
+    /// must have a corresponding DefineStyle command earlier in the same sequence.
+    /// A missing DefineStyle is a silent runtime failure — WM_CTLCOLOR gets no brush and
+    /// the control renders with the system default (light) colors.
+    #[test]
+    fn every_applied_style_has_a_prior_definition() {
+        use std::collections::HashSet;
+        let cmds = initial_commands(WindowId::new(99));
+        let mut defined: HashSet<StyleId> = HashSet::new();
+        for cmd in &cmds {
+            match cmd {
+                PlatformCommand::DefineStyle { style_id, .. } => {
+                    defined.insert(*style_id);
+                }
+                PlatformCommand::ApplyStyleToControl { style_id, control_id, .. } => {
+                    assert!(
+                        defined.contains(style_id),
+                        "StyleId::{style_id:?} is applied to control {} but was never defined with DefineStyle — \
+                         WM_CTLCOLOR will get no brush and the control will render with system-default (light) colors",
+                        control_id.raw()
+                    );
+                }
+                _ => {}
+            }
+        }
     }
 
     #[test]
