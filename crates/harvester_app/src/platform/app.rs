@@ -1018,6 +1018,7 @@ mod tests {
         handler.handle_event(AppEvent::CheckBoxToggled {
             window_id: WindowId::new(1),
             control_id: ui::constants::CHK_PROMPT_LAB_TEMPLATE_OPEN,
+            checked: true,
         });
         handler.handle_event(AppEvent::ButtonClicked {
             window_id: WindowId::new(1),

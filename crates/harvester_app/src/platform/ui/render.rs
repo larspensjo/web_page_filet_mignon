@@ -278,13 +278,103 @@ pub fn render(
     view: &AppViewModel,
     tree_state: &mut TreeRenderState,
 ) -> Vec<PlatformCommand> {
+    let mut cmds = Vec::new();
+    render_layout_section(window_id, view, tree_state, &mut cmds);
+    render_status_section(window_id, view, tree_state, &mut cmds);
+    render_token_progress_section(window_id, view, tree_state, &mut cmds);
+    render_main_controls_section(window_id, view, tree_state, &mut cmds);
+    render_prompt_lab_section(window_id, view, tree_state, &mut cmds);
+
+    let job_items = build_job_tree(view);
+    append_tree_commands(window_id, job_items, tree_state, &mut cmds);
+
+    render_preview_section(window_id, view, tree_state, &mut cmds);
+
+    cmds
+}
+
+fn emit_if_changed<T, F>(
+    prev: &mut Option<T>,
+    next: T,
+    cmds: &mut Vec<PlatformCommand>,
+    emit: F,
+) where
+    T: PartialEq + Clone,
+    F: FnOnce(T) -> PlatformCommand,
+{
+    if prev.as_ref() != Some(&next) {
+        cmds.push(emit(next.clone()));
+        *prev = Some(next);
+    }
+}
+
+fn render_layout_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
+        || view.input_panel_visible != tree_state.prev_input_panel_visible
+        || view.prompt_lab.visible != tree_state.prev_prompt_lab_visible
+        || view.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
+        || view.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
+        || view.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
+        || view.prompt_lab.template_section_open
+            != tree_state.prev_prompt_lab_template_section_open
+        || view.prompt_lab.template_editor_open != tree_state.prev_prompt_lab_template_editor_open;
+    if !layout_changed {
+        return;
+    }
+    engine_debug!(
+        "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}",
+        tree_state.prev_left_panel_width,
+        view.left_panel_width,
+        tree_state.prev_input_panel_visible,
+        view.input_panel_visible
+    );
+    cmds.push(build_layout_command(
+        window_id,
+        LayoutConfig {
+            left_panel_width: view.left_panel_width,
+            input_panel_visible: view.input_panel_visible,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: view.prompt_lab.visible,
+                advanced_mode: view.prompt_lab.advanced_mode,
+                compare_section_open: view.prompt_lab.compare_section_open,
+                context_section_open: view.prompt_lab.context_section_open,
+                template_section_open: view.prompt_lab.template_section_open,
+                run_details_section_open: view.prompt_lab.run_details_section_open,
+                template_editor_open: view.prompt_lab.template_editor_open,
+            },
+        },
+    ));
+    if view.prompt_lab.visible && !tree_state.prev_prompt_lab_visible {
+        tree_state.prev_prompt_lab_model_catalog = None;
+        tree_state.prev_prompt_lab_selected_model = None;
+    }
+    tree_state.prev_left_panel_width = view.left_panel_width;
+    tree_state.prev_input_panel_visible = view.input_panel_visible;
+    tree_state.prev_prompt_lab_visible = view.prompt_lab.visible;
+    tree_state.prev_prompt_lab_advanced_mode = view.prompt_lab.advanced_mode;
+    tree_state.prev_prompt_lab_compare_section_open = view.prompt_lab.compare_section_open;
+    tree_state.prev_prompt_lab_context_section_open = view.prompt_lab.context_section_open;
+    tree_state.prev_prompt_lab_template_section_open = view.prompt_lab.template_section_open;
+    tree_state.prev_prompt_lab_template_editor_open = view.prompt_lab.template_editor_open;
+}
+
+fn render_status_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
     let session_label = match view.session {
         SessionState::Idle => "Idle",
         SessionState::Running => "Running",
         SessionState::Finishing => "Finishing",
         SessionState::Finished => "Finished",
     };
-
     let status_base_text = match &view.last_paste_stats {
         Some(stats) => format!(
             "Session: {} | Jobs: {} | Last paste: enqueued {}, skipped {}",
@@ -293,6 +383,37 @@ pub fn render(
         None => format!("Session: {} | Jobs: {}", session_label, view.job_count),
     };
 
+    let mut status_parts = vec![status_base_text];
+    if let Some(progress) = view.briefing_progress.as_deref() {
+        status_parts.push(progress.to_string());
+    }
+    if let Some(progress) = view.triage_progress.as_deref() {
+        status_parts.push(progress.to_string());
+    }
+    if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
+        status_parts.push(usage);
+    }
+    emit_if_changed(
+        &mut tree_state.prev_status_text,
+        status_parts.join(" | "),
+        cmds,
+        |text| PlatformCommand::UpdateLabelText {
+            window_id,
+            control_id: LABEL_STATUS,
+            text,
+            severity: MessageSeverity::Information,
+        },
+    );
+    tree_state.prev_briefing_progress = view.briefing_progress.clone();
+    tree_state.prev_triage_progress = view.triage_progress.clone();
+}
+
+fn render_token_progress_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
     let raw_limit = view.token_limit;
     let effective_limit = raw_limit.max(1);
     let bar_max = effective_limit.min(u32::MAX as u64);
@@ -309,263 +430,196 @@ pub fn render(
         percent
     );
 
-    let mut cmds = Vec::new();
-
-    // Check if left_panel_width changed and emit updated layout
-    let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
-        || view.input_panel_visible != tree_state.prev_input_panel_visible
-        || view.prompt_lab.visible != tree_state.prev_prompt_lab_visible
-        || view.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
-        || view.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
-        || view.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
-        || view.prompt_lab.template_section_open
-            != tree_state.prev_prompt_lab_template_section_open
-        || view.prompt_lab.template_editor_open != tree_state.prev_prompt_lab_template_editor_open;
-    if layout_changed {
-        engine_debug!(
-            "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}",
-            tree_state.prev_left_panel_width,
-            view.left_panel_width,
-            tree_state.prev_input_panel_visible,
-            view.input_panel_visible
-        );
-        cmds.push(build_layout_command(
-            window_id,
-            LayoutConfig {
-                left_panel_width: view.left_panel_width,
-                input_panel_visible: view.input_panel_visible,
-                prompt_lab: PromptLabLayoutConfig {
-                    visible: view.prompt_lab.visible,
-                    advanced_mode: view.prompt_lab.advanced_mode,
-                    compare_section_open: view.prompt_lab.compare_section_open,
-                    context_section_open: view.prompt_lab.context_section_open,
-                    template_section_open: view.prompt_lab.template_section_open,
-                    run_details_section_open: view.prompt_lab.run_details_section_open,
-                    template_editor_open: view.prompt_lab.template_editor_open,
-                },
-            },
-        ));
-        // When prompt lab transitions to visible, reset combo box cached state
-        // so SetComboBoxItems/Selection are re-sent to the now-existing control.
-        if view.prompt_lab.visible && !tree_state.prev_prompt_lab_visible {
-            tree_state.prev_prompt_lab_model_catalog = None;
-            tree_state.prev_prompt_lab_selected_model = None;
-        }
-        tree_state.prev_left_panel_width = view.left_panel_width;
-        tree_state.prev_input_panel_visible = view.input_panel_visible;
-        tree_state.prev_prompt_lab_visible = view.prompt_lab.visible;
-        tree_state.prev_prompt_lab_advanced_mode = view.prompt_lab.advanced_mode;
-        tree_state.prev_prompt_lab_compare_section_open = view.prompt_lab.compare_section_open;
-        tree_state.prev_prompt_lab_context_section_open = view.prompt_lab.context_section_open;
-        tree_state.prev_prompt_lab_template_section_open = view.prompt_lab.template_section_open;
-        tree_state.prev_prompt_lab_template_editor_open = view.prompt_lab.template_editor_open;
-    }
-
-    let mut status_parts = vec![status_base_text.clone()];
-    if let Some(progress) = view.briefing_progress.as_deref() {
-        status_parts.push(progress.to_string());
-    }
-    if let Some(progress) = view.triage_progress.as_deref() {
-        status_parts.push(progress.to_string());
-    }
-    if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
-        status_parts.push(usage);
-    }
-    let status_text = status_parts.join(" | ");
-
-    let status_changed = match tree_state.prev_status_text.as_deref() {
-        Some(prev) => prev != status_text.as_str(),
-        None => true,
-    };
-    if status_changed {
-        let updated_text = status_text.clone();
-        cmds.push(PlatformCommand::UpdateLabelText {
-            window_id,
-            control_id: LABEL_STATUS,
-            text: updated_text.clone(),
-            severity: MessageSeverity::Information,
-        });
-        tree_state.prev_status_text = Some(updated_text);
-    }
-    tree_state.prev_briefing_progress = view.briefing_progress.clone();
-    tree_state.prev_triage_progress = view.triage_progress.clone();
-
-    let range = (0, bar_max as u32);
-    if tree_state.prev_progress_range != Some(range) {
-        cmds.push(PlatformCommand::SetProgressBarRange {
+    emit_if_changed(
+        &mut tree_state.prev_progress_range,
+        (0, bar_max as u32),
+        cmds,
+        |(min, max)| PlatformCommand::SetProgressBarRange {
             window_id,
             control_id: PROGRESS_TOKENS,
-            min: range.0,
-            max: range.1,
-        });
-        tree_state.prev_progress_range = Some(range);
-    }
-    let pos = clamped_tokens as u32;
-    if tree_state.prev_progress_pos != Some(pos) {
-        cmds.push(PlatformCommand::SetProgressBarPosition {
+            min,
+            max,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_progress_pos,
+        clamped_tokens as u32,
+        cmds,
+        |position| PlatformCommand::SetProgressBarPosition {
             window_id,
             control_id: PROGRESS_TOKENS,
-            position: pos,
-        });
-        tree_state.prev_progress_pos = Some(pos);
-    }
-    let progress_text_changed = match tree_state.prev_progress_text.as_deref() {
-        Some(prev) => prev != progress_text,
-        None => true,
-    };
-    if progress_text_changed {
-        cmds.push(PlatformCommand::SetControlText {
+            position,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_progress_text,
+        progress_text,
+        cmds,
+        |text| PlatformCommand::SetControlText {
             window_id,
             control_id: LABEL_TOKEN_PROGRESS,
-            text: progress_text.to_string(),
-        });
-        tree_state.prev_progress_text = Some(progress_text.to_string());
-    }
+            text,
+        },
+    );
+}
 
-    let stop_enabled = matches!(view.session, SessionState::Running);
-    if tree_state.prev_stop_enabled != Some(stop_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+fn render_main_controls_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    emit_if_changed(
+        &mut tree_state.prev_stop_enabled,
+        matches!(view.session, SessionState::Running),
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_STOP,
-            enabled: stop_enabled,
-        });
-        tree_state.prev_stop_enabled = Some(stop_enabled);
-    }
-
-    let briefing_enabled = view.briefing_can_start;
-    if tree_state.prev_briefing_enabled != Some(briefing_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_briefing_enabled,
+        view.briefing_can_start,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_BRIEFING,
-            enabled: briefing_enabled,
-        });
-        tree_state.prev_briefing_enabled = Some(briefing_enabled);
-    }
-
-    let triage_enabled = view.triage_can_start;
-    if tree_state.prev_triage_enabled != Some(triage_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_triage_enabled,
+        view.triage_can_start,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_TRIAGE,
-            enabled: triage_enabled,
-        });
-        tree_state.prev_triage_enabled = Some(triage_enabled);
-    }
-
-    let poll_enabled = view.poll_sources_enabled;
-    if tree_state.prev_poll_enabled != Some(poll_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_poll_enabled,
+        view.poll_sources_enabled,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_POLL_SOURCES,
-            enabled: poll_enabled,
-        });
-        tree_state.prev_poll_enabled = Some(poll_enabled);
-    }
-
-    let open_browser_enabled = view.selected_url.is_some();
-    if tree_state.prev_open_browser_enabled != Some(open_browser_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_open_browser_enabled,
+        view.selected_url.is_some(),
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_OPEN_BROWSER,
-            enabled: open_browser_enabled,
-        });
-        tree_state.prev_open_browser_enabled = Some(open_browser_enabled);
-    }
-    let mode_basic_checked = !view.prompt_lab.advanced_mode;
-    if tree_state.prev_prompt_lab_mode_basic_checked != Some(mode_basic_checked) {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            enabled,
+        },
+    );
+}
+
+fn render_prompt_lab_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_mode_basic_checked,
+        !view.prompt_lab.advanced_mode,
+        cmds,
+        |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_PROMPT_LAB_MODE_BASIC,
-            checked: mode_basic_checked,
-        });
-        tree_state.prev_prompt_lab_mode_basic_checked = Some(mode_basic_checked);
-    }
-    let mode_advanced_checked = view.prompt_lab.advanced_mode;
-    if tree_state.prev_prompt_lab_mode_advanced_checked != Some(mode_advanced_checked) {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            checked,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_mode_advanced_checked,
+        view.prompt_lab.advanced_mode,
+        cmds,
+        |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_PROMPT_LAB_MODE_ADVANCED,
-            checked: mode_advanced_checked,
-        });
-        tree_state.prev_prompt_lab_mode_advanced_checked = Some(mode_advanced_checked);
-    }
-    let stage_triage_checked = view.prompt_lab.selected_stage == PromptLabStage::Triage;
-    if tree_state.prev_prompt_lab_stage_triage_checked != Some(stage_triage_checked) {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            checked,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_stage_triage_checked,
+        view.prompt_lab.selected_stage == PromptLabStage::Triage,
+        cmds,
+        |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_STAGE_TRIAGE,
-            checked: stage_triage_checked,
-        });
-        tree_state.prev_prompt_lab_stage_triage_checked = Some(stage_triage_checked);
-    }
-    let stage_summary_checked = view.prompt_lab.selected_stage == PromptLabStage::Summary;
-    if tree_state.prev_prompt_lab_stage_summary_checked != Some(stage_summary_checked) {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            checked,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_stage_summary_checked,
+        view.prompt_lab.selected_stage == PromptLabStage::Summary,
+        cmds,
+        |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_STAGE_SUMMARY,
-            checked: stage_summary_checked,
-        });
-        tree_state.prev_prompt_lab_stage_summary_checked = Some(stage_summary_checked);
-    }
-    let stage_briefing_checked = view.prompt_lab.selected_stage == PromptLabStage::Briefing;
-    if tree_state.prev_prompt_lab_stage_briefing_checked != Some(stage_briefing_checked) {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            checked,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_stage_briefing_checked,
+        view.prompt_lab.selected_stage == PromptLabStage::Briefing,
+        cmds,
+        |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
             control_id: BTN_STAGE_BRIEFING,
-            checked: stage_briefing_checked,
-        });
-        tree_state.prev_prompt_lab_stage_briefing_checked = Some(stage_briefing_checked);
-    }
-    if tree_state.prev_prompt_lab_section_compare_checked
-        != Some(view.prompt_lab.compare_section_open)
-    {
-        cmds.push(PlatformCommand::SetCheckBoxChecked {
+            checked,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_section_compare_checked,
+        view.prompt_lab.compare_section_open,
+        cmds,
+        |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
             control_id: CHK_PROMPT_LAB_SECTION_COMPARE,
-            checked: view.prompt_lab.compare_section_open,
-        });
-        tree_state.prev_prompt_lab_section_compare_checked =
-            Some(view.prompt_lab.compare_section_open);
-    }
-    if tree_state.prev_prompt_lab_section_context_checked
-        != Some(view.prompt_lab.context_section_open)
-    {
-        cmds.push(PlatformCommand::SetCheckBoxChecked {
+            checked,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_section_context_checked,
+        view.prompt_lab.context_section_open,
+        cmds,
+        |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
             control_id: CHK_PROMPT_LAB_SECTION_CONTEXT,
-            checked: view.prompt_lab.context_section_open,
-        });
-        tree_state.prev_prompt_lab_section_context_checked =
-            Some(view.prompt_lab.context_section_open);
-    }
-    if tree_state.prev_prompt_lab_section_template_checked
-        != Some(view.prompt_lab.template_section_open)
-    {
-        cmds.push(PlatformCommand::SetCheckBoxChecked {
+            checked,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_section_template_checked,
+        view.prompt_lab.template_section_open,
+        cmds,
+        |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
             control_id: CHK_PROMPT_LAB_SECTION_TEMPLATE,
-            checked: view.prompt_lab.template_section_open,
-        });
-        tree_state.prev_prompt_lab_section_template_checked =
-            Some(view.prompt_lab.template_section_open);
-    }
-    if tree_state.prev_prompt_lab_section_run_details_checked
-        != Some(view.prompt_lab.run_details_section_open)
-    {
-        cmds.push(PlatformCommand::SetCheckBoxChecked {
+            checked,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_section_run_details_checked,
+        view.prompt_lab.run_details_section_open,
+        cmds,
+        |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
             control_id: CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
-            checked: view.prompt_lab.run_details_section_open,
-        });
-        tree_state.prev_prompt_lab_section_run_details_checked =
-            Some(view.prompt_lab.run_details_section_open);
-    }
+            checked,
+        },
+    );
 
-    // Model selector combo box updates
     let model_catalog = &view.prompt_lab.model_catalog;
     let selected_model = view.prompt_lab.selected_model_override.as_ref();
-
-    // Check if catalog changed -> update combo items
     if tree_state.prev_prompt_lab_model_catalog.as_deref() != Some(model_catalog.as_slice()) {
         engine_info!(
             "[prompt-lab-model] render updating combo items source={:?} count={}",
@@ -581,9 +635,6 @@ pub fn render(
         });
         tree_state.prev_prompt_lab_model_catalog = Some(model_catalog.clone());
     }
-
-    // Check if selected model changed -> update combo selection.
-    // Use a stable key so initial "None" still emits a default-selection command.
     let selected_model_key = selected_model
         .map(|m| m.model_name().to_string())
         .unwrap_or_else(|| "__DEFAULT__".to_string());
@@ -603,283 +654,300 @@ pub fn render(
         tree_state.prev_prompt_lab_selected_model = Some(selected_model_key);
     }
 
-    if tree_state.prev_prompt_lab_run_enabled != Some(view.prompt_lab.can_run) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_run_enabled,
+        view.prompt_lab.can_run,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_RUN,
-            enabled: view.prompt_lab.can_run,
-        });
-        tree_state.prev_prompt_lab_run_enabled = Some(view.prompt_lab.can_run);
-    }
-    let resolve_enabled = !view.prompt_lab.resolve_pending;
-    if tree_state.prev_prompt_lab_resolve_enabled != Some(resolve_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_resolve_enabled,
+        !view.prompt_lab.resolve_pending,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_RESOLVE,
-            enabled: resolve_enabled,
-        });
-        tree_state.prev_prompt_lab_resolve_enabled = Some(resolve_enabled);
-    }
-    if tree_state.prev_prompt_lab_url_enabled != Some(true) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_url_enabled,
+        true,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: INPUT_PROMPT_LAB_URL,
-            enabled: true,
-        });
-        tree_state.prev_prompt_lab_url_enabled = Some(true);
-    }
+            enabled,
+        },
+    );
+
     let compare_add_enabled = view.prompt_lab.can_add_candidate;
-    if tree_state.prev_prompt_lab_compare_add_current_enabled != Some(compare_add_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_compare_add_current_enabled,
+        compare_add_enabled,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_COMPARE_ADD_CURRENT,
-            enabled: compare_add_enabled,
-        });
-        tree_state.prev_prompt_lab_compare_add_current_enabled = Some(compare_add_enabled);
-    }
-    if tree_state.prev_prompt_lab_compare_add_baseline_enabled != Some(compare_add_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_compare_add_baseline_enabled,
+        compare_add_enabled,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_COMPARE_ADD_BASELINE,
-            enabled: compare_add_enabled,
-        });
-        tree_state.prev_prompt_lab_compare_add_baseline_enabled = Some(compare_add_enabled);
-    }
-    let compare_reset_enabled = view.prompt_lab.can_reset_draft;
-    if tree_state.prev_prompt_lab_compare_reset_draft_enabled != Some(compare_reset_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_compare_reset_draft_enabled,
+        view.prompt_lab.can_reset_draft,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_COMPARE_RESET_DRAFT,
-            enabled: compare_reset_enabled,
-        });
-        tree_state.prev_prompt_lab_compare_reset_draft_enabled = Some(compare_reset_enabled);
-    }
-    let compare_start_enabled =
-        view.prompt_lab.active_batch.is_none() && view.prompt_lab.draft_candidates.len() >= 2;
-    if tree_state.prev_prompt_lab_compare_start_enabled != Some(compare_start_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_compare_start_enabled,
+        view.prompt_lab.active_batch.is_none() && view.prompt_lab.draft_candidates.len() >= 2,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_COMPARE_START,
-            enabled: compare_start_enabled,
-        });
-        tree_state.prev_prompt_lab_compare_start_enabled = Some(compare_start_enabled);
-    }
-    let compare_cancel_enabled = view
-        .prompt_lab
-        .active_batch
-        .as_ref()
-        .map(|batch| batch.can_cancel)
-        .unwrap_or(false);
-    if tree_state.prev_prompt_lab_compare_cancel_enabled != Some(compare_cancel_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_compare_cancel_enabled,
+        view.prompt_lab
+            .active_batch
+            .as_ref()
+            .map(|batch| batch.can_cancel)
+            .unwrap_or(false),
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_COMPARE_CANCEL,
-            enabled: compare_cancel_enabled,
-        });
-        tree_state.prev_prompt_lab_compare_cancel_enabled = Some(compare_cancel_enabled);
-    }
-    let compare_auto_select_enabled = view
-        .prompt_lab
-        .active_batch
-        .as_ref()
-        .map(|batch| batch.can_auto_select)
-        .unwrap_or(false);
-    if tree_state.prev_prompt_lab_compare_auto_select_enabled != Some(compare_auto_select_enabled) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_compare_auto_select_enabled,
+        view.prompt_lab
+            .active_batch
+            .as_ref()
+            .map(|batch| batch.can_auto_select)
+            .unwrap_or(false),
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_COMPARE_AUTO_SELECT,
-            enabled: compare_auto_select_enabled,
-        });
-        tree_state.prev_prompt_lab_compare_auto_select_enabled = Some(compare_auto_select_enabled);
-    }
-    let compare_winner_clear_enabled = view
-        .prompt_lab
-        .active_batch
-        .as_ref()
-        .map(|batch| {
-            batch
-                .rows
-                .iter()
-                .any(|row| row.is_manual_winner || row.is_auto_winner)
-        })
-        .unwrap_or(false);
-    if tree_state.prev_prompt_lab_compare_winner_clear_enabled != Some(compare_winner_clear_enabled)
-    {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_compare_winner_clear_enabled,
+        view.prompt_lab
+            .active_batch
+            .as_ref()
+            .map(|batch| {
+                batch
+                    .rows
+                    .iter()
+                    .any(|row| row.is_manual_winner || row.is_auto_winner)
+            })
+            .unwrap_or(false),
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_COMPARE_WINNER_CLEAR,
-            enabled: compare_winner_clear_enabled,
-        });
-        tree_state.prev_prompt_lab_compare_winner_clear_enabled =
-            Some(compare_winner_clear_enabled);
-    }
-    if tree_state.prev_prompt_lab_context_apply_enabled != Some(view.prompt_lab.can_apply_context) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_context_apply_enabled,
+        view.prompt_lab.can_apply_context,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_CONTEXT_APPLY,
-            enabled: view.prompt_lab.can_apply_context,
-        });
-        tree_state.prev_prompt_lab_context_apply_enabled = Some(view.prompt_lab.can_apply_context);
-    }
-    if tree_state.prev_prompt_lab_context_apply_rerun_enabled
-        != Some(view.prompt_lab.can_apply_and_rerun)
-    {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_context_apply_rerun_enabled,
+        view.prompt_lab.can_apply_and_rerun,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
-            enabled: view.prompt_lab.can_apply_and_rerun,
-        });
-        tree_state.prev_prompt_lab_context_apply_rerun_enabled =
-            Some(view.prompt_lab.can_apply_and_rerun);
-    }
-    if tree_state.prev_prompt_lab_context_revert_enabled != Some(view.prompt_lab.can_revert_context)
-    {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_context_revert_enabled,
+        view.prompt_lab.can_revert_context,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_CONTEXT_REVERT,
-            enabled: view.prompt_lab.can_revert_context,
-        });
-        tree_state.prev_prompt_lab_context_revert_enabled =
-            Some(view.prompt_lab.can_revert_context);
-    }
-    if tree_state.prev_prompt_lab_context_save_enabled != Some(view.prompt_lab.can_save_context) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_context_save_enabled,
+        view.prompt_lab.can_save_context,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_CONTEXT_SAVE,
-            enabled: view.prompt_lab.can_save_context,
-        });
-        tree_state.prev_prompt_lab_context_save_enabled = Some(view.prompt_lab.can_save_context);
-    }
-    if tree_state.prev_prompt_lab_template_open_checked
-        != Some(view.prompt_lab.template_editor_open)
-    {
-        cmds.push(PlatformCommand::SetCheckBoxChecked {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_open_checked,
+        view.prompt_lab.template_editor_open,
+        cmds,
+        |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
             control_id: CHK_PROMPT_LAB_TEMPLATE_OPEN,
-            checked: view.prompt_lab.template_editor_open,
-        });
-        tree_state.prev_prompt_lab_template_open_checked =
-            Some(view.prompt_lab.template_editor_open);
-    }
+            checked,
+        },
+    );
+
     let can_apply_template =
         view.prompt_lab.template_dirty && view.prompt_lab.template_validation_errors.is_empty();
     let can_apply_template_and_rerun = can_apply_template && view.prompt_lab.can_run;
     let can_revert_template = view.prompt_lab.template_dirty || view.prompt_lab.template_applied;
-    if tree_state.prev_prompt_lab_template_apply_enabled != Some(can_apply_template) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_apply_enabled,
+        can_apply_template,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY,
-            enabled: can_apply_template,
-        });
-        tree_state.prev_prompt_lab_template_apply_enabled = Some(can_apply_template);
-    }
-    if tree_state.prev_prompt_lab_template_apply_rerun_enabled != Some(can_apply_template_and_rerun)
-    {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_apply_rerun_enabled,
+        can_apply_template_and_rerun,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
-            enabled: can_apply_template_and_rerun,
-        });
-        tree_state.prev_prompt_lab_template_apply_rerun_enabled =
-            Some(can_apply_template_and_rerun);
-    }
-    if tree_state.prev_prompt_lab_template_revert_enabled != Some(can_revert_template) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_revert_enabled,
+        can_revert_template,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_TEMPLATE_REVERT,
-            enabled: can_revert_template,
-        });
-        tree_state.prev_prompt_lab_template_revert_enabled = Some(can_revert_template);
-    }
-    if tree_state.prev_prompt_lab_template_save_enabled != Some(view.prompt_lab.template_applied) {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_save_enabled,
+        view.prompt_lab.template_applied,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BTN_PROMPT_LAB_TEMPLATE_SAVE,
-            enabled: view.prompt_lab.template_applied,
-        });
-        tree_state.prev_prompt_lab_template_save_enabled = Some(view.prompt_lab.template_applied);
-    }
-    if tree_state.prev_prompt_lab_template_system_text.as_deref()
-        != Some(view.prompt_lab.template_system_draft.as_str())
-    {
-        cmds.push(PlatformCommand::SetInputText {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_system_text,
+        view.prompt_lab.template_system_draft.clone(),
+        cmds,
+        |text| PlatformCommand::SetInputText {
             window_id,
             control_id: INPUT_PROMPT_LAB_TEMPLATE_SYSTEM,
-            text: view.prompt_lab.template_system_draft.clone(),
-        });
-        tree_state.prev_prompt_lab_template_system_text =
-            Some(view.prompt_lab.template_system_draft.clone());
-    }
-    if tree_state.prev_prompt_lab_template_user_text.as_deref()
-        != Some(view.prompt_lab.template_user_draft.as_str())
-    {
-        cmds.push(PlatformCommand::SetInputText {
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_user_text,
+        view.prompt_lab.template_user_draft.clone(),
+        cmds,
+        |text| PlatformCommand::SetInputText {
             window_id,
             control_id: INPUT_PROMPT_LAB_TEMPLATE_USER,
-            text: view.prompt_lab.template_user_draft.clone(),
-        });
-        tree_state.prev_prompt_lab_template_user_text =
-            Some(view.prompt_lab.template_user_draft.clone());
-    }
-    if tree_state.prev_prompt_lab_template_system_enabled
-        != Some(view.prompt_lab.template_editor_open)
-    {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_system_enabled,
+        view.prompt_lab.template_editor_open,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: INPUT_PROMPT_LAB_TEMPLATE_SYSTEM,
-            enabled: view.prompt_lab.template_editor_open,
-        });
-        tree_state.prev_prompt_lab_template_system_enabled =
-            Some(view.prompt_lab.template_editor_open);
-    }
-    if tree_state.prev_prompt_lab_template_user_enabled
-        != Some(view.prompt_lab.template_editor_open)
-    {
-        cmds.push(PlatformCommand::SetControlEnabled {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_user_enabled,
+        view.prompt_lab.template_editor_open,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: INPUT_PROMPT_LAB_TEMPLATE_USER,
-            enabled: view.prompt_lab.template_editor_open,
-        });
-        tree_state.prev_prompt_lab_template_user_enabled =
-            Some(view.prompt_lab.template_editor_open);
-    }
-
-    if tree_state.prev_prompt_lab_url_input.as_deref() != Some(view.prompt_lab.url_input.as_str()) {
-        cmds.push(PlatformCommand::SetInputText {
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_url_input,
+        view.prompt_lab.url_input.clone(),
+        cmds,
+        |text| PlatformCommand::SetInputText {
             window_id,
             control_id: INPUT_PROMPT_LAB_URL,
-            text: view.prompt_lab.url_input.clone(),
-        });
-        tree_state.prev_prompt_lab_url_input = Some(view.prompt_lab.url_input.clone());
-    }
-
-    let status_text = prompt_lab_status_text(&view.prompt_lab);
-    if tree_state.prev_prompt_lab_status_text.as_deref() != Some(status_text.as_str()) {
-        cmds.push(PlatformCommand::SetControlText {
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_status_text,
+        prompt_lab_status_text(&view.prompt_lab),
+        cmds,
+        |text| PlatformCommand::SetControlText {
             window_id,
             control_id: LABEL_PROMPT_LAB_STATUS,
-            text: status_text.clone(),
-        });
-        tree_state.prev_prompt_lab_status_text = Some(status_text);
-    }
-    let metadata_text = prompt_lab_metadata_text(&view.prompt_lab);
-    if tree_state.prev_prompt_lab_metadata_text.as_deref() != Some(metadata_text.as_str()) {
-        cmds.push(PlatformCommand::SetControlText {
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_metadata_text,
+        prompt_lab_metadata_text(&view.prompt_lab),
+        cmds,
+        |text| PlatformCommand::SetControlText {
             window_id,
             control_id: LABEL_PROMPT_LAB_METADATA,
-            text: metadata_text.clone(),
-        });
-        tree_state.prev_prompt_lab_metadata_text = Some(metadata_text);
-    }
-    let context_text = view.prompt_lab.context_draft_text.clone();
-    if tree_state.prev_prompt_lab_context_text.as_deref() != Some(context_text.as_str()) {
-        cmds.push(PlatformCommand::SetInputText {
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_context_text,
+        view.prompt_lab.context_draft_text.clone(),
+        cmds,
+        |text| PlatformCommand::SetInputText {
             window_id,
             control_id: INPUT_PROMPT_LAB_CONTEXT,
-            text: context_text.clone(),
-        });
-        tree_state.prev_prompt_lab_context_text = Some(context_text);
-    }
+            text,
+        },
+    );
     let context_status_text = if !view.prompt_lab.context_validation_errors.is_empty() {
         view.prompt_lab.context_validation_errors.join(" • ")
     } else {
@@ -888,14 +956,16 @@ pub fn render(
             .clone()
             .unwrap_or_default()
     };
-    if tree_state.prev_prompt_lab_context_status_text != Some(context_status_text.clone()) {
-        cmds.push(PlatformCommand::SetControlText {
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_context_status_text,
+        context_status_text,
+        cmds,
+        |text| PlatformCommand::SetControlText {
             window_id,
             control_id: LABEL_PROMPT_LAB_CONTEXT_STATUS,
-            text: context_status_text.clone(),
-        });
-        tree_state.prev_prompt_lab_context_status_text = Some(context_status_text);
-    }
+            text,
+        },
+    );
     let template_status_text = if !view.prompt_lab.template_validation_errors.is_empty() {
         view.prompt_lab.template_validation_errors.join(" • ")
     } else if let (Some(version), Some(path)) = (
@@ -910,24 +980,26 @@ pub fn render(
     } else {
         String::new()
     };
-    if tree_state.prev_prompt_lab_template_status_text != Some(template_status_text.clone()) {
-        cmds.push(PlatformCommand::SetControlText {
+    emit_if_changed(
+        &mut tree_state.prev_prompt_lab_template_status_text,
+        template_status_text,
+        cmds,
+        |text| PlatformCommand::SetControlText {
             window_id,
             control_id: LABEL_PROMPT_LAB_TEMPLATE_STATUS,
-            text: template_status_text.clone(),
-        });
-        tree_state.prev_prompt_lab_template_status_text = Some(template_status_text);
-    }
+            text,
+        },
+    );
+}
 
-    let job_items = build_job_tree(view);
-    append_tree_commands(window_id, job_items, tree_state, &mut cmds);
-
+fn render_preview_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
     let (preview_markdown, preview_header_text) = prompt_lab_preview_override(view);
-    let preview_text_changed = match tree_state.prev_preview_text.as_deref() {
-        Some(prev) => prev != preview_markdown,
-        None => true,
-    };
-    if preview_text_changed {
+    if tree_state.prev_preview_text.as_deref() != Some(preview_markdown) {
         let (truncated_markdown, was_truncated) = truncate_markdown_for_preview(preview_markdown);
         let mut rtf_text = convert_markdown_to_rtf(&truncated_markdown);
         if was_truncated {
@@ -957,20 +1029,16 @@ pub fn render(
             .map(format_preview_header)
             .unwrap_or_else(|| "(no selection)".to_string())
     });
-    let header_text_changed = match tree_state.prev_header_text.as_deref() {
-        Some(prev) => prev != header_text,
-        None => true,
-    };
-    if header_text_changed {
-        cmds.push(PlatformCommand::SetControlText {
+    emit_if_changed(
+        &mut tree_state.prev_header_text,
+        header_text,
+        cmds,
+        |text| PlatformCommand::SetControlText {
             window_id,
             control_id: LABEL_PREVIEW_HEADER,
-            text: header_text.to_string(),
-        });
-        tree_state.prev_header_text = Some(header_text.to_string());
-    }
-
-    cmds
+            text,
+        },
+    );
 }
 
 fn prompt_lab_preview_override(view: &AppViewModel) -> (&str, Option<String>) {

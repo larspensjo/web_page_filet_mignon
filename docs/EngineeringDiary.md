@@ -329,3 +329,9 @@ Type: Implementation
 Context: Prompt Lab section controls (`Compare`, `Context`, `Templates`, `Run details`) were implemented as `BS_AUTORADIOBUTTON` controls even though they are independent booleans. This semantic mismatch repeatedly caused dark-theme regressions when new button-like controls were added, because the split between creation-time dark-mode enablement and style-application-time classic rendering was easy to miss.
 Change: `commanductui` gained a new `CheckBox` control type.
 Refs: src/CommanDuctUI/src/types.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/controls/checkbox_handler.rs, src/CommanDuctUI/src/controls/paint_router.rs, crates/harvester_app/src/platform/ui/constants.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/app.rs
+
+## 2026-02-20 - Render function section extraction and diff helper consolidation
+Type: Implementation
+Context: `harvester_app` UI rendering had grown into a single oversized `render` function with long, repetitive `tree_state` change-detection chains, making it harder to reason about and safely extend.
+Change: Refactored `harvester_app` render orchestration into section-level functions (`layout`, `status`, `token progress`, `main controls`, `prompt lab`, `preview`) and introduced a shared `emit_if_changed` helper for repeated state-diff patterns while preserving command emission behavior and ordering.
+Refs: crates/harvester_app/src/platform/ui/render.rs
