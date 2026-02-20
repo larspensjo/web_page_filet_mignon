@@ -476,23 +476,23 @@ impl PlatformEventHandler for AppEventHandler {
                     .msg_tx
                     .send(Msg::PromptLabAdvancedModeSet { enabled: true });
             }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_COMPARE =>
+            AppEvent::CheckBoxToggled { control_id, .. }
+                if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_COMPARE =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabCompareSectionToggled);
             }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_CONTEXT =>
+            AppEvent::CheckBoxToggled { control_id, .. }
+                if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_CONTEXT =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabContextSectionToggled);
             }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_TEMPLATE =>
+            AppEvent::CheckBoxToggled { control_id, .. }
+                if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_TEMPLATE =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabTemplateSectionToggled);
             }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_SECTION_RUN_DETAILS =>
+            AppEvent::CheckBoxToggled { control_id, .. }
+                if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_RUN_DETAILS =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabRunDetailsSectionToggled);
             }
@@ -1109,21 +1109,25 @@ mod tests {
             window_id: WindowId::new(1),
             control_id: ui::constants::BTN_PROMPT_LAB_MODE_ADVANCED,
         });
-        handler.handle_event(AppEvent::RadioButtonSelected {
+        handler.handle_event(AppEvent::CheckBoxToggled {
             window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_COMPARE,
+            control_id: ui::constants::CHK_PROMPT_LAB_SECTION_COMPARE,
+            checked: true,
         });
-        handler.handle_event(AppEvent::RadioButtonSelected {
+        handler.handle_event(AppEvent::CheckBoxToggled {
             window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_CONTEXT,
+            control_id: ui::constants::CHK_PROMPT_LAB_SECTION_CONTEXT,
+            checked: true,
         });
-        handler.handle_event(AppEvent::RadioButtonSelected {
+        handler.handle_event(AppEvent::CheckBoxToggled {
             window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_TEMPLATE,
+            control_id: ui::constants::CHK_PROMPT_LAB_SECTION_TEMPLATE,
+            checked: true,
         });
-        handler.handle_event(AppEvent::RadioButtonSelected {
+        handler.handle_event(AppEvent::CheckBoxToggled {
             window_id: WindowId::new(1),
-            control_id: ui::constants::BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+            control_id: ui::constants::CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
+            checked: true,
         });
         assert_eq!(
             rx.recv_timeout(Duration::from_millis(250))

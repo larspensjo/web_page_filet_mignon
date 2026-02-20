@@ -519,9 +519,9 @@ pub fn render(
     if tree_state.prev_prompt_lab_section_compare_checked
         != Some(view.prompt_lab.compare_section_open)
     {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+        cmds.push(PlatformCommand::SetCheckBoxChecked {
             window_id,
-            control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
+            control_id: CHK_PROMPT_LAB_SECTION_COMPARE,
             checked: view.prompt_lab.compare_section_open,
         });
         tree_state.prev_prompt_lab_section_compare_checked =
@@ -530,9 +530,9 @@ pub fn render(
     if tree_state.prev_prompt_lab_section_context_checked
         != Some(view.prompt_lab.context_section_open)
     {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+        cmds.push(PlatformCommand::SetCheckBoxChecked {
             window_id,
-            control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
+            control_id: CHK_PROMPT_LAB_SECTION_CONTEXT,
             checked: view.prompt_lab.context_section_open,
         });
         tree_state.prev_prompt_lab_section_context_checked =
@@ -541,9 +541,9 @@ pub fn render(
     if tree_state.prev_prompt_lab_section_template_checked
         != Some(view.prompt_lab.template_section_open)
     {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+        cmds.push(PlatformCommand::SetCheckBoxChecked {
             window_id,
-            control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
+            control_id: CHK_PROMPT_LAB_SECTION_TEMPLATE,
             checked: view.prompt_lab.template_section_open,
         });
         tree_state.prev_prompt_lab_section_template_checked =
@@ -552,9 +552,9 @@ pub fn render(
     if tree_state.prev_prompt_lab_section_run_details_checked
         != Some(view.prompt_lab.run_details_section_open)
     {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
+        cmds.push(PlatformCommand::SetCheckBoxChecked {
             window_id,
-            control_id: BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+            control_id: CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
             checked: view.prompt_lab.run_details_section_open,
         });
         tree_state.prev_prompt_lab_section_run_details_checked =
@@ -2144,7 +2144,7 @@ mod tests {
     }
 
     #[test]
-    fn prompt_lab_section_radio_states_reflect_view_state() {
+    fn prompt_lab_section_checkbox_states_reflect_view_state() {
         let window_id = WindowId::new(33);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
@@ -2156,22 +2156,22 @@ mod tests {
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetRadioButtonChecked { control_id, checked: true, .. }
-                if *control_id == BTN_PROMPT_LAB_SECTION_COMPARE
+                PlatformCommand::SetCheckBoxChecked { control_id, checked: true, .. }
+                if *control_id == CHK_PROMPT_LAB_SECTION_COMPARE
             )
         }));
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetRadioButtonChecked { control_id, checked: false, .. }
-                if *control_id == BTN_PROMPT_LAB_SECTION_CONTEXT
+                PlatformCommand::SetCheckBoxChecked { control_id, checked: false, .. }
+                if *control_id == CHK_PROMPT_LAB_SECTION_CONTEXT
             )
         }));
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetRadioButtonChecked { control_id, checked: true, .. }
-                if *control_id == BTN_PROMPT_LAB_SECTION_RUN_DETAILS
+                PlatformCommand::SetCheckBoxChecked { control_id, checked: true, .. }
+                if *control_id == CHK_PROMPT_LAB_SECTION_RUN_DETAILS
             )
         }));
     }

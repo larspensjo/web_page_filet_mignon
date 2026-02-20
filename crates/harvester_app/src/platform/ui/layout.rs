@@ -401,12 +401,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_PROMPT_LAB_RUN,
         text: "Run".to_string(),
     });
-    commands.push(PlatformCommand::CreateRadioButton {
+    commands.push(PlatformCommand::CreateCheckBox {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_HEADER_ROW),
-        control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
+        control_id: CHK_PROMPT_LAB_SECTION_COMPARE,
         text: "Compare".to_string(),
-        group_start: true,
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -450,12 +449,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_COMPARE_WINNER_CLEAR,
         text: "Clear winner".to_string(),
     });
-    commands.push(PlatformCommand::CreateRadioButton {
+    commands.push(PlatformCommand::CreateCheckBox {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW),
-        control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
+        control_id: CHK_PROMPT_LAB_SECTION_CONTEXT,
         text: "Context".to_string(),
-        group_start: true,
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -487,19 +485,17 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
         text: "Reload".to_string(),
     });
-    commands.push(PlatformCommand::CreateRadioButton {
+    commands.push(PlatformCommand::CreateCheckBox {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW),
-        control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
+        control_id: CHK_PROMPT_LAB_SECTION_TEMPLATE,
         text: "Templates".to_string(),
-        group_start: true,
     });
-    commands.push(PlatformCommand::CreateRadioButton {
+    commands.push(PlatformCommand::CreateCheckBox {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_RUN_DETAILS_HEADER_ROW),
-        control_id: BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+        control_id: CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
         text: "Run details".to_string(),
-        group_start: true,
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -1283,7 +1279,7 @@ fn build_layout_rules(
                     margin: (0, 0, 2, 0),
                 },
                 LayoutRule {
-                    control_id: BTN_PROMPT_LAB_SECTION_COMPARE,
+                    control_id: CHK_PROMPT_LAB_SECTION_COMPARE,
                     parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_HEADER_ROW),
                     dock_style: DockStyle::Fill,
                     order: 0,
@@ -1429,7 +1425,7 @@ fn build_layout_rules(
                     margin: (0, 0, 2, 0),
                 },
                 LayoutRule {
-                    control_id: BTN_PROMPT_LAB_SECTION_CONTEXT,
+                    control_id: CHK_PROMPT_LAB_SECTION_CONTEXT,
                     parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW),
                     dock_style: DockStyle::Fill,
                     order: 0,
@@ -1537,7 +1533,7 @@ fn build_layout_rules(
                     margin: (0, 0, 2, 0),
                 },
                 LayoutRule {
-                    control_id: BTN_PROMPT_LAB_SECTION_TEMPLATE,
+                    control_id: CHK_PROMPT_LAB_SECTION_TEMPLATE,
                     parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW),
                     dock_style: DockStyle::Fill,
                     order: 0,
@@ -1619,7 +1615,7 @@ fn build_layout_rules(
                 margin: (0, 0, 2, 0),
             });
             rules.push(LayoutRule {
-                control_id: BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
+                control_id: CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
                 parent_control_id: Some(PANEL_PROMPT_LAB_RUN_DETAILS_HEADER_ROW),
                 dock_style: DockStyle::Fill,
                 order: 0,
@@ -1861,15 +1857,23 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_STAGE_TRIAGE,
         BTN_STAGE_SUMMARY,
         BTN_STAGE_BRIEFING,
-        BTN_PROMPT_LAB_SECTION_COMPARE,
-        BTN_PROMPT_LAB_SECTION_CONTEXT,
-        BTN_PROMPT_LAB_SECTION_TEMPLATE,
-        BTN_PROMPT_LAB_SECTION_RUN_DETAILS,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
             control_id,
             style_id: StyleId::RadioButton,
+        });
+    }
+    for control_id in [
+        CHK_PROMPT_LAB_SECTION_COMPARE,
+        CHK_PROMPT_LAB_SECTION_CONTEXT,
+        CHK_PROMPT_LAB_SECTION_TEMPLATE,
+        CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
+    ] {
+        commands.push(PlatformCommand::ApplyStyleToControl {
+            window_id,
+            control_id,
+            style_id: StyleId::CheckBox,
         });
     }
 
@@ -1989,11 +1993,14 @@ mod tests {
             )),
             "model selector combo box should be created"
         );
-        assert!(commands.iter().any(|cmd| matches!(
-            cmd,
-            PlatformCommand::CreateRadioButton { control_id, .. }
-                if *control_id == BTN_PROMPT_LAB_SECTION_COMPARE
-        )));
+        assert!(
+            commands.iter().any(|cmd| matches!(
+                cmd,
+                PlatformCommand::CreateCheckBox { control_id, .. }
+                    if *control_id == CHK_PROMPT_LAB_SECTION_COMPARE
+            )),
+            "section toggle Compare should be created as CheckBox"
+        );
     }
 
     #[test]
