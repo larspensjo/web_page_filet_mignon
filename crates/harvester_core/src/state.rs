@@ -303,6 +303,7 @@ pub struct AppState {
     next_llm_request_id: u64,
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
+    briefing_history: Vec<crate::briefing::BriefingHistoryEntry>,
     triage: TriageSession,
     pre_triage: PreTriageSession,
     pre_triage_manual_overrides: HashMap<ArticleFilterKey, ManualDecision>,
@@ -364,6 +365,7 @@ impl Default for AppState {
             next_llm_request_id: 1,
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
+            briefing_history: vec![],
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
             pre_triage_manual_overrides: HashMap::new(),
@@ -706,6 +708,23 @@ impl AppState {
     pub(crate) fn set_briefing(&mut self, briefing: BriefingSession) {
         self.briefing = briefing;
         self.dirty = true;
+    }
+
+    pub fn briefing_history(&self) -> &[crate::briefing::BriefingHistoryEntry] {
+        &self.briefing_history
+    }
+
+    /// Prepends `entry` (newest first) and caps the list at 3 entries.
+    pub fn push_briefing_history(&mut self, entry: crate::briefing::BriefingHistoryEntry) {
+        self.briefing_history.insert(0, entry);
+        self.briefing_history.truncate(3);
+    }
+
+    pub fn set_briefing_history(
+        &mut self,
+        entries: Vec<crate::briefing::BriefingHistoryEntry>,
+    ) {
+        self.briefing_history = entries;
     }
 
     pub(crate) fn triage(&self) -> &TriageSession {
@@ -3377,5 +3396,49 @@ mod tests {
 
         let (kind, _) = state.resolve_best_preview(url);
         assert_eq!(kind, PreviewContentKind::Summary);
+    }
+}
+
+#[cfg(test)]
+mod briefing_history_state_tests {
+    use super::*;
+    use crate::briefing::{BriefingHistoryEntry, BriefingHistoryTheme};
+
+    fn entry(ts: &str) -> BriefingHistoryEntry {
+        BriefingHistoryEntry {
+            generated_at_utc: ts.to_string(),
+            executive_summary: format!("Summary {ts}"),
+            themes: vec![],
+            article_count: 1,
+        }
+    }
+
+    #[test]
+    fn starts_empty() {
+        let state = AppState::new();
+        assert!(state.briefing_history().is_empty());
+    }
+
+    #[test]
+    fn push_adds_newest_first() {
+        let mut state = AppState::new();
+        state.push_briefing_history(entry("2026-02-20T00:00:00Z"));
+        state.push_briefing_history(entry("2026-02-21T00:00:00Z"));
+        assert_eq!(state.briefing_history()[0].generated_at_utc, "2026-02-21T00:00:00Z");
+        assert_eq!(state.briefing_history()[1].generated_at_utc, "2026-02-20T00:00:00Z");
+    }
+
+    #[test]
+    fn push_caps_at_three() {
+        let mut state = AppState::new();
+        for i in 1..=4 {
+            state.push_briefing_history(entry(&format!("2026-02-2{}T00:00:00Z", i)));
+        }
+        assert_eq!(state.briefing_history().len(), 3);
+        // Oldest (day 1) was dropped; the 4th push (day 4) is now at index 0
+        assert_eq!(
+            state.briefing_history()[0].generated_at_utc,
+            "2026-02-24T00:00:00Z"
+        );
     }
 }
