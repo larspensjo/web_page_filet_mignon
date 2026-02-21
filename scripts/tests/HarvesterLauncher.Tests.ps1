@@ -388,3 +388,70 @@ Describe 'Reducer - Activate' {
         ($r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }) | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Reducer - effect results' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        function script:S { New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 }
+        function script:Act($type, $extra=@{}) { Invoke-LauncherReducer -State (S) -Action (@{ Type=$type } + $extra) }
+    }
+
+    It 'SaveDefaults emits a SaveDefaults effect containing Values' {
+        $r = Act 'SaveDefaults'
+        $eff = $r.Effects | Where-Object { $_.Type -eq 'SaveDefaults' }
+        $eff              | Should -Not -BeNullOrEmpty
+        $eff.Values.LlmConcurrency | Should -Be 3
+    }
+    It 'DefaultsSaved sets LastStatus OK' {
+        (Act 'DefaultsSaved').State.Runtime.LastStatus | Should -Be 'OK'
+    }
+    It 'DefaultsSaved sets LastMessage containing "saved"' {
+        (Act 'DefaultsSaved').State.Runtime.LastMessage | Should -Match 'saved'
+    }
+    It 'DefaultsSaveFailed sets LastStatus Error' {
+        (Act 'DefaultsSaveFailed' @{ Message='disk full' }).State.Runtime.LastStatus | Should -Be 'Error'
+    }
+    It 'DefaultsSaveFailed includes message' {
+        (Act 'DefaultsSaveFailed' @{ Message='disk full' }).State.Runtime.LastMessage | Should -Match 'disk full'
+    }
+    It 'DefaultsLoaded merges values' {
+        $loaded = @{ LlmConcurrency=9; PollInterval=5 }
+        $r = Invoke-LauncherReducer -State (S) -Action @{ Type='DefaultsLoaded'; Values=$loaded }
+        $r.State.Values.LlmConcurrency | Should -Be 9
+        $r.State.Values.PollInterval   | Should -Be 5
+    }
+    It 'DefaultsLoadFailed sets LastStatus Warn' {
+        (Act 'DefaultsLoadFailed' @{ Message='gone' }).State.Runtime.LastStatus | Should -Be 'Warn'
+    }
+    It 'CheckpointCapabilityDetected sets CheckpointCliAvailable' {
+        (Act 'CheckpointCapabilityDetected' @{ Available=$true }).State.Runtime.CheckpointCliAvailable | Should -Be $true
+    }
+    It 'CheckpointReadCompleted updates CheckpointDisplay' {
+        (Act 'CheckpointReadCompleted' @{ Display='2026-01-15T00:00:00Z' }).State.Runtime.CheckpointDisplay | Should -Be '2026-01-15T00:00:00Z'
+    }
+    It 'CheckpointReadFailed sets display to "(unreadable)"' {
+        (Act 'CheckpointReadFailed').State.Runtime.CheckpointDisplay | Should -Be '(unreadable)'
+    }
+    It 'CheckpointCommandCompleted success sets LastStatus OK' {
+        (Act 'CheckpointCommandCompleted' @{ Success=$true; Message='done' }).State.Runtime.LastStatus | Should -Be 'OK'
+    }
+    It 'CheckpointCommandCompleted success emits ReadCheckpointDisplay effect' {
+        $r = Act 'CheckpointCommandCompleted' @{ Success=$true; Message='done' }
+        ($r.Effects | Where-Object { $_.Type -eq 'ReadCheckpointDisplay' }) | Should -Not -BeNullOrEmpty
+    }
+    It 'CheckpointCommandCompleted failure sets LastStatus Error' {
+        (Act 'CheckpointCommandCompleted' @{ Success=$false; Message='fail' }).State.Runtime.LastStatus | Should -Be 'Error'
+    }
+    It 'DatePromptCompleted with value queues RunCheckpointCommand effect' {
+        $r = Invoke-LauncherReducer -State (S) -Action @{ Type='DatePromptCompleted'; Value='2026-01-01T00:00:00Z' }
+        $eff = $r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }
+        $eff | Should -Not -BeNullOrEmpty
+        $eff.ActionId   | Should -Be 'cp-set-date'
+        $eff.CustomDate | Should -Be '2026-01-01T00:00:00Z'
+    }
+    It 'DatePromptCompleted with null value is a no-op (user cancelled)' {
+        $r = Invoke-LauncherReducer -State (S) -Action @{ Type='DatePromptCompleted'; Value=$null }
+        $r.Effects.Count | Should -Be 0
+    }
+}

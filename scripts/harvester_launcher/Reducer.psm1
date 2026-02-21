@@ -291,6 +291,47 @@ function Invoke-LauncherReducer {
             }
         }
 
+        'SaveDefaults' {
+            $effects.Add(@{ Type='SaveDefaults'; Values=$s.Values.Clone() })
+        }
+        'DefaultsSaved' {
+            $s.Runtime.LastStatus  = 'OK'
+            $s.Runtime.LastMessage = 'Defaults saved.'
+        }
+        'DefaultsSaveFailed' {
+            $s.Runtime.LastStatus  = 'Error'
+            $s.Runtime.LastMessage = "Save failed: $($Action.Message)"
+        }
+        'DefaultsLoaded' {
+            foreach ($key in $Action.Values.Keys) {
+                if ($s.Values.ContainsKey($key)) { $s.Values[$key] = $Action.Values[$key] }
+            }
+        }
+        'DefaultsLoadFailed' {
+            $s.Runtime.LastStatus  = 'Warn'
+            $s.Runtime.LastMessage = "Could not load defaults: $($Action.Message)"
+        }
+        'CheckpointCapabilityDetected' {
+            $s.Runtime.CheckpointCliAvailable = $Action.Available
+        }
+        'CheckpointReadCompleted' {
+            $s.Runtime.CheckpointDisplay = $Action.Display
+        }
+        'CheckpointReadFailed' {
+            $s.Runtime.CheckpointDisplay = '(unreadable)'
+        }
+        'CheckpointCommandCompleted' {
+            $s.Runtime.LastStatus  = if ($Action.Success) { 'OK' } else { 'Error' }
+            $s.Runtime.LastMessage = $Action.Message
+            if ($Action.Success) { $effects.Add(@{ Type='ReadCheckpointDisplay' }) }
+        }
+        'DatePromptCompleted' {
+            # Value is $null when user cancelled or entered an invalid date
+            if ($null -ne $Action.Value) {
+                $effects.Add(@{ Type='RunCheckpointCommand'; ActionId='cp-set-date'; CustomDate=$Action.Value })
+            }
+        }
+
         default { <# unknown actions are silently ignored #> }
     }
 
