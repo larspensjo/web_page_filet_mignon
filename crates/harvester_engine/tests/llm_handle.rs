@@ -62,6 +62,7 @@ fn llm_handle_dispatches_completion_event() {
             input_content: "document text".to_string(),
             context: vec![("key".to_string(), "value".to_string())],
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .expect("LLM command should dispatch");
 
@@ -128,6 +129,7 @@ fn llm_handle_skips_provider_when_cache_hit() {
             input_content: input_content.to_string(),
             context: Vec::new(),
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .expect("LLM command should dispatch");
 
@@ -178,6 +180,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
             input_content: input_content.to_string(),
             context: Vec::new(),
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .expect("LLM command should dispatch");
 
@@ -205,6 +208,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
             input_content: input_content.to_string(),
             context: Vec::new(),
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .expect("LLM command should dispatch");
 
@@ -269,6 +273,7 @@ fn concurrent_requests_never_exceed_cap() {
                 input_content: format!("document {i}"),
                 context: Vec::new(),
                 template_override: None,
+                extra_template_vars: vec![],
             })))
             .expect("send should succeed");
     }
@@ -337,6 +342,7 @@ fn override_model_wins_over_stage_and_default() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .unwrap();
 
@@ -378,6 +384,7 @@ fn stage_model_wins_over_default_when_override_is_none() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .unwrap();
 
@@ -412,6 +419,7 @@ fn unsupported_model_wrong_provider_fires_before_provider_call() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .unwrap();
 
@@ -450,6 +458,7 @@ fn unsupported_model_unknown_name_fires_before_provider_call() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .unwrap();
 
@@ -491,6 +500,7 @@ fn valid_override_cache_miss_records_override_in_metadata() {
             input_content: "document".to_string(),
             context: vec![],
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .unwrap();
 
@@ -546,6 +556,7 @@ fn valid_override_cache_hit_records_override_in_metadata() {
             input_content: input_content.to_string(),
             context: vec![],
             template_override: None,
+            extra_template_vars: vec![],
         })))
         .unwrap();
 

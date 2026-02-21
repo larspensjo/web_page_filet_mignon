@@ -523,6 +523,7 @@ impl EffectRunner {
                 input_content,
                 context,
                 template_override,
+                extra_template_vars,
             } => {
                 if let Some(handle) = &self.llm_handle {
                     let cmd = LlmCommand::Complete(Box::new(
@@ -534,6 +535,7 @@ impl EffectRunner {
                             input_content,
                             context,
                             template_override,
+                            extra_template_vars,
                         },
                     ));
                     if let Err(err) = handle.send(cmd) {

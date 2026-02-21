@@ -42,6 +42,9 @@ pub enum Effect {
         input_content: String,
         context: Vec<(String, String)>,
         template_override: Option<PromptTemplateOwned>,
+        /// Extra key-value pairs inserted as individual template variables ({{key}}).
+        /// NOT concatenated into the {{context}} block.
+        extra_template_vars: Vec<(String, String)>,
     },
     ResolvePromptLabInputFromUrl {
         resolve_id: u64,

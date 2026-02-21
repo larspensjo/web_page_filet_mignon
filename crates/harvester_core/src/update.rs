@@ -245,6 +245,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 input_content,
                 context,
                 template_override,
+                extra_template_vars: vec![],
             }]
         }
         Msg::LlmCompleted {
@@ -1568,6 +1569,7 @@ fn dispatch_prompt_lab_run(
         input_content: input_snapshot,
         context,
         template_override: state.prompt_lab().applied_template_override(prompt_id),
+        extra_template_vars: vec![],
     }]
 }
 
@@ -1725,6 +1727,7 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
             input_content: prepared_text,
             context,
             template_override: None,
+            extra_template_vars: vec![],
         });
         state.mark_dirty();
     }
@@ -1912,6 +1915,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     input_content: prepared_text,
                     context,
                     template_override: None,
+                    extra_template_vars: vec![],
                 });
                 state.mark_dirty();
                 // Live request: continue loop to fill remaining slots.
@@ -1948,6 +1952,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     input_content: prepared_text,
                     context,
                     template_override: None,
+                    extra_template_vars: vec![],
                 });
                 state.mark_dirty();
                 // Live request: continue loop to fill remaining slots.
@@ -2013,6 +2018,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         input_content: collection_text,
         context,
         template_override: None,
+        extra_template_vars: vec![],
     });
     state.mark_dirty();
 }
@@ -2354,6 +2360,7 @@ mod tests {
                 input_content,
                 context,
                 template_override: None,
+                ..
             } if input_content.starts_with("Article A text") && context.is_empty()
         ));
         assert!(matches!(
@@ -2406,6 +2413,7 @@ mod tests {
                 input_content,
                 context,
                 template_override: None,
+                ..
             } if input_content.starts_with("Article B text") && context.is_empty()
         ));
 
@@ -2434,6 +2442,7 @@ mod tests {
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
                 template_override: None,
+                extra_template_vars: vec![],
             }]
         );
 
@@ -2534,6 +2543,7 @@ mod tests {
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
                 template_override: None,
+                extra_template_vars: vec![],
             }]
         );
         let (state, _) = update(
@@ -2592,6 +2602,7 @@ mod tests {
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
                 template_override: None,
+                extra_template_vars: vec![],
             }]
         );
     }

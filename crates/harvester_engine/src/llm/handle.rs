@@ -124,6 +124,9 @@ pub struct LlmCompletionCommand {
     pub input_content: String,
     pub context: Vec<(String, String)>,
     pub template_override: Option<PromptTemplateOwned>,
+    /// Extra key-value pairs inserted as individual template variables ({{key}}).
+    /// NOT concatenated into the {{context}} block.
+    pub extra_template_vars: Vec<(String, String)>,
 }
 
 pub enum LlmCommand {
@@ -271,6 +274,7 @@ async fn handle_completion_concurrent(
         input_content,
         context,
         template_override,
+        extra_template_vars,
     } = *command;
 
     // Capture wall clock before any work so the full span is covered.
@@ -389,6 +393,9 @@ async fn handle_completion_concurrent(
     vars.insert("context".to_string(), context_text);
 
     for (key, value) in context.iter() {
+        vars.insert(key.clone(), value.clone());
+    }
+    for (key, value) in extra_template_vars.iter() {
         vars.insert(key.clone(), value.clone());
     }
     let rendered = vars.to_map();
@@ -960,6 +967,47 @@ const LLM_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Simulate the TemplateVars construction that handle_completion_concurrent does,
+    /// then verify that extra_template_vars are NOT folded into {{context}}.
+    #[test]
+    fn extra_template_vars_not_in_context_block() {
+        let context: Vec<(String, String)> = vec![
+            ("analyst".to_string(), "finance".to_string()),
+        ];
+        let extra_template_vars: Vec<(String, String)> = vec![
+            ("previous_briefings".to_string(), "old summary content".to_string()),
+        ];
+
+        // Replicate the logic in handle_completion_concurrent
+        let mut vars = TemplateVars::new();
+        vars.set_document("content", "some article text");
+        let context_text = context
+            .iter()
+            .map(|(k, v)| format!("{}: {}", k, v))
+            .collect::<Vec<_>>()
+            .join("\n");
+        vars.insert("context".to_string(), context_text);
+        for (key, value) in context.iter() {
+            vars.insert(key.clone(), value.clone());
+        }
+        for (key, value) in extra_template_vars.iter() {
+            vars.insert(key.clone(), value.clone());
+        }
+        let rendered = vars.to_map();
+
+        // {{context}} must NOT contain the extra var value
+        let context_rendered = render_template("{{context}}", &rendered).unwrap();
+        assert!(
+            !context_rendered.contains("old summary content"),
+            "extra_template_vars must not appear inside {{{{context}}}}: got {:?}",
+            context_rendered
+        );
+
+        // {{previous_briefings}} must render the extra var value
+        let pb_rendered = render_template("{{previous_briefings}}", &rendered).unwrap();
+        assert_eq!(pb_rendered, "old summary content");
+    }
 
     #[test]
     fn runtime_shutdown_is_time_bounded_when_blocking_task_is_stuck() {
