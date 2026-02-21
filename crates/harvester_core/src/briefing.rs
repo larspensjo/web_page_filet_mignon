@@ -71,6 +71,87 @@ impl BriefingResult {
     }
 }
 
+/// A single entry in the persisted briefing history.
+/// Distinct from `BriefingResult` — this is the persisted/history version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefingHistoryEntry {
+    pub generated_at_utc: String, // RFC3339, UTC
+    pub executive_summary: String,
+    pub themes: Vec<BriefingHistoryTheme>,
+    pub article_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefingHistoryTheme {
+    pub name: String,
+    pub description: String,
+}
+
+impl BriefingHistoryEntry {
+    /// Creates a history entry from a completed briefing result.
+    /// Returns `None` if the summary is blank (not worth storing).
+    pub fn from_result(result: &BriefingResult, generated_at_utc: &str) -> Option<Self> {
+        let summary = result.executive_summary.trim().to_string();
+        if summary.is_empty() {
+            return None;
+        }
+        Some(BriefingHistoryEntry {
+            generated_at_utc: generated_at_utc.to_string(),
+            executive_summary: summary,
+            themes: result
+                .themes
+                .iter()
+                .map(|t| BriefingHistoryTheme {
+                    name: t.name.clone(),
+                    description: t.description.clone(),
+                })
+                .collect(),
+            article_count: result.article_count,
+        })
+    }
+}
+
+/// Maximum number of Unicode scalar values for a single executive_summary in the history block.
+const HISTORY_SUMMARY_MAX_CHARS: usize = 500;
+
+/// Truncates `s` to at most `max_chars` Unicode scalar values, appending `…` if truncated.
+/// Safe on all UTF-8 input — never panics on multibyte boundaries.
+fn truncate_history_summary(s: &str, max_chars: usize) -> String {
+    let mut char_indices = s.char_indices();
+    match char_indices.nth(max_chars) {
+        Some((byte_pos, _)) => format!("{}…", &s[..byte_pos]),
+        None => s.to_string(),
+    }
+}
+
+/// Formats the briefing history into the `{{previous_briefings}}` template variable value.
+/// Returns `"(none)"` when history is empty.
+/// Entries are rendered newest-first (index 0 = most recent).
+pub fn format_previous_briefings_block(history: &[BriefingHistoryEntry]) -> String {
+    if history.is_empty() {
+        return "(none)".to_string();
+    }
+    let mut parts = Vec::new();
+    for entry in history {
+        let summary = if entry.executive_summary.chars().count() > HISTORY_SUMMARY_MAX_CHARS {
+            truncate_history_summary(&entry.executive_summary, HISTORY_SUMMARY_MAX_CHARS)
+        } else {
+            entry.executive_summary.clone()
+        };
+        let themes_line = entry
+            .themes
+            .iter()
+            .map(|t| format!("{}: {}", t.name, t.description))
+            .collect::<Vec<_>>()
+            .join("; ");
+        parts.push(format!(
+            "[{}]\nSummary: {}\nThemes: {}",
+            entry.generated_at_utc, summary, themes_line
+        ));
+    }
+    parts.join("\n\n")
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BriefingSession {
     phase: BriefingPhase,
@@ -725,5 +806,83 @@ mod tests {
             policy.eligible_urls(&triage),
             vec!["https://a".to_string(), "https://b".to_string()]
         );
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    fn make_entry(ts: &str, summary: &str, themes: &[(&str, &str)]) -> BriefingHistoryEntry {
+        BriefingHistoryEntry {
+            generated_at_utc: ts.to_string(),
+            executive_summary: summary.to_string(),
+            themes: themes
+                .iter()
+                .map(|(n, d)| BriefingHistoryTheme {
+                    name: n.to_string(),
+                    description: d.to_string(),
+                })
+                .collect(),
+            article_count: 5,
+        }
+    }
+
+    #[test]
+    fn format_empty_history_returns_sentinel() {
+        let block = format_previous_briefings_block(&[]);
+        assert_eq!(block, "(none)");
+    }
+
+    #[test]
+    fn format_single_entry_contains_timestamp_summary_and_themes() {
+        let entry = make_entry(
+            "2026-02-21T08:00:00Z",
+            "Markets rose sharply.",
+            &[("Economy", "Growth driven by tech."), ("Policy", "Rate cuts expected.")],
+        );
+        let block = format_previous_briefings_block(&[entry]);
+        assert!(block.contains("2026-02-21T08:00:00Z"), "missing timestamp");
+        assert!(block.contains("Markets rose sharply."), "missing summary");
+        assert!(block.contains("Economy"), "missing theme name");
+        assert!(block.contains("Growth driven by tech."), "missing theme description");
+        assert!(block.contains("Policy"), "missing second theme");
+    }
+
+    #[test]
+    fn format_three_entries_all_present() {
+        let entries: Vec<BriefingHistoryEntry> = (1..=3)
+            .map(|i| make_entry(
+                &format!("2026-02-2{}T00:00:00Z", i),
+                &format!("Summary {i}"),
+                &[("Theme", &format!("Desc {i}"))],
+            ))
+            .collect();
+        let block = format_previous_briefings_block(&entries);
+        for i in 1..=3 {
+            assert!(block.contains(&format!("Summary {i}")), "missing entry {i}");
+        }
+    }
+
+    #[test]
+    fn from_result_rejects_empty_summary() {
+        let result = BriefingResult {
+            executive_summary: "   ".to_string(),
+            themes: vec![],
+            article_count: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+        assert!(BriefingHistoryEntry::from_result(&result, "2026-02-21T00:00:00Z").is_none());
+    }
+
+    #[test]
+    fn truncation_is_safe_on_multibyte_characters() {
+        // "é" is 2 bytes but 1 char — byte-slicing at byte boundary would panic.
+        let multibyte: String = "é".repeat(600);
+        let entry = make_entry("2026-02-21T00:00:00Z", &multibyte, &[]);
+        let block = format_previous_briefings_block(&[entry]);
+        // Must not panic and must contain the truncation marker
+        assert!(block.contains('…'), "expected truncation marker");
     }
 }
