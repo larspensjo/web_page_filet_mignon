@@ -335,3 +335,10 @@ Type: Implementation
 Context: `harvester_app` UI rendering had grown into a single oversized `render` function with long, repetitive `tree_state` change-detection chains, making it harder to reason about and safely extend.
 Change: Refactored `harvester_app` render orchestration into section-level functions (`layout`, `status`, `token progress`, `main controls`, `prompt lab`, `preview`) and introduced a shared `emit_if_changed` helper for repeated state-diff patterns while preserving command emission behavior and ordering.
 Refs: crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-02-21 - Harvester batch launcher design hardening
+Type: Decision
+Context: The initial launcher design conflicted with the requirement that ENTER runs immediately, mixed side effects into reducer responsibilities, and relied on fragile command-string and stderr parsing patterns that would reduce robustness.
+Change: Updated the launcher design to enforce UDF with explicit effect requests, argv-based command execution, startup capability probing for checkpoint flags, dynamic layout sizing, and in-scope Pester coverage for reducer/render/effects.
+Evidence: Reviewed against `crates/harvester_batch/src/cli.rs` and updated `docs/plans/Design.harvester-batch-tui-launcher.md`.
+Refs: docs/plans/Design.harvester-batch-tui-launcher.md, crates/harvester_batch/src/cli.rs, ministry-of-future-plans/browser/Input.psm1
