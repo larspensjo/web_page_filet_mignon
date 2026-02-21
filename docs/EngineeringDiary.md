@@ -349,3 +349,10 @@ Context: The initial delta-briefing draft captured the core idea but left key ro
 Change: Revised the design to use reducer-owned history with capped retention, explicit load/save effects, dedicated extra template variables for `previous_briefings`, rendered-size safeguards, and a `RuntimePaths`-owned history path.
 Evidence: Cross-checked against current briefing orchestration and LLM rendering flow, then updated `docs/plans/Design.delta-briefing-design.md`.
 Refs: docs/plans/Design.delta-briefing-design.md, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/runtime_paths.rs
+
+## 2026-02-21 - Delta briefing implementation plan hardening
+Type: Decision
+Context: The initial delta-briefing implementation plan contained several brittle implementation details (context-variable duplication risk, incomplete prompt-size safeguards, and fragmented path ownership) that could cause regressions during coding.
+Change: Rewrote the plan to align with current reducer/effect/LLM plumbing, added explicit `extra_template_vars` and rendered-size guard requirements, centralized history path ownership in `RuntimePaths`, expanded regression tests, and added backlog status guidance for `FI-Storage-BriefingHistory-0001`.
+Evidence: Updated `docs/plans/Plan.delta-briefing.md` after source cross-check with `harvester_core`, `harvester_io`, and `harvester_engine`.
+Refs: docs/plans/Plan.delta-briefing.md, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/runtime_paths.rs, docs/FutureIdeas.md
