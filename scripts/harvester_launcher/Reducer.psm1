@@ -113,4 +113,118 @@ function Copy-LauncherState {
     }
 }
 
-Export-ModuleMember -Function New-LauncherState, Copy-LauncherState, Get-LauncherLayout, Get-LauncherLayoutConstraints
+# ── Cursor helpers ────────────────────────────────────────────────────────────
+
+function Move-LeftCursor {
+    param([object[]]$Actions, [int]$Current, [int]$Delta)
+    $next = $Current + $Delta
+    while ($next -ge 0 -and $next -lt $Actions.Count -and $Actions[$next].IsSeparator) {
+        $next += $Delta
+    }
+    if ($next -lt 0 -or $next -ge $Actions.Count) { return $Current }
+    $next
+}
+
+function Get-FirstSelectableIndex {
+    param([object[]]$Actions)
+    for ($i = 0; $i -lt $Actions.Count; $i++) {
+        if (-not $Actions[$i].IsSeparator) { return $i }
+    }
+    return 0
+}
+
+function Get-LastSelectableIndex {
+    param([object[]]$Actions)
+    for ($i = $Actions.Count - 1; $i -ge 0; $i--) {
+        if (-not $Actions[$i].IsSeparator) { return $i }
+    }
+    return 0
+}
+
+# ── Reducer ───────────────────────────────────────────────────────────────────
+
+function Invoke-LauncherReducer {
+    param([hashtable]$State, [object]$Action)
+    $s       = Copy-LauncherState -State $State
+    $effects = [System.Collections.Generic.List[object]]::new()
+
+    switch ($Action.Type) {
+
+        'Quit' {
+            $s.Runtime.IsRunning = $false
+        }
+
+        'SwitchPane' {
+            $s.Ui.ActivePane = if ($s.Ui.ActivePane -eq 'Left') { 'Right' } else { 'Left' }
+        }
+
+        'Resize' {
+            $layout          = Get-LauncherLayout -Width $Action.Width -Height $Action.Height -Constraints $s.Ui.Layout.Constraints
+            $s.Ui.Layout     = $layout
+            $s.Ui.TooSmall   = $layout.TooSmall
+            # Clamp cursors
+            $maxL = $s.Data.Actions.Count - 1
+            $maxR = $s.Data.Params.Count  - 1
+            if ($s.Cursor.LeftIndex  -gt $maxL) { $s.Cursor.LeftIndex  = $maxL }
+            if ($s.Cursor.RightIndex -gt $maxR) { $s.Cursor.RightIndex = $maxR }
+        }
+
+        'MoveUp' {
+            if ($s.Ui.ActivePane -eq 'Left') {
+                $s.Cursor.LeftIndex  = Move-LeftCursor -Actions $s.Data.Actions -Current $s.Cursor.LeftIndex -Delta -1
+            } else {
+                $s.Cursor.RightIndex = [Math]::Max(0, $s.Cursor.RightIndex - 1)
+            }
+        }
+
+        'MoveDown' {
+            if ($s.Ui.ActivePane -eq 'Left') {
+                $s.Cursor.LeftIndex  = Move-LeftCursor -Actions $s.Data.Actions -Current $s.Cursor.LeftIndex -Delta 1
+            } else {
+                $maxR = $s.Data.Params.Count - 1
+                $s.Cursor.RightIndex = [Math]::Min($maxR, $s.Cursor.RightIndex + 1)
+            }
+        }
+
+        'MoveHome' {
+            if ($s.Ui.ActivePane -eq 'Left') { $s.Cursor.LeftIndex  = Get-FirstSelectableIndex -Actions $s.Data.Actions }
+            else                             { $s.Cursor.RightIndex = 0 }
+        }
+
+        'MoveEnd' {
+            if ($s.Ui.ActivePane -eq 'Left') { $s.Cursor.LeftIndex  = Get-LastSelectableIndex -Actions $s.Data.Actions }
+            else                             { $s.Cursor.RightIndex = $s.Data.Params.Count - 1 }
+        }
+
+        'PageUp' {
+            $page = [Math]::Max(1, [Math]::Floor($s.Ui.Layout.Left.H / 2))
+            if ($s.Ui.ActivePane -eq 'Left') {
+                for ($i = 0; $i -lt $page; $i++) {
+                    $s.Cursor.LeftIndex = Move-LeftCursor -Actions $s.Data.Actions -Current $s.Cursor.LeftIndex -Delta -1
+                }
+            } else {
+                $s.Cursor.RightIndex = [Math]::Max(0, $s.Cursor.RightIndex - $page)
+            }
+        }
+
+        'PageDown' {
+            $page = [Math]::Max(1, [Math]::Floor($s.Ui.Layout.Left.H / 2))
+            $maxR = $s.Data.Params.Count - 1
+            if ($s.Ui.ActivePane -eq 'Left') {
+                for ($i = 0; $i -lt $page; $i++) {
+                    $s.Cursor.LeftIndex = Move-LeftCursor -Actions $s.Data.Actions -Current $s.Cursor.LeftIndex -Delta 1
+                }
+            } else {
+                $s.Cursor.RightIndex = [Math]::Min($maxR, $s.Cursor.RightIndex + $page)
+            }
+        }
+
+        # (value editing and Activate added in Tasks 5-7)
+
+        default { <# unknown actions are silently ignored #> }
+    }
+
+    @{ State = $s; Effects = $effects.ToArray() }
+}
+
+Export-ModuleMember -Function New-LauncherState, Copy-LauncherState, Get-LauncherLayout, Get-LauncherLayoutConstraints, Invoke-LauncherReducer

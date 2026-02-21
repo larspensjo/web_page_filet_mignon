@@ -165,3 +165,82 @@ Describe 'Reducer - Get-LauncherLayoutConstraints' {
         (Get-LauncherLayout -Width $c.MinWidth -Height $c.MinHeight -Constraints $c).TooSmall | Should -Be $false
     }
 }
+
+Describe 'Reducer - navigation' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        function script:S { New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 }
+        function script:Reduce($state, $type, $extra=@{}) {
+            $action = @{ Type=$type } + $extra
+            Invoke-LauncherReducer -State $state -Action $action
+        }
+    }
+
+    It 'reducer returns both State and Effects keys' {
+        $r = Reduce (S) 'Quit'
+        $r.Keys | Should -Contain 'State'
+        $r.Keys | Should -Contain 'Effects'
+    }
+    It 'Quit sets IsRunning to false' {
+        (Reduce (S) 'Quit').State.Runtime.IsRunning | Should -Be $false
+    }
+    It 'Quit emits no effects' {
+        (Reduce (S) 'Quit').Effects.Count | Should -Be 0
+    }
+    It 'SwitchPane Left->Right' {
+        (Reduce (S) 'SwitchPane').State.Ui.ActivePane | Should -Be 'Right'
+    }
+    It 'SwitchPane Right->Left' {
+        $s = S; $s.Ui.ActivePane = 'Right'
+        (Reduce $s 'SwitchPane').State.Ui.ActivePane | Should -Be 'Left'
+    }
+    It 'MoveDown advances LeftIndex in Left pane' {
+        (Reduce (S) 'MoveDown').State.Cursor.LeftIndex | Should -Be 1
+    }
+    It 'MoveDown skips separator (index 2) landing on 3' {
+        $s = S; $s.Cursor.LeftIndex = 1
+        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 3
+    }
+    It 'MoveUp from 3 skips separator landing on 1' {
+        $s = S; $s.Cursor.LeftIndex = 3
+        (Reduce $s 'MoveUp').State.Cursor.LeftIndex | Should -Be 1
+    }
+    It 'MoveDown clamps at last action item' {
+        $s = S; $s.Cursor.LeftIndex = 6   # last item (cp-show)
+        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 6
+    }
+    It 'MoveUp clamps at 0' {
+        (Reduce (S) 'MoveUp').State.Cursor.LeftIndex | Should -Be 0
+    }
+    It 'MoveDown advances RightIndex in Right pane' {
+        $s = S; $s.Ui.ActivePane = 'Right'
+        (Reduce $s 'MoveDown').State.Cursor.RightIndex | Should -Be 1
+    }
+    It 'MoveDown clamps RightIndex at last param' {
+        $s = S; $s.Ui.ActivePane = 'Right'; $s.Cursor.RightIndex = 7   # 8 params, index 7
+        (Reduce $s 'MoveDown').State.Cursor.RightIndex | Should -Be 7
+    }
+    It 'MoveHome sets LeftIndex to first non-separator' {
+        $s = S; $s.Cursor.LeftIndex = 5
+        (Reduce $s 'MoveHome').State.Cursor.LeftIndex | Should -Be 0
+    }
+    It 'MoveEnd sets LeftIndex to last item' {
+        (Reduce (S) 'MoveEnd').State.Cursor.LeftIndex | Should -Be 6
+    }
+    It 'Resize updates TooSmall to true for small terminal' {
+        $r = Reduce (S) 'Resize' @{ Width=50; Height=10 }
+        $r.State.Ui.TooSmall | Should -Be $true
+    }
+    It 'Resize updates Layout dimensions' {
+        $r = Reduce (S) 'Resize' @{ Width=120; Height=40 }
+        $r.State.Ui.Layout.Width  | Should -Be 120
+        $r.State.Ui.Layout.Height | Should -Be 40
+    }
+    It 'reducer does not mutate input state' {
+        $s = S
+        $orig = $s.Cursor.LeftIndex
+        Invoke-LauncherReducer -State $s -Action @{ Type='MoveDown' } | Out-Null
+        $s.Cursor.LeftIndex | Should -Be $orig
+    }
+}
