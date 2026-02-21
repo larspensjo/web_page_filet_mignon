@@ -12,6 +12,7 @@ pub struct RuntimePaths {
     pub triage_cache_path: PathBuf,
     pub seen_set_path: PathBuf,
     pub state_path: PathBuf,
+    pub briefing_history_path: PathBuf,
 }
 
 impl RuntimePaths {
@@ -26,6 +27,7 @@ impl RuntimePaths {
         let triage_cache_path = output_dir.join(".triage_cache.ron");
         let seen_set_path = output_dir.join(".seen_set.ron");
         let state_path = output_dir.join(".harvester_state.ron");
+        let briefing_history_path = output_dir.join(".briefing_history.ron");
 
         Self {
             output_dir,
@@ -36,6 +38,7 @@ impl RuntimePaths {
             triage_cache_path,
             seen_set_path,
             state_path,
+            briefing_history_path,
         }
     }
 
@@ -54,6 +57,7 @@ impl RuntimePaths {
 mod tests {
     use super::RuntimePaths;
     use crate::{load_summary_cache, persist_summary_cache};
+    use std::path::PathBuf;
     use chrono::Utc;
     use harvester_core::{ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
     use harvester_engine::llm::prompt::PromptId;
@@ -68,6 +72,20 @@ mod tests {
         assert!(paths.triage_cache_path.ends_with(".triage_cache.ron"));
         assert!(paths.seen_set_path.ends_with(".seen_set.ron"));
         assert!(paths.state_path.ends_with(".harvester_state.ron"));
+    }
+
+    #[test]
+    fn briefing_history_path_is_in_output_dir() {
+        let paths = RuntimePaths::new(
+            PathBuf::from("/tmp/out"),
+            PathBuf::from("/tmp/sources.ron"),
+            PathBuf::from("/tmp/contexts"),
+            PathBuf::from("/tmp/prompts"),
+        );
+        assert_eq!(
+            paths.briefing_history_path,
+            PathBuf::from("/tmp/out/.briefing_history.ron")
+        );
     }
 
     #[test]

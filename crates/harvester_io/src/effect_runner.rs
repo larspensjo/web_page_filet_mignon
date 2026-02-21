@@ -1108,6 +1108,7 @@ mod tests {
             summary_cache_path: base.join("summary_cache.ron"),
             triage_cache_path: base.join("triage_cache.ron"),
             state_path: base.join("state.json"),
+            briefing_history_path: base.join(".briefing_history.ron"),
         }
     }
 
