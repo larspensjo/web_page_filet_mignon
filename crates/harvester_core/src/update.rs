@@ -49,6 +49,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Effect::LoadPromptContexts,
                 Effect::LoadLlmMetadata,
                 Effect::LoadPromptLabModelCatalog,
+                Effect::LoadBriefingHistory,
             ]
         }
         Msg::UrlsSubmitted => {
@@ -699,8 +700,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
-        Msg::BriefingHistoryLoaded { .. } => {
-            // Stub — fleshed out in Task 7.
+        Msg::BriefingHistoryLoaded { entries } => {
+            state.set_briefing_history(entries);
             Vec::new()
         }
         Msg::ArticlesLoaded {
@@ -3954,5 +3955,31 @@ mod tests {
         );
         assert_eq!(effects.len(), 1);
         assert!(matches!(effects[0], Effect::RequestLlmCompletion { .. }));
+    }
+
+    #[test]
+    fn startup_hydration_emits_load_briefing_history() {
+        let state = AppState::new();
+        let (_, effects) = update(state, Msg::StartupHydrationRequested);
+        assert!(
+            effects.contains(&Effect::LoadBriefingHistory),
+            "expected LoadBriefingHistory in startup effects, got: {:?}",
+            effects
+        );
+    }
+
+    #[test]
+    fn briefing_history_loaded_sets_state() {
+        use crate::briefing::BriefingHistoryEntry;
+        let state = AppState::new();
+        let entry = BriefingHistoryEntry {
+            generated_at_utc: "2026-02-21T00:00:00Z".to_string(),
+            executive_summary: "Test".to_string(),
+            themes: vec![],
+            article_count: 1,
+        };
+        let (state, effects) = update(state, Msg::BriefingHistoryLoaded { entries: vec![entry] });
+        assert_eq!(state.briefing_history().len(), 1);
+        assert!(effects.is_empty());
     }
 }
