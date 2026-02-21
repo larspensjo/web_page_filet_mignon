@@ -357,6 +357,14 @@ Change: Rewrote the plan to align with current reducer/effect/LLM plumbing, adde
 Evidence: Updated `docs/plans/Plan.delta-briefing.md` after source cross-check with `harvester_core`, `harvester_io`, and `harvester_engine`.
 Refs: docs/plans/Plan.delta-briefing.md, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/runtime_paths.rs, docs/FutureIdeas.md
 
+## 2026-02-21 - Harvester batch TUI launcher implementation
+Type: Implementation
+Period: 2026-02-21
+Context: Implement a PowerShell TUI launcher (Elm/Redux UDF) for `harvester_batch`: key input → action → pure reducer → effects → follow-up actions. Fully covered by Pester 5 unit tests across all layers.
+Change: Six modules shipped: `Data.psm1` (action/param defs), `Reducer.psm1` (pure state management), `Effects.psm1` (IO/process calls), `Input.psm1` (key mapper wrapping submodule), `Render.psm1` (frame-diff rendering), `Start-HarvesterBatch.ps1` (main loop). 140 Pester tests.
+Key bugs fixed during implementation: (1) Pester 5 BeforeAll/Describe scope isolation — helpers need `function script:Name` inside `BeforeAll`. (2) `Import-Module -Global` required inside modules to expose dependencies to global scope. (3) `Set-StrictMode -Version Latest` + `ConvertFrom-Json` — must use `$json.PSObject.Properties['Key']` not dot notation for undefined properties. (4) Pester `-ModuleName` in `Mock` must match the .psm1 filename, not a logical alias. (5) `[Console]::CursorVisible` throws in headless environments — wrap in `try/catch`. (6) PowerShell `-ne` is case-insensitive by default — use `-cne` in frame-diff comparisons. (7) `List[object[]]::Add()` fails when pipeline-enumerated output is passed — use `List[object]` instead.
+Refs: scripts/harvester_launcher/, scripts/tests/HarvesterLauncher.Tests.ps1, scripts/Start-HarvesterBatch.ps1, docs/plans/Plan.harvester-batch-tui-launcher.md
+
 ## 2026-02-21 - Pester 5 module scoping in PowerShell TUI tests
 Type: Bug Fix
 Context: While implementing the harvester_batch TUI launcher, Pester tests were failing with `CommandNotFoundException` for functions that should have been in scope after `Import-Module` calls in `BeforeAll`.
