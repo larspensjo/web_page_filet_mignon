@@ -295,3 +295,96 @@ Describe 'Reducer - value editing' {
         (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.LlmConcurrency | Should -Be 3
     }
 }
+
+Describe 'Reducer - Build-CommandArgs' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        function script:S { New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 }
+    }
+
+    It 'FilePath matches HarvesterCmd' {
+        (Build-CommandArgs -State (S) -DryRun $false).FilePath | Should -Be 'hb'
+    }
+    It 'includes --sources and its value' {
+        $a = (Build-CommandArgs -State (S) -DryRun $false).Argv
+        $idx = [Array]::IndexOf($a, '--sources')
+        $idx | Should -BeGreaterThan -1
+        $a[$idx+1] | Should -Be 'sources.ron'
+    }
+    It 'includes --llm-concurrency 3' {
+        $a = (Build-CommandArgs -State (S) -DryRun $false).Argv
+        $idx = [Array]::IndexOf($a, '--llm-concurrency')
+        $a[$idx+1] | Should -Be '3'
+    }
+    It 'excludes --force-unlock when false' {
+        (Build-CommandArgs -State (S) -DryRun $false).Argv | Should -Not -Contain '--force-unlock'
+    }
+    It 'includes --force-unlock when true' {
+        $s = S; $s.Values.ForceUnlock = $true
+        (Build-CommandArgs -State $s -DryRun $false).Argv | Should -Contain '--force-unlock'
+    }
+    It 'includes --dry-run when DryRun is true' {
+        (Build-CommandArgs -State (S) -DryRun $true).Argv | Should -Contain '--dry-run'
+    }
+    It 'excludes --dry-run when DryRun is false' {
+        (Build-CommandArgs -State (S) -DryRun $false).Argv | Should -Not -Contain '--dry-run'
+    }
+    It 'path with spaces is a single argv element (not split)' {
+        $s = S; $s.Values.Sources = 'my sources/config.ron'
+        $a = (Build-CommandArgs -State $s -DryRun $false).Argv
+        $idx = [Array]::IndexOf($a, '--sources')
+        $a[$idx+1] | Should -Be 'my sources/config.ron'
+    }
+}
+
+Describe 'Reducer - Activate' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        function script:S { New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 }
+    }
+
+    It 'Activate on run-batch sets IsRunning=false' {
+        $s = S; $s.Cursor.LeftIndex = 0   # run-batch
+        (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Runtime.IsRunning | Should -Be $false
+    }
+    It 'Activate on run-batch populates LaunchAfterExit' {
+        $s = S; $s.Cursor.LeftIndex = 0
+        $r = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit
+        $r | Should -Not -BeNullOrEmpty
+        $r.FilePath | Should -Be 'hb'
+    }
+    It 'Activate on run-dry includes --dry-run in LaunchAfterExit.Argv' {
+        $s = S; $s.Cursor.LeftIndex = 1   # run-dry
+        $r = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit
+        $r.Argv | Should -Contain '--dry-run'
+    }
+    It 'Activate on run-batch emits no effects' {
+        $s = S; $s.Cursor.LeftIndex = 0
+        (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).Effects.Count | Should -Be 0
+    }
+    It 'Activate on separator is a no-op' {
+        $s = S; $s.Cursor.LeftIndex = 2   # sep-1
+        $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
+        $r.State.Runtime.IsRunning | Should -Be $true
+    }
+    It 'Activate on checkpoint when unavailable sets LastStatus Warn' {
+        $s = S; $s.Cursor.LeftIndex = 3; $s.Runtime.CheckpointCliAvailable = $false  # cp-set-now
+        $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
+        $r.State.Runtime.LastStatus | Should -Be 'Warn'
+    }
+    It 'Activate on checkpoint when available queues RunCheckpointCommand effect' {
+        $s = S; $s.Cursor.LeftIndex = 3; $s.Runtime.CheckpointCliAvailable = $true
+        $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
+        $eff = $r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }
+        $eff | Should -Not -BeNullOrEmpty
+        $eff.ActionId | Should -Be 'cp-set-now'
+    }
+    It 'Activate on cp-set-date when available emits DatePromptRequested (not RunCheckpointCommand)' {
+        $s = S; $s.Cursor.LeftIndex = 4; $s.Runtime.CheckpointCliAvailable = $true   # cp-set-date
+        $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
+        ($r.Effects | Where-Object { $_.Type -eq 'DatePromptRequested' }) | Should -Not -BeNullOrEmpty
+        ($r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }) | Should -BeNullOrEmpty
+    }
+}

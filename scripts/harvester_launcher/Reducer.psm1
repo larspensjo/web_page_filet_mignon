@@ -113,6 +113,31 @@ function Copy-LauncherState {
     }
 }
 
+# ── Command builder ───────────────────────────────────────────────────────────
+
+function Build-CommandArgs {
+    param([hashtable]$State, [bool]$DryRun = $false)
+    $v    = $State.Values
+    $argv = [System.Collections.Generic.List[string]]::new()
+
+    # All path args — always explicit for reproducibility
+    $argv.AddRange([string[]]@('--sources',      $v.Sources))
+    $argv.AddRange([string[]]@('--output-dir',   $v.OutputDir))
+    $argv.AddRange([string[]]@('--contexts-dir', $v.ContextsDir))
+    $argv.AddRange([string[]]@('--prompts-dir',  $v.PromptsDir))
+
+    # Numeric args — always explicit
+    $argv.AddRange([string[]]@('--llm-concurrency', [string]$v.LlmConcurrency))
+    $argv.AddRange([string[]]@('--poll-interval',   [string]$v.PollInterval))
+
+    # Boolean flags — only when enabled
+    if ($v.ForceUnlock)      { $argv.Add('--force-unlock') }
+    if ($v.AllowUnsupported) { $argv.Add('--allow-unsupported-sources') }
+    if ($DryRun)             { $argv.Add('--dry-run') }
+
+    @{ FilePath = $State.Runtime.HarvesterCmd; Argv = $argv.ToArray() }
+}
+
 # ── Cursor helpers ────────────────────────────────────────────────────────────
 
 function Move-LeftCursor {
@@ -244,7 +269,27 @@ function Invoke-LauncherReducer {
             }
         }
 
-        # (Activate added in Task 6)
+        'Activate' {
+            $item = $s.Data.Actions[$s.Cursor.LeftIndex]
+            if ($item.IsSeparator) { break }
+
+            if (-not $item.IsCheckpoint) {
+                # Run actions: exit TUI and launch process
+                $s.Pending.LaunchAfterExit = Build-CommandArgs -State $s -DryRun $item.IsDryRun
+                $s.Runtime.IsRunning       = $false
+            } else {
+                # Checkpoint actions
+                if (-not $s.Runtime.CheckpointCliAvailable) {
+                    $s.Runtime.LastStatus  = 'Warn'
+                    $s.Runtime.LastMessage = 'Checkpoint CLI not yet available (Slice A pending)'
+                } elseif ($item.Id -eq 'cp-set-date') {
+                    # Custom date requires interactive prompt — handled as an effect
+                    $effects.Add(@{ Type='DatePromptRequested' })
+                } else {
+                    $effects.Add(@{ Type='RunCheckpointCommand'; ActionId=$item.Id })
+                }
+            }
+        }
 
         default { <# unknown actions are silently ignored #> }
     }
@@ -252,4 +297,4 @@ function Invoke-LauncherReducer {
     @{ State = $s; Effects = $effects.ToArray() }
 }
 
-Export-ModuleMember -Function New-LauncherState, Copy-LauncherState, Get-LauncherLayout, Get-LauncherLayoutConstraints, Invoke-LauncherReducer
+Export-ModuleMember -Function New-LauncherState, Copy-LauncherState, Get-LauncherLayout, Get-LauncherLayoutConstraints, Invoke-LauncherReducer, Build-CommandArgs
