@@ -839,24 +839,32 @@ mod history_tests {
         let entry = make_entry(
             "2026-02-21T08:00:00Z",
             "Markets rose sharply.",
-            &[("Economy", "Growth driven by tech."), ("Policy", "Rate cuts expected.")],
+            &[
+                ("Economy", "Growth driven by tech."),
+                ("Policy", "Rate cuts expected."),
+            ],
         );
         let block = format_previous_briefings_block(&[entry]);
         assert!(block.contains("2026-02-21T08:00:00Z"), "missing timestamp");
         assert!(block.contains("Markets rose sharply."), "missing summary");
         assert!(block.contains("Economy"), "missing theme name");
-        assert!(block.contains("Growth driven by tech."), "missing theme description");
+        assert!(
+            block.contains("Growth driven by tech."),
+            "missing theme description"
+        );
         assert!(block.contains("Policy"), "missing second theme");
     }
 
     #[test]
     fn format_three_entries_all_present() {
         let entries: Vec<BriefingHistoryEntry> = (1..=3)
-            .map(|i| make_entry(
-                &format!("2026-02-2{}T00:00:00Z", i),
-                &format!("Summary {i}"),
-                &[("Theme", &format!("Desc {i}"))],
-            ))
+            .map(|i| {
+                make_entry(
+                    &format!("2026-02-2{}T00:00:00Z", i),
+                    &format!("Summary {i}"),
+                    &[("Theme", &format!("Desc {i}"))],
+                )
+            })
             .collect();
         let block = format_previous_briefings_block(&entries);
         for i in 1..=3 {

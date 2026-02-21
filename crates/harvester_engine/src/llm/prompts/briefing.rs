@@ -111,7 +111,9 @@ mod v5_tests {
     #[test]
     fn v5_system_template_contains_previous_briefings_slot() {
         assert!(
-            BRIEFING_PROMPT_V5.system_template.contains("{{previous_briefings}}"),
+            BRIEFING_PROMPT_V5
+                .system_template
+                .contains("{{previous_briefings}}"),
             "V5 system template must have a {{{{previous_briefings}}}} slot"
         );
     }

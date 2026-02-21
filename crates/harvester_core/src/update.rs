@@ -484,7 +484,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                             state.revert_preview_to_briefing();
                             // ── Save to briefing history ──────────────────────────
                             let now = chrono::Utc::now().to_rfc3339();
-                            if let Some(entry) = crate::briefing::BriefingHistoryEntry::from_result(&result, &now) {
+                            if let Some(entry) =
+                                crate::briefing::BriefingHistoryEntry::from_result(&result, &now)
+                            {
                                 state.push_briefing_history(entry);
                                 effects.push(Effect::SaveBriefingHistory {
                                     entries: state.briefing_history().to_vec(),
@@ -2479,8 +2481,12 @@ mod tests {
             },
         );
 
-        assert!(effects.iter().any(|e| matches!(e, Effect::PersistSummaryCache { .. })));
-        assert!(effects.iter().any(|e| matches!(e, Effect::SaveBriefingHistory { .. })));
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, Effect::PersistSummaryCache { .. })));
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, Effect::SaveBriefingHistory { .. })));
         assert_eq!(state.briefing().phase(), &BriefingPhase::Complete);
         assert!(state.briefing().briefing_result().is_some());
     }
@@ -3991,7 +3997,12 @@ mod tests {
             themes: vec![],
             article_count: 1,
         };
-        let (state, effects) = update(state, Msg::BriefingHistoryLoaded { entries: vec![entry] });
+        let (state, effects) = update(
+            state,
+            Msg::BriefingHistoryLoaded {
+                entries: vec![entry],
+            },
+        );
         assert_eq!(state.briefing_history().len(), 1);
         assert!(effects.is_empty());
     }
@@ -4000,12 +4011,16 @@ mod tests {
     // Task 11: save history on canonical briefing completion
     // ------------------------------------------------------------------
 
-    fn run_single_article_briefing_to_completion(
-        state: AppState,
-    ) -> (AppState, Vec<Effect>) {
+    fn run_single_article_briefing_to_completion(state: AppState) -> (AppState, Vec<Effect>) {
         let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
         let (articles, collection_text) = loaded_single_article();
-        let (state, _) = update(state, Msg::ArticlesLoaded { articles, collection_text });
+        let (state, _) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
         // summary completes → fires AggregateBriefing (request_id 3 for fresh state)
         let (state, effects) = update(
             state,
@@ -4045,11 +4060,18 @@ mod tests {
         init_logging();
         let state = AppState::new();
         let (state, effects) = run_single_article_briefing_to_completion(state);
-        assert_eq!(state.briefing_history().len(), 1, "history should have 1 entry");
+        assert_eq!(
+            state.briefing_history().len(),
+            1,
+            "history should have 1 entry"
+        );
         let has_save = effects
             .iter()
             .any(|e| matches!(e, Effect::SaveBriefingHistory { .. }));
-        assert!(has_save, "SaveBriefingHistory effect should be emitted after briefing completion");
+        assert!(
+            has_save,
+            "SaveBriefingHistory effect should be emitted after briefing completion"
+        );
     }
 
     #[test]
@@ -4058,7 +4080,12 @@ mod tests {
         use crate::prompt_lab::PromptLabStage;
         let state = AppState::new();
         let (state, _) = update(state, Msg::PromptLabOpenRequested);
-        let (state, _) = update(state, Msg::PromptLabStageSelected { stage: PromptLabStage::Briefing });
+        let (state, _) = update(
+            state,
+            Msg::PromptLabStageSelected {
+                stage: PromptLabStage::Briefing,
+            },
+        );
         // Simulate a Prompt Lab run
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
         // Prompt Lab runs shouldn't fire because there's no input, so check we still start cleanly
@@ -4142,7 +4169,10 @@ mod tests {
                 let pb = extra_template_vars
                     .iter()
                     .find(|(k, _)| k == "previous_briefings");
-                assert!(pb.is_some(), "missing previous_briefings in extra_template_vars");
+                assert!(
+                    pb.is_some(),
+                    "missing previous_briefings in extra_template_vars"
+                );
                 let (_, value) = pb.unwrap();
                 assert!(
                     value.contains("Old summary content."),

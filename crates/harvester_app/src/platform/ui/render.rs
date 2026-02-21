@@ -293,12 +293,8 @@ pub fn render(
     cmds
 }
 
-fn emit_if_changed<T, F>(
-    prev: &mut Option<T>,
-    next: T,
-    cmds: &mut Vec<PlatformCommand>,
-    emit: F,
-) where
+fn emit_if_changed<T, F>(prev: &mut Option<T>, next: T, cmds: &mut Vec<PlatformCommand>, emit: F)
+where
     T: PartialEq + Clone,
     F: FnOnce(T) -> PlatformCommand,
 {

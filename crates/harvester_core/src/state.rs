@@ -720,10 +720,7 @@ impl AppState {
         self.briefing_history.truncate(3);
     }
 
-    pub fn set_briefing_history(
-        &mut self,
-        entries: Vec<crate::briefing::BriefingHistoryEntry>,
-    ) {
+    pub fn set_briefing_history(&mut self, entries: Vec<crate::briefing::BriefingHistoryEntry>) {
         self.briefing_history = entries;
     }
 
@@ -3402,7 +3399,7 @@ mod tests {
 #[cfg(test)]
 mod briefing_history_state_tests {
     use super::*;
-    use crate::briefing::{BriefingHistoryEntry, BriefingHistoryTheme};
+    use crate::briefing::BriefingHistoryEntry;
 
     fn entry(ts: &str) -> BriefingHistoryEntry {
         BriefingHistoryEntry {
@@ -3424,8 +3421,14 @@ mod briefing_history_state_tests {
         let mut state = AppState::new();
         state.push_briefing_history(entry("2026-02-20T00:00:00Z"));
         state.push_briefing_history(entry("2026-02-21T00:00:00Z"));
-        assert_eq!(state.briefing_history()[0].generated_at_utc, "2026-02-21T00:00:00Z");
-        assert_eq!(state.briefing_history()[1].generated_at_utc, "2026-02-20T00:00:00Z");
+        assert_eq!(
+            state.briefing_history()[0].generated_at_utc,
+            "2026-02-21T00:00:00Z"
+        );
+        assert_eq!(
+            state.briefing_history()[1].generated_at_utc,
+            "2026-02-20T00:00:00Z"
+        );
     }
 
     #[test]

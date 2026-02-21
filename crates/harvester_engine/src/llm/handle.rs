@@ -972,12 +972,11 @@ mod tests {
     /// then verify that extra_template_vars are NOT folded into {{context}}.
     #[test]
     fn extra_template_vars_not_in_context_block() {
-        let context: Vec<(String, String)> = vec![
-            ("analyst".to_string(), "finance".to_string()),
-        ];
-        let extra_template_vars: Vec<(String, String)> = vec![
-            ("previous_briefings".to_string(), "old summary content".to_string()),
-        ];
+        let context: Vec<(String, String)> = vec![("analyst".to_string(), "finance".to_string())];
+        let extra_template_vars: Vec<(String, String)> = vec![(
+            "previous_briefings".to_string(),
+            "old summary content".to_string(),
+        )];
 
         // Replicate the logic in handle_completion_concurrent
         let mut vars = TemplateVars::new();

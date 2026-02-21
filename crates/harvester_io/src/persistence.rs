@@ -369,10 +369,14 @@ mod briefing_history_tests {
     fn round_trip_three_entries() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join(".briefing_history.ron");
-        let entries: Vec<_> = ["2026-02-21T10:00:00Z", "2026-02-21T08:00:00Z", "2026-02-20T18:00:00Z"]
-            .iter()
-            .map(|ts| make_entry(ts))
-            .collect();
+        let entries: Vec<_> = [
+            "2026-02-21T10:00:00Z",
+            "2026-02-21T08:00:00Z",
+            "2026-02-20T18:00:00Z",
+        ]
+        .iter()
+        .map(|ts| make_entry(ts))
+        .collect();
         save_briefing_history(&path, &entries).unwrap();
         let loaded = load_briefing_history(&path);
         assert_eq!(loaded.len(), 3);

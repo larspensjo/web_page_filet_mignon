@@ -57,10 +57,10 @@ impl RuntimePaths {
 mod tests {
     use super::RuntimePaths;
     use crate::{load_summary_cache, persist_summary_cache};
-    use std::path::PathBuf;
     use chrono::Utc;
     use harvester_core::{ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
     use harvester_engine::llm::prompt::PromptId;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     #[test]
