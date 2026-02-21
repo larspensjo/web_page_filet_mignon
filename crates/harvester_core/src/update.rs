@@ -2015,6 +2015,9 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
 
     let context = state.context_for(PromptId::AggregateBriefing).to_vec();
 
+    let previous_briefings =
+        crate::briefing::format_previous_briefings_block(state.briefing_history());
+
     effects.push(Effect::RequestLlmCompletion {
         request_id,
         prompt_id: PromptId::AggregateBriefing,
@@ -2023,7 +2026,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         input_content: collection_text,
         context,
         template_override: None,
-        extra_template_vars: vec![],
+        extra_template_vars: vec![("previous_briefings".to_string(), previous_briefings)],
     });
     state.mark_dirty();
 }
@@ -2447,7 +2450,7 @@ mod tests {
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
                 template_override: None,
-                extra_template_vars: vec![],
+                extra_template_vars: vec![("previous_briefings".to_string(), "(none)".to_string())],
             }]
         );
 
@@ -2548,7 +2551,7 @@ mod tests {
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
                 template_override: None,
-                extra_template_vars: vec![],
+                extra_template_vars: vec![("previous_briefings".to_string(), "(none)".to_string())],
             }]
         );
         let (state, _) = update(
@@ -2607,7 +2610,7 @@ mod tests {
                 input_content: "Collection text".to_string(),
                 context: Vec::new(),
                 template_override: None,
-                extra_template_vars: vec![],
+                extra_template_vars: vec![("previous_briefings".to_string(), "(none)".to_string())],
             }]
         );
     }
@@ -3981,5 +3984,88 @@ mod tests {
         let (state, effects) = update(state, Msg::BriefingHistoryLoaded { entries: vec![entry] });
         assert_eq!(state.briefing_history().len(), 1);
         assert!(effects.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // Task 10: inject previous_briefings into aggregate briefing request
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn format_block_contains_history_content() {
+        use crate::briefing::{format_previous_briefings_block, BriefingHistoryEntry};
+        let mut state = AppState::new();
+        state.push_briefing_history(BriefingHistoryEntry {
+            generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
+            executive_summary: "Old summary content.".to_string(),
+            themes: vec![],
+            article_count: 2,
+        });
+        let block = format_previous_briefings_block(state.briefing_history());
+        assert!(block.contains("Old summary content."));
+        assert!(block.contains("2026-02-20T10:00:00Z"));
+    }
+
+    #[test]
+    fn aggregate_briefing_effect_includes_previous_briefings_extra_var() {
+        init_logging();
+        use crate::briefing::BriefingHistoryEntry;
+        let mut state = AppState::new();
+        // Pre-load a history entry so it shows up in the extra_template_vars
+        state.push_briefing_history(BriefingHistoryEntry {
+            generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
+            executive_summary: "Old summary content.".to_string(),
+            themes: vec![],
+            article_count: 2,
+        });
+        let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
+        let (articles, collection_text) = loaded_single_article();
+        let (state, _) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+        // Single article summary completes → aggregate briefing effect fires
+        let (_state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 2,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article A"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
+                },
+                metadata: None,
+            },
+        );
+        let completion_effect = effects.iter().find(|e| {
+            matches!(
+                e,
+                Effect::RequestLlmCompletion {
+                    prompt_id: PromptId::AggregateBriefing,
+                    ..
+                }
+            )
+        });
+        match completion_effect {
+            Some(Effect::RequestLlmCompletion {
+                extra_template_vars,
+                ..
+            }) => {
+                let pb = extra_template_vars
+                    .iter()
+                    .find(|(k, _)| k == "previous_briefings");
+                assert!(pb.is_some(), "missing previous_briefings in extra_template_vars");
+                let (_, value) = pb.unwrap();
+                assert!(
+                    value.contains("Old summary content."),
+                    "previous_briefings value should contain history: {value}"
+                );
+            }
+            _ => panic!("no AggregateBriefing RequestLlmCompletion effect emitted"),
+        }
     }
 }
