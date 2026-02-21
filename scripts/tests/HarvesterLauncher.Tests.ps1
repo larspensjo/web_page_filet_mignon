@@ -83,3 +83,85 @@ Describe 'Data - Get-DefaultsFilePath' {
         (Get-DefaultsFilePath) | Should -Match 'harvester_launcher_defaults\.json$'
     }
 }
+
+Describe 'Reducer - New-LauncherState' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+    }
+
+    It 'ActivePane starts as Left' {
+        (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Ui.ActivePane | Should -Be 'Left'
+    }
+    It 'IsRunning starts true' {
+        (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Runtime.IsRunning | Should -Be $true
+    }
+    It 'HarvesterCmd stored in Runtime' {
+        (New-LauncherState -HarvesterCmd 'myhb' -Width 100 -Height 30).Runtime.HarvesterCmd | Should -Be 'myhb'
+    }
+    It 'layout Left pane width is at least 32 at normal size' {
+        (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Ui.Layout.Left.W | Should -BeGreaterOrEqual 32
+    }
+    It 'layout Right pane starts after Left + gap' {
+        $s = New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30
+        $s.Ui.Layout.Right.X | Should -BeGreaterThan $s.Ui.Layout.Left.W
+    }
+    It 'TooSmall is true for narrow terminal' {
+        (New-LauncherState -HarvesterCmd 'hb' -Width 50 -Height 10).Ui.TooSmall | Should -Be $true
+    }
+    It 'TooSmall is false for adequate terminal' {
+        (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Ui.TooSmall | Should -Be $false
+    }
+    It 'cursor starts at 0 for both panes' {
+        $c = (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Cursor
+        $c.LeftIndex  | Should -Be 0
+        $c.RightIndex | Should -Be 0
+    }
+    It 'defaults are loaded' {
+        $v = (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Values
+        $v.LlmConcurrency | Should -Be 3
+        $v.PollInterval   | Should -Be 15
+    }
+    It 'custom InitialValues override defaults' {
+        $custom = New-LauncherDefaults; $custom.LlmConcurrency = 7
+        $v = (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 -InitialValues $custom).Values
+        $v.LlmConcurrency | Should -Be 7
+    }
+    It 'Pending.LaunchAfterExit starts null' {
+        (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Pending.LaunchAfterExit | Should -BeNullOrEmpty
+    }
+    It 'CheckpointCliAvailable starts false' {
+        (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Runtime.CheckpointCliAvailable | Should -Be $false
+    }
+}
+
+Describe 'Reducer - Get-LauncherLayoutConstraints' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+    }
+
+    It 'LeftW is at least 32' {
+        $d = @{ Actions = Get-LauncherActionItems; Params = Get-LauncherParamDefs }
+        (Get-LauncherLayoutConstraints -Data $d).LeftW | Should -BeGreaterOrEqual 32
+    }
+    It 'MinWidth is greater than LeftW' {
+        $d = @{ Actions = Get-LauncherActionItems; Params = Get-LauncherParamDefs }
+        $c = Get-LauncherLayoutConstraints -Data $d
+        $c.MinWidth | Should -BeGreaterThan $c.LeftW
+    }
+    It 'MinHeight is at least 16' {
+        $d = @{ Actions = Get-LauncherActionItems; Params = Get-LauncherParamDefs }
+        (Get-LauncherLayoutConstraints -Data $d).MinHeight | Should -BeGreaterOrEqual 16
+    }
+    It 'Get-LauncherLayout TooSmall true when width below MinWidth' {
+        $d = @{ Actions = Get-LauncherActionItems; Params = Get-LauncherParamDefs }
+        $c = Get-LauncherLayoutConstraints -Data $d
+        (Get-LauncherLayout -Width ($c.MinWidth - 1) -Height $c.MinHeight -Constraints $c).TooSmall | Should -Be $true
+    }
+    It 'Get-LauncherLayout TooSmall false at MinWidth x MinHeight' {
+        $d = @{ Actions = Get-LauncherActionItems; Params = Get-LauncherParamDefs }
+        $c = Get-LauncherLayoutConstraints -Data $d
+        (Get-LauncherLayout -Width $c.MinWidth -Height $c.MinHeight -Constraints $c).TooSmall | Should -Be $false
+    }
+}
