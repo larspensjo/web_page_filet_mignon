@@ -639,3 +639,68 @@ Describe 'Input - ConvertFrom-KeyInfoToLauncherAction' {
         ConvertFrom-KeyInfoToLauncherAction (Key 'F12') | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Render - Pad-SegmentsToWidth' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Render.psm1"  -Force
+        function script:Seg($t) { [pscustomobject]@{ Text=$t; Fg='Gray'; Bg='Black' } }
+    }
+
+    It 'pads short content to exact width' {
+        $r = Pad-SegmentsToWidth -Segments @(Seg 'Hi') -Width 10
+        ($r | ForEach-Object { $_.Text } | Join-String).Length | Should -Be 10
+    }
+    It 'truncates long content to exact width' {
+        $r = Pad-SegmentsToWidth -Segments @(Seg 'Hello World Long') -Width 5
+        ($r | ForEach-Object { $_.Text } | Join-String).Length | Should -Be 5
+    }
+    It 'exact-width content unchanged' {
+        $r = Pad-SegmentsToWidth -Segments @(Seg 'Hello') -Width 5
+        ($r | ForEach-Object { $_.Text } | Join-String) | Should -Be 'Hello'
+    }
+}
+
+Describe 'Render - Get-FrameDiff' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Render.psm1" -Force
+        function script:Row($t) { @([pscustomobject]@{ Text=$t; Fg='Gray'; Bg='Black' }) }
+    }
+
+    It 'returns empty diff for identical frames' {
+        $f = @( (Row 'abc'), (Row 'xyz') )
+        (Get-FrameDiff -PrevFrame $f -CurrFrame $f).Count | Should -Be 0
+    }
+    It 'detects changed row' {
+        $f1 = @( (Row 'abc') )
+        $f2 = @( (Row 'xyz') )
+        (Get-FrameDiff -PrevFrame $f1 -CurrFrame $f2).Count | Should -Be 1
+    }
+    It 'returns correct RowIndex for changed row' {
+        $f1 = @( (Row 'aaa'), (Row 'bbb') )
+        $f2 = @( (Row 'aaa'), (Row 'BBB') )
+        # @() wrapping ensures array context even when function returns a single item
+        $diffs = @(Get-FrameDiff -PrevFrame $f1 -CurrFrame $f2)
+        $diffs[0].RowIndex | Should -Be 1
+    }
+    It 'treats empty prev frame as all-changed' {
+        $f = @( (Row 'abc') )
+        (Get-FrameDiff -PrevFrame @() -CurrFrame $f).Count | Should -Be 1
+    }
+}
+
+Describe 'Render - Build-CommandPreviewLines' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Render.psm1" -Force
+    }
+
+    It 'returns at least one line' {
+        $lines = Build-CommandPreviewLines -FilePath 'hb' -Argv @('--sources','s.ron') -MaxWidth 40
+        $lines.Count | Should -BeGreaterThan 0
+    }
+    It 'first line is the binary name' {
+        $lines = Build-CommandPreviewLines -FilePath 'harvester_batch' -Argv @('--sources','s.ron') -MaxWidth 40
+        $lines[0] | Should -Match 'harvester_batch'
+    }
+}
