@@ -342,3 +342,10 @@ Context: The initial launcher design conflicted with the requirement that ENTER 
 Change: Updated the launcher design to enforce UDF with explicit effect requests, argv-based command execution, startup capability probing for checkpoint flags, dynamic layout sizing, and in-scope Pester coverage for reducer/render/effects.
 Evidence: Reviewed against `crates/harvester_batch/src/cli.rs` and updated `docs/plans/Design.harvester-batch-tui-launcher.md`.
 Refs: docs/plans/Design.harvester-batch-tui-launcher.md, crates/harvester_batch/src/cli.rs, ministry-of-future-plans/browser/Input.psm1
+
+## 2026-02-21 - Delta briefing design hardening
+Type: Decision
+Context: The initial delta-briefing draft captured the core idea but left key robustness gaps around prompt variable injection, render-size control, and centralized path ownership, which could cause noisy prompts and long-term maintenance drift.
+Change: Revised the design to use reducer-owned history with capped retention, explicit load/save effects, dedicated extra template variables for `previous_briefings`, rendered-size safeguards, and a `RuntimePaths`-owned history path.
+Evidence: Cross-checked against current briefing orchestration and LLM rendering flow, then updated `docs/plans/Design.delta-briefing-design.md`.
+Refs: docs/plans/Design.delta-briefing-design.md, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/runtime_paths.rs
