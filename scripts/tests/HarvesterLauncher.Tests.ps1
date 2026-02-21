@@ -244,3 +244,54 @@ Describe 'Reducer - navigation' {
         $s.Cursor.LeftIndex | Should -Be $orig
     }
 }
+
+Describe 'Reducer - value editing' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        function script:RightState($paramIdx) {
+            $s = New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30
+            $s.Ui.ActivePane = 'Right'; $s.Cursor.RightIndex = $paramIdx; $s
+        }
+    }
+    # Param indices (from Get-LauncherParamDefs order):
+    # 0=LlmConcurrency, 1=PollInterval, 2=ForceUnlock, 3=AllowUnsupported, 4=Sources, ...
+
+    It 'ValueIncrease on LlmConcurrency increments by 1' {
+        $r = Invoke-LauncherReducer -State (RightState 0) -Action @{ Type='ValueIncrease' }
+        $r.State.Values.LlmConcurrency | Should -Be 4
+    }
+    It 'ValueIncrease clamps at Max (10)' {
+        $s = RightState 0; $s.Values.LlmConcurrency = 10
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.LlmConcurrency | Should -Be 10
+    }
+    It 'ValueDecrease on LlmConcurrency decrements by 1' {
+        $s = RightState 0; $s.Values.LlmConcurrency = 5
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueDecrease' }).State.Values.LlmConcurrency | Should -Be 4
+    }
+    It 'ValueDecrease clamps at Min (1)' {
+        $s = RightState 0; $s.Values.LlmConcurrency = 1
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueDecrease' }).State.Values.LlmConcurrency | Should -Be 1
+    }
+    It 'ValueIncrease on PollInterval uses correct max 1440' {
+        $s = RightState 1; $s.Values.PollInterval = 1440
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.PollInterval | Should -Be 1440
+    }
+    It 'ValueToggle flips ForceUnlock false->true' {
+        (Invoke-LauncherReducer -State (RightState 2) -Action @{ Type='ValueToggle' }).State.Values.ForceUnlock | Should -Be $true
+    }
+    It 'ValueToggle flips ForceUnlock true->false' {
+        $s = RightState 2; $s.Values.ForceUnlock = $true
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueToggle' }).State.Values.ForceUnlock | Should -Be $false
+    }
+    It 'ValueToggle does nothing on Path param' {
+        (Invoke-LauncherReducer -State (RightState 4) -Action @{ Type='ValueToggle' }).State.Values.Sources | Should -Be 'sources.ron'
+    }
+    It 'ValueIncrease does nothing on Bool param' {
+        (Invoke-LauncherReducer -State (RightState 2) -Action @{ Type='ValueIncrease' }).State.Values.ForceUnlock | Should -Be $false
+    }
+    It 'ValueIncrease does nothing when Left pane is active' {
+        $s = New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.LlmConcurrency | Should -Be 3
+    }
+}

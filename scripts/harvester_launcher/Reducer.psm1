@@ -219,7 +219,32 @@ function Invoke-LauncherReducer {
             }
         }
 
-        # (value editing and Activate added in Tasks 5-7)
+        'ValueIncrease' {
+            if ($s.Ui.ActivePane -eq 'Right') {
+                $p = $s.Data.Params[$s.Cursor.RightIndex]
+                if ($p.Type -eq 'Int') {
+                    $s.Values[$p.Name] = [Math]::Min($p.Max, [int]$s.Values[$p.Name] + 1)
+                }
+            }
+        }
+        'ValueDecrease' {
+            if ($s.Ui.ActivePane -eq 'Right') {
+                $p = $s.Data.Params[$s.Cursor.RightIndex]
+                if ($p.Type -eq 'Int') {
+                    $s.Values[$p.Name] = [Math]::Max($p.Min, [int]$s.Values[$p.Name] - 1)
+                }
+            }
+        }
+        'ValueToggle' {
+            if ($s.Ui.ActivePane -eq 'Right') {
+                $p = $s.Data.Params[$s.Cursor.RightIndex]
+                if ($p.Type -eq 'Bool') {
+                    $s.Values[$p.Name] = -not [bool]$s.Values[$p.Name]
+                }
+            }
+        }
+
+        # (Activate added in Task 6)
 
         default { <# unknown actions are silently ignored #> }
     }
