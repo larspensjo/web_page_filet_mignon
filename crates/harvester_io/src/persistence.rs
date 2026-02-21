@@ -232,6 +232,172 @@ fn persist_state(
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Briefing History Persistence
+// ──────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PersistedBriefingHistory {
+    #[serde(default)]
+    entries: Vec<PersistedBriefingEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedBriefingEntry {
+    generated_at_utc: String,
+    executive_summary: String,
+    themes: Vec<PersistedBriefingTheme>,
+    #[serde(default)]
+    article_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedBriefingTheme {
+    name: String,
+    description: String,
+}
+
+/// Loads briefing history from disk. Returns an empty Vec on missing file or parse error.
+pub fn load_briefing_history(path: &Path) -> Vec<harvester_core::BriefingHistoryEntry> {
+    let text = match fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return vec![],
+        Err(e) => {
+            engine_warn!("[briefing-history] Failed to read {:?}: {}", path, e);
+            return vec![];
+        }
+    };
+    let persisted: PersistedBriefingHistory = match ron::from_str(&text) {
+        Ok(p) => p,
+        Err(e) => {
+            engine_warn!("[briefing-history] Failed to parse {:?}: {}", path, e);
+            return vec![];
+        }
+    };
+    persisted
+        .entries
+        .into_iter()
+        .filter_map(|e| {
+            if e.generated_at_utc.trim().is_empty() {
+                engine_warn!("[briefing-history] Dropping entry with empty timestamp");
+                return None;
+            }
+            Some(harvester_core::BriefingHistoryEntry {
+                generated_at_utc: e.generated_at_utc,
+                executive_summary: e.executive_summary,
+                themes: e
+                    .themes
+                    .into_iter()
+                    .map(|t| harvester_core::BriefingHistoryTheme {
+                        name: t.name,
+                        description: t.description,
+                    })
+                    .collect(),
+                article_count: e.article_count,
+            })
+        })
+        .collect()
+}
+
+/// Saves briefing history to disk atomically. Logs on error; never panics.
+pub fn save_briefing_history(
+    path: &Path,
+    entries: &[harvester_core::BriefingHistoryEntry],
+) -> Result<(), String> {
+    let output_dir = path.parent().unwrap_or(Path::new("."));
+    ensure_output_dir(output_dir).map_err(|e| format!("ensure_output_dir: {e}"))?;
+    let persisted = PersistedBriefingHistory {
+        entries: entries
+            .iter()
+            .map(|e| PersistedBriefingEntry {
+                generated_at_utc: e.generated_at_utc.clone(),
+                executive_summary: e.executive_summary.clone(),
+                themes: e
+                    .themes
+                    .iter()
+                    .map(|t| PersistedBriefingTheme {
+                        name: t.name.clone(),
+                        description: t.description.clone(),
+                    })
+                    .collect(),
+                article_count: e.article_count,
+            })
+            .collect(),
+    };
+    let pretty = ron::ser::PrettyConfig::new();
+    let content = ron::ser::to_string_pretty(&persisted, pretty)
+        .map_err(|e| format!("RON serialize: {e}"))?;
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("invalid file path: {:?}", path))?;
+    let writer = AtomicFileWriter::new(PathBuf::from(output_dir));
+    writer
+        .write(filename, &content)
+        .map(|_| ())
+        .map_err(|e| format!("AtomicFileWriter: {e}"))
+}
+
+#[cfg(test)]
+mod briefing_history_tests {
+    use super::*;
+    use harvester_core::{BriefingHistoryEntry, BriefingHistoryTheme};
+    use tempfile::TempDir;
+
+    fn make_entry(ts: &str) -> BriefingHistoryEntry {
+        BriefingHistoryEntry {
+            generated_at_utc: ts.to_string(),
+            executive_summary: format!("Summary for {ts}"),
+            themes: vec![BriefingHistoryTheme {
+                name: "Topic".to_string(),
+                description: "Details.".to_string(),
+            }],
+            article_count: 3,
+        }
+    }
+
+    #[test]
+    fn round_trip_empty() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".briefing_history.ron");
+        save_briefing_history(&path, &[]).unwrap();
+        let loaded = load_briefing_history(&path);
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn round_trip_three_entries() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".briefing_history.ron");
+        let entries: Vec<_> = ["2026-02-21T10:00:00Z", "2026-02-21T08:00:00Z", "2026-02-20T18:00:00Z"]
+            .iter()
+            .map(|ts| make_entry(ts))
+            .collect();
+        save_briefing_history(&path, &entries).unwrap();
+        let loaded = load_briefing_history(&path);
+        assert_eq!(loaded.len(), 3);
+        assert_eq!(loaded[0].generated_at_utc, "2026-02-21T10:00:00Z");
+        assert_eq!(loaded[0].themes[0].name, "Topic");
+    }
+
+    #[test]
+    fn missing_file_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nonexistent.ron");
+        let loaded = load_briefing_history(&path);
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn malformed_ron_returns_empty() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".briefing_history.ron");
+        std::fs::write(&path, "{{not valid ron]]").unwrap();
+        let loaded = load_briefing_history(&path);
+        assert!(loaded.is_empty());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

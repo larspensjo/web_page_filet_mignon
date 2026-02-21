@@ -18,8 +18,9 @@ mod url_age;
 mod view_model;
 
 pub use briefing::{
-    ArticleSummaryResult, BriefingArticle, BriefingArticleId, BriefingPhase, BriefingResult,
-    BriefingSession, BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
+    format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
+    BriefingHistoryEntry, BriefingHistoryTheme, BriefingPhase, BriefingResult, BriefingSession,
+    BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
