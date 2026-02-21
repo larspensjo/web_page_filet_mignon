@@ -1,9 +1,15 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [string]$HarvesterBatchCmd = 'harvester_batch',
+    # Leave empty (default) to invoke via 'cargo run -p harvester_batch --'.
+    # Pass an explicit path (e.g. '.\target\release\harvester_batch.exe') to run that binary directly.
+    [string]$HarvesterBatchCmd = '',
     [string]$ProjectRoot       = (Split-Path -Parent $PSScriptRoot)
 )
+
+# Resolve invocation style: cargo run (default) vs direct binary
+$script:useCargoRun = [string]::IsNullOrEmpty($HarvesterBatchCmd)
+$script:harvesterDisplayCmd = if ($script:useCargoRun) { 'harvester_batch' } else { $HarvesterBatchCmd }
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -23,7 +29,7 @@ Import-Module (Join-Path $launcherDir 'Effects.psm1')   -Force
 Import-Module (Join-Path $launcherDir 'Render.psm1')    -Force
 
 # ── Startup ───────────────────────────────────────────────────────────────────
-$state = New-LauncherState -HarvesterCmd $HarvesterBatchCmd `
+$state = New-LauncherState -HarvesterCmd $script:harvesterDisplayCmd `
                             -Width  ([Console]::WindowWidth) `
                             -Height ([Console]::WindowHeight)
 
@@ -91,6 +97,11 @@ try {
 # ── Post-exit launch ─────────────────────────────────────────────────────────
 if ($null -ne $state.Pending.LaunchAfterExit) {
     $cmd = $state.Pending.LaunchAfterExit
-    Write-Host "Running: $($cmd.FilePath) $($cmd.Argv -join ' ')"
-    & $cmd.FilePath @($cmd.Argv)
+    if ($script:useCargoRun) {
+        Write-Host "Running: cargo run -p harvester_batch -- $($cmd.Argv -join ' ')"
+        & cargo run -p harvester_batch -- @($cmd.Argv)
+    } else {
+        Write-Host "Running: $($cmd.FilePath) $($cmd.Argv -join ' ')"
+        & $cmd.FilePath @($cmd.Argv)
+    }
 }
