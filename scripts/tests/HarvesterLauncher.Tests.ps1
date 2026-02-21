@@ -455,3 +455,187 @@ Describe 'Reducer - effect results' {
         $r.Effects.Count | Should -Be 0
     }
 }
+
+Describe 'Effects - Invoke-DatePrompt' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+    }
+
+    It 'returns DatePromptCompleted with Value for valid RFC3339 date' {
+        Mock Read-Host { '2026-01-01T00:00:00Z' } -ModuleName Effects
+        $r = Invoke-DatePrompt
+        $r.Type  | Should -Be 'DatePromptCompleted'
+        $r.Value | Should -Be '2026-01-01T00:00:00Z'
+    }
+    It 'returns DatePromptCompleted with null Value for empty input (cancel)' {
+        Mock Read-Host { '' } -ModuleName Effects
+        $r = Invoke-DatePrompt
+        $r.Type  | Should -Be 'DatePromptCompleted'
+        $r.Value | Should -BeNullOrEmpty
+    }
+    It 'returns DatePromptCompleted with null Value for invalid date format' {
+        Mock Read-Host { 'not-a-date' } -ModuleName Effects
+        $r = Invoke-DatePrompt
+        $r.Type  | Should -Be 'DatePromptCompleted'
+        $r.Value | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Effects - Invoke-LoadDefaults' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+    }
+
+    It 'returns DefaultsLoadFailed when file absent' {
+        (Invoke-LoadDefaults -FilePath 'nonexistent_xyz.json').Type | Should -Be 'DefaultsLoadFailed'
+    }
+    It 'returns DefaultsLoadFailed for malformed JSON' {
+        $tmp = [IO.Path]::GetTempFileName()
+        'not { json' | Set-Content $tmp
+        $r = Invoke-LoadDefaults -FilePath $tmp; Remove-Item $tmp -Force
+        $r.Type | Should -Be 'DefaultsLoadFailed'
+    }
+    It 'returns DefaultsLoaded with correct LlmConcurrency' {
+        $tmp = [IO.Path]::GetTempFileName()
+        @{ SchemaVersion=1; LlmConcurrency=7; PollInterval=30 } | ConvertTo-Json | Set-Content $tmp
+        $r = Invoke-LoadDefaults -FilePath $tmp; Remove-Item $tmp -Force
+        $r.Type                  | Should -Be 'DefaultsLoaded'
+        $r.Values.LlmConcurrency | Should -Be 7
+    }
+    It 'clamps out-of-range LlmConcurrency to 10' {
+        $tmp = [IO.Path]::GetTempFileName()
+        @{ SchemaVersion=1; LlmConcurrency=999 } | ConvertTo-Json | Set-Content $tmp
+        $r = Invoke-LoadDefaults -FilePath $tmp; Remove-Item $tmp -Force
+        $r.Values.LlmConcurrency | Should -Be 10
+    }
+    It 'unknown keys are ignored (no error)' {
+        $tmp = [IO.Path]::GetTempFileName()
+        @{ SchemaVersion=1; FutureKey='hello'; LlmConcurrency=5 } | ConvertTo-Json | Set-Content $tmp
+        $r = Invoke-LoadDefaults -FilePath $tmp; Remove-Item $tmp -Force
+        $r.Type | Should -Be 'DefaultsLoaded'
+    }
+}
+
+Describe 'Effects - Invoke-SaveDefaults' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+    }
+
+    It 'returns DefaultsSaved and writes SchemaVersion=1' {
+        $tmp = [IO.Path]::GetTempFileName()
+        $vals = New-LauncherDefaults; $vals.LlmConcurrency = 5
+        $r = Invoke-SaveDefaults -FilePath $tmp -Values $vals
+        $written = Get-Content $tmp -Raw | ConvertFrom-Json; Remove-Item $tmp -Force
+        $r.Type            | Should -Be 'DefaultsSaved'
+        $written.SchemaVersion  | Should -Be 1
+        $written.LlmConcurrency | Should -Be 5
+    }
+    It 'returns DefaultsSaveFailed on unwritable path' {
+        (Invoke-SaveDefaults -FilePath 'Z:\impossible\path.json' -Values @{}).Type | Should -Be 'DefaultsSaveFailed'
+    }
+}
+
+Describe 'Effects - Invoke-ProbeCheckpointCliSupport' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+    }
+    It 'returns CheckpointCapabilityDetected with Available=false for nonexistent binary' {
+        $r = Invoke-ProbeCheckpointCliSupport -HarvesterCmd 'nonexistent_binary_xyz_abc'
+        $r.Type      | Should -Be 'CheckpointCapabilityDetected'
+        $r.Available | Should -Be $false
+    }
+    It 'returns Available=false when only one checkpoint flag is present in help text' {
+        $r = Invoke-ProbeCheckpointCliSupport -HarvesterCmd 'nonexistent_binary_xyz_abc'
+        $r.Available | Should -Be $false
+    }
+}
+
+Describe 'Effects - Invoke-ReadCheckpointDisplay' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+    }
+    It 'returns not-set when file absent' {
+        $r = Invoke-ReadCheckpointDisplay -CheckpointFilePath 'nonexistent_chk.ron'
+        $r.Type    | Should -Be 'CheckpointReadCompleted'
+        $r.Display | Should -Match 'not set'
+    }
+    It 'parses Some value correctly' {
+        $tmp = [IO.Path]::GetTempFileName()
+        'BriefingCheckpoint(since_utc: Some("2026-01-15T10:00:00Z"))' | Set-Content $tmp
+        $r = Invoke-ReadCheckpointDisplay -CheckpointFilePath $tmp; Remove-Item $tmp -Force
+        $r.Display | Should -Be '2026-01-15T10:00:00Z'
+    }
+    It 'returns not-set for None value' {
+        $tmp = [IO.Path]::GetTempFileName()
+        'BriefingCheckpoint(since_utc: None)' | Set-Content $tmp
+        $r = Invoke-ReadCheckpointDisplay -CheckpointFilePath $tmp; Remove-Item $tmp -Force
+        $r.Display | Should -Match 'not set'
+    }
+    It 'returns CheckpointReadCompleted for unrecognized RON (falls back to not-set)' {
+        $tmp = [IO.Path]::GetTempFileName()
+        '(garbage ron)' | Set-Content $tmp
+        $r = Invoke-ReadCheckpointDisplay -CheckpointFilePath $tmp; Remove-Item $tmp -Force
+        $r.Type | Should -Be 'CheckpointReadCompleted'
+    }
+}
+
+Describe 'Input - ConvertFrom-KeyInfoToLauncherAction' {
+    BeforeAll {
+        $sub = Resolve-Path "$PSScriptRoot\..\..\ministry-of-future-plans\browser\Input.psm1"
+        Import-Module $sub -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Input.psm1" -Force
+        function script:Key($k, $c = [char]0) { [System.ConsoleKeyInfo]::new($c, $k, $false, $false, $false) }
+    }
+
+    It 'Enter returns Activate' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'Enter')).Type | Should -Be 'Activate'
+    }
+    It 'Escape returns Cancel' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'Escape')).Type | Should -Be 'Cancel'
+    }
+    It 'RightArrow returns ValueIncrease' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'RightArrow')).Type | Should -Be 'ValueIncrease'
+    }
+    It 'LeftArrow returns ValueDecrease' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'LeftArrow')).Type | Should -Be 'ValueDecrease'
+    }
+    It 'Spacebar returns ValueToggle' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'Spacebar' ' ')).Type | Should -Be 'ValueToggle'
+    }
+    It 'S returns SaveDefaults' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'S' 'S')).Type | Should -Be 'SaveDefaults'
+    }
+    It 's (lowercase) returns SaveDefaults' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'S' 's')).Type | Should -Be 'SaveDefaults'
+    }
+    It 'Plus char returns ValueIncrease' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'OemPlus' '+')).Type | Should -Be 'ValueIncrease'
+    }
+    It 'Minus char returns ValueDecrease' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'OemMinus' '-')).Type | Should -Be 'ValueDecrease'
+    }
+    It 'UpArrow returns MoveUp (from submodule)' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'UpArrow')).Type | Should -Be 'MoveUp'
+    }
+    It 'DownArrow returns MoveDown (from submodule)' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'DownArrow')).Type | Should -Be 'MoveDown'
+    }
+    It 'Q returns Quit (from submodule)' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'Q' 'Q')).Type | Should -Be 'Quit'
+    }
+    It 'Tab returns SwitchPane (from submodule)' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'Tab')).Type | Should -Be 'SwitchPane'
+    }
+    It 'PageUp returns PageUp (from submodule)' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'PageUp')).Type | Should -Be 'PageUp'
+    }
+    It 'Home returns MoveHome (from submodule)' {
+        (ConvertFrom-KeyInfoToLauncherAction (Key 'Home')).Type | Should -Be 'MoveHome'
+    }
+    It 'F12 returns null' {
+        ConvertFrom-KeyInfoToLauncherAction (Key 'F12') | Should -BeNullOrEmpty
+    }
+}
