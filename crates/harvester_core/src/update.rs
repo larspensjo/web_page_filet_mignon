@@ -699,6 +699,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
+        Msg::BriefingHistoryLoaded { .. } => {
+            // Stub — fleshed out in Task 7.
+            Vec::new()
+        }
         Msg::ArticlesLoaded {
             articles,
             collection_text,

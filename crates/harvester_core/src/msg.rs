@@ -149,6 +149,12 @@ pub enum Msg {
     BriefingPrereqArticlesLoaded {
         articles: Vec<LoadedArticle>,
     },
+    /// Briefing history loaded from disk at startup.
+    /// On IO or parse failure, the effect runner sends this with an empty Vec
+    /// rather than a separate failure message — keeps the reducer simple and avoids dead variants.
+    BriefingHistoryLoaded {
+        entries: Vec<crate::briefing::BriefingHistoryEntry>,
+    },
     /// Loader failed for briefing prerequisites.
     BriefingPrereqLoadFailed {
         reason: String,

@@ -72,6 +72,12 @@ pub enum Effect {
     PersistTriageCache {
         cache: crate::TriageCache,
     },
+    /// Load briefing history from disk at startup.
+    LoadBriefingHistory,
+    /// Save briefing history to disk after a successful briefing.
+    SaveBriefingHistory {
+        entries: Vec<crate::briefing::BriefingHistoryEntry>,
+    },
     /// Open a URL in the user's default web browser.
     OpenUrlInBrowser {
         url: String,

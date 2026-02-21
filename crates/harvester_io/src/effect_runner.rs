@@ -845,6 +845,8 @@ impl EffectRunner {
             Effect::PollAllSources => {
                 self.execute_poll_all_sources();
             }
+            Effect::LoadBriefingHistory => { /* handled in Task 8 */ }
+            Effect::SaveBriefingHistory { .. } => { /* handled in Task 8 */ }
         }
     }
 
