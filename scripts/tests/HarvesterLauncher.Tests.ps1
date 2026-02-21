@@ -704,3 +704,48 @@ Describe 'Render - Build-CommandPreviewLines' {
         $lines[0] | Should -Match 'harvester_batch'
     }
 }
+
+Describe 'Render - Build-LauncherFrame' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Render.psm1"  -Force
+        function script:S { New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 }
+    }
+
+    It 'frame row count equals terminal height' {
+        (Build-LauncherFrame -State (S)).Count | Should -Be 30
+    }
+    It 'each row total character count equals terminal width' {
+        $frame = Build-LauncherFrame -State (S)
+        foreach ($row in $frame) {
+            $len = 0; foreach ($seg in $row) { $len += $seg.Text.Length }
+            $len | Should -Be 100
+        }
+    }
+    It 'too-small frame still has correct row count' {
+        $s = New-LauncherState -HarvesterCmd 'hb' -Width 50 -Height 10
+        (Build-LauncherFrame -State $s).Count | Should -Be 10
+    }
+    It 'frame contains Run batch text' {
+        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        ($all -join '') | Should -Match 'Run batch'
+    }
+    It 'frame contains checkpoint not-set text' {
+        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        ($all -join '') | Should -Match 'not set'
+    }
+    It 'frame contains command preview binary name' {
+        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        ($all -join '') | Should -Match 'hb'
+    }
+    It 'frame contains LLM concurrency label' {
+        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        ($all -join '') | Should -Match 'LLM'
+    }
+    It 'selected item in Left pane uses DarkCyan background when Left is active' {
+        $frame = Build-LauncherFrame -State (S)
+        $hasDarkCyan = $frame | ForEach-Object { $_ | Where-Object { $_.Bg -eq 'DarkCyan' } } | Where-Object { $_ }
+        $hasDarkCyan | Should -Not -BeNullOrEmpty
+    }
+}
