@@ -91,6 +91,27 @@ SuccessCriteria:
 - Single-cycle mode is idempotent: re-running with identical inputs produces no duplicate work.
 - Exit code reflects cycle outcome (success, partial, fatal).
 
+#### [FI-Architecture-BatchOrchestration-0007] harvester_batch checkpoint CLI flags for briefing window management
+Status: Candidate
+TopLevel: Architecture
+SubLevel: BatchOrchestration
+Priority: P1
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.harvester-batch-tui-launcher.md
+- SourceSection: Blockers — item 5 (Checkpoint CLI flags absent until Slice A ships)
+- Captured: 2026-02-21
+Tags: [batch, checkpoint, briefing, cli, slice-a]
+Summary: Add `--set-briefing-since`, `--set-briefing-since-now`, and `--clear-briefing-since` CLI flags to `crates/harvester_batch/src/cli.rs`. The TUI launcher probes for all three at startup and gracefully degrades with a "Checkpoint CLI not yet available" message until the flags ship.
+Rationale: The TUI launcher's checkpoint management UI and startup probe are fully implemented; shipping the Rust CLI flags is the only remaining step to unlock the checkpoint action items.
+SuccessCriteria:
+- `harvester_batch --set-briefing-since <timestamp>` persists the briefing window start.
+- `harvester_batch --set-briefing-since-now` sets briefing-since to the current timestamp.
+- `harvester_batch --clear-briefing-since` removes the briefing window constraint.
+- The TUI launcher startup probe detects all three flags and enables checkpoint action items.
+Related: FI-Architecture-BatchOrchestration-0006, FI-LLM-Briefing-0001
+
 ### DownloadPipeline
 
 #### [FI-Architecture-DownloadPipeline-0001] Unified download path for linked pages
@@ -2003,6 +2024,26 @@ Rationale: Gives operators explicit control when they suspect stale or low-quali
 SuccessCriteria:
 - UI exposes a retriage override action in the briefing flow.
 - Using the override bypasses reuse checks and runs triage against the current corpus.
+
+#### [FI-UX-SessionControls-0004] Confirm guard before clearing briefing checkpoint in TUI launcher
+Status: Candidate
+TopLevel: UX
+SubLevel: SessionControls
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.harvester-batch-tui-launcher.md
+- SourceSection: Future Extensions (out of scope)
+- Captured: 2026-02-21
+Tags: [tui, checkpoint, confirmation, safety]
+Summary: Add an inline confirmation prompt before executing the "Clear checkpoint" action in the TUI launcher, while keeping "Run batch" and other run actions immediately executable.
+Rationale: Clearing the briefing checkpoint is irreversible and causes the next briefing to include all-time items; a confirm step prevents accidental activation while preserving quick keyboard flow for run actions.
+SuccessCriteria:
+- Pressing Enter on "Clear checkpoint" shows an inline Y/n prompt before executing.
+- Pressing Enter on "Run batch" or "Run dry-run" launches immediately with no confirm step.
+- Pressing Escape on the confirm prompt returns to the launcher without executing the action.
+Related: FI-Architecture-BatchOrchestration-0007
 
 ### TriageUi
 
