@@ -212,13 +212,18 @@ Decisions already confirmed are marked **[DECIDED]**; ideas still open are unmar
 - **Cons:** Requires strict grounding; LLMs can still hallucinate — citations help but don't eliminate risk.
 - **Cons:** API cost per question (retrieval + answer generation).
 
-### Idea 5E: "What changed since last checkpoint?" comparative briefing
+### Idea 5E: Delta briefing (focus on new/changed vs. prior runs) **[COMPLETE]**
 
-- **How:** Instead of a free-form Q&A, generate a structured delta report: new topics, returning topics, and disappeared topics vs. the prior briefing window.
-- **How:** Could be a special prompt template rather than RAG retrieval.
-- **How:** One way to create a briefing is to also include the pevious briefing and use a prompt with instructions to not repeat the same information. This is usally a problem as the same information can come from several articles, spread over time.
-- **Pros:** Answers a recurring daily question directly; low new infrastructure.
-- **Cons:** Quality depends on briefing prompt quality and LLM reasoning.
+Implemented via the Delta Briefing feature (2026-02). The last 3 briefing results are persisted
+in `output/.briefing_history.ron` and injected into each aggregate briefing request as the
+`{{previous_briefings}}` template variable (via `extra_template_vars` — separate from `{{context}}`).
+`BRIEFING_PROMPT_V5` instructs the model to focus on what is NEW or CHANGED and avoid repeating
+previously covered points. History is capped at 3 entries (newest-first); each entry stores
+timestamp, executive summary (truncated to 500 chars), themes, and article count.
+
+- **Key files:** `briefing.rs` (types + formatter), `state.rs` (accessors), `update.rs` (inject +
+  save on completion), `prompts/briefing.rs` (V5), `persistence.rs` + `effect_runner.rs` (load/save).
+- **Remaining limitation:** History resets if the app state is cleared; no cross-machine sync yet.
 
 ---
 
