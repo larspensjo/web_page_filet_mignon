@@ -4,6 +4,7 @@ Some instructions here doesn't hold for the CommanDuctUI submodule.
 ## Workflow
 * Build with "cargo build".
 * At the end of complete plan implementation, test with "cargo clippy --all-targets -- -D warnings". Don't do that for itermediary steps as there will be warnings from unused entities.
+* When adding a new CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change so the launcher supports the flag.
 *
 * Maintain an engineering diary in `docs/EngineeringDiary.md` (see "Engineering Diary" section below).
 
