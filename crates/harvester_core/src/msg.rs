@@ -155,6 +155,14 @@ pub enum Msg {
     BriefingHistoryLoaded {
         entries: Vec<crate::briefing::BriefingHistoryEntry>,
     },
+    /// Briefing time checkpoint loaded from disk at startup.
+    /// Raw wire type; the reducer parses the string into `DateTime<Utc>`.
+    BriefingCheckpointLoaded {
+        since_utc: Option<String>,
+    },
+    /// Request to update the in-memory briefing checkpoint (and persist it).
+    /// Raw wire type; the reducer validates the string before storing.
+    BriefingCheckpointSet(Option<String>),
     /// Loader failed for briefing prerequisites.
     BriefingPrereqLoadFailed {
         reason: String,

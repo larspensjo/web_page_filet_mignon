@@ -59,7 +59,7 @@ fn triage_loader_shared_scanning_matches_briefing() {
     );
     fs::write(tmp.path().join("bad.txt"), "ignore me").unwrap();
 
-    let briefing_articles = load_and_prepare_articles(tmp.path(), 100_000, &registry)
+    let briefing_articles = load_and_prepare_articles(tmp.path(), 100_000, &registry, None)
         .unwrap()
         .0;
     let triage_articles =

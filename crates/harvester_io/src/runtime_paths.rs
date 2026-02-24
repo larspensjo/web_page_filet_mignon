@@ -13,6 +13,7 @@ pub struct RuntimePaths {
     pub seen_set_path: PathBuf,
     pub state_path: PathBuf,
     pub briefing_history_path: PathBuf,
+    pub briefing_checkpoint_path: PathBuf,
 }
 
 impl RuntimePaths {
@@ -28,6 +29,7 @@ impl RuntimePaths {
         let seen_set_path = output_dir.join(".seen_set.ron");
         let state_path = output_dir.join(".harvester_state.ron");
         let briefing_history_path = output_dir.join(".briefing_history.ron");
+        let briefing_checkpoint_path = output_dir.join(".briefing_checkpoint.ron");
 
         Self {
             output_dir,
@@ -39,6 +41,7 @@ impl RuntimePaths {
             seen_set_path,
             state_path,
             briefing_history_path,
+            briefing_checkpoint_path,
         }
     }
 

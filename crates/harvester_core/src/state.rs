@@ -304,6 +304,7 @@ pub struct AppState {
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
     briefing_history: Vec<crate::briefing::BriefingHistoryEntry>,
+    briefing_since_utc: Option<chrono::DateTime<chrono::Utc>>,
     triage: TriageSession,
     pre_triage: PreTriageSession,
     pre_triage_manual_overrides: HashMap<ArticleFilterKey, ManualDecision>,
@@ -366,6 +367,7 @@ impl Default for AppState {
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
             briefing_history: vec![],
+            briefing_since_utc: None,
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
             pre_triage_manual_overrides: HashMap::new(),
@@ -722,6 +724,17 @@ impl AppState {
 
     pub fn set_briefing_history(&mut self, entries: Vec<crate::briefing::BriefingHistoryEntry>) {
         self.briefing_history = entries;
+    }
+
+    pub fn briefing_since_utc(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.briefing_since_utc
+    }
+
+    pub(crate) fn set_briefing_since_utc(
+        &mut self,
+        v: Option<chrono::DateTime<chrono::Utc>>,
+    ) {
+        self.briefing_since_utc = v;
     }
 
     pub(crate) fn triage(&self) -> &TriageSession {

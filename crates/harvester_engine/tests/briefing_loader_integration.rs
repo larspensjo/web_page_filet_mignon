@@ -34,7 +34,7 @@ fn prompt_registry_with_defaults() -> PromptRegistry {
 fn empty_directory_returns_no_articles() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
-    let (articles, collection) = load_and_prepare_articles(tmp.path(), 10_000, &registry).unwrap();
+    let (articles, collection) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
     assert!(collection.is_empty());
 }
@@ -51,7 +51,7 @@ fn single_article_is_loaded_and_in_collection() {
         "body text",
     );
 
-    let (articles, collection) = load_and_prepare_articles(tmp.path(), 10_000, &registry).unwrap();
+    let (articles, collection) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/1");
@@ -64,7 +64,7 @@ fn non_md_files_are_skipped() {
     let tmp = tempdir().unwrap();
     fs::write(tmp.path().join("note.txt"), "irrelevant").unwrap();
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry).unwrap();
+    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
 }
 
@@ -82,7 +82,7 @@ fn linked_directory_is_not_scanned() {
         "body",
     );
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry).unwrap();
+    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
 }
 
@@ -92,7 +92,7 @@ fn files_without_frontmatter_are_skipped() {
     let tmp = tempdir().unwrap();
     fs::write(tmp.path().join("orphan.md"), "just a body").unwrap();
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry).unwrap();
+    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
 }
 
@@ -109,7 +109,7 @@ fn valid_files_do_not_prevent_others_from_loading() {
     );
     fs::write(tmp.path().join("bad.md"), "no frontmatter").unwrap();
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry).unwrap();
+    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert_eq!(articles.len(), 1);
 }
 
@@ -135,7 +135,7 @@ fn prepared_text_is_within_summary_budget() {
         "body",
     );
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), max_input, &registry).unwrap();
+    let (articles, _) = load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
     let summary_budget = max_input - summary_overhead;
     assert!(articles[0].prepared_text.len() <= summary_budget);
 }
@@ -162,14 +162,17 @@ fn collection_text_respects_collection_budget() {
         "body",
     );
 
-    let (_, collection) = load_and_prepare_articles(tmp.path(), max_input, &registry).unwrap();
+    let (_, collection) = load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
     let collection_budget = max_input - briefing_overhead;
     assert!(collection.len() <= collection_budget);
 }
 
 #[test]
 fn collection_limits_articles_when_budget_tight() {
-    let registry = prompt_registry_with_defaults();
+    let mut registry = prompt_registry_with_defaults();
+    // Pin prompt versions so this budget-shaping test does not depend on evolving defaults.
+    registry.set_active(PromptId::ArticleSummary, 1);
+    registry.set_active(PromptId::AggregateBriefing, 1);
     let summary_template = registry
         .active(PromptId::ArticleSummary)
         .expect("summary prompt missing");
@@ -193,7 +196,7 @@ fn collection_limits_articles_when_budget_tight() {
     }
 
     let (articles, collection) =
-        load_and_prepare_articles(tmp.path(), max_input, &registry).unwrap();
+        load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
     assert_eq!(articles.len(), TOTAL_ARTICLES);
     let selected_articles = collection.matches("--- Article").count();
     assert!(
@@ -227,7 +230,7 @@ fn filtered_loader_includes_only_selected_urls() {
 
     let selected = vec!["https://example.com/b".to_string()];
     let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected).unwrap();
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/b");
@@ -257,7 +260,7 @@ fn filtered_loader_preserves_caller_order() {
         "https://example.com/a".to_string(),
     ];
     let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected).unwrap();
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 2);
     assert_eq!(articles[0].url, "https://example.com/b");
@@ -281,7 +284,7 @@ fn filtered_loader_missing_selected_url_is_skipped() {
         "https://example.com/a".to_string(),
     ];
     let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected).unwrap();
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/a");
@@ -289,7 +292,10 @@ fn filtered_loader_missing_selected_url_is_skipped() {
 
 #[test]
 fn filtered_loader_budget_trimming_drops_tail_only() {
-    let registry = prompt_registry_with_defaults();
+    let mut registry = prompt_registry_with_defaults();
+    // Pin prompt versions so this budget-shaping test does not depend on evolving defaults.
+    registry.set_active(PromptId::ArticleSummary, 1);
+    registry.set_active(PromptId::AggregateBriefing, 1);
     let summary_template = registry
         .active(PromptId::ArticleSummary)
         .expect("summary prompt missing");
@@ -314,7 +320,7 @@ fn filtered_loader_budget_trimming_drops_tail_only() {
         selected.push(url);
     }
     let (_articles, collection) =
-        load_and_prepare_articles_filtered(tmp.path(), max_input, &registry, &selected).unwrap();
+        load_and_prepare_articles_filtered(tmp.path(), max_input, &registry, &selected, None).unwrap();
 
     let selected_articles = collection.matches("--- Article").count();
     assert!(selected_articles >= 1);
@@ -336,7 +342,7 @@ fn filtered_loader_empty_selection_returns_empty_result() {
     );
 
     let (articles, collection) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &[]).unwrap();
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &[], None).unwrap();
 
     assert!(articles.is_empty());
     assert!(collection.is_empty());
@@ -358,7 +364,7 @@ fn filtered_loader_matches_www_and_eu_host_variants() {
     let selected =
         vec!["https://www.detroitnews.com/story/business/2026/02/14/example/".to_string()];
     let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected).unwrap();
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, article_url);
@@ -378,7 +384,7 @@ fn filtered_loader_matches_normalized_url_shape() {
 
     let selected = vec!["HTTPS://EXAMPLE.COM:443/news/item/".to_string()];
     let (articles, _) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected).unwrap();
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/news/item");

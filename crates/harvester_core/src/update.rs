@@ -50,6 +50,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Effect::LoadLlmMetadata,
                 Effect::LoadPromptLabModelCatalog,
                 Effect::LoadBriefingHistory,
+                Effect::LoadBriefingCheckpoint,
             ]
         }
         Msg::UrlsSubmitted => {
@@ -647,11 +648,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] generate requested");
             let ordered_urls = state.ordered_completed_job_urls();
+            let since_utc = state.briefing_since_utc();
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadPromptTemplateFiles,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefingPrereq { ordered_urls },
+                Effect::LoadArticlesForBriefingPrereq { ordered_urls, since_utc },
             ]
         }
         Msg::PrepareSummariesClicked => {
@@ -667,11 +669,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] summary-prep requested");
             let ordered_urls = state.ordered_completed_job_urls();
+            let since_utc = state.briefing_since_utc();
             vec![
                 Effect::LoadPromptContexts,
                 Effect::LoadPromptTemplateFiles,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefingPrereq { ordered_urls },
+                Effect::LoadArticlesForBriefingPrereq { ordered_urls, since_utc },
             ]
         }
         Msg::BriefingPrereqArticlesLoaded { articles } => {
@@ -715,6 +718,42 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::BriefingHistoryLoaded { entries } => {
             state.set_briefing_history(entries);
             Vec::new()
+        }
+        Msg::BriefingCheckpointLoaded { since_utc } => {
+            let parsed = since_utc.as_deref().and_then(|s| {
+                match chrono::DateTime::parse_from_rfc3339(s) {
+                    Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
+                    Err(e) => {
+                        engine_warn!(
+                            "[briefing-checkpoint] file contained invalid RFC3339: {}",
+                            e
+                        );
+                        None
+                    }
+                }
+            });
+            state.set_briefing_since_utc(parsed);
+            vec![]
+        }
+        Msg::BriefingCheckpointSet(since) => {
+            let parsed = since.as_deref().and_then(|s| {
+                match chrono::DateTime::parse_from_rfc3339(s) {
+                    Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
+                    Err(_) => {
+                        engine_warn!(
+                            "[briefing-checkpoint] ignoring invalid timestamp: {}",
+                            s
+                        );
+                        None
+                    }
+                }
+            });
+            // If caller passed Some(bad string), treat as no-op
+            if since.is_some() && parsed.is_none() {
+                return (state, vec![]);
+            }
+            state.set_briefing_since_utc(parsed);
+            vec![Effect::SaveBriefingCheckpoint { since_utc: parsed }]
         }
         Msg::ArticlesLoaded {
             articles,
@@ -1843,7 +1882,8 @@ fn on_triage_settled_for_briefing(state: &mut AppState, effects: &mut Vec<Effect
     state.mark_briefing_metadata_ready();
     state.set_briefing(BriefingSession::new_loading(None));
     state.clear_briefing_orchestration_request();
-    effects.push(Effect::LoadArticlesForBriefing { ordered_urls });
+    let since_utc = state.briefing_since_utc();
+    effects.push(Effect::LoadArticlesForBriefing { ordered_urls, since_utc });
 }
 
 fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
@@ -2348,6 +2388,7 @@ mod tests {
                 Effect::LoadLlmMetadata,
                 Effect::LoadArticlesForBriefingPrereq {
                     ordered_urls: Vec::new(),
+                    since_utc: None,
                 }
             ]
         );
@@ -2594,6 +2635,7 @@ mod tests {
                 Effect::LoadLlmMetadata,
                 Effect::LoadArticlesForBriefingPrereq {
                     ordered_urls: Vec::new(),
+                    since_utc: None,
                 }
             ]
         );
