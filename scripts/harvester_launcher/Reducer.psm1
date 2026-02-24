@@ -57,6 +57,7 @@ function Get-LauncherLayout {
 function New-LauncherState {
     param(
         [string]   $HarvesterCmd   = 'harvester_batch',
+        [bool]     $UseCargoRun    = $false,
         [int]      $Width          = 80,
         [int]      $Height         = 24,
         [hashtable]$InitialValues  = $null
@@ -84,6 +85,7 @@ function New-LauncherState {
             CheckpointDisplay      = 'not set (all-time briefing)'
             CheckpointCliAvailable = $false
             HarvesterCmd           = $HarvesterCmd
+            UseCargoRun            = $UseCargoRun
         }
         Pending = @{
             Effects         = @()

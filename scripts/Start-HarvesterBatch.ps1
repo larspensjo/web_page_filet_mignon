@@ -33,6 +33,7 @@ Import-Module (Join-Path $launcherDir 'Render.psm1')    -Force
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 $state = New-LauncherState -HarvesterCmd $script:harvesterDisplayCmd `
+                            -UseCargoRun  $script:useCargoRun `
                             -Width  ([Console]::WindowWidth) `
                             -Height ([Console]::WindowHeight)
 

@@ -12,8 +12,9 @@ mod triage_cache_store;
 
 pub use effect_runner::{EffectRunner, NoOpPlatformHandler, PlatformEffectHandler};
 pub use persistence::{
-    load_briefing_history, load_completed_jobs, load_pre_triage_overrides, persist_completed_jobs,
-    persist_pre_triage_overrides, save_briefing_history,
+    load_briefing_checkpoint, load_briefing_history, load_completed_jobs,
+    load_pre_triage_overrides, persist_completed_jobs, persist_pre_triage_overrides,
+    save_briefing_checkpoint, save_briefing_history,
 };
 pub use prompt_template_store::{load_prompt_templates, save_prompt_template};
 pub use runtime_paths::RuntimePaths;

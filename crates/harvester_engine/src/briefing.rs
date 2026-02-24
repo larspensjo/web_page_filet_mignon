@@ -11,6 +11,13 @@ use crate::frontmatter::parse_frontmatter;
 use crate::llm::{PromptId, PromptRegistry};
 use crate::token::WhitespaceTokenCounter;
 
+fn parse_rfc3339_utc(label: &str, value: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
+    let snippet = if value.len() > 50 { &value[..50] } else { value };
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .map_err(|e| format!("[briefing-filter] {label}: invalid RFC3339 '{snippet}': {e}"))
+}
+
 const MIN_COLLECTION_PER_ARTICLE: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +58,12 @@ fn build_content_prep_config() -> ContentPrepConfig {
 
 /// Scan `output_dir` for markdown files, parse frontmatter, and derive clean text.
 /// Packages are ordered by filename so callers can rely on deterministic order.
-fn scan_and_prepare_articles(output_dir: &Path) -> Result<Vec<ArticlePackage>, String> {
+/// If `since_utc` is `Some`, articles with a `fetched_utc` older than the threshold are excluded.
+/// Articles missing or with malformed `fetched_utc` are always included (with a summary warning).
+fn scan_and_prepare_articles(
+    output_dir: &Path,
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Vec<ArticlePackage>, String> {
     let config = build_content_prep_config();
 
     let mut markdown_files = Vec::new();
@@ -80,6 +92,9 @@ fn scan_and_prepare_articles(output_dir: &Path) -> Result<Vec<ArticlePackage>, S
     }
 
     markdown_files.sort();
+
+    let mut missing_fetched_utc_count: usize = 0;
+    let mut malformed_fetched_utc_count: usize = 0;
 
     let mut packages = Vec::with_capacity(markdown_files.len());
     for path in markdown_files {
@@ -111,12 +126,43 @@ fn scan_and_prepare_articles(output_dir: &Path) -> Result<Vec<ArticlePackage>, S
             }
         };
 
+        if let Some(since_dt) = since_utc {
+            match &fields.fetched_utc {
+                None => {
+                    missing_fetched_utc_count += 1;
+                }
+                Some(raw) => match parse_rfc3339_utc("article", raw) {
+                    Err(_) => {
+                        malformed_fetched_utc_count += 1;
+                    }
+                    Ok(art_ts) => {
+                        if art_ts < since_dt {
+                            continue;
+                        }
+                    }
+                },
+            }
+        }
+
         let clean_text = derive_clean_text(&markdown, &url, fields.title.as_deref(), &config);
         packages.push(ArticlePackage {
             url,
             source_title: fields.title,
             clean_text,
         });
+    }
+
+    if missing_fetched_utc_count > 0 {
+        engine_warn!(
+            "[briefing-filter] {} article(s) missing fetched_utc — included",
+            missing_fetched_utc_count
+        );
+    }
+    if malformed_fetched_utc_count > 0 {
+        engine_warn!(
+            "[briefing-filter] {} article(s) had malformed fetched_utc — included",
+            malformed_fetched_utc_count
+        );
     }
 
     Ok(packages)
@@ -126,8 +172,9 @@ pub fn load_and_prepare_articles(
     output_dir: &Path,
     max_input_bytes: usize,
     registry: &PromptRegistry,
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<(Vec<LoadedArticle>, String), String> {
-    let packages = scan_and_prepare_articles(output_dir)?;
+    let packages = scan_and_prepare_articles(output_dir, since_utc)?;
     prepare_loaded_articles_and_collection(packages, max_input_bytes, registry)
 }
 
@@ -286,12 +333,13 @@ pub fn load_and_prepare_articles_filtered(
     max_input_bytes: usize,
     registry: &PromptRegistry,
     ordered_urls: &[String],
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<(Vec<LoadedArticle>, String), String> {
     if ordered_urls.is_empty() {
         return Ok((Vec::new(), String::new()));
     }
 
-    let packages = scan_and_prepare_articles(output_dir)?;
+    let packages = scan_and_prepare_articles(output_dir, since_utc)?;
     let mut indexed: HashMap<String, ArticlePackage> = HashMap::with_capacity(packages.len());
     for package in packages {
         for key in url_lookup_aliases(&package.url) {
@@ -344,7 +392,7 @@ pub fn load_and_prepare_articles_for_triage(
             )
         })?;
 
-    let packages = scan_and_prepare_articles(output_dir)?;
+    let packages = scan_and_prepare_articles(output_dir, None)?;
 
     if packages.is_empty() {
         return Ok(Vec::new());

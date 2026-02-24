@@ -43,6 +43,31 @@ pub struct Args {
     /// Wait time in minutes between poll cycles (1-1440)
     #[arg(long, default_value_t = DEFAULT_POLL_INTERVAL_MINUTES)]
     pub poll_interval: u32,
+
+    /// Set the briefing time-filter checkpoint to the given RFC3339 timestamp
+    #[arg(long, value_name = "RFC3339")]
+    pub set_briefing_since: Option<String>,
+
+    /// Set the briefing time-filter checkpoint to the current UTC time
+    #[arg(long)]
+    pub set_briefing_since_now: bool,
+
+    /// Clear the briefing time-filter checkpoint (include all articles)
+    #[arg(long)]
+    pub clear_briefing_since: bool,
+
+    /// Print the current briefing time-filter checkpoint and exit
+    #[arg(long)]
+    pub show_briefing_since: bool,
+}
+
+/// A resolved checkpoint management command.
+#[derive(Debug)]
+pub enum CheckpointCommand {
+    Set(String),
+    SetNow,
+    Clear,
+    Show,
 }
 
 impl Args {
@@ -69,11 +94,116 @@ impl Args {
         // Clamp poll_interval to valid range (1 minute to 24 hours)
         self.poll_interval = self.poll_interval.clamp(1, 1440);
     }
+
+    /// Resolve the checkpoint flags into a single command, or `None` if no flags are set.
+    /// Returns `Err` if more than one checkpoint flag is set simultaneously.
+    pub fn checkpoint_command(&self) -> Result<Option<CheckpointCommand>, String> {
+        let count = self.set_briefing_since.is_some() as usize
+            + self.set_briefing_since_now as usize
+            + self.clear_briefing_since as usize
+            + self.show_briefing_since as usize;
+        if count > 1 {
+            return Err(
+                "--set-briefing-since, --set-briefing-since-now, --clear-briefing-since, \
+                 and --show-briefing-since are mutually exclusive"
+                    .to_string(),
+            );
+        }
+        if self.show_briefing_since {
+            return Ok(Some(CheckpointCommand::Show));
+        }
+        if self.set_briefing_since_now {
+            return Ok(Some(CheckpointCommand::SetNow));
+        }
+        if self.clear_briefing_since {
+            return Ok(Some(CheckpointCommand::Clear));
+        }
+        if let Some(ts) = &self.set_briefing_since {
+            chrono::DateTime::parse_from_rfc3339(ts).map_err(|_| {
+                format!(
+                    "Invalid timestamp format. Expected RFC3339, e.g. 2025-01-01T12:00:00Z\nGot: {}",
+                    ts
+                )
+            })?;
+            return Ok(Some(CheckpointCommand::Set(ts.clone())));
+        }
+        Ok(None)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkpoint_command_none_when_no_flags() {
+        let args = Args::parse_from(&["harvester_batch"]);
+        assert!(matches!(args.checkpoint_command(), Ok(None)));
+    }
+
+    #[test]
+    fn checkpoint_command_show() {
+        let args = Args::parse_from(&["harvester_batch", "--show-briefing-since"]);
+        assert!(matches!(
+            args.checkpoint_command(),
+            Ok(Some(CheckpointCommand::Show))
+        ));
+    }
+
+    #[test]
+    fn checkpoint_command_set_now() {
+        let args = Args::parse_from(&["harvester_batch", "--set-briefing-since-now"]);
+        assert!(matches!(
+            args.checkpoint_command(),
+            Ok(Some(CheckpointCommand::SetNow))
+        ));
+    }
+
+    #[test]
+    fn checkpoint_command_clear() {
+        let args = Args::parse_from(&["harvester_batch", "--clear-briefing-since"]);
+        assert!(matches!(
+            args.checkpoint_command(),
+            Ok(Some(CheckpointCommand::Clear))
+        ));
+    }
+
+    #[test]
+    fn checkpoint_command_valid_set_since() {
+        let args = Args::parse_from(&[
+            "harvester_batch",
+            "--set-briefing-since",
+            "2025-01-01T12:00:00Z",
+        ]);
+        match args.checkpoint_command() {
+            Ok(Some(CheckpointCommand::Set(ts))) => {
+                assert_eq!(ts, "2025-01-01T12:00:00Z");
+            }
+            other => panic!("unexpected result: {:?}", other.map(|_| "Ok")),
+        }
+    }
+
+    #[test]
+    fn checkpoint_command_invalid_timestamp_returns_err() {
+        let args = Args::parse_from(&[
+            "harvester_batch",
+            "--set-briefing-since",
+            "not-a-timestamp",
+        ]);
+        let err = args.checkpoint_command().unwrap_err();
+        assert!(err.contains("Invalid timestamp format"));
+        assert!(err.contains("RFC3339"));
+    }
+
+    #[test]
+    fn checkpoint_command_rejects_multiple_flags() {
+        let args = Args::parse_from(&[
+            "harvester_batch",
+            "--set-briefing-since-now",
+            "--show-briefing-since",
+        ]);
+        assert!(args.checkpoint_command().is_err());
+    }
 
     #[test]
     fn default_values_are_reasonable() {

@@ -338,6 +338,129 @@ pub fn save_briefing_history(
         .map_err(|e| format!("AtomicFileWriter: {e}"))
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Briefing Checkpoint Persistence
+// ──────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PersistedBriefingCheckpoint {
+    since_utc: Option<String>,
+}
+
+/// Loads the briefing time checkpoint from disk.
+/// Returns `None` on missing file (normal), malformed RON, or non-RFC3339 timestamp.
+pub fn load_briefing_checkpoint(path: &Path) -> Option<String> {
+    let text = match fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => {
+            engine_warn!("[briefing-checkpoint] failed to read {:?}: {}", path, e);
+            return None;
+        }
+    };
+    let persisted: PersistedBriefingCheckpoint = match ron::from_str(&text) {
+        Ok(p) => p,
+        Err(e) => {
+            engine_warn!("[briefing-checkpoint] malformed RON in {:?}: {}", path, e);
+            return None;
+        }
+    };
+    let value = persisted.since_utc?;
+    // Validate RFC3339 at IO boundary (defense-in-depth; reducer also validates)
+    match chrono::DateTime::parse_from_rfc3339(&value) {
+        Ok(_) => {
+            engine_info!("[briefing-checkpoint] loaded: {}", value);
+            Some(value)
+        }
+        Err(e) => {
+            engine_warn!(
+                "[briefing-checkpoint] invalid RFC3339 in {:?}: {}",
+                path,
+                e
+            );
+            None
+        }
+    }
+}
+
+/// Saves (or clears) the briefing time checkpoint.
+/// `since_utc = None` deletes the file; otherwise the RFC3339 string is written atomically.
+pub fn save_briefing_checkpoint(path: &Path, since_utc: Option<&str>) -> Result<(), String> {
+    if since_utc.is_none() {
+        match fs::remove_file(path) {
+            Ok(_) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(format!("failed to delete checkpoint {:?}: {}", path, e)),
+        }
+    }
+    let output_dir = path.parent().unwrap_or(Path::new("."));
+    ensure_output_dir(output_dir).map_err(|e| format!("ensure_output_dir: {e}"))?;
+    let persisted = PersistedBriefingCheckpoint {
+        since_utc: since_utc.map(str::to_owned),
+    };
+    let pretty = ron::ser::PrettyConfig::new();
+    let content = ron::ser::to_string_pretty(&persisted, pretty)
+        .map_err(|e| format!("RON serialize: {e}"))?;
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| format!("invalid file path: {:?}", path))?;
+    let writer = AtomicFileWriter::new(PathBuf::from(output_dir));
+    writer
+        .write(filename, &content)
+        .map(|_| ())
+        .map_err(|e| format!("AtomicFileWriter: {e}"))
+}
+
+#[cfg(test)]
+mod briefing_checkpoint_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn checkpoint_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".briefing_checkpoint.ron");
+        save_briefing_checkpoint(&path, Some("2025-12-31T23:00:00Z")).unwrap();
+        let loaded = load_briefing_checkpoint(&path);
+        assert_eq!(loaded.as_deref(), Some("2025-12-31T23:00:00Z"));
+    }
+
+    #[test]
+    fn checkpoint_absent_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".briefing_checkpoint.ron");
+        assert!(load_briefing_checkpoint(&path).is_none());
+    }
+
+    #[test]
+    fn checkpoint_clear_deletes_file() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".briefing_checkpoint.ron");
+        save_briefing_checkpoint(&path, Some("2025-12-31T23:00:00Z")).unwrap();
+        assert!(path.exists());
+        save_briefing_checkpoint(&path, None).unwrap();
+        assert!(!path.exists());
+        assert!(load_briefing_checkpoint(&path).is_none());
+    }
+
+    #[test]
+    fn checkpoint_malformed_ron_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".briefing_checkpoint.ron");
+        std::fs::write(&path, "{{not valid ron]]").unwrap();
+        assert!(load_briefing_checkpoint(&path).is_none());
+    }
+
+    #[test]
+    fn checkpoint_invalid_timestamp_returns_none() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(".briefing_checkpoint.ron");
+        std::fs::write(&path, "(since_utc: Some(\"not-a-timestamp\"))").unwrap();
+        assert!(load_briefing_checkpoint(&path).is_none());
+    }
+}
+
 #[cfg(test)]
 mod briefing_history_tests {
     use super::*;

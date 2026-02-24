@@ -197,6 +197,7 @@ impl EffectRunner {
                         max_input_bytes,
                         &guard,
                         std::slice::from_ref(&url),
+                        None,
                     ) {
                         Ok((mut articles, _collection_text)) => {
                             if let Some(article) = articles.pop() {
@@ -572,7 +573,10 @@ impl EffectRunner {
                     });
                 }
             }
-            Effect::LoadArticlesForBriefing { ordered_urls } => {
+            Effect::LoadArticlesForBriefing {
+                ordered_urls,
+                since_utc,
+            } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
@@ -584,6 +588,7 @@ impl EffectRunner {
                         max_input_bytes,
                         &guard,
                         &ordered_urls,
+                        since_utc,
                     ) {
                         Ok((articles, collection_text)) => {
                             let loaded_articles: Vec<LoadedArticle> = articles
@@ -611,7 +616,10 @@ impl EffectRunner {
                     }
                 });
             }
-            Effect::LoadArticlesForBriefingPrereq { ordered_urls } => {
+            Effect::LoadArticlesForBriefingPrereq {
+                ordered_urls,
+                since_utc,
+            } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
@@ -623,6 +631,7 @@ impl EffectRunner {
                         max_input_bytes,
                         &guard,
                         &ordered_urls,
+                        since_utc,
                     ) {
                         Ok((engine_articles, _)) => {
                             let articles: Vec<LoadedArticle> = engine_articles
@@ -654,6 +663,7 @@ impl EffectRunner {
                         max_input_bytes,
                         &guard,
                         &ordered_urls,
+                        None,
                     ) {
                         Ok((engine_articles, _)) => {
                             let articles: Vec<LoadedArticle> = engine_articles
@@ -861,6 +871,23 @@ impl EffectRunner {
                     if let Err(e) = crate::save_briefing_history(&path, &entries) {
                         engine_error!("[briefing-history] Save failed: {}", e);
                         // Non-fatal: no Msg sent on failure
+                    }
+                });
+            }
+            Effect::LoadBriefingCheckpoint => {
+                let msg_tx = self.msg_tx.clone();
+                let path = self.paths.briefing_checkpoint_path.clone();
+                thread::spawn(move || {
+                    let since_utc = crate::load_briefing_checkpoint(&path);
+                    let _ = msg_tx.send(Msg::BriefingCheckpointLoaded { since_utc });
+                });
+            }
+            Effect::SaveBriefingCheckpoint { since_utc } => {
+                let path = self.paths.briefing_checkpoint_path.clone();
+                thread::spawn(move || {
+                    let s = since_utc.map(|dt| dt.to_rfc3339());
+                    if let Err(e) = crate::save_briefing_checkpoint(&path, s.as_deref()) {
+                        engine_error!("[briefing-checkpoint] save failed: {}", e);
                     }
                 });
             }
@@ -1130,6 +1157,7 @@ mod tests {
             triage_cache_path: base.join("triage_cache.ron"),
             state_path: base.join("state.json"),
             briefing_history_path: base.join(".briefing_history.ron"),
+            briefing_checkpoint_path: base.join(".briefing_checkpoint.ron"),
         }
     }
 
@@ -1378,6 +1406,7 @@ mod tests {
         let (runner, rx) = runner_with_receiver(temp.path());
         runner.enqueue(vec![Effect::LoadArticlesForBriefingPrereq {
             ordered_urls: vec!["https://example.com/a".to_string()],
+            since_utc: None,
         }]);
 
         let msg = rx
@@ -1399,6 +1428,7 @@ mod tests {
         let (runner, rx) = runner_with_receiver(temp.path());
         runner.enqueue(vec![Effect::LoadArticlesForBriefing {
             ordered_urls: Vec::new(),
+            since_utc: None,
         }]);
 
         let msg = rx

@@ -11,9 +11,11 @@ pub enum Effect {
     },
     LoadArticlesForBriefing {
         ordered_urls: Vec<String>,
+        since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
     LoadArticlesForBriefingPrereq {
         ordered_urls: Vec<String>,
+        since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
     LoadArticlesForTriage {
         ordered_urls: Vec<String>,
@@ -77,6 +79,12 @@ pub enum Effect {
     /// Save briefing history to disk after a successful briefing.
     SaveBriefingHistory {
         entries: Vec<crate::briefing::BriefingHistoryEntry>,
+    },
+    /// Load the briefing time checkpoint from disk at startup.
+    LoadBriefingCheckpoint,
+    /// Save (or clear) the briefing time checkpoint.
+    SaveBriefingCheckpoint {
+        since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
     /// Open a URL in the user's default web browser.
     OpenUrlInBrowser {

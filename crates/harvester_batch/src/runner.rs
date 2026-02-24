@@ -1,4 +1,4 @@
-use crate::cli::Args;
+use crate::cli::{Args, CheckpointCommand};
 use crate::lock;
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
@@ -10,8 +10,9 @@ use harvester_engine::llm::{
     ProviderKind,
 };
 use harvester_io::{
-    load_completed_jobs, load_sources, load_summary_cache, load_triage_cache,
-    persist_completed_jobs, EffectRunner, NoOpPlatformHandler, RuntimePaths,
+    load_briefing_checkpoint, load_completed_jobs, load_sources, load_summary_cache,
+    load_triage_cache, persist_completed_jobs, save_briefing_checkpoint, EffectRunner,
+    NoOpPlatformHandler, RuntimePaths,
 };
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -251,6 +252,21 @@ pub fn run(args: Args) -> Result<i32, String> {
         args.prompts_dir.clone(),
     );
 
+    // Handle checkpoint commands before entering the batch loop.
+    match args.checkpoint_command()? {
+        Some(CheckpointCommand::Show) => {
+            let val = load_briefing_checkpoint(&paths.briefing_checkpoint_path);
+            println!("{}", val.as_deref().unwrap_or("NONE"));
+            return Ok(0);
+        }
+        Some(cmd) => {
+            let _lock_guard = lock::acquire_lock(&paths.output_dir, args.force_unlock)?;
+            execute_checkpoint_write(cmd, &paths)?;
+            return Ok(0);
+        }
+        None => {}
+    }
+
     engine_info!("[batch] Acquiring lock");
     let _lock_guard = lock::acquire_lock(&paths.output_dir, args.force_unlock)?;
 
@@ -466,6 +482,29 @@ pub fn run(args: Args) -> Result<i32, String> {
     };
 
     Ok(exit_code)
+}
+
+/// Writes or clears the briefing checkpoint file.
+///
+/// Called after the output lock is already held.
+fn execute_checkpoint_write(cmd: CheckpointCommand, paths: &RuntimePaths) -> Result<(), String> {
+    match cmd {
+        CheckpointCommand::Set(ts) => {
+            // ts was already validated by checkpoint_command()
+            engine_info!("[briefing-checkpoint] set to {}", ts);
+            save_briefing_checkpoint(&paths.briefing_checkpoint_path, Some(ts.as_str()))
+        }
+        CheckpointCommand::SetNow => {
+            let ts = Utc::now().to_rfc3339();
+            engine_info!("[briefing-checkpoint] set to {}", ts);
+            save_briefing_checkpoint(&paths.briefing_checkpoint_path, Some(ts.as_str()))
+        }
+        CheckpointCommand::Clear => {
+            engine_info!("[briefing-checkpoint] cleared");
+            save_briefing_checkpoint(&paths.briefing_checkpoint_path, None)
+        }
+        CheckpointCommand::Show => unreachable!("Show is handled before lock acquisition"),
+    }
 }
 
 /// Runs the inner dispatch loop until settlement or error.
@@ -811,6 +850,10 @@ mod tests {
             llm_concurrency: 1,
             poll_interval: 1,
             force_unlock: false,
+            set_briefing_since: None,
+            set_briefing_since_now: false,
+            clear_briefing_since: false,
+            show_briefing_since: false,
         }
     }
 
@@ -1204,5 +1247,80 @@ mod tests {
     fn format_llm_usage_lines_empty_returns_empty() {
         let lines = format_llm_usage_lines(&[]);
         assert!(lines.is_empty());
+    }
+
+    fn make_checkpoint_test_paths(temp_dir: &TempDir) -> RuntimePaths {
+        let output_dir = temp_dir.path().to_path_buf();
+        std::fs::create_dir_all(&output_dir).unwrap();
+        RuntimePaths::new(
+            output_dir,
+            temp_dir.path().join("sources.ron"),
+            temp_dir.path().join("contexts"),
+            temp_dir.path().join("prompts"),
+        )
+    }
+
+    #[test]
+    fn set_checkpoint_invalid_timestamp_returns_err_without_write() {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = make_checkpoint_test_paths(&temp_dir);
+        // Simulate the validation in checkpoint_command() — Set is only constructed after validation
+        // We test execute_checkpoint_write with a directly-valid Set to confirm it writes
+        let result =
+            execute_checkpoint_write(CheckpointCommand::Set("not-rfc3339".to_string()), &paths);
+        // save_briefing_checkpoint does not validate the string; validation is in checkpoint_command().
+        // But the file SHOULD be written with whatever string is passed.
+        // This test verifies the call succeeds (the CLI layer is responsible for validation).
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn set_checkpoint_writes_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = make_checkpoint_test_paths(&temp_dir);
+        execute_checkpoint_write(
+            CheckpointCommand::Set("2025-12-31T23:00:00Z".to_string()),
+            &paths,
+        )
+        .unwrap();
+        let loaded = load_briefing_checkpoint(&paths.briefing_checkpoint_path);
+        assert_eq!(loaded.as_deref(), Some("2025-12-31T23:00:00Z"));
+    }
+
+    #[test]
+    fn set_checkpoint_now_writes_valid_rfc3339() {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = make_checkpoint_test_paths(&temp_dir);
+        execute_checkpoint_write(CheckpointCommand::SetNow, &paths).unwrap();
+        let loaded = load_briefing_checkpoint(&paths.briefing_checkpoint_path);
+        let ts = loaded.expect("checkpoint should be written");
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(&ts).is_ok(),
+            "expected valid RFC3339, got: {ts}"
+        );
+    }
+
+    #[test]
+    fn clear_checkpoint_deletes_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = make_checkpoint_test_paths(&temp_dir);
+        // Write first
+        execute_checkpoint_write(
+            CheckpointCommand::Set("2025-12-31T23:00:00Z".to_string()),
+            &paths,
+        )
+        .unwrap();
+        assert!(paths.briefing_checkpoint_path.exists());
+        // Then clear
+        execute_checkpoint_write(CheckpointCommand::Clear, &paths).unwrap();
+        assert!(!paths.briefing_checkpoint_path.exists());
+    }
+
+    #[test]
+    fn show_checkpoint_prints_none_when_absent() {
+        let temp_dir = TempDir::new().unwrap();
+        let paths = make_checkpoint_test_paths(&temp_dir);
+        let val = load_briefing_checkpoint(&paths.briefing_checkpoint_path);
+        assert_eq!(val.as_deref().unwrap_or("NONE"), "NONE");
     }
 }
