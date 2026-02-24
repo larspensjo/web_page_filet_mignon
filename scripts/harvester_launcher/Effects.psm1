@@ -150,12 +150,24 @@ function Invoke-LauncherEffects {
     $chkPath = Join-Path $State.Values.OutputDir '.briefing_checkpoint.ron'
 
     foreach ($eff in $Effects) {
+        $customDate = ''
+        if ($eff -is [hashtable]) {
+            if ($eff.ContainsKey('CustomDate') -and $null -ne $eff['CustomDate']) {
+                $customDate = [string]$eff['CustomDate']
+            }
+        } elseif ($null -ne $eff) {
+            $effProps = $eff.PSObject.Properties
+            if ($effProps['CustomDate'] -and $null -ne $effProps['CustomDate'].Value) {
+                $customDate = [string]$effProps['CustomDate'].Value
+            }
+        }
+
         $action = switch ($eff.Type) {
             'LoadDefaults'              { Invoke-LoadDefaults -FilePath (Get-DefaultsFilePath) }
             'SaveDefaults'              { Invoke-SaveDefaults -FilePath (Get-DefaultsFilePath) -Values $eff.Values }
             'ProbeCheckpointCliSupport' { Invoke-ProbeCheckpointCliSupport -HarvesterCmd $State.Runtime.HarvesterCmd -UseCargoRun $State.Runtime.UseCargoRun }
             'ReadCheckpointDisplay'     { Invoke-ReadCheckpointDisplay -CheckpointFilePath $chkPath }
-            'RunCheckpointCommand'      { Invoke-RunCheckpointCommand -HarvesterCmd $State.Runtime.HarvesterCmd -UseCargoRun $State.Runtime.UseCargoRun -OutputDir $State.Values.OutputDir -ActionId $eff.ActionId -CustomDate (if ($null -ne $eff.CustomDate) { $eff.CustomDate } else { '' }) }
+            'RunCheckpointCommand'      { Invoke-RunCheckpointCommand -HarvesterCmd $State.Runtime.HarvesterCmd -UseCargoRun $State.Runtime.UseCargoRun -OutputDir $State.Values.OutputDir -ActionId $eff.ActionId -CustomDate $customDate }
             'DatePromptRequested'       { Invoke-DatePrompt }
             default                     { $null }
         }

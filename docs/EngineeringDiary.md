@@ -372,3 +372,12 @@ Change: Two fixes applied: (1) `Import-Module` inside a module's own script body
 Lessons Learned: Pester 5 runs `Describe` body code during discovery (before module imports run), so helper functions defined there cannot call imported cmdlets. `It` blocks run in a child scope that does not inherit from the `Describe` discovery scope. Module-internal `Import-Module` without `-Global` creates a nested module visible only within that module.
 Prevention: Always define test helper functions inside `BeforeAll` using `function script:Name`. When a module requires another module's exports to be globally accessible (e.g., because tests import them independently), use `Import-Module <path> -Force -Global` inside the depending module.
 Refs: scripts/harvester_launcher/Reducer.psm1, scripts/tests/HarvesterLauncher.Tests.ps1
+
+## 2026-02-24 - Harvester launcher checkpoint show strict-mode optional property fix
+Type: Bug Fix
+Context: Choosing `Show current checkpoint` in `scripts/Start-HarvesterBatch.ps1` crashed before running the command because the effect dispatcher assumed every `RunCheckpointCommand` effect object carried a `CustomDate` property.
+Change: Hardened the launcher effects dispatcher to read `CustomDate` as an optional field for both hashtable and PSCustomObject effects, defaulting to an empty string for non-date checkpoint actions. Added a Pester regression test that exercises the `cp-show` path through `Invoke-LauncherEffects`.
+Evidence: `Invoke-Pester -Path scripts/tests/HarvesterLauncher.Tests.ps1 -CI` (141 passed).
+Lessons Learned: Under `Set-StrictMode -Version Latest`, dot-accessing a missing property/key in heterogeneous effect payloads is a runtime error; optional effect fields must be read via explicit existence checks at the effect boundary.
+Prevention: Treat effect payloads as versioned/partial contracts, centralize optional-field extraction in dispatcher code, and add dispatcher-level tests for action variants that intentionally omit optional fields.
+Refs: scripts/harvester_launcher/Effects.psm1, scripts/tests/HarvesterLauncher.Tests.ps1

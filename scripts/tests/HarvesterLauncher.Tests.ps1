@@ -582,6 +582,45 @@ Describe 'Effects - Invoke-ReadCheckpointDisplay' {
     }
 }
 
+Describe 'Effects - Invoke-LauncherEffects' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+        function script:S { New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 }
+    }
+
+    It 'RunCheckpointCommand effect without CustomDate does not fail under strict mode' {
+        Mock Invoke-RunCheckpointCommand {
+            param(
+                [string]$HarvesterCmd,
+                [bool]$UseCargoRun,
+                [string]$OutputDir,
+                [string]$ActionId,
+                [string]$CustomDate
+            )
+            [pscustomobject]@{
+                Type      = 'CheckpointCommandCompleted'
+                Success   = $true
+                Message   = 'mocked'
+                ActionId  = $ActionId
+                CustomDate = $CustomDate
+            }
+        } -ModuleName Effects
+
+        $s = S
+        $actions = @(Invoke-LauncherEffects -State $s -Effects @(@{ Type='RunCheckpointCommand'; ActionId='cp-show' }))
+
+        $actions.Count           | Should -Be 1
+        $actions[0].Type         | Should -Be 'CheckpointCommandCompleted'
+        $actions[0].ActionId     | Should -Be 'cp-show'
+        $actions[0].CustomDate   | Should -Be ''
+        Assert-MockCalled Invoke-RunCheckpointCommand -ModuleName Effects -Times 1 -ParameterFilter {
+            $ActionId -eq 'cp-show' -and $CustomDate -eq ''
+        }
+    }
+}
+
 Describe 'Input - ConvertFrom-KeyInfoToLauncherAction' {
     BeforeAll {
         $sub = Resolve-Path "$PSScriptRoot\..\..\ministry-of-future-plans\browser\Input.psm1"
