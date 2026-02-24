@@ -373,6 +373,23 @@ Lessons Learned: Pester 5 runs `Describe` body code during discovery (before mod
 Prevention: Always define test helper functions inside `BeforeAll` using `function script:Name`. When a module requires another module's exports to be globally accessible (e.g., because tests import them independently), use `Import-Module <path> -Force -Global` inside the depending module.
 Refs: scripts/harvester_launcher/Reducer.psm1, scripts/tests/HarvesterLauncher.Tests.ps1
 
+## 2026-02-24 - Trends and tabs: design and implementation planning
+Type: Decision
+Context: The right-pane preview area had grown into a single overloaded surface handling four
+distinct responsibilities: selected-article preview, briefing preview, Prompt Lab output override,
+and future content types. Separately, there was no way to see how coverage of companies,
+technologies, products, or themes was evolving across the archive over time. The user requested
+a tab system to give each content type its own surface, plus an entity trend chart that the LLM
+populates automatically from summaries (no hard-coded keyword lists).
+Change: Produced `docs/plans/Design.trends-and-tabs.md` (brainstormed, reviewed, and hardened
+against current source) and `docs/plans/Plan.trends-and-tabs.md` (five-slice implementation plan).
+Key design decisions locked: content-area tabs using existing RadioButton-row pattern; entity
+extraction added to summary prompt V4 (companies, technologies, products); themes reuse existing
+triage tags; entity sidecar index `.entity_index.ron` with race-safe serialized upsert lane;
+rebuild from markdown scan + cache join; GDI+ chart control deferred to Slice 5 with text/table
+view in Slice 4.
+Refs: docs/plans/Design.trends-and-tabs.md, docs/plans/Plan.trends-and-tabs.md
+
 ## 2026-02-24 - Harvester batch launcher TUI rendering fixes for Windows console
 Type: Bug Fix
 Context: `Start-HarvesterBatch.ps1` rendered malformed borders and shifted rows in some Windows terminals due to console encoding defaults, a wide/ambiguous selection glyph, and unbounded preview text pushing pane borders.
