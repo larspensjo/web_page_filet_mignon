@@ -80,3 +80,20 @@ pub const COMBO_PROMPT_LAB_MODEL_SELECTOR: ControlId = ControlId::new(3113);
 pub const PROGRESS_TOKENS: ControlId = ControlId::new(4001);
 pub const VIEWER_PREVIEW: ControlId = ControlId::new(5001);
 pub const SPLITTER_MAIN: ControlId = ControlId::new(6001);
+
+// Tab bar and tab panels (2200 range)
+pub const PANEL_TAB_BAR: ControlId = ControlId::new(2200);
+pub const BUTTON_TAB_TRIAGE: ControlId = ControlId::new(2201);
+pub const BUTTON_TAB_SUMMARY: ControlId = ControlId::new(2202);
+pub const BUTTON_TAB_BRIEFING: ControlId = ControlId::new(2203);
+pub const BUTTON_TAB_TRENDS: ControlId = ControlId::new(2204);
+pub const BUTTON_TAB_PROMPT_LAB: ControlId = ControlId::new(2205);
+pub const PANEL_TAB_TRIAGE: ControlId = ControlId::new(2210);
+pub const PANEL_TAB_SUMMARY: ControlId = ControlId::new(2211);
+pub const PANEL_TAB_BRIEFING: ControlId = ControlId::new(2212);
+pub const PANEL_TAB_TRENDS: ControlId = ControlId::new(2213);
+pub const PANEL_TAB_PROMPT_LAB: ControlId = ControlId::new(2214);
+// RichEdit viewers inside each tab (except PromptLab which reuses existing controls)
+pub const VIEWER_TRIAGE: ControlId = ControlId::new(5002);
+pub const VIEWER_BRIEFING: ControlId = ControlId::new(5003);
+pub const VIEWER_TRENDS: ControlId = ControlId::new(5004);

@@ -3,6 +3,7 @@ use crate::context_hash;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
+use crate::tabs::{AppTab, TrendCategory};
 use crate::preview::{self, PreviewContentKind};
 use crate::prompt_lab::{
     PromptLabRunId, PromptLabRunOverrides, PromptLabStage, PromptLabState,
@@ -333,6 +334,10 @@ pub struct AppState {
     prompt_lab_next_resolve_id: u64,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
+    /// Currently active right-pane tab.
+    active_tab: AppTab,
+    /// Currently active trend category in the Trends tab.
+    active_trend_category: TrendCategory,
 }
 
 pub(crate) struct PromptLabPendingRunRegistration {
@@ -393,6 +398,8 @@ impl Default for AppState {
             prompt_lab_next_resolve_id: 1,
             prompt_lab_templates: default_prompt_template_snapshots(),
             llm_usage_by_model: BTreeMap::new(),
+            active_tab: AppTab::default(),
+            active_trend_category: TrendCategory::default(),
         }
     }
 }
@@ -639,6 +646,69 @@ impl AppState {
             ),
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
             llm_usage_by_model: self.llm_usage_rows(),
+            right_pane: self.build_right_pane_view(selected_triage_article_available),
+        }
+    }
+
+    fn build_right_pane_view(
+        &self,
+        selected_triage_article_available: bool,
+    ) -> crate::view_model::RightPaneView {
+        use crate::view_model::RightPaneView;
+
+        let selected_url = self
+            .ui
+            .selected_job_id()
+            .and_then(|job_id| self.jobs.get(&job_id))
+            .map(|job| job.url.as_str());
+
+        // Build triage markdown for the selected job.
+        let triage_markdown = selected_url.and_then(|url| {
+            self.triage.result_for_url(url).map(|r| {
+                let tags_line = if r.tags.is_empty() {
+                    "none".to_string()
+                } else {
+                    r.tags.join(", ")
+                };
+                format!(
+                    "**Category:** {}\n**Priority:** P{}\n**Tags:** {}\n\n---\n\n{}\n",
+                    r.category, r.priority, tags_line, r.rationale
+                )
+            })
+        });
+
+        // Build summary markdown for the selected job.
+        let summary_markdown = selected_url.and_then(|url| {
+            self.briefing.summary_for_url(url).map(|s| {
+                let kp_lines: String = s
+                    .key_points
+                    .iter()
+                    .map(|kp| format!("- {kp}\n"))
+                    .collect();
+                format!(
+                    "# {}\n\n{}\n\n**Key Points:**\n\n{}\n",
+                    s.title, s.summary, kp_lines
+                )
+            })
+        });
+
+        // Briefing markdown — use the existing briefing preview.
+        let briefing_markdown = self.briefing.format_preview();
+
+        let prompt_lab = crate::view_model::PromptLabView::from_state(
+            &self.prompt_lab,
+            &self.prompt_contexts,
+            &self.prompt_lab_templates,
+            selected_triage_article_available,
+        );
+
+        RightPaneView {
+            active_tab: self.active_tab,
+            triage_markdown,
+            summary_markdown,
+            briefing_markdown,
+            trends_placeholder: "Trends data loading…".to_string(),
+            prompt_lab,
         }
     }
 
@@ -1734,14 +1804,32 @@ impl AppState {
         &mut self.prompt_lab
     }
 
-    pub(crate) fn open_prompt_lab(&mut self) {
-        self.prompt_lab.open();
+    pub(crate) fn select_tab(&mut self, tab: AppTab) {
+        self.active_tab = tab;
         self.dirty = true;
     }
 
-    pub(crate) fn close_prompt_lab(&mut self) {
-        self.prompt_lab.close();
+    pub fn active_tab(&self) -> AppTab {
+        self.active_tab
+    }
+
+    pub(crate) fn set_active_trend_category(&mut self, category: TrendCategory) {
+        self.active_trend_category = category;
         self.dirty = true;
+    }
+
+    pub fn active_trend_category(&self) -> TrendCategory {
+        self.active_trend_category
+    }
+
+    pub(crate) fn open_prompt_lab(&mut self) {
+        self.select_tab(AppTab::PromptLab);
+        self.prompt_lab.open();
+    }
+
+    pub(crate) fn close_prompt_lab(&mut self) {
+        self.select_tab(AppTab::Summary);
+        self.prompt_lab.close();
     }
 
     pub(crate) fn select_prompt_lab_stage(&mut self, stage: PromptLabStage) {

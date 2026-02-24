@@ -6,6 +6,7 @@ use crate::prompt_lab::{
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::LinkDownloadState;
+use crate::tabs::AppTab;
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
 use harvester_engine::llm::types::ModelId;
@@ -41,6 +42,36 @@ pub struct PreviewHeaderView {
     pub heading_count: usize,
     pub link_density: f64,
     pub nav_heavy: bool,
+}
+
+/// View state for the right-pane tab content area.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RightPaneView {
+    /// Which tab is currently active.
+    pub active_tab: AppTab,
+    /// Markdown content for the Triage tab (formatted triage result).
+    pub triage_markdown: Option<String>,
+    /// Markdown content for the Summary tab.
+    pub summary_markdown: Option<String>,
+    /// Markdown content for the Briefing tab.
+    pub briefing_markdown: Option<String>,
+    /// Placeholder / status text for the Trends tab (filled in Slice 4).
+    pub trends_placeholder: String,
+    /// Prompt Lab view (existing sub-view, now hosted in the PromptLab tab).
+    pub prompt_lab: PromptLabView,
+}
+
+impl Default for RightPaneView {
+    fn default() -> Self {
+        Self {
+            active_tab: AppTab::default(),
+            triage_markdown: None,
+            summary_markdown: None,
+            briefing_markdown: None,
+            trends_placeholder: "Trends data loading…".to_string(),
+            prompt_lab: PromptLabView::default(),
+        }
+    }
 }
 
 // Default left panel width when the input panel is shown (PANEL_INPUT + PANEL_JOBS = 240 + 440)
@@ -80,6 +111,8 @@ pub struct AppViewModel {
     pub is_pre_triage_reviewing: bool,
     /// Per-model LLM token usage, sorted alphabetically by model name. Only Miss runs counted.
     pub llm_usage_by_model: Vec<LlmModelUsageView>,
+    /// Right-pane tab content area view.
+    pub right_pane: RightPaneView,
 }
 
 impl Default for AppViewModel {
@@ -109,6 +142,7 @@ impl Default for AppViewModel {
             prompt_lab: PromptLabView::default(),
             is_pre_triage_reviewing: false,
             llm_usage_by_model: Vec::new(),
+            right_pane: RightPaneView::default(),
         }
     }
 }

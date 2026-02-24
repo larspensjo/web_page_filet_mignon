@@ -891,6 +891,10 @@ impl EffectRunner {
                     }
                 });
             }
+            // Entity index effects: stubs — full implementation in Slice 3/4.
+            Effect::LoadEntityIndex => { /* full handling in Slice 3 */ }
+            Effect::RebuildEntityIndex => { /* full handling in Slice 4 */ }
+            Effect::UpsertEntityIndexEntry { .. } => { /* full handling in Slice 3 */ }
         }
     }
 

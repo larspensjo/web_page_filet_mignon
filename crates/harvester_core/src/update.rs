@@ -3,6 +3,7 @@ use std::borrow::ToOwned;
 use std::path::PathBuf;
 
 use crate::state::TriageCacheLookupResult;
+use crate::tabs::AppTab;
 use crate::{
     briefing::{
         ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingThemeResult,
@@ -936,11 +937,26 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.end_poll();
             Vec::new()
         }
+        Msg::TabSelected { tab } => {
+            state.select_tab(tab);
+            if tab == AppTab::Trends {
+                // Stub in Slice 1; full entity index loading in Slice 3.
+                vec![Effect::LoadEntityIndex]
+            } else {
+                Vec::new()
+            }
+        }
+        Msg::TrendCategorySelected { category } => {
+            state.set_active_trend_category(category);
+            Vec::new()
+        }
         Msg::PromptLabOpenRequested => {
+            // Bridge: selecting the PromptLab tab is now the canonical open action.
             state.open_prompt_lab();
             Vec::new()
         }
         Msg::PromptLabCloseRequested => {
+            // Bridge: close selects the Summary tab as the fallback.
             state.close_prompt_lab();
             Vec::new()
         }

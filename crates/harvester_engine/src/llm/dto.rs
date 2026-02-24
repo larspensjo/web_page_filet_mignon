@@ -24,11 +24,21 @@ impl TriagePriority {
     }
 }
 
+/// Structured entity lists extracted from an article summary.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SummaryEntities {
+    pub companies: Vec<String>,
+    pub technologies: Vec<String>,
+    pub products: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArticleSummary {
     pub title: String,
     pub summary: String,
     pub key_points: Vec<String>,
+    /// Structured entity lists (from V4+ prompt). Empty for V3 responses.
+    pub entities: SummaryEntities,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

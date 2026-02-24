@@ -10,6 +10,7 @@ mod prompt_lab;
 mod source_state;
 mod state;
 mod summary_cache;
+mod tabs;
 mod triage;
 mod triage_cache;
 mod ui_geometry;
@@ -44,6 +45,7 @@ pub use state::{
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
 };
+pub use tabs::{AppTab, TrendCategory};
 pub use triage::{
     ArticleTriageResult, ArticleTriageState, TriageArticle, TriageArticleId, TriagePhase,
     TriageSession,
@@ -54,7 +56,7 @@ pub use update::update;
 pub use view_model::{
     AppViewModel, JobFilterStatus, JobRowView, LinkRowView, LlmModelUsageView, PreviewHeaderView,
     PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
-    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, TriageAnnotationView,
-    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
-    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
+    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, RightPaneView,
+    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH,
+    DEFAULT_WINDOW_WIDTH, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };

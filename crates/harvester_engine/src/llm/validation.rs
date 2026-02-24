@@ -116,6 +116,7 @@ pub fn validate_summary(content: &str) -> Result<ArticleSummary, ValidationError
         title: title.to_string(),
         summary: summary.to_string(),
         key_points,
+        entities: Default::default(),
     })
 }
 

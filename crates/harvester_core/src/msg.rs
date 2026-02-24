@@ -13,6 +13,7 @@ use crate::prompt_lab::{
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
+use crate::tabs::{AppTab, TrendCategory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
@@ -329,6 +330,14 @@ pub enum Msg {
     PromptLabCompareBatchSetWarning {
         batch_id: PromptLabCompareBatchId,
         warning: Option<String>,
+    },
+    /// User selected a tab in the right pane.
+    TabSelected {
+        tab: AppTab,
+    },
+    /// User selected a trend category in the Trends tab.
+    TrendCategorySelected {
+        category: TrendCategory,
     },
 }
 

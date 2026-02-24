@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use harvester_engine::llm::dto::SummaryEntities;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
 use harvester_engine::llm::types::ModelId;
 
@@ -89,6 +90,18 @@ pub enum Effect {
     /// Open a URL in the user's default web browser.
     OpenUrlInBrowser {
         url: String,
+    },
+    /// Load the entity index from disk (full loading in Slice 3).
+    LoadEntityIndex,
+    /// Rebuild the entity index from scratch from the article archive (full implementation Slice 4).
+    RebuildEntityIndex,
+    /// Upsert one article's entity data into the entity index (full implementation Slice 3).
+    UpsertEntityIndexEntry {
+        url: String,
+        fetched_utc: Option<String>,
+        content_hash: Option<String>,
+        summary_entities: Option<SummaryEntities>,
+        themes: Option<Vec<String>>,
     },
 }
 
