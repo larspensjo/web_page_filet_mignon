@@ -372,3 +372,12 @@ Change: Two fixes applied: (1) `Import-Module` inside a module's own script body
 Lessons Learned: Pester 5 runs `Describe` body code during discovery (before module imports run), so helper functions defined there cannot call imported cmdlets. `It` blocks run in a child scope that does not inherit from the `Describe` discovery scope. Module-internal `Import-Module` without `-Global` creates a nested module visible only within that module.
 Prevention: Always define test helper functions inside `BeforeAll` using `function script:Name`. When a module requires another module's exports to be globally accessible (e.g., because tests import them independently), use `Import-Module <path> -Force -Global` inside the depending module.
 Refs: scripts/harvester_launcher/Reducer.psm1, scripts/tests/HarvesterLauncher.Tests.ps1
+
+## 2026-02-24 - Harvester batch launcher TUI rendering fixes for Windows console
+Type: Bug Fix
+Context: `Start-HarvesterBatch.ps1` rendered malformed borders and shifted rows in some Windows terminals due to console encoding defaults, a wide/ambiguous selection glyph, and unbounded preview text pushing pane borders.
+Change: Updated the PowerShell harvester launcher TUI (`scripts/harvester_launcher` + startup script) to force UTF-8 console output, render explicit top borders in both panes, use a narrow selection marker glyph, clamp right-pane preview text before padding, and raise layout minimum height to account for the added border row. Added Pester regression tests for top borders, marker glyph choice, preview border preservation, and min-height sizing.
+Evidence: `Invoke-Pester scripts/tests/HarvesterLauncher.Tests.ps1`
+Lessons Learned: Console TUI layout correctness depends on three separate invariants at once (encoding, glyph display width, and explicit string truncation); fixing only one can leave visually similar border corruption.
+Prevention: Keep renderer regression tests that assert pane border characters and preview-row right borders under long input, and treat non-ASCII TUI glyphs as width-sensitive choices (prefer known narrow glyphs).
+Refs: scripts/Start-HarvesterBatch.ps1, scripts/harvester_launcher/Render.psm1, scripts/harvester_launcher/Reducer.psm1, scripts/tests/HarvesterLauncher.Tests.ps1

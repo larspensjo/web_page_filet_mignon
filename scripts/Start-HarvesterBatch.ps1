@@ -13,6 +13,9 @@ $script:harvesterDisplayCmd = if ($script:useCargoRun) { 'harvester_batch' } els
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Force UTF-8 so box-drawing characters render correctly on Windows consoles.
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+
 # ── Module imports ────────────────────────────────────────────────────────────
 $launcherDir = Join-Path $PSScriptRoot 'harvester_launcher'
 $subInput    = Join-Path $ProjectRoot  'ministry-of-future-plans\browser\Input.psm1'

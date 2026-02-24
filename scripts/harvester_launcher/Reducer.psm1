@@ -19,7 +19,7 @@ function Get-LauncherLayoutConstraints {
     # Minimum total dimensions derived from content
     $minWidth  = $leftW + 1 + $minRightW   # leftW + gap + rightW
     $actionCount = ($Data.Actions | Where-Object { -not $_.IsSeparator }).Count
-    $minHeight = [Math]::Max(16, $actionCount + 7)  # title+sep+checkpoint+border+status + padding
+    $minHeight = [Math]::Max(16, $actionCount + 8)  # top+title+sep+checkpoint+bottom+status + padding
 
     @{ LeftW=$leftW; MinWidth=$minWidth; MinHeight=$minHeight }
 }

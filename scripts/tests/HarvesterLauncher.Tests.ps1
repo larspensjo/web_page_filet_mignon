@@ -154,6 +154,12 @@ Describe 'Reducer - Get-LauncherLayoutConstraints' {
         $d = @{ Actions = Get-LauncherActionItems; Params = Get-LauncherParamDefs }
         (Get-LauncherLayoutConstraints -Data $d).MinHeight | Should -BeGreaterOrEqual 16
     }
+    It 'MinHeight leaves room for the left-pane top border row' {
+        $d = @{ Actions = Get-LauncherActionItems; Params = Get-LauncherParamDefs }
+        $c = Get-LauncherLayoutConstraints -Data $d
+        $actionCount = ($d.Actions | Where-Object { -not $_.IsSeparator }).Count
+        $c.MinHeight | Should -BeGreaterOrEqual ($actionCount + 8)
+    }
     It 'Get-LauncherLayout TooSmall true when width below MinWidth' {
         $d = @{ Actions = Get-LauncherActionItems; Params = Get-LauncherParamDefs }
         $c = Get-LauncherLayoutConstraints -Data $d
@@ -747,5 +753,22 @@ Describe 'Render - Build-LauncherFrame' {
         $frame = Build-LauncherFrame -State (S)
         $hasDarkCyan = $frame | ForEach-Object { $_ | Where-Object { $_.Bg -eq 'DarkCyan' } } | Where-Object { $_ }
         $hasDarkCyan | Should -Not -BeNullOrEmpty
+    }
+    It 'first content row includes top borders for both panes' {
+        $row = ((Build-LauncherFrame -State (S))[0] | ForEach-Object { $_.Text }) -join ''
+        (($row.ToCharArray() | Where-Object { $_ -eq '╭' }).Count) | Should -Be 2
+        (($row.ToCharArray() | Where-Object { $_ -eq '╮' }).Count) | Should -Be 2
+    }
+    It 'selected row uses narrow marker glyph to avoid width drift' {
+        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        ($all -join '') | Should -Match '▸ Run batch'
+        ($all -join '') | Should -Not -Match '► Run batch'
+    }
+    It 'command preview keeps right border when command path is very long' {
+        $s = New-LauncherState -HarvesterCmd ('C:\' + ('verylong\' * 20) + 'harvester_batch.exe') -Width 90 -Height 30
+        $rows = (Build-LauncherFrame -State $s) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        $previewRow = $rows | Where-Object { $_ -match 'harvester_batch\.exe|verylong' } | Select-Object -First 1
+        $previewRow | Should -Not -BeNullOrEmpty
+        $previewRow.EndsWith('│') | Should -Be $true
     }
 }

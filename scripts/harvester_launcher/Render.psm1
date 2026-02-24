@@ -109,6 +109,11 @@ function Build-LeftPaneRows {
     $rows  = [System.Collections.Generic.List[object]]::new()
     $inner = $W - 2   # minus left and right border chars
 
+    # Top border
+    $rows.Add((Pad-SegmentsToWidth @(
+        New-Seg ($script:Box.TL + ($script:Box.H * $inner) + $script:Box.TR) 'DarkGray' 'Black'
+    ) $W))
+
     # Title row
     $title = " Harvester Batch Launcher"
     $rows.Add((Pad-SegmentsToWidth @(
@@ -135,7 +140,7 @@ function Build-LeftPaneRows {
         $isSelRow = ($itemIdx -eq $curIdx)
         $bg       = if ($isSelRow -and $isActive) { 'DarkCyan' } else { 'Black' }
         $fg       = if ($isSelRow) { 'White' } elseif ($item.IsCheckpoint -and -not $chkAvail) { 'DarkGray' } else { 'Gray' }
-        $marker   = if ($isSelRow -and $isActive) { [char]0x25BA + ' ' } else { '  ' }
+        $marker   = if ($isSelRow -and $isActive) { [char]0x25B8 + ' ' } else { '  ' }
         $label    = " $marker$($item.Label)"
         $rows.Add((Pad-SegmentsToWidth @(
             (New-Seg $script:Box.V 'DarkGray' 'Black')
@@ -212,6 +217,11 @@ function Build-RightPaneRows {
     $rows  = [System.Collections.Generic.List[object]]::new()
     $inner = $W - 2
 
+    # Top border
+    $rows.Add((Pad-SegmentsToWidth @(
+        New-Seg ($script:Box.TL + ($script:Box.H * $inner) + $script:Box.TR) 'DarkGray' 'Black'
+    ) $W))
+
     # Title
     $rows.Add((Pad-SegmentsToWidth @(
         (New-Seg $script:Box.V 'DarkGray' 'Black')
@@ -226,7 +236,7 @@ function Build-RightPaneRows {
 
     # Parameter rows (leave 8 rows for command preview)
     $previewLines  = 8
-    $paramAreaH    = $H - $previewLines - 4   # title + sep + preview header + bottom border
+    $paramAreaH    = $H - $previewLines - 5   # top border + title + sep + preview header + bottom border
     $scrollTop     = $State.Cursor.RightScroll
     $visibleParams = $params | Select-Object -Skip $scrollTop -First $paramAreaH
 
@@ -261,9 +271,11 @@ function Build-RightPaneRows {
     $maxPrev     = $previewLines - 2
     for ($i = 0; $i -lt $maxPrev; $i++) {
         $text = if ($i -lt $previewText.Count) { $previewText[$i] } else { '' }
+        $display = "  $text"
+        if ($display.Length -gt $inner) { $display = $display.Substring(0, $inner) }
         $rows.Add((Pad-SegmentsToWidth @(
             (New-Seg $script:Box.V 'DarkGray' 'Black')
-            (New-Seg ("  $text".PadRight($inner)) 'Cyan' 'Black')
+            (New-Seg ($display.PadRight($inner)) 'Cyan' 'Black')
             (New-Seg $script:Box.V 'DarkGray' 'Black')
         ) $W))
     }
