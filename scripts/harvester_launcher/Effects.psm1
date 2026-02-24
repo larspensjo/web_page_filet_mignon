@@ -51,7 +51,12 @@ function Invoke-SaveDefaults {
 }
 
 function Invoke-ProbeCheckpointCliSupport {
-    param([string]$HarvesterCmd)
+    param([string]$HarvesterCmd, [bool]$UseCargoRun = $false)
+    if ($UseCargoRun) {
+        # In cargo-run (dev) mode the binary is always built from current source,
+        # so checkpoint flags are guaranteed present — skip the slow probe.
+        return [pscustomobject]@{ Type='CheckpointCapabilityDetected'; Available=$true }
+    }
     try {
         $helpText = (& $HarvesterCmd '--help' 2>&1) | Out-String
         # Require ALL three checkpoint flags to be present; partial rollout = unavailable
@@ -87,25 +92,29 @@ function Invoke-ReadCheckpointDisplay {
 }
 
 function Invoke-RunCheckpointCommand {
-    param([string]$HarvesterCmd, [string]$ActionId, [string]$CustomDate = '')
-    $argList = switch ($ActionId) {
+    param([string]$HarvesterCmd, [bool]$UseCargoRun = $false, [string]$OutputDir = 'output', [string]$ActionId, [string]$CustomDate = '')
+    $flagArgs = switch ($ActionId) {
         'cp-set-now'  { @('--set-briefing-since-now') }
         'cp-set-date' { @('--set-briefing-since', $CustomDate) }
         'cp-clear'    { @('--clear-briefing-since') }
         'cp-show'     { @('--show-briefing-since') }
         default       { return [pscustomobject]@{ Type='CheckpointCommandCompleted'; Success=$false; Message="Unknown action: $ActionId" } }
     }
+    # Always forward --output-dir so the binary writes to the correct location
+    $argList = @('--output-dir', $OutputDir) + $flagArgs
     try {
-        $errFile = [IO.Path]::GetTempFileName()
-        $proc = Start-Process -FilePath $HarvesterCmd -ArgumentList $argList `
-                              -Wait -PassThru -NoNewWindow `
-                              -RedirectStandardError $errFile -ErrorAction Stop
-        Remove-Item $errFile -Force -ErrorAction SilentlyContinue
-        $ok = $proc.ExitCode -eq 0
-        [pscustomobject]@{
-            Type    = 'CheckpointCommandCompleted'
-            Success = $ok
-            Message = if ($ok) { 'Done.' } else { "Exit code $($proc.ExitCode)" }
+        if ($UseCargoRun) {
+            & cargo run -q -p harvester_batch -- @argList 2>&1 | Out-Null
+            $ok = ($LASTEXITCODE -eq 0)
+            [pscustomobject]@{ Type='CheckpointCommandCompleted'; Success=$ok; Message=if ($ok) { 'Done.' } else { "Exit code $LASTEXITCODE" } }
+        } else {
+            $errFile = [IO.Path]::GetTempFileName()
+            $proc = Start-Process -FilePath $HarvesterCmd -ArgumentList $argList `
+                                  -Wait -PassThru -NoNewWindow `
+                                  -RedirectStandardError $errFile -ErrorAction Stop
+            Remove-Item $errFile -Force -ErrorAction SilentlyContinue
+            $ok = $proc.ExitCode -eq 0
+            [pscustomobject]@{ Type='CheckpointCommandCompleted'; Success=$ok; Message=if ($ok) { 'Done.' } else { "Exit code $($proc.ExitCode)" } }
         }
     } catch {
         [pscustomobject]@{ Type='CheckpointCommandCompleted'; Success=$false; Message=$_.Exception.Message }
@@ -144,9 +153,9 @@ function Invoke-LauncherEffects {
         $action = switch ($eff.Type) {
             'LoadDefaults'              { Invoke-LoadDefaults -FilePath (Get-DefaultsFilePath) }
             'SaveDefaults'              { Invoke-SaveDefaults -FilePath (Get-DefaultsFilePath) -Values $eff.Values }
-            'ProbeCheckpointCliSupport' { Invoke-ProbeCheckpointCliSupport -HarvesterCmd $State.Runtime.HarvesterCmd }
+            'ProbeCheckpointCliSupport' { Invoke-ProbeCheckpointCliSupport -HarvesterCmd $State.Runtime.HarvesterCmd -UseCargoRun $State.Runtime.UseCargoRun }
             'ReadCheckpointDisplay'     { Invoke-ReadCheckpointDisplay -CheckpointFilePath $chkPath }
-            'RunCheckpointCommand'      { Invoke-RunCheckpointCommand -HarvesterCmd $State.Runtime.HarvesterCmd -ActionId $eff.ActionId -CustomDate (if ($null -ne $eff.CustomDate) { $eff.CustomDate } else { '' }) }
+            'RunCheckpointCommand'      { Invoke-RunCheckpointCommand -HarvesterCmd $State.Runtime.HarvesterCmd -UseCargoRun $State.Runtime.UseCargoRun -OutputDir $State.Values.OutputDir -ActionId $eff.ActionId -CustomDate (if ($null -ne $eff.CustomDate) { $eff.CustomDate } else { '' }) }
             'DatePromptRequested'       { Invoke-DatePrompt }
             default                     { $null }
         }
