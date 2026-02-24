@@ -373,11 +373,7 @@ pub fn load_briefing_checkpoint(path: &Path) -> Option<String> {
             Some(value)
         }
         Err(e) => {
-            engine_warn!(
-                "[briefing-checkpoint] invalid RFC3339 in {:?}: {}",
-                path,
-                e
-            );
+            engine_warn!("[briefing-checkpoint] invalid RFC3339 in {:?}: {}", path, e);
             None
         }
     }

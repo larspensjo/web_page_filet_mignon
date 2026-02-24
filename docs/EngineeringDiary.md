@@ -407,3 +407,10 @@ Evidence: `Invoke-Pester -Path scripts/tests/HarvesterLauncher.Tests.ps1 -CI` (1
 Lessons Learned: Under `Set-StrictMode -Version Latest`, dot-accessing a missing property/key in heterogeneous effect payloads is a runtime error; optional effect fields must be read via explicit existence checks at the effect boundary.
 Prevention: Treat effect payloads as versioned/partial contracts, centralize optional-field extraction in dispatcher code, and add dispatcher-level tests for action variants that intentionally omit optional fields.
 Refs: scripts/harvester_launcher/Effects.psm1, scripts/tests/HarvesterLauncher.Tests.ps1
+
+## 2026-02-24 - Briefing coverage window injected into aggregate briefing prompt and preview
+Type: Implementation
+Context: Time-limited briefing checkpoints filter article inputs, but the generated briefing did not explicitly tell the recipient what period was covered, making it easy to misread an intentionally filtered briefing as all-time coverage.
+Change: `harvester_core` now snapshots a per-run briefing coverage window label from the active checkpoint, passes it to aggregate briefing requests as a `briefing_time_window` extra template variable, and includes the same label in briefing preview session metadata. `harvester_engine` adds aggregate briefing prompt `v6` (set active) so the coverage window is rendered and the model is instructed to mention it in the executive summary without mutating `v5` semantics.
+Evidence: `cargo test -p harvester_core aggregate_briefing_effect_includes_checkpoint_time_window_extra_var -- --nocapture`; `cargo test -p harvester_core briefing_format_preview_includes_coverage_window_when_present -- --nocapture`; `cargo test -p harvester_engine aggregate_briefing_active_version_is_v6 -- --nocapture`; `cargo test -p harvester_engine v6_system_template_contains_briefing_time_window_slot -- --nocapture`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
+Refs: crates/harvester_core/src/briefing.rs, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/prompts/briefing.rs, crates/harvester_engine/src/llm/prompts/mod.rs

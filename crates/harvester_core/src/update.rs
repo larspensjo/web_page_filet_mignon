@@ -645,6 +645,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.request_briefing_orchestration();
             state.set_briefing(BriefingSession::new_waiting_for_triage(None));
+            snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] generate requested");
             let ordered_urls = state.ordered_completed_job_urls();
@@ -653,7 +654,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Effect::LoadPromptContexts,
                 Effect::LoadPromptTemplateFiles,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefingPrereq { ordered_urls, since_utc },
+                Effect::LoadArticlesForBriefingPrereq {
+                    ordered_urls,
+                    since_utc,
+                },
             ]
         }
         Msg::PrepareSummariesClicked => {
@@ -666,6 +670,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.request_summary_preparation();
             state.set_briefing(BriefingSession::new_waiting_for_triage(None));
+            snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] summary-prep requested");
             let ordered_urls = state.ordered_completed_job_urls();
@@ -674,7 +679,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Effect::LoadPromptContexts,
                 Effect::LoadPromptTemplateFiles,
                 Effect::LoadLlmMetadata,
-                Effect::LoadArticlesForBriefingPrereq { ordered_urls, since_utc },
+                Effect::LoadArticlesForBriefingPrereq {
+                    ordered_urls,
+                    since_utc,
+                },
             ]
         }
         Msg::BriefingPrereqArticlesLoaded { articles } => {
@@ -720,34 +728,33 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::BriefingCheckpointLoaded { since_utc } => {
-            let parsed = since_utc.as_deref().and_then(|s| {
-                match chrono::DateTime::parse_from_rfc3339(s) {
-                    Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
-                    Err(e) => {
-                        engine_warn!(
-                            "[briefing-checkpoint] file contained invalid RFC3339: {}",
-                            e
-                        );
-                        None
-                    }
-                }
-            });
+            let parsed =
+                since_utc
+                    .as_deref()
+                    .and_then(|s| match chrono::DateTime::parse_from_rfc3339(s) {
+                        Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
+                        Err(e) => {
+                            engine_warn!(
+                                "[briefing-checkpoint] file contained invalid RFC3339: {}",
+                                e
+                            );
+                            None
+                        }
+                    });
             state.set_briefing_since_utc(parsed);
             vec![]
         }
         Msg::BriefingCheckpointSet(since) => {
-            let parsed = since.as_deref().and_then(|s| {
-                match chrono::DateTime::parse_from_rfc3339(s) {
-                    Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
-                    Err(_) => {
-                        engine_warn!(
-                            "[briefing-checkpoint] ignoring invalid timestamp: {}",
-                            s
-                        );
-                        None
-                    }
-                }
-            });
+            let parsed =
+                since
+                    .as_deref()
+                    .and_then(|s| match chrono::DateTime::parse_from_rfc3339(s) {
+                        Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
+                        Err(_) => {
+                            engine_warn!("[briefing-checkpoint] ignoring invalid timestamp: {}", s);
+                            None
+                        }
+                    });
             // If caller passed Some(bad string), treat as no-op
             if since.is_some() && parsed.is_none() {
                 return (state, vec![]);
@@ -1881,9 +1888,13 @@ fn on_triage_settled_for_briefing(state: &mut AppState, effects: &mut Vec<Effect
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
     state.set_briefing(BriefingSession::new_loading(None));
+    snapshot_briefing_coverage_window(state);
     state.clear_briefing_orchestration_request();
     let since_utc = state.briefing_since_utc();
-    effects.push(Effect::LoadArticlesForBriefing { ordered_urls, since_utc });
+    effects.push(Effect::LoadArticlesForBriefing {
+        ordered_urls,
+        since_utc,
+    });
 }
 
 fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
@@ -2069,6 +2080,13 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
 
     let previous_briefings =
         crate::briefing::format_previous_briefings_block(state.briefing_history());
+    let briefing_time_window = state
+        .briefing()
+        .coverage_window_label()
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            crate::briefing::format_briefing_time_window_label(state.briefing_since_utc())
+        });
 
     effects.push(Effect::RequestLlmCompletion {
         request_id,
@@ -2078,9 +2096,17 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
         input_content: collection_text,
         context,
         template_override: None,
-        extra_template_vars: vec![("previous_briefings".to_string(), previous_briefings)],
+        extra_template_vars: vec![
+            ("previous_briefings".to_string(), previous_briefings),
+            ("briefing_time_window".to_string(), briefing_time_window),
+        ],
     });
     state.mark_dirty();
+}
+
+fn snapshot_briefing_coverage_window(state: &mut AppState) {
+    let label = crate::briefing::format_briefing_time_window_label(state.briefing_since_utc());
+    state.briefing_mut().set_coverage_window_label(label);
 }
 
 fn try_start_briefing_with_metadata(state: &mut AppState, effects: &mut Vec<Effect>) {
@@ -2493,19 +2519,35 @@ mod tests {
             },
         );
 
-        assert_eq!(
-            effects,
-            vec![Effect::RequestLlmCompletion {
-                request_id: 5,
-                prompt_id: PromptId::AggregateBriefing,
-                prompt_version: None,
-                model_override: None,
-                input_content: "Collection text".to_string(),
-                context: Vec::new(),
-                template_override: None,
-                extra_template_vars: vec![("previous_briefings".to_string(), "(none)".to_string())],
-            }]
-        );
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                prompt_version,
+                model_override,
+                input_content,
+                context,
+                template_override,
+                extra_template_vars,
+            } => {
+                assert_eq!(*request_id, 5);
+                assert_eq!(*prompt_id, PromptId::AggregateBriefing);
+                assert_eq!(*prompt_version, None);
+                assert_eq!(*model_override, None);
+                assert_eq!(input_content, "Collection text");
+                assert!(context.is_empty());
+                assert!(template_override.is_none());
+                assert!(extra_template_vars.iter().any(
+                    |(k, v)| k == "previous_briefings" && v == "(none)"
+                ));
+                assert!(extra_template_vars.iter().any(|(k, v)| {
+                    k == "briefing_time_window"
+                        && v.contains("All available articles")
+                }));
+            }
+            other => panic!("expected aggregate briefing request, got {other:?}"),
+        }
 
         let (state, effects) = update(
             state,
@@ -2598,19 +2640,35 @@ mod tests {
                 metadata: None,
             },
         );
-        assert_eq!(
-            effects,
-            vec![Effect::RequestLlmCompletion {
-                request_id: 3,
-                prompt_id: PromptId::AggregateBriefing,
-                prompt_version: None,
-                model_override: None,
-                input_content: "Collection text".to_string(),
-                context: Vec::new(),
-                template_override: None,
-                extra_template_vars: vec![("previous_briefings".to_string(), "(none)".to_string())],
-            }]
-        );
+        assert_eq!(effects.len(), 1);
+        match &effects[0] {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                prompt_version,
+                model_override,
+                input_content,
+                context,
+                template_override,
+                extra_template_vars,
+            } => {
+                assert_eq!(*request_id, 3);
+                assert_eq!(*prompt_id, PromptId::AggregateBriefing);
+                assert_eq!(*prompt_version, None);
+                assert_eq!(*model_override, None);
+                assert_eq!(input_content, "Collection text");
+                assert!(context.is_empty());
+                assert!(template_override.is_none());
+                assert!(extra_template_vars.iter().any(
+                    |(k, v)| k == "previous_briefings" && v == "(none)"
+                ));
+                assert!(extra_template_vars.iter().any(|(k, v)| {
+                    k == "briefing_time_window"
+                        && v.contains("All available articles")
+                }));
+            }
+            other => panic!("expected aggregate briefing request, got {other:?}"),
+        }
         let (state, _) = update(
             state,
             Msg::LlmCompleted {
@@ -4219,6 +4277,78 @@ mod tests {
                 assert!(
                     value.contains("Old summary content."),
                     "previous_briefings value should contain history: {value}"
+                );
+                let window = extra_template_vars
+                    .iter()
+                    .find(|(k, _)| k == "briefing_time_window");
+                assert!(
+                    window.is_some(),
+                    "missing briefing_time_window in extra_template_vars"
+                );
+                let (_, window_value) = window.unwrap();
+                assert!(
+                    window_value.contains("All available articles"),
+                    "briefing_time_window should describe all-time coverage: {window_value}"
+                );
+            }
+            _ => panic!("no AggregateBriefing RequestLlmCompletion effect emitted"),
+        }
+    }
+
+    #[test]
+    fn aggregate_briefing_effect_includes_checkpoint_time_window_extra_var() {
+        init_logging();
+        let mut state = AppState::new();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-02-24T12:34:56Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        state.set_briefing_since_utc(Some(since));
+        let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
+        let (articles, collection_text) = loaded_single_article();
+        let (state, _) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+        let (_state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 2,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article A"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
+                },
+                metadata: None,
+            },
+        );
+
+        let completion_effect = effects.iter().find(|e| {
+            matches!(
+                e,
+                Effect::RequestLlmCompletion {
+                    prompt_id: PromptId::AggregateBriefing,
+                    ..
+                }
+            )
+        });
+        match completion_effect {
+            Some(Effect::RequestLlmCompletion {
+                extra_template_vars,
+                ..
+            }) => {
+                let window = extra_template_vars
+                    .iter()
+                    .find(|(k, _)| k == "briefing_time_window")
+                    .expect("briefing_time_window extra var");
+                assert!(
+                    window.1.contains("2026-02-24T12:34:56Z"),
+                    "window label should include checkpoint timestamp: {}",
+                    window.1
                 );
             }
             _ => panic!("no AggregateBriefing RequestLlmCompletion effect emitted"),

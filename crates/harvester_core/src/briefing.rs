@@ -152,6 +152,20 @@ pub fn format_previous_briefings_block(history: &[BriefingHistoryEntry]) -> Stri
     parts.join("\n\n")
 }
 
+/// Formats a human-readable coverage window label for aggregate briefings.
+/// This string is used both in prompt template variables and in briefing preview metadata.
+pub fn format_briefing_time_window_label(
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
+) -> String {
+    match since_utc {
+        Some(dt) => format!(
+            "Articles fetched on or after {} (briefing checkpoint filter).",
+            dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        ),
+        None => "All available articles (no briefing checkpoint filter).".to_string(),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BriefingSession {
     phase: BriefingPhase,
@@ -160,6 +174,7 @@ pub struct BriefingSession {
     briefing_request_id: Option<u64>,
     briefing_result: Option<BriefingResult>,
     started_at: Option<String>,
+    coverage_window_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -238,6 +253,7 @@ impl Default for BriefingSession {
             briefing_request_id: None,
             briefing_result: None,
             started_at: None,
+            coverage_window_label: None,
         }
     }
 }
@@ -251,6 +267,7 @@ impl BriefingSession {
             briefing_request_id: None,
             briefing_result: None,
             started_at,
+            coverage_window_label: None,
         }
     }
 
@@ -262,6 +279,7 @@ impl BriefingSession {
             briefing_request_id: None,
             briefing_result: None,
             started_at,
+            coverage_window_label: None,
         }
     }
 
@@ -425,6 +443,14 @@ impl BriefingSession {
         self.phase = BriefingPhase::GeneratingBriefing;
     }
 
+    pub fn set_coverage_window_label(&mut self, label: String) {
+        self.coverage_window_label = Some(label);
+    }
+
+    pub fn coverage_window_label(&self) -> Option<&str> {
+        self.coverage_window_label.as_deref()
+    }
+
     pub fn complete_briefing(&mut self, result: BriefingResult) {
         self.briefing_result = Some(result);
         self.phase = BriefingPhase::Complete;
@@ -513,7 +539,11 @@ impl BriefingSession {
         sections.push(themes);
 
         sections.push(format!(
-            "## Session Info\n\nArticles: {} total, {} summarized, {} failed",
+            "## Session Info\n\n{}Articles: {} total, {} summarized, {} failed",
+            self.coverage_window_label
+                .as_deref()
+                .map(|label| format!("Coverage Window: {label}\n"))
+                .unwrap_or_default(),
             self.articles.len(),
             self.completed_summary_count(),
             self.failed_summary_count()
@@ -694,6 +724,18 @@ mod tests {
     }
 
     #[test]
+    fn briefing_format_preview_includes_coverage_window_when_present() {
+        let mut session = completed_session_with_themes(vec![]);
+        session.set_coverage_window_label(
+            "Articles fetched on or after 2026-02-24T00:00:00Z (briefing checkpoint filter)."
+                .to_string(),
+        );
+        let preview = session.format_preview().expect("preview");
+        assert!(preview.contains("Coverage Window:"));
+        assert!(preview.contains("2026-02-24T00:00:00Z"));
+    }
+
+    #[test]
     fn briefing_format_preview_none_when_not_complete() {
         let mut session = BriefingSession::new_loading(None);
         session.set_articles(
@@ -729,6 +771,19 @@ mod tests {
         let preview = session.format_preview().expect("preview");
         assert!(preview.ends_with(PREVIEW_TRUNCATE_MARKER));
         assert_eq!(preview.chars().count(), MAX_BRIEFING_PREVIEW_CHARS);
+    }
+
+    #[test]
+    fn format_briefing_time_window_label_formats_checkpoint_and_all_time() {
+        let all_time = format_briefing_time_window_label(None);
+        assert!(all_time.contains("All available articles"));
+
+        let since = chrono::DateTime::parse_from_rfc3339("2026-02-24T12:34:56Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let filtered = format_briefing_time_window_label(Some(since));
+        assert!(filtered.contains("2026-02-24T12:34:56Z"));
+        assert!(filtered.contains("checkpoint"));
     }
 
     fn make_loaded(url: &str, hash: &str) -> LoadedArticle {

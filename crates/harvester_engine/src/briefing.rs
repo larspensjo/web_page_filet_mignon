@@ -12,7 +12,11 @@ use crate::llm::{PromptId, PromptRegistry};
 use crate::token::WhitespaceTokenCounter;
 
 fn parse_rfc3339_utc(label: &str, value: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
-    let snippet = if value.len() > 50 { &value[..50] } else { value };
+    let snippet = if value.len() > 50 {
+        &value[..50]
+    } else {
+        value
+    };
     chrono::DateTime::parse_from_rfc3339(value)
         .map(|dt| dt.with_timezone(&chrono::Utc))
         .map_err(|e| format!("[briefing-filter] {label}: invalid RFC3339 '{snippet}': {e}"))

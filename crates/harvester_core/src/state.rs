@@ -730,10 +730,7 @@ impl AppState {
         self.briefing_since_utc
     }
 
-    pub(crate) fn set_briefing_since_utc(
-        &mut self,
-        v: Option<chrono::DateTime<chrono::Utc>>,
-    ) {
+    pub(crate) fn set_briefing_since_utc(&mut self, v: Option<chrono::DateTime<chrono::Utc>>) {
         self.briefing_since_utc = v;
     }
 

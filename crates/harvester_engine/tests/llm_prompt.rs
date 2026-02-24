@@ -80,9 +80,9 @@ fn registry_with_defaults_has_restart_scope() {
             .active(PromptId::AggregateBriefing)
             .unwrap()
             .version,
-        5
+        6
     );
-    assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 5);
+    assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 6);
 }
 
 #[test]

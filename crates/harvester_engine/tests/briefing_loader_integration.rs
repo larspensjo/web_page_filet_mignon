@@ -34,7 +34,8 @@ fn prompt_registry_with_defaults() -> PromptRegistry {
 fn empty_directory_returns_no_articles() {
     let registry = prompt_registry_with_defaults();
     let tmp = tempdir().unwrap();
-    let (articles, collection) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let (articles, collection) =
+        load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
     assert!(articles.is_empty());
     assert!(collection.is_empty());
 }
@@ -51,7 +52,8 @@ fn single_article_is_loaded_and_in_collection() {
         "body text",
     );
 
-    let (articles, collection) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let (articles, collection) =
+        load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/1");
@@ -162,7 +164,8 @@ fn collection_text_respects_collection_budget() {
         "body",
     );
 
-    let (_, collection) = load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
+    let (_, collection) =
+        load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
     let collection_budget = max_input - briefing_overhead;
     assert!(collection.len() <= collection_budget);
 }
@@ -320,7 +323,8 @@ fn filtered_loader_budget_trimming_drops_tail_only() {
         selected.push(url);
     }
     let (_articles, collection) =
-        load_and_prepare_articles_filtered(tmp.path(), max_input, &registry, &selected, None).unwrap();
+        load_and_prepare_articles_filtered(tmp.path(), max_input, &registry, &selected, None)
+            .unwrap();
 
     let selected_articles = collection.matches("--- Article").count();
     assert!(selected_articles >= 1);

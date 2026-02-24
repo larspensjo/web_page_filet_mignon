@@ -185,11 +185,8 @@ mod tests {
 
     #[test]
     fn checkpoint_command_invalid_timestamp_returns_err() {
-        let args = Args::parse_from(&[
-            "harvester_batch",
-            "--set-briefing-since",
-            "not-a-timestamp",
-        ]);
+        let args =
+            Args::parse_from(&["harvester_batch", "--set-briefing-since", "not-a-timestamp"]);
         let err = args.checkpoint_command().unwrap_err();
         assert!(err.contains("Invalid timestamp format"));
         assert!(err.contains("RFC3339"));
