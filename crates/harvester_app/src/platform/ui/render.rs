@@ -272,7 +272,6 @@ impl TreeSnapshot {
     }
 }
 
-#[allow(clippy::vec_init_then_push)]
 pub fn render(
     window_id: WindowId,
     view: &AppViewModel,
