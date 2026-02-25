@@ -459,3 +459,12 @@ Evidence: `cargo test -p harvester_app prompt_lab_tab_advanced_layout_does_not_d
 Lessons Learned: UI refactors that relocate a feature can leave hidden gating booleans behind; duplicated “visibility” concepts must be re-derived from the new owner state (here: active tab) instead of preserved by coincidence.
 Prevention: When migrating a panel into a tab/surface, audit render and layout code for all legacy visibility predicates and add regression tests that intentionally keep old flags false while the new navigation state is active.
 Refs: crates/harvester_app/src/platform/ui/render.rs, prompt_lab_tab_advanced_layout_does_not_depend_on_legacy_visible_flag
+
+## 2026-02-25 - Generate Briefing now switches directly to Briefing tab
+Type: Bug Fix
+Context: After introducing right-pane tabs, clicking `Generate Briefing` left the UI on the default `Summary` tab even though the briefing workflow had started, which made the user manually switch tabs to follow briefing progress/output.
+Change: Updated `harvester_core` reducer handling for `Msg::GenerateBriefingClicked` to select `AppTab::Briefing` immediately before starting briefing orchestration. Extended the reducer test to assert the tab switch alongside the existing emitted effects and briefing phase transition.
+Evidence: `cargo test -p harvester_core generate_briefing_emits_load_effect -- --nocapture`
+Lessons Learned: Feature actions that previously relied on a single shared preview surface need explicit navigation updates after tabbed UI refactors; preserving old side effects alone is not enough to preserve user-visible flow.
+Prevention: For tabbed surfaces, add reducer tests that assert both domain state changes and `active_tab` transitions for primary workflow entry actions (e.g., Generate Briefing, Prompt Lab open).
+Refs: crates/harvester_core/src/update.rs, generate_briefing_emits_load_effect

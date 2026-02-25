@@ -675,6 +675,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 engine_info!("[briefing-triage] interleave blocked: triage in progress");
                 return (state, Vec::new());
             }
+            state.select_tab(AppTab::Briefing);
             state.request_briefing_orchestration();
             state.set_briefing(BriefingSession::new_waiting_for_triage(None));
             snapshot_briefing_coverage_window(&mut state);
@@ -2507,6 +2508,7 @@ mod tests {
             ]
         );
         assert_eq!(state.briefing().phase(), &BriefingPhase::WaitingForTriage);
+        assert_eq!(state.active_tab(), AppTab::Briefing);
     }
 
     #[test]
