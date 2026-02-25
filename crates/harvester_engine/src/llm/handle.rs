@@ -329,11 +329,11 @@ async fn handle_completion_concurrent(
 
     // Validate the model override (if any) before doing any further work.
     if let Some(ref override_model) = model_override {
-        if let Err(err) = validate_model_override(override_model, config, None) {
+        if let Err(validation_err) = validate_model_override(override_model, config, None) {
             quota_tracker.lock().unwrap().release_call();
             let _ = event_tx.send(LlmEvent::Completed {
                 request_id,
-                result: Err(err),
+                result: Err(validation_err.into_completion_error(override_model.clone())),
             });
             return;
         }
@@ -795,13 +795,13 @@ pub fn local_dispatchable_model_names(config: &LlmConfig) -> Vec<String> {
 /// 2. Model name must be in the allow-list built from config models and the pricing registry,
 ///    or in the optional extra_catalog parameter (for remote-discovered models).
 ///
-/// Returns `Err(LlmCompletionError::UnsupportedModel)` on validation failure.
-#[allow(clippy::result_large_err)]
+/// Returns a small validation error on failure; caller maps it into
+/// `LlmCompletionError::UnsupportedModel`.
 fn validate_model_override(
     override_model: &ModelId,
     config: &LlmConfig,
     extra_catalog: Option<&[ModelId]>,
-) -> Result<(), LlmCompletionError> {
+) -> Result<(), ModelOverrideValidationError> {
     let configured_provider = config.default_model.provider();
 
     // Check 1: provider must match.
@@ -812,13 +812,8 @@ fn validate_model_override(
             configured_provider,
             override_model.model_name()
         );
-        return Err(LlmCompletionError::UnsupportedModel {
-            model: override_model.clone(),
-            reason: format!(
-                "provider {:?} does not match configured provider {:?}",
-                override_model.provider(),
-                configured_provider
-            ),
+        return Err(ModelOverrideValidationError::WrongProvider {
+            configured_provider,
         });
     }
 
@@ -852,16 +847,33 @@ fn validate_model_override(
             override_model.model_name(),
             override_model.provider()
         );
-        return Err(LlmCompletionError::UnsupportedModel {
-            model: override_model.clone(),
-            reason: format!(
-                "model name '{}' is not in the known-model allow-list",
-                override_model.model_name()
-            ),
-        });
+        return Err(ModelOverrideValidationError::UnknownModelName);
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModelOverrideValidationError {
+    WrongProvider { configured_provider: ProviderKind },
+    UnknownModelName,
+}
+
+impl ModelOverrideValidationError {
+    fn into_completion_error(self, model: ModelId) -> LlmCompletionError {
+        let reason = match self {
+            Self::WrongProvider { configured_provider } => format!(
+                "provider {:?} does not match configured provider {:?}",
+                model.provider(),
+                configured_provider
+            ),
+            Self::UnknownModelName => format!(
+                "model name '{}' is not in the known-model allow-list",
+                model.model_name()
+            ),
+        };
+        LlmCompletionError::UnsupportedModel { model, reason }
+    }
 }
 
 fn fetch_prompt_template(
@@ -967,6 +979,7 @@ const LLM_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::llm::mock_provider::MockLlmProvider;
 
     /// Simulate the TemplateVars construction that handle_completion_concurrent does,
     /// then verify that extra_template_vars are NOT folded into {{context}}.
@@ -1027,5 +1040,55 @@ mod tests {
             "runtime shutdown exceeded expected timeout: {:?}",
             elapsed
         );
+    }
+
+    fn test_llm_config() -> LlmConfig {
+        let provider = Arc::new(MockLlmProvider::new());
+        let registry = Arc::new(RwLock::new(PromptRegistry::with_defaults()));
+        #[allow(deprecated)]
+        {
+            LlmConfig {
+                provider,
+                default_model: ModelId::new(ProviderKind::OpenAi, "gpt-4o-mini"),
+                triage_model: None,
+                summary_model: None,
+                briefing_model: None,
+                registry,
+                quotas: LlmQuotas::default(),
+                output_dir: PathBuf::from("."),
+                pricing: PricingRegistry::with_defaults(),
+                max_input_bytes: 100_000,
+                max_input_chars: 0,
+                timestamp_utc: Arc::new(|| "2026-01-01T00:00:00Z".to_string()),
+                session_id: "test-session".to_string(),
+                replay_cache: None,
+                max_concurrent_requests: 1,
+            }
+        }
+    }
+
+    #[test]
+    fn validate_model_override_rejects_wrong_provider_with_small_error_type() {
+        let config = test_llm_config();
+        let override_model = ModelId::new(ProviderKind::Anthropic, "claude-3-5-sonnet");
+
+        let err = validate_model_override(&override_model, &config, None).unwrap_err();
+
+        assert_eq!(
+            err,
+            ModelOverrideValidationError::WrongProvider {
+                configured_provider: ProviderKind::OpenAi
+            }
+        );
+    }
+
+    #[test]
+    fn validate_model_override_rejects_unknown_model_name_with_small_error_type() {
+        let config = test_llm_config();
+        let override_model = ModelId::new(ProviderKind::OpenAi, "definitely-unknown-model");
+
+        let err = validate_model_override(&override_model, &config, None).unwrap_err();
+
+        assert_eq!(err, ModelOverrideValidationError::UnknownModelName);
     }
 }
