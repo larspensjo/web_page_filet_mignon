@@ -182,6 +182,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let Some(url) = state.selected_job_url() else {
                 return (state, Vec::new());
             };
+            state.select_tab(crate::tabs::AppTab::Summary);
             let url_changed = state.prompt_lab().url_input() != url;
             if url_changed {
                 state.prompt_lab_mut().set_url_input(url.clone());
@@ -3460,7 +3461,14 @@ mod tests {
             Msg::InputChanged("https://example.com/article".to_string()),
         );
         let (state, _) = update(state, Msg::UrlsSubmitted);
+        let (state, _) = update(
+            state,
+            Msg::TabSelected {
+                tab: crate::tabs::AppTab::PromptLab,
+            },
+        );
         let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+        assert_eq!(state.active_tab(), crate::tabs::AppTab::Summary);
         assert_eq!(
             state.prompt_lab().url_input(),
             "https://example.com/article"
