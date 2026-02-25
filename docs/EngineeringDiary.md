@@ -414,3 +414,12 @@ Context: Time-limited briefing checkpoints filter article inputs, but the genera
 Change: `harvester_core` now snapshots a per-run briefing coverage window label from the active checkpoint, passes it to aggregate briefing requests as a `briefing_time_window` extra template variable, and includes the same label in briefing preview session metadata. `harvester_engine` adds aggregate briefing prompt `v6` (set active) so the coverage window is rendered and the model is instructed to mention it in the executive summary without mutating `v5` semantics.
 Evidence: `cargo test -p harvester_core aggregate_briefing_effect_includes_checkpoint_time_window_extra_var -- --nocapture`; `cargo test -p harvester_core briefing_format_preview_includes_coverage_window_when_present -- --nocapture`; `cargo test -p harvester_engine aggregate_briefing_active_version_is_v6 -- --nocapture`; `cargo test -p harvester_engine v6_system_template_contains_briefing_time_window_slot -- --nocapture`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
 Refs: crates/harvester_core/src/briefing.rs, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/prompts/briefing.rs, crates/harvester_engine/src/llm/prompts/mod.rs
+
+## 2026-02-25 - Preview tab ghost square from multiple Fill panels
+Type: Bug Fix
+Context: After adding preview tabs, a persistent small white square appeared at the top-left of the preview pane. The artifact remained even with no selected job, indicating a hidden control/layout issue rather than header text content.
+Change: Updated `harvester_app` tab-panel layout rules so only the active preview tab panel uses `DockStyle::Fill`; inactive tab panels now collapse with zero-height `Top` docking. Added a layout regression test that enforces exactly one Fill tab panel under `PANEL_PREVIEW`.
+Evidence: `cargo test -p harvester_app preview_tab_panels_use_single_fill_rule -- --nocapture`
+Lessons Learned: A UI layout workaround that depends on unsupported toolkit semantics (multiple sibling Fill docks with “collapsed” sizes) can fail as visual artifacts far from the feature code.
+Prevention: Encode toolkit layout constraints directly in app layout builders (one Fill child per parent) and add tests that assert structural layout invariants, not only resulting sizes.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, preview_tab_panels_use_single_fill_rule

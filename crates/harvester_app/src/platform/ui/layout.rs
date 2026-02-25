@@ -1042,6 +1042,16 @@ fn build_layout_rules(
     };
     let jobs_width = (left_panel_width - input_width).max(0);
 
+    // Helper: exactly one tab panel may use Fill under PANEL_PREVIEW because the current
+    // layout engine supports a single Fill child per parent. Inactive tabs are collapsed
+    // via a zero-height Top dock so they still receive a deterministic 0x0-ish layout pass.
+    let tab_dock = |tab: AppTab| -> DockStyle {
+        if active_tab == tab {
+            DockStyle::Fill
+        } else {
+            DockStyle::Top
+        }
+    };
     // Helper: returns fixed_size=Some(0) for collapsed tabs, None for the active tab.
     let tab_size = |tab: AppTab| -> Option<i32> {
         if active_tab == tab { None } else { Some(0) }
@@ -1196,7 +1206,7 @@ fn build_layout_rules(
         LayoutRule {
             control_id: PANEL_TAB_TRIAGE,
             parent_control_id: Some(PANEL_PREVIEW),
-            dock_style: DockStyle::Fill,
+            dock_style: tab_dock(AppTab::Triage),
             order: 2,
             fixed_size: tab_size(AppTab::Triage),
             margin: (0, 0, 0, 0),
@@ -1212,7 +1222,7 @@ fn build_layout_rules(
         LayoutRule {
             control_id: PANEL_TAB_SUMMARY,
             parent_control_id: Some(PANEL_PREVIEW),
-            dock_style: DockStyle::Fill,
+            dock_style: tab_dock(AppTab::Summary),
             order: 3,
             fixed_size: tab_size(AppTab::Summary),
             margin: (0, 0, 0, 0),
@@ -1228,7 +1238,7 @@ fn build_layout_rules(
         LayoutRule {
             control_id: PANEL_TAB_BRIEFING,
             parent_control_id: Some(PANEL_PREVIEW),
-            dock_style: DockStyle::Fill,
+            dock_style: tab_dock(AppTab::Briefing),
             order: 4,
             fixed_size: tab_size(AppTab::Briefing),
             margin: (0, 0, 0, 0),
@@ -1244,7 +1254,7 @@ fn build_layout_rules(
         LayoutRule {
             control_id: PANEL_TAB_TRENDS,
             parent_control_id: Some(PANEL_PREVIEW),
-            dock_style: DockStyle::Fill,
+            dock_style: tab_dock(AppTab::Trends),
             order: 5,
             fixed_size: tab_size(AppTab::Trends),
             margin: (0, 0, 0, 0),
@@ -1300,7 +1310,7 @@ fn build_layout_rules(
         LayoutRule {
             control_id: PANEL_TAB_PROMPT_LAB,
             parent_control_id: Some(PANEL_PREVIEW),
-            dock_style: DockStyle::Fill,
+            dock_style: tab_dock(AppTab::PromptLab),
             order: 6,
             fixed_size: tab_size(AppTab::PromptLab),
             margin: (0, 0, 0, 0),
@@ -2402,6 +2412,51 @@ mod tests {
             let tab = rules.iter().find(|r| r.control_id == control_id).expect("tab panel rule");
             assert_eq!(tab.fixed_size, Some(0), "tab {:?} should be collapsed", control_id);
         }
+    }
+
+    #[test]
+    fn preview_tab_panels_use_single_fill_rule() {
+        let cmd = build_layout_command(
+            WindowId::new(31),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                active_tab: AppTab::Summary,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        let tab_panel_ids = [
+            PANEL_TAB_TRIAGE,
+            PANEL_TAB_SUMMARY,
+            PANEL_TAB_BRIEFING,
+            PANEL_TAB_TRENDS,
+            PANEL_TAB_PROMPT_LAB,
+        ];
+
+        let fill_count = rules
+            .iter()
+            .filter(|r| {
+                r.parent_control_id == Some(PANEL_PREVIEW)
+                    && tab_panel_ids.contains(&r.control_id)
+                    && r.dock_style == DockStyle::Fill
+            })
+            .count();
+        assert_eq!(
+            fill_count, 1,
+            "PANEL_PREVIEW tab panels must have exactly one Fill child; additional tabs should be collapsed with zero-size non-Fill rules"
+        );
     }
 
     #[test]
