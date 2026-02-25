@@ -1,5 +1,6 @@
 use crate::summary_cache::SummaryCacheKey;
 use crate::triage::{ArticleTriageState, TriageSession};
+use harvester_engine::llm::SummaryEntities;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write;
 use std::hash::{Hash, Hasher};
@@ -34,6 +35,8 @@ pub struct ArticleSummaryResult {
     pub key_points: Vec<String>,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Structured entity lists extracted by V4+ summary prompt. Empty for V3 cache hits.
+    pub entities: SummaryEntities,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +45,7 @@ pub struct BriefingArticle {
     pub source_title: Option<String>,
     pub prepared_text: String,
     pub content_hash: String,
+    pub fetched_utc: Option<String>,
     pub summary_state: ArticleSummaryState,
     pub cache_key_snapshot: Option<SummaryCacheKey>,
 }
@@ -183,6 +187,8 @@ pub struct LoadedArticle {
     pub source_title: Option<String>,
     pub prepared_text: String,
     pub content_hash: String,
+    /// RFC3339 UTC timestamp from the article's frontmatter; `None` if absent or unparseable.
+    pub fetched_utc: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,6 +325,7 @@ impl BriefingSession {
                 source_title: article.source_title,
                 prepared_text: article.prepared_text,
                 content_hash: article.content_hash,
+                fetched_utc: article.fetched_utc,
                 summary_state: ArticleSummaryState::Pending,
                 cache_key_snapshot: None,
             })
@@ -585,6 +592,7 @@ mod tests {
             key_points: vec!["Point 1".to_string()],
             input_tokens: 10,
             output_tokens: 5,
+            entities: Default::default(),
         }
     }
 
@@ -595,6 +603,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
                 summary_state: state,
                 cache_key_snapshot: None,
             }],
@@ -659,12 +668,14 @@ mod tests {
                     source_title: None,
                     prepared_text: "Article A".to_string(),
                     content_hash: "hash-a".to_string(),
+                    fetched_utc: None,
                 },
                 LoadedArticle {
                     url: "https://example.com/b".to_string(),
                     source_title: None,
                     prepared_text: "Article B".to_string(),
                     content_hash: "hash-b".to_string(),
+                    fetched_utc: None,
                 },
             ],
             "collection".to_string(),
@@ -744,6 +755,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -792,6 +804,7 @@ mod tests {
             source_title: None,
             prepared_text: "text".to_string(),
             content_hash: hash.to_string(),
+            fetched_utc: None,
         }
     }
 

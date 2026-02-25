@@ -3,6 +3,7 @@ use std::borrow::ToOwned;
 use std::path::PathBuf;
 
 use crate::state::TriageCacheLookupResult;
+use crate::tabs::AppTab;
 use crate::{
     briefing::{
         ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingThemeResult,
@@ -181,6 +182,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let Some(url) = state.selected_job_url() else {
                 return (state, Vec::new());
             };
+            state.select_tab(crate::tabs::AppTab::Summary);
             let url_changed = state.prompt_lab().url_input() != url;
             if url_changed {
                 state.prompt_lab_mut().set_url_input(url.clone());
@@ -304,6 +306,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 key_points: summary.key_points,
                                 input_tokens: *input_tokens,
                                 output_tokens: *output_tokens,
+                                entities: summary.entities,
                             };
 
                             // Clone data needed for cache key before mutable operations
@@ -360,6 +363,17 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                         );
                                     }
 
+                                    let article_entities = summary_result.entities.clone();
+                                    let article_url = state
+                                        .briefing()
+                                        .articles()[article_idx]
+                                        .url
+                                        .clone();
+                                    let article_fetched_utc = state
+                                        .briefing()
+                                        .articles()[article_idx]
+                                        .fetched_utc
+                                        .clone();
                                     state.store_summary_result(
                                         store_key.clone(),
                                         summary_result,
@@ -379,6 +393,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                         store_key.context_hash,
                                         short_hash(&content_hash),
                                     );
+                                    effects.push(Effect::UpsertEntityIndexEntry {
+                                        url: article_url,
+                                        fetched_utc: article_fetched_utc,
+                                        content_hash: Some(content_hash.clone()),
+                                        summary_entities: Some(article_entities),
+                                        themes: None,
+                                    });
                                 }
                                 Err(err) => {
                                     engine_warn!(
@@ -425,6 +446,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         Ok(triage) => {
                             let content_hash =
                                 state.triage().articles()[article_idx].content_hash.clone();
+                            let url = state.triage().articles()[article_idx].url.clone();
+                            let fetched_utc =
+                                state.triage().articles()[article_idx].fetched_utc.clone();
                             let result = ArticleTriageResult {
                                 category: triage.category,
                                 priority: triage.priority.value(),
@@ -433,10 +457,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 input_tokens: *input_tokens,
                                 output_tokens: *output_tokens,
                             };
+                            let themes = result.tags.clone();
                             state
                                 .triage_mut()
                                 .complete_article(article_idx, result.clone());
                             state.store_triage_result(&content_hash, result);
+                            effects.push(Effect::UpsertEntityIndexEntry {
+                                url,
+                                fetched_utc,
+                                content_hash: Some(content_hash),
+                                summary_entities: None,
+                                themes: Some(themes),
+                            });
 
                             // Refresh preview if this article is currently selected
                             state.refresh_selected_preview();
@@ -643,6 +675,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 engine_info!("[briefing-triage] interleave blocked: triage in progress");
                 return (state, Vec::new());
             }
+            state.select_tab(AppTab::Briefing);
             state.request_briefing_orchestration();
             state.set_briefing(BriefingSession::new_waiting_for_triage(None));
             snapshot_briefing_coverage_window(&mut state);
@@ -936,11 +969,26 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.end_poll();
             Vec::new()
         }
+        Msg::TabSelected { tab } => {
+            state.select_tab(tab);
+            if tab == AppTab::Trends {
+                // Stub in Slice 1; full entity index loading in Slice 3.
+                vec![Effect::LoadEntityIndex]
+            } else {
+                Vec::new()
+            }
+        }
+        Msg::TrendCategorySelected { category } => {
+            state.set_active_trend_category(category);
+            Vec::new()
+        }
         Msg::PromptLabOpenRequested => {
+            // Bridge: selecting the PromptLab tab is now the canonical open action.
             state.open_prompt_lab();
             Vec::new()
         }
         Msg::PromptLabCloseRequested => {
+            // Bridge: close selects the Summary tab as the fallback.
             state.close_prompt_lab();
             Vec::new()
         }
@@ -1575,6 +1623,24 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             Vec::new()
         }
+        Msg::EntityIndexLoaded { index } => {
+            engine_info!("[entity-index] loaded {} entries", index.entries.len());
+            state.set_entity_index(index, 13, 10);
+            Vec::new()
+        }
+        Msg::EntityIndexLoadFailed { reason } => {
+            engine_warn!("[entity-index] load failed: {reason}; triggering rebuild");
+            vec![Effect::RebuildEntityIndex]
+        }
+        Msg::EntityIndexRebuilt { index } => {
+            engine_info!("[entity-index] rebuilt {} entries", index.entries.len());
+            state.set_entity_index(index, 13, 10);
+            Vec::new()
+        }
+        Msg::EntityIndexRebuildFailed { reason } => {
+            engine_warn!("[entity-index] rebuild failed: {reason}");
+            Vec::new()
+        }
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 
@@ -1739,12 +1805,22 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
 
         match state.try_reuse_triage(&content_hash) {
             TriageCacheLookupResult::Hit(cached) => {
+                let themes = cached.tags.clone();
+                let url = state.triage().articles()[next_idx].url.clone();
+                let fetched_utc = state.triage().articles()[next_idx].fetched_utc.clone();
                 let result = cached.clone();
                 state.record_triage_cache_hit();
                 engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
                 state.triage_mut().complete_article(next_idx, result);
                 state.refresh_selected_preview();
                 state.mark_dirty();
+                effects.push(Effect::UpsertEntityIndexEntry {
+                    url,
+                    fetched_utc,
+                    content_hash: Some(content_hash.clone()),
+                    summary_entities: None,
+                    themes: Some(themes),
+                });
                 continue;
             }
             TriageCacheLookupResult::Miss => {
@@ -1938,6 +2014,9 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     .briefing_mut()
                     .set_article_cache_key(next_idx, Some(key.clone()));
                 if let Some(cached_result) = state.try_reuse_summary(&key) {
+                    let article_entities = cached_result.entities.clone();
+                    let url = state.briefing().articles()[next_idx].url.clone();
+                    let fetched_utc = state.briefing().articles()[next_idx].fetched_utc.clone();
                     let result = cached_result.clone();
                     state.record_summary_cache_hit();
                     engine_info!(
@@ -1952,6 +2031,13 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     state.briefing_mut().set_article_cache_key(next_idx, None);
                     state.refresh_selected_preview();
                     state.mark_dirty();
+                    effects.push(Effect::UpsertEntityIndexEntry {
+                        url,
+                        fetched_utc,
+                        content_hash: Some(content_hash.clone()),
+                        summary_entities: Some(article_entities),
+                        themes: None,
+                    });
                     // Cache hit: slot not consumed, continue filling.
                     continue;
                 }
@@ -2290,12 +2376,14 @@ mod tests {
                 source_title: Some("Article A".to_string()),
                 prepared_text: long_text("Article A text"),
                 content_hash: "hash-a".to_string(),
+                fetched_utc: None,
             },
             LoadedArticle {
                 url: "https://example.com/b".to_string(),
                 source_title: Some("Article B".to_string()),
                 prepared_text: long_text("Article B text"),
                 content_hash: "hash-b".to_string(),
+                fetched_utc: None,
             },
         ];
         (articles, "Collection text".to_string())
@@ -2312,6 +2400,7 @@ mod tests {
                     .join(" ")
             ),
             content_hash: "hash-a".to_string(),
+            fetched_utc: None,
         }];
         (articles, "Collection text".to_string())
     }
@@ -2419,6 +2508,7 @@ mod tests {
             ]
         );
         assert_eq!(state.briefing().phase(), &BriefingPhase::WaitingForTriage);
+        assert_eq!(state.active_tab(), AppTab::Briefing);
     }
 
     #[test]
@@ -2489,9 +2579,11 @@ mod tests {
             },
         );
 
-        assert_eq!(effects.len(), 1);
+        // effects[0] = UpsertEntityIndexEntry for Article A
+        // effects[1] = RequestLlmCompletion for Article B
+        assert_eq!(effects.len(), 2);
         assert!(matches!(
-            &effects[0],
+            &effects[1],
             Effect::RequestLlmCompletion {
                 request_id: 4,
                 prompt_id: PromptId::ArticleSummary,
@@ -2519,8 +2611,10 @@ mod tests {
             },
         );
 
-        assert_eq!(effects.len(), 1);
-        match &effects[0] {
+        // effects[0] = UpsertEntityIndexEntry for Article B
+        // effects[1] = RequestLlmCompletion for AggregateBriefing
+        assert_eq!(effects.len(), 2);
+        match &effects[1] {
             Effect::RequestLlmCompletion {
                 request_id,
                 prompt_id,
@@ -2640,8 +2734,10 @@ mod tests {
                 metadata: None,
             },
         );
-        assert_eq!(effects.len(), 1);
-        match &effects[0] {
+        // effects[0] = UpsertEntityIndexEntry for Article A
+        // effects[1] = RequestLlmCompletion for AggregateBriefing
+        assert_eq!(effects.len(), 2);
+        match &effects[1] {
             Effect::RequestLlmCompletion {
                 request_id,
                 prompt_id,
@@ -2716,9 +2812,11 @@ mod tests {
             },
         );
 
-        assert_eq!(effects.len(), 1);
+        // effects[0] = UpsertEntityIndexEntry (summary cache hit for Article A)
+        // effects[1] = RequestLlmCompletion for AggregateBriefing
+        assert_eq!(effects.len(), 2);
         assert!(matches!(
-            &effects[0],
+            &effects[1],
             Effect::RequestLlmCompletion {
                 request_id: 4,
                 prompt_id: PromptId::AggregateBriefing,
@@ -2768,6 +2866,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -2781,6 +2880,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         state.set_briefing(briefing);
@@ -2837,6 +2937,7 @@ mod tests {
                     .collect::<Vec<_>>()
                     .join(" "),
                 content_hash: format!("hash-{i}"),
+                fetched_utc: None,
             })
             .collect()
     }
@@ -3317,6 +3418,7 @@ mod tests {
             source_title: Some("Example".to_string()),
             prepared_text: "selected article prepared text".to_string(),
             content_hash: "hash-selected".to_string(),
+            fetched_utc: None,
         }]);
         state.triage_mut().transition_to_triaging();
         state.triage_mut().complete_article(
@@ -3361,7 +3463,14 @@ mod tests {
             Msg::InputChanged("https://example.com/article".to_string()),
         );
         let (state, _) = update(state, Msg::UrlsSubmitted);
+        let (state, _) = update(
+            state,
+            Msg::TabSelected {
+                tab: crate::tabs::AppTab::PromptLab,
+            },
+        );
         let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
+        assert_eq!(state.active_tab(), crate::tabs::AppTab::Summary);
         assert_eq!(
             state.prompt_lab().url_input(),
             "https://example.com/article"
@@ -4353,5 +4462,65 @@ mod tests {
             }
             _ => panic!("no AggregateBriefing RequestLlmCompletion effect emitted"),
         }
+    }
+
+    // ── Entity index / trends reducer tests ──────────────────────────────────
+
+    fn make_entity_index_with_company(url: &str, company: &str, fetched_utc: &str) -> crate::entity_index::EntityIndex {
+        use std::collections::BTreeMap;
+        use crate::entity_index::{EntityIndex, EntityIndexEntry};
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            url.to_string(),
+            EntityIndexEntry {
+                fetched_utc: Some(fetched_utc.to_string()),
+                content_hash: Some("abc123".to_string()),
+                companies: vec![company.to_string()],
+                ..EntityIndexEntry::default()
+            },
+        );
+        EntityIndex { schema_version: 1, entries }
+    }
+
+    #[test]
+    fn entity_index_loaded_populates_trend_data() {
+        init_logging();
+        let state = AppState::default();
+        let index = make_entity_index_with_company(
+            "https://example.com/a",
+            "Nvidia",
+            "2026-02-01T00:00:00Z",
+        );
+        let (state, effects) = update(state, Msg::EntityIndexLoaded { index });
+        assert!(effects.is_empty());
+        let trend_data = state.entity_trend_data().expect("entity_trend_data should be set");
+        assert_eq!(trend_data.companies.weeks.len(), 13, "should have 13 week buckets");
+    }
+
+    #[test]
+    fn entity_index_load_failed_triggers_rebuild() {
+        init_logging();
+        let state = AppState::default();
+        let (_, effects) = update(
+            state,
+            Msg::EntityIndexLoadFailed { reason: "file not found".to_string() },
+        );
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::RebuildEntityIndex)),
+            "EntityIndexLoadFailed should emit Effect::RebuildEntityIndex; got: {effects:?}"
+        );
+    }
+
+    #[test]
+    fn trend_category_selected_updates_active_category_no_effects() {
+        init_logging();
+        let state = AppState::default();
+        assert_eq!(state.active_trend_category(), crate::tabs::TrendCategory::Companies);
+        let (state, effects) = update(
+            state,
+            Msg::TrendCategorySelected { category: crate::tabs::TrendCategory::Technologies },
+        );
+        assert!(effects.is_empty(), "TrendCategorySelected should emit no effects");
+        assert_eq!(state.active_trend_category(), crate::tabs::TrendCategory::Technologies);
     }
 }

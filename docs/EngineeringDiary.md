@@ -414,3 +414,66 @@ Context: Time-limited briefing checkpoints filter article inputs, but the genera
 Change: `harvester_core` now snapshots a per-run briefing coverage window label from the active checkpoint, passes it to aggregate briefing requests as a `briefing_time_window` extra template variable, and includes the same label in briefing preview session metadata. `harvester_engine` adds aggregate briefing prompt `v6` (set active) so the coverage window is rendered and the model is instructed to mention it in the executive summary without mutating `v5` semantics.
 Evidence: `cargo test -p harvester_core aggregate_briefing_effect_includes_checkpoint_time_window_extra_var -- --nocapture`; `cargo test -p harvester_core briefing_format_preview_includes_coverage_window_when_present -- --nocapture`; `cargo test -p harvester_engine aggregate_briefing_active_version_is_v6 -- --nocapture`; `cargo test -p harvester_engine v6_system_template_contains_briefing_time_window_slot -- --nocapture`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
 Refs: crates/harvester_core/src/briefing.rs, crates/harvester_core/src/update.rs, crates/harvester_engine/src/llm/prompts/briefing.rs, crates/harvester_engine/src/llm/prompts/mod.rs
+
+## 2026-02-25 - Preview tab ghost square from multiple Fill panels
+Type: Bug Fix
+Context: After adding preview tabs, a persistent small white square appeared at the top-left of the preview pane. The artifact remained even with no selected job, indicating a hidden control/layout issue rather than header text content.
+Change: Updated `harvester_app` tab-panel layout rules so only the active preview tab panel uses `DockStyle::Fill`; inactive tab panels now collapse with zero-height `Top` docking. Added a layout regression test that enforces exactly one Fill tab panel under `PANEL_PREVIEW`.
+Evidence: `cargo test -p harvester_app preview_tab_panels_use_single_fill_rule -- --nocapture`
+Lessons Learned: A UI layout workaround that depends on unsupported toolkit semantics (multiple sibling Fill docks with “collapsed” sizes) can fail as visual artifacts far from the feature code.
+Prevention: Encode toolkit layout constraints directly in app layout builders (one Fill child per parent) and add tests that assert structural layout invariants, not only resulting sizes.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, preview_tab_panels_use_single_fill_rule
+
+## 2026-02-25 - CommanDuctUI hard-fails invalid multi-Fill layouts
+Type: Bug Fix
+Context: The preview-tab artifact exposed that `CommanDuctUI` accepted unsupported layouts with multiple sibling `DockStyle::Fill` rules, logged a warning, and proceeded with degraded rendering instead of failing at the boundary.
+Change: `commanductui` now validates `DefineLayout` rules and returns a hard error when any parent has more than one `DockStyle::Fill` child. Added unit tests for both rejection and valid one-Fill-per-parent layouts, and released the submodule as `0.4.1`.
+Evidence: `cargo test --manifest-path src/CommanDuctUI/Cargo.toml define_layout_validation -- --nocapture`
+Lessons Learned: Silent degradation in foundational UI infrastructure obscures the true fault domain and turns contract violations into expensive visual debugging.
+Prevention: Treat layout rule sets as validated input contracts at `DefineLayout` boundaries and prefer explicit errors over best-effort behavior for unsupported docking combinations.
+Refs: src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/command_executor.rs, src/CommanDuctUI/Cargo.toml, src/CommanDuctUI/CHANGELOG.md
+
+## 2026-02-25 - Briefing loader URL alias matching for redirected/mobile variants
+Type: Bug Fix
+Context: `engine.log` showed repeated `[briefing-loader] selected url missing from corpus` warnings during startup because persisted briefing selections used URL variants (e.g., `www`/`m`/`edition`, `http` vs `https`, query-tagged URLs, and Cisco newsroom path variants) that did not exactly match archived markdown frontmatter URLs.
+Change: Hardened `harvester_engine` briefing URL lookup alias generation to match across host-prefix variants (`www.`, `eu.`, `m.`, `edition.`), `http`/`https` scheme variants, query/no-query forms, and the Cisco `newsroom.cisco.com/content/r/...` to `/c/r/...` path shape. Added integration tests covering each matching case and cleaned an unrelated unused import warning in `harvester_io`.
+Evidence: `cargo test -p harvester_engine --test briefing_loader_integration filtered_loader_matches`; `cargo build`
+Lessons Learned: URL equality in cross-stage pipelines is a contract boundary, not a string-compare detail; if one stage stores fetched/canonicalized URLs while another stores selected/source URLs, alias matching must explicitly model common transformations.
+Prevention: Keep URL-lookup normalization/aliasing centralized in the briefing loader and add regression tests for every new real-world mismatch observed in logs before adjusting warning policy.
+Refs: crates/harvester_engine/src/briefing.rs, crates/harvester_engine/tests/briefing_loader_integration.rs, crates/harvester_io/src/effect_runner.rs
+
+## 2026-02-25 - Block interstitial pages from entering the article archive
+Type: Bug Fix
+Context: Some fetches were succeeding technically but landing on consent/captcha/interstitial pages (e.g., Yahoo consent and site captcha challenge endpoints). Those pages were exported as markdown and later caused briefing-loader corpus mismatches and noisy warnings when selected article URLs no longer matched archived interstitial URLs.
+Change: Added a pure blocker-page classifier in `harvester_engine` (URL and narrow content heuristics) and invoked it in `run_job` before export so interstitial pages fail with `FailureKind::BlockedContent` instead of being written to the archive or persisted as completed jobs. Added unit tests for Yahoo consent, captcha challenge URLs, content-based verification pages, and a false-positive regression case.
+Evidence: `cargo test -p harvester_engine blocker_page -- --nocapture`; `cargo build`
+Lessons Learned: “Successful HTTP fetch” is not the same as “valid article acquisition”; pipelines need an explicit post-fetch content validity gate before persistence, especially when redirects can land on interstitial products.
+Prevention: Keep interstitial detection as a centralized pure classifier with real-world regression fixtures and extend it from observed logs before adding ad hoc per-site exceptions downstream.
+Refs: crates/harvester_engine/src/blocker_page.rs, crates/harvester_engine/src/engine.rs, crates/harvester_engine/src/types.rs
+
+## 2026-02-25 - Prompt Lab advanced tab mode ignored legacy visibility flag
+Type: Bug Fix
+Context: After moving Prompt Lab into its own right-pane tab, clicking `Advanced` selected the radio button but did not reveal advanced sections because the layout still gated Prompt Lab visibility on the old left-panel `prompt_lab.visible` flag.
+Change: Updated `harvester_app` Prompt Lab layout rendering to treat Prompt Lab as visible when the active tab is `PromptLab`, independent of the legacy visibility flag. Added a render regression test that asserts advanced layout rows expand when the Prompt Lab tab is active even if `prompt_lab.visible` is false.
+Evidence: `cargo test -p harvester_app prompt_lab_tab_advanced_layout_does_not_depend_on_legacy_visible_flag -- --nocapture`
+Lessons Learned: UI refactors that relocate a feature can leave hidden gating booleans behind; duplicated “visibility” concepts must be re-derived from the new owner state (here: active tab) instead of preserved by coincidence.
+Prevention: When migrating a panel into a tab/surface, audit render and layout code for all legacy visibility predicates and add regression tests that intentionally keep old flags false while the new navigation state is active.
+Refs: crates/harvester_app/src/platform/ui/render.rs, prompt_lab_tab_advanced_layout_does_not_depend_on_legacy_visible_flag
+
+## 2026-02-25 - Generate Briefing now switches directly to Briefing tab
+Type: Bug Fix
+Context: After introducing right-pane tabs, clicking `Generate Briefing` left the UI on the default `Summary` tab even though the briefing workflow had started, which made the user manually switch tabs to follow briefing progress/output.
+Change: Updated `harvester_core` reducer handling for `Msg::GenerateBriefingClicked` to select `AppTab::Briefing` immediately before starting briefing orchestration. Extended the reducer test to assert the tab switch alongside the existing emitted effects and briefing phase transition.
+Evidence: `cargo test -p harvester_core generate_briefing_emits_load_effect -- --nocapture`
+Lessons Learned: Feature actions that previously relied on a single shared preview surface need explicit navigation updates after tabbed UI refactors; preserving old side effects alone is not enough to preserve user-visible flow.
+Prevention: For tabbed surfaces, add reducer tests that assert both domain state changes and `active_tab` transitions for primary workflow entry actions (e.g., Generate Briefing, Prompt Lab open).
+Refs: crates/harvester_core/src/update.rs, generate_briefing_emits_load_effect
+
+## 2026-02-25 - Summary tab no longer falls back to briefing/shared preview content
+Type: Bug Fix
+Context: After switching to the Briefing tab during briefing generation, returning to the Summary tab with no selected article could display briefing output because Summary still fell back to the legacy shared `preview_text` content path.
+Change: Updated `harvester_app` summary-tab rendering to use only `right_pane.summary_markdown` and show an explicit empty-state message when no article is selected. Added a render regression test that prevents briefing text from leaking into the Summary viewer in the no-selection case.
+Evidence: `cargo test -p harvester_app summary_tab_without_selected_article_shows_empty_state_not_briefing_preview -- --nocapture`
+Lessons Learned: Tab migrations require strict ownership of displayed content; retaining generic fallback content paths inside tab renderers reintroduces cross-tab leakage when selection state is absent.
+Prevention: For each tab renderer, define a tab-specific empty state and add tests that set conflicting legacy preview fields to ensure tab content is sourced only from the tab’s view model fields.
+Refs: crates/harvester_app/src/platform/ui/render.rs, summary_tab_without_selected_article_shows_empty_state_not_briefing_preview

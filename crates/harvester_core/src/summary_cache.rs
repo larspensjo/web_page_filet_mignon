@@ -222,6 +222,7 @@ mod tests {
             key_points: vec!["Point 1".to_string()],
             input_tokens: 100,
             output_tokens: 50,
+            entities: Default::default(),
         };
         let entry = SummaryCacheEntry {
             result: result.clone(),
@@ -261,6 +262,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
             created_at_utc: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -271,6 +273,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 20,
                 output_tokens: 10,
+                entities: Default::default(),
             },
             created_at_utc: "2026-01-01T00:00:01Z".to_string(),
         };
@@ -418,6 +421,7 @@ mod tests {
             key_points: vec![],
             input_tokens: 10,
             output_tokens: 5,
+            entities: Default::default(),
         };
 
         // Insert entries with different timestamps
@@ -469,6 +473,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
             created_at_utc: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -495,6 +500,7 @@ mod tests {
             key_points: vec![],
             input_tokens: 10,
             output_tokens: 5,
+            entities: Default::default(),
         };
 
         let key_old = SummaryCacheKey {
@@ -541,6 +547,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
             created_at_utc: "2026-01-01T00:00:00Z".to_string(),
         };
@@ -570,6 +577,7 @@ mod tests {
             key_points: vec![],
             input_tokens: 10,
             output_tokens: 5,
+            entities: Default::default(),
         };
 
         // Insert DEFAULT_CACHE_CAPACITY + 10 entries with sequential timestamps
@@ -624,6 +632,7 @@ mod tests {
             key_points: vec![],
             input_tokens: 10,
             output_tokens: 5,
+            entities: Default::default(),
         };
 
         // Insert old entry (2 hours old)

@@ -2,8 +2,9 @@ use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState, LlmModelUsageView,
-    PreviewHeaderView, PromptLabStage, SessionState, Stage, DEFAULT_JOBS_PANEL_WIDTH,
+    AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState,
+    LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendCategory,
+    TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
@@ -19,6 +20,8 @@ use std::collections::HashMap;
 const MAX_VIEWER_CHARS: usize = 64 * 1024;
 #[allow(dead_code)]
 const VIEWER_TRUNCATE_MARKER: &str = "[display truncated]";
+const SUMMARY_EMPTY_STATE_MARKDOWN: &str =
+    "No article selected\n\nSelect a job/article from the list to view its summary.";
 /// Maximum number of models shown individually in the status bar before collapsing.
 const MAX_STATUS_BAR_MODELS: usize = 2;
 
@@ -147,6 +150,11 @@ pub struct TreeRenderState {
     prev_prompt_lab_section_run_details_checked: Option<bool>,
     prev_prompt_lab_model_catalog: Option<Vec<ModelId>>,
     prev_prompt_lab_selected_model: Option<String>,
+    // Tab bar state
+    prev_active_tab: AppTab,
+    prev_triage_text: Option<String>,
+    prev_briefing_text: Option<String>,
+    prev_trends_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -217,6 +225,10 @@ impl Default for TreeRenderState {
             prev_prompt_lab_section_run_details_checked: None,
             prev_prompt_lab_model_catalog: None,
             prev_prompt_lab_selected_model: None,
+            prev_active_tab: AppTab::Summary,
+            prev_triage_text: None,
+            prev_briefing_text: None,
+            prev_trends_text: None,
         }
     }
 }
@@ -279,6 +291,7 @@ pub fn render(
 ) -> Vec<PlatformCommand> {
     let mut cmds = Vec::new();
     render_layout_section(window_id, view, tree_state, &mut cmds);
+    render_tab_bar_section(window_id, view, tree_state, &mut cmds);
     render_status_section(window_id, view, tree_state, &mut cmds);
     render_token_progress_section(window_id, view, tree_state, &mut cmds);
     render_main_controls_section(window_id, view, tree_state, &mut cmds);
@@ -309,9 +322,11 @@ fn render_layout_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
+    let prompt_lab_tab_visible = view.right_pane.active_tab == AppTab::PromptLab;
     let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
         || view.input_panel_visible != tree_state.prev_input_panel_visible
-        || view.prompt_lab.visible != tree_state.prev_prompt_lab_visible
+        || view.right_pane.active_tab != tree_state.prev_active_tab
+        || prompt_lab_tab_visible != tree_state.prev_prompt_lab_visible
         || view.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
         || view.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
         || view.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
@@ -322,19 +337,22 @@ fn render_layout_section(
         return;
     }
     engine_debug!(
-        "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}",
+        "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}, active_tab: {:?} -> {:?}",
         tree_state.prev_left_panel_width,
         view.left_panel_width,
         tree_state.prev_input_panel_visible,
-        view.input_panel_visible
+        view.input_panel_visible,
+        tree_state.prev_active_tab,
+        view.right_pane.active_tab,
     );
     cmds.push(build_layout_command(
         window_id,
         LayoutConfig {
             left_panel_width: view.left_panel_width,
             input_panel_visible: view.input_panel_visible,
+            active_tab: view.right_pane.active_tab,
             prompt_lab: PromptLabLayoutConfig {
-                visible: view.prompt_lab.visible,
+                visible: prompt_lab_tab_visible,
                 advanced_mode: view.prompt_lab.advanced_mode,
                 compare_section_open: view.prompt_lab.compare_section_open,
                 context_section_open: view.prompt_lab.context_section_open,
@@ -344,18 +362,41 @@ fn render_layout_section(
             },
         },
     ));
-    if view.prompt_lab.visible && !tree_state.prev_prompt_lab_visible {
+    if prompt_lab_tab_visible && !tree_state.prev_prompt_lab_visible {
         tree_state.prev_prompt_lab_model_catalog = None;
         tree_state.prev_prompt_lab_selected_model = None;
     }
     tree_state.prev_left_panel_width = view.left_panel_width;
     tree_state.prev_input_panel_visible = view.input_panel_visible;
-    tree_state.prev_prompt_lab_visible = view.prompt_lab.visible;
+    tree_state.prev_active_tab = view.right_pane.active_tab;
+    tree_state.prev_prompt_lab_visible = prompt_lab_tab_visible;
     tree_state.prev_prompt_lab_advanced_mode = view.prompt_lab.advanced_mode;
     tree_state.prev_prompt_lab_compare_section_open = view.prompt_lab.compare_section_open;
     tree_state.prev_prompt_lab_context_section_open = view.prompt_lab.context_section_open;
     tree_state.prev_prompt_lab_template_section_open = view.prompt_lab.template_section_open;
     tree_state.prev_prompt_lab_template_editor_open = view.prompt_lab.template_editor_open;
+}
+
+fn render_tab_bar_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    _tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    let active = view.right_pane.active_tab;
+    for (control_id, tab) in [
+        (BUTTON_TAB_TRIAGE, AppTab::Triage),
+        (BUTTON_TAB_SUMMARY, AppTab::Summary),
+        (BUTTON_TAB_BRIEFING, AppTab::Briefing),
+        (BUTTON_TAB_TRENDS, AppTab::Trends),
+        (BUTTON_TAB_PROMPT_LAB, AppTab::PromptLab),
+    ] {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            window_id,
+            control_id,
+            checked: active == tab,
+        });
+    }
 }
 
 fn render_status_section(
@@ -993,14 +1034,19 @@ fn render_preview_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
-    let (preview_markdown, preview_header_text) = prompt_lab_preview_override(view);
-    if tree_state.prev_preview_text.as_deref() != Some(preview_markdown) {
-        let (truncated_markdown, was_truncated) = truncate_markdown_for_preview(preview_markdown);
+    // Summary tab: only show the selected article summary; never fall back to shared preview text.
+    let summary_markdown = view
+        .right_pane
+        .summary_markdown
+        .as_deref()
+        .unwrap_or(SUMMARY_EMPTY_STATE_MARKDOWN);
+    if tree_state.prev_preview_text.as_deref() != Some(summary_markdown) {
+        let (truncated_markdown, was_truncated) = truncate_markdown_for_preview(summary_markdown);
         let mut rtf_text = convert_markdown_to_rtf(&truncated_markdown);
         if was_truncated {
             engine_warn!(
-                "[preview] markdown preview truncated from {} chars to {} chars",
-                preview_markdown.chars().count(),
+                "[preview] summary markdown truncated from {} chars to {} chars",
+                summary_markdown.chars().count(),
                 truncated_markdown.chars().count()
             );
             if rtf_text.ends_with('}') {
@@ -1015,15 +1061,72 @@ fn render_preview_section(
             control_id: VIEWER_PREVIEW,
             rtf_text,
         });
-        tree_state.prev_preview_text = Some(preview_markdown.to_string());
+        tree_state.prev_preview_text = Some(summary_markdown.to_string());
     }
 
-    let header_text = preview_header_text.unwrap_or_else(|| {
-        view.preview_header
-            .as_ref()
-            .map(format_preview_header)
-            .unwrap_or_else(|| "(no selection)".to_string())
-    });
+    // Triage tab viewer.
+    let triage_markdown = view
+        .right_pane
+        .triage_markdown
+        .as_deref()
+        .unwrap_or_default();
+    if tree_state.prev_triage_text.as_deref() != Some(triage_markdown) {
+        let (truncated, _) = truncate_markdown_for_preview(triage_markdown);
+        cmds.push(PlatformCommand::SetRichEditContent {
+            window_id,
+            control_id: VIEWER_TRIAGE,
+            rtf_text: convert_markdown_to_rtf(&truncated),
+        });
+        tree_state.prev_triage_text = Some(triage_markdown.to_string());
+    }
+
+    // Briefing tab viewer.
+    let briefing_markdown = view
+        .right_pane
+        .briefing_markdown
+        .as_deref()
+        .unwrap_or_default();
+    if tree_state.prev_briefing_text.as_deref() != Some(briefing_markdown) {
+        let (truncated, _) = truncate_markdown_for_preview(briefing_markdown);
+        cmds.push(PlatformCommand::SetRichEditContent {
+            window_id,
+            control_id: VIEWER_BRIEFING,
+            rtf_text: convert_markdown_to_rtf(&truncated),
+        });
+        tree_state.prev_briefing_text = Some(briefing_markdown.to_string());
+    }
+
+    // Trends tab: category selector radio buttons.
+    let active_category = view.right_pane.trends.active_category;
+    for (control_id, category) in [
+        (BUTTON_TREND_COMPANIES, TrendCategory::Companies),
+        (BUTTON_TREND_TECHNOLOGIES, TrendCategory::Technologies),
+        (BUTTON_TREND_PRODUCTS, TrendCategory::Products),
+        (BUTTON_TREND_THEMES, TrendCategory::Themes),
+    ] {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            window_id,
+            control_id,
+            checked: active_category == category,
+        });
+    }
+
+    // Trends tab viewer: formatted text table.
+    let trends_text = format_trends_text(&view.right_pane.trends);
+    if tree_state.prev_trends_text.as_deref() != Some(trends_text.as_str()) {
+        cmds.push(PlatformCommand::SetRichEditContent {
+            window_id,
+            control_id: VIEWER_TRENDS,
+            rtf_text: convert_markdown_to_rtf(&trends_text),
+        });
+        tree_state.prev_trends_text = Some(trends_text);
+    }
+
+    let header_text = view
+        .preview_header
+        .as_ref()
+        .map(format_preview_header)
+        .unwrap_or_else(|| "(no selection)".to_string());
     emit_if_changed(
         &mut tree_state.prev_header_text,
         header_text,
@@ -1034,27 +1137,6 @@ fn render_preview_section(
             text,
         },
     );
-}
-
-fn prompt_lab_preview_override(view: &AppViewModel) -> (&str, Option<String>) {
-    if view.prompt_lab.visible {
-        if let Some(run) = view.prompt_lab.latest_run.as_ref() {
-            if run.status_label == "completed" {
-                let header = format!(
-                    "Prompt Lab - {}{}",
-                    prompt_lab_stage_label(run.stage),
-                    run.resolved_model
-                        .as_ref()
-                        .map(|model| format!(" ({model})"))
-                        .unwrap_or_default()
-                );
-                if let Some(output) = run.output_json.as_deref() {
-                    return (output, Some(header));
-                }
-            }
-        }
-    }
-    (view.preview_text.as_deref().unwrap_or_default(), None)
 }
 
 fn prompt_lab_status_text(prompt_lab: &harvester_core::PromptLabView) -> String {
@@ -1127,12 +1209,80 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
     )
 }
 
-fn prompt_lab_stage_label(stage: PromptLabStage) -> &'static str {
-    match stage {
-        PromptLabStage::Triage => "Triage",
-        PromptLabStage::Summary => "Summary",
-        PromptLabStage::Briefing => "Briefing",
+fn format_trends_text(view: &TrendsTabView) -> String {
+    if view.is_loading {
+        return "(building entity index\u{2026})".to_string();
     }
+    let data = match &view.category_data {
+        None => return "(no trend data)".to_string(),
+        Some(d) => d,
+    };
+    if data.lines.is_empty() {
+        return "(no entity data yet — run or rebuild to populate)".to_string();
+    }
+
+    let category_name = match view.active_category {
+        TrendCategory::Companies => "Companies",
+        TrendCategory::Technologies => "Technologies",
+        TrendCategory::Products => "Products",
+        TrendCategory::Themes => "Themes",
+    };
+    let n_weeks = data.weeks.len();
+    let n_entities = data.lines.len();
+
+    // Global max weekly count used to scale bar characters.
+    let global_max = data
+        .lines
+        .iter()
+        .flat_map(|e| e.weekly_counts.iter().copied())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let label_width = data
+        .lines
+        .iter()
+        .map(|e| e.label.len())
+        .max()
+        .unwrap_or(10)
+        .max(10);
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "Top {n_entities} {category_name} \u{2014} last {n_weeks} weeks\n\n"
+    ));
+
+    for line in &data.lines {
+        let label = format!("{:<width$}", line.label, width = label_width);
+        let bar: String = line
+            .weekly_counts
+            .iter()
+            .map(|&count| {
+                if count == 0 {
+                    ' '
+                } else if count * 2 <= global_max {
+                    // Lower count: right half-block (lighter visual weight).
+                    '\u{2590}' // ▐
+                } else {
+                    // Higher count: left half-block (heavier visual weight).
+                    '\u{258c}' // ▌
+                }
+            })
+            .collect();
+        out.push_str(&format!(
+            "  {}  {}  total: {}\n",
+            label, bar, line.total_count
+        ));
+    }
+
+    if data.total_entity_count > n_entities {
+        out.push_str(&format!(
+            "\n  Showing top {n_entities} of {} entities.\n",
+            data.total_entity_count
+        ));
+    }
+
+    out
 }
 
 fn append_tree_commands(
@@ -2268,6 +2418,32 @@ mod tests {
     }
 
     #[test]
+    fn prompt_lab_tab_advanced_layout_does_not_depend_on_legacy_visible_flag() {
+        let window_id = WindowId::new(39);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.right_pane.active_tab = AppTab::PromptLab;
+        view.prompt_lab.visible = false;
+        view.prompt_lab.advanced_mode = true;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let rules = cmds
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::DefineLayout { rules, .. } => Some(rules),
+                _ => None,
+            })
+            .expect("DefineLayout emitted");
+
+        let compare_header_size = rules
+            .iter()
+            .find(|rule| rule.control_id == PANEL_PROMPT_LAB_COMPARE_HEADER_ROW)
+            .and_then(|rule| rule.fixed_size)
+            .expect("compare header fixed size");
+        assert_ne!(compare_header_size, 0);
+    }
+
+    #[test]
     fn prompt_lab_model_selector_defaults_to_index_zero_on_first_render() {
         let window_id = WindowId::new(34);
         let mut tree_state = TreeRenderState::new();
@@ -2401,25 +2577,53 @@ mod tests {
         }));
     }
 
+    /// The Prompt Lab now lives in its own tab; a completed run does NOT override VIEWER_PREVIEW.
     #[test]
-    fn preview_override_emitted_when_lab_run_completed() {
+    fn prompt_lab_run_does_not_override_summary_viewer() {
         let window_id = WindowId::new(13);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
         view.prompt_lab = completed_prompt_lab_view();
         let cmds = render(window_id, &view, &mut tree_state);
-        assert!(cmds.iter().any(|cmd| {
+        // The Prompt Lab output JSON should NOT appear in VIEWER_PREVIEW.
+        assert!(!cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetRichEditContent { rtf_text, .. }
-                if rtf_text.contains("ok")
+                PlatformCommand::SetRichEditContent { control_id, rtf_text, .. }
+                if *control_id == VIEWER_PREVIEW && rtf_text.contains("ok")
             )
         }));
-        assert!(cmds.iter().any(|cmd| {
+        // LABEL_PREVIEW_HEADER should not say "Prompt Lab".
+        assert!(!cmds.iter().any(|cmd| {
             matches!(
                 cmd,
                 PlatformCommand::SetControlText { control_id, text, .. }
                 if *control_id == LABEL_PREVIEW_HEADER && text.contains("Prompt Lab")
+            )
+        }));
+    }
+
+    #[test]
+    fn summary_tab_without_selected_article_shows_empty_state_not_briefing_preview() {
+        let window_id = WindowId::new(40);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.right_pane.active_tab = AppTab::Summary;
+        view.right_pane.summary_markdown = None;
+        view.preview_text = Some("Briefing content should not leak".to_string());
+        view.right_pane.briefing_markdown = Some("Briefing content should not leak".to_string());
+
+        let cmds = render(window_id, &view, &mut tree_state);
+
+        assert_eq!(
+            tree_state.prev_preview_text.as_deref(),
+            Some(SUMMARY_EMPTY_STATE_MARKDOWN)
+        );
+        assert!(!cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetRichEditContent { control_id, rtf_text, .. }
+                if *control_id == VIEWER_PREVIEW && rtf_text.contains("Briefing content should not leak")
             )
         }));
     }

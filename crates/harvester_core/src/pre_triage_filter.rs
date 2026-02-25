@@ -445,6 +445,7 @@ mod tests {
             source_title: title.map(str::to_string),
             prepared_text: body.to_string(),
             content_hash: format!("hash-{url}"),
+            fetched_utc: None,
         }
     }
 

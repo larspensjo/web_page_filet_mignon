@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
 use chrono::Utc;
-use engine_logging::{engine_error, engine_info, engine_warn};
+use engine_logging::{engine_debug, engine_error, engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, StopPolicy};
 use harvester_engine::llm::load_context_file;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PROMPT_VERSION_DRAFT};
@@ -14,7 +15,8 @@ use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmCommand, LlmHandle, PromptRegistry};
 use harvester_engine::{
     is_confined_to, load_and_prepare_articles_filtered, poll_curated_source, poll_file_source,
-    EngineConfig, EngineEvent, EngineHandle, FetchSettings, SourceType, UrlPolicy,
+    scan_archive_article_metadata, EngineConfig, EngineEvent, EngineHandle, FetchSettings,
+    SourceType, UrlPolicy,
 };
 
 use crate::effect_helpers::{
@@ -48,7 +50,23 @@ impl PlatformEffectHandler for NoOpPlatformHandler {
     }
 }
 
-/// Effect runner that orchestrates IO effects
+/// Messages for the serialized entity-index worker.
+enum EntityIndexWorkerMsg {
+    Upsert {
+        url: String,
+        patch: crate::entity_index_store::EntityIndexPatch,
+    },
+    /// Used in tests to flush the queue and confirm all prior upserts are persisted.
+    #[cfg(test)]
+    Flush { done: mpsc::SyncSender<()> },
+}
+
+/// Effect runner that orchestrates IO effects.
+///
+/// # Entity index worker lifecycle
+/// The runner spawns a dedicated single-threaded worker for entity index upserts.
+/// Upserts are forwarded via `entity_index_worker_tx`. When `EffectRunner` is dropped,
+/// the sender is dropped, which closes the channel and signals the worker to exit cleanly.
 pub struct EffectRunner {
     engine: EngineHandle,
     msg_tx: mpsc::Sender<Msg>,
@@ -62,6 +80,8 @@ pub struct EffectRunner {
     llm_provider: Option<Arc<dyn harvester_engine::llm::provider::LlmProvider>>,
     llm_default_provider: Option<ProviderKind>,
     platform_handler: Box<dyn PlatformEffectHandler>,
+    /// Sender to the serialized entity-index worker. Dropping this closes the channel.
+    entity_index_worker_tx: mpsc::SyncSender<EntityIndexWorkerMsg>,
 }
 
 impl EffectRunner {
@@ -127,6 +147,16 @@ impl EffectRunner {
         let fetch_settings = config.fetch_settings.clone();
 
         let engine = EngineHandle::new(config);
+
+        // Spawn the serialized entity-index worker.
+        // All UpsertEntityIndexEntry effects are forwarded to this single-threaded worker,
+        // which processes them sequentially (load → merge → atomic write).
+        let entity_index_path = paths.entity_index_path.clone();
+        let (worker_tx, worker_rx) = mpsc::sync_channel::<EntityIndexWorkerMsg>(256);
+        thread::spawn(move || {
+            run_entity_index_worker(worker_rx, entity_index_path);
+        });
+
         let runner = Self {
             engine,
             msg_tx: msg_tx.clone(),
@@ -140,9 +170,21 @@ impl EffectRunner {
             llm_provider,
             llm_default_provider,
             platform_handler,
+            entity_index_worker_tx: worker_tx,
         };
         runner.spawn_event_loop(msg_tx);
         runner
+    }
+
+    /// Block until all pending entity-index upserts have been written to disk.
+    /// Only available in test builds for deterministic verification.
+    #[cfg(test)]
+    pub fn flush_entity_index_queue(&self) {
+        let (done_tx, done_rx) = mpsc::sync_channel(0);
+        let _ = self
+            .entity_index_worker_tx
+            .send(EntityIndexWorkerMsg::Flush { done: done_tx });
+        let _ = done_rx.recv();
     }
 
     pub fn enqueue(&self, effects: Vec<Effect>) {
@@ -598,6 +640,7 @@ impl EffectRunner {
                                     source_title: article.source_title,
                                     prepared_text: article.prepared_text,
                                     content_hash: article.content_hash,
+                                    fetched_utc: article.fetched_utc,
                                 })
                                 .collect();
                             engine_info!(
@@ -641,6 +684,7 @@ impl EffectRunner {
                                     source_title: article.source_title,
                                     prepared_text: article.prepared_text,
                                     content_hash: article.content_hash,
+                                    fetched_utc: article.fetched_utc,
                                 })
                                 .collect();
                             let _ = msg_tx.send(Msg::BriefingPrereqArticlesLoaded { articles });
@@ -673,6 +717,7 @@ impl EffectRunner {
                                     source_title: article.source_title,
                                     prepared_text: article.prepared_text,
                                     content_hash: article.content_hash,
+                                    fetched_utc: article.fetched_utc,
                                 })
                                 .collect();
                             let _ = msg_tx.send(Msg::TriageArticlesLoaded { articles });
@@ -890,6 +935,126 @@ impl EffectRunner {
                         engine_error!("[briefing-checkpoint] save failed: {}", e);
                     }
                 });
+            }
+            Effect::LoadEntityIndex => {
+                let path = self.paths.entity_index_path.clone();
+                let msg_tx = self.msg_tx.clone();
+                thread::spawn(move || {
+                    let index = crate::entity_index_store::load_entity_index(&path);
+                    // `load_entity_index` already logs and returns default on parse/IO errors.
+                    // Distinguish parse failures from successful-but-empty by checking if the
+                    // file exists. If it does not exist, treat as a fresh (empty) index — loaded,
+                    // not failed.
+                    engine_info!(
+                        "[entity-index] LoadEntityIndex: {} entries",
+                        index.entries.len()
+                    );
+                    let _ = msg_tx.send(Msg::EntityIndexLoaded { index });
+                });
+            }
+            Effect::RebuildEntityIndex => {
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.paths.output_dir.clone();
+                let triage_cache_path = self.paths.triage_cache_path.clone();
+                let summary_cache_path = self.paths.summary_cache_path.clone();
+                let entity_index_path = self.paths.entity_index_path.clone();
+                thread::spawn(move || {
+                    engine_info!("[entity-index] starting rebuild");
+
+                    // Step 1: scan archive for article metadata (url, fetched_utc, content_hash)
+                    let article_metas = match scan_archive_article_metadata(&output_dir) {
+                        Ok(metas) => metas,
+                        Err(e) => {
+                            engine_error!("[entity-index] rebuild: scan failed: {}", e);
+                            let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
+                                reason: format!("scan failed: {e}"),
+                            });
+                            return;
+                        }
+                    };
+
+                    // Step 2: load triage cache and build content_hash → tags map.
+                    // Use the first entry per content_hash (any version is fine for rebuild).
+                    let triage_cache = crate::triage_cache_store::load_triage_cache(&triage_cache_path);
+                    let mut themes_map: std::collections::HashMap<String, Vec<String>> =
+                        std::collections::HashMap::new();
+                    for (key, entry) in triage_cache.iter() {
+                        themes_map
+                            .entry(key.content_hash.clone())
+                            .or_insert_with(|| entry.result.tags.clone());
+                    }
+
+                    // Step 3: load summary cache and build content_hash → entities map.
+                    // Only V4+ entries will have non-empty entities; older entries → empty.
+                    let summary_cache = crate::summary_cache_store::load_summary_cache(&summary_cache_path);
+                    let mut entities_map: std::collections::HashMap<
+                        String,
+                        harvester_engine::llm::SummaryEntities,
+                    > = std::collections::HashMap::new();
+                    for (key, entry) in summary_cache.iter() {
+                        entities_map
+                            .entry(key.content_hash.clone())
+                            .or_insert_with(|| entry.result.entities.clone());
+                    }
+
+                    // Step 4: build EntityIndex by joining on content_hash.
+                    let mut index = crate::entity_index_store::load_entity_index(&entity_index_path);
+                    for meta in &article_metas {
+                        let content_hash = meta.content_hash.as_deref().unwrap_or("");
+                        let entities = entities_map.get(content_hash);
+                        let themes = themes_map.get(content_hash);
+                        let entry = harvester_core::entity_index::EntityIndexEntry {
+                            fetched_utc: meta.fetched_utc.clone(),
+                            content_hash: meta.content_hash.clone(),
+                            companies: entities
+                                .map(|e| e.companies.clone())
+                                .unwrap_or_default(),
+                            technologies: entities
+                                .map(|e| e.technologies.clone())
+                                .unwrap_or_default(),
+                            products: entities
+                                .map(|e| e.products.clone())
+                                .unwrap_or_default(),
+                            themes: themes.cloned().unwrap_or_default(),
+                        };
+                        index.entries.insert(meta.url.clone(), entry);
+                    }
+
+                    // Step 5: atomically write the rebuilt index.
+                    if let Err(e) = crate::entity_index_store::save_entity_index(&entity_index_path, &index) {
+                        engine_error!("[entity-index] rebuild: save failed: {}", e);
+                        let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
+                            reason: format!("save failed: {e}"),
+                        });
+                        return;
+                    }
+
+                    engine_info!(
+                        "[entity-index] rebuild complete: {} entries",
+                        index.entries.len()
+                    );
+                    let _ = msg_tx.send(Msg::EntityIndexRebuilt { index });
+                });
+            }
+            Effect::UpsertEntityIndexEntry {
+                url,
+                fetched_utc,
+                content_hash,
+                summary_entities,
+                themes,
+            } => {
+                let patch = crate::entity_index_store::EntityIndexPatch {
+                    fetched_utc,
+                    content_hash,
+                    summary_entities,
+                    themes,
+                };
+                if let Err(e) = self
+                    .entity_index_worker_tx
+                    .send(EntityIndexWorkerMsg::Upsert { url, patch })
+                {
+                    engine_error!("[entity-index] worker channel closed, upsert dropped: {e}");
+                }
             }
         }
     }
@@ -1131,7 +1296,45 @@ impl Drop for EffectRunner {
     fn drop(&mut self) {
         engine_info!("[effect] EffectRunner dropped, stopping engine");
         self.engine.stop(false);
+        // `entity_index_worker_tx` is dropped here, closing the channel.
+        // The worker thread sees RecvError and exits cleanly.
     }
+}
+
+/// Serialized entity-index worker.
+///
+/// Processes `EntityIndexWorkerMsg::Upsert` messages one at a time, performing
+/// a full load → merge → atomic-write cycle per message to ensure no concurrent writes.
+///
+/// Exits when the sender (`entity_index_worker_tx`) is dropped (channel closed).
+fn run_entity_index_worker(
+    rx: mpsc::Receiver<EntityIndexWorkerMsg>,
+    path: PathBuf,
+) {
+    engine_info!("[entity-index] worker started");
+    for msg in rx {
+        match msg {
+            EntityIndexWorkerMsg::Upsert { url, patch } => {
+                let mut index = crate::entity_index_store::load_entity_index(&path);
+                crate::entity_index_store::upsert_entry(&mut index, &url, patch);
+                if let Err(e) = crate::entity_index_store::save_entity_index(&path, &index) {
+                    engine_error!(
+                        "[entity-index] worker failed to save after upsert for '{}': {}",
+                        url,
+                        e
+                    );
+                } else {
+                    engine_debug!("[entity-index] upserted entry for '{}'", url);
+                }
+            }
+            #[cfg(test)]
+            EntityIndexWorkerMsg::Flush { done } => {
+                // All prior messages have been processed by the time we reach here.
+                let _ = done.send(());
+            }
+        }
+    }
+    engine_info!("[entity-index] worker exited cleanly");
 }
 
 #[cfg(test)]
@@ -1158,6 +1361,7 @@ mod tests {
             state_path: base.join("state.json"),
             briefing_history_path: base.join(".briefing_history.ron"),
             briefing_checkpoint_path: base.join(".briefing_checkpoint.ron"),
+            entity_index_path: base.join(".entity_index.ron"),
         }
     }
 

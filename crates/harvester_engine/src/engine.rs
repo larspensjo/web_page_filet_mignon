@@ -13,6 +13,7 @@ use crate::decode::decode_html;
 use crate::extract::Extractor;
 use crate::fetch::{ChannelProgressSink, FetchSettings, Fetcher, ReqwestFetcher};
 use crate::frontmatter::build_markdown_document;
+use crate::blocker_page::detect_blocked_page;
 use crate::persist::AtomicFileWriter;
 use crate::preview::prepare_preview_content;
 use crate::quota::{QuotaTracker, SessionQuotas};
@@ -350,6 +351,29 @@ async fn run_job(
     };
 
     let markdown = conversion.markdown;
+
+    if let Some(reason) = detect_blocked_page(
+        fetch_output.metadata.final_url.as_str(),
+        extracted.title.as_deref(),
+        &markdown,
+    ) {
+        let failure = FailureKind::BlockedContent {
+            description: reason.clone(),
+        };
+        engine_info!(
+            "[fetch-blocker] job_id={} original_url={} final_url={} reason={}",
+            job_id,
+            truncate_url_for_log(&url),
+            truncate_url_for_log(fetch_output.metadata.final_url.as_str()),
+            reason
+        );
+        let _ = event_tx.send(EngineEvent::JobCompleted {
+            job_id,
+            result: Err(failure.clone()),
+        });
+        return Err(failure);
+    }
+
     let preview_content = prepare_preview_content(&markdown);
 
     let _ = event_tx.send(EngineEvent::Progress(JobProgress {

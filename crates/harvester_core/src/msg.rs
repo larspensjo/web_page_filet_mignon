@@ -13,6 +13,7 @@ use crate::prompt_lab::{
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
+use crate::tabs::{AppTab, TrendCategory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
@@ -329,6 +330,30 @@ pub enum Msg {
     PromptLabCompareBatchSetWarning {
         batch_id: PromptLabCompareBatchId,
         warning: Option<String>,
+    },
+    /// User selected a tab in the right pane.
+    TabSelected {
+        tab: AppTab,
+    },
+    /// User selected a trend category in the Trends tab.
+    TrendCategorySelected {
+        category: TrendCategory,
+    },
+    /// Entity index successfully loaded from disk.
+    EntityIndexLoaded {
+        index: crate::entity_index::EntityIndex,
+    },
+    /// Entity index failed to load from disk (parse error or IO error).
+    EntityIndexLoadFailed {
+        reason: String,
+    },
+    /// Entity index successfully rebuilt from the archive.
+    EntityIndexRebuilt {
+        index: crate::entity_index::EntityIndex,
+    },
+    /// Entity index rebuild failed.
+    EntityIndexRebuildFailed {
+        reason: String,
     },
 }
 

@@ -1,6 +1,7 @@
 //! Harvester engine: IO pipeline and effect execution.
 pub mod briefing;
 pub mod content_prep;
+mod blocker_page;
 mod convert;
 mod decode;
 mod engine;
@@ -26,7 +27,8 @@ mod url_policy;
 
 pub use briefing::{
     load_and_prepare_articles, load_and_prepare_articles_filtered,
-    load_and_prepare_articles_for_triage, LoadedArticle,
+    load_and_prepare_articles_for_triage, scan_archive_article_metadata, ArchiveArticleMeta,
+    LoadedArticle,
 };
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};

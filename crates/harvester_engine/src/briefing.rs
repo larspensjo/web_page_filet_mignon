@@ -30,12 +30,26 @@ pub struct LoadedArticle {
     pub source_title: Option<String>,
     pub prepared_text: String,
     pub content_hash: String,
+    /// RFC3339 UTC timestamp from the article's frontmatter; `None` if absent or unparseable.
+    pub fetched_utc: Option<String>,
+}
+
+/// Lightweight article metadata for archive scanning without content prep budgeting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveArticleMeta {
+    pub url: String,
+    /// RFC3339 UTC timestamp from the article's frontmatter; `None` if absent or unparseable.
+    pub fetched_utc: Option<String>,
+    /// SHA256 content hash (derived from normalized clean text). `None` if derivation fails.
+    pub content_hash: Option<String>,
 }
 
 struct ArticlePackage {
     url: String,
     source_title: Option<String>,
     clean_text: CleanText,
+    /// RFC3339 UTC timestamp from frontmatter, preserved for downstream consumers.
+    fetched_utc: Option<String>,
 }
 
 impl ArticlePackage {
@@ -148,11 +162,13 @@ fn scan_and_prepare_articles(
             }
         }
 
+        let fetched_utc = fields.fetched_utc.clone();
         let clean_text = derive_clean_text(&markdown, &url, fields.title.as_deref(), &config);
         packages.push(ArticlePackage {
             url,
             source_title: fields.title,
             clean_text,
+            fetched_utc,
         });
     }
 
@@ -226,6 +242,7 @@ fn prepare_loaded_articles_and_collection(
             source_title: package.source_title.clone(),
             prepared_text: bounded_text,
             content_hash: package.clean_text.content_hash().to_string(),
+            fetched_utc: package.fetched_utc.clone(),
         });
     }
 
@@ -310,25 +327,85 @@ fn url_lookup_aliases(url: &str) -> Vec<String> {
     }
 
     let mut aliases = vec![key.clone()];
-    if let Ok(mut parsed) = Url::parse(&key) {
+    if let Ok(parsed) = Url::parse(&key) {
+        let push_scheme_variants = |aliases: &mut Vec<String>, base: &Url| {
+            match base.scheme() {
+                "http" => {
+                    let mut https = base.clone();
+                    if https.set_scheme("https").is_ok() {
+                        aliases.push(https.to_string().trim_end_matches('/').to_string());
+                    }
+                }
+                "https" => {
+                    let mut http = base.clone();
+                    if http.set_scheme("http").is_ok() {
+                        aliases.push(http.to_string().trim_end_matches('/').to_string());
+                    }
+                }
+                _ => {}
+            }
+        };
+
+        if parsed.query().is_some() {
+            let mut no_query = parsed.clone();
+            no_query.set_query(None);
+            aliases.push(no_query.to_string().trim_end_matches('/').to_string());
+            push_scheme_variants(&mut aliases, &no_query);
+        }
+
+        push_scheme_variants(&mut aliases, &parsed);
+
         let Some(host) = parsed.host_str() else {
+            aliases.sort();
+            aliases.dedup();
             return aliases;
         };
         let lowered = host.to_lowercase();
-        let host_without_prefix = if let Some(stripped) = lowered.strip_prefix("www.") {
-            Some(stripped.to_string())
-        } else {
-            lowered
-                .strip_prefix("eu.")
-                .map(|stripped| stripped.to_string())
-        };
+        for prefix in ["www.", "eu.", "m.", "edition."] {
+            if let Some(stripped) = lowered.strip_prefix(prefix) {
+                let mut host_alias = parsed.clone();
+                let alias_host = stripped.to_string();
+                let _ = host_alias.set_host(Some(&alias_host));
+                aliases.push(host_alias.to_string().trim_end_matches('/').to_string());
+                push_scheme_variants(&mut aliases, &host_alias);
+                if host_alias.query().is_some() {
+                    let mut host_alias_no_query = host_alias.clone();
+                    host_alias_no_query.set_query(None);
+                    aliases.push(
+                        host_alias_no_query
+                            .to_string()
+                            .trim_end_matches('/')
+                            .to_string(),
+                    );
+                    push_scheme_variants(&mut aliases, &host_alias_no_query);
+                }
+            }
+        }
 
-        if let Some(alias_host) = host_without_prefix {
-            let _ = parsed.set_host(Some(&alias_host));
-            aliases.push(parsed.to_string().trim_end_matches('/').to_string());
+        if parsed.host_str() == Some("newsroom.cisco.com")
+            && parsed.path().starts_with("/content/r/")
+        {
+            let mut cisco_alias = parsed.clone();
+            let new_path = parsed.path().replacen("/content/r/", "/c/r/", 1);
+            cisco_alias.set_path(&new_path);
+            aliases.push(cisco_alias.to_string().trim_end_matches('/').to_string());
+            push_scheme_variants(&mut aliases, &cisco_alias);
+            if cisco_alias.query().is_some() {
+                let mut cisco_alias_no_query = cisco_alias.clone();
+                cisco_alias_no_query.set_query(None);
+                aliases.push(
+                    cisco_alias_no_query
+                        .to_string()
+                        .trim_end_matches('/')
+                        .to_string(),
+                );
+                push_scheme_variants(&mut aliases, &cisco_alias_no_query);
+            }
         }
     }
 
+    aliases.sort();
+    aliases.dedup();
     aliases
 }
 
@@ -351,6 +428,7 @@ pub fn load_and_prepare_articles_filtered(
                 url: package.url.clone(),
                 source_title: package.source_title.clone(),
                 clean_text: package.clean_text.clone(),
+                fetched_utc: package.fetched_utc.clone(),
             });
         }
     }
@@ -365,6 +443,7 @@ pub fn load_and_prepare_articles_filtered(
                 url: package.url.clone(),
                 source_title: package.source_title.clone(),
                 clean_text: package.clean_text.clone(),
+                fetched_utc: package.fetched_utc.clone(),
             }),
             None => {
                 engine_warn!(
@@ -410,8 +489,26 @@ pub fn load_and_prepare_articles_for_triage(
             source_title: package.source_title.clone(),
             prepared_text: bounded_text,
             content_hash: package.clean_text.content_hash().to_string(),
+            fetched_utc: package.fetched_utc.clone(),
         });
     }
 
     Ok(loaded_articles)
+}
+
+/// Scan `output_dir` for markdown articles and return lightweight metadata for each.
+/// Used by the entity index rebuild procedure to join against the triage/summary caches.
+/// Articles with missing or malformed frontmatter are skipped (logged as warnings by the inner scanner).
+pub fn scan_archive_article_metadata(
+    output_dir: &Path,
+) -> Result<Vec<ArchiveArticleMeta>, String> {
+    let packages = scan_and_prepare_articles(output_dir, None)?;
+    Ok(packages
+        .into_iter()
+        .map(|p| ArchiveArticleMeta {
+            url: p.url,
+            fetched_utc: p.fetched_utc,
+            content_hash: Some(p.clean_text.content_hash().to_string()),
+        })
+        .collect())
 }

@@ -4,23 +4,13 @@ use commanductui::types::{
 use commanductui::{
     Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
 };
-use harvester_core::{DEFAULT_JOBS_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH, TOKEN_LIMIT};
+use harvester_core::{AppTab, DEFAULT_JOBS_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH, TOKEN_LIMIT};
 
 use super::constants::*;
 
 const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
 const MENU_ACTION_ARCHIVE: MenuActionId = MenuActionId(2);
 const MENU_ACTION_PROMPT_LAB: MenuActionId = MenuActionId(3);
-
-const PROMPT_LAB_HEIGHT_COLLAPSED: i32 = 56;
-const PROMPT_LAB_HEIGHT_VISIBLE_BASE: i32 = 220;
-const PROMPT_LAB_HEIGHT_ADVANCED_BASE: i32 = 96;
-const PROMPT_LAB_HEIGHT_COMPARE_SECTION_EXPANDED: i32 = 32;
-const PROMPT_LAB_HEIGHT_CONTEXT_SECTION_EXPANDED: i32 = 210;
-const PROMPT_LAB_HEIGHT_TEMPLATE_SECTION_EXPANDED: i32 = 64;
-const PROMPT_LAB_HEIGHT_TEMPLATE_EDITOR_EXPANDED: i32 = 244;
-const PROMPT_LAB_HEIGHT_RUN_DETAILS_HEADER: i32 = 28;
-const PROMPT_LAB_HEIGHT_RUN_DETAILS_BODY: i32 = 42;
 
 const PROMPT_LAB_ROW_HEIGHT_STANDARD: i32 = 26;
 const PROMPT_LAB_ROW_HEIGHT_ACTION: i32 = 28;
@@ -46,11 +36,11 @@ pub(crate) struct LayoutConfig {
     pub left_panel_width: i32,
     pub input_panel_visible: bool,
     pub prompt_lab: PromptLabLayoutConfig,
+    pub active_tab: AppTab,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct PromptLabVisibility {
-    visible: bool,
     show_advanced: bool,
     show_compare_row: bool,
     show_context_row: bool,
@@ -69,7 +59,6 @@ fn compute_prompt_lab_visibility(prompt_lab: &PromptLabLayoutConfig) -> PromptLa
     let show_run_details_row = show_advanced && prompt_lab.run_details_section_open;
 
     PromptLabVisibility {
-        visible,
         show_advanced,
         show_compare_row,
         show_context_row,
@@ -177,10 +166,131 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         class: LabelClass::Default,
     });
 
-    commands.push(PlatformCommand::CreateRichEdit {
+    // Tab bar: five radio buttons for tab selection.
+    commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_TAB_BAR,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_BAR),
+        control_id: BUTTON_TAB_TRIAGE,
+        text: "Triage".to_string(),
+        group_start: true,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_BAR),
+        control_id: BUTTON_TAB_SUMMARY,
+        text: "Summary".to_string(),
+        group_start: false,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_BAR),
+        control_id: BUTTON_TAB_BRIEFING,
+        text: "Briefing".to_string(),
+        group_start: false,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_BAR),
+        control_id: BUTTON_TAB_TRENDS,
+        text: "Trends".to_string(),
+        group_start: false,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_BAR),
+        control_id: BUTTON_TAB_PROMPT_LAB,
+        text: "Prompt Lab".to_string(),
+        group_start: false,
+    });
+
+    // Tab content panels — all created at startup; inactive ones are collapsed.
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_TAB_TRIAGE,
+    });
+    commands.push(PlatformCommand::CreateRichEdit {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_TRIAGE),
+        control_id: VIEWER_TRIAGE,
+    });
+
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_TAB_SUMMARY,
+    });
+    commands.push(PlatformCommand::CreateRichEdit {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_SUMMARY),
         control_id: VIEWER_PREVIEW,
+    });
+
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_TAB_BRIEFING,
+    });
+    commands.push(PlatformCommand::CreateRichEdit {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_BRIEFING),
+        control_id: VIEWER_BRIEFING,
+    });
+
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_TAB_TRENDS,
+    });
+    // Category selector bar (docked top inside the Trends panel)
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_TRENDS),
+        control_id: PANEL_TREND_CAT_BAR,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TREND_CAT_BAR),
+        control_id: BUTTON_TREND_COMPANIES,
+        text: "Companies".to_string(),
+        group_start: true,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TREND_CAT_BAR),
+        control_id: BUTTON_TREND_TECHNOLOGIES,
+        text: "Technologies".to_string(),
+        group_start: false,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TREND_CAT_BAR),
+        control_id: BUTTON_TREND_PRODUCTS,
+        text: "Products".to_string(),
+        group_start: false,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TREND_CAT_BAR),
+        control_id: BUTTON_TREND_THEMES,
+        text: "Themes".to_string(),
+        group_start: false,
+    });
+    commands.push(PlatformCommand::CreateRichEdit {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_TRENDS),
+        control_id: VIEWER_TRENDS,
+    });
+
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_TAB_PROMPT_LAB,
     });
 
     commands.push(PlatformCommand::CreateLabel {
@@ -231,7 +341,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
 
     commands.push(PlatformCommand::CreatePanel {
         window_id,
-        parent_control_id: Some(PANEL_INPUT),
+        parent_control_id: Some(PANEL_TAB_PROMPT_LAB),
         control_id: PANEL_PROMPT_LAB,
     });
     commands.push(PlatformCommand::CreatePanel {
@@ -619,6 +729,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         LayoutConfig {
             left_panel_width: initial_left_width,
             input_panel_visible: false,
+            active_tab: AppTab::Summary,
             prompt_lab: PromptLabLayoutConfig {
                 visible: false,
                 advanced_mode: false,
@@ -912,6 +1023,7 @@ pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) ->
             config.left_panel_width,
             config.input_panel_visible,
             config.prompt_lab,
+            config.active_tab,
         ),
     }
 }
@@ -920,6 +1032,7 @@ fn build_layout_rules(
     left_panel_width: i32,
     input_panel_visible: bool,
     prompt_lab: PromptLabLayoutConfig,
+    active_tab: AppTab,
 ) -> Vec<LayoutRule> {
     let visibility = compute_prompt_lab_visibility(&prompt_lab);
     let input_width = if input_panel_visible {
@@ -928,30 +1041,20 @@ fn build_layout_rules(
         0
     };
     let jobs_width = (left_panel_width - input_width).max(0);
-    let prompt_lab_height = if visibility.visible {
-        let mut height = PROMPT_LAB_HEIGHT_VISIBLE_BASE;
-        if visibility.show_advanced {
-            height += PROMPT_LAB_HEIGHT_ADVANCED_BASE;
-            if visibility.show_compare_row {
-                height += PROMPT_LAB_HEIGHT_COMPARE_SECTION_EXPANDED;
-            }
-            if visibility.show_context_row {
-                height += PROMPT_LAB_HEIGHT_CONTEXT_SECTION_EXPANDED;
-            }
-            if visibility.show_template_row {
-                height += PROMPT_LAB_HEIGHT_TEMPLATE_SECTION_EXPANDED;
-            }
-            if visibility.show_template_editor_rows {
-                height += PROMPT_LAB_HEIGHT_TEMPLATE_EDITOR_EXPANDED;
-            }
-            height += PROMPT_LAB_HEIGHT_RUN_DETAILS_HEADER;
-            if visibility.show_run_details_row {
-                height += PROMPT_LAB_HEIGHT_RUN_DETAILS_BODY;
-            }
+
+    // Helper: exactly one tab panel may use Fill under PANEL_PREVIEW because the current
+    // layout engine supports a single Fill child per parent. Inactive tabs are collapsed
+    // via a zero-height Top dock so they still receive a deterministic 0x0-ish layout pass.
+    let tab_dock = |tab: AppTab| -> DockStyle {
+        if active_tab == tab {
+            DockStyle::Fill
+        } else {
+            DockStyle::Top
         }
-        height
-    } else {
-        PROMPT_LAB_HEIGHT_COLLAPSED
+    };
+    // Helper: returns fixed_size=Some(0) for collapsed tabs, None for the active tab.
+    let tab_size = |tab: AppTab| -> Option<i32> {
+        if active_tab == tab { None } else { Some(0) }
     };
     let mut rules = vec![
         LayoutRule {
@@ -1050,13 +1153,184 @@ fn build_layout_rules(
             fixed_size: Some(28),
             margin: (6, 6, 4, 0),
         },
+        // Tab bar: fixed height row of radio buttons.
+        LayoutRule {
+            control_id: PANEL_TAB_BAR,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: DockStyle::Top,
+            order: 1,
+            fixed_size: Some(28),
+            margin: (0, 0, 2, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TAB_TRIAGE,
+            parent_control_id: Some(PANEL_TAB_BAR),
+            dock_style: DockStyle::Left,
+            order: 0,
+            fixed_size: Some(80),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TAB_SUMMARY,
+            parent_control_id: Some(PANEL_TAB_BAR),
+            dock_style: DockStyle::Left,
+            order: 1,
+            fixed_size: Some(88),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TAB_BRIEFING,
+            parent_control_id: Some(PANEL_TAB_BAR),
+            dock_style: DockStyle::Left,
+            order: 2,
+            fixed_size: Some(80),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TAB_TRENDS,
+            parent_control_id: Some(PANEL_TAB_BAR),
+            dock_style: DockStyle::Left,
+            order: 3,
+            fixed_size: Some(72),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TAB_PROMPT_LAB,
+            parent_control_id: Some(PANEL_TAB_BAR),
+            dock_style: DockStyle::Left,
+            order: 4,
+            fixed_size: Some(92),
+            margin: (0, 4, 0, 0),
+        },
+        // Tab content panels — active tab fills remaining space; inactive ones collapse.
+        LayoutRule {
+            control_id: PANEL_TAB_TRIAGE,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: tab_dock(AppTab::Triage),
+            order: 2,
+            fixed_size: tab_size(AppTab::Triage),
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: VIEWER_TRIAGE,
+            parent_control_id: Some(PANEL_TAB_TRIAGE),
+            dock_style: DockStyle::Fill,
+            order: 0,
+            fixed_size: None,
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_TAB_SUMMARY,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: tab_dock(AppTab::Summary),
+            order: 3,
+            fixed_size: tab_size(AppTab::Summary),
+            margin: (0, 0, 0, 0),
+        },
         LayoutRule {
             control_id: VIEWER_PREVIEW,
+            parent_control_id: Some(PANEL_TAB_SUMMARY),
+            dock_style: DockStyle::Fill,
+            order: 0,
+            fixed_size: None,
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_TAB_BRIEFING,
             parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: tab_dock(AppTab::Briefing),
+            order: 4,
+            fixed_size: tab_size(AppTab::Briefing),
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: VIEWER_BRIEFING,
+            parent_control_id: Some(PANEL_TAB_BRIEFING),
+            dock_style: DockStyle::Fill,
+            order: 0,
+            fixed_size: None,
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_TAB_TRENDS,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: tab_dock(AppTab::Trends),
+            order: 5,
+            fixed_size: tab_size(AppTab::Trends),
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_TREND_CAT_BAR,
+            parent_control_id: Some(PANEL_TAB_TRENDS),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(28),
+            margin: (0, 0, 2, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TREND_COMPANIES,
+            parent_control_id: Some(PANEL_TREND_CAT_BAR),
+            dock_style: DockStyle::Left,
+            order: 0,
+            fixed_size: Some(96),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TREND_TECHNOLOGIES,
+            parent_control_id: Some(PANEL_TREND_CAT_BAR),
+            dock_style: DockStyle::Left,
+            order: 1,
+            fixed_size: Some(112),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TREND_PRODUCTS,
+            parent_control_id: Some(PANEL_TREND_CAT_BAR),
+            dock_style: DockStyle::Left,
+            order: 2,
+            fixed_size: Some(80),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TREND_THEMES,
+            parent_control_id: Some(PANEL_TREND_CAT_BAR),
+            dock_style: DockStyle::Left,
+            order: 3,
+            fixed_size: Some(72),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: VIEWER_TRENDS,
+            parent_control_id: Some(PANEL_TAB_TRENDS),
             dock_style: DockStyle::Fill,
             order: 1,
             fixed_size: None,
             margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_TAB_PROMPT_LAB,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: tab_dock(AppTab::PromptLab),
+            order: 6,
+            fixed_size: tab_size(AppTab::PromptLab),
+            margin: (0, 0, 0, 0),
+        },
+        // PANEL_PROMPT_LAB fills PANEL_TAB_PROMPT_LAB (tab collapse handles outer visibility).
+        LayoutRule {
+            control_id: PANEL_PROMPT_LAB,
+            parent_control_id: Some(PANEL_TAB_PROMPT_LAB),
+            dock_style: DockStyle::Fill,
+            order: 0,
+            fixed_size: None,
+            margin: (0, 4, 0, 4),
+        },
+        LayoutRule {
+            control_id: LABEL_PROMPT_LAB_STATUS,
+            parent_control_id: Some(PANEL_PROMPT_LAB),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(PROMPT_LAB_ROW_HEIGHT_STATUS),
+            margin: (0, 0, 2, 0),
         },
         LayoutRule {
             control_id: LABEL_INPUT_HINT,
@@ -1073,22 +1347,6 @@ fn build_layout_rules(
             order: 1,
             fixed_size: None,
             margin: (0, 0, 0, 0),
-        },
-        LayoutRule {
-            control_id: PANEL_PROMPT_LAB,
-            parent_control_id: Some(PANEL_INPUT),
-            dock_style: DockStyle::Bottom,
-            order: 2,
-            fixed_size: Some(prompt_lab_height),
-            margin: (0, 6, 0, 6),
-        },
-        LayoutRule {
-            control_id: LABEL_PROMPT_LAB_STATUS,
-            parent_control_id: Some(PANEL_PROMPT_LAB),
-            dock_style: DockStyle::Top,
-            order: 0,
-            fixed_size: Some(PROMPT_LAB_ROW_HEIGHT_STATUS),
-            margin: (0, 0, 2, 0),
         },
         LayoutRule {
             control_id: LABEL_STATUS,
@@ -1140,7 +1398,8 @@ fn build_layout_rules(
         },
     ];
 
-    if visibility.visible {
+    // Always emit Prompt Lab sub-panel rules; tab collapse handles outer visibility.
+    {
         rules.extend([
             LayoutRule {
                 control_id: PANEL_PROMPT_LAB_MODE_ROW,
@@ -1733,6 +1992,13 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_INPUT,
         PANEL_JOBS,
         PANEL_PREVIEW,
+        PANEL_TAB_BAR,
+        PANEL_TAB_TRIAGE,
+        PANEL_TAB_SUMMARY,
+        PANEL_TAB_BRIEFING,
+        PANEL_TAB_TRENDS,
+        PANEL_TAB_PROMPT_LAB,
+        PANEL_TREND_CAT_BAR,
         PANEL_PROMPT_LAB,
         PANEL_PROMPT_LAB_MODE_ROW,
         PANEL_PROMPT_LAB_MODEL_ROW,
@@ -1815,11 +2081,13 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
         style_id: StyleId::ComboBox,
     });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: VIEWER_PREVIEW,
-        style_id: StyleId::ViewerReadable,
-    });
+    for control_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING, VIEWER_TRENDS] {
+        commands.push(PlatformCommand::ApplyStyleToControl {
+            window_id,
+            control_id,
+            style_id: StyleId::ViewerReadable,
+        });
+    }
 
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -1875,6 +2143,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     }
 
     for control_id in [
+        BUTTON_TAB_TRIAGE,
+        BUTTON_TAB_SUMMARY,
+        BUTTON_TAB_BRIEFING,
+        BUTTON_TAB_TRENDS,
+        BUTTON_TAB_PROMPT_LAB,
         BTN_PROMPT_LAB_MODE_BASIC,
         BTN_PROMPT_LAB_MODE_ADVANCED,
         BTN_STAGE_TRIAGE,
@@ -1945,6 +2218,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                active_tab: AppTab::PromptLab,
                 prompt_lab,
             },
         );
@@ -2097,13 +2371,15 @@ mod tests {
         );
     }
 
+    /// When a tab is not active, its panel is collapsed to zero; the active tab fills the space.
     #[test]
-    fn collapsed_layout_height_is_minimal() {
+    fn inactive_tab_panel_is_collapsed() {
         let cmd = build_layout_command(
             WindowId::new(3),
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                active_tab: AppTab::Summary,
                 prompt_lab: PromptLabLayoutConfig {
                     visible: false,
                     advanced_mode: false,
@@ -2119,14 +2395,68 @@ mod tests {
             PlatformCommand::DefineLayout { rules, .. } => rules,
             _ => panic!("expected DefineLayout"),
         };
-        let panel = rules
+        // PromptLab tab should be collapsed (not active).
+        let prompt_lab_tab = rules
             .iter()
-            .find(|r| r.control_id == PANEL_PROMPT_LAB)
-            .expect("prompt lab panel rule");
-        assert_eq!(panel.fixed_size, Some(PROMPT_LAB_HEIGHT_COLLAPSED));
-        assert!(!rules
+            .find(|r| r.control_id == PANEL_TAB_PROMPT_LAB)
+            .expect("prompt lab tab panel rule");
+        assert_eq!(prompt_lab_tab.fixed_size, Some(0));
+        // Summary tab should be active (None = Fill).
+        let summary_tab = rules
             .iter()
-            .any(|r| r.control_id == PANEL_PROMPT_LAB_STAGE_ROW));
+            .find(|r| r.control_id == PANEL_TAB_SUMMARY)
+            .expect("summary tab panel rule");
+        assert_eq!(summary_tab.fixed_size, None);
+        // Other content tabs should also be collapsed.
+        for &control_id in &[PANEL_TAB_TRIAGE, PANEL_TAB_BRIEFING, PANEL_TAB_TRENDS] {
+            let tab = rules.iter().find(|r| r.control_id == control_id).expect("tab panel rule");
+            assert_eq!(tab.fixed_size, Some(0), "tab {:?} should be collapsed", control_id);
+        }
+    }
+
+    #[test]
+    fn preview_tab_panels_use_single_fill_rule() {
+        let cmd = build_layout_command(
+            WindowId::new(31),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                active_tab: AppTab::Summary,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        let tab_panel_ids = [
+            PANEL_TAB_TRIAGE,
+            PANEL_TAB_SUMMARY,
+            PANEL_TAB_BRIEFING,
+            PANEL_TAB_TRENDS,
+            PANEL_TAB_PROMPT_LAB,
+        ];
+
+        let fill_count = rules
+            .iter()
+            .filter(|r| {
+                r.parent_control_id == Some(PANEL_PREVIEW)
+                    && tab_panel_ids.contains(&r.control_id)
+                    && r.dock_style == DockStyle::Fill
+            })
+            .count();
+        assert_eq!(
+            fill_count, 1,
+            "PANEL_PREVIEW tab panels must have exactly one Fill child; additional tabs should be collapsed with zero-size non-Fill rules"
+        );
     }
 
     #[test]
@@ -2136,6 +2466,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                active_tab: AppTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {
                     visible: true,
                     advanced_mode: true,
@@ -2181,6 +2512,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                active_tab: AppTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {
                     visible: true,
                     advanced_mode: true,
@@ -2216,6 +2548,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                active_tab: AppTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {
                     visible: true,
                     advanced_mode: true,

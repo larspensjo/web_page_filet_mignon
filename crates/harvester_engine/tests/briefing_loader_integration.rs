@@ -393,3 +393,50 @@ fn filtered_loader_matches_normalized_url_shape() {
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/news/item");
 }
+
+#[test]
+fn filtered_loader_matches_mobile_and_query_variants() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    let article_url = "https://www.economictimes.com/ai/story";
+    write_markdown_file(tmp.path(), "economics.md", article_url, Some("ET"), "body");
+
+    let selected = vec!["https://m.economictimes.com/ai/story?from=mdr".to_string()];
+    let (articles, _) =
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, article_url);
+}
+
+#[test]
+fn filtered_loader_matches_http_https_and_edition_variants() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    let cnn_url = "https://edition.cnn.com/2026/02/24/tech/example";
+    write_markdown_file(tmp.path(), "cnn.md", cnn_url, Some("CNN"), "body");
+
+    let selected = vec!["http://www.cnn.com/2026/02/24/tech/example".to_string()];
+    let (articles, _) =
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, cnn_url);
+}
+
+#[test]
+fn filtered_loader_matches_cisco_content_path_alias() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    let article_url = "https://newsroom.cisco.com/c/r/newsroom/en/us/a/y2026/m02/example.html";
+    write_markdown_file(tmp.path(), "cisco.md", article_url, Some("Cisco"), "body");
+
+    let selected = vec![
+        "https://newsroom.cisco.com/content/r/newsroom/en/us/a/y2026/m02/example.html".to_string(),
+    ];
+    let (articles, _) =
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, article_url);
+}

@@ -3,6 +3,7 @@ use crate::context_hash;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
+use crate::tabs::{AppTab, TrendCategory};
 use crate::preview::{self, PreviewContentKind};
 use crate::prompt_lab::{
     PromptLabRunId, PromptLabRunOverrides, PromptLabStage, PromptLabState,
@@ -333,6 +334,14 @@ pub struct AppState {
     prompt_lab_next_resolve_id: u64,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
+    /// Currently active right-pane tab.
+    active_tab: AppTab,
+    /// Currently active trend category in the Trends tab.
+    active_trend_category: TrendCategory,
+    /// Persisted entity index loaded from disk (or rebuilt from caches).
+    entity_index: Option<crate::entity_index::EntityIndex>,
+    /// Pre-computed trend data derived from `entity_index`.
+    entity_trend_data: Option<crate::trends::EntityTrendData>,
 }
 
 pub(crate) struct PromptLabPendingRunRegistration {
@@ -393,6 +402,10 @@ impl Default for AppState {
             prompt_lab_next_resolve_id: 1,
             prompt_lab_templates: default_prompt_template_snapshots(),
             llm_usage_by_model: BTreeMap::new(),
+            active_tab: AppTab::default(),
+            active_trend_category: TrendCategory::default(),
+            entity_index: None,
+            entity_trend_data: None,
         }
     }
 }
@@ -639,6 +652,74 @@ impl AppState {
             ),
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
             llm_usage_by_model: self.llm_usage_rows(),
+            right_pane: self.build_right_pane_view(selected_triage_article_available),
+        }
+    }
+
+    fn build_right_pane_view(
+        &self,
+        selected_triage_article_available: bool,
+    ) -> crate::view_model::RightPaneView {
+        use crate::view_model::RightPaneView;
+
+        let selected_url = self
+            .ui
+            .selected_job_id()
+            .and_then(|job_id| self.jobs.get(&job_id))
+            .map(|job| job.url.as_str());
+
+        // Build triage markdown for the selected job.
+        let triage_markdown = selected_url.and_then(|url| {
+            self.triage.result_for_url(url).map(|r| {
+                let tags_line = if r.tags.is_empty() {
+                    "none".to_string()
+                } else {
+                    r.tags.join(", ")
+                };
+                format!(
+                    "**Category:** {}\n**Priority:** P{}\n**Tags:** {}\n\n---\n\n{}\n",
+                    r.category, r.priority, tags_line, r.rationale
+                )
+            })
+        });
+
+        // Build summary markdown for the selected job.
+        let summary_markdown = selected_url.and_then(|url| {
+            self.briefing.summary_for_url(url).map(|s| {
+                let kp_lines: String = s
+                    .key_points
+                    .iter()
+                    .map(|kp| format!("- {kp}\n"))
+                    .collect();
+                format!(
+                    "# {}\n\n{}\n\n**Key Points:**\n\n{}\n",
+                    s.title, s.summary, kp_lines
+                )
+            })
+        });
+
+        // Briefing markdown — use the existing briefing preview.
+        let briefing_markdown = self.briefing.format_preview();
+
+        let prompt_lab = crate::view_model::PromptLabView::from_state(
+            &self.prompt_lab,
+            &self.prompt_contexts,
+            &self.prompt_lab_templates,
+            selected_triage_article_available,
+        );
+
+        let trends = crate::view_model::build_trends_tab_view(
+            self.entity_trend_data.as_ref(),
+            self.active_trend_category,
+        );
+
+        RightPaneView {
+            active_tab: self.active_tab,
+            triage_markdown,
+            summary_markdown,
+            briefing_markdown,
+            trends,
+            prompt_lab,
         }
     }
 
@@ -1734,14 +1815,48 @@ impl AppState {
         &mut self.prompt_lab
     }
 
-    pub(crate) fn open_prompt_lab(&mut self) {
-        self.prompt_lab.open();
+    pub(crate) fn select_tab(&mut self, tab: AppTab) {
+        self.active_tab = tab;
         self.dirty = true;
     }
 
-    pub(crate) fn close_prompt_lab(&mut self) {
-        self.prompt_lab.close();
+    pub fn active_tab(&self) -> AppTab {
+        self.active_tab
+    }
+
+    pub(crate) fn set_active_trend_category(&mut self, category: TrendCategory) {
+        self.active_trend_category = category;
         self.dirty = true;
+    }
+
+    pub fn active_trend_category(&self) -> TrendCategory {
+        self.active_trend_category
+    }
+
+    /// Store a freshly loaded or rebuilt entity index and re-compute trend data.
+    pub(crate) fn set_entity_index(
+        &mut self,
+        index: crate::entity_index::EntityIndex,
+        window_weeks: u32,
+        top_n: usize,
+    ) {
+        self.entity_trend_data = Some(crate::trends::compute_trends(&index, window_weeks, top_n));
+        self.entity_index = Some(index);
+        self.dirty = true;
+    }
+
+    pub fn entity_trend_data(&self) -> Option<&crate::trends::EntityTrendData> {
+        self.entity_trend_data.as_ref()
+    }
+
+    pub(crate) fn open_prompt_lab(&mut self) {
+        self.select_tab(AppTab::PromptLab);
+        self.prompt_lab.open();
+    }
+
+    pub(crate) fn close_prompt_lab(&mut self) {
+        self.select_tab(AppTab::Summary);
+        self.prompt_lab.close();
     }
 
     pub(crate) fn select_prompt_lab_stage(&mut self, stage: PromptLabStage) {
@@ -2678,6 +2793,7 @@ mod tests {
             key_points: vec!["Point 1".to_string()],
             input_tokens: 100,
             output_tokens: 50,
+            entities: Default::default(),
         };
 
         state.store_summary_result(
@@ -2718,6 +2834,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -2731,6 +2848,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         briefing.set_briefing_request_id(2);
@@ -2794,6 +2912,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -2807,6 +2926,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         briefing.set_briefing_request_id(2);
@@ -2908,6 +3028,7 @@ mod tests {
             key_points: vec![],
             input_tokens: 10,
             output_tokens: 5,
+            entities: Default::default(),
         };
         state.store_summary_result(key1.clone(), result1, "2026-01-01T00:00:00Z".to_string());
         assert_eq!(state.summary_cache().len(), 1);
@@ -2928,6 +3049,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 20,
                 output_tokens: 10,
+                entities: Default::default(),
             },
             created_at_utc: "2026-01-02T00:00:00Z".to_string(),
         };
@@ -2960,6 +3082,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -2973,6 +3096,7 @@ mod tests {
                 key_points: vec!["Point A".to_string()],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         state.set_briefing(briefing);
@@ -3046,6 +3170,7 @@ mod tests {
             key_points: vec!["KP1".to_string(), "KP2".to_string()],
             input_tokens: 0,
             output_tokens: 0,
+            entities: Default::default(),
         };
         let formatted = preview::format_summary_for_preview(&result);
         assert!(formatted.contains("Test Title"));
@@ -3064,6 +3189,7 @@ mod tests {
             key_points: vec![],
             input_tokens: 0,
             output_tokens: 0,
+            entities: Default::default(),
         };
         let formatted = preview::format_summary_for_preview(&result);
         assert!(formatted.contains("Title Only"));
@@ -3277,6 +3403,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -3290,6 +3417,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         state.set_briefing(briefing);
@@ -3300,6 +3428,7 @@ mod tests {
             source_title: None,
             prepared_text: "text".to_string(),
             content_hash: "hash".to_string(),
+            fetched_utc: None,
         }]);
         triage.transition_to_triaging();
         triage.start_article(0, 1);
@@ -3336,6 +3465,7 @@ mod tests {
             source_title: None,
             prepared_text: "text".to_string(),
             content_hash: "hash".to_string(),
+            fetched_utc: None,
         }]);
         triage.transition_to_triaging();
         triage.start_article(0, 1);
@@ -3384,6 +3514,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -3397,6 +3528,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         state.set_briefing(briefing);

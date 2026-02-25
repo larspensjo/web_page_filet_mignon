@@ -94,6 +94,7 @@ pub enum FailureKind {
     RedirectLimitExceeded,
     TooLarge { max_bytes: u64, actual: Option<u64> },
     UnsupportedContentType { content_type: String },
+    BlockedContent { description: String },
     ProcessingTimeout { stage: Stage },
     Cancelled,
     ProcessingError,
@@ -117,6 +118,9 @@ impl fmt::Display for FailureKind {
             }
             FailureKind::UnsupportedContentType { content_type } => {
                 write!(f, "unsupported content type {content_type}")
+            }
+            FailureKind::BlockedContent { description } => {
+                write!(f, "blocked content: {description}")
             }
             FailureKind::ProcessingTimeout { stage } => {
                 write!(f, "processing timeout at stage {stage:?}")

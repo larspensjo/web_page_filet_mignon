@@ -67,6 +67,7 @@ fn sample_articles(urls: &[&str]) -> Vec<LoadedArticle> {
                 .collect::<Vec<_>>()
                 .join(" "),
             content_hash: format!("{url}-hash"),
+            fetched_utc: None,
         })
         .collect()
 }
@@ -110,11 +111,12 @@ fn request_id_for_prompt(effects: &[Effect], prompt_id: PromptId) -> Option<u64>
 
 fn assert_persist_triage_cache_effect(effects: &[Effect], state: &AppState) {
     let expected_cache = state.triage_cache().clone();
-    assert_eq!(
-        effects,
-        &[Effect::PersistTriageCache {
-            cache: expected_cache,
-        }]
+    let expected = Effect::PersistTriageCache {
+        cache: expected_cache,
+    };
+    assert!(
+        effects.contains(&expected),
+        "expected PersistTriageCache in effects, got: {effects:?}"
     );
 }
 
