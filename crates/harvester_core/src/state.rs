@@ -2766,6 +2766,7 @@ mod tests {
             key_points: vec!["Point 1".to_string()],
             input_tokens: 100,
             output_tokens: 50,
+            entities: Default::default(),
         };
 
         state.store_summary_result(
@@ -2819,6 +2820,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         briefing.set_briefing_request_id(2);
@@ -2895,6 +2897,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         briefing.set_briefing_request_id(2);
@@ -2996,6 +2999,7 @@ mod tests {
             key_points: vec![],
             input_tokens: 10,
             output_tokens: 5,
+            entities: Default::default(),
         };
         state.store_summary_result(key1.clone(), result1, "2026-01-01T00:00:00Z".to_string());
         assert_eq!(state.summary_cache().len(), 1);
@@ -3016,6 +3020,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 20,
                 output_tokens: 10,
+                entities: Default::default(),
             },
             created_at_utc: "2026-01-02T00:00:00Z".to_string(),
         };
@@ -3061,6 +3066,7 @@ mod tests {
                 key_points: vec!["Point A".to_string()],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         state.set_briefing(briefing);
@@ -3134,6 +3140,7 @@ mod tests {
             key_points: vec!["KP1".to_string(), "KP2".to_string()],
             input_tokens: 0,
             output_tokens: 0,
+            entities: Default::default(),
         };
         let formatted = preview::format_summary_for_preview(&result);
         assert!(formatted.contains("Test Title"));
@@ -3152,6 +3159,7 @@ mod tests {
             key_points: vec![],
             input_tokens: 0,
             output_tokens: 0,
+            entities: Default::default(),
         };
         let formatted = preview::format_summary_for_preview(&result);
         assert!(formatted.contains("Title Only"));
@@ -3378,6 +3386,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         state.set_briefing(briefing);
@@ -3485,6 +3494,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         state.set_briefing(briefing);

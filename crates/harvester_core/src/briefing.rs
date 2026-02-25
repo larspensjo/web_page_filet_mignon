@@ -1,5 +1,6 @@
 use crate::summary_cache::SummaryCacheKey;
 use crate::triage::{ArticleTriageState, TriageSession};
+use harvester_engine::llm::SummaryEntities;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write;
 use std::hash::{Hash, Hasher};
@@ -34,6 +35,8 @@ pub struct ArticleSummaryResult {
     pub key_points: Vec<String>,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Structured entity lists extracted by V4+ summary prompt. Empty for V3 cache hits.
+    pub entities: SummaryEntities,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -585,6 +588,7 @@ mod tests {
             key_points: vec!["Point 1".to_string()],
             input_tokens: 10,
             output_tokens: 5,
+            entities: Default::default(),
         }
     }
 

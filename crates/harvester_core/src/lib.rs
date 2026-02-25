@@ -23,6 +23,7 @@ pub use briefing::{
     BriefingHistoryEntry, BriefingHistoryTheme, BriefingPhase, BriefingResult, BriefingSession,
     BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
+pub use harvester_engine::llm::SummaryEntities;
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
 pub use effect::{Effect, StopPolicy};

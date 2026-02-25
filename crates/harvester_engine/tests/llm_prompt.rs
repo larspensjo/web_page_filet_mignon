@@ -74,7 +74,7 @@ fn prompt_id_from_str_rejects_unknown() {
 fn registry_with_defaults_has_restart_scope() {
     let registry = PromptRegistry::with_defaults();
     assert_eq!(registry.active(PromptId::ArticleTriage).unwrap().version, 3);
-    assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 3);
+    assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 4);
     assert_eq!(
         registry
             .active(PromptId::AggregateBriefing)

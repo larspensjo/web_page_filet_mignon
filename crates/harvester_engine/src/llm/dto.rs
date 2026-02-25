@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 /// Typed outputs for LLM prompts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TriageResult {
@@ -25,7 +27,7 @@ impl TriagePriority {
 }
 
 /// Structured entity lists extracted from an article summary.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SummaryEntities {
     pub companies: Vec<String>,
     pub technologies: Vec<String>,

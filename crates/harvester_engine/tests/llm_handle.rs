@@ -175,7 +175,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
         .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 7,
             prompt_id: PromptId::ArticleSummary,
-            prompt_version: Some(3),
+            prompt_version: None, // use active version (V4)
             model_override: None,
             input_content: input_content.to_string(),
             context: Vec::new(),
@@ -203,7 +203,7 @@ fn llm_handle_inserts_cache_after_successful_response() {
         .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
             request_id: 8,
             prompt_id: PromptId::ArticleSummary,
-            prompt_version: Some(3),
+            prompt_version: None, // use active version (V4); should be a cache hit
             model_override: None,
             input_content: input_content.to_string(),
             context: Vec::new(),

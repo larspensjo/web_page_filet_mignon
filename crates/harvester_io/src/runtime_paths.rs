@@ -112,6 +112,7 @@ mod tests {
                 key_points: vec!["point".to_string()],
                 input_tokens: 1,
                 output_tokens: 1,
+                entities: Default::default(),
             },
             created_at_utc: Utc::now().to_rfc3339(),
         };

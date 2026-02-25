@@ -4,7 +4,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::llm::dto::{
-    AggregateBriefing, ArticleSummary, BriefingTheme, TriagePriority, TriageResult,
+    AggregateBriefing, ArticleSummary, BriefingTheme, SummaryEntities, TriagePriority, TriageResult,
 };
 use crate::text_safety::truncate_to_char_boundary;
 
@@ -33,6 +33,12 @@ const FIELD_THEMES: &str = "themes";
 const FIELD_THEME_NAME: &str = "name";
 const FIELD_THEME_DESCRIPTION: &str = "description";
 const FIELD_ARTICLE_COUNT: &str = "article_count";
+const FIELD_ENTITIES: &str = "entities";
+const FIELD_ENTITIES_COMPANIES: &str = "companies";
+const FIELD_ENTITIES_TECHNOLOGIES: &str = "technologies";
+const FIELD_ENTITIES_PRODUCTS: &str = "products";
+const MAX_ENTITY_ITEMS: usize = 15;
+const MAX_ENTITY_ITEM_LEN: usize = 100;
 const EXEC_SUMMARY_TRUNCATION_SUFFIX: &str =
     "\n\n[Truncated response: removed {removed} characters to fit the 3000-character limit.]";
 
@@ -112,12 +118,72 @@ pub fn validate_summary(content: &str) -> Result<ArticleSummary, ValidationError
         })
         .collect::<Result<Vec<_>, ValidationError>>()?;
 
+    // Optional entities block — absent means V3 response; treat as empty.
+    let entities = match document.get(FIELD_ENTITIES) {
+        None => SummaryEntities::default(),
+        Some(val) => {
+            let obj = val.as_object().ok_or_else(|| {
+                ValidationError::SchemaViolation("entities must be an object".into())
+            })?;
+            SummaryEntities {
+                companies: parse_entity_list(obj, FIELD_ENTITIES_COMPANIES)?,
+                technologies: parse_entity_list(obj, FIELD_ENTITIES_TECHNOLOGIES)?,
+                products: parse_entity_list(obj, FIELD_ENTITIES_PRODUCTS)?,
+            }
+        }
+    };
+
     Ok(ArticleSummary {
         title: title.to_string(),
         summary: summary.to_string(),
         key_points,
-        entities: Default::default(),
+        entities,
     })
+}
+
+/// Parse, validate, and deduplicate an entity list from a JSON object field.
+///
+/// - Max `MAX_ENTITY_ITEMS` items.
+/// - Each item: non-empty string, no internal newlines, max `MAX_ENTITY_ITEM_LEN` chars.
+/// - Deduplicate case-insensitively; first occurrence wins.
+/// - Missing field treated as empty array (backward compatible).
+fn parse_entity_list(
+    obj: &Map<String, Value>,
+    field: &'static str,
+) -> Result<Vec<String>, ValidationError> {
+    let array = match obj.get(field) {
+        None => return Ok(Vec::new()),
+        Some(v) => v.as_array().ok_or_else(|| {
+            ValidationError::SchemaViolation(format!("entities.{field} must be an array"))
+        })?,
+    };
+    ensure_max_items(array.len(), MAX_ENTITY_ITEMS, field)?;
+
+    let mut seen_lower: Vec<String> = Vec::new();
+    let mut result: Vec<String> = Vec::new();
+
+    for val in array {
+        let item = val.as_str().ok_or_else(|| {
+            ValidationError::SchemaViolation(format!("each entities.{field} item must be a string"))
+        })?;
+        if item.is_empty() {
+            return Err(ValidationError::SchemaViolation(format!(
+                "entities.{field} items must be non-empty"
+            )));
+        }
+        if item.contains('\n') || item.contains('\r') {
+            return Err(ValidationError::SchemaViolation(format!(
+                "entities.{field} items must not contain newlines"
+            )));
+        }
+        ensure_max_length(item, MAX_ENTITY_ITEM_LEN, field)?;
+        let lower = item.to_lowercase();
+        if !seen_lower.contains(&lower) {
+            seen_lower.push(lower);
+            result.push(item.to_string());
+        }
+    }
+    Ok(result)
 }
 
 pub fn validate_briefing(content: &str) -> Result<AggregateBriefing, ValidationError> {
@@ -253,5 +319,156 @@ fn ensure_in_range(value: u64, field: &'static str) -> Result<(), ValidationErro
         Err(ValidationError::ValueOutOfRange(field))
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── validate_summary entity tests ────────────────────────────────────────
+
+    #[test]
+    fn validate_summary_v4_response_with_all_entities() {
+        let json = r#"{
+            "title": "AI Chip Race",
+            "summary": "Nvidia leads with H100.",
+            "key_points": ["Point A", "Point B"],
+            "entities": {
+                "companies": ["Nvidia", "TSMC"],
+                "technologies": ["custom silicon", "large language models"],
+                "products": ["H100"]
+            }
+        }"#;
+        let result = validate_summary(json).expect("valid V4 response");
+        assert_eq!(result.entities.companies, vec!["Nvidia", "TSMC"]);
+        assert_eq!(
+            result.entities.technologies,
+            vec!["custom silicon", "large language models"]
+        );
+        assert_eq!(result.entities.products, vec!["H100"]);
+    }
+
+    #[test]
+    fn validate_summary_v4_response_with_empty_entity_arrays() {
+        let json = r#"{
+            "title": "No Entities",
+            "summary": "A generic article.",
+            "key_points": ["Point A"],
+            "entities": {
+                "companies": [],
+                "technologies": [],
+                "products": []
+            }
+        }"#;
+        let result = validate_summary(json).expect("valid V4 response with empty entities");
+        assert!(result.entities.companies.is_empty());
+        assert!(result.entities.technologies.is_empty());
+        assert!(result.entities.products.is_empty());
+    }
+
+    #[test]
+    fn validate_summary_v3_response_without_entities_gives_empty() {
+        let json = r#"{
+            "title": "Old Title",
+            "summary": "Old summary text.",
+            "key_points": ["Key point one"]
+        }"#;
+        let result = validate_summary(json).expect("valid V3 response");
+        assert!(
+            result.entities.companies.is_empty(),
+            "V3 response should have empty companies"
+        );
+        assert!(
+            result.entities.technologies.is_empty(),
+            "V3 response should have empty technologies"
+        );
+        assert!(
+            result.entities.products.is_empty(),
+            "V3 response should have empty products"
+        );
+    }
+
+    #[test]
+    fn validate_summary_rejects_entity_string_exceeding_max_length() {
+        let long_name = "A".repeat(MAX_ENTITY_ITEM_LEN + 1);
+        let json = format!(
+            r#"{{"title":"T","summary":"S","key_points":["P"],"entities":{{"companies":["{long_name}"],"technologies":[],"products":[]}}}}"#
+        );
+        let err = validate_summary(&json).expect_err("should reject oversized entity string");
+        assert!(
+            matches!(err, ValidationError::FieldTooLong { .. }),
+            "expected FieldTooLong, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_summary_deduplicates_entity_strings_case_insensitively() {
+        let json = r#"{
+            "title": "Dedup Test",
+            "summary": "Summary.",
+            "key_points": ["P"],
+            "entities": {
+                "companies": ["Nvidia", "nvidia", "NVIDIA"],
+                "technologies": [],
+                "products": []
+            }
+        }"#;
+        let result = validate_summary(json).expect("valid response");
+        // Only the first occurrence should survive deduplication
+        assert_eq!(result.entities.companies, vec!["Nvidia"]);
+    }
+
+    #[test]
+    fn validate_summary_rejects_entity_with_newline() {
+        let json = r#"{
+            "title": "T",
+            "summary": "S",
+            "key_points": ["P"],
+            "entities": {
+                "companies": ["Bad\nEntity"],
+                "technologies": [],
+                "products": []
+            }
+        }"#;
+        let err = validate_summary(json).expect_err("should reject entity with newline");
+        assert!(
+            matches!(err, ValidationError::SchemaViolation(_)),
+            "expected SchemaViolation, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_summary_rejects_empty_entity_string() {
+        let json = r#"{
+            "title": "T",
+            "summary": "S",
+            "key_points": ["P"],
+            "entities": {
+                "companies": [""],
+                "technologies": [],
+                "products": []
+            }
+        }"#;
+        let err = validate_summary(json).expect_err("should reject empty entity string");
+        assert!(
+            matches!(err, ValidationError::SchemaViolation(_)),
+            "expected SchemaViolation, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_summary_rejects_entities_not_an_object() {
+        let json = r#"{
+            "title": "T",
+            "summary": "S",
+            "key_points": ["P"],
+            "entities": ["not", "an", "object"]
+        }"#;
+        let err = validate_summary(json).expect_err("entities must be an object");
+        assert!(
+            matches!(err, ValidationError::SchemaViolation(_)),
+            "expected SchemaViolation, got {err:?}"
+        );
     }
 }

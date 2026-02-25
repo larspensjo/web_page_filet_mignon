@@ -2,7 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
+use harvester_core::{
+    ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryEntities,
+};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,17 @@ struct PersistedCacheKey {
     context_hash: String,
 }
 
+/// DTO for persisting SummaryEntities — backward-compatible with V3 cache files that lack the field.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct SummaryEntitiesDto {
+    #[serde(default)]
+    companies: Vec<String>,
+    #[serde(default)]
+    technologies: Vec<String>,
+    #[serde(default)]
+    products: Vec<String>,
+}
+
 /// DTO for persisting ArticleSummaryResult
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PersistedSummaryResult {
@@ -25,6 +38,8 @@ struct PersistedSummaryResult {
     key_points: Vec<String>,
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(default)]
+    entities: SummaryEntitiesDto,
 }
 
 /// DTO for persisting SummaryCacheEntry
@@ -107,6 +122,11 @@ pub fn load_summary_cache(path: &Path) -> SummaryCache {
                 key_points: persisted_entry.result.key_points,
                 input_tokens: persisted_entry.result.input_tokens,
                 output_tokens: persisted_entry.result.output_tokens,
+                entities: SummaryEntities {
+                    companies: persisted_entry.result.entities.companies,
+                    technologies: persisted_entry.result.entities.technologies,
+                    products: persisted_entry.result.entities.products,
+                },
             },
             created_at_utc: persisted_entry.created_at_utc,
         };
@@ -151,6 +171,11 @@ pub fn persist_summary_cache(
                     key_points: entry.result.key_points.clone(),
                     input_tokens: entry.result.input_tokens,
                     output_tokens: entry.result.output_tokens,
+                    entities: SummaryEntitiesDto {
+                        companies: entry.result.entities.companies.clone(),
+                        technologies: entry.result.entities.technologies.clone(),
+                        products: entry.result.entities.products.clone(),
+                    },
                 },
                 created_at_utc: entry.created_at_utc.clone(),
             };
@@ -230,6 +255,7 @@ mod tests {
                 key_points: vec!["Point 1".to_string()],
                 input_tokens: 100,
                 output_tokens: 50,
+                entities: Default::default(),
             },
             created_at_utc: Utc::now().to_rfc3339(),
         };
@@ -246,5 +272,108 @@ mod tests {
         assert_eq!(loaded_entry.result.title, "Test Title");
         assert_eq!(loaded_entry.result.summary, "Test Summary");
         assert_eq!(loaded_entry.result.key_points.len(), 1);
+    }
+
+    #[test]
+    fn roundtrip_preserves_entities() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("entities_cache.ron");
+
+        let mut cache = SummaryCache::new();
+        let key = SummaryCacheKey {
+            content_hash: "hash-v4".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 4,
+            model_id: "claude-3".to_string(),
+            context_hash: "ctx-hash".to_string(),
+        };
+        let entry = SummaryCacheEntry {
+            result: ArticleSummaryResult {
+                title: "Entity Test".to_string(),
+                summary: "Summary".to_string(),
+                key_points: vec![],
+                input_tokens: 10,
+                output_tokens: 5,
+                entities: SummaryEntities {
+                    companies: vec!["Nvidia".to_string(), "TSMC".to_string()],
+                    technologies: vec!["custom silicon".to_string()],
+                    products: vec!["H100".to_string()],
+                },
+            },
+            created_at_utc: Utc::now().to_rfc3339(),
+        };
+        cache.insert(key.clone(), entry);
+
+        persist_summary_cache(&cache, &path).unwrap();
+        let loaded = load_summary_cache(&path);
+
+        let loaded_entry = loaded.lookup(&key).expect("entry present");
+        assert_eq!(
+            loaded_entry.result.entities.companies,
+            vec!["Nvidia", "TSMC"]
+        );
+        assert_eq!(
+            loaded_entry.result.entities.technologies,
+            vec!["custom silicon"]
+        );
+        assert_eq!(loaded_entry.result.entities.products, vec!["H100"]);
+    }
+
+    #[test]
+    fn load_v3_cache_without_entities_gives_empty_entities() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("v3_cache.ron");
+
+        // Write a V3-style RON file without the entities field.
+        let v3_ron = r#"(
+    version: 1,
+    entries: [
+        (
+            (
+                content_hash: "old-hash",
+                prompt_id: "ArticleSummary",
+                prompt_version: 3,
+                model_id: "gpt-4",
+                context_hash: "ctx",
+            ),
+            (
+                result: (
+                    title: "Old Article",
+                    summary: "Old summary.",
+                    key_points: ["Point A"],
+                    input_tokens: 50,
+                    output_tokens: 25,
+                ),
+                created_at_utc: "2025-01-01T00:00:00Z",
+            ),
+        ),
+    ],
+)"#;
+        fs::write(&path, v3_ron).unwrap();
+
+        let cache = load_summary_cache(&path);
+        assert_eq!(cache.len(), 1);
+
+        let key = SummaryCacheKey {
+            content_hash: "old-hash".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 3,
+            model_id: "gpt-4".to_string(),
+            context_hash: "ctx".to_string(),
+        };
+        let entry = cache.lookup(&key).expect("entry present");
+        assert_eq!(entry.result.title, "Old Article");
+        assert!(
+            entry.result.entities.companies.is_empty(),
+            "V3 cache should have empty companies"
+        );
+        assert!(
+            entry.result.entities.technologies.is_empty(),
+            "V3 cache should have empty technologies"
+        );
+        assert!(
+            entry.result.entities.products.is_empty(),
+            "V3 cache should have empty products"
+        );
     }
 }

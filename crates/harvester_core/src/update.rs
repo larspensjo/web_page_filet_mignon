@@ -305,6 +305,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 key_points: summary.key_points,
                                 input_tokens: *input_tokens,
                                 output_tokens: *output_tokens,
+                                entities: summary.entities,
                             };
 
                             // Clone data needed for cache key before mutable operations
@@ -2797,6 +2798,7 @@ mod tests {
                 key_points: vec![],
                 input_tokens: 10,
                 output_tokens: 5,
+                entities: Default::default(),
             },
         );
         state.set_briefing(briefing);
