@@ -2134,6 +2134,8 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_COMPARE_CANCEL,
         BTN_COMPARE_AUTO_SELECT,
         BTN_COMPARE_WINNER_CLEAR,
+        BTN_SOURCE_FROM_TRIAGE,
+        BTN_SOURCE_TYPE_URL,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
@@ -2736,6 +2738,47 @@ mod tests {
                     expected_run_details_body
                 );
             }
+        }
+    }
+
+    /// Guard: every RadioButton, CheckBox, and Button created in initial_commands must have a
+    /// corresponding ApplyStyleToControl command.
+    ///
+    /// Without an applied style, handle_wm_ctlcolorbtn returns None and Windows falls back to
+    /// system-default light colors, producing the "new button appears white" regression.
+    /// Adding a control to this category and forgetting the style command will fail this test.
+    #[test]
+    fn every_button_like_control_has_a_style_applied() {
+        use std::collections::HashSet;
+        let cmds = initial_commands(WindowId::new(99));
+
+        let mut created: HashSet<i32> = HashSet::new();
+        for cmd in &cmds {
+            match cmd {
+                PlatformCommand::CreateButton { control_id, .. }
+                | PlatformCommand::CreateRadioButton { control_id, .. }
+                | PlatformCommand::CreateCheckBox { control_id, .. } => {
+                    created.insert(control_id.raw());
+                }
+                _ => {}
+            }
+        }
+
+        let mut styled: HashSet<i32> = HashSet::new();
+        for cmd in &cmds {
+            if let PlatformCommand::ApplyStyleToControl { control_id, .. } = cmd {
+                styled.insert(control_id.raw());
+            }
+        }
+
+        for id in &created {
+            assert!(
+                styled.contains(id),
+                "Control {} (Button/RadioButton/CheckBox) has no ApplyStyleToControl — \
+                 WM_CTLCOLOR will fall back to system default (light) colors. \
+                 Add it to the style application loop in initial_commands().",
+                id
+            );
         }
     }
 }
