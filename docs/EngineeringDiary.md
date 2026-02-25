@@ -423,3 +423,12 @@ Evidence: `cargo test -p harvester_app preview_tab_panels_use_single_fill_rule -
 Lessons Learned: A UI layout workaround that depends on unsupported toolkit semantics (multiple sibling Fill docks with “collapsed” sizes) can fail as visual artifacts far from the feature code.
 Prevention: Encode toolkit layout constraints directly in app layout builders (one Fill child per parent) and add tests that assert structural layout invariants, not only resulting sizes.
 Refs: crates/harvester_app/src/platform/ui/layout.rs, preview_tab_panels_use_single_fill_rule
+
+## 2026-02-25 - CommanDuctUI hard-fails invalid multi-Fill layouts
+Type: Bug Fix
+Context: The preview-tab artifact exposed that `CommanDuctUI` accepted unsupported layouts with multiple sibling `DockStyle::Fill` rules, logged a warning, and proceeded with degraded rendering instead of failing at the boundary.
+Change: `commanductui` now validates `DefineLayout` rules and returns a hard error when any parent has more than one `DockStyle::Fill` child. Added unit tests for both rejection and valid one-Fill-per-parent layouts, and released the submodule as `0.4.1`.
+Evidence: `cargo test --manifest-path src/CommanDuctUI/Cargo.toml define_layout_validation -- --nocapture`
+Lessons Learned: Silent degradation in foundational UI infrastructure obscures the true fault domain and turns contract violations into expensive visual debugging.
+Prevention: Treat layout rule sets as validated input contracts at `DefineLayout` boundaries and prefer explicit errors over best-effort behavior for unsupported docking combinations.
+Refs: src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/command_executor.rs, src/CommanDuctUI/Cargo.toml, src/CommanDuctUI/CHANGELOG.md
