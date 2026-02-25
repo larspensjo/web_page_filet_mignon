@@ -432,3 +432,12 @@ Evidence: `cargo test --manifest-path src/CommanDuctUI/Cargo.toml define_layout_
 Lessons Learned: Silent degradation in foundational UI infrastructure obscures the true fault domain and turns contract violations into expensive visual debugging.
 Prevention: Treat layout rule sets as validated input contracts at `DefineLayout` boundaries and prefer explicit errors over best-effort behavior for unsupported docking combinations.
 Refs: src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/command_executor.rs, src/CommanDuctUI/Cargo.toml, src/CommanDuctUI/CHANGELOG.md
+
+## 2026-02-25 - Briefing loader URL alias matching for redirected/mobile variants
+Type: Bug Fix
+Context: `engine.log` showed repeated `[briefing-loader] selected url missing from corpus` warnings during startup because persisted briefing selections used URL variants (e.g., `www`/`m`/`edition`, `http` vs `https`, query-tagged URLs, and Cisco newsroom path variants) that did not exactly match archived markdown frontmatter URLs.
+Change: Hardened `harvester_engine` briefing URL lookup alias generation to match across host-prefix variants (`www.`, `eu.`, `m.`, `edition.`), `http`/`https` scheme variants, query/no-query forms, and the Cisco `newsroom.cisco.com/content/r/...` to `/c/r/...` path shape. Added integration tests covering each matching case and cleaned an unrelated unused import warning in `harvester_io`.
+Evidence: `cargo test -p harvester_engine --test briefing_loader_integration filtered_loader_matches`; `cargo build`
+Lessons Learned: URL equality in cross-stage pipelines is a contract boundary, not a string-compare detail; if one stage stores fetched/canonicalized URLs while another stores selected/source URLs, alias matching must explicitly model common transformations.
+Prevention: Keep URL-lookup normalization/aliasing centralized in the briefing loader and add regression tests for every new real-world mismatch observed in logs before adjusting warning policy.
+Refs: crates/harvester_engine/src/briefing.rs, crates/harvester_engine/tests/briefing_loader_integration.rs, crates/harvester_io/src/effect_runner.rs

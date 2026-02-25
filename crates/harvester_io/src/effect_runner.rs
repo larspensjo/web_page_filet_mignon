@@ -8,7 +8,6 @@ use std::time::Duration;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_error, engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg, StopPolicy};
-use harvester_core::entity_index::EntityIndex;
 use harvester_engine::llm::load_context_file;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PROMPT_VERSION_DRAFT};
 use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
