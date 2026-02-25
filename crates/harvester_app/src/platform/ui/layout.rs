@@ -2153,6 +2153,10 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_STAGE_TRIAGE,
         BTN_STAGE_SUMMARY,
         BTN_STAGE_BRIEFING,
+        BUTTON_TREND_COMPANIES,
+        BUTTON_TREND_TECHNOLOGIES,
+        BUTTON_TREND_PRODUCTS,
+        BUTTON_TREND_THEMES,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
