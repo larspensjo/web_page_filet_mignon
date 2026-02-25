@@ -468,3 +468,12 @@ Evidence: `cargo test -p harvester_core generate_briefing_emits_load_effect -- -
 Lessons Learned: Feature actions that previously relied on a single shared preview surface need explicit navigation updates after tabbed UI refactors; preserving old side effects alone is not enough to preserve user-visible flow.
 Prevention: For tabbed surfaces, add reducer tests that assert both domain state changes and `active_tab` transitions for primary workflow entry actions (e.g., Generate Briefing, Prompt Lab open).
 Refs: crates/harvester_core/src/update.rs, generate_briefing_emits_load_effect
+
+## 2026-02-25 - Summary tab no longer falls back to briefing/shared preview content
+Type: Bug Fix
+Context: After switching to the Briefing tab during briefing generation, returning to the Summary tab with no selected article could display briefing output because Summary still fell back to the legacy shared `preview_text` content path.
+Change: Updated `harvester_app` summary-tab rendering to use only `right_pane.summary_markdown` and show an explicit empty-state message when no article is selected. Added a render regression test that prevents briefing text from leaking into the Summary viewer in the no-selection case.
+Evidence: `cargo test -p harvester_app summary_tab_without_selected_article_shows_empty_state_not_briefing_preview -- --nocapture`
+Lessons Learned: Tab migrations require strict ownership of displayed content; retaining generic fallback content paths inside tab renderers reintroduces cross-tab leakage when selection state is absent.
+Prevention: For each tab renderer, define a tab-specific empty state and add tests that set conflicting legacy preview fields to ensure tab content is sourced only from the tab’s view model fields.
+Refs: crates/harvester_app/src/platform/ui/render.rs, summary_tab_without_selected_article_shows_empty_state_not_briefing_preview

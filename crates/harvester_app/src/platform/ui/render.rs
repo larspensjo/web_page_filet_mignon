@@ -20,6 +20,8 @@ use std::collections::HashMap;
 const MAX_VIEWER_CHARS: usize = 64 * 1024;
 #[allow(dead_code)]
 const VIEWER_TRUNCATE_MARKER: &str = "[display truncated]";
+const SUMMARY_EMPTY_STATE_MARKDOWN: &str =
+    "No article selected\n\nSelect a job/article from the list to view its summary.";
 /// Maximum number of models shown individually in the status bar before collapsing.
 const MAX_STATUS_BAR_MODELS: usize = 2;
 
@@ -1033,12 +1035,12 @@ fn render_preview_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
-    // Summary tab: use right_pane.summary_markdown (falls back to preview_text via state).
+    // Summary tab: only show the selected article summary; never fall back to shared preview text.
     let summary_markdown = view
         .right_pane
         .summary_markdown
         .as_deref()
-        .unwrap_or_else(|| view.preview_text.as_deref().unwrap_or_default());
+        .unwrap_or(SUMMARY_EMPTY_STATE_MARKDOWN);
     if tree_state.prev_preview_text.as_deref() != Some(summary_markdown) {
         let (truncated_markdown, was_truncated) = truncate_markdown_for_preview(summary_markdown);
         let mut rtf_text = convert_markdown_to_rtf(&truncated_markdown);
@@ -2598,6 +2600,31 @@ mod tests {
                 cmd,
                 PlatformCommand::SetControlText { control_id, text, .. }
                 if *control_id == LABEL_PREVIEW_HEADER && text.contains("Prompt Lab")
+            )
+        }));
+    }
+
+    #[test]
+    fn summary_tab_without_selected_article_shows_empty_state_not_briefing_preview() {
+        let window_id = WindowId::new(40);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.right_pane.active_tab = AppTab::Summary;
+        view.right_pane.summary_markdown = None;
+        view.preview_text = Some("Briefing content should not leak".to_string());
+        view.right_pane.briefing_markdown = Some("Briefing content should not leak".to_string());
+
+        let cmds = render(window_id, &view, &mut tree_state);
+
+        assert_eq!(
+            tree_state.prev_preview_text.as_deref(),
+            Some(SUMMARY_EMPTY_STATE_MARKDOWN)
+        );
+        assert!(!cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetRichEditContent { control_id, rtf_text, .. }
+                if *control_id == VIEWER_PREVIEW && rtf_text.contains("Briefing content should not leak")
             )
         }));
     }
