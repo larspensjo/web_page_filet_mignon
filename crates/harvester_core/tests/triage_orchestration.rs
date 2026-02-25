@@ -67,6 +67,7 @@ fn sample_articles(urls: &[&str]) -> Vec<LoadedArticle> {
                 .collect::<Vec<_>>()
                 .join(" "),
             content_hash: format!("{url}-hash"),
+            fetched_utc: None,
         })
         .collect()
 }

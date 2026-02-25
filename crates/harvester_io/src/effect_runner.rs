@@ -16,7 +16,8 @@ use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmCommand, LlmHandle, PromptRegistry};
 use harvester_engine::{
     is_confined_to, load_and_prepare_articles_filtered, poll_curated_source, poll_file_source,
-    EngineConfig, EngineEvent, EngineHandle, FetchSettings, SourceType, UrlPolicy,
+    scan_archive_article_metadata, EngineConfig, EngineEvent, EngineHandle, FetchSettings,
+    SourceType, UrlPolicy,
 };
 
 use crate::effect_helpers::{
@@ -640,6 +641,7 @@ impl EffectRunner {
                                     source_title: article.source_title,
                                     prepared_text: article.prepared_text,
                                     content_hash: article.content_hash,
+                                    fetched_utc: article.fetched_utc,
                                 })
                                 .collect();
                             engine_info!(
@@ -683,6 +685,7 @@ impl EffectRunner {
                                     source_title: article.source_title,
                                     prepared_text: article.prepared_text,
                                     content_hash: article.content_hash,
+                                    fetched_utc: article.fetched_utc,
                                 })
                                 .collect();
                             let _ = msg_tx.send(Msg::BriefingPrereqArticlesLoaded { articles });
@@ -715,6 +718,7 @@ impl EffectRunner {
                                     source_title: article.source_title,
                                     prepared_text: article.prepared_text,
                                     content_hash: article.content_hash,
+                                    fetched_utc: article.fetched_utc,
                                 })
                                 .collect();
                             let _ = msg_tx.send(Msg::TriageArticlesLoaded { articles });
@@ -949,7 +953,90 @@ impl EffectRunner {
                     let _ = msg_tx.send(Msg::EntityIndexLoaded { index });
                 });
             }
-            Effect::RebuildEntityIndex => { /* full handling in Slice 4 */ }
+            Effect::RebuildEntityIndex => {
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.paths.output_dir.clone();
+                let triage_cache_path = self.paths.triage_cache_path.clone();
+                let summary_cache_path = self.paths.summary_cache_path.clone();
+                let entity_index_path = self.paths.entity_index_path.clone();
+                thread::spawn(move || {
+                    engine_info!("[entity-index] starting rebuild");
+
+                    // Step 1: scan archive for article metadata (url, fetched_utc, content_hash)
+                    let article_metas = match scan_archive_article_metadata(&output_dir) {
+                        Ok(metas) => metas,
+                        Err(e) => {
+                            engine_error!("[entity-index] rebuild: scan failed: {}", e);
+                            let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
+                                reason: format!("scan failed: {e}"),
+                            });
+                            return;
+                        }
+                    };
+
+                    // Step 2: load triage cache and build content_hash → tags map.
+                    // Use the first entry per content_hash (any version is fine for rebuild).
+                    let triage_cache = crate::triage_cache_store::load_triage_cache(&triage_cache_path);
+                    let mut themes_map: std::collections::HashMap<String, Vec<String>> =
+                        std::collections::HashMap::new();
+                    for (key, entry) in triage_cache.iter() {
+                        themes_map
+                            .entry(key.content_hash.clone())
+                            .or_insert_with(|| entry.result.tags.clone());
+                    }
+
+                    // Step 3: load summary cache and build content_hash → entities map.
+                    // Only V4+ entries will have non-empty entities; older entries → empty.
+                    let summary_cache = crate::summary_cache_store::load_summary_cache(&summary_cache_path);
+                    let mut entities_map: std::collections::HashMap<
+                        String,
+                        harvester_engine::llm::SummaryEntities,
+                    > = std::collections::HashMap::new();
+                    for (key, entry) in summary_cache.iter() {
+                        entities_map
+                            .entry(key.content_hash.clone())
+                            .or_insert_with(|| entry.result.entities.clone());
+                    }
+
+                    // Step 4: build EntityIndex by joining on content_hash.
+                    let mut index = crate::entity_index_store::load_entity_index(&entity_index_path);
+                    for meta in &article_metas {
+                        let content_hash = meta.content_hash.as_deref().unwrap_or("");
+                        let entities = entities_map.get(content_hash);
+                        let themes = themes_map.get(content_hash);
+                        let entry = harvester_core::entity_index::EntityIndexEntry {
+                            fetched_utc: meta.fetched_utc.clone(),
+                            content_hash: meta.content_hash.clone(),
+                            companies: entities
+                                .map(|e| e.companies.clone())
+                                .unwrap_or_default(),
+                            technologies: entities
+                                .map(|e| e.technologies.clone())
+                                .unwrap_or_default(),
+                            products: entities
+                                .map(|e| e.products.clone())
+                                .unwrap_or_default(),
+                            themes: themes.cloned().unwrap_or_default(),
+                        };
+                        index.entries.insert(meta.url.clone(), entry);
+                    }
+
+                    // Step 5: atomically write the rebuilt index.
+                    if let Err(e) = crate::entity_index_store::save_entity_index(&entity_index_path, &index) {
+                        engine_error!("[entity-index] rebuild: save failed: {}", e);
+                        let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
+                            reason: format!("save failed: {e}"),
+                        });
+                        return;
+                    }
+
+                    engine_info!(
+                        "[entity-index] rebuild complete: {} entries",
+                        index.entries.len()
+                    );
+                    let _ = msg_tx.send(Msg::EntityIndexRebuilt { index });
+                });
+            }
             Effect::UpsertEntityIndexEntry {
                 url,
                 fetched_utc,

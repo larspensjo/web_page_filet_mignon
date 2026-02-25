@@ -247,6 +247,40 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_PREVIEW),
         control_id: PANEL_TAB_TRENDS,
     });
+    // Category selector bar (docked top inside the Trends panel)
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_TRENDS),
+        control_id: PANEL_TREND_CAT_BAR,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TREND_CAT_BAR),
+        control_id: BUTTON_TREND_COMPANIES,
+        text: "Companies".to_string(),
+        group_start: true,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TREND_CAT_BAR),
+        control_id: BUTTON_TREND_TECHNOLOGIES,
+        text: "Technologies".to_string(),
+        group_start: false,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TREND_CAT_BAR),
+        control_id: BUTTON_TREND_PRODUCTS,
+        text: "Products".to_string(),
+        group_start: false,
+    });
+    commands.push(PlatformCommand::CreateRadioButton {
+        window_id,
+        parent_control_id: Some(PANEL_TREND_CAT_BAR),
+        control_id: BUTTON_TREND_THEMES,
+        text: "Themes".to_string(),
+        group_start: false,
+    });
     commands.push(PlatformCommand::CreateRichEdit {
         window_id,
         parent_control_id: Some(PANEL_TAB_TRENDS),
@@ -1216,10 +1250,50 @@ fn build_layout_rules(
             margin: (0, 0, 0, 0),
         },
         LayoutRule {
+            control_id: PANEL_TREND_CAT_BAR,
+            parent_control_id: Some(PANEL_TAB_TRENDS),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(28),
+            margin: (0, 0, 2, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TREND_COMPANIES,
+            parent_control_id: Some(PANEL_TREND_CAT_BAR),
+            dock_style: DockStyle::Left,
+            order: 0,
+            fixed_size: Some(96),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TREND_TECHNOLOGIES,
+            parent_control_id: Some(PANEL_TREND_CAT_BAR),
+            dock_style: DockStyle::Left,
+            order: 1,
+            fixed_size: Some(112),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TREND_PRODUCTS,
+            parent_control_id: Some(PANEL_TREND_CAT_BAR),
+            dock_style: DockStyle::Left,
+            order: 2,
+            fixed_size: Some(80),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_TREND_THEMES,
+            parent_control_id: Some(PANEL_TREND_CAT_BAR),
+            dock_style: DockStyle::Left,
+            order: 3,
+            fixed_size: Some(72),
+            margin: (0, 4, 0, 0),
+        },
+        LayoutRule {
             control_id: VIEWER_TRENDS,
             parent_control_id: Some(PANEL_TAB_TRENDS),
             dock_style: DockStyle::Fill,
-            order: 0,
+            order: 1,
             fixed_size: None,
             margin: (0, 0, 0, 0),
         },
@@ -1914,6 +1988,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_TAB_BRIEFING,
         PANEL_TAB_TRENDS,
         PANEL_TAB_PROMPT_LAB,
+        PANEL_TREND_CAT_BAR,
         PANEL_PROMPT_LAB,
         PANEL_PROMPT_LAB_MODE_ROW,
         PANEL_PROMPT_LAB_MODEL_ROW,

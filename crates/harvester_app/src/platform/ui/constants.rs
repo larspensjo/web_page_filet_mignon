@@ -93,6 +93,12 @@ pub const PANEL_TAB_SUMMARY: ControlId = ControlId::new(2211);
 pub const PANEL_TAB_BRIEFING: ControlId = ControlId::new(2212);
 pub const PANEL_TAB_TRENDS: ControlId = ControlId::new(2213);
 pub const PANEL_TAB_PROMPT_LAB: ControlId = ControlId::new(2214);
+// Trend category selector inside PANEL_TAB_TRENDS
+pub const PANEL_TREND_CAT_BAR: ControlId = ControlId::new(2220);
+pub const BUTTON_TREND_COMPANIES: ControlId = ControlId::new(2221);
+pub const BUTTON_TREND_TECHNOLOGIES: ControlId = ControlId::new(2222);
+pub const BUTTON_TREND_PRODUCTS: ControlId = ControlId::new(2223);
+pub const BUTTON_TREND_THEMES: ControlId = ControlId::new(2224);
 // RichEdit viewers inside each tab (except PromptLab which reuses existing controls)
 pub const VIEWER_TRIAGE: ControlId = ControlId::new(5002);
 pub const VIEWER_BRIEFING: ControlId = ControlId::new(5003);

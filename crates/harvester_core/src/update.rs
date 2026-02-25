@@ -368,6 +368,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                         .articles()[article_idx]
                                         .url
                                         .clone();
+                                    let article_fetched_utc = state
+                                        .briefing()
+                                        .articles()[article_idx]
+                                        .fetched_utc
+                                        .clone();
                                     state.store_summary_result(
                                         store_key.clone(),
                                         summary_result,
@@ -389,7 +394,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                     );
                                     effects.push(Effect::UpsertEntityIndexEntry {
                                         url: article_url,
-                                        fetched_utc: None,
+                                        fetched_utc: article_fetched_utc,
                                         content_hash: Some(content_hash.clone()),
                                         summary_entities: Some(article_entities),
                                         themes: None,
@@ -441,6 +446,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                             let content_hash =
                                 state.triage().articles()[article_idx].content_hash.clone();
                             let url = state.triage().articles()[article_idx].url.clone();
+                            let fetched_utc =
+                                state.triage().articles()[article_idx].fetched_utc.clone();
                             let result = ArticleTriageResult {
                                 category: triage.category,
                                 priority: triage.priority.value(),
@@ -456,7 +463,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                             state.store_triage_result(&content_hash, result);
                             effects.push(Effect::UpsertEntityIndexEntry {
                                 url,
-                                fetched_utc: None,
+                                fetched_utc,
                                 content_hash: Some(content_hash),
                                 summary_entities: None,
                                 themes: Some(themes),
@@ -1616,7 +1623,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::EntityIndexLoaded { index } => {
             engine_info!("[entity-index] loaded {} entries", index.entries.len());
-            // Slice 4: store into state for trend computation
+            state.set_entity_index(index, 13, 10);
             Vec::new()
         }
         Msg::EntityIndexLoadFailed { reason } => {
@@ -1625,7 +1632,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::EntityIndexRebuilt { index } => {
             engine_info!("[entity-index] rebuilt {} entries", index.entries.len());
-            // Slice 4: store into state for trend computation
+            state.set_entity_index(index, 13, 10);
             Vec::new()
         }
         Msg::EntityIndexRebuildFailed { reason } => {
@@ -1798,6 +1805,7 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
             TriageCacheLookupResult::Hit(cached) => {
                 let themes = cached.tags.clone();
                 let url = state.triage().articles()[next_idx].url.clone();
+                let fetched_utc = state.triage().articles()[next_idx].fetched_utc.clone();
                 let result = cached.clone();
                 state.record_triage_cache_hit();
                 engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
@@ -1806,7 +1814,7 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
                 state.mark_dirty();
                 effects.push(Effect::UpsertEntityIndexEntry {
                     url,
-                    fetched_utc: None,
+                    fetched_utc,
                     content_hash: Some(content_hash.clone()),
                     summary_entities: None,
                     themes: Some(themes),
@@ -2006,6 +2014,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                 if let Some(cached_result) = state.try_reuse_summary(&key) {
                     let article_entities = cached_result.entities.clone();
                     let url = state.briefing().articles()[next_idx].url.clone();
+                    let fetched_utc = state.briefing().articles()[next_idx].fetched_utc.clone();
                     let result = cached_result.clone();
                     state.record_summary_cache_hit();
                     engine_info!(
@@ -2022,7 +2031,7 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     state.mark_dirty();
                     effects.push(Effect::UpsertEntityIndexEntry {
                         url,
-                        fetched_utc: None,
+                        fetched_utc,
                         content_hash: Some(content_hash.clone()),
                         summary_entities: Some(article_entities),
                         themes: None,
@@ -2365,12 +2374,14 @@ mod tests {
                 source_title: Some("Article A".to_string()),
                 prepared_text: long_text("Article A text"),
                 content_hash: "hash-a".to_string(),
+                fetched_utc: None,
             },
             LoadedArticle {
                 url: "https://example.com/b".to_string(),
                 source_title: Some("Article B".to_string()),
                 prepared_text: long_text("Article B text"),
                 content_hash: "hash-b".to_string(),
+                fetched_utc: None,
             },
         ];
         (articles, "Collection text".to_string())
@@ -2387,6 +2398,7 @@ mod tests {
                     .join(" ")
             ),
             content_hash: "hash-a".to_string(),
+            fetched_utc: None,
         }];
         (articles, "Collection text".to_string())
     }
@@ -2851,6 +2863,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -2921,6 +2934,7 @@ mod tests {
                     .collect::<Vec<_>>()
                     .join(" "),
                 content_hash: format!("hash-{i}"),
+                fetched_utc: None,
             })
             .collect()
     }
@@ -3401,6 +3415,7 @@ mod tests {
             source_title: Some("Example".to_string()),
             prepared_text: "selected article prepared text".to_string(),
             content_hash: "hash-selected".to_string(),
+            fetched_utc: None,
         }]);
         state.triage_mut().transition_to_triaging();
         state.triage_mut().complete_article(
@@ -4437,5 +4452,65 @@ mod tests {
             }
             _ => panic!("no AggregateBriefing RequestLlmCompletion effect emitted"),
         }
+    }
+
+    // ── Entity index / trends reducer tests ──────────────────────────────────
+
+    fn make_entity_index_with_company(url: &str, company: &str, fetched_utc: &str) -> crate::entity_index::EntityIndex {
+        use std::collections::BTreeMap;
+        use crate::entity_index::{EntityIndex, EntityIndexEntry};
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            url.to_string(),
+            EntityIndexEntry {
+                fetched_utc: Some(fetched_utc.to_string()),
+                content_hash: Some("abc123".to_string()),
+                companies: vec![company.to_string()],
+                ..EntityIndexEntry::default()
+            },
+        );
+        EntityIndex { schema_version: 1, entries }
+    }
+
+    #[test]
+    fn entity_index_loaded_populates_trend_data() {
+        init_logging();
+        let state = AppState::default();
+        let index = make_entity_index_with_company(
+            "https://example.com/a",
+            "Nvidia",
+            "2026-02-01T00:00:00Z",
+        );
+        let (state, effects) = update(state, Msg::EntityIndexLoaded { index });
+        assert!(effects.is_empty());
+        let trend_data = state.entity_trend_data().expect("entity_trend_data should be set");
+        assert_eq!(trend_data.companies.weeks.len(), 13, "should have 13 week buckets");
+    }
+
+    #[test]
+    fn entity_index_load_failed_triggers_rebuild() {
+        init_logging();
+        let state = AppState::default();
+        let (_, effects) = update(
+            state,
+            Msg::EntityIndexLoadFailed { reason: "file not found".to_string() },
+        );
+        assert!(
+            effects.iter().any(|e| matches!(e, Effect::RebuildEntityIndex)),
+            "EntityIndexLoadFailed should emit Effect::RebuildEntityIndex; got: {effects:?}"
+        );
+    }
+
+    #[test]
+    fn trend_category_selected_updates_active_category_no_effects() {
+        init_logging();
+        let state = AppState::default();
+        assert_eq!(state.active_trend_category(), crate::tabs::TrendCategory::Companies);
+        let (state, effects) = update(
+            state,
+            Msg::TrendCategorySelected { category: crate::tabs::TrendCategory::Technologies },
+        );
+        assert!(effects.is_empty(), "TrendCategorySelected should emit no effects");
+        assert_eq!(state.active_trend_category(), crate::tabs::TrendCategory::Technologies);
     }
 }

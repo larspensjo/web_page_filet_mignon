@@ -338,6 +338,10 @@ pub struct AppState {
     active_tab: AppTab,
     /// Currently active trend category in the Trends tab.
     active_trend_category: TrendCategory,
+    /// Persisted entity index loaded from disk (or rebuilt from caches).
+    entity_index: Option<crate::entity_index::EntityIndex>,
+    /// Pre-computed trend data derived from `entity_index`.
+    entity_trend_data: Option<crate::trends::EntityTrendData>,
 }
 
 pub(crate) struct PromptLabPendingRunRegistration {
@@ -400,6 +404,8 @@ impl Default for AppState {
             llm_usage_by_model: BTreeMap::new(),
             active_tab: AppTab::default(),
             active_trend_category: TrendCategory::default(),
+            entity_index: None,
+            entity_trend_data: None,
         }
     }
 }
@@ -702,12 +708,17 @@ impl AppState {
             selected_triage_article_available,
         );
 
+        let trends = crate::view_model::build_trends_tab_view(
+            self.entity_trend_data.as_ref(),
+            self.active_trend_category,
+        );
+
         RightPaneView {
             active_tab: self.active_tab,
             triage_markdown,
             summary_markdown,
             briefing_markdown,
-            trends_placeholder: "Trends data loading…".to_string(),
+            trends,
             prompt_lab,
         }
     }
@@ -1822,6 +1833,22 @@ impl AppState {
         self.active_trend_category
     }
 
+    /// Store a freshly loaded or rebuilt entity index and re-compute trend data.
+    pub(crate) fn set_entity_index(
+        &mut self,
+        index: crate::entity_index::EntityIndex,
+        window_weeks: u32,
+        top_n: usize,
+    ) {
+        self.entity_trend_data = Some(crate::trends::compute_trends(&index, window_weeks, top_n));
+        self.entity_index = Some(index);
+        self.dirty = true;
+    }
+
+    pub fn entity_trend_data(&self) -> Option<&crate::trends::EntityTrendData> {
+        self.entity_trend_data.as_ref()
+    }
+
     pub(crate) fn open_prompt_lab(&mut self) {
         self.select_tab(AppTab::PromptLab);
         self.prompt_lab.open();
@@ -2807,6 +2834,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -2884,6 +2912,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -3053,6 +3082,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -3373,6 +3403,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -3397,6 +3428,7 @@ mod tests {
             source_title: None,
             prepared_text: "text".to_string(),
             content_hash: "hash".to_string(),
+            fetched_utc: None,
         }]);
         triage.transition_to_triaging();
         triage.start_article(0, 1);
@@ -3433,6 +3465,7 @@ mod tests {
             source_title: None,
             prepared_text: "text".to_string(),
             content_hash: "hash".to_string(),
+            fetched_utc: None,
         }]);
         triage.transition_to_triaging();
         triage.start_article(0, 1);
@@ -3481,6 +3514,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );

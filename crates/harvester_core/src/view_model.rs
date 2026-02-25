@@ -6,7 +6,8 @@ use crate::prompt_lab::{
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::LinkDownloadState;
-use crate::tabs::AppTab;
+use crate::tabs::{AppTab, TrendCategory};
+use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
 use harvester_engine::llm::types::ModelId;
@@ -44,6 +45,46 @@ pub struct PreviewHeaderView {
     pub nav_heavy: bool,
 }
 
+/// View data for one entity in the trends tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntityLineView {
+    pub label: String,
+    pub weekly_counts: Vec<u32>,
+    pub total_count: u32,
+}
+
+/// View data for one category in the trends tab.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CategoryTrendView {
+    /// Week display labels (oldest first).
+    pub weeks: Vec<String>,
+    /// Top-N entities.
+    pub lines: Vec<EntityLineView>,
+    /// Total number of entities (before top-N truncation).
+    pub total_entity_count: usize,
+}
+
+/// View state for the Trends tab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrendsTabView {
+    /// True when entity index has not yet loaded or been rebuilt.
+    pub is_loading: bool,
+    /// The currently selected trend category.
+    pub active_category: TrendCategory,
+    /// Data for the selected category; `None` when `is_loading` is true.
+    pub category_data: Option<CategoryTrendView>,
+}
+
+impl Default for TrendsTabView {
+    fn default() -> Self {
+        Self {
+            is_loading: true,
+            active_category: TrendCategory::default(),
+            category_data: None,
+        }
+    }
+}
+
 /// View state for the right-pane tab content area.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RightPaneView {
@@ -55,8 +96,8 @@ pub struct RightPaneView {
     pub summary_markdown: Option<String>,
     /// Markdown content for the Briefing tab.
     pub briefing_markdown: Option<String>,
-    /// Placeholder / status text for the Trends tab (filled in Slice 4).
-    pub trends_placeholder: String,
+    /// Trends tab view data.
+    pub trends: TrendsTabView,
     /// Prompt Lab view (existing sub-view, now hosted in the PromptLab tab).
     pub prompt_lab: PromptLabView,
 }
@@ -68,8 +109,50 @@ impl Default for RightPaneView {
             triage_markdown: None,
             summary_markdown: None,
             briefing_markdown: None,
-            trends_placeholder: "Trends data loading…".to_string(),
+            trends: TrendsTabView::default(),
             prompt_lab: PromptLabView::default(),
+        }
+    }
+}
+
+fn category_trend_to_view(trend: &CategoryTrend) -> CategoryTrendView {
+    CategoryTrendView {
+        weeks: trend.weeks.iter().map(|w| w.label.clone()).collect(),
+        lines: trend
+            .top_entities
+            .iter()
+            .map(|e| EntityLineView {
+                label: e.display_label.clone(),
+                weekly_counts: e.weekly_counts.clone(),
+                total_count: e.total_count,
+            })
+            .collect(),
+        total_entity_count: trend.total_entity_count,
+    }
+}
+
+pub(crate) fn build_trends_tab_view(
+    entity_trend_data: Option<&EntityTrendData>,
+    active_category: TrendCategory,
+) -> TrendsTabView {
+    match entity_trend_data {
+        None => TrendsTabView {
+            is_loading: true,
+            active_category,
+            category_data: None,
+        },
+        Some(data) => {
+            let trend = match active_category {
+                TrendCategory::Companies => &data.companies,
+                TrendCategory::Technologies => &data.technologies,
+                TrendCategory::Products => &data.products,
+                TrendCategory::Themes => &data.themes,
+            };
+            TrendsTabView {
+                is_loading: false,
+                active_category,
+                category_data: Some(category_trend_to_view(trend)),
+            }
         }
     }
 }

@@ -45,6 +45,7 @@ pub struct BriefingArticle {
     pub source_title: Option<String>,
     pub prepared_text: String,
     pub content_hash: String,
+    pub fetched_utc: Option<String>,
     pub summary_state: ArticleSummaryState,
     pub cache_key_snapshot: Option<SummaryCacheKey>,
 }
@@ -186,6 +187,8 @@ pub struct LoadedArticle {
     pub source_title: Option<String>,
     pub prepared_text: String,
     pub content_hash: String,
+    /// RFC3339 UTC timestamp from the article's frontmatter; `None` if absent or unparseable.
+    pub fetched_utc: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -322,6 +325,7 @@ impl BriefingSession {
                 source_title: article.source_title,
                 prepared_text: article.prepared_text,
                 content_hash: article.content_hash,
+                fetched_utc: article.fetched_utc,
                 summary_state: ArticleSummaryState::Pending,
                 cache_key_snapshot: None,
             })
@@ -599,6 +603,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
                 summary_state: state,
                 cache_key_snapshot: None,
             }],
@@ -663,12 +668,14 @@ mod tests {
                     source_title: None,
                     prepared_text: "Article A".to_string(),
                     content_hash: "hash-a".to_string(),
+                    fetched_utc: None,
                 },
                 LoadedArticle {
                     url: "https://example.com/b".to_string(),
                     source_title: None,
                     prepared_text: "Article B".to_string(),
                     content_hash: "hash-b".to_string(),
+                    fetched_utc: None,
                 },
             ],
             "collection".to_string(),
@@ -748,6 +755,7 @@ mod tests {
                 source_title: None,
                 prepared_text: "text".to_string(),
                 content_hash: "hash".to_string(),
+                fetched_utc: None,
             }],
             "collection".to_string(),
         );
@@ -796,6 +804,7 @@ mod tests {
             source_title: None,
             prepared_text: "text".to_string(),
             content_hash: hash.to_string(),
+            fetched_utc: None,
         }
     }
 

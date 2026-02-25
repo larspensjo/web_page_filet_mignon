@@ -12,7 +12,7 @@ use commanductui::{
 };
 use harvester_core::{
     update, AppState, AppTab, AppViewModel, Effect, JobFilterStatus, JobResultKind,
-    LinkDownloadState, ManualDecision, Msg, PromptLabStage,
+    LinkDownloadState, ManualDecision, Msg, PromptLabStage, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -486,6 +486,34 @@ impl PlatformEventHandler for AppEventHandler {
                 if control_id == ui::constants::BUTTON_TAB_PROMPT_LAB =>
             {
                 let _ = self.msg_tx.send(Msg::TabSelected { tab: AppTab::PromptLab });
+            }
+            AppEvent::RadioButtonSelected { control_id, .. }
+                if control_id == ui::constants::BUTTON_TREND_COMPANIES =>
+            {
+                let _ = self.msg_tx.send(Msg::TrendCategorySelected {
+                    category: TrendCategory::Companies,
+                });
+            }
+            AppEvent::RadioButtonSelected { control_id, .. }
+                if control_id == ui::constants::BUTTON_TREND_TECHNOLOGIES =>
+            {
+                let _ = self.msg_tx.send(Msg::TrendCategorySelected {
+                    category: TrendCategory::Technologies,
+                });
+            }
+            AppEvent::RadioButtonSelected { control_id, .. }
+                if control_id == ui::constants::BUTTON_TREND_PRODUCTS =>
+            {
+                let _ = self.msg_tx.send(Msg::TrendCategorySelected {
+                    category: TrendCategory::Products,
+                });
+            }
+            AppEvent::RadioButtonSelected { control_id, .. }
+                if control_id == ui::constants::BUTTON_TREND_THEMES =>
+            {
+                let _ = self.msg_tx.send(Msg::TrendCategorySelected {
+                    category: TrendCategory::Themes,
+                });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_MODE_BASIC =>

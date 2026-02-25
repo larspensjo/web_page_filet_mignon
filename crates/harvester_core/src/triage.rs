@@ -35,6 +35,7 @@ pub struct TriageArticle {
     pub source_title: Option<String>,
     pub prepared_text: String,
     pub content_hash: String,
+    pub fetched_utc: Option<String>,
     pub triage_state: ArticleTriageState,
 }
 
@@ -94,6 +95,7 @@ impl TriageSession {
                 source_title: article.source_title,
                 prepared_text: article.prepared_text,
                 content_hash: article.content_hash,
+                fetched_utc: article.fetched_utc,
                 triage_state: ArticleTriageState::Pending,
             })
             .collect();
@@ -267,6 +269,7 @@ mod tests {
             source_title: None,
             prepared_text: String::new(),
             content_hash: String::new(),
+            fetched_utc: None,
         }
     }
 

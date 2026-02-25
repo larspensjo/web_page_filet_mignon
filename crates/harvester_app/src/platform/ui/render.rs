@@ -3,8 +3,8 @@ use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, Window
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState,
-    LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage,
-    DEFAULT_JOBS_PANEL_WIDTH,
+    LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendCategory,
+    TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
@@ -1094,15 +1094,30 @@ fn render_preview_section(
         tree_state.prev_briefing_text = Some(briefing_markdown.to_string());
     }
 
-    // Trends tab viewer: placeholder text.
-    let trends_text = &view.right_pane.trends_placeholder;
+    // Trends tab: category selector radio buttons.
+    let active_category = view.right_pane.trends.active_category;
+    for (control_id, category) in [
+        (BUTTON_TREND_COMPANIES, TrendCategory::Companies),
+        (BUTTON_TREND_TECHNOLOGIES, TrendCategory::Technologies),
+        (BUTTON_TREND_PRODUCTS, TrendCategory::Products),
+        (BUTTON_TREND_THEMES, TrendCategory::Themes),
+    ] {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            window_id,
+            control_id,
+            checked: active_category == category,
+        });
+    }
+
+    // Trends tab viewer: formatted text table.
+    let trends_text = format_trends_text(&view.right_pane.trends);
     if tree_state.prev_trends_text.as_deref() != Some(trends_text.as_str()) {
         cmds.push(PlatformCommand::SetRichEditContent {
             window_id,
             control_id: VIEWER_TRENDS,
-            rtf_text: convert_markdown_to_rtf(trends_text),
+            rtf_text: convert_markdown_to_rtf(&trends_text),
         });
-        tree_state.prev_trends_text = Some(trends_text.clone());
+        tree_state.prev_trends_text = Some(trends_text);
     }
 
     let header_text = view
@@ -1190,6 +1205,82 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
         template_version,
         template_description
     )
+}
+
+fn format_trends_text(view: &TrendsTabView) -> String {
+    if view.is_loading {
+        return "(building entity index\u{2026})".to_string();
+    }
+    let data = match &view.category_data {
+        None => return "(no trend data)".to_string(),
+        Some(d) => d,
+    };
+    if data.lines.is_empty() {
+        return "(no entity data yet — run or rebuild to populate)".to_string();
+    }
+
+    let category_name = match view.active_category {
+        TrendCategory::Companies => "Companies",
+        TrendCategory::Technologies => "Technologies",
+        TrendCategory::Products => "Products",
+        TrendCategory::Themes => "Themes",
+    };
+    let n_weeks = data.weeks.len();
+    let n_entities = data.lines.len();
+
+    // Global max weekly count used to scale bar characters.
+    let global_max = data
+        .lines
+        .iter()
+        .flat_map(|e| e.weekly_counts.iter().copied())
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    let label_width = data
+        .lines
+        .iter()
+        .map(|e| e.label.len())
+        .max()
+        .unwrap_or(10)
+        .max(10);
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "Top {n_entities} {category_name} \u{2014} last {n_weeks} weeks\n\n"
+    ));
+
+    for line in &data.lines {
+        let label = format!("{:<width$}", line.label, width = label_width);
+        let bar: String = line
+            .weekly_counts
+            .iter()
+            .map(|&count| {
+                if count == 0 {
+                    ' '
+                } else if count * 2 <= global_max {
+                    // Lower count: right half-block (lighter visual weight).
+                    '\u{2590}' // ▐
+                } else {
+                    // Higher count: left half-block (heavier visual weight).
+                    '\u{258c}' // ▌
+                }
+            })
+            .collect();
+        out.push_str(&format!(
+            "  {}  {}  total: {}\n",
+            label, bar, line.total_count
+        ));
+    }
+
+    if data.total_entity_count > n_entities {
+        out.push_str(&format!(
+            "\n  Showing top {n_entities} of {} entities.\n",
+            data.total_entity_count
+        ));
+    }
+
+    out
 }
 
 fn append_tree_commands(

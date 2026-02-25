@@ -2,6 +2,7 @@
 mod briefing;
 mod cache_utils;
 pub mod entity_index;
+pub mod trends;
 mod context_draft;
 mod effect;
 mod msg;
@@ -25,6 +26,10 @@ pub use briefing::{
     BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
 pub use entity_index::{EntityIndex, EntityIndexEntry};
+pub use trends::{
+    CategoryTrend, EntityLine, EntityTrendData, IsoWeek, choose_display_label,
+    compute_trends, normalize_entity_key,
+};
 pub use harvester_engine::llm::SummaryEntities;
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
@@ -57,9 +62,10 @@ pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCach
 pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
-    AppViewModel, JobFilterStatus, JobRowView, LinkRowView, LlmModelUsageView, PreviewHeaderView,
-    PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
-    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, RightPaneView,
-    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH,
-    DEFAULT_WINDOW_WIDTH, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
+    AppViewModel, CategoryTrendView, EntityLineView, JobFilterStatus, JobRowView, LinkRowView,
+    LlmModelUsageView, PreviewHeaderView, PromptLabCompareBatchView, PromptLabCompareCandidateView,
+    PromptLabComparePolicyView, PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView,
+    RightPaneView, TrendsTabView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH,
+    DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
+    TOKEN_LIMIT,
 };
