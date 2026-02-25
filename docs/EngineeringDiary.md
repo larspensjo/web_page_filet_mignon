@@ -441,3 +441,12 @@ Evidence: `cargo test -p harvester_engine --test briefing_loader_integration fil
 Lessons Learned: URL equality in cross-stage pipelines is a contract boundary, not a string-compare detail; if one stage stores fetched/canonicalized URLs while another stores selected/source URLs, alias matching must explicitly model common transformations.
 Prevention: Keep URL-lookup normalization/aliasing centralized in the briefing loader and add regression tests for every new real-world mismatch observed in logs before adjusting warning policy.
 Refs: crates/harvester_engine/src/briefing.rs, crates/harvester_engine/tests/briefing_loader_integration.rs, crates/harvester_io/src/effect_runner.rs
+
+## 2026-02-25 - Block interstitial pages from entering the article archive
+Type: Bug Fix
+Context: Some fetches were succeeding technically but landing on consent/captcha/interstitial pages (e.g., Yahoo consent and site captcha challenge endpoints). Those pages were exported as markdown and later caused briefing-loader corpus mismatches and noisy warnings when selected article URLs no longer matched archived interstitial URLs.
+Change: Added a pure blocker-page classifier in `harvester_engine` (URL and narrow content heuristics) and invoked it in `run_job` before export so interstitial pages fail with `FailureKind::BlockedContent` instead of being written to the archive or persisted as completed jobs. Added unit tests for Yahoo consent, captcha challenge URLs, content-based verification pages, and a false-positive regression case.
+Evidence: `cargo test -p harvester_engine blocker_page -- --nocapture`; `cargo build`
+Lessons Learned: “Successful HTTP fetch” is not the same as “valid article acquisition”; pipelines need an explicit post-fetch content validity gate before persistence, especially when redirects can land on interstitial products.
+Prevention: Keep interstitial detection as a centralized pure classifier with real-world regression fixtures and extend it from observed logs before adding ad hoc per-site exceptions downstream.
+Refs: crates/harvester_engine/src/blocker_page.rs, crates/harvester_engine/src/engine.rs, crates/harvester_engine/src/types.rs
