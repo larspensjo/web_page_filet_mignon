@@ -1,10 +1,13 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
-use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
+use commanductui::{
+    ChartDataPacket, ChartLineData, CheckState, MessageSeverity, PlatformCommand, StyleId,
+    WindowId,
+};
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState,
     LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendCategory,
-    DEFAULT_JOBS_PANEL_WIDTH,
+    TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
@@ -302,6 +305,43 @@ pub fn render(
     render_preview_section(window_id, view, tree_state, &mut cmds);
 
     cmds
+}
+
+/// Converts a `TrendsTabView` into a `ChartDataPacket` for the chart control.
+/// Uses a fixed 10-color VS Code dark-theme palette, assigned by entity index.
+fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
+    // COLORREF palette (0x00BBGGRR), up to 10 entity lines.
+    const COLORS: [u32; 10] = [
+        0x00B0C94E, // #4EC9B0 teal
+        0x007891CE, // #CE9178 salmon
+        0x00FEDC9C, // #9CDCFE light blue
+        0x00AADCDC, // #DCDCAA yellow
+        0x00C086C5, // #C586C0 purple
+        0x004747F4, // #F44747 red
+        0x007DBAD7, // #D7BA7D gold
+        0x0055996A, // #6A9955 green
+        0x00D69C56, // #569CD6 blue
+        0x00A8CEB5, // #B5CEA8 light green
+    ];
+
+    if trends.is_loading {
+        return ChartDataPacket { lines: vec![], week_labels: vec![], is_loading: true };
+    }
+    let Some(cat_data) = &trends.category_data else {
+        return ChartDataPacket { lines: vec![], week_labels: vec![], is_loading: false };
+    };
+    let lines = cat_data
+        .lines
+        .iter()
+        .take(10)
+        .enumerate()
+        .map(|(i, el)| ChartLineData {
+            label: el.label.clone(),
+            weekly_counts: el.weekly_counts.clone(),
+            color: COLORS[i],
+        })
+        .collect();
+    ChartDataPacket { lines, week_labels: cat_data.weeks.clone(), is_loading: false }
 }
 
 fn emit_if_changed<T, F>(prev: &mut Option<T>, next: T, cmds: &mut Vec<PlatformCommand>, emit: F)
@@ -1109,6 +1149,13 @@ fn render_preview_section(
             checked: active_category == category,
         });
     }
+
+    // Trends tab: chart data (unconditional — mirrors radio button pattern; InvalidateRect is cheap).
+    cmds.push(PlatformCommand::SetChartData {
+        window_id,
+        control_id: CHART_TRENDS,
+        data: build_chart_data(&view.right_pane.trends),
+    });
 
     let header_text = view
         .preview_header
@@ -2587,5 +2634,65 @@ mod tests {
         assert!(result.contains("beta: in=2K out=1K"));
         assert!(result.contains("+1 models"));
         assert!(!result.contains("gamma"));
+    }
+
+    #[test]
+    fn trends_chart_data_emits_set_chart_data() {
+        use harvester_core::{CategoryTrendView, EntityLineView, TrendCategory, TrendsTabView};
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let mut view = AppViewModel::default();
+        view.right_pane.trends = TrendsTabView {
+            is_loading: false,
+            active_category: TrendCategory::Companies,
+            category_data: Some(CategoryTrendView {
+                weeks: vec!["W1".to_string(), "W2".to_string(), "W3".to_string()],
+                lines: vec![
+                    EntityLineView {
+                        label: "Acme".to_string(),
+                        weekly_counts: vec![1, 2, 3],
+                        total_count: 6,
+                    },
+                    EntityLineView {
+                        label: "Beta".to_string(),
+                        weekly_counts: vec![3, 2, 1],
+                        total_count: 6,
+                    },
+                ],
+                total_entity_count: 2,
+            }),
+        };
+        let cmds = render(window_id, &view, &mut state);
+        let chart_cmd = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        });
+        assert!(chart_cmd.is_some(), "SetChartData not emitted for CHART_TRENDS");
+        if let Some(PlatformCommand::SetChartData { data, .. }) = chart_cmd {
+            assert_eq!(data.lines.len(), 2);
+            assert_eq!(data.lines[0].label, "Acme");
+            assert_eq!(data.week_labels, vec!["W1", "W2", "W3"]);
+            assert!(!data.is_loading);
+        }
+    }
+
+    #[test]
+    fn trends_chart_loading_state_emits_empty_packet() {
+        use harvester_core::TrendsTabView;
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let mut view = AppViewModel::default();
+        view.right_pane.trends = TrendsTabView {
+            is_loading: true,
+            ..Default::default()
+        };
+        let cmds = render(window_id, &view, &mut state);
+        let chart_cmd = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        });
+        assert!(chart_cmd.is_some(), "SetChartData not emitted during loading");
+        if let Some(PlatformCommand::SetChartData { data, .. }) = chart_cmd {
+            assert!(data.is_loading);
+            assert!(data.lines.is_empty());
+        }
     }
 }
