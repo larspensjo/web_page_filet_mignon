@@ -321,10 +321,11 @@ fn render_layout_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
+    let prompt_lab_tab_visible = view.right_pane.active_tab == AppTab::PromptLab;
     let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
         || view.input_panel_visible != tree_state.prev_input_panel_visible
         || view.right_pane.active_tab != tree_state.prev_active_tab
-        || view.prompt_lab.visible != tree_state.prev_prompt_lab_visible
+        || prompt_lab_tab_visible != tree_state.prev_prompt_lab_visible
         || view.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
         || view.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
         || view.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
@@ -350,7 +351,7 @@ fn render_layout_section(
             input_panel_visible: view.input_panel_visible,
             active_tab: view.right_pane.active_tab,
             prompt_lab: PromptLabLayoutConfig {
-                visible: view.prompt_lab.visible,
+                visible: prompt_lab_tab_visible,
                 advanced_mode: view.prompt_lab.advanced_mode,
                 compare_section_open: view.prompt_lab.compare_section_open,
                 context_section_open: view.prompt_lab.context_section_open,
@@ -360,14 +361,14 @@ fn render_layout_section(
             },
         },
     ));
-    if view.prompt_lab.visible && !tree_state.prev_prompt_lab_visible {
+    if prompt_lab_tab_visible && !tree_state.prev_prompt_lab_visible {
         tree_state.prev_prompt_lab_model_catalog = None;
         tree_state.prev_prompt_lab_selected_model = None;
     }
     tree_state.prev_left_panel_width = view.left_panel_width;
     tree_state.prev_input_panel_visible = view.input_panel_visible;
     tree_state.prev_active_tab = view.right_pane.active_tab;
-    tree_state.prev_prompt_lab_visible = view.prompt_lab.visible;
+    tree_state.prev_prompt_lab_visible = prompt_lab_tab_visible;
     tree_state.prev_prompt_lab_advanced_mode = view.prompt_lab.advanced_mode;
     tree_state.prev_prompt_lab_compare_section_open = view.prompt_lab.compare_section_open;
     tree_state.prev_prompt_lab_context_section_open = view.prompt_lab.context_section_open;
@@ -2413,6 +2414,32 @@ mod tests {
                 if *control_id == BTN_STAGE_SUMMARY
             )
         }));
+    }
+
+    #[test]
+    fn prompt_lab_tab_advanced_layout_does_not_depend_on_legacy_visible_flag() {
+        let window_id = WindowId::new(39);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.right_pane.active_tab = AppTab::PromptLab;
+        view.prompt_lab.visible = false;
+        view.prompt_lab.advanced_mode = true;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let rules = cmds
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::DefineLayout { rules, .. } => Some(rules),
+                _ => None,
+            })
+            .expect("DefineLayout emitted");
+
+        let compare_header_size = rules
+            .iter()
+            .find(|rule| rule.control_id == PANEL_PROMPT_LAB_COMPARE_HEADER_ROW)
+            .and_then(|rule| rule.fixed_size)
+            .expect("compare header fixed size");
+        assert_ne!(compare_header_size, 0);
     }
 
     #[test]

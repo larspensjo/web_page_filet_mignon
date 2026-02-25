@@ -450,3 +450,12 @@ Evidence: `cargo test -p harvester_engine blocker_page -- --nocapture`; `cargo b
 Lessons Learned: “Successful HTTP fetch” is not the same as “valid article acquisition”; pipelines need an explicit post-fetch content validity gate before persistence, especially when redirects can land on interstitial products.
 Prevention: Keep interstitial detection as a centralized pure classifier with real-world regression fixtures and extend it from observed logs before adding ad hoc per-site exceptions downstream.
 Refs: crates/harvester_engine/src/blocker_page.rs, crates/harvester_engine/src/engine.rs, crates/harvester_engine/src/types.rs
+
+## 2026-02-25 - Prompt Lab advanced tab mode ignored legacy visibility flag
+Type: Bug Fix
+Context: After moving Prompt Lab into its own right-pane tab, clicking `Advanced` selected the radio button but did not reveal advanced sections because the layout still gated Prompt Lab visibility on the old left-panel `prompt_lab.visible` flag.
+Change: Updated `harvester_app` Prompt Lab layout rendering to treat Prompt Lab as visible when the active tab is `PromptLab`, independent of the legacy visibility flag. Added a render regression test that asserts advanced layout rows expand when the Prompt Lab tab is active even if `prompt_lab.visible` is false.
+Evidence: `cargo test -p harvester_app prompt_lab_tab_advanced_layout_does_not_depend_on_legacy_visible_flag -- --nocapture`
+Lessons Learned: UI refactors that relocate a feature can leave hidden gating booleans behind; duplicated “visibility” concepts must be re-derived from the new owner state (here: active tab) instead of preserved by coincidence.
+Prevention: When migrating a panel into a tab/surface, audit render and layout code for all legacy visibility predicates and add regression tests that intentionally keep old flags false while the new navigation state is active.
+Refs: crates/harvester_app/src/platform/ui/render.rs, prompt_lab_tab_advanced_layout_does_not_depend_on_legacy_visible_flag
