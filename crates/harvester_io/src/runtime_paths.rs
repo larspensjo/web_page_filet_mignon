@@ -14,6 +14,7 @@ pub struct RuntimePaths {
     pub state_path: PathBuf,
     pub briefing_history_path: PathBuf,
     pub briefing_checkpoint_path: PathBuf,
+    pub entity_index_path: PathBuf,
 }
 
 impl RuntimePaths {
@@ -30,6 +31,7 @@ impl RuntimePaths {
         let state_path = output_dir.join(".harvester_state.ron");
         let briefing_history_path = output_dir.join(".briefing_history.ron");
         let briefing_checkpoint_path = output_dir.join(".briefing_checkpoint.ron");
+        let entity_index_path = output_dir.join(".entity_index.ron");
 
         Self {
             output_dir,
@@ -42,6 +44,7 @@ impl RuntimePaths {
             state_path,
             briefing_history_path,
             briefing_checkpoint_path,
+            entity_index_path,
         }
     }
 

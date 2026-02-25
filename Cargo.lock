@@ -895,6 +895,7 @@ dependencies = [
  "engine_logging",
  "harvester_engine",
  "log",
+ "serde",
  "sha2",
  "url",
 ]

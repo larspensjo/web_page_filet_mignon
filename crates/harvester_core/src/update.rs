@@ -362,6 +362,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                         );
                                     }
 
+                                    let article_entities = summary_result.entities.clone();
+                                    let article_url = state
+                                        .briefing()
+                                        .articles()[article_idx]
+                                        .url
+                                        .clone();
                                     state.store_summary_result(
                                         store_key.clone(),
                                         summary_result,
@@ -381,6 +387,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                         store_key.context_hash,
                                         short_hash(&content_hash),
                                     );
+                                    effects.push(Effect::UpsertEntityIndexEntry {
+                                        url: article_url,
+                                        fetched_utc: None,
+                                        content_hash: Some(content_hash.clone()),
+                                        summary_entities: Some(article_entities),
+                                        themes: None,
+                                    });
                                 }
                                 Err(err) => {
                                     engine_warn!(
@@ -427,6 +440,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         Ok(triage) => {
                             let content_hash =
                                 state.triage().articles()[article_idx].content_hash.clone();
+                            let url = state.triage().articles()[article_idx].url.clone();
                             let result = ArticleTriageResult {
                                 category: triage.category,
                                 priority: triage.priority.value(),
@@ -435,10 +449,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                 input_tokens: *input_tokens,
                                 output_tokens: *output_tokens,
                             };
+                            let themes = result.tags.clone();
                             state
                                 .triage_mut()
                                 .complete_article(article_idx, result.clone());
                             state.store_triage_result(&content_hash, result);
+                            effects.push(Effect::UpsertEntityIndexEntry {
+                                url,
+                                fetched_utc: None,
+                                content_hash: Some(content_hash),
+                                summary_entities: None,
+                                themes: Some(themes),
+                            });
 
                             // Refresh preview if this article is currently selected
                             state.refresh_selected_preview();
@@ -1592,6 +1614,24 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             Vec::new()
         }
+        Msg::EntityIndexLoaded { index } => {
+            engine_info!("[entity-index] loaded {} entries", index.entries.len());
+            // Slice 4: store into state for trend computation
+            Vec::new()
+        }
+        Msg::EntityIndexLoadFailed { reason } => {
+            engine_warn!("[entity-index] load failed: {reason}; triggering rebuild");
+            vec![Effect::RebuildEntityIndex]
+        }
+        Msg::EntityIndexRebuilt { index } => {
+            engine_info!("[entity-index] rebuilt {} entries", index.entries.len());
+            // Slice 4: store into state for trend computation
+            Vec::new()
+        }
+        Msg::EntityIndexRebuildFailed { reason } => {
+            engine_warn!("[entity-index] rebuild failed: {reason}");
+            Vec::new()
+        }
         Msg::Tick | Msg::NoOp => Vec::new(),
     };
 
@@ -1756,12 +1796,21 @@ fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
 
         match state.try_reuse_triage(&content_hash) {
             TriageCacheLookupResult::Hit(cached) => {
+                let themes = cached.tags.clone();
+                let url = state.triage().articles()[next_idx].url.clone();
                 let result = cached.clone();
                 state.record_triage_cache_hit();
                 engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
                 state.triage_mut().complete_article(next_idx, result);
                 state.refresh_selected_preview();
                 state.mark_dirty();
+                effects.push(Effect::UpsertEntityIndexEntry {
+                    url,
+                    fetched_utc: None,
+                    content_hash: Some(content_hash.clone()),
+                    summary_entities: None,
+                    themes: Some(themes),
+                });
                 continue;
             }
             TriageCacheLookupResult::Miss => {
@@ -1955,6 +2004,8 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     .briefing_mut()
                     .set_article_cache_key(next_idx, Some(key.clone()));
                 if let Some(cached_result) = state.try_reuse_summary(&key) {
+                    let article_entities = cached_result.entities.clone();
+                    let url = state.briefing().articles()[next_idx].url.clone();
                     let result = cached_result.clone();
                     state.record_summary_cache_hit();
                     engine_info!(
@@ -1969,6 +2020,13 @@ fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) 
                     state.briefing_mut().set_article_cache_key(next_idx, None);
                     state.refresh_selected_preview();
                     state.mark_dirty();
+                    effects.push(Effect::UpsertEntityIndexEntry {
+                        url,
+                        fetched_utc: None,
+                        content_hash: Some(content_hash.clone()),
+                        summary_entities: Some(article_entities),
+                        themes: None,
+                    });
                     // Cache hit: slot not consumed, continue filling.
                     continue;
                 }
@@ -2506,9 +2564,11 @@ mod tests {
             },
         );
 
-        assert_eq!(effects.len(), 1);
+        // effects[0] = UpsertEntityIndexEntry for Article A
+        // effects[1] = RequestLlmCompletion for Article B
+        assert_eq!(effects.len(), 2);
         assert!(matches!(
-            &effects[0],
+            &effects[1],
             Effect::RequestLlmCompletion {
                 request_id: 4,
                 prompt_id: PromptId::ArticleSummary,
@@ -2536,8 +2596,10 @@ mod tests {
             },
         );
 
-        assert_eq!(effects.len(), 1);
-        match &effects[0] {
+        // effects[0] = UpsertEntityIndexEntry for Article B
+        // effects[1] = RequestLlmCompletion for AggregateBriefing
+        assert_eq!(effects.len(), 2);
+        match &effects[1] {
             Effect::RequestLlmCompletion {
                 request_id,
                 prompt_id,
@@ -2657,8 +2719,10 @@ mod tests {
                 metadata: None,
             },
         );
-        assert_eq!(effects.len(), 1);
-        match &effects[0] {
+        // effects[0] = UpsertEntityIndexEntry for Article A
+        // effects[1] = RequestLlmCompletion for AggregateBriefing
+        assert_eq!(effects.len(), 2);
+        match &effects[1] {
             Effect::RequestLlmCompletion {
                 request_id,
                 prompt_id,
@@ -2733,9 +2797,11 @@ mod tests {
             },
         );
 
-        assert_eq!(effects.len(), 1);
+        // effects[0] = UpsertEntityIndexEntry (summary cache hit for Article A)
+        // effects[1] = RequestLlmCompletion for AggregateBriefing
+        assert_eq!(effects.len(), 2);
         assert!(matches!(
-            &effects[0],
+            &effects[1],
             Effect::RequestLlmCompletion {
                 request_id: 4,
                 prompt_id: PromptId::AggregateBriefing,

@@ -339,6 +339,22 @@ pub enum Msg {
     TrendCategorySelected {
         category: TrendCategory,
     },
+    /// Entity index successfully loaded from disk.
+    EntityIndexLoaded {
+        index: crate::entity_index::EntityIndex,
+    },
+    /// Entity index failed to load from disk (parse error or IO error).
+    EntityIndexLoadFailed {
+        reason: String,
+    },
+    /// Entity index successfully rebuilt from the archive.
+    EntityIndexRebuilt {
+        index: crate::entity_index::EntityIndex,
+    },
+    /// Entity index rebuild failed.
+    EntityIndexRebuildFailed {
+        reason: String,
+    },
 }
 
 /// Result payload returned by the LLM worker.

@@ -1,6 +1,7 @@
 //! Harvester core: pure state machine and view-model helpers.
 mod briefing;
 mod cache_utils;
+pub mod entity_index;
 mod context_draft;
 mod effect;
 mod msg;
@@ -23,6 +24,7 @@ pub use briefing::{
     BriefingHistoryEntry, BriefingHistoryTheme, BriefingPhase, BriefingResult, BriefingSession,
     BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
+pub use entity_index::{EntityIndex, EntityIndexEntry};
 pub use harvester_engine::llm::SummaryEntities;
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};

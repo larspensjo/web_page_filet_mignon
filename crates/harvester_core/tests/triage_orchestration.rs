@@ -110,11 +110,12 @@ fn request_id_for_prompt(effects: &[Effect], prompt_id: PromptId) -> Option<u64>
 
 fn assert_persist_triage_cache_effect(effects: &[Effect], state: &AppState) {
     let expected_cache = state.triage_cache().clone();
-    assert_eq!(
-        effects,
-        &[Effect::PersistTriageCache {
-            cache: expected_cache,
-        }]
+    let expected = Effect::PersistTriageCache {
+        cache: expected_cache,
+    };
+    assert!(
+        effects.contains(&expected),
+        "expected PersistTriageCache in effects, got: {effects:?}"
     );
 }
 

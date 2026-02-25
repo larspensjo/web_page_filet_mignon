@@ -11,3 +11,4 @@ chrono = "0.4"
 engine_logging = { path = "../engine_logging" }
 sha2 = "0.10"
 log.workspace = true
+serde = { version = "1", features = ["derive"] }
