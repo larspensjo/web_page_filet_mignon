@@ -281,10 +281,10 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         text: "Themes".to_string(),
         group_start: false,
     });
-    commands.push(PlatformCommand::CreateRichEdit {
+    commands.push(PlatformCommand::CreateChart {
         window_id,
         parent_control_id: Some(PANEL_TAB_TRENDS),
-        control_id: VIEWER_TRENDS,
+        control_id: CHART_TRENDS,
     });
 
     commands.push(PlatformCommand::CreatePanel {
@@ -1300,7 +1300,7 @@ fn build_layout_rules(
             margin: (0, 4, 0, 0),
         },
         LayoutRule {
-            control_id: VIEWER_TRENDS,
+            control_id: CHART_TRENDS,
             parent_control_id: Some(PANEL_TAB_TRENDS),
             dock_style: DockStyle::Fill,
             order: 1,
@@ -2081,7 +2081,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
         style_id: StyleId::ComboBox,
     });
-    for control_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING, VIEWER_TRENDS] {
+    for control_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
             control_id,

@@ -1816,8 +1816,10 @@ impl AppState {
     }
 
     pub(crate) fn select_tab(&mut self, tab: AppTab) {
-        self.active_tab = tab;
-        self.dirty = true;
+        if self.active_tab != tab {
+            self.active_tab = tab;
+            self.dirty = true;
+        }
     }
 
     pub fn active_tab(&self) -> AppTab {

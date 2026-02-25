@@ -4,7 +4,7 @@ use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState,
     LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendCategory,
-    TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
+    DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
@@ -154,7 +154,6 @@ pub struct TreeRenderState {
     prev_active_tab: AppTab,
     prev_triage_text: Option<String>,
     prev_briefing_text: Option<String>,
-    prev_trends_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -228,7 +227,6 @@ impl Default for TreeRenderState {
             prev_active_tab: AppTab::Summary,
             prev_triage_text: None,
             prev_briefing_text: None,
-            prev_trends_text: None,
         }
     }
 }
@@ -1112,17 +1110,6 @@ fn render_preview_section(
         });
     }
 
-    // Trends tab viewer: formatted text table.
-    let trends_text = format_trends_text(&view.right_pane.trends);
-    if tree_state.prev_trends_text.as_deref() != Some(trends_text.as_str()) {
-        cmds.push(PlatformCommand::SetRichEditContent {
-            window_id,
-            control_id: VIEWER_TRENDS,
-            rtf_text: convert_markdown_to_rtf(&trends_text),
-        });
-        tree_state.prev_trends_text = Some(trends_text);
-    }
-
     let header_text = view
         .preview_header
         .as_ref()
@@ -1208,82 +1195,6 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
         template_version,
         template_description
     )
-}
-
-fn format_trends_text(view: &TrendsTabView) -> String {
-    if view.is_loading {
-        return "(building entity index\u{2026})".to_string();
-    }
-    let data = match &view.category_data {
-        None => return "(no trend data)".to_string(),
-        Some(d) => d,
-    };
-    if data.lines.is_empty() {
-        return "(no entity data yet — run or rebuild to populate)".to_string();
-    }
-
-    let category_name = match view.active_category {
-        TrendCategory::Companies => "Companies",
-        TrendCategory::Technologies => "Technologies",
-        TrendCategory::Products => "Products",
-        TrendCategory::Themes => "Themes",
-    };
-    let n_weeks = data.weeks.len();
-    let n_entities = data.lines.len();
-
-    // Global max weekly count used to scale bar characters.
-    let global_max = data
-        .lines
-        .iter()
-        .flat_map(|e| e.weekly_counts.iter().copied())
-        .max()
-        .unwrap_or(1)
-        .max(1);
-
-    let label_width = data
-        .lines
-        .iter()
-        .map(|e| e.label.len())
-        .max()
-        .unwrap_or(10)
-        .max(10);
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        "Top {n_entities} {category_name} \u{2014} last {n_weeks} weeks\n\n"
-    ));
-
-    for line in &data.lines {
-        let label = format!("{:<width$}", line.label, width = label_width);
-        let bar: String = line
-            .weekly_counts
-            .iter()
-            .map(|&count| {
-                if count == 0 {
-                    ' '
-                } else if count * 2 <= global_max {
-                    // Lower count: right half-block (lighter visual weight).
-                    '\u{2590}' // ▐
-                } else {
-                    // Higher count: left half-block (heavier visual weight).
-                    '\u{258c}' // ▌
-                }
-            })
-            .collect();
-        out.push_str(&format!(
-            "  {}  {}  total: {}\n",
-            label, bar, line.total_count
-        ));
-    }
-
-    if data.total_entity_count > n_entities {
-        out.push_str(&format!(
-            "\n  Showing top {n_entities} of {} entities.\n",
-            data.total_entity_count
-        ));
-    }
-
-    out
 }
 
 fn append_tree_commands(
@@ -1939,10 +1850,8 @@ mod tests {
         init_logging();
         let window_id = WindowId::new(3);
         let mut tree_state = TreeRenderState::new();
-        let view = AppViewModel {
-            preview_text: Some("first\nsecond\r\nthird\rfourth".to_string()),
-            ..Default::default()
-        };
+        let mut view = AppViewModel::default();
+        view.right_pane.summary_markdown = Some("first\nsecond\r\nthird\rfourth".to_string());
 
         let commands = render(window_id, &view, &mut tree_state);
         let viewer_text = commands
@@ -2020,10 +1929,8 @@ mod tests {
         init_logging();
         let window_id = WindowId::new(7);
         let mut tree_state = TreeRenderState::new();
-        let view = AppViewModel {
-            preview_text: Some("**bold**".to_string()),
-            ..Default::default()
-        };
+        let mut view = AppViewModel::default();
+        view.right_pane.summary_markdown = Some("**bold**".to_string());
 
         let commands = render(window_id, &view, &mut tree_state);
         let viewer_text = commands
@@ -2059,10 +1966,8 @@ mod tests {
         let window_id = WindowId::new(9);
         let mut tree_state = TreeRenderState::new();
         let long_text = "x".repeat(MAX_VIEWER_CHARS + 1);
-        let view = AppViewModel {
-            preview_text: Some(long_text),
-            ..Default::default()
-        };
+        let mut view = AppViewModel::default();
+        view.right_pane.summary_markdown = Some(long_text);
         let commands = render(window_id, &view, &mut tree_state);
         let viewer_text = commands
             .iter()
@@ -2498,7 +2403,7 @@ mod tests {
         let window_id = WindowId::new(36);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.visible = true;
+        view.right_pane.active_tab = AppTab::PromptLab;
         view.prompt_lab.model_catalog = vec![ModelId::new(
             harvester_engine::llm::ProviderKind::OpenAi,
             "gpt-4o-mini",
@@ -2514,10 +2419,10 @@ mod tests {
                 if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
         }));
 
-        view.prompt_lab.visible = false;
+        view.right_pane.active_tab = AppTab::Summary;
         let _ = render(window_id, &view, &mut tree_state);
 
-        view.prompt_lab.visible = true;
+        view.right_pane.active_tab = AppTab::PromptLab;
         let reopen_cmds = render(window_id, &view, &mut tree_state);
         assert!(reopen_cmds.iter().any(|cmd| {
             matches!(cmd, PlatformCommand::SetComboBoxItems { control_id, .. }
