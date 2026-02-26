@@ -3,7 +3,6 @@ use crate::context_hash;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
-use crate::tabs::{AppTab, TrendCategory};
 use crate::preview::{self, PreviewContentKind};
 use crate::prompt_lab::{
     PromptLabRunId, PromptLabRunOverrides, PromptLabStage, PromptLabState,
@@ -11,6 +10,7 @@ use crate::prompt_lab::{
 };
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
+use crate::tabs::{AppTab, TrendCategory};
 use crate::triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession};
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
@@ -686,11 +686,7 @@ impl AppState {
         // Build summary markdown for the selected job.
         let summary_markdown = selected_url.and_then(|url| {
             self.briefing.summary_for_url(url).map(|s| {
-                let kp_lines: String = s
-                    .key_points
-                    .iter()
-                    .map(|kp| format!("- {kp}\n"))
-                    .collect();
+                let kp_lines: String = s.key_points.iter().map(|kp| format!("- {kp}\n")).collect();
                 format!(
                     "# {}\n\n{}\n\n**Key Points:**\n\n{}\n",
                     s.title, s.summary, kp_lines

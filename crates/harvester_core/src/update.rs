@@ -364,14 +364,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                                     }
 
                                     let article_entities = summary_result.entities.clone();
-                                    let article_url = state
-                                        .briefing()
-                                        .articles()[article_idx]
-                                        .url
-                                        .clone();
-                                    let article_fetched_utc = state
-                                        .briefing()
-                                        .articles()[article_idx]
+                                    let article_url =
+                                        state.briefing().articles()[article_idx].url.clone();
+                                    let article_fetched_utc = state.briefing().articles()
+                                        [article_idx]
                                         .fetched_utc
                                         .clone();
                                     state.store_summary_result(
@@ -2632,12 +2628,11 @@ mod tests {
                 assert_eq!(input_content, "Collection text");
                 assert!(context.is_empty());
                 assert!(template_override.is_none());
-                assert!(extra_template_vars.iter().any(
-                    |(k, v)| k == "previous_briefings" && v == "(none)"
-                ));
+                assert!(extra_template_vars
+                    .iter()
+                    .any(|(k, v)| k == "previous_briefings" && v == "(none)"));
                 assert!(extra_template_vars.iter().any(|(k, v)| {
-                    k == "briefing_time_window"
-                        && v.contains("All available articles")
+                    k == "briefing_time_window" && v.contains("All available articles")
                 }));
             }
             other => panic!("expected aggregate briefing request, got {other:?}"),
@@ -2755,12 +2750,11 @@ mod tests {
                 assert_eq!(input_content, "Collection text");
                 assert!(context.is_empty());
                 assert!(template_override.is_none());
-                assert!(extra_template_vars.iter().any(
-                    |(k, v)| k == "previous_briefings" && v == "(none)"
-                ));
+                assert!(extra_template_vars
+                    .iter()
+                    .any(|(k, v)| k == "previous_briefings" && v == "(none)"));
                 assert!(extra_template_vars.iter().any(|(k, v)| {
-                    k == "briefing_time_window"
-                        && v.contains("All available articles")
+                    k == "briefing_time_window" && v.contains("All available articles")
                 }));
             }
             other => panic!("expected aggregate briefing request, got {other:?}"),
@@ -4466,9 +4460,13 @@ mod tests {
 
     // ── Entity index / trends reducer tests ──────────────────────────────────
 
-    fn make_entity_index_with_company(url: &str, company: &str, fetched_utc: &str) -> crate::entity_index::EntityIndex {
-        use std::collections::BTreeMap;
+    fn make_entity_index_with_company(
+        url: &str,
+        company: &str,
+        fetched_utc: &str,
+    ) -> crate::entity_index::EntityIndex {
         use crate::entity_index::{EntityIndex, EntityIndexEntry};
+        use std::collections::BTreeMap;
         let mut entries = BTreeMap::new();
         entries.insert(
             url.to_string(),
@@ -4479,7 +4477,10 @@ mod tests {
                 ..EntityIndexEntry::default()
             },
         );
-        EntityIndex { schema_version: 1, entries }
+        EntityIndex {
+            schema_version: 1,
+            entries,
+        }
     }
 
     #[test]
@@ -4493,8 +4494,14 @@ mod tests {
         );
         let (state, effects) = update(state, Msg::EntityIndexLoaded { index });
         assert!(effects.is_empty());
-        let trend_data = state.entity_trend_data().expect("entity_trend_data should be set");
-        assert_eq!(trend_data.companies.weeks.len(), 13, "should have 13 week buckets");
+        let trend_data = state
+            .entity_trend_data()
+            .expect("entity_trend_data should be set");
+        assert_eq!(
+            trend_data.companies.weeks.len(),
+            13,
+            "should have 13 week buckets"
+        );
     }
 
     #[test]
@@ -4503,10 +4510,14 @@ mod tests {
         let state = AppState::default();
         let (_, effects) = update(
             state,
-            Msg::EntityIndexLoadFailed { reason: "file not found".to_string() },
+            Msg::EntityIndexLoadFailed {
+                reason: "file not found".to_string(),
+            },
         );
         assert!(
-            effects.iter().any(|e| matches!(e, Effect::RebuildEntityIndex)),
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::RebuildEntityIndex)),
             "EntityIndexLoadFailed should emit Effect::RebuildEntityIndex; got: {effects:?}"
         );
     }
@@ -4515,12 +4526,23 @@ mod tests {
     fn trend_category_selected_updates_active_category_no_effects() {
         init_logging();
         let state = AppState::default();
-        assert_eq!(state.active_trend_category(), crate::tabs::TrendCategory::Companies);
+        assert_eq!(
+            state.active_trend_category(),
+            crate::tabs::TrendCategory::Companies
+        );
         let (state, effects) = update(
             state,
-            Msg::TrendCategorySelected { category: crate::tabs::TrendCategory::Technologies },
+            Msg::TrendCategorySelected {
+                category: crate::tabs::TrendCategory::Technologies,
+            },
         );
-        assert!(effects.is_empty(), "TrendCategorySelected should emit no effects");
-        assert_eq!(state.active_trend_category(), crate::tabs::TrendCategory::Technologies);
+        assert!(
+            effects.is_empty(),
+            "TrendCategorySelected should emit no effects"
+        );
+        assert_eq!(
+            state.active_trend_category(),
+            crate::tabs::TrendCategory::Technologies
+        );
     }
 }

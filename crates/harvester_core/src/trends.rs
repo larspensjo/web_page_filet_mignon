@@ -77,7 +77,10 @@ pub(crate) fn compute_trends_as_of(
 
 /// Normalize an entity string for grouping: trim, collapse internal whitespace, lowercase.
 pub fn normalize_entity_key(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Choose the canonical display label from a list of `(form, occurrence_count)` pairs.
@@ -116,8 +119,7 @@ fn build_week_buckets(window_weeks: u32, as_of: NaiveDate) -> Vec<IsoWeek> {
     (0..window_weeks)
         .rev()
         .map(|weeks_ago| {
-            let week_start =
-                current_monday - chrono::Duration::weeks(weeks_ago as i64);
+            let week_start = current_monday - chrono::Duration::weeks(weeks_ago as i64);
             let month = week_start.format("%b").to_string();
             let day = week_start.day();
             let label = format!("{month} {day}");
@@ -150,7 +152,7 @@ where
     // normalized_key → original_form → occurrence_count (for display label election)
     let mut entity_forms: HashMap<String, HashMap<String, u32>> = HashMap::new();
 
-    for (_url, entry) in &index.entries {
+    for entry in index.entries.values() {
         // Parse fetched_utc — skip articles with missing or unparseable timestamps.
         let article_date = match entry.fetched_utc.as_deref() {
             Some(s) => match chrono::DateTime::parse_from_rfc3339(s) {
@@ -274,7 +276,10 @@ mod tests {
 
     #[test]
     fn normalize_collapses_whitespace() {
-        assert_eq!(normalize_entity_key("Large  Language  Models"), "large language models");
+        assert_eq!(
+            normalize_entity_key("Large  Language  Models"),
+            "large language models"
+        );
     }
 
     #[test]
@@ -359,7 +364,11 @@ mod tests {
         )]);
         let data = compute_trends_as_of(&index, 4, 10, ref_date());
         let last_week_idx = data.companies.weeks.len() - 1;
-        let nvidia_line = data.companies.top_entities.iter().find(|e| e.display_label == "Nvidia");
+        let nvidia_line = data
+            .companies
+            .top_entities
+            .iter()
+            .find(|e| e.display_label == "Nvidia");
         let nvidia_line = nvidia_line.expect("Nvidia should appear");
         assert_eq!(nvidia_line.weekly_counts[last_week_idx], 1);
         assert_eq!(nvidia_line.total_count, 1);
@@ -478,10 +487,7 @@ mod tests {
             .collect();
         let index = EntityIndex {
             schema_version: 1,
-            entries: entries
-                .into_iter()
-                .map(|(url, e)| (url, e))
-                .collect::<BTreeMap<_, _>>(),
+            entries: entries.into_iter().collect::<BTreeMap<_, _>>(),
         };
         let data = compute_trends_as_of(&index, 4, 2, ref_date());
         assert_eq!(data.companies.total_entity_count, 5);

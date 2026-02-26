@@ -328,22 +328,20 @@ fn url_lookup_aliases(url: &str) -> Vec<String> {
 
     let mut aliases = vec![key.clone()];
     if let Ok(parsed) = Url::parse(&key) {
-        let push_scheme_variants = |aliases: &mut Vec<String>, base: &Url| {
-            match base.scheme() {
-                "http" => {
-                    let mut https = base.clone();
-                    if https.set_scheme("https").is_ok() {
-                        aliases.push(https.to_string().trim_end_matches('/').to_string());
-                    }
+        let push_scheme_variants = |aliases: &mut Vec<String>, base: &Url| match base.scheme() {
+            "http" => {
+                let mut https = base.clone();
+                if https.set_scheme("https").is_ok() {
+                    aliases.push(https.to_string().trim_end_matches('/').to_string());
                 }
-                "https" => {
-                    let mut http = base.clone();
-                    if http.set_scheme("http").is_ok() {
-                        aliases.push(http.to_string().trim_end_matches('/').to_string());
-                    }
-                }
-                _ => {}
             }
+            "https" => {
+                let mut http = base.clone();
+                if http.set_scheme("http").is_ok() {
+                    aliases.push(http.to_string().trim_end_matches('/').to_string());
+                }
+            }
+            _ => {}
         };
 
         if parsed.query().is_some() {
@@ -499,9 +497,7 @@ pub fn load_and_prepare_articles_for_triage(
 /// Scan `output_dir` for markdown articles and return lightweight metadata for each.
 /// Used by the entity index rebuild procedure to join against the triage/summary caches.
 /// Articles with missing or malformed frontmatter are skipped (logged as warnings by the inner scanner).
-pub fn scan_archive_article_metadata(
-    output_dir: &Path,
-) -> Result<Vec<ArchiveArticleMeta>, String> {
+pub fn scan_archive_article_metadata(output_dir: &Path) -> Result<Vec<ArchiveArticleMeta>, String> {
     let packages = scan_and_prepare_articles(output_dir, None)?;
     Ok(packages
         .into_iter()

@@ -183,7 +183,11 @@ mod tests {
         let url = "https://example.com/article";
 
         // First: add entities via summary patch.
-        upsert_entry(&mut index, url, make_patch_entities(&["Nvidia"], &[], &["H100"]));
+        upsert_entry(
+            &mut index,
+            url,
+            make_patch_entities(&["Nvidia"], &[], &["H100"]),
+        );
         // Then: add themes via triage patch.
         upsert_entry(&mut index, url, make_patch_themes(&["AI"]));
 

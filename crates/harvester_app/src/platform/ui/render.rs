@@ -1,7 +1,6 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{
-    ChartDataPacket, ChartLineData, CheckState, MessageSeverity, PlatformCommand, StyleId,
-    WindowId,
+    ChartDataPacket, ChartLineData, CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId,
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
@@ -324,10 +323,18 @@ fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
     ];
 
     if trends.is_loading {
-        return ChartDataPacket { lines: vec![], week_labels: vec![], is_loading: true };
+        return ChartDataPacket {
+            lines: vec![],
+            week_labels: vec![],
+            is_loading: true,
+        };
     }
     let Some(cat_data) = &trends.category_data else {
-        return ChartDataPacket { lines: vec![], week_labels: vec![], is_loading: false };
+        return ChartDataPacket {
+            lines: vec![],
+            week_labels: vec![],
+            is_loading: false,
+        };
     };
     let lines = cat_data
         .lines
@@ -340,7 +347,11 @@ fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
             color: COLORS[i],
         })
         .collect();
-    ChartDataPacket { lines, week_labels: cat_data.weeks.clone(), is_loading: false }
+    ChartDataPacket {
+        lines,
+        week_labels: cat_data.weeks.clone(),
+        is_loading: false,
+    }
 }
 
 fn emit_if_changed<T, F>(prev: &mut Option<T>, next: T, cmds: &mut Vec<PlatformCommand>, emit: F)
@@ -2665,7 +2676,10 @@ mod tests {
         let chart_cmd = cmds.iter().find(|c| {
             matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
         });
-        assert!(chart_cmd.is_some(), "SetChartData not emitted for CHART_TRENDS");
+        assert!(
+            chart_cmd.is_some(),
+            "SetChartData not emitted for CHART_TRENDS"
+        );
         if let Some(PlatformCommand::SetChartData { data, .. }) = chart_cmd {
             assert_eq!(data.lines.len(), 2);
             assert_eq!(data.lines[0].label, "Acme");
@@ -2688,7 +2702,10 @@ mod tests {
         let chart_cmd = cmds.iter().find(|c| {
             matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
         });
-        assert!(chart_cmd.is_some(), "SetChartData not emitted during loading");
+        assert!(
+            chart_cmd.is_some(),
+            "SetChartData not emitted during loading"
+        );
         if let Some(PlatformCommand::SetChartData { data, .. }) = chart_cmd {
             assert!(data.is_loading);
             assert!(data.lines.is_empty());

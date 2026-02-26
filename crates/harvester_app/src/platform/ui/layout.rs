@@ -1054,7 +1054,11 @@ fn build_layout_rules(
     };
     // Helper: returns fixed_size=Some(0) for collapsed tabs, None for the active tab.
     let tab_size = |tab: AppTab| -> Option<i32> {
-        if active_tab == tab { None } else { Some(0) }
+        if active_tab == tab {
+            None
+        } else {
+            Some(0)
+        }
     };
     let mut rules = vec![
         LayoutRule {
@@ -2415,8 +2419,16 @@ mod tests {
         assert_eq!(summary_tab.fixed_size, None);
         // Other content tabs should also be collapsed.
         for &control_id in &[PANEL_TAB_TRIAGE, PANEL_TAB_BRIEFING, PANEL_TAB_TRENDS] {
-            let tab = rules.iter().find(|r| r.control_id == control_id).expect("tab panel rule");
-            assert_eq!(tab.fixed_size, Some(0), "tab {:?} should be collapsed", control_id);
+            let tab = rules
+                .iter()
+                .find(|r| r.control_id == control_id)
+                .expect("tab panel rule");
+            assert_eq!(
+                tab.fixed_size,
+                Some(0),
+                "tab {:?} should be collapsed",
+                control_id
+            );
         }
     }
 

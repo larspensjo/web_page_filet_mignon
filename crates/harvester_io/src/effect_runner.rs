@@ -975,7 +975,8 @@ impl EffectRunner {
 
                     // Step 2: load triage cache and build content_hash → tags map.
                     // Use the first entry per content_hash (any version is fine for rebuild).
-                    let triage_cache = crate::triage_cache_store::load_triage_cache(&triage_cache_path);
+                    let triage_cache =
+                        crate::triage_cache_store::load_triage_cache(&triage_cache_path);
                     let mut themes_map: std::collections::HashMap<String, Vec<String>> =
                         std::collections::HashMap::new();
                     for (key, entry) in triage_cache.iter() {
@@ -986,7 +987,8 @@ impl EffectRunner {
 
                     // Step 3: load summary cache and build content_hash → entities map.
                     // Only V4+ entries will have non-empty entities; older entries → empty.
-                    let summary_cache = crate::summary_cache_store::load_summary_cache(&summary_cache_path);
+                    let summary_cache =
+                        crate::summary_cache_store::load_summary_cache(&summary_cache_path);
                     let mut entities_map: std::collections::HashMap<
                         String,
                         harvester_engine::llm::SummaryEntities,
@@ -998,7 +1000,8 @@ impl EffectRunner {
                     }
 
                     // Step 4: build EntityIndex by joining on content_hash.
-                    let mut index = crate::entity_index_store::load_entity_index(&entity_index_path);
+                    let mut index =
+                        crate::entity_index_store::load_entity_index(&entity_index_path);
                     for meta in &article_metas {
                         let content_hash = meta.content_hash.as_deref().unwrap_or("");
                         let entities = entities_map.get(content_hash);
@@ -1006,22 +1009,20 @@ impl EffectRunner {
                         let entry = harvester_core::entity_index::EntityIndexEntry {
                             fetched_utc: meta.fetched_utc.clone(),
                             content_hash: meta.content_hash.clone(),
-                            companies: entities
-                                .map(|e| e.companies.clone())
-                                .unwrap_or_default(),
+                            companies: entities.map(|e| e.companies.clone()).unwrap_or_default(),
                             technologies: entities
                                 .map(|e| e.technologies.clone())
                                 .unwrap_or_default(),
-                            products: entities
-                                .map(|e| e.products.clone())
-                                .unwrap_or_default(),
+                            products: entities.map(|e| e.products.clone()).unwrap_or_default(),
                             themes: themes.cloned().unwrap_or_default(),
                         };
                         index.entries.insert(meta.url.clone(), entry);
                     }
 
                     // Step 5: atomically write the rebuilt index.
-                    if let Err(e) = crate::entity_index_store::save_entity_index(&entity_index_path, &index) {
+                    if let Err(e) =
+                        crate::entity_index_store::save_entity_index(&entity_index_path, &index)
+                    {
                         engine_error!("[entity-index] rebuild: save failed: {}", e);
                         let _ = msg_tx.send(Msg::EntityIndexRebuildFailed {
                             reason: format!("save failed: {e}"),
@@ -1307,10 +1308,7 @@ impl Drop for EffectRunner {
 /// a full load → merge → atomic-write cycle per message to ensure no concurrent writes.
 ///
 /// Exits when the sender (`entity_index_worker_tx`) is dropped (channel closed).
-fn run_entity_index_worker(
-    rx: mpsc::Receiver<EntityIndexWorkerMsg>,
-    path: PathBuf,
-) {
+fn run_entity_index_worker(rx: mpsc::Receiver<EntityIndexWorkerMsg>, path: PathBuf) {
     engine_info!("[entity-index] worker started");
     for msg in rx {
         match msg {

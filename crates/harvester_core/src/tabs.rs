@@ -1,17 +1,12 @@
 /// The active content tab in the right pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AppTab {
     Triage,
+    #[default]
     Summary,
     Briefing,
     Trends,
     PromptLab,
-}
-
-impl Default for AppTab {
-    fn default() -> Self {
-        AppTab::Summary
-    }
 }
 
 /// The active trend category in the Trends tab.

@@ -86,7 +86,7 @@ impl Default for TrendsTabView {
 }
 
 /// View state for the right-pane tab content area.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RightPaneView {
     /// Which tab is currently active.
     pub active_tab: AppTab,
@@ -100,19 +100,6 @@ pub struct RightPaneView {
     pub trends: TrendsTabView,
     /// Prompt Lab view (existing sub-view, now hosted in the PromptLab tab).
     pub prompt_lab: PromptLabView,
-}
-
-impl Default for RightPaneView {
-    fn default() -> Self {
-        Self {
-            active_tab: AppTab::default(),
-            triage_markdown: None,
-            summary_markdown: None,
-            briefing_markdown: None,
-            trends: TrendsTabView::default(),
-            prompt_lab: PromptLabView::default(),
-        }
-    }
 }
 
 fn category_trend_to_view(trend: &CategoryTrend) -> CategoryTrendView {

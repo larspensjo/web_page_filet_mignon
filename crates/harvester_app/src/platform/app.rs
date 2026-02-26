@@ -465,27 +465,37 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BUTTON_TAB_TRIAGE =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected { tab: AppTab::Triage });
+                let _ = self.msg_tx.send(Msg::TabSelected {
+                    tab: AppTab::Triage,
+                });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BUTTON_TAB_SUMMARY =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected { tab: AppTab::Summary });
+                let _ = self.msg_tx.send(Msg::TabSelected {
+                    tab: AppTab::Summary,
+                });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BUTTON_TAB_BRIEFING =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected { tab: AppTab::Briefing });
+                let _ = self.msg_tx.send(Msg::TabSelected {
+                    tab: AppTab::Briefing,
+                });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BUTTON_TAB_TRENDS =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected { tab: AppTab::Trends });
+                let _ = self.msg_tx.send(Msg::TabSelected {
+                    tab: AppTab::Trends,
+                });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BUTTON_TAB_PROMPT_LAB =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected { tab: AppTab::PromptLab });
+                let _ = self.msg_tx.send(Msg::TabSelected {
+                    tab: AppTab::PromptLab,
+                });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BUTTON_TREND_COMPANIES =>

@@ -60,7 +60,10 @@ mod tests {
             Some("Yahoo"),
             "consent form",
         );
-        assert!(matches!(result.as_deref(), Some("yahoo consent interstitial")));
+        assert!(matches!(
+            result.as_deref(),
+            Some("yahoo consent interstitial")
+        ));
     }
 
     #[test]
@@ -70,7 +73,10 @@ mod tests {
             Some("Captcha"),
             "challenge",
         );
-        assert!(matches!(result.as_deref(), Some("captcha challenge interstitial")));
+        assert!(matches!(
+            result.as_deref(),
+            Some("captcha challenge interstitial")
+        ));
     }
 
     #[test]

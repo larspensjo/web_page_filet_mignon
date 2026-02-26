@@ -1,10 +1,9 @@
 //! Harvester core: pure state machine and view-model helpers.
 mod briefing;
 mod cache_utils;
-pub mod entity_index;
-pub mod trends;
 mod context_draft;
 mod effect;
+pub mod entity_index;
 mod msg;
 mod pre_triage_filter;
 mod preview;
@@ -13,6 +12,7 @@ mod source_state;
 mod state;
 mod summary_cache;
 mod tabs;
+pub mod trends;
 mod triage;
 mod triage_cache;
 mod ui_geometry;
@@ -25,15 +25,11 @@ pub use briefing::{
     BriefingHistoryEntry, BriefingHistoryTheme, BriefingPhase, BriefingResult, BriefingSession,
     BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
-pub use entity_index::{EntityIndex, EntityIndexEntry};
-pub use trends::{
-    CategoryTrend, EntityLine, EntityTrendData, IsoWeek, choose_display_label,
-    compute_trends, normalize_entity_key,
-};
-pub use harvester_engine::llm::SummaryEntities;
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
 pub use effect::{Effect, StopPolicy};
+pub use entity_index::{EntityIndex, EntityIndexEntry};
+pub use harvester_engine::llm::SummaryEntities;
 pub use msg::{LlmResultKind, Msg};
 pub use pre_triage_filter::{
     ArticleFilterEntry, ArticleFilterKey, AutoVerdict, FilterReason, ManualDecision,
@@ -54,6 +50,10 @@ pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
 };
 pub use tabs::{AppTab, TrendCategory};
+pub use trends::{
+    choose_display_label, compute_trends, normalize_entity_key, CategoryTrend, EntityLine,
+    EntityTrendData, IsoWeek,
+};
 pub use triage::{
     ArticleTriageResult, ArticleTriageState, TriageArticle, TriageArticleId, TriagePhase,
     TriageSession,

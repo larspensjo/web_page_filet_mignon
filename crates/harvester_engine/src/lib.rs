@@ -1,7 +1,7 @@
 //! Harvester engine: IO pipeline and effect execution.
+mod blocker_page;
 pub mod briefing;
 pub mod content_prep;
-mod blocker_page;
 mod convert;
 mod decode;
 mod engine;

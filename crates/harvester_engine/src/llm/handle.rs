@@ -862,7 +862,9 @@ enum ModelOverrideValidationError {
 impl ModelOverrideValidationError {
     fn into_completion_error(self, model: ModelId) -> LlmCompletionError {
         let reason = match self {
-            Self::WrongProvider { configured_provider } => format!(
+            Self::WrongProvider {
+                configured_provider,
+            } => format!(
                 "provider {:?} does not match configured provider {:?}",
                 model.provider(),
                 configured_provider
