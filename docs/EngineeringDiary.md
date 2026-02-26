@@ -508,3 +508,10 @@ Evidence: Clicking tabs now dispatches `AppEvent::TabBarSelectionChanged` and sw
 Lessons Learned: Custom controls that send `WM_APP_*` notifications must target the root-ancestor window, not the immediate parent, when they may be nested inside intermediate panels. `GetParent` is only safe when the control is a direct child of the main window (as the splitter is).
 Prevention: When adding a new custom WndProc control that raises a `WM_APP_*` notification, always use `GetAncestor(hwnd, GA_ROOT)` as the message target.
 Refs: src/CommanDuctUI/src/controls/tab_bar_handler.rs, commit 155031f
+
+## 2026-02-26 - Coalesced pre-triage refreshes during source polling
+Type: Implementation
+Context: `Poll Sources` enqueues many jobs in quick succession, and each `JobDone` previously triggered a full pre-triage article reload (`LoadArticlesForTriage`) that reloaded persisted completed jobs and re-ran `content_prep` across the corpus. This produced repeated expensive work and made polling feel much slower than the RSS fetch itself.
+Change: Added a serialized, debounced pre-triage refresh worker in `harvester_io` that coalesces repeated `LoadArticlesForTriage` requests and runs only the latest refresh request per burst. Added timing logs for source polling and article-loading effects (`briefing`, `briefing-prereq`, and pre-triage refresh) to expose elapsed time and coalescing behavior. Affected subsystems: `harvester_io`.
+Evidence: `cargo build`; `cargo test -p harvester_io drain_latest_triage_refresh_requests_keeps_latest_batch -- --nocapture`; `cargo clippy --all-targets -- -D warnings`.
+Refs: crates/harvester_io/src/effect_runner.rs, drain_latest_triage_refresh_requests_keeps_latest_batch

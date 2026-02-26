@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_error, engine_info, engine_warn};
@@ -61,6 +61,11 @@ enum EntityIndexWorkerMsg {
     Flush { done: mpsc::SyncSender<()> },
 }
 
+/// Messages for the serialized pre-triage article load worker.
+enum TriageRefreshWorkerMsg {
+    Refresh { ordered_urls: Vec<String> },
+}
+
 /// Effect runner that orchestrates IO effects.
 ///
 /// # Entity index worker lifecycle
@@ -82,7 +87,11 @@ pub struct EffectRunner {
     platform_handler: Box<dyn PlatformEffectHandler>,
     /// Sender to the serialized entity-index worker. Dropping this closes the channel.
     entity_index_worker_tx: mpsc::SyncSender<EntityIndexWorkerMsg>,
+    /// Sender to the serialized pre-triage refresh worker. Dropping this closes the channel.
+    triage_refresh_worker_tx: mpsc::Sender<TriageRefreshWorkerMsg>,
 }
+
+const TRIAGE_REFRESH_DEBOUNCE_MS: u64 = 300;
 
 impl EffectRunner {
     pub fn new(
@@ -157,6 +166,26 @@ impl EffectRunner {
             run_entity_index_worker(worker_rx, entity_index_path);
         });
 
+        // Spawn a serialized, debounced worker for pre-triage article refresh.
+        // Polling can complete many jobs in quick succession; this avoids spawning
+        // a full corpus reload/content-prep pass for every JobDone event.
+        let (triage_refresh_worker_tx, triage_refresh_worker_rx) =
+            mpsc::channel::<TriageRefreshWorkerMsg>();
+        let triage_refresh_msg_tx = msg_tx.clone();
+        let triage_refresh_output_dir = paths.output_dir.clone();
+        let triage_refresh_registry = Arc::clone(&prompt_registry);
+        let triage_refresh_max_input_bytes = llm_max_input_bytes.unwrap_or(100_000);
+        thread::spawn(move || {
+            run_triage_refresh_worker(
+                triage_refresh_worker_rx,
+                triage_refresh_msg_tx,
+                triage_refresh_output_dir,
+                triage_refresh_registry,
+                triage_refresh_max_input_bytes,
+                Duration::from_millis(TRIAGE_REFRESH_DEBOUNCE_MS),
+            );
+        });
+
         let runner = Self {
             engine,
             msg_tx: msg_tx.clone(),
@@ -171,6 +200,7 @@ impl EffectRunner {
             llm_default_provider,
             platform_handler,
             entity_index_worker_tx: worker_tx,
+            triage_refresh_worker_tx,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -624,6 +654,12 @@ impl EffectRunner {
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
+                    let load_started = Instant::now();
+                    engine_info!(
+                        "[articles-load] briefing start urls={} since_filter={}",
+                        ordered_urls.len(),
+                        since_utc.is_some()
+                    );
                     let guard = registry.read().unwrap();
                     match load_and_prepare_articles_filtered(
                         &output_dir,
@@ -647,12 +683,24 @@ impl EffectRunner {
                                 "[briefing-loader] prepared {} article(s)",
                                 loaded_articles.len()
                             );
+                            engine_info!(
+                                "[articles-load] briefing done urls={} prepared={} elapsed_ms={}",
+                                ordered_urls.len(),
+                                loaded_articles.len(),
+                                load_started.elapsed().as_millis()
+                            );
                             let _ = msg_tx.send(Msg::ArticlesLoaded {
                                 articles: loaded_articles,
                                 collection_text,
                             });
                         }
                         Err(reason) => {
+                            engine_warn!(
+                                "[articles-load] briefing failed urls={} elapsed_ms={} reason={}",
+                                ordered_urls.len(),
+                                load_started.elapsed().as_millis(),
+                                reason
+                            );
                             engine_warn!("[briefing-loader] load failed: {}", reason);
                             let _ = msg_tx.send(Msg::ArticlesLoadFailed { reason });
                         }
@@ -668,6 +716,12 @@ impl EffectRunner {
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
+                    let load_started = Instant::now();
+                    engine_info!(
+                        "[articles-load] briefing-prereq start urls={} since_filter={}",
+                        ordered_urls.len(),
+                        since_utc.is_some()
+                    );
                     let guard = registry.read().unwrap();
                     match load_and_prepare_articles_filtered(
                         &output_dir,
@@ -687,46 +741,39 @@ impl EffectRunner {
                                     fetched_utc: article.fetched_utc,
                                 })
                                 .collect();
+                            engine_info!(
+                                "[articles-load] briefing-prereq done urls={} prepared={} elapsed_ms={}",
+                                ordered_urls.len(),
+                                articles.len(),
+                                load_started.elapsed().as_millis()
+                            );
                             let _ = msg_tx.send(Msg::BriefingPrereqArticlesLoaded { articles });
                         }
                         Err(reason) => {
+                            engine_warn!(
+                                "[articles-load] briefing-prereq failed urls={} elapsed_ms={} reason={}",
+                                ordered_urls.len(),
+                                load_started.elapsed().as_millis(),
+                                reason
+                            );
                             let _ = msg_tx.send(Msg::BriefingPrereqLoadFailed { reason });
                         }
                     }
                 });
             }
             Effect::LoadArticlesForTriage { ordered_urls } => {
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
-                let registry = self.prompt_registry.clone();
-                thread::spawn(move || {
-                    let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(
-                        &output_dir,
-                        max_input_bytes,
-                        &guard,
-                        &ordered_urls,
-                        None,
-                    ) {
-                        Ok((engine_articles, _)) => {
-                            let articles: Vec<LoadedArticle> = engine_articles
-                                .into_iter()
-                                .map(|article| LoadedArticle {
-                                    url: article.url,
-                                    source_title: article.source_title,
-                                    prepared_text: article.prepared_text,
-                                    content_hash: article.content_hash,
-                                    fetched_utc: article.fetched_utc,
-                                })
-                                .collect();
-                            let _ = msg_tx.send(Msg::TriageArticlesLoaded { articles });
-                        }
-                        Err(reason) => {
-                            let _ = msg_tx.send(Msg::TriageArticlesLoadFailed { reason });
-                        }
-                    }
-                });
+                engine_info!(
+                    "[pre-triage-refresh] request queued urls={}",
+                    ordered_urls.len()
+                );
+                if let Err(err) = self
+                    .triage_refresh_worker_tx
+                    .send(TriageRefreshWorkerMsg::Refresh { ordered_urls })
+                {
+                    let reason = format!("pre-triage refresh worker unavailable: {}", err);
+                    engine_error!("[pre-triage-refresh] {}", reason);
+                    let _ = self.msg_tx.send(Msg::TriageArticlesLoadFailed { reason });
+                }
             }
             Effect::LoadPromptContexts => {
                 let msg_tx = self.msg_tx.clone();
@@ -1212,6 +1259,7 @@ impl EffectRunner {
 
         thread::spawn(move || {
             let _guard = PollGuard::new(msg_tx.clone());
+            let poll_started = Instant::now();
 
             engine_info!("[source-config] loading {}", sources_path.display());
             let registry = load_sources(&sources_path);
@@ -1223,8 +1271,11 @@ impl EffectRunner {
 
             let mut seen_set = load_seen_set(&seen_set_path);
 
+            let mut enabled_sources = 0usize;
             for config in registry.sources.into_iter().filter(|s| s.enabled) {
+                enabled_sources += 1;
                 let source_id = config.id.clone();
+                let source_started = Instant::now();
                 match config.source_type {
                     SourceType::File { path } => match poll_file_source(
                         source_id.clone(),
@@ -1239,6 +1290,12 @@ impl EffectRunner {
                                 source_id,
                                 result.urls.len()
                             );
+                            engine_info!(
+                                "[poll-all-timing] source={} kind=file status=ok urls={} elapsed_ms={}",
+                                source_id,
+                                result.urls.len(),
+                                source_started.elapsed().as_millis()
+                            );
                             let _ = msg_tx.send(Msg::SourcePollCompleted {
                                 source_id,
                                 urls: result.urls,
@@ -1246,6 +1303,12 @@ impl EffectRunner {
                         }
                         Err(err) => {
                             engine_warn!("[file-poll] {} failed: {}", source_id, err);
+                            engine_warn!(
+                                "[poll-all-timing] source={} kind=file status=err elapsed_ms={} error={}",
+                                source_id,
+                                source_started.elapsed().as_millis(),
+                                err
+                            );
                             let _ = msg_tx.send(Msg::SourcePollFailed {
                                 source_id,
                                 error: err.to_string(),
@@ -1260,6 +1323,12 @@ impl EffectRunner {
                             source_id,
                             result.urls.len()
                         );
+                        engine_info!(
+                            "[poll-all-timing] source={} kind=curated status=ok urls={} elapsed_ms={}",
+                            source_id,
+                            result.urls.len(),
+                            source_started.elapsed().as_millis()
+                        );
                         let _ = msg_tx.send(Msg::SourcePollCompleted {
                             source_id,
                             urls: result.urls,
@@ -1267,6 +1336,11 @@ impl EffectRunner {
                     }
                     SourceType::Script { .. } => {
                         engine_warn!("[poll-all] Script sources not yet supported: {}", source_id);
+                        engine_warn!(
+                            "[poll-all-timing] source={} kind=script status=unsupported elapsed_ms={}",
+                            source_id,
+                            source_started.elapsed().as_millis()
+                        );
                         let _ = msg_tx.send(Msg::SourcePollFailed {
                             source_id,
                             error: "Script sources not implemented".to_string(),
@@ -1286,9 +1360,19 @@ impl EffectRunner {
                             &mut context,
                             config.max_urls_per_poll,
                         );
+                        engine_info!(
+                            "[poll-all-timing] source={} kind=rss elapsed_ms={}",
+                            source_id,
+                            source_started.elapsed().as_millis()
+                        );
                     }
                 }
             }
+            engine_info!(
+                "[poll-all-timing] all-sources completed enabled_sources={} elapsed_ms={}",
+                enabled_sources,
+                poll_started.elapsed().as_millis()
+            );
         });
     }
 }
@@ -1333,6 +1417,106 @@ fn run_entity_index_worker(rx: mpsc::Receiver<EntityIndexWorkerMsg>, path: PathB
         }
     }
     engine_info!("[entity-index] worker exited cleanly");
+}
+
+fn drain_latest_triage_refresh_requests(
+    rx: &mpsc::Receiver<TriageRefreshWorkerMsg>,
+    latest_urls: &mut Vec<String>,
+) -> usize {
+    let mut drained = 0;
+    while let Ok(TriageRefreshWorkerMsg::Refresh { ordered_urls }) = rx.try_recv() {
+        *latest_urls = ordered_urls;
+        drained += 1;
+    }
+    drained
+}
+
+fn run_triage_refresh_worker(
+    rx: mpsc::Receiver<TriageRefreshWorkerMsg>,
+    msg_tx: mpsc::Sender<Msg>,
+    output_dir: PathBuf,
+    registry: Arc<RwLock<PromptRegistry>>,
+    max_input_bytes: usize,
+    debounce_window: Duration,
+) {
+    engine_info!(
+        "[pre-triage-refresh] worker started debounce_ms={}",
+        debounce_window.as_millis()
+    );
+
+    while let Ok(TriageRefreshWorkerMsg::Refresh { mut ordered_urls }) = rx.recv() {
+        let batch_received = Instant::now();
+        let mut coalesced_requests = 0usize;
+        let debounce_started = Instant::now();
+
+        loop {
+            let Some(remaining) = debounce_window.checked_sub(debounce_started.elapsed()) else {
+                break;
+            };
+            match rx.recv_timeout(remaining) {
+                Ok(TriageRefreshWorkerMsg::Refresh {
+                    ordered_urls: newer_urls,
+                }) => {
+                    ordered_urls = newer_urls;
+                    coalesced_requests += 1;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        coalesced_requests += drain_latest_triage_refresh_requests(&rx, &mut ordered_urls);
+
+        let load_started = Instant::now();
+        engine_info!(
+            "[pre-triage-refresh] load start urls={} coalesced={} queue_ms={}",
+            ordered_urls.len(),
+            coalesced_requests,
+            batch_received.elapsed().as_millis()
+        );
+
+        let guard = registry.read().unwrap();
+        match load_and_prepare_articles_filtered(
+            &output_dir,
+            max_input_bytes,
+            &guard,
+            &ordered_urls,
+            None,
+        ) {
+            Ok((engine_articles, _)) => {
+                let articles: Vec<LoadedArticle> = engine_articles
+                    .into_iter()
+                    .map(|article| LoadedArticle {
+                        url: article.url,
+                        source_title: article.source_title,
+                        prepared_text: article.prepared_text,
+                        content_hash: article.content_hash,
+                        fetched_utc: article.fetched_utc,
+                    })
+                    .collect();
+                engine_info!(
+                    "[pre-triage-refresh] load done urls={} prepared={} coalesced={} elapsed_ms={}",
+                    ordered_urls.len(),
+                    articles.len(),
+                    coalesced_requests,
+                    load_started.elapsed().as_millis()
+                );
+                let _ = msg_tx.send(Msg::TriageArticlesLoaded { articles });
+            }
+            Err(reason) => {
+                engine_warn!(
+                    "[pre-triage-refresh] load failed urls={} coalesced={} elapsed_ms={} reason={}",
+                    ordered_urls.len(),
+                    coalesced_requests,
+                    load_started.elapsed().as_millis(),
+                    reason
+                );
+                let _ = msg_tx.send(Msg::TriageArticlesLoadFailed { reason });
+            }
+        }
+    }
+
+    engine_info!("[pre-triage-refresh] worker exited");
 }
 
 #[cfg(test)]
@@ -1480,6 +1664,32 @@ mod tests {
             }
             other => panic!("unexpected message: {:?}", other),
         }
+    }
+
+    #[test]
+    fn drain_latest_triage_refresh_requests_keeps_latest_batch() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(TriageRefreshWorkerMsg::Refresh {
+            ordered_urls: vec!["https://example.com/a".to_string()],
+        })
+        .unwrap();
+        tx.send(TriageRefreshWorkerMsg::Refresh {
+            ordered_urls: vec![
+                "https://example.com/a".to_string(),
+                "https://example.com/b".to_string(),
+            ],
+        })
+        .unwrap();
+        tx.send(TriageRefreshWorkerMsg::Refresh {
+            ordered_urls: vec!["https://example.com/c".to_string()],
+        })
+        .unwrap();
+
+        let mut latest = vec!["seed".to_string()];
+        let drained = drain_latest_triage_refresh_requests(&rx, &mut latest);
+
+        assert_eq!(drained, 3);
+        assert_eq!(latest, vec!["https://example.com/c".to_string()]);
     }
 
     #[test]
