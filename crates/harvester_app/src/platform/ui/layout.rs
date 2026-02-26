@@ -141,24 +141,19 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: None,
         control_id: PANEL_LEFT,
     });
-    commands.push(PlatformCommand::CreatePanel {
+    commands.push(PlatformCommand::CreateTabBar {
         window_id,
+        control_id: TAB_BAR_LEFT,
         parent_control_id: Some(PANEL_LEFT),
-        control_id: PANEL_LEFT_TAB_BAR,
+        items: vec!["Jobs".to_string(), "Prompt Lab".to_string()],
     });
-    commands.push(PlatformCommand::CreateRadioButton {
+    commands.push(PlatformCommand::SetTabBarStyle {
         window_id,
-        parent_control_id: Some(PANEL_LEFT_TAB_BAR),
-        control_id: BUTTON_LEFT_TAB_JOBS,
-        text: "Jobs".to_string(),
-        group_start: true,
-    });
-    commands.push(PlatformCommand::CreateRadioButton {
-        window_id,
-        parent_control_id: Some(PANEL_LEFT_TAB_BAR),
-        control_id: BUTTON_LEFT_TAB_PROMPT_LAB,
-        text: "Prompt Lab".to_string(),
-        group_start: false,
+        control_id: TAB_BAR_LEFT,
+        background_color: Color { r: 0x2E, g: 0x32, b: 0x39 },
+        text_color: Color { r: 0xE0, g: 0xE5, b: 0xEC },
+        accent_color: Color { r: 0x00, g: 0x80, b: 0xFF },
+        font: None,
     });
     commands.push(PlatformCommand::CreatePanel {
         window_id,
@@ -205,39 +200,20 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         class: LabelClass::Default,
     });
 
-    // Tab bar: five radio buttons for tab selection.
-    commands.push(PlatformCommand::CreatePanel {
+    // Right-pane tab bar (custom TabBar widget).
+    commands.push(PlatformCommand::CreateTabBar {
         window_id,
+        control_id: TAB_BAR_RIGHT,
         parent_control_id: Some(PANEL_PREVIEW),
-        control_id: PANEL_TAB_BAR,
+        items: vec!["Triage".to_string(), "Summary".to_string(), "Briefing".to_string(), "Trends".to_string()],
     });
-    commands.push(PlatformCommand::CreateRadioButton {
+    commands.push(PlatformCommand::SetTabBarStyle {
         window_id,
-        parent_control_id: Some(PANEL_TAB_BAR),
-        control_id: BUTTON_TAB_TRIAGE,
-        text: "Triage".to_string(),
-        group_start: true,
-    });
-    commands.push(PlatformCommand::CreateRadioButton {
-        window_id,
-        parent_control_id: Some(PANEL_TAB_BAR),
-        control_id: BUTTON_TAB_SUMMARY,
-        text: "Summary".to_string(),
-        group_start: false,
-    });
-    commands.push(PlatformCommand::CreateRadioButton {
-        window_id,
-        parent_control_id: Some(PANEL_TAB_BAR),
-        control_id: BUTTON_TAB_BRIEFING,
-        text: "Briefing".to_string(),
-        group_start: false,
-    });
-    commands.push(PlatformCommand::CreateRadioButton {
-        window_id,
-        parent_control_id: Some(PANEL_TAB_BAR),
-        control_id: BUTTON_TAB_TRENDS,
-        text: "Trends".to_string(),
-        group_start: false,
+        control_id: TAB_BAR_RIGHT,
+        background_color: Color { r: 0x2E, g: 0x32, b: 0x39 },
+        text_color: Color { r: 0xE0, g: 0xE5, b: 0xEC },
+        accent_color: Color { r: 0x00, g: 0x80, b: 0xFF },
+        font: None,
     });
 
     // Tab content panels — all created at startup; inactive ones are collapsed.
@@ -279,39 +255,20 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_PREVIEW),
         control_id: PANEL_TAB_TRENDS,
     });
-    // Category selector bar (docked top inside the Trends panel)
-    commands.push(PlatformCommand::CreatePanel {
+    // Trend-category selector bar (custom TabBar widget).
+    commands.push(PlatformCommand::CreateTabBar {
         window_id,
+        control_id: TAB_BAR_TRENDS,
         parent_control_id: Some(PANEL_TAB_TRENDS),
-        control_id: PANEL_TREND_CAT_BAR,
+        items: vec!["Companies".to_string(), "Technologies".to_string(), "Products".to_string(), "Themes".to_string()],
     });
-    commands.push(PlatformCommand::CreateRadioButton {
+    commands.push(PlatformCommand::SetTabBarStyle {
         window_id,
-        parent_control_id: Some(PANEL_TREND_CAT_BAR),
-        control_id: BUTTON_TREND_COMPANIES,
-        text: "Companies".to_string(),
-        group_start: true,
-    });
-    commands.push(PlatformCommand::CreateRadioButton {
-        window_id,
-        parent_control_id: Some(PANEL_TREND_CAT_BAR),
-        control_id: BUTTON_TREND_TECHNOLOGIES,
-        text: "Technologies".to_string(),
-        group_start: false,
-    });
-    commands.push(PlatformCommand::CreateRadioButton {
-        window_id,
-        parent_control_id: Some(PANEL_TREND_CAT_BAR),
-        control_id: BUTTON_TREND_PRODUCTS,
-        text: "Products".to_string(),
-        group_start: false,
-    });
-    commands.push(PlatformCommand::CreateRadioButton {
-        window_id,
-        parent_control_id: Some(PANEL_TREND_CAT_BAR),
-        control_id: BUTTON_TREND_THEMES,
-        text: "Themes".to_string(),
-        group_start: false,
+        control_id: TAB_BAR_TRENDS,
+        background_color: Color { r: 0x2E, g: 0x32, b: 0x39 },
+        text_color: Color { r: 0xE0, g: 0xE5, b: 0xEC },
+        accent_color: Color { r: 0x00, g: 0x80, b: 0xFF },
+        font: None,
     });
     commands.push(PlatformCommand::CreateChart {
         window_id,
@@ -923,6 +880,36 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         },
     });
 
+    // TabBar background and text colors.
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::TabBar,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2E,
+                g: 0x32,
+                b: 0x39,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+    // TabBarAccent: the bottom accent line color (background_color carries the value).
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::TabBarAccent,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x00,
+                g: 0x80,
+                b: 0xFF,
+            }),
+            ..Default::default()
+        },
+    });
+
     commands.push(PlatformCommand::DefineStyle {
         style_id: StyleId::TreeView,
         style: ControlStyle {
@@ -1154,28 +1141,12 @@ fn build_layout_rules(
         },
         // Left-pane tab bar.
         LayoutRule {
-            control_id: PANEL_LEFT_TAB_BAR,
+            control_id: TAB_BAR_LEFT,
             parent_control_id: Some(PANEL_LEFT),
             dock_style: DockStyle::Top,
             order: 0,
             fixed_size: Some(28),
             margin: (0, 0, 2, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_LEFT_TAB_JOBS,
-            parent_control_id: Some(PANEL_LEFT_TAB_BAR),
-            dock_style: DockStyle::Left,
-            order: 0,
-            fixed_size: Some(52),
-            margin: (0, 4, 0, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_LEFT_TAB_PROMPT_LAB,
-            parent_control_id: Some(PANEL_LEFT_TAB_BAR),
-            dock_style: DockStyle::Left,
-            order: 1,
-            fixed_size: Some(92),
-            margin: (0, 4, 0, 0),
         },
         // Left content: Jobs (shown when left_tab == JobList).
         LayoutRule {
@@ -1260,46 +1231,14 @@ fn build_layout_rules(
             fixed_size: Some(28),
             margin: (6, 6, 4, 0),
         },
-        // Tab bar: fixed height row of radio buttons.
+        // Right-pane tab bar (custom TabBar widget).
         LayoutRule {
-            control_id: PANEL_TAB_BAR,
+            control_id: TAB_BAR_RIGHT,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
             order: 1,
             fixed_size: Some(28),
             margin: (0, 0, 2, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_TAB_TRIAGE,
-            parent_control_id: Some(PANEL_TAB_BAR),
-            dock_style: DockStyle::Left,
-            order: 0,
-            fixed_size: Some(80),
-            margin: (0, 4, 0, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_TAB_SUMMARY,
-            parent_control_id: Some(PANEL_TAB_BAR),
-            dock_style: DockStyle::Left,
-            order: 1,
-            fixed_size: Some(88),
-            margin: (0, 4, 0, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_TAB_BRIEFING,
-            parent_control_id: Some(PANEL_TAB_BAR),
-            dock_style: DockStyle::Left,
-            order: 2,
-            fixed_size: Some(80),
-            margin: (0, 4, 0, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_TAB_TRENDS,
-            parent_control_id: Some(PANEL_TAB_BAR),
-            dock_style: DockStyle::Left,
-            order: 3,
-            fixed_size: Some(72),
-            margin: (0, 4, 0, 0),
         },
         // Tab content panels — active tab fills remaining space; inactive ones collapse.
         LayoutRule {
@@ -1358,45 +1297,14 @@ fn build_layout_rules(
             fixed_size: tab_size(AppTab::Trends),
             margin: (0, 0, 0, 0),
         },
+        // Trend-category tab bar (custom TabBar widget).
         LayoutRule {
-            control_id: PANEL_TREND_CAT_BAR,
+            control_id: TAB_BAR_TRENDS,
             parent_control_id: Some(PANEL_TAB_TRENDS),
             dock_style: DockStyle::Top,
             order: 0,
             fixed_size: Some(28),
             margin: (0, 0, 2, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_TREND_COMPANIES,
-            parent_control_id: Some(PANEL_TREND_CAT_BAR),
-            dock_style: DockStyle::Left,
-            order: 0,
-            fixed_size: Some(96),
-            margin: (0, 4, 0, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_TREND_TECHNOLOGIES,
-            parent_control_id: Some(PANEL_TREND_CAT_BAR),
-            dock_style: DockStyle::Left,
-            order: 1,
-            fixed_size: Some(112),
-            margin: (0, 4, 0, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_TREND_PRODUCTS,
-            parent_control_id: Some(PANEL_TREND_CAT_BAR),
-            dock_style: DockStyle::Left,
-            order: 2,
-            fixed_size: Some(80),
-            margin: (0, 4, 0, 0),
-        },
-        LayoutRule {
-            control_id: BUTTON_TREND_THEMES,
-            parent_control_id: Some(PANEL_TREND_CAT_BAR),
-            dock_style: DockStyle::Left,
-            order: 3,
-            fixed_size: Some(72),
-            margin: (0, 4, 0, 0),
         },
         LayoutRule {
             control_id: CHART_TRENDS,
@@ -2074,16 +1982,13 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_INPUT,
         PANEL_JOBS,
         PANEL_PREVIEW,
-        PANEL_TAB_BAR,
         PANEL_TAB_TRIAGE,
         PANEL_TAB_SUMMARY,
         PANEL_TAB_BRIEFING,
         PANEL_TAB_TRENDS,
         PANEL_LEFT,
-        PANEL_LEFT_TAB_BAR,
         PANEL_LEFT_JOBS,
         PANEL_LEFT_PROMPT_LAB,
-        PANEL_TREND_CAT_BAR,
         PANEL_PROMPT_LAB,
         PANEL_PROMPT_LAB_MODE_ROW,
         PANEL_PROMPT_LAB_MODEL_ROW,
@@ -2230,21 +2135,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     }
 
     for control_id in [
-        BUTTON_TAB_TRIAGE,
-        BUTTON_TAB_SUMMARY,
-        BUTTON_TAB_BRIEFING,
-        BUTTON_TAB_TRENDS,
-        BUTTON_LEFT_TAB_JOBS,
-        BUTTON_LEFT_TAB_PROMPT_LAB,
         BTN_PROMPT_LAB_MODE_BASIC,
         BTN_PROMPT_LAB_MODE_ADVANCED,
         BTN_STAGE_TRIAGE,
         BTN_STAGE_SUMMARY,
         BTN_STAGE_BRIEFING,
-        BUTTON_TREND_COMPANIES,
-        BUTTON_TREND_TECHNOLOGIES,
-        BUTTON_TREND_PRODUCTS,
-        BUTTON_TREND_THEMES,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,

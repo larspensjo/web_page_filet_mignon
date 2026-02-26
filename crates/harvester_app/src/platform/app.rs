@@ -462,75 +462,26 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
             }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TAB_TRIAGE =>
+            AppEvent::TabBarSelectionChanged { control_id, selected_index, .. }
+                if control_id == ui::constants::TAB_BAR_RIGHT =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected {
-                    tab: AppTab::Triage,
-                });
+                if let Some(tab) = AppTab::from_index(selected_index) {
+                    let _ = self.msg_tx.send(Msg::TabSelected { tab });
+                }
             }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TAB_SUMMARY =>
+            AppEvent::TabBarSelectionChanged { control_id, selected_index, .. }
+                if control_id == ui::constants::TAB_BAR_LEFT =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected {
-                    tab: AppTab::Summary,
-                });
+                if let Some(tab) = LeftTab::from_index(selected_index) {
+                    let _ = self.msg_tx.send(Msg::LeftTabSelected { tab });
+                }
             }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TAB_BRIEFING =>
+            AppEvent::TabBarSelectionChanged { control_id, selected_index, .. }
+                if control_id == ui::constants::TAB_BAR_TRENDS =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected {
-                    tab: AppTab::Briefing,
-                });
-            }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TAB_TRENDS =>
-            {
-                let _ = self.msg_tx.send(Msg::TabSelected {
-                    tab: AppTab::Trends,
-                });
-            }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_LEFT_TAB_JOBS =>
-            {
-                let _ = self.msg_tx.send(Msg::LeftTabSelected {
-                    tab: LeftTab::JobList,
-                });
-            }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_LEFT_TAB_PROMPT_LAB =>
-            {
-                let _ = self.msg_tx.send(Msg::LeftTabSelected {
-                    tab: LeftTab::PromptLab,
-                });
-            }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TREND_COMPANIES =>
-            {
-                let _ = self.msg_tx.send(Msg::TrendCategorySelected {
-                    category: TrendCategory::Companies,
-                });
-            }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TREND_TECHNOLOGIES =>
-            {
-                let _ = self.msg_tx.send(Msg::TrendCategorySelected {
-                    category: TrendCategory::Technologies,
-                });
-            }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TREND_PRODUCTS =>
-            {
-                let _ = self.msg_tx.send(Msg::TrendCategorySelected {
-                    category: TrendCategory::Products,
-                });
-            }
-            AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TREND_THEMES =>
-            {
-                let _ = self.msg_tx.send(Msg::TrendCategorySelected {
-                    category: TrendCategory::Themes,
-                });
+                if let Some(category) = TrendCategory::from_index(selected_index) {
+                    let _ = self.msg_tx.send(Msg::TrendCategorySelected { category });
+                }
             }
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BTN_PROMPT_LAB_MODE_BASIC =>

@@ -81,31 +81,22 @@ pub const PROGRESS_TOKENS: ControlId = ControlId::new(4001);
 pub const VIEWER_PREVIEW: ControlId = ControlId::new(5001);
 pub const SPLITTER_MAIN: ControlId = ControlId::new(6001);
 
-// Tab bar and tab panels (2200 range)
-pub const PANEL_TAB_BAR: ControlId = ControlId::new(2200);
-pub const BUTTON_TAB_TRIAGE: ControlId = ControlId::new(2201);
-pub const BUTTON_TAB_SUMMARY: ControlId = ControlId::new(2202);
-pub const BUTTON_TAB_BRIEFING: ControlId = ControlId::new(2203);
-pub const BUTTON_TAB_TRENDS: ControlId = ControlId::new(2204);
+// Tab content panels (2200 range)
 pub const PANEL_TAB_TRIAGE: ControlId = ControlId::new(2210);
 pub const PANEL_TAB_SUMMARY: ControlId = ControlId::new(2211);
 pub const PANEL_TAB_BRIEFING: ControlId = ControlId::new(2212);
 pub const PANEL_TAB_TRENDS: ControlId = ControlId::new(2213);
-// Trend category selector inside PANEL_TAB_TRENDS
-pub const PANEL_TREND_CAT_BAR: ControlId = ControlId::new(2220);
-pub const BUTTON_TREND_COMPANIES: ControlId = ControlId::new(2221);
-pub const BUTTON_TREND_TECHNOLOGIES: ControlId = ControlId::new(2222);
-pub const BUTTON_TREND_PRODUCTS: ControlId = ControlId::new(2223);
-pub const BUTTON_TREND_THEMES: ControlId = ControlId::new(2224);
 // RichEdit viewers inside each tab (except PromptLab which reuses existing controls)
 pub const VIEWER_TRIAGE: ControlId = ControlId::new(5002);
 pub const VIEWER_BRIEFING: ControlId = ControlId::new(5003);
 // GDI chart control for the Trends tab
 pub const CHART_TRENDS: ControlId = ControlId::new(2230);
-// Left panel: tab bar + two tab content areas (2300 range)
+// Left panel: two tab content areas (2300 range)
 pub const PANEL_LEFT: ControlId = ControlId::new(2300);
-pub const PANEL_LEFT_TAB_BAR: ControlId = ControlId::new(2301);
-pub const BUTTON_LEFT_TAB_JOBS: ControlId = ControlId::new(2302);
-pub const BUTTON_LEFT_TAB_PROMPT_LAB: ControlId = ControlId::new(2303);
 pub const PANEL_LEFT_JOBS: ControlId = ControlId::new(2304);
 pub const PANEL_LEFT_PROMPT_LAB: ControlId = ControlId::new(2305);
+
+// New custom TabBar controls replacing the radio-button tab bars (6000 range).
+pub const TAB_BAR_RIGHT: ControlId = ControlId::new(6100);
+pub const TAB_BAR_LEFT: ControlId = ControlId::new(6101);
+pub const TAB_BAR_TRENDS: ControlId = ControlId::new(6102);

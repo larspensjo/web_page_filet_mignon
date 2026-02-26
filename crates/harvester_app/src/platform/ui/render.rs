@@ -5,7 +5,7 @@ use commanductui::{
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LeftTab, LinkDownloadState,
-    LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendCategory,
+    LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage,
     TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
@@ -446,18 +446,11 @@ fn render_tab_bar_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     let active = view.right_pane.active_tab;
-    for (control_id, tab) in [
-        (BUTTON_TAB_TRIAGE, AppTab::Triage),
-        (BUTTON_TAB_SUMMARY, AppTab::Summary),
-        (BUTTON_TAB_BRIEFING, AppTab::Briefing),
-        (BUTTON_TAB_TRENDS, AppTab::Trends),
-    ] {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
-            window_id,
-            control_id,
-            checked: active == tab,
-        });
-    }
+    cmds.push(PlatformCommand::SetTabBarSelection {
+        window_id,
+        control_id: TAB_BAR_RIGHT,
+        selected_index: active.to_index(),
+    });
 }
 
 fn render_left_tab_bar_section(
@@ -467,16 +460,11 @@ fn render_left_tab_bar_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     let active = view.left_pane.left_tab;
-    for (control_id, tab) in [
-        (BUTTON_LEFT_TAB_JOBS, LeftTab::JobList),
-        (BUTTON_LEFT_TAB_PROMPT_LAB, LeftTab::PromptLab),
-    ] {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
-            window_id,
-            control_id,
-            checked: active == tab,
-        });
-    }
+    cmds.push(PlatformCommand::SetTabBarSelection {
+        window_id,
+        control_id: TAB_BAR_LEFT,
+        selected_index: active.to_index(),
+    });
 }
 
 fn render_status_section(
@@ -1202,20 +1190,13 @@ fn render_preview_section(
         tree_state.prev_briefing_text = Some(briefing_markdown.to_string());
     }
 
-    // Trends tab: category selector radio buttons.
+    // Trends tab: category selector.
     let active_category = view.right_pane.trends.active_category;
-    for (control_id, category) in [
-        (BUTTON_TREND_COMPANIES, TrendCategory::Companies),
-        (BUTTON_TREND_TECHNOLOGIES, TrendCategory::Technologies),
-        (BUTTON_TREND_PRODUCTS, TrendCategory::Products),
-        (BUTTON_TREND_THEMES, TrendCategory::Themes),
-    ] {
-        cmds.push(PlatformCommand::SetRadioButtonChecked {
-            window_id,
-            control_id,
-            checked: active_category == category,
-        });
-    }
+    cmds.push(PlatformCommand::SetTabBarSelection {
+        window_id,
+        control_id: TAB_BAR_TRENDS,
+        selected_index: active_category.to_index(),
+    });
 
     // Trends tab: chart data (unconditional — mirrors radio button pattern; InvalidateRect is cheap).
     cmds.push(PlatformCommand::SetChartData {
