@@ -31,5 +31,8 @@
   "coverage-gutters.coverageFileNames": [
       "lcov.info"
   ],
-  "coverage-gutters.watch": true
+  "coverage-gutters.watch": true,
+  "chat.tools.terminal.autoApprove": {
+    "Test-Path": true
+  }
 }

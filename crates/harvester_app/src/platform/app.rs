@@ -594,7 +594,10 @@ impl PlatformEventHandler for AppEventHandler {
             } if control_id == ui::constants::COMBO_PROMPT_LAB_MODEL_SELECTOR => {
                 let guard = self.shared.lock().unwrap();
                 let view = guard.state.view();
-                let model = ui::render::combo_index_to_model(index, &view.left_pane.prompt_lab.model_catalog);
+                let model = ui::render::combo_index_to_model(
+                    index,
+                    &view.left_pane.prompt_lab.model_catalog,
+                );
                 let _ = self.msg_tx.send(Msg::PromptLabModelOverrideSet { model });
             }
             AppEvent::ButtonClicked { control_id, .. }

@@ -4,7 +4,9 @@ use commanductui::types::{
 use commanductui::{
     Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
 };
-use harvester_core::{AppTab, LeftTab, DEFAULT_JOBS_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH, TOKEN_LIMIT};
+use harvester_core::{
+    AppTab, LeftTab, DEFAULT_JOBS_PANEL_WIDTH, INPUT_PANEL_FIXED_WIDTH, TOKEN_LIMIT,
+};
 
 use super::constants::*;
 

@@ -2019,7 +2019,10 @@ fn format_lab_triage_markdown(output_json: &str) -> String {
             };
             format!(
                 "**\\[Lab\\]** **Category:** {}\n**Priority:** P{}\n**Tags:** {}\n\n---\n\n{}\n",
-                result.category, result.priority.value(), tags_line, result.rationale
+                result.category,
+                result.priority.value(),
+                tags_line,
+                result.rationale
             )
         }
         Err(_) => format!("**\\[Lab Triage\\]**\n\n```json\n{output_json}\n```\n"),
@@ -2031,7 +2034,11 @@ fn format_lab_summary_markdown(output_json: &str) -> String {
     use harvester_engine::llm::validation::validate_summary;
     match validate_summary(output_json) {
         Ok(result) => {
-            let kp_lines: String = result.key_points.iter().map(|kp| format!("- {kp}\n")).collect();
+            let kp_lines: String = result
+                .key_points
+                .iter()
+                .map(|kp| format!("- {kp}\n"))
+                .collect();
             format!(
                 "# \\[Lab\\] {}\n\n{}\n\n**Key Points:**\n\n{}\n",
                 result.title, result.summary, kp_lines

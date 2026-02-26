@@ -381,11 +381,14 @@ fn render_layout_section(
         || view.left_pane.left_tab != tree_state.prev_left_tab
         || prompt_lab_tab_visible != tree_state.prev_prompt_lab_visible
         || view.left_pane.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
-        || view.left_pane.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
-        || view.left_pane.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
+        || view.left_pane.prompt_lab.compare_section_open
+            != tree_state.prev_prompt_lab_compare_section_open
+        || view.left_pane.prompt_lab.context_section_open
+            != tree_state.prev_prompt_lab_context_section_open
         || view.left_pane.prompt_lab.template_section_open
             != tree_state.prev_prompt_lab_template_section_open
-        || view.left_pane.prompt_lab.template_editor_open != tree_state.prev_prompt_lab_template_editor_open;
+        || view.left_pane.prompt_lab.template_editor_open
+            != tree_state.prev_prompt_lab_template_editor_open;
     if !layout_changed {
         return;
     }
@@ -426,10 +429,14 @@ fn render_layout_section(
     tree_state.prev_left_tab = view.left_pane.left_tab;
     tree_state.prev_prompt_lab_visible = prompt_lab_tab_visible;
     tree_state.prev_prompt_lab_advanced_mode = view.left_pane.prompt_lab.advanced_mode;
-    tree_state.prev_prompt_lab_compare_section_open = view.left_pane.prompt_lab.compare_section_open;
-    tree_state.prev_prompt_lab_context_section_open = view.left_pane.prompt_lab.context_section_open;
-    tree_state.prev_prompt_lab_template_section_open = view.left_pane.prompt_lab.template_section_open;
-    tree_state.prev_prompt_lab_template_editor_open = view.left_pane.prompt_lab.template_editor_open;
+    tree_state.prev_prompt_lab_compare_section_open =
+        view.left_pane.prompt_lab.compare_section_open;
+    tree_state.prev_prompt_lab_context_section_open =
+        view.left_pane.prompt_lab.context_section_open;
+    tree_state.prev_prompt_lab_template_section_open =
+        view.left_pane.prompt_lab.template_section_open;
+    tree_state.prev_prompt_lab_template_editor_open =
+        view.left_pane.prompt_lab.template_editor_open;
 }
 
 fn render_tab_bar_section(
@@ -827,7 +834,8 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_start_enabled,
-        view.left_pane.prompt_lab.active_batch.is_none() && view.left_pane.prompt_lab.draft_candidates.len() >= 2,
+        view.left_pane.prompt_lab.active_batch.is_none()
+            && view.left_pane.prompt_lab.draft_candidates.len() >= 2,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -837,7 +845,8 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_cancel_enabled,
-        view.left_pane.prompt_lab
+        view.left_pane
+            .prompt_lab
             .active_batch
             .as_ref()
             .map(|batch| batch.can_cancel)
@@ -851,7 +860,8 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_auto_select_enabled,
-        view.left_pane.prompt_lab
+        view.left_pane
+            .prompt_lab
             .active_batch
             .as_ref()
             .map(|batch| batch.can_auto_select)
@@ -865,7 +875,8 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_winner_clear_enabled,
-        view.left_pane.prompt_lab
+        view.left_pane
+            .prompt_lab
             .active_batch
             .as_ref()
             .map(|batch| {
@@ -933,10 +944,15 @@ fn render_prompt_lab_section(
         },
     );
 
-    let can_apply_template =
-        view.left_pane.prompt_lab.template_dirty && view.left_pane.prompt_lab.template_validation_errors.is_empty();
+    let can_apply_template = view.left_pane.prompt_lab.template_dirty
+        && view
+            .left_pane
+            .prompt_lab
+            .template_validation_errors
+            .is_empty();
     let can_apply_template_and_rerun = can_apply_template && view.left_pane.prompt_lab.can_run;
-    let can_revert_template = view.left_pane.prompt_lab.template_dirty || view.left_pane.prompt_lab.template_applied;
+    let can_revert_template =
+        view.left_pane.prompt_lab.template_dirty || view.left_pane.prompt_lab.template_applied;
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_template_apply_enabled,
         can_apply_template,
@@ -1057,10 +1073,19 @@ fn render_prompt_lab_section(
             text,
         },
     );
-    let context_status_text = if !view.left_pane.prompt_lab.context_validation_errors.is_empty() {
-        view.left_pane.prompt_lab.context_validation_errors.join(" • ")
+    let context_status_text = if !view
+        .left_pane
+        .prompt_lab
+        .context_validation_errors
+        .is_empty()
+    {
+        view.left_pane
+            .prompt_lab
+            .context_validation_errors
+            .join(" • ")
     } else {
-        view.left_pane.prompt_lab
+        view.left_pane
+            .prompt_lab
             .context_status_message
             .clone()
             .unwrap_or_default()
@@ -1075,8 +1100,16 @@ fn render_prompt_lab_section(
             text,
         },
     );
-    let template_status_text = if !view.left_pane.prompt_lab.template_validation_errors.is_empty() {
-        view.left_pane.prompt_lab.template_validation_errors.join(" • ")
+    let template_status_text = if !view
+        .left_pane
+        .prompt_lab
+        .template_validation_errors
+        .is_empty()
+    {
+        view.left_pane
+            .prompt_lab
+            .template_validation_errors
+            .join(" • ")
     } else if let (Some(version), Some(path)) = (
         view.left_pane.prompt_lab.template_saved_version,
         view.left_pane.prompt_lab.template_saved_path.as_deref(),
