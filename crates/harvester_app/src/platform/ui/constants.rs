@@ -102,4 +102,5 @@ pub const BUTTON_TREND_THEMES: ControlId = ControlId::new(2224);
 // RichEdit viewers inside each tab (except PromptLab which reuses existing controls)
 pub const VIEWER_TRIAGE: ControlId = ControlId::new(5002);
 pub const VIEWER_BRIEFING: ControlId = ControlId::new(5003);
-pub const VIEWER_TRENDS: ControlId = ControlId::new(5004);
+// GDI chart control for the Trends tab
+pub const CHART_TRENDS: ControlId = ControlId::new(2230);

@@ -469,6 +469,14 @@ Lessons Learned: Feature actions that previously relied on a single shared previ
 Prevention: For tabbed surfaces, add reducer tests that assert both domain state changes and `active_tab` transitions for primary workflow entry actions (e.g., Generate Briefing, Prompt Lab open).
 Refs: crates/harvester_core/src/update.rs, generate_briefing_emits_load_effect
 
+## 2026-02-25 - Button-like controls missing dark theme style — recurring pattern
+Type: Bug Fix
+Context: Trends category radio buttons (BUTTON_TREND_COMPANIES/TECHNOLOGIES/PRODUCTS/THEMES) appeared with light/white backgrounds because they were created via `CreateRadioButton` but never assigned `StyleId::RadioButton` via `ApplyStyleToControl`. Two Prompt Lab source buttons (BTN_SOURCE_FROM_TRIAGE, BTN_SOURCE_TYPE_URL) were also found unstyled when the regression test ran. Without a style, `handle_wm_ctlcolorbtn` returns `None` and Windows falls back to system-default (light) colors. The same pattern had silently affected other controls in earlier slices.
+Change: Added `ApplyStyleToControl` for the four trend category buttons and two source buttons. Added `every_button_like_control_has_a_style_applied` unit test in `layout.rs` that collects all `CreateButton`/`CreateRadioButton`/`CreateCheckBox` control IDs and asserts each has a corresponding `ApplyStyleToControl` command — the test fails at CI time the moment a new button is added without styling.
+Lessons Learned: `initial_commands()` in layout.rs has a two-step, spatially separated pattern: control creation (~line 170) and style application (~line 2100), far apart in the same file. There is nothing in the type system to enforce the pairing. The omission is silent at compile time and only visible as a visual regression at runtime on Windows.
+Prevention: `every_button_like_control_has_a_style_applied` test in `crates/harvester_app/src/platform/ui/layout.rs` now acts as the guard. Any future `CreateButton`/`CreateRadioButton`/`CreateCheckBox` without a matching `ApplyStyleToControl` will fail this test immediately.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, every_button_like_control_has_a_style_applied
+
 ## 2026-02-25 - Summary tab no longer falls back to briefing/shared preview content
 Type: Bug Fix
 Context: After switching to the Briefing tab during briefing generation, returning to the Summary tab with no selected article could display briefing output because Summary still fell back to the legacy shared `preview_text` content path.

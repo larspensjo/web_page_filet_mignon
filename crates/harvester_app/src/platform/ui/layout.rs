@@ -281,10 +281,10 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         text: "Themes".to_string(),
         group_start: false,
     });
-    commands.push(PlatformCommand::CreateRichEdit {
+    commands.push(PlatformCommand::CreateChart {
         window_id,
         parent_control_id: Some(PANEL_TAB_TRENDS),
-        control_id: VIEWER_TRENDS,
+        control_id: CHART_TRENDS,
     });
 
     commands.push(PlatformCommand::CreatePanel {
@@ -1300,7 +1300,7 @@ fn build_layout_rules(
             margin: (0, 4, 0, 0),
         },
         LayoutRule {
-            control_id: VIEWER_TRENDS,
+            control_id: CHART_TRENDS,
             parent_control_id: Some(PANEL_TAB_TRENDS),
             dock_style: DockStyle::Fill,
             order: 1,
@@ -2081,7 +2081,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
         style_id: StyleId::ComboBox,
     });
-    for control_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING, VIEWER_TRENDS] {
+    for control_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
             control_id,
@@ -2134,6 +2134,8 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_COMPARE_CANCEL,
         BTN_COMPARE_AUTO_SELECT,
         BTN_COMPARE_WINNER_CLEAR,
+        BTN_SOURCE_FROM_TRIAGE,
+        BTN_SOURCE_TYPE_URL,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
@@ -2153,6 +2155,10 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         BTN_STAGE_TRIAGE,
         BTN_STAGE_SUMMARY,
         BTN_STAGE_BRIEFING,
+        BUTTON_TREND_COMPANIES,
+        BUTTON_TREND_TECHNOLOGIES,
+        BUTTON_TREND_PRODUCTS,
+        BUTTON_TREND_THEMES,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
@@ -2732,6 +2738,47 @@ mod tests {
                     expected_run_details_body
                 );
             }
+        }
+    }
+
+    /// Guard: every RadioButton, CheckBox, and Button created in initial_commands must have a
+    /// corresponding ApplyStyleToControl command.
+    ///
+    /// Without an applied style, handle_wm_ctlcolorbtn returns None and Windows falls back to
+    /// system-default light colors, producing the "new button appears white" regression.
+    /// Adding a control to this category and forgetting the style command will fail this test.
+    #[test]
+    fn every_button_like_control_has_a_style_applied() {
+        use std::collections::HashSet;
+        let cmds = initial_commands(WindowId::new(99));
+
+        let mut created: HashSet<i32> = HashSet::new();
+        for cmd in &cmds {
+            match cmd {
+                PlatformCommand::CreateButton { control_id, .. }
+                | PlatformCommand::CreateRadioButton { control_id, .. }
+                | PlatformCommand::CreateCheckBox { control_id, .. } => {
+                    created.insert(control_id.raw());
+                }
+                _ => {}
+            }
+        }
+
+        let mut styled: HashSet<i32> = HashSet::new();
+        for cmd in &cmds {
+            if let PlatformCommand::ApplyStyleToControl { control_id, .. } = cmd {
+                styled.insert(control_id.raw());
+            }
+        }
+
+        for id in &created {
+            assert!(
+                styled.contains(id),
+                "Control {} (Button/RadioButton/CheckBox) has no ApplyStyleToControl — \
+                 WM_CTLCOLOR will fall back to system default (light) colors. \
+                 Add it to the style application loop in initial_commands().",
+                id
+            );
         }
     }
 }

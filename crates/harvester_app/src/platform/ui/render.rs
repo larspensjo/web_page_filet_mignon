@@ -1,5 +1,8 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
-use commanductui::{CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId};
+use commanductui::{
+    ChartDataPacket, ChartLineData, CheckState, MessageSeverity, PlatformCommand, StyleId,
+    WindowId,
+};
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState,
@@ -154,7 +157,6 @@ pub struct TreeRenderState {
     prev_active_tab: AppTab,
     prev_triage_text: Option<String>,
     prev_briefing_text: Option<String>,
-    prev_trends_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -228,7 +230,6 @@ impl Default for TreeRenderState {
             prev_active_tab: AppTab::Summary,
             prev_triage_text: None,
             prev_briefing_text: None,
-            prev_trends_text: None,
         }
     }
 }
@@ -303,6 +304,43 @@ pub fn render(
     render_preview_section(window_id, view, tree_state, &mut cmds);
 
     cmds
+}
+
+/// Converts a `TrendsTabView` into a `ChartDataPacket` for the chart control.
+/// Uses a fixed 10-color VS Code dark-theme palette, assigned by entity index.
+fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
+    // COLORREF palette (0x00BBGGRR), up to 10 entity lines.
+    const COLORS: [u32; 10] = [
+        0x00B0C94E, // #4EC9B0 teal
+        0x007891CE, // #CE9178 salmon
+        0x00FEDC9C, // #9CDCFE light blue
+        0x00AADCDC, // #DCDCAA yellow
+        0x00C086C5, // #C586C0 purple
+        0x004747F4, // #F44747 red
+        0x007DBAD7, // #D7BA7D gold
+        0x0055996A, // #6A9955 green
+        0x00D69C56, // #569CD6 blue
+        0x00A8CEB5, // #B5CEA8 light green
+    ];
+
+    if trends.is_loading {
+        return ChartDataPacket { lines: vec![], week_labels: vec![], is_loading: true };
+    }
+    let Some(cat_data) = &trends.category_data else {
+        return ChartDataPacket { lines: vec![], week_labels: vec![], is_loading: false };
+    };
+    let lines = cat_data
+        .lines
+        .iter()
+        .take(10)
+        .enumerate()
+        .map(|(i, el)| ChartLineData {
+            label: el.label.clone(),
+            weekly_counts: el.weekly_counts.clone(),
+            color: COLORS[i],
+        })
+        .collect();
+    ChartDataPacket { lines, week_labels: cat_data.weeks.clone(), is_loading: false }
 }
 
 fn emit_if_changed<T, F>(prev: &mut Option<T>, next: T, cmds: &mut Vec<PlatformCommand>, emit: F)
@@ -1111,16 +1149,12 @@ fn render_preview_section(
         });
     }
 
-    // Trends tab viewer: formatted text table.
-    let trends_text = format_trends_text(&view.right_pane.trends);
-    if tree_state.prev_trends_text.as_deref() != Some(trends_text.as_str()) {
-        cmds.push(PlatformCommand::SetRichEditContent {
-            window_id,
-            control_id: VIEWER_TRENDS,
-            rtf_text: convert_markdown_to_rtf(&trends_text),
-        });
-        tree_state.prev_trends_text = Some(trends_text);
-    }
+    // Trends tab: chart data (unconditional — mirrors radio button pattern; InvalidateRect is cheap).
+    cmds.push(PlatformCommand::SetChartData {
+        window_id,
+        control_id: CHART_TRENDS,
+        data: build_chart_data(&view.right_pane.trends),
+    });
 
     let header_text = view
         .preview_header
@@ -1207,82 +1241,6 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
         template_version,
         template_description
     )
-}
-
-fn format_trends_text(view: &TrendsTabView) -> String {
-    if view.is_loading {
-        return "(building entity index\u{2026})".to_string();
-    }
-    let data = match &view.category_data {
-        None => return "(no trend data)".to_string(),
-        Some(d) => d,
-    };
-    if data.lines.is_empty() {
-        return "(no entity data yet — run or rebuild to populate)".to_string();
-    }
-
-    let category_name = match view.active_category {
-        TrendCategory::Companies => "Companies",
-        TrendCategory::Technologies => "Technologies",
-        TrendCategory::Products => "Products",
-        TrendCategory::Themes => "Themes",
-    };
-    let n_weeks = data.weeks.len();
-    let n_entities = data.lines.len();
-
-    // Global max weekly count used to scale bar characters.
-    let global_max = data
-        .lines
-        .iter()
-        .flat_map(|e| e.weekly_counts.iter().copied())
-        .max()
-        .unwrap_or(1)
-        .max(1);
-
-    let label_width = data
-        .lines
-        .iter()
-        .map(|e| e.label.len())
-        .max()
-        .unwrap_or(10)
-        .max(10);
-
-    let mut out = String::new();
-    out.push_str(&format!(
-        "Top {n_entities} {category_name} \u{2014} last {n_weeks} weeks\n\n"
-    ));
-
-    for line in &data.lines {
-        let label = format!("{:<width$}", line.label, width = label_width);
-        let bar: String = line
-            .weekly_counts
-            .iter()
-            .map(|&count| {
-                if count == 0 {
-                    ' '
-                } else if count * 2 <= global_max {
-                    // Lower count: right half-block (lighter visual weight).
-                    '\u{2590}' // ▐
-                } else {
-                    // Higher count: left half-block (heavier visual weight).
-                    '\u{258c}' // ▌
-                }
-            })
-            .collect();
-        out.push_str(&format!(
-            "  {}  {}  total: {}\n",
-            label, bar, line.total_count
-        ));
-    }
-
-    if data.total_entity_count > n_entities {
-        out.push_str(&format!(
-            "\n  Showing top {n_entities} of {} entities.\n",
-            data.total_entity_count
-        ));
-    }
-
-    out
 }
 
 fn append_tree_commands(
@@ -1938,10 +1896,8 @@ mod tests {
         init_logging();
         let window_id = WindowId::new(3);
         let mut tree_state = TreeRenderState::new();
-        let view = AppViewModel {
-            preview_text: Some("first\nsecond\r\nthird\rfourth".to_string()),
-            ..Default::default()
-        };
+        let mut view = AppViewModel::default();
+        view.right_pane.summary_markdown = Some("first\nsecond\r\nthird\rfourth".to_string());
 
         let commands = render(window_id, &view, &mut tree_state);
         let viewer_text = commands
@@ -2019,10 +1975,8 @@ mod tests {
         init_logging();
         let window_id = WindowId::new(7);
         let mut tree_state = TreeRenderState::new();
-        let view = AppViewModel {
-            preview_text: Some("**bold**".to_string()),
-            ..Default::default()
-        };
+        let mut view = AppViewModel::default();
+        view.right_pane.summary_markdown = Some("**bold**".to_string());
 
         let commands = render(window_id, &view, &mut tree_state);
         let viewer_text = commands
@@ -2058,10 +2012,8 @@ mod tests {
         let window_id = WindowId::new(9);
         let mut tree_state = TreeRenderState::new();
         let long_text = "x".repeat(MAX_VIEWER_CHARS + 1);
-        let view = AppViewModel {
-            preview_text: Some(long_text),
-            ..Default::default()
-        };
+        let mut view = AppViewModel::default();
+        view.right_pane.summary_markdown = Some(long_text);
         let commands = render(window_id, &view, &mut tree_state);
         let viewer_text = commands
             .iter()
@@ -2497,7 +2449,7 @@ mod tests {
         let window_id = WindowId::new(36);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.visible = true;
+        view.right_pane.active_tab = AppTab::PromptLab;
         view.prompt_lab.model_catalog = vec![ModelId::new(
             harvester_engine::llm::ProviderKind::OpenAi,
             "gpt-4o-mini",
@@ -2513,10 +2465,10 @@ mod tests {
                 if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
         }));
 
-        view.prompt_lab.visible = false;
+        view.right_pane.active_tab = AppTab::Summary;
         let _ = render(window_id, &view, &mut tree_state);
 
-        view.prompt_lab.visible = true;
+        view.right_pane.active_tab = AppTab::PromptLab;
         let reopen_cmds = render(window_id, &view, &mut tree_state);
         assert!(reopen_cmds.iter().any(|cmd| {
             matches!(cmd, PlatformCommand::SetComboBoxItems { control_id, .. }
@@ -2681,5 +2633,65 @@ mod tests {
         assert!(result.contains("beta: in=2K out=1K"));
         assert!(result.contains("+1 models"));
         assert!(!result.contains("gamma"));
+    }
+
+    #[test]
+    fn trends_chart_data_emits_set_chart_data() {
+        use harvester_core::{CategoryTrendView, EntityLineView, TrendCategory, TrendsTabView};
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let mut view = AppViewModel::default();
+        view.right_pane.trends = TrendsTabView {
+            is_loading: false,
+            active_category: TrendCategory::Companies,
+            category_data: Some(CategoryTrendView {
+                weeks: vec!["W1".to_string(), "W2".to_string(), "W3".to_string()],
+                lines: vec![
+                    EntityLineView {
+                        label: "Acme".to_string(),
+                        weekly_counts: vec![1, 2, 3],
+                        total_count: 6,
+                    },
+                    EntityLineView {
+                        label: "Beta".to_string(),
+                        weekly_counts: vec![3, 2, 1],
+                        total_count: 6,
+                    },
+                ],
+                total_entity_count: 2,
+            }),
+        };
+        let cmds = render(window_id, &view, &mut state);
+        let chart_cmd = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        });
+        assert!(chart_cmd.is_some(), "SetChartData not emitted for CHART_TRENDS");
+        if let Some(PlatformCommand::SetChartData { data, .. }) = chart_cmd {
+            assert_eq!(data.lines.len(), 2);
+            assert_eq!(data.lines[0].label, "Acme");
+            assert_eq!(data.week_labels, vec!["W1", "W2", "W3"]);
+            assert!(!data.is_loading);
+        }
+    }
+
+    #[test]
+    fn trends_chart_loading_state_emits_empty_packet() {
+        use harvester_core::TrendsTabView;
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let mut view = AppViewModel::default();
+        view.right_pane.trends = TrendsTabView {
+            is_loading: true,
+            ..Default::default()
+        };
+        let cmds = render(window_id, &view, &mut state);
+        let chart_cmd = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        });
+        assert!(chart_cmd.is_some(), "SetChartData not emitted during loading");
+        if let Some(PlatformCommand::SetChartData { data, .. }) = chart_cmd {
+            assert!(data.is_loading);
+            assert!(data.lines.is_empty());
+        }
     }
 }
