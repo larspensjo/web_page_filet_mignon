@@ -499,3 +499,12 @@ Context: The three tab bars (right-pane tabs, left-pane tabs, trend-category sel
 Change: Added custom `HarvesterTabBarControl` Win32 WndProc widget in `commanductui` (v0.7.0). Implements hover fill, 3 px accent underline for the active tab, and 40 %-blended inactive text color. Introduced `ControlKind::TabBar`, `StyleId::TabBar`/`TabBarAccent`, `AppEvent::TabBarSelectionChanged`, and four new `PlatformCommand` variants (`CreateTabBar`, `SetTabBarItems`, `SetTabBarSelection`, `SetTabBarStyle`). Added `from_index`/`to_index` conversion methods to `AppTab`, `LeftTab`, `TrendCategory` in `harvester_core`. Migrated all three tab-bar sites in `harvester_app` to use the new widget; removed dead radio-button panel/button constants. Affected subsystems: `commanductui`, `harvester_core`, `harvester_app`.
 Evidence: `cargo nextest run` — all tests pass; `cargo clippy --workspace --all-targets -- -D warnings` — clean.
 Refs: src/CommanDuctUI/src/controls/tab_bar_handler.rs, crates/harvester_core/src/tabs.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/app.rs
+
+## 2026-06-11 - Bug: tab click did not trigger content change
+Type: Bug Fix
+Context: After the TabBar widget was introduced, clicking a tab visually updated the selection (accent line moved) but the content pane did not change. Programmatic switches (e.g., auto-switch after briefing generation) worked correctly.
+Change: Fixed `tab_bar_handler` to send `WM_APP_TAB_SELECTED` to the root ancestor window (`GetAncestor(hwnd, GA_ROOT)`) instead of the direct parent (`GetParent`). The tab bars are grandchildren of the main window (nested inside panel HWNDs), so the direct parent is a plain panel whose WndProc calls `DefWindowProcW` and silently drops the unrecognised message.
+Evidence: Clicking tabs now dispatches `AppEvent::TabBarSelectionChanged` and switches content correctly.
+Lessons Learned: Custom controls that send `WM_APP_*` notifications must target the root-ancestor window, not the immediate parent, when they may be nested inside intermediate panels. `GetParent` is only safe when the control is a direct child of the main window (as the splitter is).
+Prevention: When adding a new custom WndProc control that raises a `WM_APP_*` notification, always use `GetAncestor(hwnd, GA_ROOT)` as the message target.
+Refs: src/CommanDuctUI/src/controls/tab_bar_handler.rs, commit 155031f
