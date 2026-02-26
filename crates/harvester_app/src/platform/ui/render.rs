@@ -5,8 +5,8 @@ use commanductui::{
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LeftTab, LinkDownloadState,
-    LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage,
-    TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
+    LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendsTabView,
+    DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;

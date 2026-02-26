@@ -462,23 +462,29 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
             }
-            AppEvent::TabBarSelectionChanged { control_id, selected_index, .. }
-                if control_id == ui::constants::TAB_BAR_RIGHT =>
-            {
+            AppEvent::TabBarSelectionChanged {
+                control_id,
+                selected_index,
+                ..
+            } if control_id == ui::constants::TAB_BAR_RIGHT => {
                 if let Some(tab) = AppTab::from_index(selected_index) {
                     let _ = self.msg_tx.send(Msg::TabSelected { tab });
                 }
             }
-            AppEvent::TabBarSelectionChanged { control_id, selected_index, .. }
-                if control_id == ui::constants::TAB_BAR_LEFT =>
-            {
+            AppEvent::TabBarSelectionChanged {
+                control_id,
+                selected_index,
+                ..
+            } if control_id == ui::constants::TAB_BAR_LEFT => {
                 if let Some(tab) = LeftTab::from_index(selected_index) {
                     let _ = self.msg_tx.send(Msg::LeftTabSelected { tab });
                 }
             }
-            AppEvent::TabBarSelectionChanged { control_id, selected_index, .. }
-                if control_id == ui::constants::TAB_BAR_TRENDS =>
-            {
+            AppEvent::TabBarSelectionChanged {
+                control_id,
+                selected_index,
+                ..
+            } if control_id == ui::constants::TAB_BAR_TRENDS => {
                 if let Some(category) = TrendCategory::from_index(selected_index) {
                     let _ = self.msg_tx.send(Msg::TrendCategorySelected { category });
                 }

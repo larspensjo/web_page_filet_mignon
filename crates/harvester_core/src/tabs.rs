@@ -108,7 +108,12 @@ mod tests {
 
     #[test]
     fn app_tab_round_trip() {
-        let variants = [AppTab::Triage, AppTab::Summary, AppTab::Briefing, AppTab::Trends];
+        let variants = [
+            AppTab::Triage,
+            AppTab::Summary,
+            AppTab::Briefing,
+            AppTab::Trends,
+        ];
         for tab in variants {
             assert_eq!(AppTab::from_index(tab.to_index()), Some(tab));
         }

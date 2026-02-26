@@ -150,9 +150,21 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::SetTabBarStyle {
         window_id,
         control_id: TAB_BAR_LEFT,
-        background_color: Color { r: 0x2E, g: 0x32, b: 0x39 },
-        text_color: Color { r: 0xE0, g: 0xE5, b: 0xEC },
-        accent_color: Color { r: 0x00, g: 0x80, b: 0xFF },
+        background_color: Color {
+            r: 0x2E,
+            g: 0x32,
+            b: 0x39,
+        },
+        text_color: Color {
+            r: 0xE0,
+            g: 0xE5,
+            b: 0xEC,
+        },
+        accent_color: Color {
+            r: 0x00,
+            g: 0x80,
+            b: 0xFF,
+        },
         font: None,
     });
     commands.push(PlatformCommand::CreatePanel {
@@ -205,14 +217,31 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: TAB_BAR_RIGHT,
         parent_control_id: Some(PANEL_PREVIEW),
-        items: vec!["Triage".to_string(), "Summary".to_string(), "Briefing".to_string(), "Trends".to_string()],
+        items: vec![
+            "Triage".to_string(),
+            "Summary".to_string(),
+            "Briefing".to_string(),
+            "Trends".to_string(),
+        ],
     });
     commands.push(PlatformCommand::SetTabBarStyle {
         window_id,
         control_id: TAB_BAR_RIGHT,
-        background_color: Color { r: 0x2E, g: 0x32, b: 0x39 },
-        text_color: Color { r: 0xE0, g: 0xE5, b: 0xEC },
-        accent_color: Color { r: 0x00, g: 0x80, b: 0xFF },
+        background_color: Color {
+            r: 0x2E,
+            g: 0x32,
+            b: 0x39,
+        },
+        text_color: Color {
+            r: 0xE0,
+            g: 0xE5,
+            b: 0xEC,
+        },
+        accent_color: Color {
+            r: 0x00,
+            g: 0x80,
+            b: 0xFF,
+        },
         font: None,
     });
 
@@ -260,14 +289,31 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: TAB_BAR_TRENDS,
         parent_control_id: Some(PANEL_TAB_TRENDS),
-        items: vec!["Companies".to_string(), "Technologies".to_string(), "Products".to_string(), "Themes".to_string()],
+        items: vec![
+            "Companies".to_string(),
+            "Technologies".to_string(),
+            "Products".to_string(),
+            "Themes".to_string(),
+        ],
     });
     commands.push(PlatformCommand::SetTabBarStyle {
         window_id,
         control_id: TAB_BAR_TRENDS,
-        background_color: Color { r: 0x2E, g: 0x32, b: 0x39 },
-        text_color: Color { r: 0xE0, g: 0xE5, b: 0xEC },
-        accent_color: Color { r: 0x00, g: 0x80, b: 0xFF },
+        background_color: Color {
+            r: 0x2E,
+            g: 0x32,
+            b: 0x39,
+        },
+        text_color: Color {
+            r: 0xE0,
+            g: 0xE5,
+            b: 0xEC,
+        },
+        accent_color: Color {
+            r: 0x00,
+            g: 0x80,
+            b: 0xFF,
+        },
         font: None,
     });
     commands.push(PlatformCommand::CreateChart {
