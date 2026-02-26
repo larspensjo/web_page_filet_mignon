@@ -3,7 +3,7 @@ use std::borrow::ToOwned;
 use std::path::PathBuf;
 
 use crate::state::TriageCacheLookupResult;
-use crate::tabs::AppTab;
+use crate::tabs::{AppTab, LeftTab};
 use crate::{
     briefing::{
         ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingThemeResult,
@@ -600,6 +600,23 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                     }
                 }
                 state.consume_prompt_lab_ownership(request_id);
+                // Slice 5: Auto-switch right tab to match lab run stage when Prompt Lab is
+                // the active left-pane tab.
+                if state.left_tab() == LeftTab::PromptLab {
+                    if let Some(run) = state.prompt_lab().run_by_id(run_id) {
+                        let target_tab = match run.stage {
+                            PromptLabStage::Triage => AppTab::Triage,
+                            PromptLabStage::Summary => AppTab::Summary,
+                            PromptLabStage::Briefing => AppTab::Briefing,
+                        };
+                        engine_info!(
+                            "[prompt-lab-auto-tab] lab run {} completed, switching right tab to {:?}",
+                            run_id.0,
+                            target_tab
+                        );
+                        state.select_tab(target_tab);
+                    }
+                }
                 let compare_batch_id = state
                     .prompt_lab()
                     .run_by_id(run_id)
@@ -973,6 +990,14 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             } else {
                 Vec::new()
             }
+        }
+        Msg::LeftTabSelected { tab } => {
+            if tab == LeftTab::PromptLab {
+                state.open_prompt_lab();
+            } else {
+                state.close_prompt_lab();
+            }
+            Vec::new()
         }
         Msg::TrendCategorySelected { category } => {
             state.set_active_trend_category(category);
@@ -3459,8 +3484,8 @@ mod tests {
         let (state, _) = update(state, Msg::UrlsSubmitted);
         let (state, _) = update(
             state,
-            Msg::TabSelected {
-                tab: crate::tabs::AppTab::PromptLab,
+            Msg::LeftTabSelected {
+                tab: crate::tabs::LeftTab::PromptLab,
             },
         );
         let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });

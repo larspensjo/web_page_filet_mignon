@@ -49,7 +49,7 @@ pub use state::{
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
 };
-pub use tabs::{AppTab, TrendCategory};
+pub use tabs::{AppTab, LeftTab, TrendCategory};
 pub use trends::{
     choose_display_label, compute_trends, normalize_entity_key, CategoryTrend, EntityLine,
     EntityTrendData, IsoWeek,
@@ -62,10 +62,10 @@ pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCach
 pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
-    AppViewModel, CategoryTrendView, EntityLineView, JobFilterStatus, JobRowView, LinkRowView,
-    LlmModelUsageView, PreviewHeaderView, PromptLabCompareBatchView, PromptLabCompareCandidateView,
-    PromptLabComparePolicyView, PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView,
-    RightPaneView, TrendsTabView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH,
-    DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
-    TOKEN_LIMIT,
+    AppViewModel, CategoryTrendView, EntityLineView, JobFilterStatus, JobRowView, LeftPaneView,
+    LinkRowView, LlmModelUsageView, PreviewHeaderView, PromptLabCompareBatchView,
+    PromptLabCompareCandidateView, PromptLabComparePolicyView, PromptLabCompareRowView,
+    PromptLabRunSummaryView, PromptLabView, RightPaneView, TrendsTabView, TriageAnnotationView,
+    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
+    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };

@@ -10,7 +10,7 @@ use crate::prompt_lab::{
 };
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
-use crate::tabs::{AppTab, TrendCategory};
+use crate::tabs::{AppTab, LeftTab, TrendCategory};
 use crate::triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession};
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
@@ -336,6 +336,8 @@ pub struct AppState {
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
     /// Currently active right-pane tab.
     active_tab: AppTab,
+    /// Currently active left-pane tab.
+    left_tab: LeftTab,
     /// Currently active trend category in the Trends tab.
     active_trend_category: TrendCategory,
     /// Persisted entity index loaded from disk (or rebuilt from caches).
@@ -403,6 +405,7 @@ impl Default for AppState {
             prompt_lab_templates: default_prompt_template_snapshots(),
             llm_usage_by_model: BTreeMap::new(),
             active_tab: AppTab::default(),
+            left_tab: LeftTab::default(),
             active_trend_category: TrendCategory::default(),
             entity_index: None,
             entity_trend_data: None,
@@ -644,12 +647,15 @@ impl AppState {
             input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),
             selected_url,
-            prompt_lab: crate::view_model::PromptLabView::from_state(
-                &self.prompt_lab,
-                &self.prompt_contexts,
-                &self.prompt_lab_templates,
-                selected_triage_article_available,
-            ),
+            left_pane: crate::view_model::LeftPaneView {
+                left_tab: self.left_tab,
+                prompt_lab: crate::view_model::PromptLabView::from_state(
+                    &self.prompt_lab,
+                    &self.prompt_contexts,
+                    &self.prompt_lab_templates,
+                    selected_triage_article_available,
+                ),
+            },
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
             llm_usage_by_model: self.llm_usage_rows(),
             right_pane: self.build_right_pane_view(selected_triage_article_available),
@@ -704,6 +710,45 @@ impl AppState {
             selected_triage_article_available,
         );
 
+        // When the left pane is showing the Prompt Lab, route the latest completed lab
+        // run result into the matching right-pane viewer so the user can see it inline.
+        let (effective_triage_markdown, effective_summary_markdown, effective_briefing_markdown) =
+            if self.left_tab == LeftTab::PromptLab {
+                let lab_triage = prompt_lab.latest_run.as_ref().and_then(|run| {
+                    use crate::prompt_lab::PromptLabStage;
+                    if run.stage == PromptLabStage::Triage {
+                        run.output_json.as_deref().map(format_lab_triage_markdown)
+                    } else {
+                        None
+                    }
+                });
+                let lab_summary = prompt_lab.latest_run.as_ref().and_then(|run| {
+                    use crate::prompt_lab::PromptLabStage;
+                    if run.stage == PromptLabStage::Summary {
+                        run.output_json.as_deref().map(format_lab_summary_markdown)
+                    } else {
+                        None
+                    }
+                });
+                let lab_briefing = prompt_lab.latest_run.as_ref().and_then(|run| {
+                    use crate::prompt_lab::PromptLabStage;
+                    if run.stage == PromptLabStage::Briefing {
+                        run.output_json.as_deref().map(format_lab_briefing_markdown)
+                    } else {
+                        None
+                    }
+                });
+                (
+                    lab_triage.or(triage_markdown),
+                    lab_summary.or(summary_markdown),
+                    lab_briefing.or(briefing_markdown),
+                )
+            } else {
+                (triage_markdown, summary_markdown, briefing_markdown)
+            };
+
+        let _ = prompt_lab; // moved into LeftPaneView via view()
+
         let trends = crate::view_model::build_trends_tab_view(
             self.entity_trend_data.as_ref(),
             self.active_trend_category,
@@ -711,11 +756,10 @@ impl AppState {
 
         RightPaneView {
             active_tab: self.active_tab,
-            triage_markdown,
-            summary_markdown,
-            briefing_markdown,
+            triage_markdown: effective_triage_markdown,
+            summary_markdown: effective_summary_markdown,
+            briefing_markdown: effective_briefing_markdown,
             trends,
-            prompt_lab,
         }
     }
 
@@ -1822,6 +1866,17 @@ impl AppState {
         self.active_tab
     }
 
+    pub(crate) fn select_left_tab(&mut self, tab: LeftTab) {
+        if self.left_tab != tab {
+            self.left_tab = tab;
+            self.dirty = true;
+        }
+    }
+
+    pub fn left_tab(&self) -> LeftTab {
+        self.left_tab
+    }
+
     pub(crate) fn set_active_trend_category(&mut self, category: TrendCategory) {
         self.active_trend_category = category;
         self.dirty = true;
@@ -1848,12 +1903,12 @@ impl AppState {
     }
 
     pub(crate) fn open_prompt_lab(&mut self) {
-        self.select_tab(AppTab::PromptLab);
+        self.select_left_tab(LeftTab::PromptLab);
         self.prompt_lab.open();
     }
 
     pub(crate) fn close_prompt_lab(&mut self) {
-        self.select_tab(AppTab::Summary);
+        self.select_left_tab(LeftTab::JobList);
         self.prompt_lab.close();
     }
 
@@ -1950,6 +2005,45 @@ fn normalize_extracted_link(link: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/// Format a lab triage JSON output as readable markdown for the right-pane Triage viewer.
+fn format_lab_triage_markdown(output_json: &str) -> String {
+    use harvester_engine::llm::validation::validate_triage;
+    match validate_triage(output_json) {
+        Ok(result) => {
+            let tags_line = if result.tags.is_empty() {
+                "none".to_string()
+            } else {
+                result.tags.join(", ")
+            };
+            format!(
+                "**\\[Lab\\]** **Category:** {}\n**Priority:** P{}\n**Tags:** {}\n\n---\n\n{}\n",
+                result.category, result.priority.value(), tags_line, result.rationale
+            )
+        }
+        Err(_) => format!("**\\[Lab Triage\\]**\n\n```json\n{output_json}\n```\n"),
+    }
+}
+
+/// Format a lab summary JSON output as readable markdown for the right-pane Summary viewer.
+fn format_lab_summary_markdown(output_json: &str) -> String {
+    use harvester_engine::llm::validation::validate_summary;
+    match validate_summary(output_json) {
+        Ok(result) => {
+            let kp_lines: String = result.key_points.iter().map(|kp| format!("- {kp}\n")).collect();
+            format!(
+                "# \\[Lab\\] {}\n\n{}\n\n**Key Points:**\n\n{}\n",
+                result.title, result.summary, kp_lines
+            )
+        }
+        Err(_) => format!("**\\[Lab Summary\\]**\n\n```json\n{output_json}\n```\n"),
+    }
+}
+
+/// Format a lab briefing JSON output as readable markdown for the right-pane Briefing viewer.
+fn format_lab_briefing_markdown(output_json: &str) -> String {
+    format!("**\\[Lab Briefing\\]**\n\n```json\n{output_json}\n```\n")
 }
 
 fn domain_from_url(url: &str) -> String {

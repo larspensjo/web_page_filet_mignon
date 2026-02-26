@@ -485,3 +485,9 @@ Evidence: `cargo test -p harvester_app summary_tab_without_selected_article_show
 Lessons Learned: Tab migrations require strict ownership of displayed content; retaining generic fallback content paths inside tab renderers reintroduces cross-tab leakage when selection state is absent.
 Prevention: For each tab renderer, define a tab-specific empty state and add tests that set conflicting legacy preview fields to ensure tab content is sourced only from the tab’s view model fields.
 Refs: crates/harvester_app/src/platform/ui/render.rs, summary_tab_without_selected_article_shows_empty_state_not_briefing_preview
+## 2026-02-26 - Prompt Lab moved to left panel tab bar
+Type: Implementation
+Context: Prompt Lab occupied a right-pane tab alongside Triage/Summary/Briefing/Trends. This meant the user could not view lab configuration and lab results simultaneously, and lab results (`output_json`) had no viewer at all. Moving Prompt Lab to the left panel gives the user side-by-side config+result visibility by routing lab output into the existing right-pane viewers.
+Change: Added `LeftTab { JobList, PromptLab }` enum and `LeftPaneView` to `harvester_core`. Left panel now has a tab bar with two tabs; right panel drops the PromptLab entry. When `left_tab == PromptLab` the right-pane viewers show lab results instead of production content. Auto-switch after lab run completion routes the right pane to the matching content tab. Affected subsystems: `harvester_core`, `harvester_app`.
+Evidence: `cargo nextest run` — 850/850 passed; `cargo clippy --workspace --all-targets -- -D warnings` — clean.
+Refs: crates/harvester_core/src/tabs.rs, crates/harvester_core/src/view_model.rs, crates/harvester_core/src/state.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/app.rs

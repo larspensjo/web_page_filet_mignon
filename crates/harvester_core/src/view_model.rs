@@ -6,7 +6,7 @@ use crate::prompt_lab::{
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::LinkDownloadState;
-use crate::tabs::{AppTab, TrendCategory};
+use crate::tabs::{AppTab, LeftTab, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
@@ -98,8 +98,6 @@ pub struct RightPaneView {
     pub briefing_markdown: Option<String>,
     /// Trends tab view data.
     pub trends: TrendsTabView,
-    /// Prompt Lab view (existing sub-view, now hosted in the PromptLab tab).
-    pub prompt_lab: PromptLabView,
 }
 
 fn category_trend_to_view(trend: &CategoryTrend) -> CategoryTrendView {
@@ -150,6 +148,15 @@ pub const DEFAULT_JOBS_PANEL_WIDTH: i32 = DEFAULT_LEFT_PANEL_WIDTH - INPUT_PANEL
 // Default window width
 pub const DEFAULT_WINDOW_WIDTH: i32 = 960;
 
+/// View state for the left-pane tab bar and its content.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct LeftPaneView {
+    /// Which left-pane tab is currently active.
+    pub left_tab: LeftTab,
+    /// Prompt Lab controls (shown when left_tab == PromptLab).
+    pub prompt_lab: PromptLabView,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppViewModel {
     pub session: SessionState,
@@ -177,7 +184,7 @@ pub struct AppViewModel {
     pub window_width: i32,
     /// URL of the currently selected job, only when it has a completed summary.
     pub selected_url: Option<String>,
-    pub prompt_lab: PromptLabView,
+    pub left_pane: LeftPaneView,
     pub is_pre_triage_reviewing: bool,
     /// Per-model LLM token usage, sorted alphabetically by model name. Only Miss runs counted.
     pub llm_usage_by_model: Vec<LlmModelUsageView>,
@@ -209,7 +216,7 @@ impl Default for AppViewModel {
             input_panel_visible: false,
             window_width: DEFAULT_WINDOW_WIDTH,
             selected_url: None,
-            prompt_lab: PromptLabView::default(),
+            left_pane: LeftPaneView::default(),
             is_pre_triage_reviewing: false,
             llm_usage_by_model: Vec::new(),
             right_pane: RightPaneView::default(),

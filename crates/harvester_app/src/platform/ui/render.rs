@@ -4,7 +4,7 @@ use commanductui::{
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LinkDownloadState,
+    AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LeftTab, LinkDownloadState,
     LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendCategory,
     TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
@@ -154,6 +154,7 @@ pub struct TreeRenderState {
     prev_prompt_lab_selected_model: Option<String>,
     // Tab bar state
     prev_active_tab: AppTab,
+    prev_left_tab: LeftTab,
     prev_triage_text: Option<String>,
     prev_briefing_text: Option<String>,
 }
@@ -227,6 +228,7 @@ impl Default for TreeRenderState {
             prev_prompt_lab_model_catalog: None,
             prev_prompt_lab_selected_model: None,
             prev_active_tab: AppTab::Summary,
+            prev_left_tab: LeftTab::default(),
             prev_triage_text: None,
             prev_briefing_text: None,
         }
@@ -292,6 +294,7 @@ pub fn render(
     let mut cmds = Vec::new();
     render_layout_section(window_id, view, tree_state, &mut cmds);
     render_tab_bar_section(window_id, view, tree_state, &mut cmds);
+    render_left_tab_bar_section(window_id, view, tree_state, &mut cmds);
     render_status_section(window_id, view, tree_state, &mut cmds);
     render_token_progress_section(window_id, view, tree_state, &mut cmds);
     render_main_controls_section(window_id, view, tree_state, &mut cmds);
@@ -371,17 +374,18 @@ fn render_layout_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
-    let prompt_lab_tab_visible = view.right_pane.active_tab == AppTab::PromptLab;
+    let prompt_lab_tab_visible = view.left_pane.left_tab == LeftTab::PromptLab;
     let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
         || view.input_panel_visible != tree_state.prev_input_panel_visible
         || view.right_pane.active_tab != tree_state.prev_active_tab
+        || view.left_pane.left_tab != tree_state.prev_left_tab
         || prompt_lab_tab_visible != tree_state.prev_prompt_lab_visible
-        || view.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
-        || view.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
-        || view.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
-        || view.prompt_lab.template_section_open
+        || view.left_pane.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
+        || view.left_pane.prompt_lab.compare_section_open != tree_state.prev_prompt_lab_compare_section_open
+        || view.left_pane.prompt_lab.context_section_open != tree_state.prev_prompt_lab_context_section_open
+        || view.left_pane.prompt_lab.template_section_open
             != tree_state.prev_prompt_lab_template_section_open
-        || view.prompt_lab.template_editor_open != tree_state.prev_prompt_lab_template_editor_open;
+        || view.left_pane.prompt_lab.template_editor_open != tree_state.prev_prompt_lab_template_editor_open;
     if !layout_changed {
         return;
     }
@@ -400,14 +404,15 @@ fn render_layout_section(
             left_panel_width: view.left_panel_width,
             input_panel_visible: view.input_panel_visible,
             active_tab: view.right_pane.active_tab,
+            left_tab: view.left_pane.left_tab,
             prompt_lab: PromptLabLayoutConfig {
                 visible: prompt_lab_tab_visible,
-                advanced_mode: view.prompt_lab.advanced_mode,
-                compare_section_open: view.prompt_lab.compare_section_open,
-                context_section_open: view.prompt_lab.context_section_open,
-                template_section_open: view.prompt_lab.template_section_open,
-                run_details_section_open: view.prompt_lab.run_details_section_open,
-                template_editor_open: view.prompt_lab.template_editor_open,
+                advanced_mode: view.left_pane.prompt_lab.advanced_mode,
+                compare_section_open: view.left_pane.prompt_lab.compare_section_open,
+                context_section_open: view.left_pane.prompt_lab.context_section_open,
+                template_section_open: view.left_pane.prompt_lab.template_section_open,
+                run_details_section_open: view.left_pane.prompt_lab.run_details_section_open,
+                template_editor_open: view.left_pane.prompt_lab.template_editor_open,
             },
         },
     ));
@@ -418,12 +423,13 @@ fn render_layout_section(
     tree_state.prev_left_panel_width = view.left_panel_width;
     tree_state.prev_input_panel_visible = view.input_panel_visible;
     tree_state.prev_active_tab = view.right_pane.active_tab;
+    tree_state.prev_left_tab = view.left_pane.left_tab;
     tree_state.prev_prompt_lab_visible = prompt_lab_tab_visible;
-    tree_state.prev_prompt_lab_advanced_mode = view.prompt_lab.advanced_mode;
-    tree_state.prev_prompt_lab_compare_section_open = view.prompt_lab.compare_section_open;
-    tree_state.prev_prompt_lab_context_section_open = view.prompt_lab.context_section_open;
-    tree_state.prev_prompt_lab_template_section_open = view.prompt_lab.template_section_open;
-    tree_state.prev_prompt_lab_template_editor_open = view.prompt_lab.template_editor_open;
+    tree_state.prev_prompt_lab_advanced_mode = view.left_pane.prompt_lab.advanced_mode;
+    tree_state.prev_prompt_lab_compare_section_open = view.left_pane.prompt_lab.compare_section_open;
+    tree_state.prev_prompt_lab_context_section_open = view.left_pane.prompt_lab.context_section_open;
+    tree_state.prev_prompt_lab_template_section_open = view.left_pane.prompt_lab.template_section_open;
+    tree_state.prev_prompt_lab_template_editor_open = view.left_pane.prompt_lab.template_editor_open;
 }
 
 fn render_tab_bar_section(
@@ -438,7 +444,25 @@ fn render_tab_bar_section(
         (BUTTON_TAB_SUMMARY, AppTab::Summary),
         (BUTTON_TAB_BRIEFING, AppTab::Briefing),
         (BUTTON_TAB_TRENDS, AppTab::Trends),
-        (BUTTON_TAB_PROMPT_LAB, AppTab::PromptLab),
+    ] {
+        cmds.push(PlatformCommand::SetRadioButtonChecked {
+            window_id,
+            control_id,
+            checked: active == tab,
+        });
+    }
+}
+
+fn render_left_tab_bar_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    _tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    let active = view.left_pane.left_tab;
+    for (control_id, tab) in [
+        (BUTTON_LEFT_TAB_JOBS, LeftTab::JobList),
+        (BUTTON_LEFT_TAB_PROMPT_LAB, LeftTab::PromptLab),
     ] {
         cmds.push(PlatformCommand::SetRadioButtonChecked {
             window_id,
@@ -614,7 +638,7 @@ fn render_prompt_lab_section(
 ) {
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_mode_basic_checked,
-        !view.prompt_lab.advanced_mode,
+        !view.left_pane.prompt_lab.advanced_mode,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
@@ -624,7 +648,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_mode_advanced_checked,
-        view.prompt_lab.advanced_mode,
+        view.left_pane.prompt_lab.advanced_mode,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
@@ -634,7 +658,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_stage_triage_checked,
-        view.prompt_lab.selected_stage == PromptLabStage::Triage,
+        view.left_pane.prompt_lab.selected_stage == PromptLabStage::Triage,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
@@ -644,7 +668,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_stage_summary_checked,
-        view.prompt_lab.selected_stage == PromptLabStage::Summary,
+        view.left_pane.prompt_lab.selected_stage == PromptLabStage::Summary,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
@@ -654,7 +678,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_stage_briefing_checked,
-        view.prompt_lab.selected_stage == PromptLabStage::Briefing,
+        view.left_pane.prompt_lab.selected_stage == PromptLabStage::Briefing,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
             window_id,
@@ -664,7 +688,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_section_compare_checked,
-        view.prompt_lab.compare_section_open,
+        view.left_pane.prompt_lab.compare_section_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
@@ -674,7 +698,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_section_context_checked,
-        view.prompt_lab.context_section_open,
+        view.left_pane.prompt_lab.context_section_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
@@ -684,7 +708,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_section_template_checked,
-        view.prompt_lab.template_section_open,
+        view.left_pane.prompt_lab.template_section_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
@@ -694,7 +718,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_section_run_details_checked,
-        view.prompt_lab.run_details_section_open,
+        view.left_pane.prompt_lab.run_details_section_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
@@ -703,12 +727,12 @@ fn render_prompt_lab_section(
         },
     );
 
-    let model_catalog = &view.prompt_lab.model_catalog;
-    let selected_model = view.prompt_lab.selected_model_override.as_ref();
+    let model_catalog = &view.left_pane.prompt_lab.model_catalog;
+    let selected_model = view.left_pane.prompt_lab.selected_model_override.as_ref();
     if tree_state.prev_prompt_lab_model_catalog.as_deref() != Some(model_catalog.as_slice()) {
         engine_info!(
             "[prompt-lab-model] render updating combo items source={:?} count={}",
-            view.prompt_lab.model_catalog_source,
+            view.left_pane.prompt_lab.model_catalog_source,
             model_catalog.len()
         );
         let mut items = vec!["Default".to_string()];
@@ -741,7 +765,7 @@ fn render_prompt_lab_section(
 
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_run_enabled,
-        view.prompt_lab.can_run,
+        view.left_pane.prompt_lab.can_run,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -751,7 +775,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_resolve_enabled,
-        !view.prompt_lab.resolve_pending,
+        !view.left_pane.prompt_lab.resolve_pending,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -770,7 +794,7 @@ fn render_prompt_lab_section(
         },
     );
 
-    let compare_add_enabled = view.prompt_lab.can_add_candidate;
+    let compare_add_enabled = view.left_pane.prompt_lab.can_add_candidate;
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_add_current_enabled,
         compare_add_enabled,
@@ -793,7 +817,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_reset_draft_enabled,
-        view.prompt_lab.can_reset_draft,
+        view.left_pane.prompt_lab.can_reset_draft,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -803,7 +827,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_start_enabled,
-        view.prompt_lab.active_batch.is_none() && view.prompt_lab.draft_candidates.len() >= 2,
+        view.left_pane.prompt_lab.active_batch.is_none() && view.left_pane.prompt_lab.draft_candidates.len() >= 2,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -813,7 +837,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_cancel_enabled,
-        view.prompt_lab
+        view.left_pane.prompt_lab
             .active_batch
             .as_ref()
             .map(|batch| batch.can_cancel)
@@ -827,7 +851,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_auto_select_enabled,
-        view.prompt_lab
+        view.left_pane.prompt_lab
             .active_batch
             .as_ref()
             .map(|batch| batch.can_auto_select)
@@ -841,7 +865,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_compare_winner_clear_enabled,
-        view.prompt_lab
+        view.left_pane.prompt_lab
             .active_batch
             .as_ref()
             .map(|batch| {
@@ -860,7 +884,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_context_apply_enabled,
-        view.prompt_lab.can_apply_context,
+        view.left_pane.prompt_lab.can_apply_context,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -870,7 +894,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_context_apply_rerun_enabled,
-        view.prompt_lab.can_apply_and_rerun,
+        view.left_pane.prompt_lab.can_apply_and_rerun,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -880,7 +904,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_context_revert_enabled,
-        view.prompt_lab.can_revert_context,
+        view.left_pane.prompt_lab.can_revert_context,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -890,7 +914,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_context_save_enabled,
-        view.prompt_lab.can_save_context,
+        view.left_pane.prompt_lab.can_save_context,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -900,7 +924,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_template_open_checked,
-        view.prompt_lab.template_editor_open,
+        view.left_pane.prompt_lab.template_editor_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
             window_id,
@@ -910,9 +934,9 @@ fn render_prompt_lab_section(
     );
 
     let can_apply_template =
-        view.prompt_lab.template_dirty && view.prompt_lab.template_validation_errors.is_empty();
-    let can_apply_template_and_rerun = can_apply_template && view.prompt_lab.can_run;
-    let can_revert_template = view.prompt_lab.template_dirty || view.prompt_lab.template_applied;
+        view.left_pane.prompt_lab.template_dirty && view.left_pane.prompt_lab.template_validation_errors.is_empty();
+    let can_apply_template_and_rerun = can_apply_template && view.left_pane.prompt_lab.can_run;
+    let can_revert_template = view.left_pane.prompt_lab.template_dirty || view.left_pane.prompt_lab.template_applied;
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_template_apply_enabled,
         can_apply_template,
@@ -945,7 +969,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_template_save_enabled,
-        view.prompt_lab.template_applied,
+        view.left_pane.prompt_lab.template_applied,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -955,7 +979,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_template_system_text,
-        view.prompt_lab.template_system_draft.clone(),
+        view.left_pane.prompt_lab.template_system_draft.clone(),
         cmds,
         |text| PlatformCommand::SetInputText {
             window_id,
@@ -965,7 +989,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_template_user_text,
-        view.prompt_lab.template_user_draft.clone(),
+        view.left_pane.prompt_lab.template_user_draft.clone(),
         cmds,
         |text| PlatformCommand::SetInputText {
             window_id,
@@ -975,7 +999,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_template_system_enabled,
-        view.prompt_lab.template_editor_open,
+        view.left_pane.prompt_lab.template_editor_open,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -985,7 +1009,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_template_user_enabled,
-        view.prompt_lab.template_editor_open,
+        view.left_pane.prompt_lab.template_editor_open,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -995,7 +1019,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_url_input,
-        view.prompt_lab.url_input.clone(),
+        view.left_pane.prompt_lab.url_input.clone(),
         cmds,
         |text| PlatformCommand::SetInputText {
             window_id,
@@ -1005,7 +1029,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_status_text,
-        prompt_lab_status_text(&view.prompt_lab),
+        prompt_lab_status_text(&view.left_pane.prompt_lab),
         cmds,
         |text| PlatformCommand::SetControlText {
             window_id,
@@ -1015,7 +1039,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_metadata_text,
-        prompt_lab_metadata_text(&view.prompt_lab),
+        prompt_lab_metadata_text(&view.left_pane.prompt_lab),
         cmds,
         |text| PlatformCommand::SetControlText {
             window_id,
@@ -1025,7 +1049,7 @@ fn render_prompt_lab_section(
     );
     emit_if_changed(
         &mut tree_state.prev_prompt_lab_context_text,
-        view.prompt_lab.context_draft_text.clone(),
+        view.left_pane.prompt_lab.context_draft_text.clone(),
         cmds,
         |text| PlatformCommand::SetInputText {
             window_id,
@@ -1033,10 +1057,10 @@ fn render_prompt_lab_section(
             text,
         },
     );
-    let context_status_text = if !view.prompt_lab.context_validation_errors.is_empty() {
-        view.prompt_lab.context_validation_errors.join(" • ")
+    let context_status_text = if !view.left_pane.prompt_lab.context_validation_errors.is_empty() {
+        view.left_pane.prompt_lab.context_validation_errors.join(" • ")
     } else {
-        view.prompt_lab
+        view.left_pane.prompt_lab
             .context_status_message
             .clone()
             .unwrap_or_default()
@@ -1051,16 +1075,16 @@ fn render_prompt_lab_section(
             text,
         },
     );
-    let template_status_text = if !view.prompt_lab.template_validation_errors.is_empty() {
-        view.prompt_lab.template_validation_errors.join(" • ")
+    let template_status_text = if !view.left_pane.prompt_lab.template_validation_errors.is_empty() {
+        view.left_pane.prompt_lab.template_validation_errors.join(" • ")
     } else if let (Some(version), Some(path)) = (
-        view.prompt_lab.template_saved_version,
-        view.prompt_lab.template_saved_path.as_deref(),
+        view.left_pane.prompt_lab.template_saved_version,
+        view.left_pane.prompt_lab.template_saved_path.as_deref(),
     ) {
         format!("Saved template v{version} to {path}")
-    } else if view.prompt_lab.template_applied {
+    } else if view.left_pane.prompt_lab.template_applied {
         "Template draft applied".to_string()
-    } else if view.prompt_lab.template_dirty {
+    } else if view.left_pane.prompt_lab.template_dirty {
         "Template draft has unapplied changes".to_string()
     } else {
         String::new()
@@ -2061,14 +2085,20 @@ mod tests {
             .find(|rule| rule.control_id == PANEL_INPUT)
             .and_then(|rule| rule.fixed_size)
             .expect("PANEL_INPUT fixed size");
-        let jobs_width = rules
+        let left_width = rules
+            .iter()
+            .find(|rule| rule.control_id == PANEL_LEFT)
+            .and_then(|rule| rule.fixed_size)
+            .expect("PANEL_LEFT fixed size");
+        let jobs_fill = rules
             .iter()
             .find(|rule| rule.control_id == PANEL_JOBS)
-            .and_then(|rule| rule.fixed_size)
-            .expect("PANEL_JOBS fixed size");
+            .map(|rule| rule.fixed_size)
+            .expect("PANEL_JOBS rule present");
 
         assert_eq!(input_width, harvester_core::INPUT_PANEL_FIXED_WIDTH);
-        assert_eq!(jobs_width, 760 - harvester_core::INPUT_PANEL_FIXED_WIDTH);
+        assert_eq!(left_width, 760);
+        assert_eq!(jobs_fill, None, "PANEL_JOBS should Fill its parent");
     }
 
     #[test]
@@ -2198,7 +2228,7 @@ mod tests {
         let window_id = WindowId::new(10);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.can_run = false;
+        view.left_pane.prompt_lab.can_run = false;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2214,9 +2244,9 @@ mod tests {
         let window_id = WindowId::new(15);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.template_editor_open = true;
-        view.prompt_lab.template_dirty = true;
-        view.prompt_lab.template_validation_errors = vec!["unknown var".to_string()];
+        view.left_pane.prompt_lab.template_editor_open = true;
+        view.left_pane.prompt_lab.template_dirty = true;
+        view.left_pane.prompt_lab.template_validation_errors = vec!["unknown var".to_string()];
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2232,8 +2262,8 @@ mod tests {
         let window_id = WindowId::new(16);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.template_editor_open = true;
-        view.prompt_lab.template_applied = false;
+        view.left_pane.prompt_lab.template_editor_open = true;
+        view.left_pane.prompt_lab.template_applied = false;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2249,8 +2279,8 @@ mod tests {
         let window_id = WindowId::new(17);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.template_editor_open = true;
-        view.prompt_lab.template_validation_errors = vec![
+        view.left_pane.prompt_lab.template_editor_open = true;
+        view.left_pane.prompt_lab.template_validation_errors = vec![
             "missing {{context}}".to_string(),
             "unknown {{foo}}".to_string(),
         ];
@@ -2286,7 +2316,7 @@ mod tests {
         let window_id = WindowId::new(19);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.draft_candidates = vec![
+        view.left_pane.prompt_lab.draft_candidates = vec![
             harvester_core::PromptLabCompareCandidateView {
                 candidate_id: 1,
                 label: "c1".to_string(),
@@ -2321,10 +2351,10 @@ mod tests {
         let window_id = WindowId::new(33);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.compare_section_open = true;
-        view.prompt_lab.context_section_open = false;
-        view.prompt_lab.template_section_open = true;
-        view.prompt_lab.run_details_section_open = true;
+        view.left_pane.prompt_lab.compare_section_open = true;
+        view.left_pane.prompt_lab.context_section_open = false;
+        view.left_pane.prompt_lab.template_section_open = true;
+        view.left_pane.prompt_lab.run_details_section_open = true;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2354,8 +2384,8 @@ mod tests {
         let window_id = WindowId::new(38);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.advanced_mode = true;
-        view.prompt_lab.selected_stage = PromptLabStage::Summary;
+        view.left_pane.prompt_lab.advanced_mode = true;
+        view.left_pane.prompt_lab.selected_stage = PromptLabStage::Summary;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2385,9 +2415,9 @@ mod tests {
         let window_id = WindowId::new(39);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.right_pane.active_tab = AppTab::PromptLab;
-        view.prompt_lab.visible = false;
-        view.prompt_lab.advanced_mode = true;
+        view.left_pane.left_tab = LeftTab::PromptLab;
+        view.left_pane.prompt_lab.visible = false;
+        view.left_pane.prompt_lab.advanced_mode = true;
 
         let cmds = render(window_id, &view, &mut tree_state);
         let rules = cmds
@@ -2431,7 +2461,7 @@ mod tests {
         let window_id = WindowId::new(35);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.model_catalog = vec![
+        view.left_pane.prompt_lab.model_catalog = vec![
             ModelId::new(harvester_engine::llm::ProviderKind::OpenAi, "gpt-4o-mini"),
             ModelId::new(harvester_engine::llm::ProviderKind::OpenAi, "o3-mini"),
         ];
@@ -2460,8 +2490,8 @@ mod tests {
         let window_id = WindowId::new(36);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.right_pane.active_tab = AppTab::PromptLab;
-        view.prompt_lab.model_catalog = vec![ModelId::new(
+        view.left_pane.left_tab = LeftTab::PromptLab;
+        view.left_pane.prompt_lab.model_catalog = vec![ModelId::new(
             harvester_engine::llm::ProviderKind::OpenAi,
             "gpt-4o-mini",
         )];
@@ -2476,10 +2506,10 @@ mod tests {
                 if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
         }));
 
-        view.right_pane.active_tab = AppTab::Summary;
+        view.left_pane.left_tab = LeftTab::JobList;
         let _ = render(window_id, &view, &mut tree_state);
 
-        view.right_pane.active_tab = AppTab::PromptLab;
+        view.left_pane.left_tab = LeftTab::PromptLab;
         let reopen_cmds = render(window_id, &view, &mut tree_state);
         assert!(reopen_cmds.iter().any(|cmd| {
             matches!(cmd, PlatformCommand::SetComboBoxItems { control_id, .. }
@@ -2496,8 +2526,8 @@ mod tests {
         let window_id = WindowId::new(37);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.visible = true;
-        view.prompt_lab.model_catalog = vec![ModelId::new(
+        view.left_pane.prompt_lab.visible = true;
+        view.left_pane.prompt_lab.model_catalog = vec![ModelId::new(
             harvester_engine::llm::ProviderKind::OpenAi,
             "gpt-4o-mini",
         )];
@@ -2519,7 +2549,7 @@ mod tests {
         let window_id = WindowId::new(12);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab.resolve_pending = true;
+        view.left_pane.prompt_lab.resolve_pending = true;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2529,7 +2559,7 @@ mod tests {
             )
         }));
 
-        view.prompt_lab.resolve_pending = false;
+        view.left_pane.prompt_lab.resolve_pending = false;
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(cmds.iter().any(|cmd| {
             matches!(
@@ -2546,7 +2576,7 @@ mod tests {
         let window_id = WindowId::new(13);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab = completed_prompt_lab_view();
+        view.left_pane.prompt_lab = completed_prompt_lab_view();
         let cmds = render(window_id, &view, &mut tree_state);
         // The Prompt Lab output JSON should NOT appear in VIEWER_PREVIEW.
         assert!(!cmds.iter().any(|cmd| {
@@ -2596,7 +2626,7 @@ mod tests {
         let window_id = WindowId::new(14);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
-        view.prompt_lab = completed_prompt_lab_view();
+        view.left_pane.prompt_lab = completed_prompt_lab_view();
         let _ = render(window_id, &view, &mut tree_state);
         let cmds = render(window_id, &view, &mut tree_state);
         assert!(!cmds

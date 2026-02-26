@@ -11,7 +11,7 @@ use commanductui::{
     UiStateProvider, WindowConfig, WindowId,
 };
 use harvester_core::{
-    update, AppState, AppTab, AppViewModel, Effect, JobFilterStatus, JobResultKind,
+    update, AppState, AppTab, AppViewModel, Effect, JobFilterStatus, JobResultKind, LeftTab,
     LinkDownloadState, ManualDecision, Msg, PromptLabStage, TrendCategory,
 };
 
@@ -413,7 +413,7 @@ impl AppEventHandler {
             .lock()
             .map(|guard| {
                 let view = guard.state.view();
-                (view.input_panel_visible, view.prompt_lab.visible)
+                (view.input_panel_visible, view.left_pane.prompt_lab.visible)
             })
             .unwrap_or((false, false));
         if !prompt_lab_visible && !input_panel_visible {
@@ -491,10 +491,17 @@ impl PlatformEventHandler for AppEventHandler {
                 });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
-                if control_id == ui::constants::BUTTON_TAB_PROMPT_LAB =>
+                if control_id == ui::constants::BUTTON_LEFT_TAB_JOBS =>
             {
-                let _ = self.msg_tx.send(Msg::TabSelected {
-                    tab: AppTab::PromptLab,
+                let _ = self.msg_tx.send(Msg::LeftTabSelected {
+                    tab: LeftTab::JobList,
+                });
+            }
+            AppEvent::RadioButtonSelected { control_id, .. }
+                if control_id == ui::constants::BUTTON_LEFT_TAB_PROMPT_LAB =>
+            {
+                let _ = self.msg_tx.send(Msg::LeftTabSelected {
+                    tab: LeftTab::PromptLab,
                 });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
@@ -587,7 +594,7 @@ impl PlatformEventHandler for AppEventHandler {
             } if control_id == ui::constants::COMBO_PROMPT_LAB_MODEL_SELECTOR => {
                 let guard = self.shared.lock().unwrap();
                 let view = guard.state.view();
-                let model = ui::render::combo_index_to_model(index, &view.prompt_lab.model_catalog);
+                let model = ui::render::combo_index_to_model(index, &view.left_pane.prompt_lab.model_catalog);
                 let _ = self.msg_tx.send(Msg::PromptLabModelOverrideSet { model });
             }
             AppEvent::ButtonClicked { control_id, .. }

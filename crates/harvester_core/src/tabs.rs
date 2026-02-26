@@ -6,6 +6,13 @@ pub enum AppTab {
     Summary,
     Briefing,
     Trends,
+}
+
+/// The active left-pane tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LeftTab {
+    #[default]
+    JobList,
     PromptLab,
 }
 

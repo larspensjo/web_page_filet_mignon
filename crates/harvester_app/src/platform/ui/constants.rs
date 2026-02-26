@@ -87,12 +87,10 @@ pub const BUTTON_TAB_TRIAGE: ControlId = ControlId::new(2201);
 pub const BUTTON_TAB_SUMMARY: ControlId = ControlId::new(2202);
 pub const BUTTON_TAB_BRIEFING: ControlId = ControlId::new(2203);
 pub const BUTTON_TAB_TRENDS: ControlId = ControlId::new(2204);
-pub const BUTTON_TAB_PROMPT_LAB: ControlId = ControlId::new(2205);
 pub const PANEL_TAB_TRIAGE: ControlId = ControlId::new(2210);
 pub const PANEL_TAB_SUMMARY: ControlId = ControlId::new(2211);
 pub const PANEL_TAB_BRIEFING: ControlId = ControlId::new(2212);
 pub const PANEL_TAB_TRENDS: ControlId = ControlId::new(2213);
-pub const PANEL_TAB_PROMPT_LAB: ControlId = ControlId::new(2214);
 // Trend category selector inside PANEL_TAB_TRENDS
 pub const PANEL_TREND_CAT_BAR: ControlId = ControlId::new(2220);
 pub const BUTTON_TREND_COMPANIES: ControlId = ControlId::new(2221);
@@ -104,3 +102,10 @@ pub const VIEWER_TRIAGE: ControlId = ControlId::new(5002);
 pub const VIEWER_BRIEFING: ControlId = ControlId::new(5003);
 // GDI chart control for the Trends tab
 pub const CHART_TRENDS: ControlId = ControlId::new(2230);
+// Left panel: tab bar + two tab content areas (2300 range)
+pub const PANEL_LEFT: ControlId = ControlId::new(2300);
+pub const PANEL_LEFT_TAB_BAR: ControlId = ControlId::new(2301);
+pub const BUTTON_LEFT_TAB_JOBS: ControlId = ControlId::new(2302);
+pub const BUTTON_LEFT_TAB_PROMPT_LAB: ControlId = ControlId::new(2303);
+pub const PANEL_LEFT_JOBS: ControlId = ControlId::new(2304);
+pub const PANEL_LEFT_PROMPT_LAB: ControlId = ControlId::new(2305);

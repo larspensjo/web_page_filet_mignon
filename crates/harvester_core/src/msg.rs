@@ -13,7 +13,7 @@ use crate::prompt_lab::{
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
-use crate::tabs::{AppTab, TrendCategory};
+use crate::tabs::{AppTab, LeftTab, TrendCategory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
@@ -334,6 +334,10 @@ pub enum Msg {
     /// User selected a tab in the right pane.
     TabSelected {
         tab: AppTab,
+    },
+    /// User selected a tab in the left pane.
+    LeftTabSelected {
+        tab: LeftTab,
     },
     /// User selected a trend category in the Trends tab.
     TrendCategorySelected {
