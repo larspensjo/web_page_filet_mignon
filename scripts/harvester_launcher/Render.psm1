@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'Data.psm1')    -Force -Global
@@ -9,7 +9,7 @@ $script:Box = @{ TL='╭'; TR='╮'; BL='╰'; BR='╯'; H='─'; V='│' }
 
 # Colour palette
 $script:C = @{
-    Default      = 'Gray';     Dim         = 'DarkGray'
+    'Default'    = 'Gray';     Dim         = 'DarkGray'
     Selected     = 'White';    BgSelected  = 'DarkCyan'
     BgDefault    = 'Black';    Header      = 'DarkGray'
     OK           = 'Green';    Error       = 'Red'
@@ -63,16 +63,16 @@ function Get-FrameDiff {
 function Flush-FrameDiff {
     param([object[]]$Diff)
     foreach ($row in $Diff) {
-        try { [Console]::SetCursorPosition(0, $row.RowIndex) } catch { }
+        try { [Console]::SetCursorPosition(0, $row.RowIndex) } catch { $null = $_ }
         foreach ($seg in $row.Segments) {
             try {
                 [Console]::ForegroundColor = $seg.Fg
                 [Console]::BackgroundColor = $seg.Bg
                 [Console]::Write($seg.Text)
-            } catch { }
+            } catch { $null = $_ }
         }
     }
-    try { [Console]::ResetColor() } catch { }
+    try { [Console]::ResetColor() } catch { $null = $_ }
 }
 
 function Build-CommandPreviewLines {
@@ -335,7 +335,6 @@ function Build-LauncherFrame {
     $W        = $State.Ui.Layout.Width
     $H        = $State.Ui.Layout.Height
     $leftW    = $State.Ui.Layout.Left.W
-    $rightX   = $State.Ui.Layout.Right.X
     $rightW   = $State.Ui.Layout.Right.W
     $contentH = $H - 1
 

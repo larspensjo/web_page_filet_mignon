@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 Describe 'Data - Get-LauncherActionItems' {
@@ -605,6 +605,7 @@ Describe 'Effects - Invoke-LauncherEffects' {
                 [string]$ActionId,
                 [string]$CustomDate
             )
+            $null = $HarvesterCmd, $UseCargoRun, $OutputDir  # unused in mock body; declared for interface parity
             [pscustomobject]@{
                 Type      = 'CheckpointCommandCompleted'
                 Success   = $true
@@ -808,6 +809,6 @@ Describe 'Render - Build-LauncherFrame' {
         $rows = (Build-LauncherFrame -State $s) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
         $previewRow = $rows | Where-Object { $_ -match 'harvester_batch\.exe|verylong' } | Select-Object -First 1
         $previewRow | Should -Not -BeNullOrEmpty
-        $previewRow.EndsWith('│') | Should -Be $true
+        $previewRow.EndsWith([char]0x2502) | Should -Be $true
     }
 }

@@ -1,4 +1,4 @@
-<#
+﻿<#
 Two-pass plan review + revision loop across 3 CLIs:
 - codex  : review (gpt-5.3-codex, reasoning=medium)
 - claude : update plan (default model, non-interactive via -p)
@@ -11,6 +11,8 @@ Design goals:
 #>
 
 [CmdletBinding()]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'NoBackup',
+    Justification = 'Used inside nested function Backup-File defined later in the script')]
 param(
   # Existing plan file path (typically docs/plans/Plan.XXXX.md)
   [Parameter(Mandatory)]
@@ -148,6 +150,7 @@ Rules:
 The output will overwrite: $PlanPath
 
 Context:
+Updater model: $PlanModel
 Plan path: $PlanPath
 Review path: $ReviewPath
 
@@ -253,57 +256,57 @@ function Invoke-Cli {
   Assert-CliExists $Tool
   Push-Location $WorkingDir
   try {
-    $args = @()
+    $cliArgs = @()
 
     switch ($Tool) {
       'codex' {
         $cfg = $CliConfig.codex
-        $args += $cfg.ExecArgs
-        $args += $cfg.ExtraArgs
+        $cliArgs += $cfg.ExecArgs
+        $cliArgs += $cfg.ExtraArgs
 
         $modelToUse = if ($Model) { $Model } else { $cfg.DefaultModel }
-        if ($modelToUse) { $args += & $cfg.ModelArgs $modelToUse }
+        if ($modelToUse) { $cliArgs += & $cfg.ModelArgs $modelToUse }
 
         $reasonToUse = if ($Reasoning) { $Reasoning } else { $cfg.DefaultReasoning }
-        if ($reasonToUse) { $args += & $cfg.ReasoningArgs $reasonToUse }
+        if ($reasonToUse) { $cliArgs += & $cfg.ReasoningArgs $reasonToUse }
 
         # codex exec supports [PROMPT] positional
-        $args += $Prompt
+        $cliArgs += $Prompt
       }
 
       'claude' {
         $cfg = $CliConfig.claude
-        $args += $cfg.PrintArgs
-        $args += $cfg.ExtraArgs
+        $cliArgs += $cfg.PrintArgs
+        $cliArgs += $cfg.ExtraArgs
 
         $modelToUse = if ($Model) { $Model } else { $cfg.DefaultModel }
-        if ($modelToUse) { $args += & $cfg.ModelArgs $modelToUse }
+        if ($modelToUse) { $cliArgs += & $cfg.ModelArgs $modelToUse }
 
         # prompt is positional
-        $args += $Prompt
+        $cliArgs += $Prompt
       }
 
       'gemini' {
         $cfg = $CliConfig.gemini
-        $args += $cfg.ExtraArgs
+        $cliArgs += $cfg.ExtraArgs
 
         $modelToUse = if ($Model) { $Model } else { $cfg.DefaultModel }
-        if ($modelToUse) { $args += & $cfg.ModelArgs $modelToUse }
+        if ($modelToUse) { $cliArgs += & $cfg.ModelArgs $modelToUse }
 
-        $args += & $cfg.PromptArgs $Prompt
+        $cliArgs += & $cfg.PromptArgs $Prompt
       }
     }
 
-    $out = & $Tool @args
+    $out = & $Tool @cliArgs
     $exit = $LASTEXITCODE
 
     if ($exit -ne 0) {
-      throw "CLI '$Tool' exited with code $exit. Args: $($args -join ' ')"
+      throw "CLI '$Tool' exited with code $exit. Args: $($cliArgs -join ' ')"
     }
 
     $text = Normalize-Text $out
     if ([string]::IsNullOrWhiteSpace($text)) {
-      throw "CLI '$Tool' returned empty output. Args: $($args -join ' ')"
+      throw "CLI '$Tool' returned empty output. Args: $($cliArgs -join ' ')"
     }
 
     return $text
@@ -343,7 +346,7 @@ $round = 0
 foreach ($reviewer in $reviewers) {
   $round++
 
-  Add-LogLine $logPath "=== Round $round: reviewer=$reviewer, updater=$PlanModel ==="
+  Add-LogLine $logPath "=== Round ${round}: reviewer=$reviewer, updater=$PlanModel ==="
 
   $planText = Get-Content -LiteralPath $PlanPath -Raw -Encoding utf8
 

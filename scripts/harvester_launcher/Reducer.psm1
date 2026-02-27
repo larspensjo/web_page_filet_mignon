@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'Data.psm1') -Force -Global

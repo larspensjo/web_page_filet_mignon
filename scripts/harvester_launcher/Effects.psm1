@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
 Import-Module (Join-Path $PSScriptRoot 'Data.psm1') -Force -Global
@@ -124,13 +124,13 @@ function Invoke-RunCheckpointCommand {
 function Invoke-DatePrompt {
     # Suspends TUI temporarily to collect an RFC3339 date from the user.
     # Returns a DatePromptCompleted action with Value=<string> or Value=$null (cancel/invalid).
-    try { [Console]::CursorVisible = $true } catch { }
-    try { [Console]::Clear() } catch { }
+    try { [Console]::CursorVisible = $true } catch { $null = $_ }
+    try { [Console]::Clear() } catch { $null = $_ }
     Write-Host 'Set Briefing Checkpoint — enter RFC3339 date/time:'
     Write-Host '  Example: 2026-01-01T00:00:00Z'
     Write-Host '  (Press Enter with empty input to cancel)'
     $dateInput = Read-Host 'Date'
-    try { [Console]::CursorVisible = $false } catch { }
+    try { [Console]::CursorVisible = $false } catch { $null = $_ }
     if ([string]::IsNullOrWhiteSpace($dateInput)) {
         return [pscustomobject]@{ Type='DatePromptCompleted'; Value=$null }
     }

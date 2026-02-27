@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 [CmdletBinding()]
 param(
     # Leave empty (default) to invoke via 'cargo run -p harvester_batch --'.
@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # Force UTF-8 so box-drawing characters render correctly on Windows consoles.
-try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { $null = $_ }
 
 # ── Module imports ────────────────────────────────────────────────────────────
 $launcherDir = Join-Path $PSScriptRoot 'harvester_launcher'
@@ -61,8 +61,8 @@ $state = Invoke-EffectLoop -StateIn $state -Effects @(
 # ── TUI loop ─────────────────────────────────────────────────────────────────
 $prevFrame          = @()
 $savedCursorVisible = $true
-try { $savedCursorVisible = [Console]::CursorVisible } catch { }
-try { [Console]::CursorVisible = $false } catch { }
+try { $savedCursorVisible = [Console]::CursorVisible } catch { $null = $_ }
+try { [Console]::CursorVisible = $false } catch { $null = $_ }
 
 try {
     while ($state.Runtime.IsRunning) {
@@ -93,9 +93,9 @@ try {
         }
     }
 } finally {
-    try { [Console]::CursorVisible = $savedCursorVisible } catch { }
-    try { [Console]::ResetColor() } catch { }
-    try { [Console]::Clear() } catch { }
+    try { [Console]::CursorVisible = $savedCursorVisible } catch { $null = $_ }
+    try { [Console]::ResetColor() } catch { $null = $_ }
+    try { [Console]::Clear() } catch { $null = $_ }
 }
 
 # ── Post-exit launch ─────────────────────────────────────────────────────────

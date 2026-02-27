@@ -54,6 +54,23 @@
       "command": "cargo clean",
       "group": "none",
       "problemMatcher": []
+    },
+    {
+      "label": "Lint scripts (PSScriptAnalyzer)",
+      "type": "shell",
+      "command": "Invoke-ScriptAnalyzer -Path ${workspaceFolder}\\scripts -Recurse -Settings ${workspaceFolder}\\scripts\\PSScriptAnalyzerSettings.psd1",
+      "options": {
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
+      "group": "none",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
     }
   ]
 }
