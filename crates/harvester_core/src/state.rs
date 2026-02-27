@@ -344,6 +344,18 @@ pub struct AppState {
     entity_index: Option<crate::entity_index::EntityIndex>,
     /// Pre-computed trend data derived from `entity_index`.
     entity_trend_data: Option<crate::trends::EntityTrendData>,
+    /// Test-only bypass counter for injecting pre-triage request IDs without driving
+    /// the coordinator (used by `start_triage_for_test` and related helpers).
+    /// In production, request IDs are allocated exclusively by the coordinator.
+    #[cfg(test)]
+    next_triage_request_id: u64,
+    /// The request ID of the currently in-flight pre-triage load, if any.
+    /// Kept in sync with the coordinator's in-flight ID.
+    triage_in_flight_request_id: Option<u64>,
+    /// Logical tick counter driven by `Msg::Tick`; used by the pre-triage refresh coordinator.
+    tick: u64,
+    /// Reducer-owned coordinator for batching pre-triage refresh demand.
+    pub(crate) pre_triage_coordinator: crate::pre_triage_coordinator::PreTriageRefreshCoordinator,
 }
 
 pub(crate) struct PromptLabPendingRunRegistration {
@@ -409,6 +421,12 @@ impl Default for AppState {
             active_trend_category: TrendCategory::default(),
             entity_index: None,
             entity_trend_data: None,
+            #[cfg(test)]
+            next_triage_request_id: 1,
+            triage_in_flight_request_id: None,
+            tick: 0,
+            pre_triage_coordinator:
+                crate::pre_triage_coordinator::PreTriageRefreshCoordinator::new(),
         }
     }
 }
@@ -916,6 +934,43 @@ impl AppState {
         self.pre_triage_manual_overrides.clear();
         self.pre_triage.clear_manual_decisions();
         self.dirty = true;
+    }
+
+    /// Allocate the next request ID for a pre-triage load.
+    ///
+    /// Only available in tests — used to inject a request ID into messages
+    /// without driving the coordinator. In production, IDs are allocated
+    /// exclusively by `PreTriageRefreshCoordinator`.
+    #[cfg(test)]
+    pub(crate) fn alloc_triage_request_id(&mut self) -> u64 {
+        let id = self.next_triage_request_id;
+        self.next_triage_request_id += 1;
+        id
+    }
+
+    /// Record that a pre-triage load with the given request ID is in flight.
+    pub(crate) fn set_triage_in_flight(&mut self, id: u64) {
+        self.triage_in_flight_request_id = Some(id);
+    }
+
+    /// Clear the in-flight pre-triage load request (call on response or cancellation).
+    pub(crate) fn clear_triage_in_flight(&mut self) {
+        self.triage_in_flight_request_id = None;
+    }
+
+    /// Return the request ID of the currently in-flight pre-triage load, if any.
+    pub fn triage_in_flight_request_id(&self) -> Option<u64> {
+        self.triage_in_flight_request_id
+    }
+
+    /// Advance the logical tick counter by one. Called on every `Msg::Tick`.
+    pub(crate) fn advance_tick(&mut self) {
+        self.tick = self.tick.wrapping_add(1);
+    }
+
+    /// Return the current logical tick value.
+    pub(crate) fn current_tick(&self) -> u64 {
+        self.tick
     }
 
     fn pre_triage_progress_text(&self) -> Option<String> {

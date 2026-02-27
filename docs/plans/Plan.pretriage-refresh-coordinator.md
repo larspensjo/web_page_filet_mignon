@@ -1,7 +1,7 @@
 # Implementation Plan: Pre-Triage Refresh Coordinator (Reducer-Owned Quiet-Period Batching)
 
 **Date:** 2026-02-26
-**Status:** Revised draft
+**Status:** Implemented (2026-02-27)
 **Motivation:** `Poll Sources` is fast, but repeated post-poll pre-triage refreshes dominate total time.
 
 ---

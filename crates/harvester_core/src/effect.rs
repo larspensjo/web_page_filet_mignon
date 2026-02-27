@@ -19,6 +19,7 @@ pub enum Effect {
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
     LoadArticlesForTriage {
+        request_id: u64,
         ordered_urls: Vec<String>,
     },
     LoadPromptContexts,

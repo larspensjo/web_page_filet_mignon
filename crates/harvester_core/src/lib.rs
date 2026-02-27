@@ -5,6 +5,7 @@ mod context_draft;
 mod effect;
 pub mod entity_index;
 mod msg;
+mod pre_triage_coordinator;
 mod pre_triage_filter;
 mod preview;
 mod prompt_lab;

@@ -61,11 +61,6 @@ enum EntityIndexWorkerMsg {
     Flush { done: mpsc::SyncSender<()> },
 }
 
-/// Messages for the serialized pre-triage article load worker.
-enum TriageRefreshWorkerMsg {
-    Refresh { ordered_urls: Vec<String> },
-}
-
 /// Effect runner that orchestrates IO effects.
 ///
 /// # Entity index worker lifecycle
@@ -87,11 +82,7 @@ pub struct EffectRunner {
     platform_handler: Box<dyn PlatformEffectHandler>,
     /// Sender to the serialized entity-index worker. Dropping this closes the channel.
     entity_index_worker_tx: mpsc::SyncSender<EntityIndexWorkerMsg>,
-    /// Sender to the serialized pre-triage refresh worker. Dropping this closes the channel.
-    triage_refresh_worker_tx: mpsc::Sender<TriageRefreshWorkerMsg>,
 }
-
-const TRIAGE_REFRESH_DEBOUNCE_MS: u64 = 300;
 
 impl EffectRunner {
     pub fn new(
@@ -166,26 +157,6 @@ impl EffectRunner {
             run_entity_index_worker(worker_rx, entity_index_path);
         });
 
-        // Spawn a serialized, debounced worker for pre-triage article refresh.
-        // Polling can complete many jobs in quick succession; this avoids spawning
-        // a full corpus reload/content-prep pass for every JobDone event.
-        let (triage_refresh_worker_tx, triage_refresh_worker_rx) =
-            mpsc::channel::<TriageRefreshWorkerMsg>();
-        let triage_refresh_msg_tx = msg_tx.clone();
-        let triage_refresh_output_dir = paths.output_dir.clone();
-        let triage_refresh_registry = Arc::clone(&prompt_registry);
-        let triage_refresh_max_input_bytes = llm_max_input_bytes.unwrap_or(100_000);
-        thread::spawn(move || {
-            run_triage_refresh_worker(
-                triage_refresh_worker_rx,
-                triage_refresh_msg_tx,
-                triage_refresh_output_dir,
-                triage_refresh_registry,
-                triage_refresh_max_input_bytes,
-                Duration::from_millis(TRIAGE_REFRESH_DEBOUNCE_MS),
-            );
-        });
-
         let runner = Self {
             engine,
             msg_tx: msg_tx.clone(),
@@ -200,7 +171,6 @@ impl EffectRunner {
             llm_default_provider,
             platform_handler,
             entity_index_worker_tx: worker_tx,
-            triage_refresh_worker_tx,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -761,19 +731,24 @@ impl EffectRunner {
                     }
                 });
             }
-            Effect::LoadArticlesForTriage { ordered_urls } => {
-                engine_info!(
-                    "[pre-triage-refresh] request queued urls={}",
-                    ordered_urls.len()
-                );
-                if let Err(err) = self
-                    .triage_refresh_worker_tx
-                    .send(TriageRefreshWorkerMsg::Refresh { ordered_urls })
-                {
-                    let reason = format!("pre-triage refresh worker unavailable: {}", err);
-                    engine_error!("[pre-triage-refresh] {}", reason);
-                    let _ = self.msg_tx.send(Msg::TriageArticlesLoadFailed { reason });
-                }
+            Effect::LoadArticlesForTriage {
+                request_id,
+                ordered_urls,
+            } => {
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.paths.output_dir.clone();
+                let registry = Arc::clone(&self.prompt_registry);
+                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
+                thread::spawn(move || {
+                    run_triage_refresh_load(
+                        request_id,
+                        ordered_urls,
+                        msg_tx,
+                        output_dir,
+                        registry,
+                        max_input_bytes,
+                    );
+                });
             }
             Effect::LoadPromptContexts => {
                 let msg_tx = self.msg_tx.clone();
@@ -1419,104 +1394,70 @@ fn run_entity_index_worker(rx: mpsc::Receiver<EntityIndexWorkerMsg>, path: PathB
     engine_info!("[entity-index] worker exited cleanly");
 }
 
-fn drain_latest_triage_refresh_requests(
-    rx: &mpsc::Receiver<TriageRefreshWorkerMsg>,
-    latest_urls: &mut Vec<String>,
-) -> usize {
-    let mut drained = 0;
-    while let Ok(TriageRefreshWorkerMsg::Refresh { ordered_urls }) = rx.try_recv() {
-        *latest_urls = ordered_urls;
-        drained += 1;
-    }
-    drained
-}
-
-fn run_triage_refresh_worker(
-    rx: mpsc::Receiver<TriageRefreshWorkerMsg>,
+/// Execute a single pre-triage article load in the calling thread.
+///
+/// Batching and quiet-period policy are handled by the reducer-owned
+/// `PreTriageRefreshCoordinator`; this function is pure IO.
+fn run_triage_refresh_load(
+    request_id: u64,
+    ordered_urls: Vec<String>,
     msg_tx: mpsc::Sender<Msg>,
     output_dir: PathBuf,
     registry: Arc<RwLock<PromptRegistry>>,
     max_input_bytes: usize,
-    debounce_window: Duration,
 ) {
+    let load_started = Instant::now();
     engine_info!(
-        "[pre-triage-refresh] worker started debounce_ms={}",
-        debounce_window.as_millis()
+        "[pre-triage-refresh] load start request_id={} urls={}",
+        request_id,
+        ordered_urls.len(),
     );
 
-    while let Ok(TriageRefreshWorkerMsg::Refresh { mut ordered_urls }) = rx.recv() {
-        let batch_received = Instant::now();
-        let mut coalesced_requests = 0usize;
-        let debounce_started = Instant::now();
-
-        loop {
-            let Some(remaining) = debounce_window.checked_sub(debounce_started.elapsed()) else {
-                break;
-            };
-            match rx.recv_timeout(remaining) {
-                Ok(TriageRefreshWorkerMsg::Refresh {
-                    ordered_urls: newer_urls,
-                }) => {
-                    ordered_urls = newer_urls;
-                    coalesced_requests += 1;
-                }
-                Err(mpsc::RecvTimeoutError::Timeout) => break,
-                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-            }
+    let guard = registry.read().unwrap();
+    match load_and_prepare_articles_filtered(
+        &output_dir,
+        max_input_bytes,
+        &guard,
+        &ordered_urls,
+        None,
+    ) {
+        Ok((engine_articles, _)) => {
+            let articles: Vec<LoadedArticle> = engine_articles
+                .into_iter()
+                .map(|article| LoadedArticle {
+                    url: article.url,
+                    source_title: article.source_title,
+                    prepared_text: article.prepared_text,
+                    content_hash: article.content_hash,
+                    fetched_utc: article.fetched_utc,
+                })
+                .collect();
+            engine_info!(
+                "[pre-triage-refresh] load done request_id={} urls={} prepared={} elapsed_ms={}",
+                request_id,
+                ordered_urls.len(),
+                articles.len(),
+                load_started.elapsed().as_millis()
+            );
+            let _ = msg_tx.send(Msg::TriageArticlesLoaded {
+                request_id,
+                articles,
+            });
         }
-
-        coalesced_requests += drain_latest_triage_refresh_requests(&rx, &mut ordered_urls);
-
-        let load_started = Instant::now();
-        engine_info!(
-            "[pre-triage-refresh] load start urls={} coalesced={} queue_ms={}",
-            ordered_urls.len(),
-            coalesced_requests,
-            batch_received.elapsed().as_millis()
-        );
-
-        let guard = registry.read().unwrap();
-        match load_and_prepare_articles_filtered(
-            &output_dir,
-            max_input_bytes,
-            &guard,
-            &ordered_urls,
-            None,
-        ) {
-            Ok((engine_articles, _)) => {
-                let articles: Vec<LoadedArticle> = engine_articles
-                    .into_iter()
-                    .map(|article| LoadedArticle {
-                        url: article.url,
-                        source_title: article.source_title,
-                        prepared_text: article.prepared_text,
-                        content_hash: article.content_hash,
-                        fetched_utc: article.fetched_utc,
-                    })
-                    .collect();
-                engine_info!(
-                    "[pre-triage-refresh] load done urls={} prepared={} coalesced={} elapsed_ms={}",
-                    ordered_urls.len(),
-                    articles.len(),
-                    coalesced_requests,
-                    load_started.elapsed().as_millis()
-                );
-                let _ = msg_tx.send(Msg::TriageArticlesLoaded { articles });
-            }
-            Err(reason) => {
-                engine_warn!(
-                    "[pre-triage-refresh] load failed urls={} coalesced={} elapsed_ms={} reason={}",
-                    ordered_urls.len(),
-                    coalesced_requests,
-                    load_started.elapsed().as_millis(),
-                    reason
-                );
-                let _ = msg_tx.send(Msg::TriageArticlesLoadFailed { reason });
-            }
+        Err(reason) => {
+            engine_warn!(
+                "[pre-triage-refresh] load failed request_id={} urls={} elapsed_ms={} reason={}",
+                request_id,
+                ordered_urls.len(),
+                load_started.elapsed().as_millis(),
+                reason
+            );
+            let _ = msg_tx.send(Msg::TriageArticlesLoadFailed {
+                request_id,
+                reason,
+            });
         }
     }
-
-    engine_info!("[pre-triage-refresh] worker exited");
 }
 
 #[cfg(test)]
@@ -1664,32 +1605,6 @@ mod tests {
             }
             other => panic!("unexpected message: {:?}", other),
         }
-    }
-
-    #[test]
-    fn drain_latest_triage_refresh_requests_keeps_latest_batch() {
-        let (tx, rx) = mpsc::channel();
-        tx.send(TriageRefreshWorkerMsg::Refresh {
-            ordered_urls: vec!["https://example.com/a".to_string()],
-        })
-        .unwrap();
-        tx.send(TriageRefreshWorkerMsg::Refresh {
-            ordered_urls: vec![
-                "https://example.com/a".to_string(),
-                "https://example.com/b".to_string(),
-            ],
-        })
-        .unwrap();
-        tx.send(TriageRefreshWorkerMsg::Refresh {
-            ordered_urls: vec!["https://example.com/c".to_string()],
-        })
-        .unwrap();
-
-        let mut latest = vec!["seed".to_string()];
-        let drained = drain_latest_triage_refresh_requests(&rx, &mut latest);
-
-        assert_eq!(drained, 3);
-        assert_eq!(latest, vec!["https://example.com/c".to_string()]);
     }
 
     #[test]

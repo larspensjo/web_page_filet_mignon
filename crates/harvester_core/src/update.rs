@@ -126,7 +126,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             extracted_links,
         } => {
             state.apply_done(job_id, result, content_preview, extracted_links);
-            refresh_pre_triage_if_needed(&mut state)
+            schedule_pre_triage_refresh(
+                &mut state,
+                crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone,
+            )
         }
         Msg::LinkToggleRequested {
             job_id,
@@ -201,7 +204,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
-            refresh_pre_triage_if_needed(&mut state)
+            schedule_pre_triage_refresh(
+                &mut state,
+                crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
+            )
         }
         Msg::SplitterMoved {
             desired_left_width_px,
@@ -857,7 +863,21 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             engine_info!("[triage] triage requested");
             start_triage_from_pretriage(&mut state)
         }
-        Msg::TriageArticlesLoaded { articles } => {
+        Msg::TriageArticlesLoaded { request_id, articles } => {
+            if Some(request_id) != state.triage_in_flight_request_id() {
+                engine_info!(
+                    "[pre-triage-refresh-coord] stale result ignored request_id={} in_flight={:?}",
+                    request_id,
+                    state.triage_in_flight_request_id()
+                );
+                return (state, Vec::new());
+            }
+            engine_info!(
+                "[pre-triage-refresh-coord] apply request_id={}",
+                request_id
+            );
+            state.clear_triage_in_flight();
+            state.pre_triage_coordinator.complete_request(request_id);
             let policy = PreTriagePolicy::default();
             let mut pre_triage = PreTriageSession::load_articles(articles, &policy);
             let job_url_pairs = state
@@ -873,10 +893,27 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
-        Msg::TriageArticlesLoadFailed { reason } => {
-            state.set_pre_triage(PreTriageSession::default());
+        Msg::TriageArticlesLoadFailed { request_id, reason } => {
+            if Some(request_id) != state.triage_in_flight_request_id() {
+                engine_info!(
+                    "[pre-triage-refresh-coord] stale failure ignored request_id={} in_flight={:?}",
+                    request_id,
+                    state.triage_in_flight_request_id()
+                );
+                return (state, Vec::new());
+            }
+            engine_warn!(
+                "[pre-triage-refresh-coord] background refresh failed request_id={} reason={}",
+                request_id,
+                reason
+            );
+            state.clear_triage_in_flight();
+            state.pre_triage_coordinator.complete_request(request_id);
+            // Clear manual overrides to avoid stale decisions on the blank pre-triage.
+            // Do NOT fail the TriageSession — a background refresh error should not
+            // destroy the user's active triage session.
             state.clear_pre_triage_manual_overrides();
-            state.triage_mut().fail(reason);
+            state.set_pre_triage(PreTriageSession::default());
             state.mark_dirty();
             Vec::new()
         }
@@ -962,6 +999,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Vec::new()
             } else if state.start_poll() {
                 engine_info!("[source-poll] polling requested");
+                state.pre_triage_coordinator.note_poll_started();
                 vec![Effect::PollAllSources]
             } else {
                 Vec::new()
@@ -980,6 +1018,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::AllSourcesPollEnded => {
             state.end_poll();
+            state.pre_triage_coordinator.note_poll_sources_ended();
             Vec::new()
         }
         Msg::TabSelected { tab } => {
@@ -1662,7 +1701,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             engine_warn!("[entity-index] rebuild failed: {reason}");
             Vec::new()
         }
-        Msg::Tick | Msg::NoOp => Vec::new(),
+        Msg::Tick => {
+            state.advance_tick();
+            let tick = state.current_tick();
+            let has_in_flight_jobs = state.batch_observation().jobs_in_flight > 0;
+            dispatch_pre_triage_if_due(&mut state, tick, has_in_flight_jobs)
+        }
+        Msg::NoOp => Vec::new(),
     };
 
     (state, effects)
@@ -1778,16 +1823,72 @@ fn parse_urls(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn refresh_pre_triage_if_needed(state: &mut AppState) -> Vec<Effect> {
+/// Record refresh demand with the coordinator. If the URL list is empty,
+/// resets pre-triage immediately (same as before). Otherwise, marks demand
+/// as pending — actual dispatch happens on the next eligible `Msg::Tick`.
+fn schedule_pre_triage_refresh(
+    state: &mut AppState,
+    reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
+) -> Vec<Effect> {
     let ordered_urls = state.ordered_completed_job_urls();
-    if ordered_urls.is_empty() {
-        state.set_pre_triage(PreTriageSession::default());
-        state.clear_pre_triage_manual_overrides();
-        return Vec::new();
+    let tick = state.current_tick();
+    let result = state
+        .pre_triage_coordinator
+        .schedule_refresh(ordered_urls, reason, tick);
+
+    match result {
+        crate::pre_triage_coordinator::PreTriageRefreshScheduleResult::ImmediateReset => {
+            engine_info!("[pre-triage-refresh-coord] immediate reset (empty corpus)");
+            // Clear overrides BEFORE resetting the session so that
+            // `clear_manual_decisions` (which re-derives phase) runs on the
+            // old session, not the freshly-reset one.  The final
+            // `set_pre_triage(default)` then establishes the correct Idle phase.
+            state.clear_pre_triage_manual_overrides();
+            state.set_pre_triage(PreTriageSession::default());
+            state.clear_triage_in_flight();
+            Vec::new()
+        }
+        crate::pre_triage_coordinator::PreTriageRefreshScheduleResult::Scheduled => {
+            engine_info!(
+                "[pre-triage-refresh-coord] request scheduled reason={:?}",
+                reason
+            );
+            // Set pre-triage to loading so the UI shows a spinner immediately.
+            state.set_pre_triage(PreTriageSession::new_loading());
+            state.mark_dirty();
+            Vec::new()
+        }
     }
-    state.set_pre_triage(PreTriageSession::new_loading());
+}
+
+/// Check whether the coordinator wants to dispatch a pre-triage load on this tick.
+fn dispatch_pre_triage_if_due(
+    state: &mut AppState,
+    tick: u64,
+    has_in_flight_engine_jobs: bool,
+) -> Vec<Effect> {
+    let Some(dispatch) = state
+        .pre_triage_coordinator
+        .maybe_dispatch(tick, has_in_flight_engine_jobs)
+    else {
+        return Vec::new();
+    };
+
+    let request_id = dispatch.request_id;
+    let ordered_urls = dispatch.ordered_urls;
+
+    // Keep Slice 1 in-flight tracker in sync with the coordinator.
+    state.set_triage_in_flight(request_id);
     state.mark_dirty();
-    vec![Effect::LoadArticlesForTriage { ordered_urls }]
+    engine_info!(
+        "[pre-triage-refresh-coord] dispatch request_id={} urls={}",
+        request_id,
+        ordered_urls.len()
+    );
+    vec![Effect::LoadArticlesForTriage {
+        request_id,
+        ordered_urls,
+    }]
 }
 
 fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
@@ -3001,7 +3102,19 @@ mod tests {
                 contexts: std::collections::HashMap::new(),
             },
         );
-        let (state, _) = update(state, Msg::TriageArticlesLoaded { articles });
+        // Bypass the coordinator quiet window: directly set up the in-flight state
+        // so TriageArticlesLoaded is applied immediately. These tests focus on the
+        // triage LLM dispatch behavior, not the pre-triage scheduling policy.
+        let mut state = state;
+        let triage_request_id = state.alloc_triage_request_id();
+        state.set_triage_in_flight(triage_request_id);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: triage_request_id,
+                articles,
+            },
+        );
         update(state, Msg::TriageClicked)
     }
 
@@ -4040,10 +4153,14 @@ mod tests {
     #[test]
     fn production_dispatch_paths_emit_none_model_override() {
         init_logging();
-        // Triage path
+        // Triage path: set up an in-flight request ID so the message is not treated as stale
+        let mut triage_state = AppState::new();
+        let triage_request_id = triage_state.alloc_triage_request_id();
+        triage_state.set_triage_in_flight(triage_request_id);
         let (_, effects) = update(
-            AppState::new(),
+            triage_state,
             Msg::TriageArticlesLoaded {
+                request_id: triage_request_id,
                 articles: loaded_triage_articles(1),
             },
         );
@@ -4568,6 +4685,467 @@ mod tests {
         assert_eq!(
             state.active_trend_category(),
             crate::tabs::TrendCategory::Technologies
+        );
+    }
+
+    // ── Pre-triage refresh coordinator: shared test helpers ──────────────────
+
+    /// Advance ticks (up to 200) until the coordinator dispatches a
+    /// `LoadArticlesForTriage` effect. Panics if no dispatch occurs.
+    fn tick_until_dispatch(mut state: AppState) -> (AppState, u64) {
+        for _ in 0..200 {
+            let (next, effects) = update(state, Msg::Tick);
+            state = next;
+            if let Some(request_id) = effects.iter().find_map(|e| match e {
+                Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+                _ => None,
+            }) {
+                return (state, request_id);
+            }
+        }
+        panic!("no LoadArticlesForTriage dispatch within 200 ticks");
+    }
+
+    fn add_completed_job_for_test(state: AppState, url: &str) -> AppState {
+        use crate::JobResultKind;
+        let (state, effects) = update(state, Msg::InputChanged(format!("{url}\n")));
+        let (state, effects2) = update(state, Msg::UrlsSubmitted);
+        let job_id = effects
+            .into_iter()
+            .chain(effects2)
+            .find_map(|e| match e {
+                Effect::EnqueueUrl { job_id, .. } => Some(job_id),
+                _ => None,
+            })
+            .expect("EnqueueUrl effect expected");
+        let (state, _) = update(
+            state,
+            Msg::JobDone {
+                job_id,
+                result: JobResultKind::Success,
+                content_preview: None,
+                extracted_links: Vec::new(),
+            },
+        );
+        state
+    }
+
+    // ── Pre-triage refresh coordinator: Slice 1+2 tests ──────────────────────
+
+    #[test]
+    fn triage_loaded_matching_request_id_applies_articles() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        // Coordinator now batches demand; advance ticks until dispatch.
+        let (state, request_id) = tick_until_dispatch(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles: loaded_triage_articles(1),
+            },
+        );
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
+            ),
+            "matching result should apply articles"
+        );
+        assert!(
+            state.triage_in_flight_request_id().is_none(),
+            "in-flight id must be cleared after apply"
+        );
+    }
+
+    #[test]
+    fn triage_loaded_stale_request_id_is_ignored() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        // Advance ticks until dispatch so there IS an in-flight request.
+        let (state, _real_request_id) = tick_until_dispatch(state);
+        let stale_id = 999u64;
+        let pre_triage_phase_before = state.pre_triage().phase().clone();
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: stale_id,
+                articles: loaded_triage_articles(1),
+            },
+        );
+        assert_eq!(
+            state.pre_triage().phase(),
+            &pre_triage_phase_before,
+            "stale result must not mutate pre-triage state"
+        );
+        assert!(
+            state.triage_in_flight_request_id().is_some(),
+            "in-flight id must remain set after stale result"
+        );
+    }
+
+    #[test]
+    fn triage_load_failed_matching_clears_manual_overrides_not_triage_session() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, request_id) = tick_until_dispatch(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoadFailed {
+                request_id,
+                reason: "disk error".to_string(),
+            },
+        );
+        assert!(
+            state.triage_in_flight_request_id().is_none(),
+            "in-flight id must be cleared after failure"
+        );
+        // Triage session should NOT be in Failed state — background refresh errors
+        // must not destroy the user's active triage session.
+        assert!(
+            !matches!(state.triage().phase(), crate::triage::TriagePhase::Failed { .. }),
+            "background refresh failure must not fail the triage session"
+        );
+    }
+
+    #[test]
+    fn triage_load_failed_stale_request_id_is_ignored() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, _real_request_id) = tick_until_dispatch(state);
+        let stale_id = 888u64;
+        let in_flight_before = state.triage_in_flight_request_id();
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoadFailed {
+                request_id: stale_id,
+                reason: "boom".to_string(),
+            },
+        );
+        assert_eq!(
+            state.triage_in_flight_request_id(),
+            in_flight_before,
+            "stale failure must not clear in-flight request id"
+        );
+    }
+
+    // ── Slice 2 generic batching tests ────────────────────────────────────────
+    //
+    // (helpers `count_triage_loads`, `extract_triage_load_request_id`,
+    //  `advance_ticks`, `tick_until_dispatch`, `add_completed_job_for_test`
+    //  are defined below and shared with Slice 3 tests)
+
+    fn count_triage_loads(effects: &[Effect]) -> usize {
+        effects
+            .iter()
+            .filter(|e| matches!(e, Effect::LoadArticlesForTriage { .. }))
+            .count()
+    }
+
+    fn extract_triage_load_request_id(effects: &[Effect]) -> Option<u64> {
+        effects.iter().find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+    }
+
+    /// Advance `n` ticks and collect all emitted effects.
+    fn advance_ticks(mut state: AppState, n: usize) -> (AppState, Vec<Effect>) {
+        let mut all_effects = Vec::new();
+        for _ in 0..n {
+            let (next, effects) = update(state, Msg::Tick);
+            state = next;
+            all_effects.extend(effects);
+        }
+        (state, all_effects)
+    }
+
+    #[test]
+    fn multiple_job_dones_within_quiet_window_emit_exactly_one_triage_load() {
+        init_logging();
+        let mut state = AppState::new();
+        // Complete 3 jobs in quick succession (all within quiet window of tick 0).
+        state = add_completed_job_for_test(state, "https://example.com/1");
+        state = add_completed_job_for_test(state, "https://example.com/2");
+        state = add_completed_job_for_test(state, "https://example.com/3");
+
+        // Advance past the quiet window.
+        let (_state, effects) = advance_ticks(
+            state,
+            crate::pre_triage_coordinator::QUIET_TICKS_NORMAL as usize + 1,
+        );
+        assert_eq!(
+            count_triage_loads(&effects),
+            1,
+            "burst of 3 JobDones must yield exactly one triage load"
+        );
+        let request_id = extract_triage_load_request_id(&effects).unwrap();
+        assert_eq!(request_id, 1, "first dispatch gets request_id=1 from coordinator");
+    }
+
+    #[test]
+    fn restore_completed_jobs_schedules_and_dispatches_after_quiet_window() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        // Drain first dispatch so we start fresh.
+        let (state, request_id) = tick_until_dispatch(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles: loaded_triage_articles(1),
+            },
+        );
+
+        // Now simulate a RestoreCompletedJobs (e.g., after restart).
+        let snapshot = state.completed_jobs_snapshot();
+        let (state, effects) = update(state, Msg::RestoreCompletedJobs(snapshot));
+        assert_eq!(
+            count_triage_loads(&effects),
+            0,
+            "RestoreCompletedJobs must not dispatch immediately"
+        );
+        let (state, effects) = advance_ticks(
+            state,
+            crate::pre_triage_coordinator::QUIET_TICKS_NORMAL as usize + 1,
+        );
+        assert_eq!(
+            count_triage_loads(&effects),
+            1,
+            "must dispatch exactly one triage load after quiet window"
+        );
+        let _ = state;
+    }
+
+    #[test]
+    fn new_demand_while_in_flight_queues_and_dispatches_after_response() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, first_request_id) = tick_until_dispatch(state);
+
+        // New demand arrives while in-flight.
+        let state = add_completed_job_for_test(state, "https://example.com/2");
+
+        // No second dispatch while in-flight.
+        let (state, effects) = advance_ticks(
+            state,
+            crate::pre_triage_coordinator::QUIET_TICKS_NORMAL as usize + 5,
+        );
+        assert_eq!(
+            count_triage_loads(&effects),
+            0,
+            "must not dispatch while prior request is in flight"
+        );
+
+        // Complete the in-flight request.
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: first_request_id,
+                articles: loaded_triage_articles(1),
+            },
+        );
+
+        // Now the queued demand should dispatch.
+        let (state, request_id) = tick_until_dispatch(state);
+        assert_eq!(request_id, 2, "second dispatch gets request_id=2");
+        let _ = state;
+    }
+
+    #[test]
+    fn empty_corpus_after_job_done_triggers_immediate_reset_no_loader_effect() {
+        init_logging();
+        // No jobs → corpus is empty → ImmediateReset path.
+        let state = AppState::new();
+        // Simulate a JobDone for a URL that was never submitted (not tracked in state),
+        // which means ordered_completed_job_urls() returns empty.
+        // Since AppState::new() has no jobs, RestoreCompletedJobs with empty snapshot
+        // is the cleanest way to test this path.
+        let (state, effects) = update(state, Msg::RestoreCompletedJobs(vec![]));
+        assert_eq!(
+            count_triage_loads(&effects),
+            0,
+            "empty corpus must not dispatch a loader effect"
+        );
+        // Pre-triage should be reset to default (Idle).
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Idle
+            ),
+            "empty corpus must reset pre-triage to Idle"
+        );
+    }
+
+    // ── Slice 3 poll-burst integration tests ──────────────────────────────────
+
+    /// Submit a URL and return the job_id WITHOUT completing the job.
+    fn submit_job_for_test(state: AppState, url: &str) -> (AppState, crate::JobId) {
+        let (state, effects) = update(state, Msg::InputChanged(format!("{url}\n")));
+        let (state, effects2) = update(state, Msg::UrlsSubmitted);
+        let job_id = effects
+            .into_iter()
+            .chain(effects2)
+            .find_map(|e| match e {
+                Effect::EnqueueUrl { job_id, .. } => Some(job_id),
+                _ => None,
+            })
+            .expect("EnqueueUrl effect expected");
+        (state, job_id)
+    }
+
+    /// Mark a job as successfully completed.
+    fn complete_job_for_test(state: AppState, job_id: crate::JobId) -> AppState {
+        let (state, _) = update(
+            state,
+            Msg::JobDone {
+                job_id,
+                result: crate::JobResultKind::Success,
+                content_preview: None,
+                extracted_links: Vec::new(),
+            },
+        );
+        state
+    }
+
+    /// Core poll sequence: multiple JobDones during a burst yield exactly one
+    /// post-burst triage load after AllSourcesPollEnded.
+    #[test]
+    fn poll_burst_multiple_job_dones_yields_exactly_one_triage_load() {
+        use crate::pre_triage_coordinator::{QUIET_TICKS_AFTER_POLL, QUIET_TICKS_NORMAL};
+        init_logging();
+
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+
+        // Complete 3 jobs during the burst (immediately done, so jobs_in_flight=0 between calls).
+        let state = add_completed_job_for_test(state, "https://example.com/1");
+        let state = add_completed_job_for_test(state, "https://example.com/2");
+        let state = add_completed_job_for_test(state, "https://example.com/3");
+
+        // Tick through the after-poll quiet window — poll still active, no dispatch.
+        let (state, effects_during_burst) =
+            advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize);
+        assert_eq!(
+            count_triage_loads(&effects_during_burst),
+            0,
+            "must not dispatch while poll burst is active (poll_sources_ended=false)"
+        );
+
+        // End the poll burst.
+        let (state, _) = update(state, Msg::AllSourcesPollEnded);
+
+        // Tick until the single post-burst dispatch.
+        let (state, request_id) = tick_until_dispatch(state);
+        assert_eq!(request_id, 1, "first and only dispatch gets request_id=1");
+
+        // No second dispatch in the next few ticks.
+        let (state, extra) = advance_ticks(state, QUIET_TICKS_NORMAL as usize + 5);
+        assert_eq!(
+            count_triage_loads(&extra),
+            0,
+            "no second dispatch immediately after first"
+        );
+        let _ = state;
+    }
+
+    /// Dispatch must wait until engine jobs are no longer in flight, even after
+    /// AllSourcesPollEnded.
+    #[test]
+    fn poll_burst_waits_for_engine_jobs_to_drain_before_dispatching() {
+        use crate::pre_triage_coordinator::QUIET_TICKS_AFTER_POLL;
+        init_logging();
+
+        // Submit two URLs but do not complete them yet — both jobs in flight.
+        let state = AppState::new();
+        let (state, job_id1) = submit_job_for_test(state, "https://example.com/1");
+        let (state, job_id2) = submit_job_for_test(state, "https://example.com/2");
+        assert_eq!(
+            state.batch_observation().jobs_in_flight,
+            2,
+            "both jobs should be in flight"
+        );
+
+        // Start the poll burst.
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+
+        // Complete job1 — demand is scheduled, job2 still in flight.
+        let state = complete_job_for_test(state, job_id1);
+        assert_eq!(
+            state.batch_observation().jobs_in_flight,
+            1,
+            "job2 should still be in flight"
+        );
+
+        // End poll sources — engine job2 still running.
+        let (state, _) = update(state, Msg::AllSourcesPollEnded);
+
+        // Tick past quiet window — must NOT dispatch because job2 is still in flight.
+        let (state, effects) =
+            advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize + 5);
+        assert_eq!(
+            count_triage_loads(&effects),
+            0,
+            "must not dispatch while an engine job is still in flight"
+        );
+
+        // Complete job2 — demand re-recorded, jobs_in_flight now 0.
+        let state = complete_job_for_test(state, job_id2);
+        assert_eq!(
+            state.batch_observation().jobs_in_flight,
+            0,
+            "all engine jobs should be done"
+        );
+
+        // Tick until dispatch — should fire exactly one triage load now.
+        let (_state, request_id) = tick_until_dispatch(state);
+        assert_eq!(request_id, 1, "single dispatch after engine jobs drained");
+    }
+
+    /// Poll burst with no completed jobs must not dispatch any triage load.
+    #[test]
+    fn poll_burst_zero_urls_no_triage_load_dispatched() {
+        use crate::pre_triage_coordinator::QUIET_TICKS_AFTER_POLL;
+        init_logging();
+
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+        let (state, _) = update(state, Msg::AllSourcesPollEnded);
+
+        // No jobs → no demand → no dispatch.
+        let (state, effects) =
+            advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize + 20);
+        assert_eq!(
+            count_triage_loads(&effects),
+            0,
+            "poll with no completed jobs must not dispatch a triage load"
+        );
+        let _ = state;
+    }
+
+    /// Non-poll single JobDone must use the normal (shorter) quiet window and
+    /// not be gated by poll-burst logic.
+    #[test]
+    fn non_poll_single_job_done_dispatches_with_normal_quiet_window() {
+        use crate::pre_triage_coordinator::QUIET_TICKS_NORMAL;
+        init_logging();
+
+        let state = AppState::new();
+        let state = add_completed_job_for_test(state, "https://example.com/1");
+
+        // Must not dispatch before the normal quiet window elapses.
+        let (state, effects_before) = advance_ticks(state, QUIET_TICKS_NORMAL as usize - 1);
+        assert_eq!(
+            count_triage_loads(&effects_before),
+            0,
+            "must not dispatch before normal quiet window"
+        );
+
+        // Should dispatch at or after QUIET_TICKS_NORMAL.
+        let (_state, request_id) = tick_until_dispatch(state);
+        assert_eq!(
+            request_id, 1,
+            "single dispatch with normal quiet window gets request_id=1"
         );
     }
 }

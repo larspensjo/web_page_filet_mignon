@@ -189,7 +189,7 @@ fn summarize_batch_msg(msg: &Msg) -> String {
             };
             format!("JobDone {{ job_id: {}, result: {} }}", job_id, result_label)
         }
-        Msg::TriageArticlesLoaded { articles } => {
+        Msg::TriageArticlesLoaded { articles, .. } => {
             format!("TriageArticlesLoaded {{ articles: {} }}", articles.len())
         }
         Msg::ArticlesLoaded { articles, .. } => {
@@ -984,6 +984,7 @@ mod tests {
     #[test]
     fn test_summarize_batch_msg_compacts_large_payloads() {
         let msg = Msg::TriageArticlesLoaded {
+            request_id: 1,
             articles: Vec::new(),
         };
         assert_eq!(

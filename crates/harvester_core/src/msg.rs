@@ -140,10 +140,12 @@ pub enum Msg {
     },
     /// Triage-specific articles prepared by the loader.
     TriageArticlesLoaded {
+        request_id: u64,
         articles: Vec<LoadedArticle>,
     },
     /// Loader failed for triage.
     TriageArticlesLoadFailed {
+        request_id: u64,
         reason: String,
     },
     /// Briefing prerequisite articles prepared by the loader.

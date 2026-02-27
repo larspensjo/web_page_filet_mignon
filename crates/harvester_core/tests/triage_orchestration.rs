@@ -46,15 +46,46 @@ fn completed_state_with_jobs(urls: &[&str]) -> (AppState, Vec<u64>) {
     (state, job_ids)
 }
 
+/// Advance ticks until the coordinator dispatches a `LoadArticlesForTriage` effect.
+/// Panics if no dispatch occurs within 200 ticks.
+fn tick_until_triage_dispatch(mut state: AppState) -> (AppState, u64) {
+    for _ in 0..200 {
+        let (next, effects) = update(state, Msg::Tick);
+        state = next;
+        if let Some(request_id) = effects.iter().find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        }) {
+            return (state, request_id);
+        }
+    }
+    panic!("no LoadArticlesForTriage dispatch within 200 ticks");
+}
+
+/// Advance ticks until dispatch, then apply the given articles.
+fn simulate_triage_loaded(state: AppState, articles: Vec<LoadedArticle>) -> AppState {
+    let (state, request_id) = tick_until_triage_dispatch(state);
+    let (state, _) = update(state, Msg::TriageArticlesLoaded { request_id, articles });
+    state
+}
+
+/// Advance ticks until dispatch, then apply a failure.
+fn simulate_triage_load_failed(state: AppState, reason: &str) -> AppState {
+    let (state, request_id) = tick_until_triage_dispatch(state);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoadFailed {
+            request_id,
+            reason: reason.to_string(),
+        },
+    );
+    state
+}
+
 fn ready_state_with_pretriage(urls: &[&str]) -> (AppState, Vec<u64>) {
     let (state, job_ids) = completed_state_with_jobs(urls);
     let state = with_triage_metadata_ready(state);
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoaded {
-            articles: sample_articles(urls),
-        },
-    );
+    let state = simulate_triage_loaded(state, sample_articles(urls));
     (state, job_ids)
 }
 
@@ -167,8 +198,7 @@ fn triage_articles_loaded_dispatches_first_request() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = with_triage_metadata_ready(state);
-    let articles = sample_articles(&["https://one.example"]);
-    let (state, _) = update(state, Msg::TriageArticlesLoaded { articles });
+    let state = simulate_triage_loaded(state, sample_articles(&["https://one.example"]));
     let (_, effects) = update(state, Msg::TriageClicked);
     let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
     assert_eq!(request_id, 1);
@@ -178,12 +208,7 @@ fn triage_articles_loaded_dispatches_first_request() {
 fn triage_articles_loaded_empty_fails() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoaded {
-            articles: Vec::new(),
-        },
-    );
+    let state = simulate_triage_loaded(state, Vec::new());
     assert!(!state.view().triage_can_start);
     assert!(state.view().triage_progress.is_none());
 }
@@ -192,12 +217,7 @@ fn triage_articles_loaded_empty_fails() {
 fn triage_load_failed_transitions_to_failed() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoadFailed {
-            reason: "boom".to_string(),
-        },
-    );
+    let state = simulate_triage_load_failed(state, "boom");
     assert!(!state.view().triage_can_start);
     assert!(state.view().triage_progress.is_none());
 }
@@ -206,12 +226,7 @@ fn triage_flow_with_two_articles() -> (AppState, Vec<LoadedArticle>) {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = with_triage_metadata_ready(state);
     let articles = sample_articles(&["https://one.example", "https://two.example"]);
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoaded {
-            articles: articles.clone(),
-        },
-    );
+    let state = simulate_triage_loaded(state, articles.clone());
     let (state, _) = update(state, Msg::TriageClicked);
     (state, articles)
 }
@@ -387,11 +402,9 @@ fn view_model_sorts_by_priority() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://low.example", "https://high.example"]);
     let state = with_triage_metadata_ready(state);
-    let (state, _) = update(
+    let state = simulate_triage_loaded(
         state,
-        Msg::TriageArticlesLoaded {
-            articles: sample_articles(&["https://low.example", "https://high.example"]),
-        },
+        sample_articles(&["https://low.example", "https://high.example"]),
     );
     let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
@@ -421,11 +434,9 @@ fn view_model_equal_priority_sorted_by_job_id() {
     let (state, job_ids) =
         completed_state_with_jobs(&["https://first.example", "https://second.example"]);
     let state = with_triage_metadata_ready(state);
-    let (state, _) = update(
+    let state = simulate_triage_loaded(
         state,
-        Msg::TriageArticlesLoaded {
-            articles: sample_articles(&["https://first.example", "https://second.example"]),
-        },
+        sample_articles(&["https://first.example", "https://second.example"]),
     );
     let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
@@ -454,11 +465,9 @@ fn view_model_stale_triage_url_ignored() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = with_triage_metadata_ready(state);
-    let (state, _) = update(
+    let state = simulate_triage_loaded(
         state,
-        Msg::TriageArticlesLoaded {
-            articles: sample_articles(&["https://one.example", "https://stale.example"]),
-        },
+        sample_articles(&["https://one.example", "https://stale.example"]),
     );
     let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
@@ -542,12 +551,8 @@ fn rerun_uses_triage_cache_when_metadata_and_corpus_unchanged() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = with_triage_metadata_ready(state);
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoaded {
-            articles: sample_articles(&["https://one.example"]),
-        },
-    );
+    // First load: valid in-flight request ID set by JobDone.
+    let state = simulate_triage_loaded(state, sample_articles(&["https://one.example"]));
     let (state, first_effects) = update(state, Msg::TriageClicked);
     let first_request = request_id_for_prompt(&first_effects, PromptId::ArticleTriage)
         .expect("first run dispatches llm request");
@@ -560,9 +565,13 @@ fn rerun_uses_triage_cache_when_metadata_and_corpus_unchanged() {
             metadata: None,
         },
     );
+    // Second load: no in-flight request ID after the first load was applied, so
+    // this message is intentionally stale and will be ignored by the coordinator.
+    // The pre-triage session from the first load remains valid for the rerun.
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
+            request_id: 0, // stale — no in-flight request at this point
             articles: sample_articles(&["https://one.example"]),
         },
     );
