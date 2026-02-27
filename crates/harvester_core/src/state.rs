@@ -356,6 +356,10 @@ pub struct AppState {
     tick: u64,
     /// Reducer-owned coordinator for batching pre-triage refresh demand.
     pub(crate) pre_triage_coordinator: crate::pre_triage_coordinator::PreTriageRefreshCoordinator,
+    /// True when app/batch loop should dispatch one `Msg::EvaluatePreTriageRefresh`.
+    pre_triage_refresh_eval_pending: bool,
+    /// Coalesced cause bit for pending pre-triage refresh evaluation.
+    pre_triage_refresh_eval_job_done: bool,
 }
 
 pub(crate) struct PromptLabPendingRunRegistration {
@@ -427,6 +431,8 @@ impl Default for AppState {
             tick: 0,
             pre_triage_coordinator:
                 crate::pre_triage_coordinator::PreTriageRefreshCoordinator::new(),
+            pre_triage_refresh_eval_pending: false,
+            pre_triage_refresh_eval_job_done: false,
         }
     }
 }
@@ -1042,7 +1048,7 @@ impl AppState {
         self.source_states.is_poll_in_progress()
     }
 
-    pub(crate) fn ordered_completed_job_urls(&self) -> Vec<String> {
+    pub fn ordered_completed_job_urls_snapshot(&self) -> Vec<String> {
         self.jobs
             .iter()
             .filter_map(|(_, job)| {
@@ -1053,6 +1059,26 @@ impl AppState {
                 }
             })
             .collect()
+    }
+
+    pub(crate) fn request_pre_triage_refresh_evaluation(
+        &mut self,
+        triggered_by_job_done: bool,
+    ) {
+        self.pre_triage_refresh_eval_pending = true;
+        if triggered_by_job_done {
+            self.pre_triage_refresh_eval_job_done = true;
+        }
+    }
+
+    pub fn take_pre_triage_refresh_evaluation_request(&mut self) -> Option<bool> {
+        if !self.pre_triage_refresh_eval_pending {
+            return None;
+        }
+        self.pre_triage_refresh_eval_pending = false;
+        let triggered_by_job_done = self.pre_triage_refresh_eval_job_done;
+        self.pre_triage_refresh_eval_job_done = false;
+        Some(triggered_by_job_done)
     }
 
     /// Returns the current dirty flag and clears it in one step.

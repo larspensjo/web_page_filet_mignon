@@ -160,7 +160,11 @@ fn is_safe_downloaded_path(value: &str) -> bool {
 }
 
 pub fn persist_completed_jobs(state_path: &Path, completed: &[CompletedJobSnapshot]) {
-    persist_state(state_path, completed, &std::collections::HashMap::new());
+    persist_runtime_state(
+        state_path,
+        completed,
+        &std::collections::HashMap::new(),
+    );
 }
 
 pub fn persist_pre_triage_overrides(
@@ -168,10 +172,10 @@ pub fn persist_pre_triage_overrides(
     pre_triage_overrides: &std::collections::HashMap<ArticleFilterKey, ManualDecision>,
 ) {
     let completed = load_completed_jobs(state_path);
-    persist_state(state_path, &completed, pre_triage_overrides);
+    persist_runtime_state(state_path, &completed, pre_triage_overrides);
 }
 
-fn persist_state(
+pub fn persist_runtime_state(
     state_path: &Path,
     completed: &[CompletedJobSnapshot],
     pre_triage_overrides: &std::collections::HashMap<ArticleFilterKey, ManualDecision>,

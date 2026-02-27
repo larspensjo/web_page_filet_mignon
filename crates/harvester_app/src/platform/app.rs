@@ -25,7 +25,7 @@ use harvester_engine::llm::{
 };
 use harvester_io::{
     load_completed_jobs, load_pre_triage_overrides, load_summary_cache, load_triage_cache,
-    persist_completed_jobs, persist_pre_triage_overrides, EffectRunner, RuntimePaths,
+    EffectRunner, PersistenceSnapshot, PersistenceWorker, RuntimePaths,
 };
 
 use super::effects;
@@ -200,8 +200,8 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             msg_rx,
             msg_tx.clone(),
             effect_runner,
+            PersistenceWorker::new(paths.state_path.clone()),
             tree_render_state,
-            paths.state_path.clone(),
         )));
     let ui_state_provider: Arc<Mutex<dyn UiStateProvider>> =
         Arc::new(Mutex::new(AppUiStateProvider::new(shared_state)));
@@ -283,8 +283,8 @@ struct AppEventHandler {
     msg_rx: Mutex<mpsc::Receiver<Msg>>,
     msg_tx: mpsc::Sender<Msg>,
     effect_runner: EffectRunner,
+    persistence_worker: PersistenceWorker,
     tree_render_state: ui::render::TreeRenderState,
-    state_path: std::path::PathBuf,
 }
 
 fn job_id_for_item(item_id: commanductui::TreeItemId) -> Option<harvester_core::JobId> {
@@ -303,8 +303,8 @@ impl AppEventHandler {
         msg_rx: mpsc::Receiver<Msg>,
         msg_tx: mpsc::Sender<Msg>,
         effect_runner: EffectRunner,
+        persistence_worker: PersistenceWorker,
         tree_render_state: ui::render::TreeRenderState,
-        state_path: std::path::PathBuf,
     ) -> Self {
         Self {
             window_id,
@@ -313,8 +313,8 @@ impl AppEventHandler {
             msg_rx: Mutex::new(msg_rx),
             msg_tx,
             effect_runner,
+            persistence_worker,
             tree_render_state,
-            state_path,
         }
     }
 
@@ -325,68 +325,96 @@ impl AppEventHandler {
                 inbox.push(msg);
             }
         }
-        for msg in inbox {
-            self.dispatch_msg(msg);
+        if inbox.is_empty() {
+            return;
         }
-    }
+        let batch_size = inbox.len();
 
-    fn dispatch_msg(&mut self, msg: Msg) {
-        let (maybe_view, clear_input) = {
-            let msg_for_log = msg.clone();
+        let mut clear_input_needed = false;
+        let mut persist_completed_needed = false;
+        let mut persist_overrides_needed = false;
+        let mut refresh_evaluation_dispatched = false;
+        let mut persistence_enqueued = false;
+        let mut queued_effects = Vec::new();
+        let maybe_view = {
             let mut guard = self.shared.lock().expect("lock shared state");
-            let state = std::mem::take(&mut guard.state);
-            let (state, effects) = update(state, msg);
-            let should_persist_completed = matches!(
-                msg_for_log,
-                Msg::JobDone {
-                    result: JobResultKind::Success,
-                    ..
-                }
-            );
-            let should_persist_overrides = matches!(
-                msg_for_log,
-                Msg::PreTriageDecisionSet { .. } | Msg::PreTriageResetClicked
-            );
-            let clear_input = effects
-                .iter()
-                .any(|effect| matches!(effect, Effect::EnqueueUrl { .. }));
-            let view = state.view();
-            let mut state = state;
-            let completed_snapshot = if should_persist_completed {
+            let mut state = std::mem::take(&mut guard.state);
+            let mut any_dirty = false;
+
+            for msg in inbox {
+                let msg_for_flags = msg.clone();
+                let (next_state, effects) = update(state, msg);
+                state = next_state;
+                persist_completed_needed |= matches!(
+                    msg_for_flags,
+                    Msg::JobDone {
+                        result: JobResultKind::Success,
+                        ..
+                    }
+                );
+                persist_overrides_needed |= matches!(
+                    msg_for_flags,
+                    Msg::PreTriageDecisionSet { .. } | Msg::PreTriageResetClicked
+                );
+                clear_input_needed |= effects
+                    .iter()
+                    .any(|effect| matches!(effect, Effect::EnqueueUrl { .. }));
+                queued_effects.extend(effects);
+                any_dirty |= state.consume_dirty();
+            }
+
+            if let Some(triggered_by_job_done) =
+                state.take_pre_triage_refresh_evaluation_request()
+            {
+                refresh_evaluation_dispatched = true;
+                let ordered_urls = state.ordered_completed_job_urls_snapshot();
+                let (next_state, effects) = update(
+                    state,
+                    Msg::EvaluatePreTriageRefresh {
+                        ordered_urls,
+                        triggered_by_job_done,
+                    },
+                );
+                state = next_state;
+                queued_effects.extend(effects);
+                any_dirty |= state.consume_dirty();
+            }
+
+            let completed_snapshot = if persist_completed_needed {
                 Some(state.completed_jobs_snapshot())
             } else {
                 None
             };
-            let pre_triage_overrides = if should_persist_completed || should_persist_overrides {
+            let overrides_snapshot = if persist_completed_needed || persist_overrides_needed {
                 Some(state.pre_triage_manual_overrides().clone())
             } else {
                 None
             };
-            let was_dirty = state.consume_dirty();
+            let maybe_view = if any_dirty { Some(state.view()) } else { None };
             guard.state = state;
-            self.effect_runner.enqueue(effects);
-            let state_path = self.state_path.clone();
-            match (completed_snapshot, pre_triage_overrides) {
-                (Some(snapshot), Some(overrides)) => {
-                    persist_completed_jobs(&state_path, &snapshot);
-                    persist_pre_triage_overrides(&state_path, &overrides);
-                }
-                (Some(snapshot), None) => {
-                    persist_completed_jobs(&state_path, &snapshot);
-                }
-                (None, Some(overrides)) => {
-                    persist_pre_triage_overrides(&state_path, &overrides);
-                }
-                (None, None) => {}
+
+            if completed_snapshot.is_some() || overrides_snapshot.is_some() {
+                persistence_enqueued = true;
+                self.persistence_worker.enqueue(PersistenceSnapshot {
+                    completed: completed_snapshot.unwrap_or_default(),
+                    pre_triage_overrides: overrides_snapshot.unwrap_or_default(),
+                });
             }
-            if was_dirty {
-                (Some(view), clear_input)
-            } else {
-                (None, clear_input)
-            }
+            maybe_view
         };
 
-        if clear_input {
+        let effect_count = queued_effects.len();
+        self.effect_runner.enqueue(queued_effects);
+        let did_work = effect_count > 0
+            || maybe_view.is_some()
+            || clear_input_needed
+            || persistence_enqueued
+            || refresh_evaluation_dispatched;
+        if did_work {
+            engine_info!("[msg-loop] batch_size={} queue_lag_ms={}", batch_size, 0);
+        }
+
+        if clear_input_needed {
             self.commands.push_back(PlatformCommand::SetInputText {
                 window_id: self.window_id,
                 control_id: ui::constants::INPUT_URLS,
@@ -428,6 +456,12 @@ impl AppEventHandler {
         if matches!(msg, Msg::PromptLabOpenRequested) {
             let _ = self.msg_tx.send(Msg::PromptLabContextEditorOpened);
         }
+    }
+}
+
+impl Drop for AppEventHandler {
+    fn drop(&mut self) {
+        self.persistence_worker.shutdown();
     }
 }
 
@@ -890,8 +924,8 @@ mod tests {
             in_rx,
             out_tx,
             effect_runner,
+            PersistenceWorker::new(paths.state_path.clone()),
             ui::render::TreeRenderState::new(),
-            paths.state_path.clone(),
         );
         (handler, out_rx)
     }

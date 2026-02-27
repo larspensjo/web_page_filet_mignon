@@ -537,21 +537,42 @@ fn run_dispatch_loop(
             return Ok(classify_cycle_outcome(&obs));
         }
 
-        // Receive message with timeout
+        // Receive at least one message with timeout, then drain a batch.
         match msg_rx.recv_timeout(timeout) {
-            Ok(msg) => {
-                if should_log_batch_msg(&msg) {
-                    engine_info!("[batch] Processing message: {}", summarize_batch_msg(&msg));
+            Ok(first_msg) => {
+                let mut inbox = vec![first_msg];
+                while let Ok(next_msg) = msg_rx.try_recv() {
+                    inbox.push(next_msg);
                 }
 
-                // Update state
-                let (new_state, effects) = update(state.clone(), msg);
-                *state = new_state;
+                let mut queued_effects = Vec::new();
+                for msg in inbox {
+                    if should_log_batch_msg(&msg) {
+                        engine_info!("[batch] Processing message: {}", summarize_batch_msg(&msg));
+                    }
+                    let (new_state, effects) = update(state.clone(), msg);
+                    *state = new_state;
+                    queued_effects.extend(effects);
+                }
 
-                // Execute effects
-                if !effects.is_empty() {
-                    engine_info!("[batch] Enqueuing {} effects", effects.len());
-                    effect_runner.enqueue(effects);
+                if let Some(triggered_by_job_done) =
+                    state.take_pre_triage_refresh_evaluation_request()
+                {
+                    let ordered_urls = state.ordered_completed_job_urls_snapshot();
+                    let (new_state, effects) = update(
+                        state.clone(),
+                        Msg::EvaluatePreTriageRefresh {
+                            ordered_urls,
+                            triggered_by_job_done,
+                        },
+                    );
+                    *state = new_state;
+                    queued_effects.extend(effects);
+                }
+
+                if !queued_effects.is_empty() {
+                    engine_info!("[batch] Enqueuing {} effects", queued_effects.len());
+                    effect_runner.enqueue(queued_effects);
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {

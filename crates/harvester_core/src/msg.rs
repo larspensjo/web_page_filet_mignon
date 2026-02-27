@@ -25,6 +25,12 @@ pub enum Msg {
     UrlsSubmitted,
     /// Restore previously completed jobs from persisted state.
     RestoreCompletedJobs(Vec<crate::CompletedJobSnapshot>),
+    /// App-loop boundary action: evaluate pre-triage refresh demand with a
+    /// single snapshot of currently completed URLs.
+    EvaluatePreTriageRefresh {
+        ordered_urls: Vec<String>,
+        triggered_by_job_done: bool,
+    },
     /// User clicked Stop/Finish.
     StopFinishClicked,
     /// User clicked Archive.

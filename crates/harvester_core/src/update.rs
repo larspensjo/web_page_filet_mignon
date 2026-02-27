@@ -126,10 +126,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             extracted_links,
         } => {
             state.apply_done(job_id, result, content_preview, extracted_links);
-            schedule_pre_triage_refresh(
-                &mut state,
-                crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone,
-            )
+            state.request_pre_triage_refresh_evaluation(true);
+            Vec::new()
         }
         Msg::LinkToggleRequested {
             job_id,
@@ -204,10 +202,19 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
-            schedule_pre_triage_refresh(
-                &mut state,
-                crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
-            )
+            state.request_pre_triage_refresh_evaluation(false);
+            Vec::new()
+        }
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls,
+            triggered_by_job_done,
+        } => {
+            let reason = if triggered_by_job_done {
+                crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone
+            } else {
+                crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs
+            };
+            schedule_pre_triage_refresh(&mut state, reason, ordered_urls)
         }
         Msg::SplitterMoved {
             desired_left_width_px,
@@ -700,7 +707,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] generate requested");
-            let ordered_urls = state.ordered_completed_job_urls();
+            let ordered_urls = state.ordered_completed_job_urls_snapshot();
             let since_utc = state.briefing_since_utc();
             vec![
                 Effect::LoadPromptContexts,
@@ -725,7 +732,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] summary-prep requested");
-            let ordered_urls = state.ordered_completed_job_urls();
+            let ordered_urls = state.ordered_completed_job_urls_snapshot();
             let since_utc = state.briefing_since_utc();
             vec![
                 Effect::LoadPromptContexts,
@@ -1829,8 +1836,8 @@ fn parse_urls(raw: &str) -> Vec<String> {
 fn schedule_pre_triage_refresh(
     state: &mut AppState,
     reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
+    ordered_urls: Vec<String>,
 ) -> Vec<Effect> {
-    let ordered_urls = state.ordered_completed_job_urls();
     let tick = state.current_tick();
     let result = state
         .pre_triage_coordinator
@@ -4727,7 +4734,23 @@ mod tests {
                 extracted_links: Vec::new(),
             },
         );
-        state
+        apply_pending_pre_triage_refresh_evaluation(state)
+    }
+
+    fn apply_pending_pre_triage_refresh_evaluation(mut state: AppState) -> AppState {
+        if let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request() {
+            let ordered_urls = state.ordered_completed_job_urls_snapshot();
+            let (next, _) = update(
+                state,
+                Msg::EvaluatePreTriageRefresh {
+                    ordered_urls,
+                    triggered_by_job_done,
+                },
+            );
+            next
+        } else {
+            state
+        }
     }
 
     // ── Pre-triage refresh coordinator: Slice 1+2 tests ──────────────────────
@@ -4900,6 +4923,7 @@ mod tests {
         // Now simulate a RestoreCompletedJobs (e.g., after restart).
         let snapshot = state.completed_jobs_snapshot();
         let (state, effects) = update(state, Msg::RestoreCompletedJobs(snapshot));
+        let state = apply_pending_pre_triage_refresh_evaluation(state);
         assert_eq!(
             count_triage_loads(&effects),
             0,
@@ -4962,6 +4986,7 @@ mod tests {
         // Since AppState::new() has no jobs, RestoreCompletedJobs with empty snapshot
         // is the cleanest way to test this path.
         let (state, effects) = update(state, Msg::RestoreCompletedJobs(vec![]));
+        let state = apply_pending_pre_triage_refresh_evaluation(state);
         assert_eq!(
             count_triage_loads(&effects),
             0,
