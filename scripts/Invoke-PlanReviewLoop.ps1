@@ -103,7 +103,7 @@ function New-ReviewPrompt {
   )
 
 @"
-You are reviewing a software implementation plan.
+You have the role of a senior software engineer performing a review of an implementation plan.
 
 Rules:
 - Output Markdown only.
@@ -111,6 +111,9 @@ Rules:
 - Focus on: correctness, missing requirements, sequencing, risks, test strategy, maintainability, and integration/rollout.
 - Prefer prioritized bullets; include rationale briefly.
 - If something is ambiguous, ask explicit questions.
+- Check with source code to make sure the plan is correct.
+- Elegant, robust and flexible solutions have a high priority.
+- See extra instructions in Agents.md.
 
 Output headings:
 # Review by $ReviewerModel
