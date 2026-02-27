@@ -16,28 +16,28 @@ Some instructions here doesn't hold for the CommanDuctUI submodule.
 ## Unidirectional Data Flow Architecture
 Adhere to the Unidirectional Data Flow Architecture.
 
-* **All state changes flow in one direction.** UI (or other input sources) must not mutate model/state directly. State changes only occur by dispatching actions/events into the update pipeline.
+* All state changes flow in one direction. UI (or other input sources) must not mutate model/state directly. State changes only occur by dispatching actions/events into the update pipeline.
 
-* **Single source of truth per feature.** Each feature/module owns a single authoritative state structure. Other parts of the system read state via that owner’s public API and do not keep competing “shadow state”.
+* Single source of truth per feature. Each feature/module owns a single authoritative state structure. Other parts of the system read state via that owner’s public API and do not keep competing “shadow state”.
 
-* **Pipeline shape is fixed:**
+* Pipeline shape is fixed:
 
-  1. **Inputs** (UI, timers, IO callbacks) create **Actions** (intent).
-  2. Actions are processed by a **Reducer/Update** function that produces the next **State**.
-  3. **Views** render from State (read-only).
-  4. **Side effects** (network/filesystem, background work) are triggered by actions and feed results back as new actions.
+  1. Inputs (UI, timers, IO callbacks) create Actions (intent).
+  2. Actions are processed by a Reducer/Update function that produces the next State.
+  3. Views render from State (read-only).
+  4. Side effects (network/filesystem, background work) are triggered by actions and feed results back as new actions.
 
-* **Reducers are pure.** Update/Reducer code must be deterministic and free of side effects (no IO, no random, no sleeping, no global mutation). It may compute new state and emit “effect requests” only.
+* Reducers are pure. Update/Reducer code must be deterministic and free of side effects (no IO, no random, no sleeping, no global mutation). It may compute new state and emit “effect requests” only.
 
-* **Effects are isolated.** All IO is performed in effect handlers/services. An effect handler receives an effect request and must respond by dispatching a follow-up action (success/failure/progress).
+* Effects are isolated. All IO is performed in effect handlers/services. An effect handler receives an effect request and must respond by dispatching a follow-up action (success/failure/progress).
 
-* **No back-channels.** Views and services must not call into each other to “push” changes. The only way to change state is dispatching an action.
+* No back-channels. Views and services must not call into each other to “push” changes. The only way to change state is dispatching an action.
 
-* **State is immutable from the outside.** Expose state snapshots or read-only views; never return mutable references that allow external mutation. Prefer “replace with new state” semantics internally.
+* State is immutable from the outside. Expose state snapshots or read-only views; never return mutable references that allow external mutation. Prefer “replace with new state” semantics internally.
 
-* **Traceability is mandatory.** Every user-visible change should be explainable as: *Action → (Reducer) → State’ → Render*, with optional *Action → Effect → Action* loops. Add logging/telemetry at action dispatch boundaries.
+* Traceability is mandatory. Every user-visible change should be explainable as: *Action → (Reducer) → State’ → Render*, with optional *Action → Effect → Action* loops. Add logging/telemetry at action dispatch boundaries.
 
-* **Testing expectation.** Reducers must be unit-testable: given (State, Action) assert resulting State and emitted effects. Effect handlers are tested separately with mocked IO.
+* Testing expectation. Reducers must be unit-testable: given (State, Action) assert resulting State and emitted effects. Effect handlers are tested separately with mocked IO.
 
 ## Structs
 First and foremost, adhere to the Unidirectional Data Flow Architecture.
@@ -56,7 +56,7 @@ First and foremost, adhere to the Unidirectional Data Flow Architecture.
 
 ## General Rust design
 * mod.rs, lib.rs and main.rs should be thin wrappers.
-* Follow the principle of **Correctness-by-construction**: Prefer designs and language features that prevent bugs by construction—make illegal states unrepresentable and incorrect usage hard or impossible.
+* Follow the principle of Correctness-by-construction: Prefer designs and language features that prevent bugs by construction—make illegal states unrepresentable and incorrect usage hard or impossible.
 * Instead of liberally use of comments, try to use names on things (functions, variables, etc) that makes the intent clear. But still, comments may be needed eventually.
 * When building long prompt strings (system/user templates or `expected_format` literals), prefer `concat!` to split the text into readable pieces while preserving the literal content; do not rely on a single massive inline string with escaped newlines.
 
@@ -91,13 +91,25 @@ Use this project diary as long-term memory for AI-assisted coding.
 
 ### Capturing diary entries at plan creation
 
-Every new plan document must include a **draft diary entry** (at the top or in a dedicated section) with at least `Context` and `Change` fields pre-filled. At plan-creation time the motivation and goals are freshest — this is the golden opportunity to document *why* the work is being done. The `Change` field can be written as the intended outcome; it will be confirmed or adjusted when the plan is completed and the diary entry is finalized.
+Every new plan document must include a draft diary entry (at the top or in a dedicated section) with at least `Context` and `Change` fields pre-filled. At plan-creation time the motivation and goals are freshest — this is the golden opportunity to document *why* the work is being done. The `Change` field can be written as the intended outcome; it will be confirmed or adjusted when the plan is completed and the diary entry is finalized.
+
+### Async/Burst feature planning checklist
+
+For features that react to streams/batches of events (e.g. `JobDone`, timers, polling, callbacks), the plan must include:
+
+* Burst behavior / backpressure — What happens if many events arrive quickly? (coalesce, throttle, queue, dedupe)
+* Async result safety — How stale/out-of-order async results are rejected (request IDs/versioning/cancellation)
+* Performance envelope — Expected cost per event and whether any path is `O(N)` / full rebuild
+* Observability — Timing logs/spans that prove batching and identify bottlenecks
+* Failure semantics — What fails on background errors (local feature vs wider workflow)
+* Starvation/livelock guard — Maximum wait before progress is forced
+* Burst test case — At least one test scenario that asserts exact dispatch/rebuild count during a burst
 
 ### What to record in diary entries
 
-* **Context** — the motivation, goal, or problem being solved. Focus on *why*, not *how*. This is the most valuable part; without it, history becomes a meaningless list of changes.
-* **Change** — name the **subsystems or crates affected** (e.g., "harvester_engine, harvester_core"), not individual files. Keep it to one or two sentences. File-level detail belongs in commit messages, not the diary.
-* **Bug fixes** — only record a diary entry when the fix reveals an **insight that changes how you would design or review code in the future**. Ask: *"Would knowing this prevent a whole category of future bugs?"* If yes, document the lesson. If it was a simple typo, wrong variable, or misreading of docs, skip the diary entry.
+* Context — the motivation, goal, or problem being solved. Focus on *why*, not *how*. This is the most valuable part; without it, history becomes a meaningless list of changes.
+* Change — name the subsystems or crates affected (e.g., "harvester_engine, harvester_core"), not individual files. Keep it to one or two sentences. File-level detail belongs in commit messages, not the diary.
+* Bug fixes — only record a diary entry when the fix reveals an insight that changes how you would design or review code in the future. Ask: *"Would knowing this prevent a whole category of future bugs?"* If yes, document the lesson. If it was a simple typo, wrong variable, or misreading of docs, skip the diary entry.
 
 ### When a plan is completed and deleted
 
