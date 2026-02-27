@@ -11,8 +11,6 @@ Design goals:
 #>
 
 [CmdletBinding()]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', 'NoBackup',
-    Justification = 'Used inside nested function Backup-File defined later in the script')]
 param(
   # Existing plan file path (typically docs/plans/Plan.XXXX.md)
   [Parameter(Mandatory)]
@@ -37,10 +35,7 @@ param(
   [string]$RepoRoot = (Get-Location).Path,
 
   # Where plan/review docs live (default: <RepoRoot>/docs/plans)
-  [string]$PlansDir,
-
-  # If set, do not create plan backups before overwriting
-  [switch]$NoBackup
+  [string]$PlansDir
 )
 
 Set-StrictMode -Version Latest
@@ -209,16 +204,6 @@ function Write-AtomicUtf8([string]$Path, [string]$Content) {
   Move-Item -Force -LiteralPath $tmp -Destination $Path
 }
 
-function Backup-File([string]$Path, [string]$Suffix) {
-  if ($NoBackup) { return $null }
-  $dir = Split-Path -Parent $Path
-  $name = [IO.Path]::GetFileNameWithoutExtension($Path)
-  $ext  = [IO.Path]::GetExtension($Path)
-  $bak  = Join-Path $dir ("{0}.{1}{2}" -f $name, $Suffix, $ext)
-  Copy-Item -Force -LiteralPath $Path -Destination $bak
-  return $bak
-}
-
 function Assert-CliExists([string]$CliName) {
   $cmd = Get-Command $CliName -ErrorAction SilentlyContinue
   if (-not $cmd) { throw "CLI '$CliName' not found in PATH." }
@@ -367,9 +352,6 @@ foreach ($reviewer in $reviewers) {
   # 2) PlanModel updates the plan using the review
   $planText2 = Get-Content -LiteralPath $PlanPath -Raw -Encoding utf8
   $updatePrompt = New-UpdatePrompt -PlanModel $PlanModel -PlanPath $PlanPath -ReviewPath $reviewPath -PlanText $planText2 -ReviewText $reviewText
-
-  $bak = Backup-File -Path $PlanPath -Suffix ("bak.r{0}" -f $round)
-  if ($bak) { Add-LogLine $logPath "Backed up plan: $bak" }
 
   Add-LogLine $logPath "Invoking updater '$PlanModel'..."
   $updatedPlan = Invoke-Cli -Tool $PlanModel -Prompt $updatePrompt -WorkingDir $RepoRoot
