@@ -11,6 +11,14 @@
       "console": "integratedTerminal",
       "stopAtEntry": false,
       "preLaunchTask": "Build workspace"
+    },
+    {
+      "name": "Debug scripts/debug.ps1",
+      "type": "PowerShell",
+      "request": "launch",
+      "script": "${workspaceFolder}/scripts/debug.ps1",
+      "cwd": "${workspaceFolder}",
+      "createTemporaryIntegratedConsole": true
     }
   ]
 }
