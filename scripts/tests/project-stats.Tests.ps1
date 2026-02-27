@@ -18,7 +18,7 @@ Describe 'project-stats crate discovery' {
 
         $missingCrates = @($expectedCrates | Where-Object { $_ -notin $actualCrates })
 
-        $missingCrates.Count | Should Be 0
-        $actualCrates.Count | Should Be $expectedCrates.Count
+        $missingCrates.Count | Should -Be 0
+        $actualCrates.Count | Should -Be $expectedCrates.Count
     }
 }

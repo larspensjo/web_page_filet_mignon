@@ -12,8 +12,8 @@ function Invoke-LoadDefaults {
         $json = Get-Content -LiteralPath $FilePath -Raw -ErrorAction Stop | ConvertFrom-Json
         $vals = New-LauncherDefaults
         $props = $json.PSObject.Properties
-        if ($props['LlmConcurrency'])   { $vals.LlmConcurrency   = [Math]::Clamp([int]$props['LlmConcurrency'].Value,   1, 10)   }
-        if ($props['PollInterval'])     { $vals.PollInterval     = [Math]::Clamp([int]$props['PollInterval'].Value,     1, 1440) }
+        if ($props['LlmConcurrency'])   { $vals.LlmConcurrency   = [Math]::Max(1,    [Math]::Min(10,   [int]$props['LlmConcurrency'].Value))   }
+        if ($props['PollInterval'])     { $vals.PollInterval     = [Math]::Max(1,    [Math]::Min(1440, [int]$props['PollInterval'].Value))     }
         if ($props['ForceUnlock'])      { $vals.ForceUnlock      = [bool]$props['ForceUnlock'].Value      }
         if ($props['AllowUnsupported']) { $vals.AllowUnsupported = [bool]$props['AllowUnsupported'].Value }
         if ($props['Sources'])          { $vals.Sources          = [string]$props['Sources'].Value        }

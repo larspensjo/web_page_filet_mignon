@@ -17,7 +17,7 @@ Describe 'Data - Get-LauncherActionItems' {
         $i.IsDryRun | Should -Be $true
     }
     It 'has exactly one separator' {
-        ((Get-LauncherActionItems) | Where-Object { $_.IsSeparator }).Count | Should -Be 1
+        @(Get-LauncherActionItems | Where-Object { $_.IsSeparator }).Count | Should -Be 1
     }
     It 'has exactly 4 checkpoint items' {
         ((Get-LauncherActionItems) | Where-Object { $_.IsCheckpoint }).Count | Should -Be 4
@@ -696,15 +696,15 @@ Describe 'Render - Pad-SegmentsToWidth' {
 
     It 'pads short content to exact width' {
         $r = Pad-SegmentsToWidth -Segments @(Seg 'Hi') -Width 10
-        ($r | ForEach-Object { $_.Text } | Join-String).Length | Should -Be 10
+        (($r | ForEach-Object { $_.Text }) -join '').Length | Should -Be 10
     }
     It 'truncates long content to exact width' {
         $r = Pad-SegmentsToWidth -Segments @(Seg 'Hello World Long') -Width 5
-        ($r | ForEach-Object { $_.Text } | Join-String).Length | Should -Be 5
+        (($r | ForEach-Object { $_.Text }) -join '').Length | Should -Be 5
     }
     It 'exact-width content unchanged' {
         $r = Pad-SegmentsToWidth -Segments @(Seg 'Hello') -Width 5
-        ($r | ForEach-Object { $_.Text } | Join-String) | Should -Be 'Hello'
+        ($r | ForEach-Object { $_.Text }) -join '' | Should -Be 'Hello'
     }
 }
 
@@ -721,7 +721,7 @@ Describe 'Render - Get-FrameDiff' {
     It 'detects changed row' {
         $f1 = @( (Row 'abc') )
         $f2 = @( (Row 'xyz') )
-        (Get-FrameDiff -PrevFrame $f1 -CurrFrame $f2).Count | Should -Be 1
+        @(Get-FrameDiff -PrevFrame $f1 -CurrFrame $f2).Count | Should -Be 1
     }
     It 'returns correct RowIndex for changed row' {
         $f1 = @( (Row 'aaa'), (Row 'bbb') )
@@ -732,7 +732,7 @@ Describe 'Render - Get-FrameDiff' {
     }
     It 'treats empty prev frame as all-changed' {
         $f = @( (Row 'abc') )
-        (Get-FrameDiff -PrevFrame @() -CurrFrame $f).Count | Should -Be 1
+        @(Get-FrameDiff -PrevFrame @() -CurrFrame $f).Count | Should -Be 1
     }
 }
 
