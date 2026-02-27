@@ -66,6 +66,7 @@ Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-
 | UX        | PromptComparison    | Side-by-side prompt evaluation UI                |
 | UX        | SessionControls     | Operator controls for active sessions            |
 | UX        | TriageUi            | Triage list filtering and visualization          |
+| UX        | TrendInsights      | Trends and entity analytics UX                  |
 | UX        | WorkflowAutomation  | One-click multi-step workflows                   |
 
 ## Architecture
@@ -2044,6 +2045,179 @@ SuccessCriteria:
 - Pressing Enter on "Run batch" or "Run dry-run" launches immediately with no confirm step.
 - Pressing Escape on the confirm prompt returns to the launcher without executing the action.
 Related: FI-Architecture-BatchOrchestration-0007
+
+### TrendInsights
+
+#### [FI-UX-TrendInsights-0001] Configurable trend time windows
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P2
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Near-term (v1.1)
+- Captured: 2026-02-27
+Tags: [ux, trends, analytics, timeframe]
+Summary: Add trend window toggles such as 4 weeks, 13 weeks, 26 weeks, and 1 year for the Trends tab.
+Rationale: Different monitoring tasks need short-term spike detection and longer-term baseline visibility.
+SuccessCriteria:
+- Trends UI exposes predefined window toggles.
+- Selecting a window recomputes and rerenders trend data deterministically.
+- Reducer and trend computation tests cover window switching behavior.
+
+#### [FI-UX-TrendInsights-0002] Weighted trend counting mode
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Medium-term (v1.2)
+- Captured: 2026-02-27
+Tags: [ux, trends, weighting, triage]
+Summary: Add a toggle between raw mention counts and priority-weighted counts for trend ranking.
+Rationale: Weighting by triage priority can surface strategically important entities that raw counts may under-rank.
+SuccessCriteria:
+- Trends UI provides Counts and Weighted modes.
+- Weighted mode applies a documented deterministic priority-to-weight mapping.
+- Tests verify ranking and totals differ as expected between modes.
+
+#### [FI-UX-TrendInsights-0003] Entity alias canonicalization for trends
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P1
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Medium-term (v1.2)
+- Captured: 2026-02-27
+Tags: [ux, trends, entities, normalization]
+Summary: Add alias mapping support so variant entity spellings collapse to a canonical display name during trend computation.
+Rationale: Canonicalization improves trend accuracy by preventing split counts across known aliases.
+SuccessCriteria:
+- Alias mappings are loaded from a dedicated config source.
+- Trend grouping uses canonical keys while preserving a stable display label.
+- Tests verify aliases merge into one series without data loss.
+
+#### [FI-UX-TrendInsights-0004] Export trends view to CSV
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Medium-term (v1.2)
+- Captured: 2026-02-27
+Tags: [ux, trends, export, csv]
+Summary: Add an export action that writes current trend window data to CSV rows with date, category, entity, and count.
+Rationale: CSV export supports offline analysis and sharing outside the application.
+SuccessCriteria:
+- UI provides an explicit export trends action.
+- Exported CSV includes the active window and category data with stable column names.
+- Export path and write failures are surfaced to the user.
+
+#### [FI-UX-TrendInsights-0005] Trend smoothing overlay
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Long-term (v2+)
+- Captured: 2026-02-27
+Tags: [ux, trends, analytics, smoothing]
+Summary: Add optional smoothing such as a 3-week moving average overlay on trend lines.
+Rationale: Smoothing reduces volatility noise and makes directional movement easier to interpret.
+SuccessCriteria:
+- UI supports toggling raw and smoothed line display.
+- Smoothing algorithm and window are deterministic and documented.
+- Tests cover boundary handling at the start of the selected window.
+
+#### [FI-UX-TrendInsights-0006] Highlight newly emerging entities
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P3
+Effort: S
+Risk: L
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Long-term (v2+)
+- Captured: 2026-02-27
+Tags: [ux, trends, discovery]
+Summary: Mark entities that were absent in prior weeks and appear in the current window as new entrants.
+Rationale: New entrant cues help operators detect emerging companies, products, or technologies early.
+SuccessCriteria:
+- Trend rows/lines include a deterministic new-entrant marker.
+- Marker logic uses prior-week absence within the configured window definition.
+- Tests verify marker behavior for first appearance and repeat appearance cases.
+
+#### [FI-UX-TrendInsights-0007] Chart annotations for notable events
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Long-term (v2+)
+- Captured: 2026-02-27
+Tags: [ux, trends, annotations]
+Summary: Allow operators to add notes tied to specific weeks in trend charts and persist them as sidecar annotation data.
+Rationale: Annotations preserve context for spikes and dips so trend interpretation remains explainable over time.
+SuccessCriteria:
+- Users can create, edit, and remove week-level annotations.
+- Annotation persistence survives restart and loads with the trends view.
+- Rendering and persistence behavior is covered by tests.
+
+#### [FI-UX-TrendInsights-0008] Cross-entity co-occurrence analytics
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P3
+Effort: L
+Risk: M
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Long-term (v2+)
+- Captured: 2026-02-27
+Tags: [ux, trends, analytics, cooccurrence]
+Summary: Add a companion view that shows entity co-occurrence frequency within the same articles for the selected window.
+Rationale: Co-occurrence analysis reveals relationship patterns that line charts alone do not show.
+SuccessCriteria:
+- View displays co-occurrence strength for entity pairs in the active window.
+- Computation is deterministic and scalable for expected archive sizes.
+- Tests validate pair counting and tie ordering rules.
+
+#### [FI-UX-TrendInsights-0009] Surprise-score ranking mode
+Status: Candidate
+TopLevel: UX
+SubLevel: TrendInsights
+Priority: P3
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.trends-and-tabs.md
+- SourceSection: Future Ideas and Extensions - Long-term (v2+)
+- Captured: 2026-02-27
+Tags: [ux, trends, ranking, anomaly]
+Summary: Add an alternative ranking mode that sorts entities by deviation from trailing baseline instead of absolute counts.
+Rationale: Surprise-based ranking surfaces unusual movement that may be more actionable than volume alone.
+SuccessCriteria:
+- Trends UI offers Top by Count and Top by Surprise modes.
+- Surprise calculation method is documented and deterministic.
+- Tests verify expected ordering on synthetic baseline-and-spike datasets.
 
 ### TriageUi
 
