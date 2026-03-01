@@ -63,6 +63,7 @@ pub fn build_concatenated_export(
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     let mut entries = collect_archive_md_files(output_dir)?;
+    exclude_export_artifacts(&mut entries, output_dir, &options);
     entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
 
     let mut docs = Vec::new();
@@ -122,6 +123,7 @@ pub fn build_triage_archive(
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     let mut entries = collect_archive_md_files(output_dir)?;
+    exclude_export_artifacts(&mut entries, output_dir, &options);
     entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
 
     let mut docs_by_url: HashMap<String, DocMeta> = HashMap::new();
@@ -160,14 +162,6 @@ pub fn build_triage_archive(
         }
         buffer.push_str(&options.delimiter_start);
         buffer.push('\n');
-        buffer.push_str(&format!(
-            "url: {}\ntitle: {}\ntokens: {}\nfetched_utc: {}\nfilename: {}\n\n",
-            doc.url,
-            doc.title,
-            doc.token_count.unwrap_or(0),
-            doc.fetched_utc,
-            doc.filename
-        ));
         buffer.push_str(&doc.raw_content);
         if !doc.raw_content.ends_with('\n') {
             buffer.push('\n');
@@ -194,6 +188,26 @@ fn collect_archive_md_files(output_dir: &Path) -> Result<Vec<PathBuf>, ExportErr
         entries.extend(collect_md_files(&linked_dir)?);
     }
     Ok(entries)
+}
+
+fn exclude_export_artifacts(entries: &mut Vec<PathBuf>, output_dir: &Path, options: &ExportOptions) {
+    let output_artifact = output_dir.join(&options.output_filename);
+    let manifest_artifact = options
+        .manifest_filename
+        .as_ref()
+        .map(|name| output_dir.join(name));
+
+    entries.retain(|path| {
+        if *path == output_artifact {
+            return false;
+        }
+        if let Some(manifest) = manifest_artifact.as_ref() {
+            if path == manifest {
+                return false;
+            }
+        }
+        true
+    });
 }
 
 fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {

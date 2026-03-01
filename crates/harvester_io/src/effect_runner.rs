@@ -1969,8 +1969,9 @@ mod tests {
         }
 
         let archive = content.expect("archive.md should be written");
-        assert!(archive.contains("url: https://example.com/b"));
-        assert!(!archive.contains("url: https://example.com/a"));
+        assert!(!archive.contains("url: https://example.com/b\n"));
+        assert!(!archive.contains("url: https://example.com/a\n"));
         assert!(archive.contains("url: \"https://example.com/b\""));
+        assert!(!archive.contains("url: \"https://example.com/a\""));
     }
 }

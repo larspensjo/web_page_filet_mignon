@@ -162,9 +162,11 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
     assert!(summary.manifest_path.is_none());
 
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
-    let idx_b = archive.find("url: https://b").unwrap();
-    let idx_a = archive.find("url: https://a").unwrap();
+    let idx_b = archive.find("url: \"https://b\"").unwrap();
+    let idx_a = archive.find("url: \"https://a\"").unwrap();
     assert!(idx_b < idx_a, "archive order should follow ordered_urls");
+    assert!(!archive.contains("url: https://b\n"));
+    assert!(!archive.contains("url: https://a\n"));
     assert!(archive.contains("url: \"https://b\""));
     assert!(archive.contains("url: \"https://a\""));
     assert!(archive.contains("# B Heading"));
@@ -199,6 +201,25 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
     assert_eq!(summary.doc_count, 1);
     assert_eq!(summary.total_tokens, 2);
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
-    assert!(!archive.contains("url: https://old"));
-    assert!(archive.contains("url: https://bad"));
+    assert!(!archive.contains("url: \"https://old\""));
+    assert!(archive.contains("url: \"https://bad\""));
+}
+
+#[test]
+fn triage_archive_ignores_existing_archive_md_artifact() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md = "---\nurl: \"https://keep\"\ntitle: \"Keep\"\ntoken_count: 1\nfetched_utc: \"2026-02-15T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nkeep\n";
+    std::fs::write(dir.join("keep.md"), md).unwrap();
+    std::fs::write(dir.join("archive.md"), "not-frontmatter-archive-content").unwrap();
+
+    let options = ExportOptions {
+        output_filename: "archive.md".to_string(),
+        manifest_filename: None,
+        ..ExportOptions::default()
+    };
+    let summary = build_triage_archive(dir, &["https://keep".to_string()], None, options).unwrap();
+    assert_eq!(summary.doc_count, 1);
+    let archive = std::fs::read_to_string(summary.output_path).unwrap();
+    assert!(archive.contains("url: \"https://keep\""));
 }
