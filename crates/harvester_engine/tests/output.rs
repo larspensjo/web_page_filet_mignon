@@ -1,7 +1,7 @@
 use harvester_engine::{
-    build_concatenated_export, build_markdown_document, deterministic_filename, Converter,
-    ExportOptions, Extractor, Html2MdConverter, ReadabilityLikeExtractor, TokenCounter,
-    WhitespaceTokenCounter,
+    build_concatenated_export, build_markdown_document, build_triage_archive,
+    deterministic_filename, Converter, ExportOptions, Extractor, Html2MdConverter,
+    ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter,
 };
 use pretty_assertions::assert_eq;
 
@@ -134,4 +134,71 @@ fn concatenated_export_includes_linked_pages_and_dedupes_urls() {
         manifest
     );
     assert!(manifest.contains("\"url\":\"https://root\""));
+}
+
+#[test]
+fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md_a = "---\nurl: \"https://a\"\ntitle: \"A\"\ntoken_count: 2\nfetched_utc: \"2026-02-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\n# A Heading\n\nBody A\n";
+    let md_b = "---\nurl: \"https://b\"\ntitle: \"B\"\ntoken_count: 3\nfetched_utc: \"2026-02-02T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\n# B Heading\n\nBody B\n";
+    std::fs::write(dir.join("a.md"), md_a).unwrap();
+    std::fs::write(dir.join("b.md"), md_b).unwrap();
+
+    let options = ExportOptions {
+        output_filename: "archive.md".to_string(),
+        manifest_filename: None,
+        ..ExportOptions::default()
+    };
+    let summary = build_triage_archive(
+        dir,
+        &["https://b".to_string(), "https://a".to_string()],
+        None,
+        options,
+    )
+    .unwrap();
+    assert_eq!(summary.doc_count, 2);
+    assert_eq!(summary.total_tokens, 5);
+    assert!(summary.manifest_path.is_none());
+
+    let archive = std::fs::read_to_string(summary.output_path).unwrap();
+    let idx_b = archive.find("url: https://b").unwrap();
+    let idx_a = archive.find("url: https://a").unwrap();
+    assert!(idx_b < idx_a, "archive order should follow ordered_urls");
+    assert!(archive.contains("url: \"https://b\""));
+    assert!(archive.contains("url: \"https://a\""));
+    assert!(archive.contains("# B Heading"));
+    assert!(archive.contains("# A Heading"));
+}
+
+#[test]
+fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md_old = "---\nurl: \"https://old\"\ntitle: \"Old\"\ntoken_count: 1\nfetched_utc: \"2024-01-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nold\n";
+    let md_bad = "---\nurl: \"https://bad\"\ntitle: \"Bad\"\ntoken_count: 2\nfetched_utc: \"not-a-date\"\nencoding: \"UTF-8\"\n---\n\nbad\n";
+    std::fs::write(dir.join("old.md"), md_old).unwrap();
+    std::fs::write(dir.join("bad.md"), md_bad).unwrap();
+
+    let since = chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let options = ExportOptions {
+        output_filename: "archive.md".to_string(),
+        manifest_filename: None,
+        ..ExportOptions::default()
+    };
+    let summary = build_triage_archive(
+        dir,
+        &["https://old".to_string(), "https://bad".to_string()],
+        Some(since),
+        options,
+    )
+    .unwrap();
+
+    assert_eq!(summary.doc_count, 1);
+    assert_eq!(summary.total_tokens, 2);
+    let archive = std::fs::read_to_string(summary.output_path).unwrap();
+    assert!(!archive.contains("url: https://old"));
+    assert!(archive.contains("url: https://bad"));
 }

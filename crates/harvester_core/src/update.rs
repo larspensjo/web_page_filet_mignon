@@ -84,7 +84,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Vec::new()
             }
         }
-        Msg::ArchiveClicked => vec![Effect::ArchiveRequested],
+        Msg::ArchiveClicked => {
+            let policy = state.briefing_triage_policy();
+            let ordered_urls = policy.eligible_urls(state.triage());
+            let since_utc = state.briefing_since_utc();
+            vec![Effect::ArchiveRequested {
+                ordered_urls,
+                since_utc,
+            }]
+        }
         Msg::ToggleInputPanel => {
             let opening = !state.input_panel_visible();
             let desired_left_width_px = if opening {

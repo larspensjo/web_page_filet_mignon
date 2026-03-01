@@ -14,9 +14,9 @@ use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
 use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmCommand, LlmHandle, PromptRegistry};
 use harvester_engine::{
-    is_confined_to, load_and_prepare_articles_filtered, poll_curated_source, poll_file_source,
-    scan_archive_article_metadata, EngineConfig, EngineEvent, EngineHandle, FetchSettings,
-    SourceType, UrlPolicy,
+    build_triage_archive, is_confined_to, load_and_prepare_articles_filtered,
+    poll_curated_source, poll_file_source, scan_archive_article_metadata, EngineConfig,
+    EngineEvent, EngineHandle, ExportOptions, FetchSettings, SourceType, UrlPolicy,
 };
 
 use crate::effect_helpers::{
@@ -215,9 +215,26 @@ impl EffectRunner {
                 let immediate = matches!(policy, StopPolicy::Immediate);
                 self.engine.stop(immediate);
             }
-            Effect::ArchiveRequested => {
-                engine_info!("Archive requested: enqueue export job");
-                self.engine.request_export();
+            Effect::ArchiveRequested {
+                ordered_urls,
+                since_utc,
+            } => {
+                let output_dir = self.paths.output_dir.clone();
+                thread::spawn(move || {
+                    let options = ExportOptions {
+                        output_filename: "archive.md".to_string(),
+                        manifest_filename: None,
+                        ..ExportOptions::default()
+                    };
+                    match build_triage_archive(&output_dir, &ordered_urls, since_utc, options) {
+                        Ok(summary) => engine_info!(
+                            "[archive] archive.md written docs={} path={}",
+                            summary.doc_count,
+                            summary.output_path.display()
+                        ),
+                        Err(err) => engine_warn!("[archive] archive.md failed: {}", err),
+                    }
+                });
             }
             Effect::OpenUrlInBrowser { url } => {
                 self.platform_handler.open_url(&url);
@@ -1924,5 +1941,36 @@ mod tests {
             }
             other => panic!("unexpected message: {:?}", other),
         }
+    }
+
+    #[test]
+    fn archive_requested_writes_archive_markdown_for_selected_urls() {
+        let temp = tempdir().expect("tempdir");
+        let output = temp.path();
+        let md_a = "---\nurl: \"https://example.com/a\"\ntitle: \"A\"\ntoken_count: 1\nfetched_utc: \"2026-02-10T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nA body\n";
+        let md_b = "---\nurl: \"https://example.com/b\"\ntitle: \"B\"\ntoken_count: 2\nfetched_utc: \"2026-02-11T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nB body\n";
+        fs::write(output.join("a.md"), md_a).expect("write a");
+        fs::write(output.join("b.md"), md_b).expect("write b");
+
+        let (runner, _rx) = runner_with_receiver(output);
+        runner.enqueue(vec![Effect::ArchiveRequested {
+            ordered_urls: vec!["https://example.com/b".to_string()],
+            since_utc: None,
+        }]);
+
+        let archive_path = output.join("archive.md");
+        let mut content = None;
+        for _ in 0..40 {
+            if let Ok(text) = fs::read_to_string(&archive_path) {
+                content = Some(text);
+                break;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+
+        let archive = content.expect("archive.md should be written");
+        assert!(archive.contains("url: https://example.com/b"));
+        assert!(!archive.contains("url: https://example.com/a"));
+        assert!(archive.contains("url: \"https://example.com/b\""));
     }
 }

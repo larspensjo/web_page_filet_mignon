@@ -33,7 +33,9 @@ pub use briefing::{
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};
 pub use engine::{EngineConfig, EngineHandle};
-pub use export::{build_concatenated_export, ExportError, ExportOptions, ExportSummary};
+pub use export::{
+    build_concatenated_export, build_triage_archive, ExportError, ExportOptions, ExportSummary,
+};
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher, RetrySettings};
 pub use filename::deterministic_filename;

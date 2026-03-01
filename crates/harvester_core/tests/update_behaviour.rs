@@ -191,7 +191,13 @@ fn archive_click_emits_effect_without_state_change() {
     let (next, effects) = update(state, Msg::ArchiveClicked);
 
     assert_eq!(next.view(), before);
-    assert_eq!(effects, vec![Effect::ArchiveRequested]);
+    assert_eq!(
+        effects,
+        vec![Effect::ArchiveRequested {
+            ordered_urls: vec![],
+            since_utc: None,
+        }]
+    );
 }
 
 fn send_llm_request_with_context(state: AppState) -> (AppState, Vec<Effect>) {

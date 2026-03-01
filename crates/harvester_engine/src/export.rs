@@ -1,7 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::frontmatter::{parse_frontmatter, strip_frontmatter};
@@ -52,6 +53,7 @@ struct DocMeta {
     fetched_utc: String,
     token_count: Option<u32>,
     body: String,
+    raw_content: String,
     filename: String,
 }
 
@@ -60,11 +62,7 @@ pub fn build_concatenated_export(
     options: ExportOptions,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
-    let mut entries = collect_md_files(output_dir)?;
-    let linked_dir = output_dir.join("linked");
-    if linked_dir.exists() {
-        entries.extend(collect_md_files(&linked_dir)?);
-    }
+    let mut entries = collect_archive_md_files(output_dir)?;
     entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
 
     let mut docs = Vec::new();
@@ -105,29 +103,8 @@ pub fn build_concatenated_export(
         buffer.push_str("\n\n");
     }
 
-    let writer = AtomicFileWriter::new(output_dir.to_path_buf());
-    let output_path = writer.write(&options.output_filename, &buffer)?;
-
-    let manifest_path = if let Some(name) = options.manifest_filename {
-        let manifest = json!({
-            "doc_count": docs.len(),
-            "total_tokens": total_tokens,
-            "files": docs.iter().map(|d| {
-                json!({
-                    "filename": d.filename,
-                    "title": d.title,
-                    "url": d.url,
-                    "tokens": d.token_count.unwrap_or(0),
-                    "fetched_utc": d.fetched_utc
-                })
-            }).collect::<Vec<_>>()
-        });
-        let writer = AtomicFileWriter::new(output_dir.to_path_buf());
-        let path = writer.write(&name, &manifest.to_string())?;
-        Some(path)
-    } else {
-        None
-    };
+    let output_path = write_export_file(output_dir, &options.output_filename, &buffer)?;
+    let manifest_path = write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
 
     Ok(ExportSummary {
         doc_count: docs.len(),
@@ -135,6 +112,88 @@ pub fn build_concatenated_export(
         output_path,
         manifest_path,
     })
+}
+
+pub fn build_triage_archive(
+    output_dir: &Path,
+    ordered_urls: &[String],
+    since_utc: Option<DateTime<Utc>>,
+    options: ExportOptions,
+) -> Result<ExportSummary, ExportError> {
+    ensure_output_dir(output_dir)?;
+    let mut entries = collect_archive_md_files(output_dir)?;
+    entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
+
+    let mut docs_by_url: HashMap<String, DocMeta> = HashMap::new();
+    for path in entries {
+        let relative = path
+            .strip_prefix(output_dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+        let content = fs::read_to_string(&path)?;
+        let meta = parse_doc(&content, &relative)?;
+        if !passes_since_filter(&meta, since_utc) {
+            continue;
+        }
+        let normalized = normalize_url(&meta.url);
+        docs_by_url.entry(normalized).or_insert(meta);
+    }
+
+    let mut docs = Vec::new();
+    let mut selected = HashSet::new();
+    for url in ordered_urls {
+        let normalized = normalize_url(url);
+        if !selected.insert(normalized.clone()) {
+            continue;
+        }
+        if let Some(meta) = docs_by_url.remove(&normalized) {
+            docs.push(meta);
+        }
+    }
+
+    let mut buffer = String::new();
+    let mut total_tokens: u64 = 0;
+    for doc in &docs {
+        if let Some(t) = doc.token_count {
+            total_tokens += t as u64;
+        }
+        buffer.push_str(&options.delimiter_start);
+        buffer.push('\n');
+        buffer.push_str(&format!(
+            "url: {}\ntitle: {}\ntokens: {}\nfetched_utc: {}\nfilename: {}\n\n",
+            doc.url,
+            doc.title,
+            doc.token_count.unwrap_or(0),
+            doc.fetched_utc,
+            doc.filename
+        ));
+        buffer.push_str(&doc.raw_content);
+        if !doc.raw_content.ends_with('\n') {
+            buffer.push('\n');
+        }
+        buffer.push_str(&options.delimiter_end);
+        buffer.push_str("\n\n");
+    }
+
+    let output_path = write_export_file(output_dir, &options.output_filename, &buffer)?;
+    let manifest_path = write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
+
+    Ok(ExportSummary {
+        doc_count: docs.len(),
+        total_tokens,
+        output_path,
+        manifest_path,
+    })
+}
+
+fn collect_archive_md_files(output_dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
+    let mut entries = collect_md_files(output_dir)?;
+    let linked_dir = output_dir.join("linked");
+    if linked_dir.exists() {
+        entries.extend(collect_md_files(&linked_dir)?);
+    }
+    Ok(entries)
 }
 
 fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
@@ -171,6 +230,53 @@ fn normalize_url(url: &str) -> String {
     trimmed.to_lowercase()
 }
 
+fn write_export_file(
+    output_dir: &Path,
+    output_filename: &str,
+    content: &str,
+) -> Result<PathBuf, ExportError> {
+    let writer = AtomicFileWriter::new(output_dir.to_path_buf());
+    Ok(writer.write(output_filename, content)?)
+}
+
+fn write_manifest(
+    output_dir: &Path,
+    manifest_filename: &Option<String>,
+    docs: &[DocMeta],
+    total_tokens: u64,
+) -> Result<Option<PathBuf>, ExportError> {
+    if let Some(name) = manifest_filename {
+        let manifest = json!({
+            "doc_count": docs.len(),
+            "total_tokens": total_tokens,
+            "files": docs.iter().map(|d| {
+                json!({
+                    "filename": d.filename,
+                    "title": d.title,
+                    "url": d.url,
+                    "tokens": d.token_count.unwrap_or(0),
+                    "fetched_utc": d.fetched_utc
+                })
+            }).collect::<Vec<_>>()
+        });
+        let writer = AtomicFileWriter::new(output_dir.to_path_buf());
+        let path = writer.write(name, &manifest.to_string())?;
+        Ok(Some(path))
+    } else {
+        Ok(None)
+    }
+}
+
+fn passes_since_filter(meta: &DocMeta, since_utc: Option<DateTime<Utc>>) -> bool {
+    let Some(since_dt) = since_utc else {
+        return true;
+    };
+    match DateTime::parse_from_rfc3339(&meta.fetched_utc) {
+        Ok(parsed) => parsed.with_timezone(&Utc) >= since_dt,
+        Err(_) => true,
+    }
+}
+
 fn parse_doc(content: &str, filename: &str) -> Result<DocMeta, ExportError> {
     let fields = parse_frontmatter(content)
         .ok_or_else(|| ExportError::MissingFrontmatter(filename.to_string()))?;
@@ -187,6 +293,7 @@ fn parse_doc(content: &str, filename: &str) -> Result<DocMeta, ExportError> {
         fetched_utc: fetched,
         token_count: fields.token_count,
         body,
+        raw_content: content.to_string(),
         filename: filename.to_string(),
     })
 }

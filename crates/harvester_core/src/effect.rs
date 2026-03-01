@@ -59,7 +59,10 @@ pub enum Effect {
     StopFinish {
         policy: StopPolicy,
     },
-    ArchiveRequested,
+    ArchiveRequested {
+        ordered_urls: Vec<String>,
+        since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    },
     DownloadLinkedPage {
         job_id: crate::JobId,
         link_index: u32,
