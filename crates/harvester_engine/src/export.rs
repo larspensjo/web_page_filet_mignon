@@ -170,7 +170,8 @@ pub fn build_triage_archive(
         buffer.push_str("\n\n");
     }
 
-    let output_path = write_export_file(output_dir, &options.output_filename, &buffer)?;
+    let archive_filename = archive_filename_for_range(since_utc, latest_fetched_utc(&docs));
+    let output_path = write_export_file(output_dir, &archive_filename, &buffer)?;
     let manifest_path = write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
 
     Ok(ExportSummary {
@@ -198,6 +199,9 @@ fn exclude_export_artifacts(entries: &mut Vec<PathBuf>, output_dir: &Path, optio
         .map(|name| output_dir.join(name));
 
     entries.retain(|path| {
+        if is_archive_artifact(path, output_dir) {
+            return false;
+        }
         if *path == output_artifact {
             return false;
         }
@@ -208,6 +212,36 @@ fn exclude_export_artifacts(entries: &mut Vec<PathBuf>, output_dir: &Path, optio
         }
         true
     });
+}
+
+fn is_archive_artifact(path: &Path, output_dir: &Path) -> bool {
+    if path.parent() != Some(output_dir) {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    name == "archive.md" || (name.starts_with("archive-") && name.ends_with(".md"))
+}
+
+fn archive_filename_for_range(
+    since_utc: Option<DateTime<Utc>>,
+    latest_fetched_utc: Option<DateTime<Utc>>,
+) -> String {
+    let from = since_utc
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "all".to_string());
+    let to = latest_fetched_utc
+        .map(|dt| dt.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| from.clone());
+    format!("archive-{from}-{to}.md")
+}
+
+fn latest_fetched_utc(docs: &[DocMeta]) -> Option<DateTime<Utc>> {
+    docs.iter()
+        .filter_map(|doc| DateTime::parse_from_rfc3339(&doc.fetched_utc).ok())
+        .map(|dt| dt.with_timezone(&Utc))
+        .max()
 }
 
 fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {

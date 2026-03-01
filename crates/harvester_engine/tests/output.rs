@@ -157,6 +157,14 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
         options,
     )
     .unwrap();
+    assert_eq!(
+        summary
+            .output_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap(),
+        "archive-all-2026-02-02.md"
+    );
     assert_eq!(summary.doc_count, 2);
     assert_eq!(summary.total_tokens, 5);
     assert!(summary.manifest_path.is_none());
@@ -197,6 +205,14 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
         options,
     )
     .unwrap();
+    assert_eq!(
+        summary
+            .output_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap(),
+        "archive-2025-01-01-2025-01-01.md"
+    );
 
     assert_eq!(summary.doc_count, 1);
     assert_eq!(summary.total_tokens, 2);
@@ -212,6 +228,7 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
     let md = "---\nurl: \"https://keep\"\ntitle: \"Keep\"\ntoken_count: 1\nfetched_utc: \"2026-02-15T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nkeep\n";
     std::fs::write(dir.join("keep.md"), md).unwrap();
     std::fs::write(dir.join("archive.md"), "not-frontmatter-archive-content").unwrap();
+    std::fs::write(dir.join("archive-all-2026-02-01.md"), "old archive artifact").unwrap();
 
     let options = ExportOptions {
         output_filename: "archive.md".to_string(),
@@ -219,6 +236,14 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
         ..ExportOptions::default()
     };
     let summary = build_triage_archive(dir, &["https://keep".to_string()], None, options).unwrap();
+    assert_eq!(
+        summary
+            .output_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap(),
+        "archive-all-2026-02-15.md"
+    );
     assert_eq!(summary.doc_count, 1);
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
     assert!(archive.contains("url: \"https://keep\""));

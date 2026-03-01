@@ -228,11 +228,11 @@ impl EffectRunner {
                     };
                     match build_triage_archive(&output_dir, &ordered_urls, since_utc, options) {
                         Ok(summary) => engine_info!(
-                            "[archive] archive.md written docs={} path={}",
+                            "[archive] archive written docs={} path={}",
                             summary.doc_count,
                             summary.output_path.display()
                         ),
-                        Err(err) => engine_warn!("[archive] archive.md failed: {}", err),
+                        Err(err) => engine_warn!("[archive] archive failed: {}", err),
                     }
                 });
             }
@@ -1958,17 +1958,32 @@ mod tests {
             since_utc: None,
         }]);
 
-        let archive_path = output.join("archive.md");
-        let mut content = None;
+        let mut archive_path = None;
         for _ in 0..40 {
-            if let Ok(text) = fs::read_to_string(&archive_path) {
-                content = Some(text);
+            if let Ok(entries) = fs::read_dir(output) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let is_archive = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with("archive-") && n.ends_with(".md"))
+                        .unwrap_or(false);
+                    if is_archive {
+                        archive_path = Some(path);
+                        break;
+                    }
+                }
+            }
+            if archive_path.is_some() {
                 break;
             }
             thread::sleep(Duration::from_millis(25));
         }
 
-        let archive = content.expect("archive.md should be written");
+        let archive_path = archive_path.expect("archive-[FROM]-[TO].md should be written");
+        let archive_name = archive_path.file_name().and_then(|n| n.to_str()).unwrap();
+        assert_eq!(archive_name, "archive-all-2026-02-11.md");
+        let archive = fs::read_to_string(&archive_path).expect("read archive");
         assert!(!archive.contains("url: https://example.com/b\n"));
         assert!(!archive.contains("url: https://example.com/a\n"));
         assert!(archive.contains("url: \"https://example.com/b\""));
