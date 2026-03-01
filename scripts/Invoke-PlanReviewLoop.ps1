@@ -140,6 +140,8 @@ You are updating a software implementation plan based on a review.
 Rules:
 - Output the FULL UPDATED PLAN as Markdown only (no commentary).
 - Return text only. Do not edit files, do not claim to have edited files, and do not ask for write permissions.
+- Do not blindly accept review feedback. Independently validate each suggested change for correctness and relevance against the current plan and source code.
+- Only apply suggestions that are correct and improve the plan. If a suggestion is incorrect, redundant, or out of scope, keep the plan behavior and add a brief rationale under a "Notes" section.
 - Preserve useful structure; improve clarity and sequencing.
 - Ensure the plan remains actionable: steps, milestones, acceptance criteria, test plan.
 - Resolve issues raised in the review. If you intentionally do not apply a suggestion, incorporate a brief justification in the plan (e.g. under "Notes" or "Assumptions").

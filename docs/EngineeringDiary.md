@@ -550,3 +550,10 @@ Context: Plan-review loop runs should be deterministic and not inherit prior Cla
 Change: Defaulted Claude CLI args to `--no-session-persistence` in the loop and set process native-command encoding to UTF-8 (`Console` input/output plus `$OutputEncoding`) before invoking model CLIs.
 Evidence: `scripts/Invoke-PlanReviewLoop.ps1` syntax parse check passed (`Parser::ParseFile` returned OK).
 Refs: scripts/Invoke-PlanReviewLoop.ps1
+
+## 2026-03-01 - Updater prompt now requires independent validation of review claims
+Type: Decision
+Context: Review outputs can include incorrect or out-of-scope suggestions, and blindly applying them degrades plan quality.
+Change: Strengthened the plan-updater prompt contract to require claim-by-claim validation against the current plan and source code, apply only correct/relevant suggestions, and document rejected suggestions with rationale in `Notes`.
+Evidence: `scripts/Invoke-PlanReviewLoop.ps1` syntax parse check passed (`Parser::ParseFile` returned OK).
+Refs: scripts/Invoke-PlanReviewLoop.ps1
