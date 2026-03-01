@@ -228,7 +228,11 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
     let md = "---\nurl: \"https://keep\"\ntitle: \"Keep\"\ntoken_count: 1\nfetched_utc: \"2026-02-15T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nkeep\n";
     std::fs::write(dir.join("keep.md"), md).unwrap();
     std::fs::write(dir.join("archive.md"), "not-frontmatter-archive-content").unwrap();
-    std::fs::write(dir.join("archive-all-2026-02-01.md"), "old archive artifact").unwrap();
+    std::fs::write(
+        dir.join("archive-all-2026-02-01.md"),
+        "old archive artifact",
+    )
+    .unwrap();
 
     let options = ExportOptions {
         output_filename: "archive.md".to_string(),

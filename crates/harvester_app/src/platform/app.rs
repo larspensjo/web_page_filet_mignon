@@ -363,8 +363,7 @@ impl AppEventHandler {
                 any_dirty |= state.consume_dirty();
             }
 
-            if let Some(triggered_by_job_done) =
-                state.take_pre_triage_refresh_evaluation_request()
+            if let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request()
             {
                 refresh_evaluation_dispatched = true;
                 let ordered_urls = state.ordered_completed_job_urls_snapshot();

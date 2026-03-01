@@ -122,12 +122,11 @@ fn run_worker(shared: Arc<(Mutex<WorkerState>, Condvar)>, state_path: PathBuf) {
                             .checked_sub(now.saturating_duration_since(existing.last_updated_at));
                         let max_wait = MAX_FLUSH_INTERVAL
                             .checked_sub(now.saturating_duration_since(last_flush_at));
-                        if let (Some(wait), Some(max_wait_remaining)) =
-                            (debounce_wait, max_wait)
-                        {
+                        if let (Some(wait), Some(max_wait_remaining)) = (debounce_wait, max_wait) {
                             let sleep_for = wait.min(max_wait_remaining);
-                            let (guard, timeout) =
-                                condvar.wait_timeout(state, sleep_for).expect("wait_timeout");
+                            let (guard, timeout) = condvar
+                                .wait_timeout(state, sleep_for)
+                                .expect("wait_timeout");
                             state = guard;
                             if !timeout.timed_out() {
                                 continue;

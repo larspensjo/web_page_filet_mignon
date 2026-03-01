@@ -878,7 +878,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             engine_info!("[triage] triage requested");
             start_triage_from_pretriage(&mut state)
         }
-        Msg::TriageArticlesLoaded { request_id, articles } => {
+        Msg::TriageArticlesLoaded {
+            request_id,
+            articles,
+        } => {
             if Some(request_id) != state.triage_in_flight_request_id() {
                 engine_info!(
                     "[pre-triage-refresh-coord] stale result ignored request_id={} in_flight={:?}",
@@ -887,10 +890,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 );
                 return (state, Vec::new());
             }
-            engine_info!(
-                "[pre-triage-refresh-coord] apply request_id={}",
-                request_id
-            );
+            engine_info!("[pre-triage-refresh-coord] apply request_id={}", request_id);
             state.clear_triage_in_flight();
             state.pre_triage_coordinator.complete_request(request_id);
             let policy = PreTriagePolicy::default();
@@ -4834,7 +4834,10 @@ mod tests {
         // Triage session should NOT be in Failed state — background refresh errors
         // must not destroy the user's active triage session.
         assert!(
-            !matches!(state.triage().phase(), crate::triage::TriagePhase::Failed { .. }),
+            !matches!(
+                state.triage().phase(),
+                crate::triage::TriagePhase::Failed { .. }
+            ),
             "background refresh failure must not fail the triage session"
         );
     }
@@ -4911,7 +4914,10 @@ mod tests {
             "burst of 3 JobDones must yield exactly one triage load"
         );
         let request_id = extract_triage_load_request_id(&effects).unwrap();
-        assert_eq!(request_id, 1, "first dispatch gets request_id=1 from coordinator");
+        assert_eq!(
+            request_id, 1,
+            "first dispatch gets request_id=1 from coordinator"
+        );
     }
 
     #[test]
@@ -5057,8 +5063,7 @@ mod tests {
         let state = add_completed_job_for_test(state, "https://example.com/3");
 
         // Tick through the after-poll quiet window — poll still active, no dispatch.
-        let (state, effects_during_burst) =
-            advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize);
+        let (state, effects_during_burst) = advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize);
         assert_eq!(
             count_triage_loads(&effects_during_burst),
             0,
@@ -5114,8 +5119,7 @@ mod tests {
         let (state, _) = update(state, Msg::AllSourcesPollEnded);
 
         // Tick past quiet window — must NOT dispatch because job2 is still in flight.
-        let (state, effects) =
-            advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize + 5);
+        let (state, effects) = advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize + 5);
         assert_eq!(
             count_triage_loads(&effects),
             0,
@@ -5146,8 +5150,7 @@ mod tests {
         let (state, _) = update(state, Msg::AllSourcesPollEnded);
 
         // No jobs → no demand → no dispatch.
-        let (state, effects) =
-            advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize + 20);
+        let (state, effects) = advance_ticks(state, QUIET_TICKS_AFTER_POLL as usize + 20);
         assert_eq!(
             count_triage_loads(&effects),
             0,

@@ -105,7 +105,8 @@ pub fn build_concatenated_export(
     }
 
     let output_path = write_export_file(output_dir, &options.output_filename, &buffer)?;
-    let manifest_path = write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
+    let manifest_path =
+        write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
 
     Ok(ExportSummary {
         doc_count: docs.len(),
@@ -172,7 +173,8 @@ pub fn build_triage_archive(
 
     let archive_filename = archive_filename_for_range(since_utc, latest_fetched_utc(&docs));
     let output_path = write_export_file(output_dir, &archive_filename, &buffer)?;
-    let manifest_path = write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
+    let manifest_path =
+        write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
 
     Ok(ExportSummary {
         doc_count: docs.len(),
@@ -191,7 +193,11 @@ fn collect_archive_md_files(output_dir: &Path) -> Result<Vec<PathBuf>, ExportErr
     Ok(entries)
 }
 
-fn exclude_export_artifacts(entries: &mut Vec<PathBuf>, output_dir: &Path, options: &ExportOptions) {
+fn exclude_export_artifacts(
+    entries: &mut Vec<PathBuf>,
+    output_dir: &Path,
+    options: &ExportOptions,
+) {
     let output_artifact = output_dir.join(&options.output_filename);
     let manifest_artifact = options
         .manifest_filename

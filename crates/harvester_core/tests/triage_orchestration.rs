@@ -65,7 +65,13 @@ fn tick_until_triage_dispatch(mut state: AppState) -> (AppState, u64) {
 /// Advance ticks until dispatch, then apply the given articles.
 fn simulate_triage_loaded(state: AppState, articles: Vec<LoadedArticle>) -> AppState {
     let (state, request_id) = tick_until_triage_dispatch(state);
-    let (state, _) = update(state, Msg::TriageArticlesLoaded { request_id, articles });
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            articles,
+        },
+    );
     state
 }
 

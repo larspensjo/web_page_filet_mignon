@@ -429,8 +429,8 @@ impl Default for AppState {
             next_triage_request_id: 1,
             triage_in_flight_request_id: None,
             tick: 0,
-            pre_triage_coordinator:
-                crate::pre_triage_coordinator::PreTriageRefreshCoordinator::new(),
+            pre_triage_coordinator: crate::pre_triage_coordinator::PreTriageRefreshCoordinator::new(
+            ),
             pre_triage_refresh_eval_pending: false,
             pre_triage_refresh_eval_job_done: false,
         }
@@ -1061,10 +1061,7 @@ impl AppState {
             .collect()
     }
 
-    pub(crate) fn request_pre_triage_refresh_evaluation(
-        &mut self,
-        triggered_by_job_done: bool,
-    ) {
+    pub(crate) fn request_pre_triage_refresh_evaluation(&mut self, triggered_by_job_done: bool) {
         self.pre_triage_refresh_eval_pending = true;
         if triggered_by_job_done {
             self.pre_triage_refresh_eval_job_done = true;

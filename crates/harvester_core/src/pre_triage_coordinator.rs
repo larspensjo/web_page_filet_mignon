@@ -196,8 +196,7 @@ impl PreTriageRefreshCoordinator {
         // Dispatch.
         let request_id_raw = self.next_request_id;
         self.next_request_id += 1;
-        let request_id =
-            NonZeroU64::new(request_id_raw).expect("next_request_id is always >= 1");
+        let request_id = NonZeroU64::new(request_id_raw).expect("next_request_id is always >= 1");
 
         self.in_flight_request_id = Some(request_id);
         self.dirty = false;
@@ -245,16 +244,13 @@ mod tests {
     use super::*;
 
     fn urls(n: usize) -> Vec<String> {
-        (0..n)
-            .map(|i| format!("https://example.com/{i}"))
-            .collect()
+        (0..n).map(|i| format!("https://example.com/{i}")).collect()
     }
 
     #[test]
     fn empty_urls_returns_immediate_reset() {
         let mut coord = PreTriageRefreshCoordinator::new();
-        let result =
-            coord.schedule_refresh(vec![], PreTriageRefreshReason::JobDone, 0);
+        let result = coord.schedule_refresh(vec![], PreTriageRefreshReason::JobDone, 0);
         assert_eq!(result, PreTriageRefreshScheduleResult::ImmediateReset);
         assert!(!coord.is_dirty());
         assert!(coord.maybe_dispatch(10, false).is_none());
@@ -267,7 +263,9 @@ mod tests {
 
         // Not yet — quiet window not elapsed.
         assert!(coord.maybe_dispatch(0, false).is_none());
-        assert!(coord.maybe_dispatch(QUIET_TICKS_NORMAL - 1, false).is_none());
+        assert!(coord
+            .maybe_dispatch(QUIET_TICKS_NORMAL - 1, false)
+            .is_none());
 
         // Now eligible.
         let dispatch = coord
@@ -293,7 +291,9 @@ mod tests {
         assert_eq!(dispatch.request_id, 1);
 
         // No second dispatch immediately.
-        assert!(coord.maybe_dispatch(QUIET_TICKS_NORMAL + 3, false).is_none());
+        assert!(coord
+            .maybe_dispatch(QUIET_TICKS_NORMAL + 3, false)
+            .is_none());
     }
 
     #[test]
@@ -305,14 +305,16 @@ mod tests {
             .expect("first dispatch");
 
         // Arrive while in flight.
-        coord.schedule_refresh(urls(2), PreTriageRefreshReason::JobDone, QUIET_TICKS_NORMAL + 1);
+        coord.schedule_refresh(
+            urls(2),
+            PreTriageRefreshReason::JobDone,
+            QUIET_TICKS_NORMAL + 1,
+        );
 
         // In-flight — no second dispatch yet.
-        assert!(
-            coord
-                .maybe_dispatch(QUIET_TICKS_NORMAL + 1, false)
-                .is_none()
-        );
+        assert!(coord
+            .maybe_dispatch(QUIET_TICKS_NORMAL + 1, false)
+            .is_none());
 
         // Complete the in-flight request.
         let has_queued = coord.complete_request(dispatch.request_id);
@@ -333,11 +335,7 @@ mod tests {
 
         // Keep pushing earliest_dispatch_tick forward by re-scheduling every tick.
         for tick in 1..MAX_WAIT_TICKS {
-            coord.schedule_refresh(
-                urls(1),
-                PreTriageRefreshReason::JobDone,
-                tick,
-            );
+            coord.schedule_refresh(urls(1), PreTriageRefreshReason::JobDone, tick);
             assert!(
                 coord.maybe_dispatch(tick, false).is_none(),
                 "should not dispatch before MAX_WAIT_TICKS"
@@ -360,18 +358,14 @@ mod tests {
 
         // Poll still active — block even after quiet window.
         assert!(
-            coord
-                .maybe_dispatch(QUIET_TICKS_AFTER_POLL, true)
-                .is_none(),
+            coord.maybe_dispatch(QUIET_TICKS_AFTER_POLL, true).is_none(),
             "should not dispatch while poll is active"
         );
 
         // Poll ended but engine jobs still in flight — still blocked.
         coord.note_poll_sources_ended();
         assert!(
-            coord
-                .maybe_dispatch(QUIET_TICKS_AFTER_POLL, true)
-                .is_none(),
+            coord.maybe_dispatch(QUIET_TICKS_AFTER_POLL, true).is_none(),
             "should not dispatch with engine jobs in flight"
         );
 
@@ -385,11 +379,8 @@ mod tests {
     #[test]
     fn restore_completed_jobs_schedules_refresh() {
         let mut coord = PreTriageRefreshCoordinator::new();
-        let result = coord.schedule_refresh(
-            urls(3),
-            PreTriageRefreshReason::RestoreCompletedJobs,
-            0,
-        );
+        let result =
+            coord.schedule_refresh(urls(3), PreTriageRefreshReason::RestoreCompletedJobs, 0);
         assert_eq!(result, PreTriageRefreshScheduleResult::Scheduled);
         let dispatch = coord
             .maybe_dispatch(QUIET_TICKS_NORMAL, false)

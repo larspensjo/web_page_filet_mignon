@@ -14,9 +14,9 @@ use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
 use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmCommand, LlmHandle, PromptRegistry};
 use harvester_engine::{
-    build_triage_archive, is_confined_to, load_and_prepare_articles_filtered,
-    poll_curated_source, poll_file_source, scan_archive_article_metadata, EngineConfig,
-    EngineEvent, EngineHandle, ExportOptions, FetchSettings, SourceType, UrlPolicy,
+    build_triage_archive, is_confined_to, load_and_prepare_articles_filtered, poll_curated_source,
+    poll_file_source, scan_archive_article_metadata, EngineConfig, EngineEvent, EngineHandle,
+    ExportOptions, FetchSettings, SourceType, UrlPolicy,
 };
 
 use crate::effect_helpers::{
@@ -1469,10 +1469,7 @@ fn run_triage_refresh_load(
                 load_started.elapsed().as_millis(),
                 reason
             );
-            let _ = msg_tx.send(Msg::TriageArticlesLoadFailed {
-                request_id,
-                reason,
-            });
+            let _ = msg_tx.send(Msg::TriageArticlesLoadFailed { request_id, reason });
         }
     }
 }
