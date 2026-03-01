@@ -536,3 +536,17 @@ Context: `Archive` previously triggered engine `export.txt` for all markdown fil
 Change: `harvester_core` now emits `Effect::ArchiveRequested { ordered_urls, since_utc }` from reducer state (`briefing_triage_policy`, triage session, briefing checkpoint). `harvester_io` handles this effect by spawning a dedicated archive writer that calls new `harvester_engine::build_triage_archive`, writing `archive.md` with delimiter blocks plus full raw markdown documents ordered by triage priority (via reducer-provided URL order). Affected subsystems: `harvester_core`, `harvester_engine`, `harvester_io`.
 Evidence: `cargo test -p harvester_core`; `cargo test -p harvester_engine output`; `cargo test -p harvester_io archive_requested_writes_archive_markdown_for_selected_urls`; `cargo clippy --all-targets -- -D warnings`.
 Refs: crates/harvester_core/src/effect.rs, crates/harvester_core/src/update.rs, crates/harvester_engine/src/export.rs, crates/harvester_engine/tests/output.rs, crates/harvester_io/src/effect_runner.rs, crates/harvester_core/tests/update_behaviour.rs
+
+## 2026-03-01 - Clarified updater prompt as text-return contract
+Type: Decision
+Context: The updater prompt wording implied direct file overwrite, which could trigger tool-write behavior in CLI agents despite this script being designed as a text-return pipeline with local atomic writes.
+Change: Refined the updater contract in the plan-review loop prompt to explicitly require returned Markdown text and forbid file edits/permission requests. This aligns model behavior with script ownership of writes.
+Evidence: `scripts/Invoke-PlanReviewLoop.ps1` syntax parse check passed (`Parser::ParseFile` returned OK).
+Refs: scripts/Invoke-PlanReviewLoop.ps1
+
+## 2026-03-01 - Claude plan loop isolation and UTF-8 CLI encoding
+Type: Decision
+Context: Plan-review loop runs should be deterministic and not inherit prior Claude session state, and generated markdown had mojibake (`ΓÇö`) from an encoding mismatch in the CLI capture path.
+Change: Defaulted Claude CLI args to `--no-session-persistence` in the loop and set process native-command encoding to UTF-8 (`Console` input/output plus `$OutputEncoding`) before invoking model CLIs.
+Evidence: `scripts/Invoke-PlanReviewLoop.ps1` syntax parse check passed (`Parser::ParseFile` returned OK).
+Refs: scripts/Invoke-PlanReviewLoop.ps1

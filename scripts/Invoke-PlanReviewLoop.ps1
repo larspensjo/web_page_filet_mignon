@@ -72,7 +72,7 @@ $CliConfig = @{
     PrintArgs = @('-p')
     ModelArgs = { param($modelName) @('--model', $modelName) }
     DefaultModel = $null  # keep default (e.g. Sonnet 4.6)
-    ExtraArgs = @()       # e.g. @('--permission-mode','plan')
+    ExtraArgs = @('--no-session-persistence') # keep runs isolated/deterministic in -p mode
   }
 
   gemini = @{
@@ -93,7 +93,6 @@ $CliConfig = @{
 function New-ReviewPrompt {
   param(
     [Parameter(Mandatory)][string]$ReviewerModel,
-    [Parameter(Mandatory)][string]$PlanPath,
     [Parameter(Mandatory)][string]$PlanText
   )
 
@@ -102,6 +101,7 @@ You have the role of a senior software engineer performing a review of an implem
 
 Rules:
 - Output Markdown only.
+- Read-only review only. Do not edit files, do not claim to have edited files, and do not ask for write permissions.
 - Be concrete and actionable.
 - Focus on: correctness, missing requirements, sequencing, risks, test strategy, maintainability, and integration/rollout.
 - Prefer prioritized bullets; include rationale briefly.
@@ -118,8 +118,6 @@ Output headings:
 ## Suggested Improvements (prioritized)
 ## Questions / Assumptions
 ## Quick Checklist
-
-Plan path: $PlanPath
 
 --- BEGIN PLAN ---
 $PlanText
@@ -141,11 +139,12 @@ You are updating a software implementation plan based on a review.
 
 Rules:
 - Output the FULL UPDATED PLAN as Markdown only (no commentary).
+- Return text only. Do not edit files, do not claim to have edited files, and do not ask for write permissions.
 - Preserve useful structure; improve clarity and sequencing.
 - Ensure the plan remains actionable: steps, milestones, acceptance criteria, test plan.
 - Resolve issues raised in the review. If you intentionally do not apply a suggestion, incorporate a brief justification in the plan (e.g. under "Notes" or "Assumptions").
 
-The output will overwrite: $PlanPath
+The caller will overwrite the file using your returned Markdown text.
 
 Context:
 Updater model: $PlanModel
@@ -180,6 +179,13 @@ $LogTimestamps = $true
 
 function Resolve-FullPath([string]$Path) {
   (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+}
+
+function Set-Utf8ProcessEncoding {
+  $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+  [Console]::InputEncoding = $utf8NoBom
+  [Console]::OutputEncoding = $utf8NoBom
+  $global:OutputEncoding = $utf8NoBom
 }
 
 function Ensure-Dir([string]$DirPath) {
@@ -310,6 +316,7 @@ function Invoke-Cli {
 
 $RepoRoot = Resolve-FullPath $RepoRoot
 $PlanPath = Resolve-FullPath $PlanPath
+Set-Utf8ProcessEncoding
 
 if (-not $PlansDir) { $PlansDir = Join-Path $RepoRoot 'docs\plans' }
 Ensure-Dir $PlansDir
@@ -339,7 +346,7 @@ foreach ($reviewer in $reviewers) {
   $planText = Get-Content -LiteralPath $PlanPath -Raw -Encoding utf8
 
   # 1) Reviewer generates review
-  $reviewPrompt = New-ReviewPrompt -ReviewerModel $reviewer -PlanPath $PlanPath -PlanText $planText
+  $reviewPrompt = New-ReviewPrompt -ReviewerModel $reviewer -PlanText $planText
   Add-LogLine $logPath "Invoking reviewer '$reviewer'..."
 
   $reviewText = Invoke-Cli -Tool $reviewer -Prompt $reviewPrompt -WorkingDir $RepoRoot
