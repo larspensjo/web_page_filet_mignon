@@ -6,7 +6,7 @@ use crate::prompt_lab::{
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::LinkDownloadState;
-use crate::tabs::{AppTab, LeftTab, TrendCategory};
+use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
@@ -153,6 +153,8 @@ pub const DEFAULT_WINDOW_WIDTH: i32 = 960;
 pub struct LeftPaneView {
     /// Which left-pane tab is currently active.
     pub left_tab: LeftTab,
+    /// Scope filter applied to job-oriented tabs.
+    pub job_list_scope: JobListScope,
     /// Prompt Lab controls (shown when left_tab == PromptLab).
     pub prompt_lab: PromptLabView,
 }

@@ -4,9 +4,9 @@ use commanductui::{
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppTab, AppViewModel, JobFilterStatus, JobResultKind, JobRowView, LeftTab, LinkDownloadState,
-    LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendsTabView,
-    DEFAULT_JOBS_PANEL_WIDTH,
+    AppTab, AppViewModel, JobFilterStatus, JobListScope, JobResultKind, JobRowView, LeftTab,
+    LinkDownloadState, LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage,
+    TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
@@ -403,17 +403,21 @@ fn render_layout_section(
     );
     if view.left_pane.left_tab != tree_state.prev_left_tab {
         let visible_count = match view.left_pane.left_tab {
-            LeftTab::SinceCheckpoint => {
-                view.jobs.iter().filter(|j| j.is_since_checkpoint).count()
+            LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults => {
+                match view.left_pane.job_list_scope {
+                    JobListScope::SinceCheckpoint => {
+                        view.jobs.iter().filter(|j| j.is_since_checkpoint).count()
+                    }
+                    JobListScope::All => view.jobs.len(),
+                }
             }
-            LeftTab::JobList => view.jobs.len(),
             LeftTab::PromptLab => 0,
         };
         engine_info!(
-            "[jobs] left tab switched to {:?} — showing {} {}",
-            view.left_pane.left_tab,
+            "[jobs-ui] visible rows: {} (tab={:?}, scope={:?})",
             visible_count,
-            if visible_count == 1 { "entry" } else { "entries" },
+            view.left_pane.left_tab,
+            view.left_pane.job_list_scope,
         );
     }
     cmds.push(build_layout_command(
@@ -1358,7 +1362,7 @@ fn append_tree_commands(
 
 fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
     let jobs_iter: Box<dyn Iterator<Item = &JobRowView>> =
-        if view.left_pane.left_tab == LeftTab::SinceCheckpoint {
+        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
             Box::new(view.jobs.iter().filter(|j| j.is_since_checkpoint))
         } else {
             Box::new(view.jobs.iter())
@@ -2542,7 +2546,7 @@ mod tests {
                 if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR)
         }));
 
-        view.left_pane.left_tab = LeftTab::JobList;
+        view.left_pane.left_tab = LeftTab::Jobs;
         let _ = render(window_id, &view, &mut tree_state);
 
         view.left_pane.left_tab = LeftTab::PromptLab;

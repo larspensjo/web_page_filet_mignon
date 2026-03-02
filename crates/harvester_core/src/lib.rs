@@ -50,7 +50,7 @@ pub use state::{
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
 };
-pub use tabs::{AppTab, LeftTab, TrendCategory};
+pub use tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 pub use trends::{
     choose_display_label, compute_trends, normalize_entity_key, CategoryTrend, EntityLine,
     EntityTrendData, IsoWeek,

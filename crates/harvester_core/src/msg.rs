@@ -13,7 +13,7 @@ use crate::prompt_lab::{
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
-use crate::tabs::{AppTab, LeftTab, TrendCategory};
+use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
@@ -347,6 +347,10 @@ pub enum Msg {
     /// User selected a tab in the left pane.
     LeftTabSelected {
         tab: LeftTab,
+    },
+    /// User changed the job list scope (All vs SinceCheckpoint).
+    JobListScopeSet {
+        scope: JobListScope,
     },
     /// User selected a trend category in the Trends tab.
     TrendCategorySelected {

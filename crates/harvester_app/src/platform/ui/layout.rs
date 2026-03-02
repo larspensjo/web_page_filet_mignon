@@ -763,7 +763,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
             left_panel_width: initial_left_width,
             input_panel_visible: false,
             active_tab: AppTab::Summary,
-            left_tab: LeftTab::JobList,
+            left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
                 visible: false,
                 advanced_mode: false,
@@ -1198,14 +1198,14 @@ fn build_layout_rules(
             fixed_size: Some(28),
             margin: (0, 0, 2, 0),
         },
-        // Left content: Jobs (shown when left_tab == JobList or SinceCheckpoint).
+        // Left content: Jobs (shown when left_tab is a job-oriented tab).
         LayoutRule {
             control_id: PANEL_LEFT_JOBS,
             parent_control_id: Some(PANEL_LEFT),
             dock_style: {
                 let show = matches!(
                     left_tab,
-                    LeftTab::JobList | LeftTab::SinceCheckpoint
+                    LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults
                 );
                 if show { DockStyle::Fill } else { DockStyle::Top }
             },
@@ -1213,7 +1213,7 @@ fn build_layout_rules(
             fixed_size: {
                 let show = matches!(
                     left_tab,
-                    LeftTab::JobList | LeftTab::SinceCheckpoint
+                    LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults
                 );
                 if show { None } else { Some(0) }
             },
@@ -2430,7 +2430,7 @@ mod tests {
                 left_panel_width: 600,
                 input_panel_visible: true,
                 active_tab: AppTab::Summary,
-                left_tab: LeftTab::JobList,
+                left_tab: LeftTab::Jobs,
                 prompt_lab: PromptLabLayoutConfig {
                     visible: false,
                     advanced_mode: false,
@@ -2475,7 +2475,7 @@ mod tests {
                 left_panel_width: 600,
                 input_panel_visible: true,
                 active_tab: AppTab::Summary,
-                left_tab: LeftTab::JobList,
+                left_tab: LeftTab::Jobs,
                 prompt_lab: PromptLabLayoutConfig {
                     visible: false,
                     advanced_mode: false,

@@ -10,7 +10,7 @@ use crate::prompt_lab::{
 };
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
-use crate::tabs::{AppTab, LeftTab, TrendCategory};
+use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession};
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
@@ -339,6 +339,8 @@ pub struct AppState {
     active_tab: AppTab,
     /// Currently active left-pane tab.
     left_tab: LeftTab,
+    /// Scope filter for job-oriented tabs (All vs SinceCheckpoint).
+    job_list_scope: JobListScope,
     /// Currently active trend category in the Trends tab.
     active_trend_category: TrendCategory,
     /// Persisted entity index loaded from disk (or rebuilt from caches).
@@ -423,6 +425,7 @@ impl Default for AppState {
             llm_usage_by_model: BTreeMap::new(),
             active_tab: AppTab::default(),
             left_tab: LeftTab::default(),
+            job_list_scope: JobListScope::default(),
             active_trend_category: TrendCategory::default(),
             entity_index: None,
             entity_trend_data: None,
@@ -687,6 +690,7 @@ impl AppState {
             selected_url,
             left_pane: crate::view_model::LeftPaneView {
                 left_tab: self.left_tab,
+                job_list_scope: self.job_list_scope,
                 prompt_lab: crate::view_model::PromptLabView::from_state(
                     &self.prompt_lab,
                     &self.prompt_contexts,
@@ -1993,6 +1997,17 @@ impl AppState {
 
     pub fn left_tab(&self) -> LeftTab {
         self.left_tab
+    }
+
+    pub fn job_list_scope(&self) -> JobListScope {
+        self.job_list_scope
+    }
+
+    pub(crate) fn set_job_list_scope(&mut self, scope: JobListScope) {
+        if self.job_list_scope != scope {
+            self.job_list_scope = scope;
+            self.dirty = true;
+        }
     }
 
     pub(crate) fn set_active_trend_category(&mut self, category: TrendCategory) {

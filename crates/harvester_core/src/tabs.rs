@@ -40,8 +40,9 @@ impl AppTab {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LeftTab {
     #[default]
-    JobList,
-    SinceCheckpoint,
+    Jobs,
+    TriageReview,
+    TriageResults,
     PromptLab,
 }
 
@@ -49,24 +50,34 @@ impl LeftTab {
     /// Returns the zero-based index of this tab in the canonical order.
     pub fn to_index(self) -> usize {
         match self {
-            LeftTab::JobList => 0,
-            LeftTab::SinceCheckpoint => 1,
-            LeftTab::PromptLab => 2,
+            LeftTab::Jobs => 0,
+            LeftTab::TriageReview => 1,
+            LeftTab::TriageResults => 2,
+            LeftTab::PromptLab => 3,
         }
     }
 
     /// Returns the tab for the given zero-based index, or `None` if out of range.
     pub fn from_index(index: usize) -> Option<Self> {
         match index {
-            0 => Some(LeftTab::JobList),
-            1 => Some(LeftTab::SinceCheckpoint),
-            2 => Some(LeftTab::PromptLab),
+            0 => Some(LeftTab::Jobs),
+            1 => Some(LeftTab::TriageReview),
+            2 => Some(LeftTab::TriageResults),
+            3 => Some(LeftTab::PromptLab),
             _ => {
                 engine_warn!("[tabs] LeftTab::from_index: out-of-range index {index}");
                 None
             }
         }
     }
+}
+
+/// Scope filter for job-oriented left-pane tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JobListScope {
+    #[default]
+    All,
+    SinceCheckpoint,
 }
 
 /// The active trend category in the Trends tab.
@@ -130,7 +141,12 @@ mod tests {
 
     #[test]
     fn left_tab_round_trip() {
-        let variants = [LeftTab::JobList, LeftTab::SinceCheckpoint, LeftTab::PromptLab];
+        let variants = [
+            LeftTab::Jobs,
+            LeftTab::TriageReview,
+            LeftTab::TriageResults,
+            LeftTab::PromptLab,
+        ];
         for tab in variants {
             assert_eq!(LeftTab::from_index(tab.to_index()), Some(tab));
         }
@@ -138,7 +154,17 @@ mod tests {
 
     #[test]
     fn left_tab_from_index_out_of_range_returns_none() {
-        assert_eq!(LeftTab::from_index(3), None);
+        assert_eq!(LeftTab::from_index(4), None);
+    }
+
+    #[test]
+    fn left_tab_default_is_jobs() {
+        assert_eq!(LeftTab::default(), LeftTab::Jobs);
+    }
+
+    #[test]
+    fn job_list_scope_default_is_all() {
+        assert_eq!(JobListScope::default(), JobListScope::All);
     }
 
     #[test]

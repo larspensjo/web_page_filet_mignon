@@ -3,7 +3,7 @@ use std::borrow::ToOwned;
 use std::path::PathBuf;
 
 use crate::state::TriageCacheLookupResult;
-use crate::tabs::{AppTab, LeftTab};
+use crate::tabs::{AppTab, JobListScope, LeftTab};
 use crate::{
     briefing::{
         ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingThemeResult,
@@ -1058,6 +1058,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
         }
         Msg::LeftTabSelected { tab } => {
+            engine_info!("[jobs-ui] left tab selected: {:?}", tab);
             if tab == LeftTab::PromptLab {
                 state.open_prompt_lab();
             } else {
@@ -1077,7 +1078,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::PromptLabCloseRequested => {
             state.close_prompt_lab_internals();
-            state.set_left_tab(LeftTab::JobList);
+            state.set_left_tab(LeftTab::Jobs);
+            Vec::new()
+        }
+        Msg::JobListScopeSet { scope } => {
+            engine_info!(
+                "[jobs-ui] scope set: {}",
+                match scope {
+                    JobListScope::All => "all",
+                    JobListScope::SinceCheckpoint => "since-checkpoint",
+                }
+            );
+            state.set_job_list_scope(scope);
             Vec::new()
         }
         Msg::PromptLabStageSelected { stage } => {
