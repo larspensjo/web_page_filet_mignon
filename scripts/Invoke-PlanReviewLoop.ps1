@@ -293,7 +293,9 @@ function Invoke-Cli {
       }
     }
 
-    Write-Verbose "Invoking CLI '$Tool' with args: $($cliArgs -join ' ')"
+    $argStr = ($cliArgs -join ' ')
+    if ($argStr.Length -gt 120) { $argStr = $argStr.Substring(0, 117) + '...' }
+    Write-Verbose "Invoking CLI '$Tool' with args: $argStr"
     $out = & $Tool @cliArgs
     $exit = $LASTEXITCODE
 
