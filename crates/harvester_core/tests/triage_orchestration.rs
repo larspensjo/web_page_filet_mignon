@@ -14,6 +14,22 @@ fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
     update(state, Msg::UrlsSubmitted)
 }
 
+fn apply_pending_pre_triage_refresh_evaluation(mut state: AppState) -> AppState {
+    if let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request() {
+        let ordered_urls = state.ordered_completed_job_urls_snapshot();
+        let (next, _) = update(
+            state,
+            Msg::EvaluatePreTriageRefresh {
+                ordered_urls,
+                triggered_by_job_done,
+            },
+        );
+        next
+    } else {
+        state
+    }
+}
+
 fn add_completed_job(state: AppState, url: &str) -> (AppState, u64) {
     let (state, effects) = submit_urls(state, &format!("{url}\n"));
     let job_id = effects
@@ -33,6 +49,7 @@ fn add_completed_job(state: AppState, url: &str) -> (AppState, u64) {
             fetched_utc: None,
         },
     );
+    let state = apply_pending_pre_triage_refresh_evaluation(state);
     (state, job_id)
 }
 

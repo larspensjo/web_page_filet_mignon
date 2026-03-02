@@ -5061,7 +5061,7 @@ mod tests {
                 fetched_utc: None,
             },
         );
-        state
+        apply_pending_pre_triage_refresh_evaluation(state)
     }
 
     /// Core poll sequence: multiple JobDones during a burst yield exactly one
