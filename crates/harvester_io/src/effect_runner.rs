@@ -1122,6 +1122,7 @@ impl EffectRunner {
                                 result: JobResultKind::Success,
                                 content_preview: outcome.content_preview,
                                 extracted_links: outcome.extracted_links,
+                                fetched_utc: outcome.fetched_utc,
                             },
                             Err(failure_kind) => {
                                 let reason = failure_kind.to_string();
@@ -1131,6 +1132,7 @@ impl EffectRunner {
                                     result: JobResultKind::Failed { reason },
                                     content_preview: None,
                                     extracted_links: Vec::new(),
+                                    fetched_utc: None,
                                 }
                             }
                         };
@@ -1218,6 +1220,7 @@ impl EffectRunner {
                     result: JobResultKind::Failed { reason },
                     content_preview: None,
                     extracted_links: Vec::new(),
+                    fetched_utc: None,
                 });
             }
             Effect::DownloadLinkedPage {

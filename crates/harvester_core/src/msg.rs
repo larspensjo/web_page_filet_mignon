@@ -53,6 +53,7 @@ pub enum Msg {
         result: crate::JobResultKind,
         content_preview: Option<String>,
         extracted_links: Vec<ExtractedLink>,
+        fetched_utc: Option<String>,
     },
     LinkToggleRequested {
         job_id: crate::JobId,

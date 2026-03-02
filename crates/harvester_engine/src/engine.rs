@@ -428,11 +428,12 @@ async fn run_job(
         return Err(failure);
     }
 
+    let fetched_utc_str = (config.fetched_utc)();
     let (token_count, doc) = build_markdown_document(
         fetch_output.metadata.final_url.as_str(),
         extracted.title.as_deref(),
         &decoded.encoding_label,
-        &(config.fetched_utc)(),
+        &fetched_utc_str,
         &markdown,
         config.token_counter.as_ref(),
     );
@@ -462,6 +463,7 @@ async fn run_job(
                     bytes_written: Some(doc_for_write.len() as u64),
                     content_preview: Some(preview_content),
                     extracted_links: conversion.links,
+                    fetched_utc: Some(fetched_utc_str),
                 }),
             });
             Ok((doc_for_write.len() as u64, token_count))

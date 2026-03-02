@@ -13,6 +13,8 @@ struct PersistedJob {
     bytes: Option<u64>,
     #[serde(default)]
     links: Vec<PersistedLink>,
+    #[serde(default)]
+    fetched_utc: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +80,7 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
                     downloaded_path: sanitize_downloaded_path(link.downloaded_path),
                 })
                 .collect(),
+            fetched_utc: job.fetched_utc,
         })
         .collect();
 
@@ -197,6 +200,7 @@ pub fn persist_runtime_state(
                         downloaded_path: link.downloaded_path.clone(),
                     })
                     .collect(),
+                fetched_utc: job.fetched_utc.clone(),
             })
             .collect(),
         pre_triage_overrides: pre_triage_overrides
@@ -575,6 +579,7 @@ mod tests {
                     downloaded_path: Some("linked/alpha.md".to_string()),
                 },
             ],
+            fetched_utc: None,
         }];
 
         persist_completed_jobs(&state_path(temp.path()), &snapshot);

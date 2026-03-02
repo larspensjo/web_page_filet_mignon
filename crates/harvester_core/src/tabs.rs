@@ -41,6 +41,7 @@ impl AppTab {
 pub enum LeftTab {
     #[default]
     JobList,
+    SinceCheckpoint,
     PromptLab,
 }
 
@@ -49,7 +50,8 @@ impl LeftTab {
     pub fn to_index(self) -> usize {
         match self {
             LeftTab::JobList => 0,
-            LeftTab::PromptLab => 1,
+            LeftTab::SinceCheckpoint => 1,
+            LeftTab::PromptLab => 2,
         }
     }
 
@@ -57,7 +59,8 @@ impl LeftTab {
     pub fn from_index(index: usize) -> Option<Self> {
         match index {
             0 => Some(LeftTab::JobList),
-            1 => Some(LeftTab::PromptLab),
+            1 => Some(LeftTab::SinceCheckpoint),
+            2 => Some(LeftTab::PromptLab),
             _ => {
                 engine_warn!("[tabs] LeftTab::from_index: out-of-range index {index}");
                 None
@@ -127,7 +130,7 @@ mod tests {
 
     #[test]
     fn left_tab_round_trip() {
-        let variants = [LeftTab::JobList, LeftTab::PromptLab];
+        let variants = [LeftTab::JobList, LeftTab::SinceCheckpoint, LeftTab::PromptLab];
         for tab in variants {
             assert_eq!(LeftTab::from_index(tab.to_index()), Some(tab));
         }
@@ -135,7 +138,7 @@ mod tests {
 
     #[test]
     fn left_tab_from_index_out_of_range_returns_none() {
-        assert_eq!(LeftTab::from_index(2), None);
+        assert_eq!(LeftTab::from_index(3), None);
     }
 
     #[test]

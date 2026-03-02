@@ -227,6 +227,7 @@ mod tests {
                 tokens: Some(1),
                 bytes: Some(1),
                 links: vec![],
+                fetched_utc: None,
             }],
             pre_triage_overrides: HashMap::new(),
         };

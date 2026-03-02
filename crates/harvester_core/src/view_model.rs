@@ -949,6 +949,7 @@ pub struct JobRowView {
     pub summary_title: Option<String>,
     pub filter_status: Option<JobFilterStatus>,
     pub has_analysis: bool,
+    pub is_since_checkpoint: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

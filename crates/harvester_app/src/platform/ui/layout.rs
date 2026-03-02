@@ -145,7 +145,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: TAB_BAR_LEFT,
         parent_control_id: Some(PANEL_LEFT),
-        items: vec!["Jobs".to_string(), "Prompt Lab".to_string()],
+        items: vec![
+            "Jobs".to_string(),
+            "Since Checkpoint".to_string(),
+            "Prompt Lab".to_string(),
+        ],
     });
     commands.push(PlatformCommand::SetTabBarStyle {
         window_id,
@@ -1194,13 +1198,25 @@ fn build_layout_rules(
             fixed_size: Some(28),
             margin: (0, 0, 2, 0),
         },
-        // Left content: Jobs (shown when left_tab == JobList).
+        // Left content: Jobs (shown when left_tab == JobList or SinceCheckpoint).
         LayoutRule {
             control_id: PANEL_LEFT_JOBS,
             parent_control_id: Some(PANEL_LEFT),
-            dock_style: left_tab_dock(LeftTab::JobList),
+            dock_style: {
+                let show = matches!(
+                    left_tab,
+                    LeftTab::JobList | LeftTab::SinceCheckpoint
+                );
+                if show { DockStyle::Fill } else { DockStyle::Top }
+            },
             order: 1,
-            fixed_size: left_tab_size(LeftTab::JobList),
+            fixed_size: {
+                let show = matches!(
+                    left_tab,
+                    LeftTab::JobList | LeftTab::SinceCheckpoint
+                );
+                if show { None } else { Some(0) }
+            },
             margin: (0, 0, 0, 0),
         },
         LayoutRule {

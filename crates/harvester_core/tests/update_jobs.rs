@@ -23,6 +23,7 @@ fn state_with_single_link() -> AppState {
                 text: Some("Example".to_string()),
                 kind: LinkKind::Hyperlink,
             }],
+            fetched_utc: None,
         },
     );
     state
@@ -75,6 +76,7 @@ fn urls_pasted_trims_and_ignores_empty() {
             result: JobResultKind::Success,
             content_preview: None,
             extracted_links: Vec::new(),
+            fetched_utc: None,
         },
     );
     let job1_done = next
@@ -179,6 +181,7 @@ fn job_done_attaches_link_records_and_dedupes() {
                     kind: LinkKind::Hyperlink,
                 },
             ],
+            fetched_utc: None,
         },
     );
     let links = state.job_links(1).expect("job links available");

@@ -224,6 +224,7 @@ pub struct CompletedJobSnapshot {
     pub tokens: Option<u32>,
     pub bytes: Option<u64>,
     pub links: Vec<LinkSnapshotRecord>,
+    pub fetched_utc: Option<String>,
 }
 
 /// Maximum allowed value for any per-flow in-flight limit.
@@ -535,8 +536,16 @@ impl AppState {
     }
 
     pub fn view(&self) -> AppViewModel {
-        let mut jobs: Vec<JobRowView> =
-            self.jobs.iter().map(|(id, job)| job.to_view(*id)).collect();
+        let since = self.briefing_since_utc();
+        let mut jobs: Vec<JobRowView> = self
+            .jobs
+            .iter()
+            .map(|(id, job)| {
+                let is_since =
+                    harvester_engine::since_filter::passes_since_filter_dt(job.fetched_utc, since);
+                job.to_view(*id, is_since)
+            })
+            .collect();
         for job_view in &mut jobs {
             if let Some(result) = self.triage.result_for_url(&job_view.url) {
                 job_view.triage_annotation = Some(TriageAnnotationView {
@@ -1111,6 +1120,7 @@ impl AppState {
                         },
                     })
                     .collect(),
+                fetched_utc: job.fetched_utc.map(|dt| dt.to_rfc3339()),
             })
             .collect()
     }
@@ -1455,7 +1465,11 @@ impl AppState {
                 tokens,
                 bytes,
                 links: link_snapshots,
+                fetched_utc: snapshot_fetched_utc,
             } = entry;
+            let restored_fetched_utc = snapshot_fetched_utc
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc));
             let job_id = self.next_job_id;
             self.next_job_id += 1;
             self.jobs.insert(
@@ -1469,6 +1483,7 @@ impl AppState {
                     content_preview: None,
                     preview_quality: None,
                     links: Vec::new(),
+                    fetched_utc: restored_fetched_utc,
                 },
             );
             let extracted_links: Vec<ExtractedLink> = link_snapshots
@@ -1749,6 +1764,7 @@ impl AppState {
                     content_preview: None,
                     preview_quality: None,
                     links: Vec::new(),
+                    fetched_utc: None,
                 },
             );
             enqueued.push((job_id, url.clone()));
@@ -1845,10 +1861,14 @@ impl AppState {
         result: JobResultKind,
         content_preview: Option<String>,
         extracted_links: Vec<ExtractedLink>,
+        msg_fetched_utc: Option<String>,
     ) {
         let job_updated = if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = Stage::Done;
             job.outcome = Some(result);
+            job.fetched_utc = msg_fetched_utc
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+                .map(|dt| dt.with_timezone(&chrono::Utc));
             if matches!(job.outcome.as_ref(), Some(JobResultKind::Success)) {
                 if let Some(content) = content_preview {
                     job.set_preview_content(content);
@@ -1980,13 +2000,18 @@ impl AppState {
         self.entity_trend_data.as_ref()
     }
 
+    /// Set the active left tab unconditionally.
+    pub(crate) fn set_left_tab(&mut self, tab: LeftTab) {
+        self.select_left_tab(tab);
+    }
+
     pub(crate) fn open_prompt_lab(&mut self) {
         self.select_left_tab(LeftTab::PromptLab);
         self.prompt_lab.open();
     }
 
-    pub(crate) fn close_prompt_lab(&mut self) {
-        self.select_left_tab(LeftTab::JobList);
+    /// Close Prompt Lab internal state (panel state, etc.) without changing `left_tab`.
+    pub(crate) fn close_prompt_lab_internals(&mut self) {
         self.prompt_lab.close();
     }
 
@@ -2187,10 +2212,11 @@ struct JobState {
     content_preview: Option<String>,
     preview_quality: Option<PreviewQuality>,
     links: Vec<LinkRecord>,
+    fetched_utc: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl JobState {
-    fn to_view(&self, id: JobId) -> JobRowView {
+    fn to_view(&self, id: JobId, is_since_checkpoint: bool) -> JobRowView {
         let links = build_link_rows(&self.links);
         let downloaded_link_count = self
             .links
@@ -2212,6 +2238,7 @@ impl JobState {
             summary_title: None,
             filter_status: None,
             has_analysis: false,
+            is_since_checkpoint,
         }
     }
 
@@ -2619,6 +2646,7 @@ mod tests {
             JobResultKind::Success,
             Some("preview content".to_string()),
             Vec::new(),
+            None,
         );
         let job = state.jobs.get(&1).expect("job exists");
         assert_eq!(job.content_preview(), Some("preview content"));
@@ -2695,6 +2723,7 @@ mod tests {
             },
             Some("ignored".to_string()),
             Vec::new(),
+            None,
         );
         let job = state.jobs.get(&2).expect("job exists");
         assert_eq!(job.content_preview(), None);
@@ -2864,6 +2893,7 @@ mod tests {
                 result: JobResultKind::Success,
                 content_preview: Some("final".to_string()),
                 extracted_links: Vec::new(),
+                fetched_utc: None,
             },
         );
 
@@ -2929,6 +2959,7 @@ mod tests {
                 result: JobResultKind::Success,
                 content_preview: None,
                 extracted_links: links,
+                fetched_utc: None,
             },
         );
 

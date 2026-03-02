@@ -7,6 +7,7 @@ How to use:
 - Add an entry for every bug fix, including lessons learned and prevention.
 - Add an entry for important decisions and tradeoffs.
 - Keep entries concise and reference concrete artifacts.
+- New entries goes to the end of the file
 
 ## Entry Template
 
@@ -557,3 +558,12 @@ Context: Review outputs can include incorrect or out-of-scope suggestions, and b
 Change: Strengthened the plan-updater prompt contract to require claim-by-claim validation against the current plan and source code, apply only correct/relevant suggestions, and document rejected suggestions with rationale in `Notes`.
 Evidence: `scripts/Invoke-PlanReviewLoop.ps1` syntax parse check passed (`Parser::ParseFile` returned OK).
 Refs: scripts/Invoke-PlanReviewLoop.ps1
+
+## 2026-03-02 - Since Checkpoint Tab
+Type: Implementation
+Context: Users needed a way to see only articles fetched since the last briefing checkpoint without scrolling through older jobs. Archive and Briefing already had this filter; the UI had no equivalent.
+Change: Added a new `SinceCheckpoint` left-pane tab. Threaded `fetched_utc` from the engine through `JobOutcome` → `Msg::JobDone` → `JobState` → `JobRowView`. Persisted via `PersistedJob` for restart correctness. Fixed reducer tab-selection logic that was overriding any non-PromptLab tab to `JobList` by splitting `close_prompt_lab()` into `close_prompt_lab_internals()` (tab-selection concern) and `set_left_tab()`. Extracted shared `passes_since_filter_dt` / `passes_since_filter_str` helpers into `harvester_engine/src/since_filter.rs` to keep semantics consistent across Archive, Briefing, and the new tab while respecting the crate dependency graph.
+Inclusion semantics: Since Checkpoint intentionally includes in-flight and failed jobs (fetched_utc = None → include by default), unlike Archive/Briefing which only see completed on-disk articles. This gives users visibility into work in progress.
+Evidence: `cargo build --all-targets` clean. 280 harvester_core tests pass (1 pre-existing failure in `poll_burst_waits_for_engine_jobs_to_drain_before_dispatching` unrelated to this change). 95 harvester_engine, 59 harvester_io, 0 harvester_app lib test failures. `cargo clippy --all-targets -- -D warnings` clean.
+Lessons Learned: `JobState` constructors exist in multiple inline test functions scattered across state.rs — track all callsites when extending a struct. The `close_prompt_lab()` function conflated two concerns (tab selection + lab state); splitting them made `Msg::LeftTabSelected` correctly handle any tab without side-effect overrides.
+Refs: crates/harvester_engine/src/since_filter.rs, crates/harvester_core/src/tabs.rs, crates/harvester_core/src/state.rs, crates/harvester_core/src/update.rs, crates/harvester_app/src/platform/ui/render.rs, docs/plans/Plan.since-checkpoint-tab-design.md

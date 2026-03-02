@@ -891,6 +891,7 @@ mod tests {
                     text: Some("Example".to_string()),
                     kind: LinkKind::Hyperlink,
                 }],
+                fetched_utc: None,
             },
         );
         let shared = SharedState { state };

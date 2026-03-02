@@ -46,6 +46,7 @@ pub struct JobOutcome {
     pub bytes_written: Option<u64>,
     pub content_preview: Option<String>,
     pub extracted_links: Vec<ExtractedLink>,
+    pub fetched_utc: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

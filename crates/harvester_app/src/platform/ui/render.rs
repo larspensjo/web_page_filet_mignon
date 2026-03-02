@@ -401,6 +401,21 @@ fn render_layout_section(
         tree_state.prev_active_tab,
         view.right_pane.active_tab,
     );
+    if view.left_pane.left_tab != tree_state.prev_left_tab {
+        let visible_count = match view.left_pane.left_tab {
+            LeftTab::SinceCheckpoint => {
+                view.jobs.iter().filter(|j| j.is_since_checkpoint).count()
+            }
+            LeftTab::JobList => view.jobs.len(),
+            LeftTab::PromptLab => 0,
+        };
+        engine_info!(
+            "[jobs] left tab switched to {:?} — showing {} {}",
+            view.left_pane.left_tab,
+            visible_count,
+            if visible_count == 1 { "entry" } else { "entries" },
+        );
+    }
     cmds.push(build_layout_command(
         window_id,
         LayoutConfig {
@@ -1342,8 +1357,13 @@ fn append_tree_commands(
 }
 
 fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
-    view.jobs
-        .iter()
+    let jobs_iter: Box<dyn Iterator<Item = &JobRowView>> =
+        if view.left_pane.left_tab == LeftTab::SinceCheckpoint {
+            Box::new(view.jobs.iter().filter(|j| j.is_since_checkpoint))
+        } else {
+            Box::new(view.jobs.iter())
+        };
+    jobs_iter
         .map(|job| {
             let mut children = Vec::new();
             if job.link_count > 0 {
@@ -1724,6 +1744,7 @@ mod tests {
             summary_title: None,
             filter_status: None,
             has_analysis: false,
+            is_since_checkpoint: false,
         }
     }
 
@@ -1904,6 +1925,7 @@ mod tests {
             summary_title: None,
             filter_status: None,
             has_analysis: false,
+            is_since_checkpoint: false,
         };
         let view = make_view(vec![job]);
         let commands = render(window_id, &view, &mut tree_state);

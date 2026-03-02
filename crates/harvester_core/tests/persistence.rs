@@ -41,6 +41,7 @@ fn completed_jobs_can_be_restored_for_resume() {
             result: JobResultKind::Success,
             content_preview: None,
             extracted_links: Vec::new(),
+            fetched_utc: None,
         },
     );
 
@@ -68,6 +69,7 @@ fn restored_jobs_are_deduped_on_paste() {
             tokens: None,
             bytes: None,
             links: Vec::new(),
+            fetched_utc: None,
         }]),
     );
 
@@ -87,6 +89,7 @@ fn restore_completed_job_records_downloaded_link_paths() {
             url: "https://downloaded.example".to_string(),
             downloaded_path: Some("linked/123.md".to_string()),
         }],
+        fetched_utc: None,
     }];
 
     let (state, _) = update(AppState::new(), Msg::RestoreCompletedJobs(snapshot));

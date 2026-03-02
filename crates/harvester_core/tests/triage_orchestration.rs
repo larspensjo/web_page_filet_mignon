@@ -30,6 +30,7 @@ fn add_completed_job(state: AppState, url: &str) -> (AppState, u64) {
             result: JobResultKind::Success,
             content_preview: None,
             extracted_links: Vec::new(),
+            fetched_utc: None,
         },
     );
     (state, job_id)

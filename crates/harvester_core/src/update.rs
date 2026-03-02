@@ -132,8 +132,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             result,
             content_preview,
             extracted_links,
+            fetched_utc,
         } => {
-            state.apply_done(job_id, result, content_preview, extracted_links);
+            state.apply_done(job_id, result, content_preview, extracted_links, fetched_utc);
             state.request_pre_triage_refresh_evaluation(true);
             Vec::new()
         }
@@ -1049,7 +1050,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if tab == LeftTab::PromptLab {
                 state.open_prompt_lab();
             } else {
-                state.close_prompt_lab();
+                state.close_prompt_lab_internals();
+                state.set_left_tab(tab);
             }
             Vec::new()
         }
@@ -1063,8 +1065,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::PromptLabCloseRequested => {
-            // Bridge: close selects the Summary tab as the fallback.
-            state.close_prompt_lab();
+            state.close_prompt_lab_internals();
+            state.set_left_tab(LeftTab::JobList);
             Vec::new()
         }
         Msg::PromptLabStageSelected { stage } => {
@@ -2992,6 +2994,7 @@ mod tests {
             tokens: None,
             bytes: None,
             links: vec![],
+            fetched_utc: None,
         }]);
         // Set up briefing with completed summary for this URL
         let mut briefing = crate::briefing::BriefingSession::new_loading(None);
@@ -3046,6 +3049,7 @@ mod tests {
             tokens: None,
             bytes: None,
             links: vec![],
+            fetched_utc: None,
         }]);
         let job_id = state.view().jobs.first().map(|j| j.job_id).unwrap_or(1);
         state.select_job(job_id);
@@ -4740,6 +4744,7 @@ mod tests {
                 result: JobResultKind::Success,
                 content_preview: None,
                 extracted_links: Vec::new(),
+                fetched_utc: None,
             },
         );
         apply_pending_pre_triage_refresh_evaluation(state)
@@ -5042,6 +5047,7 @@ mod tests {
                 result: crate::JobResultKind::Success,
                 content_preview: None,
                 extracted_links: Vec::new(),
+                fetched_utc: None,
             },
         );
         state
