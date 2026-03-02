@@ -293,6 +293,7 @@ function Invoke-Cli {
       }
     }
 
+    Write-Verbose "Invoking CLI '$Tool' with args: $($cliArgs -join ' ')"
     $out = & $Tool @cliArgs
     $exit = $LASTEXITCODE
 
