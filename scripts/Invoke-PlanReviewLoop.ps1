@@ -1,8 +1,13 @@
 ﻿<#
-Two-pass plan review + revision loop across 3 CLIs:
+Plan review + revision loop across 3 CLIs:
 - codex  : review (gpt-5.3-codex, reasoning=medium)
 - claude : update plan (default model, non-interactive via -p)
 - gemini : review (gemini-3.1-pro-preview)
+
+Usage:
+  -Reviewers codex,claude               # two reviewers (one pass each)
+  -Reviewers claude                     # single reviewer
+  -Reviewers codex,claude,codex,claude  # repeated sequence
 
 Design goals:
 - Configurable: all knobs at top (models, reasoning, prompts, file naming).
@@ -21,15 +26,11 @@ param(
   [ValidateSet('claude','codex','gemini')]
   [string]$PlanModel,
 
-  # First reviewer model
+  # Ordered list of reviewer models (1 or more; may repeat for multi-pass)
   [Parameter(Mandatory)]
   [ValidateSet('claude','codex','gemini')]
-  [string]$ReviewModel1,
-
-  # Second reviewer model
-  [Parameter(Mandatory)]
-  [ValidateSet('claude','codex','gemini')]
-  [string]$ReviewModel2,
+  [ValidateCount(1, 99)]
+  [string[]]$Reviewers,
 
   # Root directory for CLI execution (working dir / repo root)
   [string]$RepoRoot = (Get-Location).Path,
@@ -334,16 +335,16 @@ Started: $(Get-Date)
 PlanPath: $PlanPath
 PlanId: $planId
 PlanModel: $PlanModel
-Reviewers: $ReviewModel1, $ReviewModel2
+Reviewers: $($Reviewers -join ', ')
 RepoRoot: $RepoRoot
 PlansDir: $PlansDir
 
 "@
 
-$reviewers = @($ReviewModel1, $ReviewModel2)
+$hasDuplicates = @($Reviewers | Sort-Object -Unique).Count -lt $Reviewers.Count
 $round = 0
 
-foreach ($reviewer in $reviewers) {
+foreach ($reviewer in $Reviewers) {
   $round++
 
   Add-LogLine $logPath "=== Round ${round}: reviewer=$reviewer, updater=$PlanModel ==="
@@ -356,7 +357,11 @@ foreach ($reviewer in $reviewers) {
 
   $reviewText = Invoke-Cli -Tool $reviewer -Prompt $reviewPrompt -WorkingDir $RepoRoot
 
-  $reviewFileName = & $FileNamePatterns.ReviewName $planId $reviewer
+  $reviewFileName = if ($hasDuplicates) {
+    & $FileNamePatterns.ReviewName $planId "R$round.$reviewer"
+  } else {
+    & $FileNamePatterns.ReviewName $planId $reviewer
+  }
   $reviewPath = Join-Path $PlansDir $reviewFileName
   Write-AtomicUtf8 -Path $reviewPath -Content $reviewText
   Add-LogLine $logPath "Saved review: $reviewPath"
