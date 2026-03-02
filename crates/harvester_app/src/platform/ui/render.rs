@@ -1360,6 +1360,48 @@ fn append_tree_commands(
     tree_state.check_state_by_id = snapshot.check_state_by_id;
 }
 
+enum JobRowPresentation {
+    Jobs,
+    TriageReview,
+    TriageResults,
+}
+
+fn job_row_presentation(tab: LeftTab) -> JobRowPresentation {
+    match tab {
+        LeftTab::Jobs => JobRowPresentation::Jobs,
+        LeftTab::TriageReview => JobRowPresentation::TriageReview,
+        LeftTab::TriageResults => JobRowPresentation::TriageResults,
+        LeftTab::PromptLab => JobRowPresentation::Jobs,
+    }
+}
+
+fn job_row_check_policy(tab: LeftTab, is_pre_triage_reviewing: bool, job: &JobRowView) -> CheckState {
+    match tab {
+        LeftTab::TriageReview if is_pre_triage_reviewing => match job.filter_status {
+            Some(JobFilterStatus::HardExcluded { .. })
+            | Some(JobFilterStatus::ManuallyExcluded) => CheckState::Unchecked,
+            Some(JobFilterStatus::ReviewNeeded { .. })
+            | Some(JobFilterStatus::ManuallyIncluded)
+            | Some(JobFilterStatus::AutoIncluded) => CheckState::Checked,
+            None => CheckState::Unchecked,
+        },
+        _ => CheckState::Unchecked,
+    }
+}
+
+fn job_row_style_policy(tab: LeftTab, has_summary: bool) -> Option<StyleId> {
+    match tab {
+        LeftTab::Jobs => {
+            if has_summary {
+                None
+            } else {
+                Some(StyleId::TreeItemDisabled)
+            }
+        }
+        LeftTab::TriageReview | LeftTab::TriageResults | LeftTab::PromptLab => None,
+    }
+}
+
 fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
     let jobs_iter: Box<dyn Iterator<Item = &JobRowView>> =
         if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
@@ -1367,6 +1409,8 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
         } else {
             Box::new(view.jobs.iter())
         };
+    let tab = view.left_pane.left_tab;
+    let presentation = job_row_presentation(tab);
     jobs_iter
         .map(|job| {
             let mut children = Vec::new();
@@ -1380,35 +1424,21 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
                     style_override: None,
                 });
             }
+            let text = match presentation {
+                JobRowPresentation::Jobs => format_job_row_legacy(job),
+                JobRowPresentation::TriageReview => format_job_row_triage_review(job),
+                JobRowPresentation::TriageResults => format_job_row_triage_results(job),
+            };
             TreeItemDescriptor {
                 id: job_tree_item_id(job.job_id),
-                text: format_job_row(job),
+                text,
                 is_folder: true,
-                state: job_check_state(view, job),
+                state: job_row_check_policy(tab, view.is_pre_triage_reviewing, job),
                 children,
-                style_override: if job.has_summary {
-                    None
-                } else {
-                    Some(StyleId::TreeItemDisabled)
-                },
+                style_override: job_row_style_policy(tab, job.has_summary),
             }
         })
         .collect()
-}
-
-fn job_check_state(view: &AppViewModel, job: &JobRowView) -> CheckState {
-    if !view.is_pre_triage_reviewing {
-        return CheckState::Unchecked;
-    }
-    match job.filter_status {
-        Some(JobFilterStatus::HardExcluded { .. }) | Some(JobFilterStatus::ManuallyExcluded) => {
-            CheckState::Unchecked
-        }
-        Some(JobFilterStatus::ReviewNeeded { .. })
-        | Some(JobFilterStatus::ManuallyIncluded)
-        | Some(JobFilterStatus::AutoIncluded) => CheckState::Checked,
-        None => CheckState::Unchecked,
-    }
 }
 
 fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
@@ -1444,7 +1474,8 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
     children
 }
 
-fn format_job_row(job: &JobRowView) -> String {
+/// Jobs tab: preserves the original pre/post-triage row layout.
+fn format_job_row_legacy(job: &JobRowView) -> String {
     let filter_prefix = match &job.filter_status {
         Some(JobFilterStatus::HardExcluded { .. }) => "[AUTO EXCLUDED] ",
         Some(JobFilterStatus::ReviewNeeded { .. }) => "[REVIEW] ",
@@ -1513,6 +1544,56 @@ fn format_job_row(job: &JobRowView) -> String {
         )
     };
     format!("{filter_prefix}{base}")
+}
+
+/// Triage Review tab: shows the URL/title and review status cue.
+fn format_job_row_triage_review(job: &JobRowView) -> String {
+    let review_status = match &job.filter_status {
+        Some(JobFilterStatus::HardExcluded { .. }) => "[AUTO EXCLUDED] ",
+        Some(JobFilterStatus::ReviewNeeded { .. }) => "[REVIEW NEEDED] ",
+        Some(JobFilterStatus::ManuallyExcluded) => "[EXCLUDED] ",
+        Some(JobFilterStatus::ManuallyIncluded) => "[INCLUDED] ",
+        Some(JobFilterStatus::AutoIncluded) => "[AUTO INCLUDED] ",
+        None => "",
+    };
+    let label = job_display_label(job);
+    format!("{review_status}{label}")
+}
+
+/// Triage Results tab: shows triage annotation (priority/category/tags) prominently.
+fn format_job_row_triage_results(job: &JobRowView) -> String {
+    if let Some(annotation) = &job.triage_annotation {
+        let tag_suffix = if annotation.tags.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", annotation.tags.join(", "))
+        };
+        let label = job_display_label(job);
+        format!(
+            "P{} [{}]{} — {}",
+            annotation.priority, annotation.category, tag_suffix, label
+        )
+    } else {
+        let label = job_display_label(job);
+        format!("[no triage] {label}")
+    }
+}
+
+/// Returns the best short display label for a job (summary title or URL).
+fn job_display_label(job: &JobRowView) -> String {
+    if job.has_summary {
+        let title = job
+            .summary_title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .unwrap_or("(summary available)");
+        let domain = domain_from_url(&job.url);
+        let source = if domain.is_empty() { job.url.as_str() } else { domain.as_str() };
+        format!("{title} — {source}")
+    } else {
+        job.url.clone()
+    }
 }
 
 fn stage_label(stage: Stage) -> &'static str {
@@ -1873,7 +1954,7 @@ mod tests {
         assert_eq!(text_updates.len(), 1);
         let (item_id, text) = text_updates.pop().expect("update exists");
         assert_eq!(*item_id, TreeItemId(1));
-        assert_eq!(text, &format_job_row(&view_updated.jobs[0]));
+        assert_eq!(text, &format_job_row_legacy(&view_updated.jobs[0]));
     }
 
     #[test]
@@ -2180,7 +2261,7 @@ mod tests {
             tags: vec!["tag1".to_string()],
         });
 
-        let row = format_job_row(&job);
+        let row = format_job_row_legacy(&job);
         assert_eq!(row, "P4 [security] Headline from summary — example.com");
         assert!(!row.contains("[#7]"));
         assert!(!row.contains("OK"));
@@ -2200,7 +2281,7 @@ mod tests {
         job.has_summary = false;
         job.summary_title = Some("Should not be used yet".to_string());
 
-        let row = format_job_row(&job);
+        let row = format_job_row_legacy(&job);
         assert!(row.contains("[#9] OK"));
         assert!(row.contains("https://example.com/path"));
     }
