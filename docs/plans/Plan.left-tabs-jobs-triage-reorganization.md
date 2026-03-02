@@ -1,7 +1,7 @@
 # Plan: Stable Jobs/Triage Left-Tab Information Architecture
 
 **Date:** 2026-03-02  
-**Status:** Draft (ready for implementation)  
+**Status:** Draft (updated after review)  
 **Scope:** `harvester_core`, `harvester_app` (no CommanDuctUI changes expected)
 
 ## Draft Diary Entry
@@ -22,51 +22,51 @@ Current source behavior:
 - Left tabs are `JobList`, `SinceCheckpoint`, `PromptLab` (`crates/harvester_core/src/tabs.rs`).
 - Both `JobList` and `SinceCheckpoint` render the same jobs panel (`crates/harvester_app/src/platform/ui/layout.rs`).
 - The same row formatter changes output based on analysis state (`has_summary`, `triage_annotation`) (`crates/harvester_app/src/platform/ui/render.rs`).
-- Triage/post-triage data is always projected into the single `jobs` view model list (`crates/harvester_core/src/state.rs`).
+- `PromptLabCloseRequested` currently hardcodes `LeftTab::JobList` (`crates/harvester_core/src/update.rs`).
+- Render logging and visibility matches still branch on `LeftTab::JobList` / `LeftTab::SinceCheckpoint` (`render.rs`, `layout.rs`).
 
-Result: the visible meaning of "Jobs" changes over time.  
-Design target: tabs represent *workflow views*; checkpoint is a *scope filter*.
+Result: the visible meaning of “Jobs” changes over time, and renaming alone would leave compile/runtime gaps.
 
 ## Goals
 
 1. Keep `Jobs` visually stable before and after triage.
-2. Provide dedicated triage-oriented tabs so users can switch views without losing context.
-3. Preserve UDF: all view-mode/scope changes are reducer-owned and traceable.
-4. Keep architecture extensible for future triage filtering features.
+2. Provide dedicated triage-oriented tabs without changing right-pane behavior.
+3. Preserve UDF: all tab/scope changes are reducer-owned and traceable.
+4. Keep one canonical jobs collection in view model (no duplicated per-tab state).
+5. Land change with explicit tab behavior decisions (checkboxes, style, empty states) before coding.
 
 ## Non-Goals
 
 1. No right-pane tab changes.
-2. No persistence schema changes unless explicitly desired later for UI preferences.
-3. No advanced triage filtering UI (category/tag/policy chips) in this slice.
+2. No persistence schema changes in this slice.
+3. No advanced triage filtering UI (category/tag chips, bulk actions) in this slice.
+4. No Prompt Lab workflow redesign (only enum/branch migration needed for compatibility).
 
-## Recommended IA
+## Information Architecture Decisions
 
-Left tabs become:
+Left tabs:
 
-1. `Jobs`  
-2. `Triage Review`  
-3. `Triage Results`  
+1. `Jobs`
+2. `Triage Review`
+3. `Triage Results`
 4. `Prompt Lab`
 
-`Since Checkpoint` becomes a left-pane scope toggle (checkbox or small switch) affecting only job-oriented tabs:
+Scope control:
 
-- `Off`: all jobs
-- `On`: jobs where `is_since_checkpoint == true`
+- `Since Checkpoint` is a scope toggle, not a tab.
+- Scope applies to all job-oriented tabs: `Jobs`, `Triage Review`, `Triage Results`.
+- `Prompt Lab` ignores scope.
 
-## Baseline Architecture Gaps To Address
+Tab availability:
 
-1. `LeftTab` currently conflates view type and scope (`SinceCheckpoint` is a scope, not a view).
-2. `format_job_row` has mixed responsibilities (legacy row + triage projection + summary headline mode).
-3. `build_job_tree` handles only one scope branch (`SinceCheckpoint` tab check) instead of reusable filtering.
-4. No explicit "row presentation mode" in reducer/view model.
+- `Triage Review` and `Triage Results` are always visible in the tab bar.
+- Before triage data exists, tabs render neutral empty/placeholder states (not disabled/hidden).
 
 ## Proposed State Model
 
-Add reducer-owned left-pane view mode and scope as separate concepts:
-
 ```rust
 pub enum LeftTab {
+    #[default]
     Jobs,
     TriageReview,
     TriageResults,
@@ -79,95 +79,82 @@ pub enum JobListScope {
 }
 ```
 
-`AppState` owns both:
+`AppState` owns:
 
 - `left_tab: LeftTab`
 - `job_list_scope: JobListScope`
 
-Add messages:
+Message contract:
 
-- `Msg::JobListScopeToggled { since_checkpoint_only: bool }`
+- `Msg::LeftTabSelected { tab: LeftTab }`
+- `Msg::JobListScopeSet { scope: JobListScope }` (typed enum, no bool translation)
 
-Keep existing `Msg::LeftTabSelected` and map selected index into new `LeftTab`.
+Reducer rules:
 
-## View Model Changes
+- Tab/scope updates call `mark_dirty()`.
+- `Msg::PromptLabCloseRequested` sets `LeftTab::Jobs` (compatibility with current behavior).
 
-Add explicit mode and scope to `LeftPaneView`:
+## View Model and Rendering Decisions
+
+`LeftPaneView` contains:
 
 - `left_tab: LeftTab`
 - `job_list_scope: JobListScope`
 
-Keep one canonical `jobs: Vec<JobRowView>` and derive filtered lists in render layer or with helper iterators from view model.  
-Important: *do not* reintroduce duplicate state lists.
-
-Add per-tab row format strategy:
+Row presentation dispatch:
 
 ```rust
-enum JobRowPresentation {
-    LegacyJobs,      // stable classic text
-    TriageReview,    // review/exclude emphasis
-    TriageResults,   // P{n} category/tags emphasis
-}
+enum JobRowPresentation { LegacyJobs, TriageReview, TriageResults }
+fn job_row_presentation(tab: LeftTab) -> JobRowPresentation
 ```
 
-Map from `LeftTab` to `JobRowPresentation` in one helper.
+Explicit per-tab behavior decisions:
 
-## Rendering Strategy
-
-Refactor `format_job_row` into mode-specific formatters:
-
-- `format_job_row_legacy(job)`
-- `format_job_row_triage_review(job)`
-- `format_job_row_triage_results(job)`
-
-Rules:
-
-1. `Jobs` tab never changes into summary-headline-first layout.
-2. `Triage Review` prioritizes filter state (`[REVIEW]`, `[AUTO EXCLUDED]`, etc.).
-3. `Triage Results` prioritizes triage rank/category/tags and optionally summary title.
-
-`build_job_tree` should:
-
-1. Filter by `JobListScope`.
-2. Sort according to tab mode (for example, keep priority sort only in triage-centric tabs).
-3. Format rows via selected presentation helper.
+1. Checkbox behavior:
+   - `job_check_state` remains gated by `view.is_pre_triage_reviewing`.
+   - In `Triage Review`, checkboxes are shown only during interactive pre-triage review; outside that phase, rows show textual review status cues.
+2. Disabled style (`StyleId::TreeItemDisabled`):
+   - `Jobs`: preserve current behavior for `has_summary == false`.
+   - `Triage Review` and `Triage Results`: normal style (no disabled override by summary absence).
+3. Scope filter:
+   - Applied in `build_job_tree` based on `job_list_scope`, independent of tab identity.
+4. Logging branches:
+   - Update all `LeftTab` matches (including visible-row count logging) to new variants.
 
 ## UDF and Traceability Requirements
 
-1. Every tab change: `AppEvent -> Msg::LeftTabSelected -> update -> state.left_tab -> render`.
-2. Every scope change: `AppEvent -> Msg::JobListScopeToggled -> update -> state.job_list_scope -> render`.
-3. Add logging at dispatch boundaries:
+1. `AppEvent -> Msg::LeftTabSelected -> update -> state.left_tab -> render`
+2. `AppEvent -> Msg::JobListScopeSet -> update -> state.job_list_scope -> render`
+3. Logs at action boundaries:
    - `[jobs-ui] left tab selected: ...`
    - `[jobs-ui] scope set: all|since-checkpoint`
-   - `[jobs-ui] visible rows: N (scope/tab)`
+   - `[jobs-ui] visible rows: N (tab=..., scope=...)`
 
-Use `engine_info!`/`engine_warn!` macros only.
+Use `engine_logging` macros only.
 
-## Async/Burst Checklist (Required)
+## Async/Burst Checklist
 
-This feature reacts to bursty `JobDone` and triage-progress updates because the jobs tree re-renders frequently.
+1. Burst behavior/backpressure:
+   - Keep one canonical jobs list.
+   - No per-tab replicated collections.
+2. Async result safety:
+   - No new async effects added.
+   - Existing stale-result safeguards in triage orchestration remain authoritative.
+3. Performance envelope:
+   - Avoid extra full sorts unless tab-specific ordering demands it.
+4. Observability:
+   - Info logs for tab/scope switches and visible counts.
+   - Optional debug timing around tree rebuild.
+5. Failure semantics:
+   - Missing triage data yields neutral rows/empty states, no panic.
+6. Starvation/livelock guard:
+   - Event-driven rendering only; no polling loop.
+7. Burst test:
+   - Simulate burst `JobDone`/triage updates + tab/scope switching; assert deterministic counts and no duplicates.
 
-1. Burst behavior/backpressure
-   - Keep one canonical jobs list; avoid per-tab duplicated collections.
-   - Recompute row text on render from already-derived `JobRowView`; no additional IO/effects.
-2. Async result safety
-   - No new async effect path required.
-   - Reuse existing stale-request protections in triage/pre-triage orchestration; this plan must not bypass them.
-3. Performance envelope
-   - Baseline now: `AppState::view()` sorts jobs once.
-   - Target: avoid extra full `O(N log N)` sorts per tab unless tab-specific ordering differs; if needed, compute one shared order + lightweight stable partition for review mode.
-4. Observability
-   - Add timing/debug counters around tree snapshot builds (optional debug-level) and visible item counts (info-level on tab/scope switch).
-5. Failure semantics
-   - If triage/pre-triage data missing, `Triage Review` and `Triage Results` degrade gracefully with neutral rows and no panics.
-6. Starvation/livelock guard
-   - Rendering remains event-driven; no polling loop introduced.
-7. Burst test case
-   - Add a test simulating many `JobDone` updates followed by tab/scope switches; assert deterministic visible row counts and no duplicated/omitted jobs.
+## Milestones and Implementation Slices
 
-## Implementation Slices
-
-## Slice 1: Domain and Message Model
+## Milestone 1: Domain Model Migration (core compile-safe)
 
 Files:
 
@@ -178,61 +165,55 @@ Files:
 
 Steps:
 
-1. Replace left-tab variants with 4 workflow tabs.
-2. Add `JobListScope` type and reducer-owned field on `AppState`.
-3. Add `Msg::JobListScopeToggled`.
-4. Wire reducer transitions with `mark_dirty()` and logging.
-5. Keep Prompt Lab bridge behavior intact (`LeftTab::PromptLab` open/close rules).
+1. Rename `LeftTab` variants to `Jobs`, `TriageReview`, `TriageResults`, `PromptLab`.
+2. Move `#[default]` to `LeftTab::Jobs`.
+3. Update `to_index` / `from_index` for 4 tabs.
+4. Add `JobListScope` to state with reducer-owned transitions.
+5. Add `Msg::JobListScopeSet { scope: JobListScope }`.
+6. Update `Msg::PromptLabCloseRequested` path to `LeftTab::Jobs`.
+7. Keep existing Prompt Lab bridge semantics otherwise unchanged.
 
 Tests:
 
-- `LeftTab` round-trip index tests updated to 4 tabs.
-- Reducer tests for:
-  - selecting each tab
-  - toggling scope
-  - scope preserved while switching tabs
-  - Prompt Lab open/close unchanged
+- `LeftTab` round-trip/index bounds tests updated.
+- Reducer tests: tab selection, scope changes, scope persistence across tabs, Prompt Lab close behavior.
 
-## Slice 2: View Model Projection
+Milestone acceptance criteria:
+
+- `cargo build` succeeds after core-only changes.
+- No remaining references to removed `LeftTab::JobList` / `LeftTab::SinceCheckpoint`.
+
+## Milestone 2: View Projection and UI Event Wiring
 
 Files:
 
 - `crates/harvester_core/src/view_model.rs`
 - `crates/harvester_core/src/state.rs`
-
-Steps:
-
-1. Add `job_list_scope` to `LeftPaneView`.
-2. Ensure `AppState::view()` exposes scope and tab without introducing shadow collections.
-3. Keep `is_since_checkpoint` on row view; it is still needed for filtering.
-
-Tests:
-
-- View-model tests for tab/scope projection.
-- Ensure `is_since_checkpoint` semantics unchanged when checkpoint is missing.
-
-## Slice 3: UI Layout and Events
-
-Files:
-
 - `crates/harvester_app/src/platform/ui/layout.rs`
 - `crates/harvester_app/src/platform/ui/constants.rs`
 - `crates/harvester_app/src/platform/app.rs`
 
 Steps:
 
-1. Update left tab bar labels to 4 tabs.
-2. Add a scope toggle control in left jobs panel header area (`Since checkpoint only`).
-3. Emit `Msg::JobListScopeToggled` from checkbox/switch events.
-4. Keep Prompt Lab controls isolated.
+1. Project `job_list_scope` into `LeftPaneView`.
+2. Update left-tab labels and index mapping to 4 tabs.
+3. Update jobs-panel visibility match in layout:
+   - `LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults`.
+4. Add `Since checkpoint only` scope toggle control to jobs-pane header.
+5. Emit `Msg::JobListScopeSet { scope }` from UI event handler.
 
 Tests:
 
-- Event-handler tests:
-  - left tab selection indices map to new `LeftTab`
-  - scope toggle emits correct message
+- Event tests for tab index mapping.
+- Scope toggle event emits typed scope message.
+- Layout tests assert jobs panel is visible on all three job-oriented tabs.
 
-## Slice 4: Render and Row Formatting
+Milestone acceptance criteria:
+
+- Triage tabs render jobs pane (not zero-height/hidden).
+- Scope toggle updates state through reducer path only.
+
+## Milestone 3: Render Refactor and Behavior Lock-in
 
 Files:
 
@@ -240,124 +221,106 @@ Files:
 
 Steps:
 
-1. Split row formatter by presentation mode.
-2. Update `build_job_tree` to:
-   - select row presentation mode from `left_tab`
-   - apply scope filter from `job_list_scope`
-3. Keep link children and checkbox semantics unchanged unless intentionally adjusted for `Triage Review`.
-4. Maintain disabled-style behavior for `has_summary == false` only if still desired; otherwise decide explicitly per tab and test.
+1. Split formatter:
+   - `format_job_row_legacy`
+   - `format_job_row_triage_review`
+   - `format_job_row_triage_results`
+2. Add per-tab dispatch helpers:
+   - `job_row_presentation(tab)`
+   - `job_row_check_policy(tab, is_pre_triage_reviewing)`
+   - `job_row_style_policy(tab, has_summary)`
+3. Update `build_job_tree`:
+   - filter by `job_list_scope`
+   - apply per-tab presentation/check/style policies
+4. Update logging match arms to new `LeftTab` variants.
+5. Preserve link-children behavior unless explicitly changed by tests.
 
 Tests:
 
-- Formatting tests per mode:
-  - jobs mode stays stable pre/post triage
-  - triage review row contains review/exclusion cues
-  - triage results row surfaces priority/category
-- Tree build tests:
-  - scope filter on/off counts
-  - deterministic ordering
+- Existing legacy-layout tests remain passing for `Jobs`.
+- New tests for review/results formatting cues.
+- Tests for checkbox gating in `Triage Review` (interactive vs non-interactive).
+- Tests for style policy by tab.
+- Scope filter on/off count and deterministic ordering tests.
 
-## Slice 5: Robustness/Regression Guard Rails
+Milestone acceptance criteria:
+
+- `Jobs` row text remains stable pre/post triage.
+- `Triage Review` and `Triage Results` show differentiated row semantics.
+- Render path has no stale `LeftTab` branches.
+
+## Milestone 4: Regression, Burst, and Integration Coverage
 
 Files:
 
 - `crates/harvester_core/tests/*`
 - `crates/harvester_app/src/platform/ui/render.rs` tests
 
-Add integration-style reducer/render tests covering:
+Steps:
 
-1. Startup `Jobs` view -> run triage -> `Jobs` row text unchanged.
-2. Switch to `Triage Results` -> triage-enriched formatting appears.
-3. Toggle scope in each non-PromptLab tab -> visible counts update consistently.
-4. `TriageClicked` does not force tab switch.
-5. Missing triage data does not break triage tabs.
+1. Add integration-style reducer/render tests:
+   - `Jobs` stable through triage completion
+   - `Triage Results` triage-enriched formatting
+   - scope toggling across all non-PromptLab tabs
+   - `TriageClicked` does not force tab switch
+   - missing triage data remains safe
+2. Add burst scenario test for repeated updates and tab/scope switches.
+3. Run/confirm orchestration suite (`triage_orchestration.rs`) still green.
+
+Milestone acceptance criteria:
+
+- No regressions in orchestration behavior.
+- Burst test confirms deterministic visible rows and no duplicate/omitted jobs.
 
 ## Edge Cases
 
-1. Checkpoint set but many jobs lack `fetched_utc` (restored legacy data): keep current strict rule (`unknown => excluded` when scope is `SinceCheckpoint`).
-2. Pre-triage phase `Idle/Failed`: `Triage Review` should still show list with neutral markers.
-3. Empty list states:
+1. Checkpoint set but legacy jobs missing `fetched_utc`: keep strict existing rule (`unknown => excluded` for `SinceCheckpoint` scope).
+2. Pre-triage `Idle/Failed`: `Triage Review` renders neutral markers, no panic.
+3. Empty states:
    - none since checkpoint
    - no triage results yet
    - no review-needed items
-4. Very long titles/tags: rely on existing tree text behavior; do not hard-code truncation lengths beyond current helpers.
-
-## Observability Plan
-
-Add or keep logs:
-
-1. `[jobs-ui] left tab switched to ...`
-2. `[jobs-ui] scope switched to ...`
-3. `[jobs-ui] render rows visible=... total=...`
-
-Optional debug:
-
-1. `[jobs-ui] build_job_tree elapsed_ms=...`
+4. Very long title/tag strings: rely on existing text behavior; no hard-coded truncation lengths.
 
 ## Verification Plan
 
 During development:
 
 1. `cargo build`
-2. Targeted tests for changed crates/modules
+2. Targeted tests for changed modules after each milestone
 
 Before final merge:
 
 1. `cargo test -p harvester_core`
 2. `cargo test -p harvester_app`
-3. `cargo clippy --all-targets -- -D warnings`
+3. `cargo test -p harvester_core --test triage_orchestration`
+4. `cargo clippy --all-targets -- -D warnings`
 
 Manual checks:
 
-1. Start app: `Jobs` tab shows stable legacy rows.
-2. Run triage: `Jobs` still stable; `Triage Results` shows triage-first rows.
-3. Toggle `Since checkpoint only`: counts and rows update in `Jobs`, `Triage Review`, `Triage Results`.
-4. Switch back/forth tabs repeatedly while triage is in progress: no flicker/incorrect tab state transitions.
+1. `Jobs` stays legacy-stable before/after triage.
+2. `Triage Review`/`Triage Results` visible even before triage results (neutral empty states).
+3. Scope toggle affects `Jobs`, `Triage Review`, `Triage Results`, not `Prompt Lab`.
+4. Repeated tab switches during triage progress keep correct tab/scope state and row counts.
 
-## Risks and Mitigations
+## Final Acceptance Criteria
 
-1. Risk: behavior drift in existing row text tests.
-   - Mitigation: keep old legacy formatter as explicit function and assert exact output.
-2. Risk: accidental Prompt Lab regressions from expanded `LeftTab` enum.
-   - Mitigation: preserve Prompt Lab-specific reducer branches and update tests first.
-3. Risk: user confusion from scope toggle discoverability.
-   - Mitigation: explicit header text and count label, for example `Since checkpoint only (N shown)`.
-
-## Future Extensions (Post-Slice)
-
-1. Tab-local filters in `Triage Results`:
-   - priority threshold
-   - category multi-select
-   - tag includes/excludes
-2. Saved UI preferences:
-   - remember last left tab and scope in persistence
-3. Quick actions:
-   - `Triage Review`: include-all / exclude-all unresolved review items
-4. Split triage results views:
-   - `Top signal` vs `All triaged`
+1. Left tabs represent workflow views only; `Since Checkpoint` is no longer a tab.
+2. Scope is reducer-owned (`JobListScope`) and traceable through action/update/render.
+3. Jobs panel is visible for all job-oriented tabs.
+4. `Jobs` formatting remains stable regardless of triage completion.
+5. Triage tabs provide distinct, triage-oriented row presentation.
+6. Prompt Lab close path remains functional with new tab enum (`LeftTab::Jobs`).
+7. Full test + clippy gates pass.
 
 ## FutureIdeas.md Reconciliation
 
 Likely impacted entries after implementation:
 
-1. `FI-UX-TriageUi-0001` (Triage list filtering and visualization)
-   - Expected status after this plan: **Partially satisfied** (visual separation and triage-focused view foundation, but not full category/tag filtering yet).
-2. `FI-UX-TriageUi-0002` (Bulk review actions)
-   - Not completed here, but becomes easier with dedicated `Triage Review` tab.
+1. `FI-UX-TriageUi-0001`: mark **Partially satisfied** (IA split + triage-centric views, no advanced filters yet).
+2. `FI-UX-TriageUi-0002`: still open unless bulk review actions are added in this scope.
 
-Action after implementation:
+## Notes
 
-1. Update `docs/FutureIdeas.md` with explicit partial-completion note for `FI-UX-TriageUi-0001`.
-2. If optional bulk actions are included in the same implementation, close `FI-UX-TriageUi-0002`; otherwise keep as Candidate.
-
-## Recommended Code-Level Notes For Implementing Agent
-
-1. Start from reducer and enum updates, then compile, then UI.
-2. Keep tab/scope naming explicit and domain-like; avoid bool soup in render functions.
-3. Keep one source of truth for row presentation mode mapping:
-   - `fn job_row_presentation(tab: LeftTab) -> JobRowPresentation`
-4. Prefer pure helpers for:
-   - row filtering by scope
-   - row formatting by mode
-   - row ordering by mode
-5. Add tests before deleting old logic branches to reduce regressions.
+1. Review suggestion to always show active checkboxes in `Triage Review` was not adopted. Current `is_pre_triage_reviewing` gate is a workflow safety boundary; removing it in this slice would expand editability semantics beyond IA reorganization.
+2. Question about restoring “previous tab” on `PromptLabCloseRequested` is out of scope for this plan. This plan preserves current close behavior and only migrates renamed variants for correctness.
