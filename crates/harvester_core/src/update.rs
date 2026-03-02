@@ -894,6 +894,17 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             engine_info!("[pre-triage-refresh-coord] apply request_id={}", request_id);
             state.clear_triage_in_flight();
             state.pre_triage_coordinator.complete_request(request_id);
+            // Backfill fetched_utc from frontmatter for jobs restored without it (pre-feature state).
+            let url_to_fetched: std::collections::HashMap<String, chrono::DateTime<chrono::Utc>> =
+                articles
+                    .iter()
+                    .filter_map(|a| {
+                        let fu = a.fetched_utc.as_deref()?;
+                        let dt = chrono::DateTime::parse_from_rfc3339(fu).ok()?;
+                        Some((a.url.clone(), dt.with_timezone(&chrono::Utc)))
+                    })
+                    .collect();
+            state.backfill_jobs_fetched_utc(&url_to_fetched);
             let policy = PreTriagePolicy::default();
             let mut pre_triage = PreTriageSession::load_articles(articles, &policy);
             let job_url_pairs = state

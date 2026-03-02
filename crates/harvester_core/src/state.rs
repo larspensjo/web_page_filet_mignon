@@ -541,8 +541,13 @@ impl AppState {
             .jobs
             .iter()
             .map(|(id, job)| {
-                let is_since =
-                    harvester_engine::since_filter::passes_since_filter_dt(job.fetched_utc, since);
+                // UI tab uses strict semantics: unknown fetch time → exclude.
+                // (Archive/briefing use the inclusive passes_since_filter helper instead.)
+                let is_since = match (job.fetched_utc, since) {
+                    (_, None) => true,
+                    (None, Some(_)) => false,
+                    (Some(t), Some(s)) => t >= s,
+                };
                 job.to_view(*id, is_since)
             })
             .collect();
@@ -886,6 +891,21 @@ impl AppState {
 
     pub(crate) fn set_briefing_since_utc(&mut self, v: Option<chrono::DateTime<chrono::Utc>>) {
         self.briefing_since_utc = v;
+    }
+
+    /// Backfills `fetched_utc` on jobs that have it as `None`, keyed by URL.
+    /// Used to recover timestamps for jobs restored from pre-feature persisted state.
+    pub(crate) fn backfill_jobs_fetched_utc(
+        &mut self,
+        url_to_fetched: &HashMap<String, chrono::DateTime<chrono::Utc>>,
+    ) {
+        for job in self.jobs.values_mut() {
+            if job.fetched_utc.is_none() {
+                if let Some(&dt) = url_to_fetched.get(&job.url) {
+                    job.fetched_utc = Some(dt);
+                }
+            }
+        }
     }
 
     pub(crate) fn triage(&self) -> &TriageSession {
