@@ -2286,6 +2286,142 @@ mod tests {
         assert!(row.contains("https://example.com/path"));
     }
 
+    // ── Per-tab formatter tests ───────────────────────────────────────────────
+
+    #[test]
+    fn format_job_row_triage_review_shows_review_needed_prefix() {
+        let mut job = make_job(1, "https://example.com/a", Stage::Done, Some(JobResultKind::Success), None, None);
+        job.has_summary = true;
+        job.summary_title = Some("Article Title".to_string());
+        job.filter_status = Some(JobFilterStatus::ReviewNeeded { reasons: vec![] });
+        let row = format_job_row_triage_review(&job);
+        assert!(row.starts_with("[REVIEW NEEDED] "), "expected review prefix, got: {row}");
+        assert!(row.contains("Article Title"));
+    }
+
+    #[test]
+    fn format_job_row_triage_review_shows_excluded_prefix() {
+        let mut job = make_job(2, "https://example.com/b", Stage::Done, None, None, None);
+        job.filter_status = Some(JobFilterStatus::ManuallyExcluded);
+        let row = format_job_row_triage_review(&job);
+        assert!(row.starts_with("[EXCLUDED] "), "expected excluded prefix, got: {row}");
+    }
+
+    #[test]
+    fn format_job_row_triage_results_shows_annotation() {
+        let mut job = make_job(3, "https://example.com/c", Stage::Done, Some(JobResultKind::Success), None, None);
+        job.has_summary = true;
+        job.summary_title = Some("Summary Headline".to_string());
+        job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 2,
+            category: "tech".to_string(),
+            tags: vec!["ai".to_string(), "ml".to_string()],
+        });
+        let row = format_job_row_triage_results(&job);
+        assert!(row.starts_with("P2 [tech] (ai, ml) — "), "got: {row}");
+        assert!(row.contains("Summary Headline"));
+    }
+
+    #[test]
+    fn format_job_row_triage_results_no_annotation_shows_placeholder() {
+        let mut job = make_job(4, "https://example.com/d", Stage::Done, None, None, None);
+        job.triage_annotation = None;
+        let row = format_job_row_triage_results(&job);
+        assert!(row.starts_with("[no triage] "), "got: {row}");
+    }
+
+    // ── Scope filter tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn scope_since_checkpoint_filters_jobs_in_tree() {
+        init_logging();
+        let window_id = WindowId::new(60);
+        let mut tree_state = TreeRenderState::new();
+
+        let mut job_in = make_job(1, "https://a.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        job_in.is_since_checkpoint = true;
+        job_in.has_summary = true;
+        job_in.summary_title = Some("In Scope".to_string());
+
+        let mut job_out = make_job(2, "https://b.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        job_out.is_since_checkpoint = false;
+        job_out.has_summary = true;
+        job_out.summary_title = Some("Out of Scope".to_string());
+
+        let mut view = make_view(vec![job_in, job_out]);
+        view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let populated = cmds.iter().find_map(|cmd| match cmd {
+            PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+            _ => None,
+        }).expect("PopulateTreeView emitted");
+
+        assert_eq!(populated.len(), 1, "only the in-scope job should appear");
+        assert!(populated[0].text.contains("In Scope"), "wrong item: {}", populated[0].text);
+    }
+
+    #[test]
+    fn scope_all_shows_all_jobs() {
+        init_logging();
+        let window_id = WindowId::new(61);
+        let mut tree_state = TreeRenderState::new();
+
+        let mut job1 = make_job(1, "https://a.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        job1.is_since_checkpoint = true;
+        job1.has_summary = true;
+        job1.summary_title = Some("Job A".to_string());
+
+        let mut job2 = make_job(2, "https://b.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        job2.is_since_checkpoint = false;
+        job2.has_summary = true;
+        job2.summary_title = Some("Job B".to_string());
+
+        let mut view = make_view(vec![job1, job2]);
+        view.left_pane.job_list_scope = JobListScope::All;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let populated = cmds.iter().find_map(|cmd| match cmd {
+            PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+            _ => None,
+        }).expect("PopulateTreeView emitted");
+
+        assert_eq!(populated.len(), 2, "all jobs should appear with All scope");
+    }
+
+    // ── Per-tab style policy tests ────────────────────────────────────────────
+
+    #[test]
+    fn jobs_tab_applies_disabled_style_when_no_summary() {
+        assert_eq!(job_row_style_policy(LeftTab::Jobs, false), Some(StyleId::TreeItemDisabled));
+        assert_eq!(job_row_style_policy(LeftTab::Jobs, true), None);
+    }
+
+    #[test]
+    fn triage_tabs_never_apply_disabled_style() {
+        assert_eq!(job_row_style_policy(LeftTab::TriageReview, false), None);
+        assert_eq!(job_row_style_policy(LeftTab::TriageReview, true), None);
+        assert_eq!(job_row_style_policy(LeftTab::TriageResults, false), None);
+        assert_eq!(job_row_style_policy(LeftTab::TriageResults, true), None);
+    }
+
+    // ── Per-tab check policy tests ────────────────────────────────────────────
+
+    #[test]
+    fn check_policy_only_active_in_triage_review_during_interactive_phase() {
+        let mut job = make_job(1, "https://x.com/", Stage::Done, None, None, None);
+        job.filter_status = Some(JobFilterStatus::AutoIncluded);
+
+        // TriageReview + interactive → Checked
+        assert_eq!(job_row_check_policy(LeftTab::TriageReview, true, &job), CheckState::Checked);
+        // TriageReview + not interactive → Unchecked
+        assert_eq!(job_row_check_policy(LeftTab::TriageReview, false, &job), CheckState::Unchecked);
+        // Jobs tab → always Unchecked
+        assert_eq!(job_row_check_policy(LeftTab::Jobs, true, &job), CheckState::Unchecked);
+        // TriageResults → always Unchecked
+        assert_eq!(job_row_check_policy(LeftTab::TriageResults, true, &job), CheckState::Unchecked);
+    }
+
     #[test]
     fn render_enables_open_browser_when_selected_url_is_some() {
         init_logging();

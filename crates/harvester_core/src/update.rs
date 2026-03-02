@@ -4730,6 +4730,87 @@ mod tests {
         );
     }
 
+    // ── LeftTab / JobListScope reducer tests ─────────────────────────────────
+
+    #[test]
+    fn left_tab_selected_jobs_updates_tab_and_dirty() {
+        init_logging();
+        let state = AppState::new();
+        assert_eq!(state.left_tab(), LeftTab::Jobs);
+        let (state, effects) = update(state, Msg::LeftTabSelected { tab: LeftTab::TriageReview });
+        assert!(effects.is_empty());
+        assert_eq!(state.left_tab(), LeftTab::TriageReview);
+        assert!(state.view().dirty);
+    }
+
+    #[test]
+    fn left_tab_selected_triage_results_updates_tab() {
+        init_logging();
+        let (state, _) = update(AppState::new(), Msg::LeftTabSelected { tab: LeftTab::TriageResults });
+        assert_eq!(state.left_tab(), LeftTab::TriageResults);
+    }
+
+    #[test]
+    fn job_list_scope_set_to_since_checkpoint_updates_state() {
+        init_logging();
+        let state = AppState::new();
+        assert_eq!(state.job_list_scope(), JobListScope::All);
+        let (state, effects) = update(
+            state,
+            Msg::JobListScopeSet { scope: JobListScope::SinceCheckpoint },
+        );
+        assert!(effects.is_empty());
+        assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
+        assert!(state.view().dirty);
+    }
+
+    #[test]
+    fn job_list_scope_set_same_value_is_noop() {
+        init_logging();
+        let state = AppState::new();
+        // Already All; setting All again should not mark dirty.
+        let view_before = state.view();
+        let (state, _) = update(state, Msg::JobListScopeSet { scope: JobListScope::All });
+        // dirty starts false; setting same scope should leave it false
+        assert!(!state.view().dirty, "setting same scope must not mark dirty");
+        let _ = view_before;
+    }
+
+    #[test]
+    fn job_list_scope_persists_across_tab_switches() {
+        init_logging();
+        let state = AppState::new();
+        let (state, _) = update(
+            state,
+            Msg::JobListScopeSet { scope: JobListScope::SinceCheckpoint },
+        );
+        let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::TriageReview });
+        assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
+        let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::TriageResults });
+        assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
+        let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
+        assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
+    }
+
+    #[test]
+    fn prompt_lab_close_restores_jobs_tab() {
+        init_logging();
+        let mut state = AppState::new();
+        state.open_prompt_lab();
+        assert_eq!(state.left_tab(), LeftTab::PromptLab);
+        let (state, _) = update(state, Msg::PromptLabCloseRequested);
+        assert_eq!(state.left_tab(), LeftTab::Jobs);
+    }
+
+    #[test]
+    fn triage_clicked_does_not_force_tab_switch() {
+        init_logging();
+        let (state, _) = update(AppState::new(), Msg::LeftTabSelected { tab: LeftTab::TriageReview });
+        // TriageClicked should not alter the active left tab.
+        let (state, _) = update(state, Msg::TriageClicked);
+        assert_eq!(state.left_tab(), LeftTab::TriageReview);
+    }
+
     // ── Pre-triage refresh coordinator: shared test helpers ──────────────────
 
     /// Advance ticks (up to 200) until the coordinator dispatches a
