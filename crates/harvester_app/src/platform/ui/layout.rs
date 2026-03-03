@@ -147,7 +147,8 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_LEFT),
         items: vec![
             "Jobs".to_string(),
-            "Since Checkpoint".to_string(),
+            "Triage Review".to_string(),
+            "Triage Results".to_string(),
             "Prompt Lab".to_string(),
         ],
     });

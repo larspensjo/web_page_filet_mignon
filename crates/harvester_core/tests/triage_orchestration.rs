@@ -422,9 +422,13 @@ fn view_model_annotates_jobs_with_triage() {
 }
 
 #[test]
-fn view_model_sorts_by_priority() {
+fn view_model_jobs_stable_order_after_triage() {
+    // The view model's `jobs` list must remain in stable job_id order regardless of
+    // triage results.  Priority-based ordering is applied by the TriageResults render
+    // layer, not here, so the Jobs tab is never reordered by triage.
     init_logging();
-    let (state, _) = completed_state_with_jobs(&["https://low.example", "https://high.example"]);
+    let (state, job_ids) =
+        completed_state_with_jobs(&["https://low.example", "https://high.example"]);
     let state = with_triage_metadata_ready(state);
     let state = simulate_triage_loaded(
         state,
@@ -435,7 +439,7 @@ fn view_model_sorts_by_priority() {
         state,
         Msg::LlmCompleted {
             request_id: 1,
-            result: triage_success(2),
+            result: triage_success(2), // low priority for job 0
             metadata: None,
         },
     );
@@ -443,13 +447,17 @@ fn view_model_sorts_by_priority() {
         state,
         Msg::LlmCompleted {
             request_id: 2,
-            result: triage_success(5),
+            result: triage_success(5), // high priority for job 1
             metadata: None,
         },
     );
     let view = state.view();
-    assert_eq!(view.jobs[0].triage_annotation.as_ref().unwrap().priority, 5);
-    assert_eq!(view.jobs[1].triage_annotation.as_ref().unwrap().priority, 2);
+    // Both jobs have annotations.
+    assert!(view.jobs[0].triage_annotation.is_some());
+    assert!(view.jobs[1].triage_annotation.is_some());
+    // Order is stable by job_id — NOT reordered by triage priority.
+    assert_eq!(view.jobs[0].job_id, job_ids[0]);
+    assert_eq!(view.jobs[1].job_id, job_ids[1]);
 }
 
 #[test]

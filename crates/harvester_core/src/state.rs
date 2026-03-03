@@ -597,19 +597,9 @@ impl AppState {
                 );
         }
 
-        jobs.sort_by(|a, b| {
-            let p_a = a
-                .triage_annotation
-                .as_ref()
-                .map(|t| t.priority)
-                .unwrap_or(0);
-            let p_b = b
-                .triage_annotation
-                .as_ref()
-                .map(|t| t.priority)
-                .unwrap_or(0);
-            p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
-        });
+        // Jobs remain in BTreeMap (job_id) insertion order — stable regardless of triage.
+        // Tab-specific ordering (e.g. triage-priority for TriageResults) is applied in
+        // the render layer (build_job_tree) so the Jobs tab is never affected.
 
         // Derive selected_url — expose for any selected job
         let selected_url = self

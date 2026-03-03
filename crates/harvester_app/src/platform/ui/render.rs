@@ -1403,15 +1403,35 @@ fn job_row_style_policy(tab: LeftTab, has_summary: bool) -> Option<StyleId> {
 }
 
 fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
-    let jobs_iter: Box<dyn Iterator<Item = &JobRowView>> =
-        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
-            Box::new(view.jobs.iter().filter(|j| j.is_since_checkpoint))
-        } else {
-            Box::new(view.jobs.iter())
-        };
     let tab = view.left_pane.left_tab;
     let presentation = job_row_presentation(tab);
+
+    // Scope filter: SinceCheckpoint drops jobs not in the checkpoint window.
+    let scope_filtered: Vec<&JobRowView> =
+        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+            view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
+        } else {
+            view.jobs.iter().collect()
+        };
+
+    // TriageResults: sort by triage priority (desc), then job_id (asc) for tie-breaking.
+    // All other tabs use stable job-id order from the view model.
+    let mut sorted_buf: Vec<&JobRowView>;
+    let jobs_iter: &[&JobRowView] = if matches!(tab, LeftTab::TriageResults) {
+        sorted_buf = scope_filtered;
+        sorted_buf.sort_by(|a, b| {
+            let p_a = a.triage_annotation.as_ref().map(|t| t.priority).unwrap_or(0);
+            let p_b = b.triage_annotation.as_ref().map(|t| t.priority).unwrap_or(0);
+            p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
+        });
+        &sorted_buf
+    } else {
+        sorted_buf = scope_filtered;
+        &sorted_buf
+    };
+
     jobs_iter
+        .iter()
         .map(|job| {
             let mut children = Vec::new();
             if job.link_count > 0 {
@@ -1474,7 +1494,8 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
     children
 }
 
-/// Jobs tab: preserves the original pre/post-triage row layout.
+/// Jobs tab: stable row text — never changes based on triage results.
+/// Triage annotation is intentionally omitted; use TriageResults tab for that.
 fn format_job_row_legacy(job: &JobRowView) -> String {
     let filter_prefix = match &job.filter_status {
         Some(JobFilterStatus::HardExcluded { .. }) => "[AUTO EXCLUDED] ",
@@ -1492,12 +1513,7 @@ fn format_job_row_legacy(job: &JobRowView) -> String {
             .unwrap_or("(summary available)");
         let domain = domain_from_url(&job.url);
         let source = if domain.is_empty() { &job.url } else { &domain };
-        let triage_prefix = job
-            .triage_annotation
-            .as_ref()
-            .map(|annotation| format!("P{} [{}] ", annotation.priority, annotation.category))
-            .unwrap_or_default();
-        return format!("{filter_prefix}{triage_prefix}{title} — {source}");
+        return format!("{filter_prefix}{title} — {source}");
     }
 
     let status = match &job.outcome {
@@ -1513,20 +1529,7 @@ fn format_job_row_legacy(job: &JobRowView) -> String {
         (None, Some(b)) => b,
         _ => String::new(),
     };
-    let annotation = job.triage_annotation.as_ref().map(|annotation| {
-        let mut prefix = format!("P{} [{}]", annotation.priority, annotation.category);
-        if !annotation.tags.is_empty() {
-            let tags = annotation.tags.join(", ");
-            prefix.push_str(&format!(" ({tags})"));
-        }
-        prefix.push_str(" — ");
-        prefix
-    });
-    let annotated_url = if let Some(prefix) = annotation {
-        format!("{prefix}{}", job.url)
-    } else {
-        job.url.clone()
-    };
+    let annotated_url = job.url.clone();
     let base = if metrics.is_empty() {
         format!(
             "[#{id}] {status} — {annotated_url}",
@@ -2262,7 +2265,9 @@ mod tests {
         });
 
         let row = format_job_row_legacy(&job);
-        assert_eq!(row, "P4 [security] Headline from summary — example.com");
+        // Triage annotation must NOT appear in the Jobs tab — row is stable pre/post triage.
+        assert_eq!(row, "Headline from summary — example.com");
+        assert!(!row.contains("P4"));
         assert!(!row.contains("[#7]"));
         assert!(!row.contains("OK"));
         assert!(!row.contains("https://example.com/path?q=1"));
@@ -2387,6 +2392,88 @@ mod tests {
         }).expect("PopulateTreeView emitted");
 
         assert_eq!(populated.len(), 2, "all jobs should appear with All scope");
+    }
+
+    #[test]
+    fn triage_results_tab_sorts_by_priority_descending() {
+        // Jobs arrive in job_id order (low priority first), but TriageResults should
+        // show highest priority first.
+        init_logging();
+        let window_id = WindowId::new(62);
+        let mut tree_state = TreeRenderState::new();
+
+        let mut low = make_job(1, "https://low.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        low.has_summary = true;
+        low.summary_title = Some("Low Priority".to_string());
+        low.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 2,
+            category: "misc".to_string(),
+            tags: vec![],
+        });
+
+        let mut high = make_job(2, "https://high.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        high.has_summary = true;
+        high.summary_title = Some("High Priority".to_string());
+        high.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 5,
+            category: "tech".to_string(),
+            tags: vec![],
+        });
+
+        // View model has jobs in job_id order (low=1, high=2) — stable, not triage-sorted.
+        let mut view = make_view(vec![low, high]);
+        view.left_pane.left_tab = LeftTab::TriageResults;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let populated = cmds.iter().find_map(|cmd| match cmd {
+            PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+            _ => None,
+        }).expect("PopulateTreeView emitted");
+
+        assert_eq!(populated.len(), 2);
+        // TriageResults render must reorder: highest priority (P5) first.
+        assert!(populated[0].text.contains("P5"), "first item should be P5, got: {}", populated[0].text);
+        assert!(populated[1].text.contains("P2"), "second item should be P2, got: {}", populated[1].text);
+    }
+
+    #[test]
+    fn jobs_tab_stable_order_unaffected_by_triage_priority() {
+        // Jobs tab must show items in job_id order, not reordered by triage priority.
+        init_logging();
+        let window_id = WindowId::new(63);
+        let mut tree_state = TreeRenderState::new();
+
+        let mut low = make_job(1, "https://low.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        low.has_summary = true;
+        low.summary_title = Some("Low Priority".to_string());
+        low.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 2,
+            category: "misc".to_string(),
+            tags: vec![],
+        });
+
+        let mut high = make_job(2, "https://high.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        high.has_summary = true;
+        high.summary_title = Some("High Priority".to_string());
+        high.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 5,
+            category: "tech".to_string(),
+            tags: vec![],
+        });
+
+        let mut view = make_view(vec![low, high]);
+        view.left_pane.left_tab = LeftTab::Jobs; // stable order
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let populated = cmds.iter().find_map(|cmd| match cmd {
+            PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+            _ => None,
+        }).expect("PopulateTreeView emitted");
+
+        assert_eq!(populated.len(), 2);
+        // Jobs tab must preserve insertion order (job_id 1 first, then job_id 2).
+        assert!(populated[0].text.contains("Low Priority"), "first should be Low Priority (job 1), got: {}", populated[0].text);
+        assert!(populated[1].text.contains("High Priority"), "second should be High Priority (job 2), got: {}", populated[1].text);
     }
 
     // ── Per-tab style policy tests ────────────────────────────────────────────
