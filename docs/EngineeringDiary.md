@@ -583,3 +583,10 @@ Context: The Jobs/Triage left-tab IA plan had landed partially, but key operator
 Change: Completed the missing slice across `harvester_app` and `harvester_core`: added a `Since checkpoint only` jobs-pane checkbox control wired to `Msg::JobListScopeSet { scope }`, synchronized checkbox render state from `job_list_scope`, added neutral jobs-header placeholder messaging for empty triage/review conditions, and added new app/layout/render/core integration tests for left-tab mapping, scope events, jobs-pane visibility on all job-oriented tabs, and burst updates with tab/scope switching.
 Evidence: `cargo build`; `cargo test -p harvester_app`; `cargo test -p harvester_core --test left_tab_scope_integration`; `cargo clippy --all-targets -- -D warnings`.
 Refs: crates/harvester_app/src/platform/ui/constants.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_core/tests/left_tab_scope_integration.rs, docs/plans/Plan.left-tabs-jobs-triage-reorganization.md
+
+## 2026-03-03 - CommanDuctUI layout/checkbox hardening
+Type: Implementation
+Context: A visible UI regression risk remained in any app using CommanDuctUI with docked header rows: layout rules could silently accept invalid dock sizing, and checkbox rows relied on fixed pixel heights that were brittle under DPI/font scaling.
+Change: Hardened `commanductui` by validating docked edge rules (`Top/Bottom/Left/Right`) require non-negative `fixed_size`, added DPI-aware minimum checkbox height helpers, and enforced minimum native checkbox height in layout application for `ControlKind::CheckBox`. Added regression tests for header+checkbox+fill non-overlap and new validation failure cases. Bumped submodule version to `0.7.2` and updated its changelog.
+Evidence: `cargo test -p commanductui`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
+Refs: src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/controls/checkbox_handler.rs, src/CommanDuctUI/Cargo.toml, src/CommanDuctUI/CHANGELOG.md
