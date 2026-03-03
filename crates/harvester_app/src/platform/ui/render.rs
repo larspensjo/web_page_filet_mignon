@@ -106,6 +106,8 @@ pub struct TreeRenderState {
     prev_progress_range: Option<(u32, u32)>,
     prev_progress_pos: Option<u32>,
     prev_open_browser_enabled: Option<bool>,
+    prev_jobs_header_text: Option<String>,
+    prev_jobs_scope_since_checkpoint_checked: Option<bool>,
     prev_prompt_lab_visible: bool,
     prev_prompt_lab_advanced_mode: bool,
     prev_prompt_lab_mode_basic_checked: Option<bool>,
@@ -181,6 +183,8 @@ impl Default for TreeRenderState {
             prev_progress_range: None,
             prev_progress_pos: None,
             prev_open_browser_enabled: None,
+            prev_jobs_header_text: None,
+            prev_jobs_scope_since_checkpoint_checked: None,
             prev_prompt_lab_visible: false,
             prev_prompt_lab_advanced_mode: false,
             prev_prompt_lab_mode_basic_checked: None,
@@ -593,6 +597,16 @@ fn render_main_controls_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     emit_if_changed(
+        &mut tree_state.prev_jobs_header_text,
+        jobs_header_text(view),
+        cmds,
+        |text| PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_JOBS_HEADER,
+            text,
+        },
+    );
+    emit_if_changed(
         &mut tree_state.prev_stop_enabled,
         matches!(view.session, SessionState::Running),
         cmds,
@@ -642,6 +656,62 @@ fn render_main_controls_section(
             enabled,
         },
     );
+    emit_if_changed(
+        &mut tree_state.prev_jobs_scope_since_checkpoint_checked,
+        view.left_pane.job_list_scope == JobListScope::SinceCheckpoint,
+        cmds,
+        |checked| PlatformCommand::SetCheckBoxChecked {
+            window_id,
+            control_id: CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
+            checked,
+        },
+    );
+}
+
+fn jobs_header_text(view: &AppViewModel) -> String {
+    let scoped_jobs: Vec<&JobRowView> = if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint
+    {
+        view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
+    } else {
+        view.jobs.iter().collect()
+    };
+    let scope_suffix = if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+        " | Since checkpoint"
+    } else {
+        ""
+    };
+    match view.left_pane.left_tab {
+        LeftTab::Jobs => {
+            if scoped_jobs.is_empty() && view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+                format!("Jobs{scope_suffix} (none)")
+            } else {
+                format!("Jobs{scope_suffix}")
+            }
+        }
+        LeftTab::TriageReview => {
+            let review_needed_count = scoped_jobs
+                .iter()
+                .filter(|job| matches!(job.filter_status, Some(JobFilterStatus::ReviewNeeded { .. })))
+                .count();
+            if review_needed_count == 0 {
+                format!("Triage Review{scope_suffix} (no review-needed items)")
+            } else {
+                format!("Triage Review{scope_suffix} ({review_needed_count} review-needed)")
+            }
+        }
+        LeftTab::TriageResults => {
+            let triage_result_count = scoped_jobs
+                .iter()
+                .filter(|job| job.triage_annotation.is_some())
+                .count();
+            if triage_result_count == 0 {
+                format!("Triage Results{scope_suffix} (no triage results yet)")
+            } else {
+                format!("Triage Results{scope_suffix} ({triage_result_count} with triage)")
+            }
+        }
+        LeftTab::PromptLab => "Job List".to_string(),
+    }
 }
 
 fn render_prompt_lab_section(
@@ -2719,6 +2789,65 @@ mod tests {
                 cmd,
                 PlatformCommand::SetCheckBoxChecked { control_id, checked: true, .. }
                 if *control_id == CHK_PROMPT_LAB_SECTION_RUN_DETAILS
+            )
+        }));
+    }
+
+    #[test]
+    fn jobs_scope_checkbox_reflects_scope_state() {
+        let window_id = WindowId::new(39);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetCheckBoxChecked { control_id, checked: true, .. }
+                if *control_id == CHK_JOBS_SCOPE_SINCE_CHECKPOINT
+            )
+        }));
+
+        view.left_pane.job_list_scope = JobListScope::All;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetCheckBoxChecked { control_id, checked: false, .. }
+                if *control_id == CHK_JOBS_SCOPE_SINCE_CHECKPOINT
+            )
+        }));
+    }
+
+    #[test]
+    fn triage_results_header_shows_placeholder_without_triage_data() {
+        let window_id = WindowId::new(40);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![JobRowView {
+            job_id: 1,
+            url: "https://example.com".to_string(),
+            stage: Stage::Done,
+            outcome: Some(JobResultKind::Success),
+            tokens: None,
+            bytes: None,
+            link_count: 0,
+            downloaded_link_count: 0,
+            links: vec![],
+            triage_annotation: None,
+            has_summary: false,
+            summary_title: None,
+            filter_status: None,
+            has_analysis: false,
+            is_since_checkpoint: true,
+        }]);
+        view.left_pane.left_tab = LeftTab::TriageResults;
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == LABEL_JOBS_HEADER
+                    && text.contains("no triage results yet")
             )
         }));
     }

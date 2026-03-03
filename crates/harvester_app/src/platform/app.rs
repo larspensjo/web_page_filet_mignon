@@ -11,8 +11,8 @@ use commanductui::{
     UiStateProvider, WindowConfig, WindowId,
 };
 use harvester_core::{
-    update, AppState, AppTab, AppViewModel, Effect, JobFilterStatus, JobResultKind, LeftTab,
-    LinkDownloadState, ManualDecision, Msg, PromptLabStage, TrendCategory,
+    update, AppState, AppTab, AppViewModel, Effect, JobFilterStatus, JobListScope, JobResultKind,
+    LeftTab, LinkDownloadState, ManualDecision, Msg, PromptLabStage, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -555,6 +555,18 @@ impl PlatformEventHandler for AppEventHandler {
                 if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_RUN_DETAILS =>
             {
                 let _ = self.msg_tx.send(Msg::PromptLabRunDetailsSectionToggled);
+            }
+            AppEvent::CheckBoxToggled {
+                control_id,
+                checked,
+                ..
+            } if control_id == ui::constants::CHK_JOBS_SCOPE_SINCE_CHECKPOINT => {
+                let scope = if checked {
+                    JobListScope::SinceCheckpoint
+                } else {
+                    JobListScope::All
+                };
+                let _ = self.msg_tx.send(Msg::JobListScopeSet { scope });
             }
             AppEvent::RadioButtonSelected { control_id, .. }
                 if control_id == ui::constants::BTN_STAGE_TRIAGE =>
@@ -1218,6 +1230,66 @@ mod tests {
             rx.recv_timeout(Duration::from_millis(250))
                 .expect("toggle run details"),
             Msg::PromptLabRunDetailsSectionToggled
+        );
+    }
+
+    #[test]
+    fn left_tab_bar_selection_emits_new_left_tab_variants() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::TabBarSelectionChanged {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::TAB_BAR_LEFT,
+            selected_index: LeftTab::TriageReview.to_index(),
+        });
+        handler.handle_event(AppEvent::TabBarSelectionChanged {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::TAB_BAR_LEFT,
+            selected_index: LeftTab::TriageResults.to_index(),
+        });
+
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("triage review tab"),
+            Msg::LeftTabSelected {
+                tab: LeftTab::TriageReview
+            }
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("triage results tab"),
+            Msg::LeftTabSelected {
+                tab: LeftTab::TriageResults
+            }
+        );
+    }
+
+    #[test]
+    fn jobs_scope_checkbox_emits_typed_scope_message() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::CheckBoxToggled {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
+            checked: true,
+        });
+        handler.handle_event(AppEvent::CheckBoxToggled {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
+            checked: false,
+        });
+
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("scope on"),
+            Msg::JobListScopeSet {
+                scope: JobListScope::SinceCheckpoint
+            }
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("scope off"),
+            Msg::JobListScopeSet {
+                scope: JobListScope::All
+            }
         );
     }
 

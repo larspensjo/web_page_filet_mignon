@@ -334,6 +334,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         initial_text: "Job List".to_string(),
         class: LabelClass::Default,
     });
+    commands.push(PlatformCommand::CreateCheckBox {
+        window_id,
+        parent_control_id: Some(PANEL_JOBS),
+        control_id: CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
+        text: "Since checkpoint only".to_string(),
+    });
 
     commands.push(PlatformCommand::CreateTreeView {
         window_id,
@@ -1245,10 +1251,18 @@ fn build_layout_rules(
             margin: (0, 0, 4, 0),
         },
         LayoutRule {
+            control_id: CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
+            parent_control_id: Some(PANEL_JOBS),
+            dock_style: DockStyle::Top,
+            order: 1,
+            fixed_size: Some(24),
+            margin: (4, 0, 4, 4),
+        },
+        LayoutRule {
             control_id: TREE_JOBS,
             parent_control_id: Some(PANEL_JOBS),
             dock_style: DockStyle::Fill,
-            order: 1,
+            order: 2,
             fixed_size: None,
             margin: (0, 0, 0, 0),
         },
@@ -2211,6 +2225,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         });
     }
     for control_id in [
+        CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
         CHK_PROMPT_LAB_SECTION_COMPARE,
         CHK_PROMPT_LAB_SECTION_CONTEXT,
         CHK_PROMPT_LAB_SECTION_TEMPLATE,
@@ -2349,6 +2364,55 @@ mod tests {
             )),
             "section toggle Compare should be created as CheckBox"
         );
+        assert!(
+            commands.iter().any(|cmd| matches!(
+                cmd,
+                PlatformCommand::CreateCheckBox { control_id, .. }
+                    if *control_id == CHK_JOBS_SCOPE_SINCE_CHECKPOINT
+            )),
+            "jobs scope checkbox should be created"
+        );
+    }
+
+    #[test]
+    fn jobs_panel_visible_for_all_job_oriented_tabs() {
+        for left_tab in [LeftTab::Jobs, LeftTab::TriageReview, LeftTab::TriageResults] {
+            let cmd = build_layout_command(
+                WindowId::new(42),
+                LayoutConfig {
+                    left_panel_width: 600,
+                    input_panel_visible: true,
+                    active_tab: AppTab::Summary,
+                    left_tab,
+                    prompt_lab: PromptLabLayoutConfig {
+                        visible: false,
+                        advanced_mode: false,
+                        compare_section_open: false,
+                        context_section_open: false,
+                        template_section_open: false,
+                        run_details_section_open: false,
+                        template_editor_open: false,
+                    },
+                },
+            );
+            let rules = match cmd {
+                PlatformCommand::DefineLayout { rules, .. } => rules,
+                _ => panic!("expected DefineLayout"),
+            };
+            let jobs_rule = rules
+                .iter()
+                .find(|r| r.control_id == PANEL_LEFT_JOBS)
+                .expect("jobs panel rule");
+            assert_eq!(
+                jobs_rule.dock_style,
+                DockStyle::Fill,
+                "jobs panel must fill for {left_tab:?}"
+            );
+            assert_eq!(
+                jobs_rule.fixed_size, None,
+                "jobs panel must be visible for {left_tab:?}"
+            );
+        }
     }
 
     #[test]

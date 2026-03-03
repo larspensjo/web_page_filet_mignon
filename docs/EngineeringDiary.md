@@ -576,3 +576,10 @@ Evidence: `cargo test -p harvester_engine filtered_loader_single_selection_ignor
 Lessons Learned: Reusing a bulk-oriented data path for single-item interactions can silently turn O(1)-intent UI actions into O(N)-workload side effects, which then look like "log noise" but are real compute amplification.
 Prevention: Add explicit single-item code paths (or indexed lookups) for URL-targeted workflows and require tests that include unrelated malformed corpus entries so single-item resolve remains isolated from archive-wide scanning failures.
 Refs: crates/harvester_engine, crates/harvester_io, filtered_loader_single_selection_ignores_unrelated_invalid_markdown
+
+## 2026-03-03 - Left-tab jobs/triage reorganization completion pass
+Type: Implementation
+Context: The Jobs/Triage left-tab IA plan had landed partially, but key operator-facing pieces were still missing: a reducer-wired scope toggle in the jobs pane, explicit tab/scope event coverage, and integration-style burst safety coverage for tab/scope switches.
+Change: Completed the missing slice across `harvester_app` and `harvester_core`: added a `Since checkpoint only` jobs-pane checkbox control wired to `Msg::JobListScopeSet { scope }`, synchronized checkbox render state from `job_list_scope`, added neutral jobs-header placeholder messaging for empty triage/review conditions, and added new app/layout/render/core integration tests for left-tab mapping, scope events, jobs-pane visibility on all job-oriented tabs, and burst updates with tab/scope switching.
+Evidence: `cargo build`; `cargo test -p harvester_app`; `cargo test -p harvester_core --test left_tab_scope_integration`; `cargo clippy --all-targets -- -D warnings`.
+Refs: crates/harvester_app/src/platform/ui/constants.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_core/tests/left_tab_scope_integration.rs, docs/plans/Plan.left-tabs-jobs-triage-reorganization.md

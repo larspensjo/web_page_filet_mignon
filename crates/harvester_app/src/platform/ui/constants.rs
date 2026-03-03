@@ -63,6 +63,7 @@ pub const LABEL_PROMPT_LAB_STATUS: ControlId = ControlId::new(3010);
 pub const LABEL_PROMPT_LAB_METADATA: ControlId = ControlId::new(3011);
 pub const LABEL_PROMPT_LAB_CONTEXT_STATUS: ControlId = ControlId::new(3012);
 pub const LABEL_PROMPT_LAB_TEMPLATE_STATUS: ControlId = ControlId::new(3013);
+pub const CHK_JOBS_SCOPE_SINCE_CHECKPOINT: ControlId = ControlId::new(3014);
 pub const BTN_COMPARE_ADD_CURRENT: ControlId = ControlId::new(3100);
 pub const BTN_COMPARE_ADD_BASELINE: ControlId = ControlId::new(3101);
 pub const BTN_COMPARE_RESET_DRAFT: ControlId = ControlId::new(3102);

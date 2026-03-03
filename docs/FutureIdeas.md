@@ -2222,7 +2222,7 @@ SuccessCriteria:
 ### TriageUi
 
 #### [FI-UX-TriageUi-0001] Triage list filtering and visualization
-Status: Candidate
+Status: Partially Implemented
 TopLevel: UX
 SubLevel: TriageUi
 Priority: P2
@@ -2232,12 +2232,14 @@ Origin:
 - SourceDoc: Plan.Rough.RssLlmCuration.SecurityFirst.md
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
+- PartiallyImplemented: 2026-03-03 (left-tab jobs/triage IA reorganization)
 Tags: [UX, triage, visualization]
 Summary: Add category/tag filtering, tag cloud aggregation, color-coded priority, and injection indicators.
 Rationale: Helps users focus on high-signal items quickly.
 SuccessCriteria:
 - Triage list supports filtering by category and priority.
 - UI displays tag aggregation and priority color cues.
+Notes: Left-pane workflow split and triage-oriented row presentation are now implemented (`Jobs`, `Triage Review`, `Triage Results`) with reducer-owned `JobListScope` (`All` / `SinceCheckpoint`). Advanced triage filtering (category/tag chips), tag aggregation cloud, and explicit priority color cues remain open.
 
 #### [FI-UX-TriageUi-0002] Bulk review actions for pre-triage overrides
 Status: Candidate
@@ -2257,6 +2259,7 @@ SuccessCriteria:
 - UI offers explicit bulk actions for unresolved review items.
 - Bulk action results are persisted as manual overrides and are fully reversible.
 - Reducer tests verify deterministic behavior for mixed review sets.
+Notes: Still open. Current implementation keeps per-item review controls and scope filtering but does not add one-click include-all/exclude-all actions.
 
 ### WorkflowAutomation
 
