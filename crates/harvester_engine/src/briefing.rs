@@ -1,4 +1,9 @@
-use std::{collections::HashMap, fs, path::Path, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+    path::Path,
+    sync::Arc,
+};
 
 use engine_logging::{engine_info, engine_warn};
 use url::Url;
@@ -418,6 +423,20 @@ pub fn load_and_prepare_articles_filtered(
         return Ok((Vec::new(), String::new()));
     }
 
+    if ordered_urls.len() == 1 {
+        let selected_url = &ordered_urls[0];
+        if let Some(package) =
+            find_article_package_for_selected_url(output_dir, selected_url, since_utc)?
+        {
+            return prepare_loaded_articles_and_collection(vec![package], max_input_bytes, registry);
+        }
+        engine_warn!(
+            "[briefing-loader] selected url missing from corpus: {}",
+            selected_url
+        );
+        return Ok((Vec::new(), String::new()));
+    }
+
     let packages = scan_and_prepare_articles(output_dir, since_utc)?;
     let mut indexed: HashMap<String, ArticlePackage> = HashMap::with_capacity(packages.len());
     for package in packages {
@@ -453,6 +472,85 @@ pub fn load_and_prepare_articles_filtered(
     }
 
     prepare_loaded_articles_and_collection(selected_packages, max_input_bytes, registry)
+}
+
+fn find_article_package_for_selected_url(
+    output_dir: &Path,
+    selected_url: &str,
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Option<ArticlePackage>, String> {
+    let config = build_content_prep_config();
+    let selected_aliases: HashSet<String> = url_lookup_aliases(selected_url).into_iter().collect();
+    let mut markdown_files = Vec::new();
+    for entry in fs::read_dir(output_dir).map_err(|err| {
+        format!(
+            "failed to list markdown files in {}: {}",
+            output_dir.display(),
+            err
+        )
+    })? {
+        let entry = entry
+            .map_err(|err| format!("failed to read entry in {}: {}", output_dir.display(), err))?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("md"))
+            != Some(true)
+        {
+            continue;
+        }
+        markdown_files.push(path);
+    }
+    markdown_files.sort();
+
+    for path in markdown_files {
+        let markdown = fs::read_to_string(&path)
+            .map_err(|err| format!("failed to read {}: {}", path.display(), err))?;
+        let Some(fields) = parse_frontmatter(&markdown) else {
+            continue;
+        };
+        let Some(url) = fields
+            .url
+            .as_deref()
+            .map(|u| u.trim())
+            .filter(|u| !u.is_empty())
+            .map(ToString::to_string)
+        else {
+            continue;
+        };
+
+        if let Some(since_dt) = since_utc {
+            if let Some(raw_fetched_utc) = &fields.fetched_utc {
+                if let Ok(article_ts) = parse_rfc3339_utc("article", raw_fetched_utc) {
+                    if article_ts < since_dt {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        let article_aliases = url_lookup_aliases(&url);
+        if !article_aliases
+            .iter()
+            .any(|alias| selected_aliases.contains(alias))
+        {
+            continue;
+        }
+
+        let clean_text = derive_clean_text(&markdown, &url, fields.title.as_deref(), &config);
+        return Ok(Some(ArticlePackage {
+            url,
+            source_title: fields.title,
+            clean_text,
+            fetched_utc: fields.fetched_utc,
+        }));
+    }
+
+    Ok(None)
 }
 
 pub fn load_and_prepare_articles_for_triage(

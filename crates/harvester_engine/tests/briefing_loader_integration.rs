@@ -440,3 +440,24 @@ fn filtered_loader_matches_cisco_content_path_alias() {
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, article_url);
 }
+
+#[test]
+fn filtered_loader_single_selection_ignores_unrelated_invalid_markdown() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    write_markdown_file(
+        tmp.path(),
+        "a.md",
+        "https://example.com/a",
+        Some("A"),
+        "body a",
+    );
+    fs::write(tmp.path().join("z-invalid.md"), [0xFF, 0xFE, 0xFD]).unwrap();
+
+    let selected = vec!["https://example.com/a".to_string()];
+    let (articles, _) =
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, None).unwrap();
+
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, "https://example.com/a");
+}
