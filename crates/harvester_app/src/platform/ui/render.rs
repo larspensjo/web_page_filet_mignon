@@ -541,18 +541,27 @@ fn render_token_progress_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
+    let scoped_total_tokens = match view.left_pane.job_list_scope {
+        JobListScope::All => view.total_tokens,
+        JobListScope::SinceCheckpoint => view
+            .jobs
+            .iter()
+            .filter(|job| job.is_since_checkpoint)
+            .filter_map(|job| job.tokens.map(u64::from))
+            .sum(),
+    };
     let raw_limit = view.token_limit;
     let effective_limit = raw_limit.max(1);
     let bar_max = effective_limit.min(u32::MAX as u64);
-    let clamped_tokens = view.total_tokens.min(bar_max);
+    let clamped_tokens = scoped_total_tokens.min(bar_max);
     let percent = if raw_limit > 0 {
-        (view.total_tokens.min(raw_limit) as f64 / raw_limit as f64) * 100.0
+        (scoped_total_tokens.min(raw_limit) as f64 / raw_limit as f64) * 100.0
     } else {
         0.0
     };
     let progress_text = format!(
         "Tokens: {} / {} ({:.1}%)",
-        format_with_commas(view.total_tokens),
+        format_with_commas(scoped_total_tokens),
         format_with_commas(view.token_limit),
         percent
     );
@@ -2815,6 +2824,51 @@ mod tests {
                 cmd,
                 PlatformCommand::SetCheckBoxChecked { control_id, checked: false, .. }
                 if *control_id == CHK_JOBS_SCOPE_SINCE_CHECKPOINT
+            )
+        }));
+    }
+
+    #[test]
+    fn token_progress_uses_since_checkpoint_scope_total_when_enabled() {
+        let window_id = WindowId::new(41);
+        let mut tree_state = TreeRenderState::new();
+        let mut since_job = make_job(
+            1,
+            "https://since.example",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            Some(50),
+            None,
+        );
+        since_job.is_since_checkpoint = true;
+        let all_time_job = make_job(
+            2,
+            "https://all.example",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            Some(150),
+            None,
+        );
+        let mut view = make_view(vec![since_job, all_time_job]);
+        view.total_tokens = 200;
+        view.token_limit = 200_000;
+        view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == LABEL_TOKEN_PROGRESS
+                    && text == "Tokens: 50 / 200,000 (0.0%)"
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetProgressBarPosition { control_id, position, .. }
+                if *control_id == PROGRESS_TOKENS && *position == 50
             )
         }));
     }

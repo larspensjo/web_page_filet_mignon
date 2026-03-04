@@ -590,3 +590,12 @@ Context: A visible UI regression risk remained in any app using CommanDuctUI wit
 Change: Hardened `commanductui` by validating docked edge rules (`Top/Bottom/Left/Right`) require non-negative `fixed_size`, added DPI-aware minimum checkbox height helpers, and enforced minimum native checkbox height in layout application for `ControlKind::CheckBox`. Added regression tests for header+checkbox+fill non-overlap and new validation failure cases. Bumped submodule version to `0.7.2` and updated its changelog.
 Evidence: `cargo test -p commanductui`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
 Refs: src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/controls/checkbox_handler.rs, src/CommanDuctUI/Cargo.toml, src/CommanDuctUI/CHANGELOG.md
+
+## 2026-03-04 - Token progress now respects Since checkpoint scope
+Type: Bug Fix
+Context: The jobs-pane `Since checkpoint only` scope correctly filtered visible rows, but the top token progress bar continued to use all-time totals, which made the scoped view misleading and inconsistent with operator intent.
+Change: Updated `harvester_app` token-progress rendering to compute the numerator from scope-filtered jobs when `JobListScope::SinceCheckpoint` is active, while preserving all-time behavior for `JobListScope::All`. Added a render regression test that asserts both label text and progress bar position use only since-checkpoint token totals in scoped mode.
+Evidence: `cargo test -p harvester_app token_progress_uses_since_checkpoint_scope_total_when_enabled -- --nocapture`; `cargo clippy --all-targets -- -D warnings`.
+Lessons Learned: Scope toggles that filter rows should also drive summary metrics in the same surface, otherwise the UI can present internally inconsistent state even when each piece is individually correct.
+Prevention: For each new scope/filter control, add explicit render tests for aggregate labels and progress indicators (not only row visibility) so scoped metrics regressions are caught early.
+Refs: crates/harvester_app/src/platform/ui/render.rs, token_progress_uses_since_checkpoint_scope_total_when_enabled
