@@ -37,7 +37,7 @@ pub fn load_entity_index(path: &Path) -> EntityIndex {
 
     match ron::from_str::<EntityIndex>(&content) {
         Ok(index) => {
-            engine_info!(
+            engine_debug!(
                 "[entity-index] Loaded {} entries from {:?}",
                 index.entries.len(),
                 path
