@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::RwLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CycleOutcome {
@@ -41,10 +41,19 @@ fn should_settle_cycle(obs: &BatchObservation) -> bool {
             obs.triage_phase,
             harvester_core::TriagePhase::LoadingArticles | harvester_core::TriagePhase::Triaging
         )
+        && !matches!(
+            obs.pre_triage_phase,
+            harvester_core::PreTriagePhase::LoadingArticles
+                | harvester_core::PreTriagePhase::Reviewing
+        )
         && obs.jobs_in_flight == 0
         && obs.triage_in_flight == 0
         && obs.summary_in_flight == 0
         && obs.summary_pending == 0
+}
+
+fn should_check_settlement_this_iteration(orchestrated: bool) -> bool {
+    !orchestrated
 }
 
 /// Classifies the outcome of a completed cycle based on observation metrics.
@@ -105,6 +114,10 @@ fn build_effect_runner(
     platform_handler: Box<NoOpPlatformHandler>,
 ) -> EffectRunner {
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
+        if api_key.trim().is_empty() {
+            engine_warn!("[batch] OPENAI_API_KEY is empty; AI triage/summary features disabled");
+            return EffectRunner::new(paths.clone(), msg_tx, platform_handler);
+        }
         let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
             Arc::new(OpenAiProvider::new(api_key));
         let provider_clone = Arc::clone(&provider);
@@ -146,6 +159,12 @@ fn build_effect_runner(
         engine_warn!("[batch] OPENAI_API_KEY not set; AI triage/summary features disabled");
         EffectRunner::new(paths.clone(), msg_tx, platform_handler)
     }
+}
+
+fn is_ai_orchestration_enabled() -> bool {
+    std::env::var("OPENAI_API_KEY")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
 }
 
 const MAX_BATCH_MSG_LOG_LEN: usize = 240;
@@ -337,6 +356,7 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     // Build EffectRunner (with optional LLM support based on OPENAI_API_KEY)
     engine_info!("[batch] Building EffectRunner");
+    let enable_ai_orchestration = is_ai_orchestration_enabled();
     let platform_handler = Box::new(NoOpPlatformHandler);
     let effect_runner = build_effect_runner(
         &paths,
@@ -392,9 +412,10 @@ pub fn run(args: Args) -> Result<i32, String> {
     let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
     let mut cycle_count = 0;
     let mut total_cycles = 0;
-    let mut successful_cycles = 0;
     let mut partial_failure_cycles = 0;
     let mut total_failure_cycles = 0;
+    let mut prev_jobs_total = 0usize;
+    let mut total_new_articles = 0usize;
 
     loop {
         cycle_count += 1;
@@ -414,22 +435,25 @@ pub fn run(args: Args) -> Result<i32, String> {
             &msg_rx,
             &effect_runner,
             &shutdown_flag,
-            true,
+            enable_ai_orchestration,
         )?;
 
         // Track outcome statistics
         match outcome {
-            CycleOutcome::Success => successful_cycles += 1,
+            CycleOutcome::Success => {}
             CycleOutcome::PartialFailure => partial_failure_cycles += 1,
             CycleOutcome::TotalFailure => total_failure_cycles += 1,
         }
 
         // Print cycle summary
         let obs = state.batch_observation();
+        let new_jobs = obs.jobs_total.saturating_sub(prev_jobs_total);
+        prev_jobs_total = obs.jobs_total;
+        total_new_articles += new_jobs;
         if cycle_count == 1 {
             print_cycle_table_header();
         }
-        print_cycle_summary(cycle_count, &outcome, &obs);
+        print_cycle_summary(cycle_count, &outcome, &obs, new_jobs);
         for line in format_llm_usage_lines(&state.llm_usage_rows()) {
             println!("{}", line);
         }
@@ -465,11 +489,12 @@ pub fn run(args: Args) -> Result<i32, String> {
     persist_completed_jobs(&paths.state_path, &completed_jobs);
 
     // Print final summary
+    let final_obs = state.batch_observation();
     print_final_summary(
         total_cycles,
-        successful_cycles,
-        partial_failure_cycles,
-        total_failure_cycles,
+        total_new_articles,
+        final_obs.triage_completed,
+        final_obs.summary_completed,
     );
 
     engine_info!("[batch] Shutdown complete");
@@ -517,8 +542,29 @@ fn run_dispatch_loop(
     shutdown_flag: &Arc<AtomicBool>,
     enable_ai_orchestration: bool,
 ) -> Result<CycleOutcome, String> {
+    run_dispatch_loop_with_tick_interval(
+        state,
+        msg_tx,
+        msg_rx,
+        effect_runner,
+        shutdown_flag,
+        enable_ai_orchestration,
+        Duration::from_millis(75),
+    )
+}
+
+fn run_dispatch_loop_with_tick_interval(
+    state: &mut AppState,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_runner: &EffectRunner,
+    shutdown_flag: &Arc<AtomicBool>,
+    enable_ai_orchestration: bool,
+    tick_interval: Duration,
+) -> Result<CycleOutcome, String> {
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
+    let mut last_tick = Instant::now();
     const MAX_ITERATIONS: usize = 10_000; // Safety limit
 
     loop {
@@ -583,7 +629,17 @@ fn run_dispatch_loop(
             }
         }
 
+        if enable_ai_orchestration && last_tick.elapsed() >= tick_interval {
+            let (new_state, tick_effects) = update(state.clone(), Msg::Tick);
+            *state = new_state;
+            if !tick_effects.is_empty() {
+                effect_runner.enqueue(tick_effects);
+            }
+            last_tick = Instant::now();
+        }
+
         // Check for settlement after processing available work.
+        let mut orchestrated = false;
         if enable_ai_orchestration {
             if let Some(next_msg) = maybe_dispatch_batch_ai_orchestration(state) {
                 msg_tx.send(next_msg.clone()).map_err(|e| {
@@ -592,13 +648,14 @@ fn run_dispatch_loop(
                         next_msg, e
                     )
                 })?;
+                orchestrated = true;
             }
         }
 
         // This prevents an immediate idle-state exit before queued actions
         // (like PollSourcesClicked) have been reduced.
         let obs = state.batch_observation();
-        if should_settle_cycle(&obs) {
+        if should_check_settlement_this_iteration(orchestrated) && should_settle_cycle(&obs) {
             engine_info!(
                 "[batch] Cycle settled after {} iterations: jobs={}/{}, triage={}/{}",
                 iterations,
@@ -664,70 +721,39 @@ fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
 
 fn print_cycle_table_header() {
     println!(
-        "{:<5} {:<8} {:>15} {:>22} {:>20} {:>20} {:>16} {:>16}",
+        "{:<6} {:<9} {:>20} {:>18} {:>21}",
         "Cycle",
         "Outcome",
-        "Jobs T/D/F/I",
-        "PreTri T/I/R/F",
-        "Triage T/C/F/P",
-        "Summ T/C/F/P",
-        "TriCache H/M/K",
-        "SumCache H/M/K"
+        "Jobs(new/done/fail)",
+        "Triage(ok/fail)",
+        "Summaries(ok/fail)"
     );
-    println!("{}", "-".repeat(132));
+    println!("{}", "-".repeat(78));
 }
 
 /// Prints a summary of the completed cycle.
-fn print_cycle_summary(cycle: usize, outcome: &CycleOutcome, obs: &BatchObservation) {
+fn print_cycle_summary(cycle: usize, outcome: &CycleOutcome, obs: &BatchObservation, new_jobs: usize) {
     println!(
-        "{:<5} {:<8} {:>15} {:>22} {:>20} {:>20} {:>16} {:>16}",
+        "{:<6} {:<9} {:>20} {:>18} {:>21}",
         cycle,
         cycle_outcome_label(outcome),
-        format!(
-            "{}/{}/{}/{}",
-            obs.jobs_total, obs.jobs_done, obs.jobs_failed, obs.jobs_in_flight
-        ),
-        format!(
-            "{}/{}/{}/{}",
-            obs.pre_triage_total,
-            obs.pre_triage_included,
-            obs.pre_triage_review,
-            obs.pre_triage_filtered
-        ),
-        format!(
-            "{}/{}/{}/{}",
-            obs.triage_total, obs.triage_completed, obs.triage_failed, obs.triage_pending
-        ),
-        format!(
-            "{}/{}/{}/{}",
-            obs.summary_total, obs.summary_completed, obs.summary_failed, obs.summary_pending
-        ),
-        format!(
-            "{}/{}/{}",
-            obs.triage_cache_hits, obs.triage_cache_misses, obs.triage_cache_key_unavailable
-        ),
-        format!(
-            "{}/{}/{}",
-            obs.summary_cache_hits, obs.summary_cache_misses, obs.summary_cache_key_unavailable
-        )
+        format!("{}/{}/{}", new_jobs, obs.jobs_done, obs.jobs_failed),
+        format!("{}/{}", obs.triage_completed, obs.triage_failed),
+        format!("{}/{}", obs.summary_completed, obs.summary_failed),
     );
 }
 
 /// Prints the final summary when batch runner exits.
 fn print_final_summary(
     total_cycles: usize,
-    successful: usize,
-    partial_failures: usize,
-    total_failures: usize,
+    total_new_articles: usize,
+    total_triaged: usize,
+    total_summarized: usize,
 ) {
-    println!("\n╔═══════════════════════════════════════╗");
-    println!("║        BATCH RUN FINAL SUMMARY        ║");
-    println!("╚═══════════════════════════════════════╝");
-    println!("Total cycles:      {}", total_cycles);
-    println!("  Successful:      {}", successful);
-    println!("  Partial failure: {}", partial_failures);
-    println!("  Total failure:   {}", total_failures);
-    println!("═══════════════════════════════════════\n");
+    println!(
+        "\n-- Batch complete: {} cycles, {} new articles, {} triaged, {} summarized --\n",
+        total_cycles, total_new_articles, total_triaged, total_summarized
+    );
 }
 
 /// Sleeps for the specified duration, checking shutdown flag periodically.
@@ -1003,6 +1029,158 @@ mod tests {
     }
 
     #[test]
+    fn test_should_not_settle_when_pre_triage_loading() {
+        let obs = BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 0,
+            jobs_done: 0,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::LoadingArticles,
+            pre_triage_total: 0,
+            pre_triage_included: 0,
+            pre_triage_review: 0,
+            pre_triage_filtered: 0,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 0,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 0,
+            summary_total: 0,
+            summary_pending: 0,
+            summary_in_flight: 0,
+            summary_completed: 0,
+            summary_failed: 0,
+            triage_cache_hits: 0,
+            triage_cache_misses: 0,
+            triage_cache_key_unavailable: 0,
+            summary_cache_hits: 0,
+            summary_cache_misses: 0,
+            summary_cache_key_unavailable: 0,
+        };
+
+        assert!(!should_settle_cycle(&obs));
+    }
+
+    #[test]
+    fn test_should_not_settle_when_pre_triage_reviewing() {
+        let obs = BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 0,
+            jobs_done: 0,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Reviewing,
+            pre_triage_total: 0,
+            pre_triage_included: 0,
+            pre_triage_review: 0,
+            pre_triage_filtered: 0,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 0,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 0,
+            summary_total: 0,
+            summary_pending: 0,
+            summary_in_flight: 0,
+            summary_completed: 0,
+            summary_failed: 0,
+            triage_cache_hits: 0,
+            triage_cache_misses: 0,
+            triage_cache_key_unavailable: 0,
+            summary_cache_hits: 0,
+            summary_cache_misses: 0,
+            summary_cache_key_unavailable: 0,
+        };
+
+        assert!(!should_settle_cycle(&obs));
+    }
+
+    #[test]
+    fn test_should_settle_when_pre_triage_ready_to_triage() {
+        let obs = BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 0,
+            jobs_done: 0,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::ReadyToTriage,
+            pre_triage_total: 0,
+            pre_triage_included: 0,
+            pre_triage_review: 0,
+            pre_triage_filtered: 0,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 0,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 0,
+            summary_total: 0,
+            summary_pending: 0,
+            summary_in_flight: 0,
+            summary_completed: 0,
+            summary_failed: 0,
+            triage_cache_hits: 0,
+            triage_cache_misses: 0,
+            triage_cache_key_unavailable: 0,
+            summary_cache_hits: 0,
+            summary_cache_misses: 0,
+            summary_cache_key_unavailable: 0,
+        };
+
+        assert!(should_settle_cycle(&obs));
+    }
+
+    #[test]
+    fn test_should_settle_when_pre_triage_failed() {
+        let obs = BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 0,
+            jobs_done: 0,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Failed {
+                reason: "load failed".to_string(),
+            },
+            pre_triage_total: 0,
+            pre_triage_included: 0,
+            pre_triage_review: 0,
+            pre_triage_filtered: 0,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 0,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 0,
+            summary_total: 0,
+            summary_pending: 0,
+            summary_in_flight: 0,
+            summary_completed: 0,
+            summary_failed: 0,
+            triage_cache_hits: 0,
+            triage_cache_misses: 0,
+            triage_cache_key_unavailable: 0,
+            summary_cache_hits: 0,
+            summary_cache_misses: 0,
+            summary_cache_key_unavailable: 0,
+        };
+
+        assert!(should_settle_cycle(&obs));
+    }
+
+    #[test]
+    fn test_orchestration_dispatch_skips_settlement_in_same_iteration() {
+        assert!(!should_check_settlement_this_iteration(true));
+        assert!(should_check_settlement_this_iteration(false));
+    }
+
+    #[test]
     fn test_summarize_batch_msg_compacts_large_payloads() {
         let msg = Msg::TriageArticlesLoaded {
             request_id: 1,
@@ -1079,6 +1257,60 @@ mod tests {
         assert_eq!(outcome, CycleOutcome::Success);
 
         assert!(matches!(msg_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    }
+
+    #[test]
+    fn test_dispatch_loop_ticks_drive_pretriage_from_restore_signal() {
+        engine_logging::initialize_for_tests();
+        let temp_dir = TempDir::new().unwrap();
+        let output_dir = temp_dir.path().join("output");
+        std::fs::create_dir_all(&output_dir).unwrap();
+
+        let sources_path = temp_dir.path().join("sources.ron");
+        std::fs::write(&sources_path, "SourceRegistry(sources: [])").unwrap();
+
+        let runtime_paths = RuntimePaths::new(
+            output_dir,
+            sources_path,
+            temp_dir.path().join("contexts"),
+            temp_dir.path().join("prompts"),
+        );
+
+        let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
+        let mut state = AppState::new();
+        let effect_runner =
+            EffectRunner::new(runtime_paths, msg_tx.clone(), Box::new(NoOpPlatformHandler));
+        let shutdown_flag = Arc::new(AtomicBool::new(false));
+
+        msg_tx
+            .send(Msg::RestoreCompletedJobs(vec![
+                harvester_core::CompletedJobSnapshot {
+                    url: "https://example.com/article-1".to_string(),
+                    tokens: Some(123),
+                    bytes: Some(4567),
+                    links: Vec::new(),
+                    fetched_utc: Some("2026-03-05T00:00:00Z".to_string()),
+                },
+            ]))
+            .unwrap();
+
+        let outcome = run_dispatch_loop_with_tick_interval(
+            &mut state,
+            &msg_tx,
+            &msg_rx,
+            &effect_runner,
+            &shutdown_flag,
+            true,
+            Duration::ZERO,
+        )
+        .expect("dispatch loop should complete");
+        assert_eq!(outcome, CycleOutcome::Success);
+
+        let obs = state.batch_observation();
+        assert!(!matches!(
+            obs.pre_triage_phase,
+            harvester_core::PreTriagePhase::Idle
+        ));
     }
 
     #[test]

@@ -599,3 +599,12 @@ Evidence: `cargo test -p harvester_app token_progress_uses_since_checkpoint_scop
 Lessons Learned: Scope toggles that filter rows should also drive summary metrics in the same surface, otherwise the UI can present internally inconsistent state even when each piece is individually correct.
 Prevention: For each new scope/filter control, add explicit render tests for aggregate labels and progress indicators (not only row visibility) so scoped metrics regressions are caught early.
 Refs: crates/harvester_app/src/platform/ui/render.rs, token_progress_uses_since_checkpoint_scope_total_when_enabled
+
+## 2026-03-05 - Batch loop tick injection and output simplification
+Type: Bug Fix
+Context: `harvester_batch` cycles were settling with pre-triage/triage/summary counters at zero because the dispatch loop never emitted `Msg::Tick`, so reducer-owned pre-triage refresh dispatch never ran.
+Change: Updated `harvester_batch` dispatch loop to emit cadence-guarded ticks (75 ms) before AI orchestration, skip same-iteration settlement when orchestration enqueues a follow-up action, and block settlement during active pre-triage work phases (`LoadingArticles`, `Reviewing`). AI orchestration/ticks are now enabled only when `OPENAI_API_KEY` is present and non-empty, preventing no-LLM runs from stalling in triage orchestration and restoring regular cycle completion/output cadence. Simplified cycle output to `Jobs(new/done/fail)`, `Triage(ok/fail)`, and `Summaries(ok/fail)`, and changed final summary to a single line including total new articles.
+Evidence: `cargo test -p harvester_batch`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
+Lessons Learned: Batch/headless loops that rely on reducer-owned time coordination must inject periodic ticks explicitly; omitting the tick path silently disables downstream pipelines even when all other orchestration code is present.
+Prevention: Add a batch-runner checklist item and regression tests that verify `Action -> Tick -> Effect -> Action` loops execute under headless dispatch (including orchestration handoff settlement behavior).
+Refs: crates/harvester_batch/src/runner.rs, runner::tests::test_dispatch_loop_ticks_drive_pretriage_from_restore_signal
