@@ -1,4 +1,4 @@
-# Brainstorming: Briefing, Archive, Search, and RAG
+# Brainstorming: Archive, Search, and RAG
 
 This document is intentionally broad to grow the option space before narrowing.
 Decisions already confirmed are marked **[DECIDED]**; ideas still open are unmarked.
@@ -7,109 +7,52 @@ Decisions already confirmed are marked **[DECIDED]**; ideas still open are unmar
 
 ## Current Source-Code Baseline (verified against code, 2026-02)
 
-- **Briefing loaders** in `crates/harvester_engine/src/briefing.rs` expose three entry points:
-  - `scan_and_prepare_articles(output_dir)` — scans all `.md` files, returns `Vec<ArticlePackage>` sorted deterministically.
-  - `load_and_prepare_articles(output_dir, max_input_bytes, registry)` — for briefing; allocates equal token budget per article.
-  - `load_and_prepare_articles_filtered(output_dir, max_input_bytes, registry, ordered_urls)` — filters by URL list with alias normalization (`www.`, `eu.` prefix stripping, port normalization).
-  - None of these currently accept a `since_utc` time filter.
 - **`fetched_utc`** already exists as an `Option<String>` (RFC3339) in `FrontmatterFields`, written via `build_markdown_document()` and parsed via `parse_frontmatter()` in `crates/harvester_engine/src/frontmatter.rs`. Round-trip is tested.
 - **`harvester_batch` CLI** (`crates/harvester_batch/src/cli.rs`) has no timestamp or checkpoint flags. Current args: `sources`, `output_dir`, `contexts_dir`, `prompts_dir`, `llm_concurrency`, `force_unlock`, `allow_unsupported_sources`, `dry_run`, `poll_interval`.
-- **Batch runner** (`crates/harvester_batch/src/runner.rs`) orchestrates polling → pre-triage → triage → summaries. Briefing generation is never triggered automatically; it stays a user/app action.
-- **Persistence** (`crates/harvester_io/src/persistence.rs`) stores completed jobs + pre-triage overrides in `output/.harvester_state.ron` (RON format, atomic writes). No briefing checkpoint field exists yet. The `PersistedState` struct is straightforward to extend.
-- **`ordered_completed_job_urls()`** in `crates/harvester_core/src/state.rs` returns URLs of done+successful jobs in BTreeMap (JobId) order. Used to feed briefing article selection.
-- **State machine** follows Elm-like pattern: pure `update(AppState, Msg) -> (AppState, Vec<Effect>)`. All IO goes through `Effect` and `EffectRunner`. Checkpoint state must follow the same pattern.
+- **Batch runner** (`crates/harvester_batch/src/runner.rs`) orchestrates polling → pre-triage → triage → summaries. - **Persistence** (`crates/harvester_io/src/persistence.rs`) stores completed jobs + pre-triage overrides in `output/.harvester_state.ron` (RON format, atomic writes). No - **`ordered_completed_job_urls()`** in `crates/harvester_core/src/state.rs` returns URLs of done+successful jobs in BTreeMap (JobId) order. Used to feed - **State machine** follows Elm-like pattern: pure `update(AppState, Msg) -> (AppState, Vec<Effect>)`. All IO goes through `Effect` and `EffectRunner`. Checkpoint state must follow the same pattern.
 
 ---
 
 ## Preferences Captured
 
 - No filesystem partitioning strategy for this feature.
-- Prefer explicit timestamp management, especially via `harvester_batch` argument(s), instead of implicit reset when briefing runs.
-- Keep downloaded article files (no purge policy coupled to briefing window).
-- Add an ergonomic PowerShell TUI launcher for batch options/flags.
+- Prefer explicit timestamp management, especially via `harvester_batch` argument(s), instead of implicit reset when - Keep downloaded article files (no purge policy coupled to - Add an ergonomic PowerShell TUI launcher for batch options/flags.
 - Strong interest in archive-as-knowledge-base, including plain-English Q&A with citations/links.
 - Search should be content-indexed (full text), not mostly key/index-field based.
 - RAG for plain-English Q&A is a high-priority future goal.
 
 ---
 
-## 1) Time-Limited Briefing Without Purging
-
-### Idea 1A: Explicit briefing checkpoint file **[DECIDED: preferred baseline]**
-
-- **How:** Add `output/.briefing_checkpoint.ron` with a single field `since_utc: Option<String>` (RFC3339).
-  - Simpler than embedding it in `.harvester_state.ron`, and the file is easy to inspect/edit manually.
-  - Alternatively: add a `briefing_checkpoint` field to the existing `PersistedState` struct to avoid a second file. Either works; separate file is more self-documenting.
-- **How:** `harvester_batch` gets new CLI flags:
-  - `--set-briefing-since <RFC3339>` — write an explicit timestamp and exit (no batch loop).
-  - `--set-briefing-since-now` — write current UTC time and exit.
-  - `--clear-briefing-since` — remove the checkpoint (revert to all-time briefing).
-- **How:** `GenerateBriefingClicked` causes the app to load the checkpoint (via an `Effect::LoadBriefingCheckpoint`) and pass `since_utc` into the article loader. This keeps the reducer pure.
-- **How:** The loader (`load_and_prepare_articles`) gains an optional `since_utc: Option<DateTime<Utc>>` parameter; `scan_and_prepare_articles` filters by comparing parsed `fetched_utc` from frontmatter.
-- **Checkpoint update policy (sub-decision, still open — see 1B/1C):**
-  - Default: briefing generation never moves the checkpoint.
-  - Offer explicit "advance to now" as a separate action.
-- **Pros:** Matches explicit-control preference; archive remains immutable; easy to inspect/override by editing the RON file.
-- **Pros:** Simple mental model: checkpoint is independent from briefing execution.
-- **Cons:** Need clear UX for malformed/missing checkpoint values (fallback policy required — see Section 8).
-- **Cons:** Two small state files to keep in sync if checkpoint is separate from `.harvester_state.ron`.
-
-### Idea 1B: Manual-only checkpoint updates (strict control mode) **[DECIDED: default behavior within 1A]**
-
-- Briefing generation never updates the checkpoint automatically.
-- Only explicit CLI flags or future UI button update it.
-- Fully respects "accumulate more articles unless I explicitly move the cursor."
-
-### Idea 1C: Optional "advance checkpoint" action (convenience layer on top of 1B)
-
-- Keep strict manual mode as the default, but offer a single-click / single-flag action to advance checkpoint to `now`.
-- Could be a button in the app or a launcher menu item.
-- Needs a guard: "You are about to move the briefing window to now. Confirm?" to avoid accidental advancement.
-- **Pros:** Supports both intentional accumulation and fast daily operation.
-
 ---
+## Search Requirements (English Commands)
 
-## 2) Where to Apply the Time Filter (No FS Partitioning)
+ReqEnglishCommandQueryIRV1 Define a strict intermediate representation (IR) for user “English commands” that covers query text, must/should terms, entities, topics/tags, date range, source filters, and a mode selector (Find/Filter/Answer).
 
-### Idea 2A: Frontmatter filtering during loader scan **[DECIDED: starting point]**
+ReqQueryInterpreterJsonV1 Implement a query interpreter that converts English commands into the IR and always outputs validated, machine-readable data (e.g., JSON) with clear error messages for un-parseable requests.
 
-- **How:** `scan_and_prepare_articles` skips files whose parsed `fetched_utc` is before `since_utc`.
-  - `fetched_utc` is already parsed to `Option<String>` in `FrontmatterFields`; just need a `DateTime<Utc>` comparison.
-  - Files with missing or unparseable `fetched_utc` should be handled by a configurable policy (exclude silently, include with warning, or fail — see Section 8).
-- **Pros:** Minimal architecture change; reuses the existing parse path; low risk.
-- **Cons:** Still opens and reads every markdown file on every briefing run. Acceptable for hundreds of articles; degrades at tens of thousands.
-- **Migration path:** 2A → 2B (index) → 2C (hybrid) is natural as the archive grows.
+ReqRetrievalModesV1 Support explicit retrieval modes: Filter (metadata/FTS only, high precision), Find (hybrid retrieval for high recall), and Answer (retrieve then synthesize with citations).
 
-### Idea 2B: Maintain an article manifest/index sidecar
+ReqHybridCandidateMergeV1 Generate candidates from lexical search (FTS/BM25) and semantic search (embeddings) independently, then merge, de-duplicate, and re-rank a bounded top-N result set.
 
-- **How:** Persist `output/.article_index.ron` (or SQLite) with `{ url, filename, fetched_utc, title, content_hash, token_count }`.
-- **How:** Written by the download effect when an article is saved; updated on re-download.
-- **How:** Briefing/search consult index first, then load only selected files.
-- **Pros:** O(1) time-filter lookup; also the natural foundation for full-text search (Section 5).
-- **Cons:** Index rebuild/sync logic needed. Must handle: missing index (rebuild from scan), deleted markdown files (stale entries), re-downloaded same URL (update entry).
-- **Note:** `content_hash` already computed in `briefing.rs`; including it enables dedup and cache-key reuse.
+ReqStableCitationsV1 Ensure every returned hit can be cited back to stable coordinates in the archive (file path + heading or byte/line span), and expose a deterministic snippet for each hit.
 
-### Idea 2C: Hybrid fallback (index-first, scan-on-miss)
+ReqChunkingPolicyV1 Define and document a chunking policy for semantic indexing (chunk size, overlap, and heading-aware boundaries) and persist chunk-to-document mappings for traceability.
 
-- **How:** Load index; if absent or `mtime`-check flags it stale, rebuild from frontmatter scan.
-- **Pros:** Robust operation with graceful degradation for first run or corrupted state.
-- **Cons:** Slightly more code; `mtime`-based staleness detection is approximate.
+ReqOfflineEnrichmentV1 Provide an optional offline enrichment phase keyed by content hash that can attach topics/tags, entities, and an abstract to each article without reprocessing unchanged content.
 
----
+ReqIndexRebuildableV1 Treat all indexes (FTS, vector store, enrichment tables) as rebuildable sidecars; the markdown files remain the source of truth.
+
+ReqObservabilitySearchV1 Log query IR, candidate counts per retriever, latency, and final top-K IDs to make relevance regressions diagnosable.
 
 ## 3) Batch UX: PowerShell TUI Launcher
 
 ### Idea 3A: Interactive launcher script for `harvester_batch`
 
 - **How:** Add `scripts/Start-HarvesterBatch.ps1` with numbered menus/prompts/defaults.
-- **How:** Show the generated command line before execution ("You are about to run: `harvester_batch --set-briefing-since-now` — proceed?").
-- **How:** Include actions like:
+- **How:** Show the generated command line before execution ("You are about to run: `harvester_batch --set-- **How:** Include actions like:
   - `[1] Run batch loop (continuous)`
   - `[2] Run once (dry-run, read-only)`
-  - `[3] Set briefing checkpoint to now`
-  - `[4] Set briefing checkpoint to custom date`
-  - `[5] Clear briefing checkpoint (all-time briefing)`
-  - `[6] Show current checkpoint`
+  - `[3] Set   - `[4] Set   - `[5] Clear   - `[6] Show current checkpoint`
 - **Pros:** Solves "too many flags to remember"; reduces operator mistakes.
 - **Cons:** One more artifact to maintain as CLI evolves.
 
@@ -134,8 +77,7 @@ Decisions already confirmed are marked **[DECIDED]**; ideas still open are unmar
 - **How:** Treeview defaults to last 24h/7d and exposes "Load older" / "Archive search" actions.
 - **Pros:** Keeps UI responsive and relevant without index.
 - **Cons:** Requires explicit user action to browse older items.
-- **Interaction with checkpoint:** The briefing checkpoint window could drive the default treeview window.
-
+- **Interaction with checkpoint:** The 
 ### Idea 4B: Quick local filter for visible set
 
 - **How:** Add a filter text box in the article panel; filter by title/URL/category on the currently loaded list.
@@ -159,6 +101,22 @@ Decisions already confirmed are marked **[DECIDED]**; ideas still open are unmar
 
 ## 5) Search and RAG on the Archive
 
+### Addendum 5X: Query interpretation (English → IR)
+
+- Treat “English commands” as input to a **query interpreter** that emits a strict IR (see Requirements).
+- The IR should be the only input to retrieval, so retrieval is deterministic and testable.
+- Keep an explicit `mode` field (`filter|find|answer`) to prevent accidental expensive runs.
+
+### Addendum 5Y: Chunking + citation mapping (required for trustworthy answers)
+
+- Chunk semantic index entries on **heading boundaries** first, then apply a size cap with overlap.
+- Persist `chunk_id → (doc_id, heading_path, byte_span or line_span)` so hits can be cited and opened precisely.
+- Always return a stable snippet for each hit, derived deterministically from the stored spans.
+
+### Addendum 5Z: Optional offline enrichment (cheap semantics)
+
+- Add a background/batch step that generates **topics/tags, entities, and an abstract** per document keyed by `content_hash`.
+- Store enrichment fields in the sidecar DB so `Filter`/`Find` can match them without calling an LLM at query-time.
 ### Idea 5A: Full-text lexical index (FTS/BM25) **[strong candidate for Slice C]**
 
 - **Library options (Rust-native):**
@@ -212,21 +170,6 @@ Decisions already confirmed are marked **[DECIDED]**; ideas still open are unmar
 - **Cons:** Requires strict grounding; LLMs can still hallucinate — citations help but don't eliminate risk.
 - **Cons:** API cost per question (retrieval + answer generation).
 
-### Idea 5E: Delta briefing (focus on new/changed vs. prior runs) **[COMPLETE]**
-
-Implemented via the Delta Briefing feature (2026-02). The last 3 briefing results are persisted
-in `output/.briefing_history.ron` and injected into each aggregate briefing request as the
-`{{previous_briefings}}` template variable (via `extra_template_vars` — separate from `{{context}}`).
-`BRIEFING_PROMPT_V5` instructs the model to focus on what is NEW or CHANGED and avoid repeating
-previously covered points. History is capped at 3 entries (newest-first); each entry stores
-timestamp, executive summary (truncated to 500 chars), themes, and article count.
-
-- **Key files:** `briefing.rs` (types + formatter), `state.rs` (accessors), `update.rs` (inject +
-  save on completion), `prompts/briefing.rs` (V5), `persistence.rs` + `effect_runner.rs` (load/save).
-- **Remaining limitation:** History resets if the app state is cleared; no cross-machine sync yet.
-
----
-
 ## 6) Knowledge-Database Extensions and Future Ideas
 
 - **Time-series trend views:** "Mentions of company/topic X over the past N days" — requires entity extraction (triage LLM already extracts topics; could aggregate).
@@ -235,10 +178,8 @@ timestamp, executive summary (truncated to 500 chars), themes, and article count
 - **Duplicate/near-duplicate clustering:** Use content hash (already computed) or embedding similarity to group near-identical articles from different sources.
 - **Cross-article contradiction detection:** Ask LLM to flag articles that contradict each other on the same topic.
 - **Reading queue / "save for later":** Mark articles for deferred reading without removing them from the archive.
-- **Export to standard formats:** Export briefing window as Markdown, HTML, or PDF for sharing. Export archive index as CSV/JSON for external tools.
-- **Multi-device sync via Git:** Since the archive is markdown files + RON state files, a bare git repo could sync the archive across machines.
-- **Prompt template library:** Let user switch between briefing styles (executive summary, technical deep-dive, risk-focused) via named prompt templates — reuses the existing `contexts_dir` / `prompts_dir` infrastructure.
-- **"Ask the archive" over a time range:** Restrict Q&A retrieval to a specific date range, e.g., "What did sources say about X in December?"
+- **Export to standard formats:** Export - **Multi-device sync via Git:** Since the archive is markdown files + RON state files, a bare git repo could sync the archive across machines.
+- **Prompt template library:** Let user switch between - **"Ask the archive" over a time range:** Restrict Q&A retrieval to a specific date range, e.g., "What did sources say about X in December?"
 
 ---
 
@@ -265,9 +206,7 @@ timestamp, executive summary (truncated to 500 chars), themes, and article count
   - Option B: Include with a logged warning (more permissive; useful early on when some articles predate the field).
   - Option C: Fail loudly (too strict for a gradual rollout).
   - Recommendation: start with Option B (warn + include), make it configurable later.
-- **Checkpoint file absent or malformed:** Treat as "no filter" (all-time briefing) with a clear log warning. Never crash.
-- **URL filename determinism caveat:** Article filenames are deterministic by URL hash, so re-downloading the same URL overwrites the prior snapshot. If the article content changed between downloads, the old snapshot is lost. This is acceptable for briefing but matters for trend/change-detection use cases.
-- **Index drift risk:** Deleted or manually edited markdown files can desync the FTS/vector index. Mitigation: include a `--rebuild-index` flag; always verify index entry against filesystem before trusting it.
+- **Checkpoint file absent or malformed:** Treat as "no filter" (all-time - **URL filename determinism caveat:** Article filenames are deterministic by URL hash, so re-downloading the same URL overwrites the prior snapshot. If the article content changed between downloads, the old snapshot is lost. This is acceptable for - **Index drift risk:** Deleted or manually edited markdown files can desync the FTS/vector index. Mitigation: include a `--rebuild-index` flag; always verify index entry against filesystem before trusting it.
 - **RAG grounding risk:** Citations help but do not prevent hallucination. Mitigation: strict system prompt, confidence rating, and visual "unverified" indicator for low-context answers.
 - **Embedding cost creep:** Each new article incurs embedding API cost. Mitigations: batch embedding after each cycle; cache embeddings by `content_hash`; use cheaper local models for embeddings even if GPT-4o is used for answers.
 - **Context window for Q&A:** Top-K chunks must fit within the LLM context window after the system prompt. The existing `max_input_bytes` / token-budget logic in `load_and_prepare_articles()` can be adapted.
@@ -289,26 +228,20 @@ timestamp, executive summary (truncated to 500 chars), themes, and article count
   - Write checkpoint → delete file → read: confirm "no filter" fallback.
   - Write malformed RON → read: confirm graceful fallback, no panic.
 - **CLI parse tests** for new batch args in `crates/harvester_batch/src/cli.rs`:
-  - `--set-briefing-since "2025-12-31T23:00:00Z"` parses to correct `DateTime`.
-  - `--set-briefing-since-now` accepted.
-  - Invalid date string rejects with a clear error message.
-- **Integration test:** "set checkpoint → generate briefing → assert expected article subset (by URL)."
-- **FTS search tests:**
+  - `--set-  - `--set-  - Invalid date string rejects with a clear error message.
+- **Integration test:** "set checkpoint → generate - **FTS search tests:**
   - Index N articles → search for term in body of one → assert that article ranks first.
   - Deterministic BM25 ranking smoke test.
   - Index rebuild: delete index → rebuild from markdown files → search gives same results.
 - **RAG eval set:** Define 5-10 known Q/A pairs with expected cited source URLs; run after significant changes to retrieval or prompt.
-- **Script tests (Pester):** Launcher defaults render correct command strings; profile load/save round-trips; confirm guard prompt shown before `--set-briefing-since-now`.
-
+- **Script tests (Pester):** Launcher defaults render correct command strings; profile load/save round-trips; confirm guard prompt shown before `--set-
 ---
 
 ## 10) Incremental Delivery Options
 
 ### Slice A: Explicit checkpoint + loader time filter **[next concrete step]**
 - **What:** Add `.briefing_checkpoint.ron`, extend `scan_and_prepare_articles` with `since_utc`, add CLI flags, add `Msg`/`Effect` pairs following existing patterns.
-- **Value:** Enables "recent-only briefing" with minimal moving parts and no new dependencies.
-- **Estimated touch points:** `briefing.rs`, `cli.rs`, `runner.rs`, `persistence.rs`, `state.rs`, `msg.rs`, `effect.rs`, `effect_runner.rs`.
-
+- **Value:** Enables "recent-only - **Estimated touch points:** `
 ### Slice B: PowerShell TUI launcher + saved profiles
 - **What:** `scripts/Start-HarvesterBatch.ps1` with menu, checkpoint actions, and named profiles.
 - **Value:** Reduces daily friction and flag mistakes immediately; complements Slice A.
