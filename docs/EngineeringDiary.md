@@ -608,3 +608,12 @@ Evidence: `cargo test -p harvester_batch`; `cargo build`; `cargo clippy --all-ta
 Lessons Learned: Batch/headless loops that rely on reducer-owned time coordination must inject periodic ticks explicitly; omitting the tick path silently disables downstream pipelines even when all other orchestration code is present.
 Prevention: Add a batch-runner checklist item and regression tests that verify `Action -> Tick -> Effect -> Action` loops execute under headless dispatch (including orchestration handoff settlement behavior).
 Refs: crates/harvester_batch/src/runner.rs, runner::tests::test_dispatch_loop_ticks_drive_pretriage_from_restore_signal
+
+## 2026-03-06 - Article click defaults to triage when summary is missing
+Type: Bug Fix
+Context: Clicking an article always switched the right pane to the Summary tab, which produced an empty/placeholder summary view for unsummarized articles even when triage details existed.
+Change: Updated `harvester_core` selection reducer behavior to choose the right-pane tab by selected-article summary availability: `Summary` when a completed summary exists, otherwise `Triage`. Added reducer tests for both no-summary and summary-present paths.
+Evidence: `cargo test -p harvester_core job_selected_without_summary_selects_triage_tab_and_requests_resolve`; `cargo test -p harvester_core job_selected_with_summary_selects_summary_tab`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
+Lessons Learned: Selection actions that imply view focus should derive from content availability in reducer state, not fixed tab defaults, to avoid empty-first UX paths.
+Prevention: For each selection-driven tab switch, add paired reducer tests that assert behavior for both data-present and data-missing states.
+Refs: crates/harvester_core/src/update.rs, crates/harvester_core/src/state.rs

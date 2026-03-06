@@ -1633,6 +1633,14 @@ impl AppState {
         Some(job.url.clone())
     }
 
+    pub(crate) fn selected_job_has_summary(&self) -> bool {
+        self.ui
+            .selected_job_id()
+            .and_then(|job_id| self.jobs.get(&job_id))
+            .and_then(|job| self.briefing.summary_for_url(&job.url))
+            .is_some()
+    }
+
     /// URL of the currently selected job, regardless of summarization state.
     pub(crate) fn selected_job_url(&self) -> Option<String> {
         let job_id = self.ui.selected_job_id()?;

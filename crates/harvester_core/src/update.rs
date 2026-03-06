@@ -192,7 +192,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let Some(url) = state.selected_job_url() else {
                 return (state, Vec::new());
             };
-            state.select_tab(crate::tabs::AppTab::Summary);
+            let selected_tab = if state.selected_job_has_summary() {
+                crate::tabs::AppTab::Summary
+            } else {
+                crate::tabs::AppTab::Triage
+            };
+            state.select_tab(selected_tab);
             let url_changed = state.prompt_lab().url_input() != url;
             if url_changed {
                 state.prompt_lab_mut().set_url_input(url.clone());
@@ -3630,7 +3635,7 @@ mod tests {
     }
 
     #[test]
-    fn job_selected_populates_prompt_lab_url_and_requests_resolve() {
+    fn job_selected_without_summary_selects_triage_tab_and_requests_resolve() {
         init_logging();
         let (state, _) = update(
             AppState::new(),
@@ -3644,7 +3649,7 @@ mod tests {
             },
         );
         let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
-        assert_eq!(state.active_tab(), crate::tabs::AppTab::Summary);
+        assert_eq!(state.active_tab(), crate::tabs::AppTab::Triage);
         assert_eq!(
             state.prompt_lab().url_input(),
             "https://example.com/article"
@@ -3652,6 +3657,17 @@ mod tests {
         assert!(effects
             .iter()
             .any(|effect| matches!(effect, Effect::ResolvePromptLabInputFromUrl { .. })));
+    }
+
+    #[test]
+    fn job_selected_with_summary_selects_summary_tab() {
+        init_logging();
+        let mut state = make_state_with_summarized_job_for_update();
+        let job_id = state.view().jobs.first().map(|job| job.job_id).unwrap_or(1);
+        state.select_tab(crate::tabs::AppTab::Triage);
+
+        let (state, _effects) = update(state, Msg::JobSelected { job_id });
+        assert_eq!(state.active_tab(), crate::tabs::AppTab::Summary);
     }
 
     #[test]
