@@ -29,7 +29,7 @@ function Get-LauncherParamDefs {
 
 function New-LauncherDefaults {
     @{
-        LlmConcurrency   = 3
+        LlmConcurrency   = 6
         PollInterval     = 15
         ForceUnlock      = $false
         AllowUnsupported = $false

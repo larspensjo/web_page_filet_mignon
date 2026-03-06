@@ -1,78 +1,9 @@
 ﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
-Describe 'Data - Get-LauncherActionItems' {
-    BeforeAll {
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1" -Force
-    }
-    It 'returns exactly 7 items (including separator)' {
-        (Get-LauncherActionItems).Count | Should -Be 7
-    }
-    It 'first item id is run-batch' {
-        (Get-LauncherActionItems)[0].Id | Should -Be 'run-batch'
-    }
-    It 'second item id is run-dry with IsDryRun' {
-        $i = (Get-LauncherActionItems)[1]
-        $i.Id       | Should -Be 'run-dry'
-        $i.IsDryRun | Should -Be $true
-    }
-    It 'has exactly one separator' {
-        @(Get-LauncherActionItems | Where-Object { $_.IsSeparator }).Count | Should -Be 1
-    }
-    It 'has exactly 4 checkpoint items' {
-        ((Get-LauncherActionItems) | Where-Object { $_.IsCheckpoint }).Count | Should -Be 4
-    }
-}
-
-Describe 'Data - Get-LauncherParamDefs' {
-    BeforeAll {
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1" -Force
-    }
-    It 'returns 8 parameter definitions' {
-        (Get-LauncherParamDefs).Count | Should -Be 8
-    }
-    It 'LlmConcurrency is Int with min=1 max=10' {
-        $p = Get-LauncherParamDefs | Where-Object { $_.Name -eq 'LlmConcurrency' }
-        $p.Type | Should -Be 'Int'
-        $p.Min  | Should -Be 1
-        $p.Max  | Should -Be 10
-    }
-    It 'PollInterval is Int with min=1 max=1440' {
-        $p = Get-LauncherParamDefs | Where-Object { $_.Name -eq 'PollInterval' }
-        $p.Min | Should -Be 1
-        $p.Max | Should -Be 1440
-    }
-    It 'ForceUnlock is Bool type' {
-        $p = Get-LauncherParamDefs | Where-Object { $_.Name -eq 'ForceUnlock' }
-        $p.Type | Should -Be 'Bool'
-    }
-    It 'Sources is Path type' {
-        $p = Get-LauncherParamDefs | Where-Object { $_.Name -eq 'Sources' }
-        $p.Type | Should -Be 'Path'
-    }
-    It 'all items have a non-empty Flag' {
-        Get-LauncherParamDefs | ForEach-Object {
-            $_.Flag | Should -Not -BeNullOrEmpty
-        }
-    }
-}
-
-Describe 'Data - New-LauncherDefaults' {
-    BeforeAll {
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1" -Force
-    }
-    It 'LlmConcurrency defaults to 3' {
-        (New-LauncherDefaults).LlmConcurrency | Should -Be 3
-    }
-    It 'PollInterval defaults to 15' {
-        (New-LauncherDefaults).PollInterval | Should -Be 15
-    }
-    It 'ForceUnlock defaults to false' {
-        (New-LauncherDefaults).ForceUnlock | Should -Be $false
-    }
-    It 'Sources defaults to sources.ron' {
-        (New-LauncherDefaults).Sources | Should -Be 'sources.ron'
-    }
+function script:Import-LauncherEffectsModule {
+    Get-Module -Name 'Effects' -All | Remove-Module -Force -ErrorAction SilentlyContinue
+    Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
 }
 
 Describe 'Data - Get-DefaultsFilePath' {
@@ -117,10 +48,11 @@ Describe 'Reducer - New-LauncherState' {
         $c.LeftIndex  | Should -Be 0
         $c.RightIndex | Should -Be 0
     }
-    It 'defaults are loaded' {
+    It 'defaults are loaded from New-LauncherDefaults' {
+        $defaults = New-LauncherDefaults
         $v = (New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30).Values
-        $v.LlmConcurrency | Should -Be 3
-        $v.PollInterval   | Should -Be 15
+        $v.LlmConcurrency | Should -Be $defaults.LlmConcurrency
+        $v.PollInterval   | Should -Be $defaults.PollInterval
     }
     It 'custom InitialValues override defaults' {
         $custom = New-LauncherDefaults; $custom.LlmConcurrency = 7
@@ -264,8 +196,10 @@ Describe 'Reducer - value editing' {
     # 0=LlmConcurrency, 1=PollInterval, 2=ForceUnlock, 3=AllowUnsupported, 4=Sources, ...
 
     It 'ValueIncrease on LlmConcurrency increments by 1' {
-        $r = Invoke-LauncherReducer -State (RightState 0) -Action @{ Type='ValueIncrease' }
-        $r.State.Values.LlmConcurrency | Should -Be 4
+        $s = RightState 0
+        $before = $s.Values.LlmConcurrency
+        $r = Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }
+        $r.State.Values.LlmConcurrency | Should -Be ($before + 1)
     }
     It 'ValueIncrease clamps at Max (10)' {
         $s = RightState 0; $s.Values.LlmConcurrency = 10
@@ -291,14 +225,17 @@ Describe 'Reducer - value editing' {
         (Invoke-LauncherReducer -State $s -Action @{ Type='ValueToggle' }).State.Values.ForceUnlock | Should -Be $false
     }
     It 'ValueToggle does nothing on Path param' {
-        (Invoke-LauncherReducer -State (RightState 4) -Action @{ Type='ValueToggle' }).State.Values.Sources | Should -Be 'sources.ron'
+        $s = RightState 4
+        $s.Values.Sources = 'custom.ron'
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueToggle' }).State.Values.Sources | Should -Be 'custom.ron'
     }
     It 'ValueIncrease does nothing on Bool param' {
         (Invoke-LauncherReducer -State (RightState 2) -Action @{ Type='ValueIncrease' }).State.Values.ForceUnlock | Should -Be $false
     }
     It 'ValueIncrease does nothing when Left pane is active' {
         $s = New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30
-        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.LlmConcurrency | Should -Be 3
+        $before = $s.Values.LlmConcurrency
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.LlmConcurrency | Should -Be $before
     }
 }
 
@@ -313,15 +250,19 @@ Describe 'Reducer - Build-CommandArgs' {
         (Build-CommandArgs -State (S) -DryRun $false).FilePath | Should -Be 'hb'
     }
     It 'includes --sources and its value' {
-        $a = (Build-CommandArgs -State (S) -DryRun $false).Argv
+        $s = S
+        $s.Values.Sources = 'my-sources.ron'
+        $a = (Build-CommandArgs -State $s -DryRun $false).Argv
         $idx = [Array]::IndexOf($a, '--sources')
         $idx | Should -BeGreaterThan -1
-        $a[$idx+1] | Should -Be 'sources.ron'
+        $a[$idx+1] | Should -Be 'my-sources.ron'
     }
-    It 'includes --llm-concurrency 3' {
-        $a = (Build-CommandArgs -State (S) -DryRun $false).Argv
+    It 'includes --llm-concurrency value from state' {
+        $s = S
+        $s.Values.LlmConcurrency = 8
+        $a = (Build-CommandArgs -State $s -DryRun $false).Argv
         $idx = [Array]::IndexOf($a, '--llm-concurrency')
-        $a[$idx+1] | Should -Be '3'
+        $a[$idx+1] | Should -Be '8'
     }
     It 'excludes --force-unlock when false' {
         (Build-CommandArgs -State (S) -DryRun $false).Argv | Should -Not -Contain '--force-unlock'
@@ -403,11 +344,13 @@ Describe 'Reducer - effect results' {
         function script:Act($type, $extra=@{}) { Invoke-LauncherReducer -State (S) -Action (@{ Type=$type } + $extra) }
     }
 
-    It 'SaveDefaults emits a SaveDefaults effect containing Values' {
-        $r = Act 'SaveDefaults'
+    It 'SaveDefaults emits a SaveDefaults effect containing current state values' {
+        $s = S
+        $s.Values.LlmConcurrency = 9
+        $r = Invoke-LauncherReducer -State $s -Action @{ Type='SaveDefaults' }
         $eff = $r.Effects | Where-Object { $_.Type -eq 'SaveDefaults' }
         $eff              | Should -Not -BeNullOrEmpty
-        $eff.Values.LlmConcurrency | Should -Be 3
+        $eff.Values.LlmConcurrency | Should -Be 9
     }
     It 'DefaultsSaved sets LastStatus OK' {
         (Act 'DefaultsSaved').State.Runtime.LastStatus | Should -Be 'OK'
@@ -464,7 +407,7 @@ Describe 'Reducer - effect results' {
 
 Describe 'Effects - Invoke-DatePrompt' {
     BeforeAll {
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+        Import-LauncherEffectsModule
     }
 
     It 'returns DatePromptCompleted with Value for valid RFC3339 date' {
@@ -491,7 +434,7 @@ Describe 'Effects - Invoke-LoadDefaults' {
     BeforeAll {
         Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
         Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+        Import-LauncherEffectsModule
     }
 
     It 'returns DefaultsLoadFailed when file absent' {
@@ -527,7 +470,7 @@ Describe 'Effects - Invoke-LoadDefaults' {
 Describe 'Effects - Invoke-SaveDefaults' {
     BeforeAll {
         Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+        Import-LauncherEffectsModule
     }
 
     It 'returns DefaultsSaved and writes SchemaVersion=1' {
@@ -546,7 +489,7 @@ Describe 'Effects - Invoke-SaveDefaults' {
 
 Describe 'Effects - Invoke-ProbeCheckpointCliSupport' {
     BeforeAll {
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+        Import-LauncherEffectsModule
     }
     It 'returns CheckpointCapabilityDetected with Available=false for nonexistent binary' {
         $r = Invoke-ProbeCheckpointCliSupport -HarvesterCmd 'nonexistent_binary_xyz_abc'
@@ -561,7 +504,7 @@ Describe 'Effects - Invoke-ProbeCheckpointCliSupport' {
 
 Describe 'Effects - Invoke-ReadCheckpointDisplay' {
     BeforeAll {
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+        Import-LauncherEffectsModule
     }
     It 'returns not-set when file absent' {
         $r = Invoke-ReadCheckpointDisplay -CheckpointFilePath 'nonexistent_chk.ron'
@@ -592,7 +535,7 @@ Describe 'Effects - Invoke-LauncherEffects' {
     BeforeAll {
         Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
         Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
-        Import-Module "$PSScriptRoot\..\harvester_launcher\Effects.psm1" -Force
+        Import-LauncherEffectsModule
         function script:S { New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 }
     }
 

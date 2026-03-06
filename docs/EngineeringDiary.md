@@ -617,3 +617,10 @@ Evidence: `cargo test -p harvester_core job_selected_without_summary_selects_tri
 Lessons Learned: Selection actions that imply view focus should derive from content availability in reducer state, not fixed tab defaults, to avoid empty-first UX paths.
 Prevention: For each selection-driven tab switch, add paired reducer tests that assert behavior for both data-present and data-missing states.
 Refs: crates/harvester_core/src/update.rs, crates/harvester_core/src/state.rs
+
+## 2026-03-06 - Launcher tests shifted from constant literals to behavior checks
+Type: Decision
+Context: Launcher Pester tests contained many assertions that hard-coded configuration literals (default values/counts), causing maintenance churn without improving confidence in runtime behavior.
+Change: Updated the launcher test strategy to focus on behavior/data flow (state to argv/effects, clamping, and value propagation) and removed constant-only assertions from the data/default sections.
+Evidence: `Invoke-Pester -Path scripts/tests/HarvesterLauncher.Tests.ps1` (130 passed).
+Refs: scripts/tests/HarvesterLauncher.Tests.ps1

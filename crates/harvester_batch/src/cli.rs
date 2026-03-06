@@ -2,7 +2,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 const DEFAULT_POLL_INTERVAL_MINUTES: u32 = 15;
-const DEFAULT_LLM_CONCURRENCY: usize = 3;
+const DEFAULT_LLM_CONCURRENCY: usize = 6;
 
 /// Harvester batch runner - headless mode for scheduled execution
 #[derive(Parser, Debug)]
@@ -207,8 +207,8 @@ mod tests {
         let args = Args::parse_from(&["harvester_batch"]);
         assert_eq!(args.sources, PathBuf::from("sources.ron"));
         assert_eq!(args.output_dir, PathBuf::from("output"));
-        assert_eq!(args.llm_concurrency, 3);
-        assert_eq!(args.poll_interval, 15);
+        assert_eq!(args.llm_concurrency, DEFAULT_LLM_CONCURRENCY);
+        assert_eq!(args.poll_interval, DEFAULT_POLL_INTERVAL_MINUTES);
         assert!(!args.dry_run);
         assert!(!args.force_unlock);
     }

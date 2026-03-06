@@ -52,6 +52,9 @@ First and foremost, adhere to the Unidirectional Data Flow Architecture.
 ## Testing
 * Consider using dependency injection and mock objects to enhance unit testing
 * It is very important that all feaures have unit tests to lock-in functionality.
+* Test behavior and contracts, not arbitrary literals. Prefer assertions about outcomes, transitions, emitted effects, and command arguments over direct checks of internal/config constants.
+* Rust: focus unit tests on reducer/output behavior (`given State + Action -> next State + Effects`), clamping/validation behavior, and public API contracts.
+* PowerShell: focus Pester tests on action/effect flow, argument construction, clamping, and IO outcomes. Avoid tests that only mirror default numeric/string literals unless those values are an intentional external contract.
 * Don't build the release version.
 
 ## General Rust design
