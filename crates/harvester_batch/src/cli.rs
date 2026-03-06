@@ -203,14 +203,34 @@ mod tests {
     }
 
     #[test]
-    fn default_values_are_reasonable() {
-        let args = Args::parse_from(&["harvester_batch"]);
-        assert_eq!(args.sources, PathBuf::from("sources.ron"));
-        assert_eq!(args.output_dir, PathBuf::from("output"));
-        assert_eq!(args.llm_concurrency, DEFAULT_LLM_CONCURRENCY);
-        assert_eq!(args.poll_interval, DEFAULT_POLL_INTERVAL_MINUTES);
-        assert!(!args.dry_run);
-        assert!(!args.force_unlock);
+    fn explicit_values_are_parsed_and_applied() {
+        let args = Args::parse_from(&[
+            "harvester_batch",
+            "--sources",
+            "custom_sources.ron",
+            "--output-dir",
+            "custom_output",
+            "--contexts-dir",
+            "custom_contexts",
+            "--prompts-dir",
+            "custom_prompts",
+            "--llm-concurrency",
+            "4",
+            "--poll-interval",
+            "30",
+            "--dry-run",
+            "--force-unlock",
+            "--allow-unsupported-sources",
+        ]);
+        assert_eq!(args.sources, PathBuf::from("custom_sources.ron"));
+        assert_eq!(args.output_dir, PathBuf::from("custom_output"));
+        assert_eq!(args.contexts_dir, PathBuf::from("custom_contexts"));
+        assert_eq!(args.prompts_dir, PathBuf::from("custom_prompts"));
+        assert_eq!(args.llm_concurrency, 4);
+        assert_eq!(args.poll_interval, 30);
+        assert!(args.dry_run);
+        assert!(args.force_unlock);
+        assert!(args.allow_unsupported_sources);
     }
 
     #[test]
