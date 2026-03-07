@@ -60,8 +60,8 @@ $CliConfig = @{
     ExecArgs = @('exec')
     ModelArgs = { param($modelName) @('--model', $modelName) }
     ReasoningArgs = { param($level) @('--config', "reasoning.level=`"$level`"") } # change key if needed
-    DefaultModel = 'gpt-5.3-codex'
-    DefaultReasoning = 'medium'
+    DefaultModel = 'gpt-5.4'
+    DefaultReasoning = 'heigh'
     # Optional safety defaults (you can tweak):
     ExtraArgs = @() # e.g. @('--sandbox','workspace-write','-a','on-request')
   }
@@ -298,8 +298,25 @@ function Invoke-Cli {
     $argStr = ($cliArgs -join ' ')
     if ($argStr.Length -gt 120) { $argStr = $argStr.Substring(0, 117) + '...' }
     Write-Verbose "Invoking CLI '$Tool' with args: $argStr"
-    $out = & $Tool @cliArgs
-    $exit = $LASTEXITCODE
+
+    # codex's npm wrapper (codex.ps1) sets StandardOutputEncoding on the node
+    # process it spawns, which requires stdout to be truly redirected at the OS
+    # level. PowerShell pipeline capture ($out = & tool) doesn't satisfy this,
+    # causing "StandardOutputEncoding is only supported when standard output is
+    # redirected". Workaround: redirect to a temp file (real OS file redirect).
+    if ($Tool -eq 'codex') {
+      $tmpOut = [IO.Path]::GetTempFileName()
+      try {
+        & $Tool @cliArgs > $tmpOut
+        $exit = $LASTEXITCODE
+        $out = Get-Content -LiteralPath $tmpOut -Raw -Encoding utf8
+      } finally {
+        Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
+      }
+    } else {
+      $out = & $Tool @cliArgs
+      $exit = $LASTEXITCODE
+    }
 
     if ($exit -ne 0) {
       throw "CLI '$Tool' exited with code $exit. Args: $($cliArgs -join ' ')"
