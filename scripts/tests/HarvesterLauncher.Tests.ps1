@@ -136,17 +136,17 @@ Describe 'Reducer - navigation' {
     It 'MoveDown advances LeftIndex in Left pane' {
         (Reduce (S) 'MoveDown').State.Cursor.LeftIndex | Should -Be 1
     }
-    It 'MoveDown skips separator (index 2) landing on 3' {
-        $s = S; $s.Cursor.LeftIndex = 1
-        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 3
+    It 'MoveDown skips separator (index 3) landing on 4' {
+        $s = S; $s.Cursor.LeftIndex = 2
+        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 4
     }
-    It 'MoveUp from 3 skips separator landing on 1' {
-        $s = S; $s.Cursor.LeftIndex = 3
-        (Reduce $s 'MoveUp').State.Cursor.LeftIndex | Should -Be 1
+    It 'MoveUp from 4 skips separator landing on 2' {
+        $s = S; $s.Cursor.LeftIndex = 4
+        (Reduce $s 'MoveUp').State.Cursor.LeftIndex | Should -Be 2
     }
     It 'MoveDown clamps at last action item' {
-        $s = S; $s.Cursor.LeftIndex = 6   # last item (cp-show)
-        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 6
+        $s = S; $s.Cursor.LeftIndex = 7   # last item (cp-show)
+        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 7
     }
     It 'MoveUp clamps at 0' {
         (Reduce (S) 'MoveUp').State.Cursor.LeftIndex | Should -Be 0
@@ -164,7 +164,7 @@ Describe 'Reducer - navigation' {
         (Reduce $s 'MoveHome').State.Cursor.LeftIndex | Should -Be 0
     }
     It 'MoveEnd sets LeftIndex to last item' {
-        (Reduce (S) 'MoveEnd').State.Cursor.LeftIndex | Should -Be 6
+        (Reduce (S) 'MoveEnd').State.Cursor.LeftIndex | Should -Be 7
     }
     It 'Resize updates TooSmall to true for small terminal' {
         $r = Reduce (S) 'Resize' @{ Width=50; Height=10 }
@@ -277,6 +277,21 @@ Describe 'Reducer - Build-CommandArgs' {
     It 'excludes --dry-run when DryRun is false' {
         (Build-CommandArgs -State (S) -DryRun $false).Argv | Should -Not -Contain '--dry-run'
     }
+    It 'includes --single-shot when SingleShot is true' {
+        (Build-CommandArgs -State (S) -DryRun $false -SingleShot $true).Argv | Should -Contain '--single-shot'
+    }
+    It 'excludes --single-shot when SingleShot is false' {
+        (Build-CommandArgs -State (S) -DryRun $false -SingleShot $false).Argv | Should -Not -Contain '--single-shot'
+    }
+    It 'excludes --single-shot when DryRun is true' {
+        (Build-CommandArgs -State (S) -DryRun $true -SingleShot $true).Argv | Should -Not -Contain '--single-shot'
+    }
+    It 'excludes --poll-interval when SingleShot is true' {
+        (Build-CommandArgs -State (S) -DryRun $false -SingleShot $true).Argv | Should -Not -Contain '--poll-interval'
+    }
+    It 'includes --poll-interval when SingleShot is false' {
+        (Build-CommandArgs -State (S) -DryRun $false -SingleShot $false).Argv | Should -Contain '--poll-interval'
+    }
     It 'path with spaces is a single argv element (not split)' {
         $s = S; $s.Values.Sources = 'my sources/config.ron'
         $a = (Build-CommandArgs -State $s -DryRun $false).Argv
@@ -302,8 +317,18 @@ Describe 'Reducer - Activate' {
         $r | Should -Not -BeNullOrEmpty
         $r.FilePath | Should -Be 'hb'
     }
+    It 'Activate on run-single includes --single-shot in LaunchAfterExit.Argv' {
+        $s = S; $s.Cursor.LeftIndex = 1   # run-single
+        $r = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit
+        $r.Argv | Should -Contain '--single-shot'
+    }
+    It 'Activate on run-single excludes --poll-interval in LaunchAfterExit.Argv' {
+        $s = S; $s.Cursor.LeftIndex = 1   # run-single
+        $r = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit
+        $r.Argv | Should -Not -Contain '--poll-interval'
+    }
     It 'Activate on run-dry includes --dry-run in LaunchAfterExit.Argv' {
-        $s = S; $s.Cursor.LeftIndex = 1   # run-dry
+        $s = S; $s.Cursor.LeftIndex = 2   # run-dry
         $r = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit
         $r.Argv | Should -Contain '--dry-run'
     }
@@ -312,24 +337,24 @@ Describe 'Reducer - Activate' {
         (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).Effects.Count | Should -Be 0
     }
     It 'Activate on separator is a no-op' {
-        $s = S; $s.Cursor.LeftIndex = 2   # sep-1
+        $s = S; $s.Cursor.LeftIndex = 3   # sep-1
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         $r.State.Runtime.IsRunning | Should -Be $true
     }
     It 'Activate on checkpoint when unavailable sets LastStatus Warn' {
-        $s = S; $s.Cursor.LeftIndex = 3; $s.Runtime.CheckpointCliAvailable = $false  # cp-set-now
+        $s = S; $s.Cursor.LeftIndex = 4; $s.Runtime.CheckpointCliAvailable = $false  # cp-set-now
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         $r.State.Runtime.LastStatus | Should -Be 'Warn'
     }
     It 'Activate on checkpoint when available queues RunCheckpointCommand effect' {
-        $s = S; $s.Cursor.LeftIndex = 3; $s.Runtime.CheckpointCliAvailable = $true
+        $s = S; $s.Cursor.LeftIndex = 4; $s.Runtime.CheckpointCliAvailable = $true
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         $eff = $r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }
         $eff | Should -Not -BeNullOrEmpty
         $eff.ActionId | Should -Be 'cp-set-now'
     }
     It 'Activate on cp-set-date when available emits DatePromptRequested (not RunCheckpointCommand)' {
-        $s = S; $s.Cursor.LeftIndex = 4; $s.Runtime.CheckpointCliAvailable = $true   # cp-set-date
+        $s = S; $s.Cursor.LeftIndex = 5; $s.Runtime.CheckpointCliAvailable = $true   # cp-set-date
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         ($r.Effects | Where-Object { $_.Type -eq 'DatePromptRequested' }) | Should -Not -BeNullOrEmpty
         ($r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }) | Should -BeNullOrEmpty

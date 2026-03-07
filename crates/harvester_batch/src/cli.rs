@@ -40,6 +40,10 @@ pub struct Args {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Single-shot mode: run one full cycle (poll + triage + persist) and exit
+    #[arg(long, conflicts_with = "dry_run")]
+    pub single_shot: bool,
+
     /// Wait time in minutes between poll cycles (1-1440)
     #[arg(long, default_value_t = DEFAULT_POLL_INTERVAL_MINUTES)]
     pub poll_interval: u32,
@@ -229,8 +233,22 @@ mod tests {
         assert_eq!(args.llm_concurrency, 4);
         assert_eq!(args.poll_interval, 30);
         assert!(args.dry_run);
+        assert!(!args.single_shot);
         assert!(args.force_unlock);
         assert!(args.allow_unsupported_sources);
+    }
+
+    #[test]
+    fn single_shot_flag_is_parsed() {
+        let args = Args::parse_from(&["harvester_batch", "--single-shot"]);
+        assert!(args.single_shot);
+    }
+
+    #[test]
+    fn single_shot_conflicts_with_dry_run() {
+        let result =
+            <Args as Parser>::try_parse_from(["harvester_batch", "--single-shot", "--dry-run"]);
+        assert!(result.is_err());
     }
 
     #[test]

@@ -3,13 +3,14 @@ Set-StrictMode -Version Latest
 
 function Get-LauncherActionItems {
     @(
-        [pscustomobject]@{ Id='run-batch';   Label='Run batch (continuous)';    IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$false }
-        [pscustomobject]@{ Id='run-dry';     Label='Run dry-run (single poll)'; IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$true  }
-        [pscustomobject]@{ Id='sep-1';       Label='';                          IsSeparator=$true;  IsCheckpoint=$false; IsDryRun=$false }
-        [pscustomobject]@{ Id='cp-set-now';  Label='Set checkpoint to now';     IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false }
-        [pscustomobject]@{ Id='cp-set-date'; Label='Set checkpoint to date...'; IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false }
-        [pscustomobject]@{ Id='cp-clear';    Label='Clear checkpoint';          IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false }
-        [pscustomobject]@{ Id='cp-show';     Label='Show current checkpoint';   IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false }
+        [pscustomobject]@{ Id='run-batch';   Label='Run batch (continuous)';    IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$false }
+        [pscustomobject]@{ Id='run-single';  Label='Run single-shot (one cycle)'; IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$true  }
+        [pscustomobject]@{ Id='run-dry';     Label='Run dry-run (single poll)'; IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$true;  IsSingleShot=$false }
+        [pscustomobject]@{ Id='sep-1';       Label='';                          IsSeparator=$true;  IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$false }
+        [pscustomobject]@{ Id='cp-set-now';  Label='Set checkpoint to now';     IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false }
+        [pscustomobject]@{ Id='cp-set-date'; Label='Set checkpoint to date...'; IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false }
+        [pscustomobject]@{ Id='cp-clear';    Label='Clear checkpoint';          IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false }
+        [pscustomobject]@{ Id='cp-show';     Label='Show current checkpoint';   IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false }
     )
 }
 

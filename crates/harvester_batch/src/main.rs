@@ -6,10 +6,14 @@ mod runner;
 
 use cli::Args;
 use engine_logging::{engine_error, engine_info};
+use std::fs::File;
 use std::process;
 
 fn main() {
     let args = Args::parse();
+
+    // Batch runs should always start with a fresh per-run log file.
+    let _ = File::create("engine.log");
 
     // Batch mode is file-only to keep stderr/stdout clean during scheduled runs.
     engine_logging::initialize_file_only();
@@ -18,6 +22,7 @@ fn main() {
     engine_info!("[batch] output_dir: {:?}", args.output_dir);
     engine_info!("[batch] sources: {:?}", args.sources);
     engine_info!("[batch] dry_run: {}", args.dry_run);
+    engine_info!("[batch] single_shot: {}", args.single_shot);
 
     let exit_code = match runner::run(args) {
         Ok(code) => code,

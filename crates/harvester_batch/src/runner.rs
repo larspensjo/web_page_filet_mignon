@@ -1,7 +1,7 @@
 use crate::cli::{Args, CheckpointCommand};
 use crate::lock;
 use chrono::Utc;
-use engine_logging::{engine_info, engine_warn};
+use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, LlmModelUsageView, Msg};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
@@ -26,6 +26,63 @@ enum CycleOutcome {
     Success,
     PartialFailure,
     TotalFailure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct CycleCounts {
+    new_jobs: usize,
+    jobs_done: usize,
+    jobs_failed: usize,
+    triage_completed: usize,
+    triage_failed: usize,
+    summary_completed: usize,
+    summary_failed: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct CycleCounterBaseline {
+    jobs_total: usize,
+    jobs_done: usize,
+    jobs_failed: usize,
+    triage_completed: usize,
+    triage_failed: usize,
+    summary_completed: usize,
+    summary_failed: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct DispatchLoopOptions {
+    enable_ai_orchestration: bool,
+    require_new_jobs_since: Option<usize>,
+    tick_interval: Duration,
+}
+
+impl CycleCounterBaseline {
+    fn from_observation(obs: &BatchObservation) -> Self {
+        Self {
+            jobs_total: obs.jobs_total,
+            jobs_done: obs.jobs_done,
+            jobs_failed: obs.jobs_failed,
+            triage_completed: obs.triage_completed,
+            triage_failed: obs.triage_failed,
+            summary_completed: obs.summary_completed,
+            summary_failed: obs.summary_failed,
+        }
+    }
+
+    fn measure_cycle_and_advance(&mut self, obs: &BatchObservation) -> CycleCounts {
+        let counts = CycleCounts {
+            new_jobs: obs.jobs_total.saturating_sub(self.jobs_total),
+            jobs_done: obs.jobs_done.saturating_sub(self.jobs_done),
+            jobs_failed: obs.jobs_failed.saturating_sub(self.jobs_failed),
+            triage_completed: obs.triage_completed.saturating_sub(self.triage_completed),
+            triage_failed: obs.triage_failed.saturating_sub(self.triage_failed),
+            summary_completed: obs.summary_completed.saturating_sub(self.summary_completed),
+            summary_failed: obs.summary_failed.saturating_sub(self.summary_failed),
+        };
+        *self = Self::from_observation(obs);
+        counts
+    }
 }
 
 /// Determines if the batch cycle should settle (all work done or failed).
@@ -54,6 +111,24 @@ fn should_settle_cycle(obs: &BatchObservation) -> bool {
 
 fn should_check_settlement_this_iteration(orchestrated: bool) -> bool {
     !orchestrated
+}
+
+fn should_stop_after_cycle(single_shot: bool, shutdown_requested: bool) -> bool {
+    shutdown_requested || single_shot
+}
+
+fn should_run_ai_orchestration(
+    enable_ai_orchestration: bool,
+    require_new_jobs_since: Option<usize>,
+    obs: &BatchObservation,
+) -> bool {
+    if !enable_ai_orchestration {
+        return false;
+    }
+    match require_new_jobs_since {
+        Some(baseline_jobs_total) => obs.jobs_total > baseline_jobs_total,
+        None => true,
+    }
 }
 
 /// Classifies the outcome of a completed cycle based on observation metrics.
@@ -414,13 +489,16 @@ pub fn run(args: Args) -> Result<i32, String> {
     let mut total_cycles = 0;
     let mut partial_failure_cycles = 0;
     let mut total_failure_cycles = 0;
-    let mut prev_jobs_total = 0usize;
+    let mut cycle_baseline = CycleCounterBaseline::from_observation(&state.batch_observation());
     let mut total_new_articles = 0usize;
+    let mut total_triaged = 0usize;
+    let mut total_summarized = 0usize;
 
     loop {
         cycle_count += 1;
         total_cycles += 1;
         engine_info!("[batch] === Starting cycle {} ===", cycle_count);
+        let cycle_jobs_total_baseline = state.batch_observation().jobs_total;
 
         // Start the cycle by dispatching poll
         engine_info!("[batch] Dispatching poll sources");
@@ -435,7 +513,15 @@ pub fn run(args: Args) -> Result<i32, String> {
             &msg_rx,
             &effect_runner,
             &shutdown_flag,
-            enable_ai_orchestration,
+            DispatchLoopOptions {
+                enable_ai_orchestration,
+                require_new_jobs_since: if args.single_shot {
+                    Some(cycle_jobs_total_baseline)
+                } else {
+                    None
+                },
+                tick_interval: Duration::from_millis(75),
+            },
         )?;
 
         // Track outcome statistics
@@ -447,13 +533,14 @@ pub fn run(args: Args) -> Result<i32, String> {
 
         // Print cycle summary
         let obs = state.batch_observation();
-        let new_jobs = obs.jobs_total.saturating_sub(prev_jobs_total);
-        prev_jobs_total = obs.jobs_total;
-        total_new_articles += new_jobs;
+        let cycle_counts = cycle_baseline.measure_cycle_and_advance(&obs);
+        total_new_articles += cycle_counts.new_jobs;
+        total_triaged += cycle_counts.triage_completed;
+        total_summarized += cycle_counts.summary_completed;
         if cycle_count == 1 {
             print_cycle_table_header();
         }
-        print_cycle_summary(cycle_count, &outcome, &obs, new_jobs);
+        print_cycle_summary(cycle_count, &outcome, &cycle_counts);
         for line in format_llm_usage_lines(&state.llm_usage_rows()) {
             println!("{}", line);
         }
@@ -463,9 +550,16 @@ pub fn run(args: Args) -> Result<i32, String> {
         let completed_jobs = state.completed_jobs_snapshot();
         persist_completed_jobs(&paths.state_path, &completed_jobs);
 
-        // Check for shutdown signal
-        if shutdown_flag.load(Ordering::Relaxed) {
-            engine_info!("[batch] Shutdown signal received, exiting");
+        let shutdown_requested = shutdown_flag.load(Ordering::Relaxed);
+
+        // Check for shutdown signal or single-shot completion.
+        if should_stop_after_cycle(args.single_shot, shutdown_requested) {
+            if args.single_shot {
+                engine_info!("[batch] Single-shot mode completed one cycle; exiting");
+            }
+            if shutdown_requested {
+                engine_info!("[batch] Shutdown signal received, exiting");
+            }
             break;
         }
 
@@ -489,12 +583,11 @@ pub fn run(args: Args) -> Result<i32, String> {
     persist_completed_jobs(&paths.state_path, &completed_jobs);
 
     // Print final summary
-    let final_obs = state.batch_observation();
     print_final_summary(
         total_cycles,
         total_new_articles,
-        final_obs.triage_completed,
-        final_obs.summary_completed,
+        total_triaged,
+        total_summarized,
     );
 
     engine_info!("[batch] Shutdown complete");
@@ -540,17 +633,9 @@ fn run_dispatch_loop(
     msg_rx: &mpsc::Receiver<Msg>,
     effect_runner: &EffectRunner,
     shutdown_flag: &Arc<AtomicBool>,
-    enable_ai_orchestration: bool,
+    options: DispatchLoopOptions,
 ) -> Result<CycleOutcome, String> {
-    run_dispatch_loop_with_tick_interval(
-        state,
-        msg_tx,
-        msg_rx,
-        effect_runner,
-        shutdown_flag,
-        enable_ai_orchestration,
-        Duration::from_millis(75),
-    )
+    run_dispatch_loop_with_tick_interval(state, msg_tx, msg_rx, effect_runner, shutdown_flag, options)
 }
 
 fn run_dispatch_loop_with_tick_interval(
@@ -559,8 +644,7 @@ fn run_dispatch_loop_with_tick_interval(
     msg_rx: &mpsc::Receiver<Msg>,
     effect_runner: &EffectRunner,
     shutdown_flag: &Arc<AtomicBool>,
-    enable_ai_orchestration: bool,
-    tick_interval: Duration,
+    options: DispatchLoopOptions,
 ) -> Result<CycleOutcome, String> {
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
@@ -594,7 +678,7 @@ fn run_dispatch_loop_with_tick_interval(
                 let mut queued_effects = Vec::new();
                 for msg in inbox {
                     if should_log_batch_msg(&msg) {
-                        engine_info!("[batch] Processing message: {}", summarize_batch_msg(&msg));
+                        engine_debug!("[batch] Processing message: {}", summarize_batch_msg(&msg));
                     }
                     let (new_state, effects) = update(state.clone(), msg);
                     *state = new_state;
@@ -617,7 +701,7 @@ fn run_dispatch_loop_with_tick_interval(
                 }
 
                 if !queued_effects.is_empty() {
-                    engine_info!("[batch] Enqueuing {} effects", queued_effects.len());
+                    engine_debug!("[batch] Enqueuing {} effects", queued_effects.len());
                     effect_runner.enqueue(queued_effects);
                 }
             }
@@ -629,7 +713,7 @@ fn run_dispatch_loop_with_tick_interval(
             }
         }
 
-        if enable_ai_orchestration && last_tick.elapsed() >= tick_interval {
+        if options.enable_ai_orchestration && last_tick.elapsed() >= options.tick_interval {
             let (new_state, tick_effects) = update(state.clone(), Msg::Tick);
             *state = new_state;
             if !tick_effects.is_empty() {
@@ -640,7 +724,12 @@ fn run_dispatch_loop_with_tick_interval(
 
         // Check for settlement after processing available work.
         let mut orchestrated = false;
-        if enable_ai_orchestration {
+        let obs = state.batch_observation();
+        if should_run_ai_orchestration(
+            options.enable_ai_orchestration,
+            options.require_new_jobs_since,
+            &obs,
+        ) {
             if let Some(next_msg) = maybe_dispatch_batch_ai_orchestration(state) {
                 msg_tx.send(next_msg.clone()).map_err(|e| {
                     format!(
@@ -654,7 +743,6 @@ fn run_dispatch_loop_with_tick_interval(
 
         // This prevents an immediate idle-state exit before queued actions
         // (like PollSourcesClicked) have been reduced.
-        let obs = state.batch_observation();
         if should_check_settlement_this_iteration(orchestrated) && should_settle_cycle(&obs) {
             engine_info!(
                 "[batch] Cycle settled after {} iterations: jobs={}/{}, triage={}/{}",
@@ -732,14 +820,17 @@ fn print_cycle_table_header() {
 }
 
 /// Prints a summary of the completed cycle.
-fn print_cycle_summary(cycle: usize, outcome: &CycleOutcome, obs: &BatchObservation, new_jobs: usize) {
+fn print_cycle_summary(cycle: usize, outcome: &CycleOutcome, counts: &CycleCounts) {
     println!(
         "{:<6} {:<9} {:>20} {:>18} {:>21}",
         cycle,
         cycle_outcome_label(outcome),
-        format!("{}/{}/{}", new_jobs, obs.jobs_done, obs.jobs_failed),
-        format!("{}/{}", obs.triage_completed, obs.triage_failed),
-        format!("{}/{}", obs.summary_completed, obs.summary_failed),
+        format!(
+            "{}/{}/{}",
+            counts.new_jobs, counts.jobs_done, counts.jobs_failed
+        ),
+        format!("{}/{}", counts.triage_completed, counts.triage_failed),
+        format!("{}/{}", counts.summary_completed, counts.summary_failed),
     );
 }
 
@@ -858,7 +949,11 @@ fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
         &msg_rx,
         &effect_runner,
         &shutdown_flag,
-        false,
+        DispatchLoopOptions {
+            enable_ai_orchestration: false,
+            require_new_jobs_since: None,
+            tick_interval: Duration::from_millis(75),
+        },
     )?;
 
     // Print summary
@@ -893,6 +988,7 @@ mod tests {
             contexts_dir: PathBuf::from("contexts"),
             prompts_dir: PathBuf::from("prompts"),
             dry_run,
+            single_shot: false,
             allow_unsupported_sources: false,
             llm_concurrency: 1,
             poll_interval: 1,
@@ -901,6 +997,47 @@ mod tests {
             set_briefing_since_now: false,
             clear_briefing_since: false,
             show_briefing_since: false,
+        }
+    }
+
+    fn observation_with_totals(
+        jobs_total: usize,
+        jobs_done: usize,
+        jobs_failed: usize,
+        triage_completed: usize,
+        triage_failed: usize,
+        summary_completed: usize,
+        summary_failed: usize,
+    ) -> BatchObservation {
+        BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total,
+            jobs_done,
+            jobs_failed,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
+            pre_triage_total: 0,
+            pre_triage_included: 0,
+            pre_triage_review: 0,
+            pre_triage_filtered: 0,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 0,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed,
+            triage_failed,
+            summary_total: 0,
+            summary_pending: 0,
+            summary_in_flight: 0,
+            summary_completed,
+            summary_failed,
+            triage_cache_hits: 0,
+            triage_cache_misses: 0,
+            triage_cache_key_unavailable: 0,
+            summary_cache_hits: 0,
+            summary_cache_misses: 0,
+            summary_cache_key_unavailable: 0,
         }
     }
 
@@ -1181,6 +1318,60 @@ mod tests {
     }
 
     #[test]
+    fn test_should_stop_after_cycle_for_single_shot() {
+        assert!(should_stop_after_cycle(true, false));
+    }
+
+    #[test]
+    fn test_should_stop_after_cycle_for_shutdown_signal() {
+        assert!(should_stop_after_cycle(false, true));
+    }
+
+    #[test]
+    fn test_should_continue_after_cycle_when_not_single_shot_and_no_shutdown() {
+        assert!(!should_stop_after_cycle(false, false));
+    }
+
+    #[test]
+    fn test_should_run_ai_orchestration_when_enabled_without_new_jobs_gate() {
+        let obs = observation_with_totals(10, 0, 0, 0, 0, 0, 0);
+        assert!(should_run_ai_orchestration(true, None, &obs));
+    }
+
+    #[test]
+    fn test_should_not_run_ai_orchestration_when_no_new_jobs_since_baseline() {
+        let obs = observation_with_totals(10, 0, 0, 0, 0, 0, 0);
+        assert!(!should_run_ai_orchestration(true, Some(10), &obs));
+    }
+
+    #[test]
+    fn test_should_run_ai_orchestration_when_new_jobs_arrived_since_baseline() {
+        let obs = observation_with_totals(11, 0, 0, 0, 0, 0, 0);
+        assert!(should_run_ai_orchestration(true, Some(10), &obs));
+    }
+
+    #[test]
+    fn cycle_counter_baseline_reports_deltas_not_cumulative_totals() {
+        let mut baseline =
+            CycleCounterBaseline::from_observation(&observation_with_totals(577, 577, 0, 405, 0, 61, 0));
+        let cycle_counts = baseline.measure_cycle_and_advance(&observation_with_totals(
+            578, 578, 0, 406, 0, 61, 0,
+        ));
+        assert_eq!(
+            cycle_counts,
+            CycleCounts {
+                new_jobs: 1,
+                jobs_done: 1,
+                jobs_failed: 0,
+                triage_completed: 1,
+                triage_failed: 0,
+                summary_completed: 0,
+                summary_failed: 0,
+            }
+        );
+    }
+
+    #[test]
     fn test_summarize_batch_msg_compacts_large_payloads() {
         let msg = Msg::TriageArticlesLoaded {
             request_id: 1,
@@ -1251,7 +1442,11 @@ mod tests {
             &msg_rx,
             &effect_runner,
             &shutdown_flag,
-            true,
+            DispatchLoopOptions {
+                enable_ai_orchestration: true,
+                require_new_jobs_since: None,
+                tick_interval: Duration::from_millis(75),
+            },
         )
         .expect("dispatch loop should complete");
         assert_eq!(outcome, CycleOutcome::Success);
@@ -1300,8 +1495,11 @@ mod tests {
             &msg_rx,
             &effect_runner,
             &shutdown_flag,
-            true,
-            Duration::ZERO,
+            DispatchLoopOptions {
+                enable_ai_orchestration: true,
+                require_new_jobs_since: None,
+                tick_interval: Duration::ZERO,
+            },
         )
         .expect("dispatch loop should complete");
         assert_eq!(outcome, CycleOutcome::Success);

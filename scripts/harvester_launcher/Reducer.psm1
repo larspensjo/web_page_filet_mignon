@@ -118,7 +118,7 @@ function Copy-LauncherState {
 # ── Command builder ───────────────────────────────────────────────────────────
 
 function Build-CommandArgs {
-    param([hashtable]$State, [bool]$DryRun = $false)
+    param([hashtable]$State, [bool]$DryRun = $false, [bool]$SingleShot = $false)
     $v    = $State.Values
     $argv = [System.Collections.Generic.List[string]]::new()
 
@@ -130,12 +130,16 @@ function Build-CommandArgs {
 
     # Numeric args — always explicit
     $argv.AddRange([string[]]@('--llm-concurrency', [string]$v.LlmConcurrency))
-    $argv.AddRange([string[]]@('--poll-interval',   [string]$v.PollInterval))
+    # Poll interval only matters in continuous mode.
+    if (-not $SingleShot) {
+        $argv.AddRange([string[]]@('--poll-interval', [string]$v.PollInterval))
+    }
 
     # Boolean flags — only when enabled
     if ($v.ForceUnlock)      { $argv.Add('--force-unlock') }
     if ($v.AllowUnsupported) { $argv.Add('--allow-unsupported-sources') }
     if ($DryRun)             { $argv.Add('--dry-run') }
+    if ($SingleShot -and -not $DryRun) { $argv.Add('--single-shot') }
 
     @{ FilePath = $State.Runtime.HarvesterCmd; Argv = $argv.ToArray() }
 }
@@ -277,7 +281,7 @@ function Invoke-LauncherReducer {
 
             if (-not $item.IsCheckpoint) {
                 # Run actions: exit TUI and launch process
-                $s.Pending.LaunchAfterExit = Build-CommandArgs -State $s -DryRun $item.IsDryRun
+                $s.Pending.LaunchAfterExit = Build-CommandArgs -State $s -DryRun $item.IsDryRun -SingleShot $item.IsSingleShot
                 $s.Runtime.IsRunning       = $false
             } else {
                 # Checkpoint actions

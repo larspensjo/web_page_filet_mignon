@@ -649,3 +649,17 @@ Context: Operators requested a safer default for job scope and a denser top layo
 Change: Updated `harvester_core` default `JobListScope` to `SinceCheckpoint`, set the UI toggle initial state to enabled, and moved token text/progress controls into the same top toolbar row in `harvester_app` layout rules. Added layout/default regression tests to lock these contracts.
 Evidence: `cargo test -p harvester_core job_list_scope_set_to_since_checkpoint_updates_state -- --nocapture`; `cargo test -p harvester_core job_list_scope_set_same_value_is_noop -- --nocapture`; `cargo test -p harvester_app toolbar_contains_scope_and_token_controls_on_same_row -- --nocapture`; `cargo test -p harvester_app new_controls_created_in_initial_commands -- --nocapture`; `cargo build` blocked by locked `target/debug/harvester_app.exe` (os error 5); `cargo clippy --all-targets -- -D warnings` currently fails in `src/CommanDuctUI/src/controls/toggle_switch_handler.rs` on pre-existing `clippy::too_many_arguments`.
 Refs: crates/harvester_core/src/tabs.rs, crates/harvester_core/src/update.rs, crates/harvester_app/src/platform/ui/layout.rs
+
+## 2026-03-07 - Batch single-shot mode for one poll/triage/persist cycle
+Type: Implementation
+Context: Scheduled/manual batch runs needed a one-off mode that executes exactly one full cycle (poll, triage orchestration, persistence) and exits without entering the continuous loop.
+Change: Added `--single-shot` in `harvester_batch` CLI (conflicting with `--dry-run`), made the batch loop terminate after the first settled cycle when enabled, and added a dedicated launcher TUI action (`Run single-shot (one cycle)`) that forwards `--single-shot` while omitting continuous-mode-only `--poll-interval`.
+Evidence: `cargo test -p harvester_batch`; `Invoke-Pester -Path scripts/tests/HarvesterLauncher.Tests.ps1`; `cargo build`; `cargo clippy --all-targets -- -D warnings` still fails on pre-existing `clippy::too_many_arguments` in `src/CommanDuctUI/src/controls/toggle_switch_handler.rs`.
+Refs: crates/harvester_batch/src/cli.rs, crates/harvester_batch/src/runner.rs, crates/harvester_batch/src/main.rs, scripts/Start-HarvesterBatch.ps1, scripts/harvester_launcher/Reducer.psm1
+
+## 2026-03-07 - All batch runs now start with a fresh engine.log file
+Type: Decision
+Context: Operators want each `harvester_batch` invocation to be inspectable in isolation instead of appending onto previous runs and obscuring current-run behavior.
+Change: Updated `harvester_batch` startup to truncate `engine.log` before logger initialization for every batch invocation, not only `--single-shot`.
+Evidence: `cargo build`.
+Refs: crates/harvester_batch/src/main.rs
