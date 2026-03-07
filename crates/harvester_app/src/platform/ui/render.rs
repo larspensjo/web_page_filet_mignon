@@ -511,6 +511,9 @@ fn render_status_section(
     };
 
     let mut status_parts = vec![status_base_text];
+    if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+        status_parts.push("Since checkpoint".to_string());
+    }
     if let Some(progress) = view.briefing_progress.as_deref() {
         status_parts.push(progress.to_string());
     }
@@ -669,9 +672,9 @@ fn render_main_controls_section(
         &mut tree_state.prev_jobs_scope_since_checkpoint_checked,
         view.left_pane.job_list_scope == JobListScope::SinceCheckpoint,
         cmds,
-        |checked| PlatformCommand::SetCheckBoxChecked {
+        |checked| PlatformCommand::SetToggleSwitchState {
             window_id,
-            control_id: CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
+            control_id: TS_JOBS_SCOPE,
             checked,
         },
     );
@@ -2803,7 +2806,7 @@ mod tests {
     }
 
     #[test]
-    fn jobs_scope_checkbox_reflects_scope_state() {
+    fn jobs_scope_toggle_reflects_scope_state() {
         let window_id = WindowId::new(39);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
@@ -2812,8 +2815,8 @@ mod tests {
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetCheckBoxChecked { control_id, checked: true, .. }
-                if *control_id == CHK_JOBS_SCOPE_SINCE_CHECKPOINT
+                PlatformCommand::SetToggleSwitchState { control_id, checked: true, .. }
+                if *control_id == TS_JOBS_SCOPE
             )
         }));
 
@@ -2822,8 +2825,8 @@ mod tests {
         assert!(cmds.iter().any(|cmd| {
             matches!(
                 cmd,
-                PlatformCommand::SetCheckBoxChecked { control_id, checked: false, .. }
-                if *control_id == CHK_JOBS_SCOPE_SINCE_CHECKPOINT
+                PlatformCommand::SetToggleSwitchState { control_id, checked: false, .. }
+                if *control_id == TS_JOBS_SCOPE
             )
         }));
     }

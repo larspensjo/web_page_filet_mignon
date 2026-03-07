@@ -556,11 +556,11 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::PromptLabRunDetailsSectionToggled);
             }
-            AppEvent::CheckBoxToggled {
+            AppEvent::ToggleSwitchToggled {
                 control_id,
                 checked,
                 ..
-            } if control_id == ui::constants::CHK_JOBS_SCOPE_SINCE_CHECKPOINT => {
+            } if control_id == ui::constants::TS_JOBS_SCOPE => {
                 let scope = if checked {
                     JobListScope::SinceCheckpoint
                 } else {
@@ -1264,16 +1264,16 @@ mod tests {
     }
 
     #[test]
-    fn jobs_scope_checkbox_emits_typed_scope_message() {
+    fn jobs_scope_toggle_emits_typed_scope_message() {
         let (mut handler, rx) = test_handler_with_outbound();
-        handler.handle_event(AppEvent::CheckBoxToggled {
+        handler.handle_event(AppEvent::ToggleSwitchToggled {
             window_id: WindowId::new(1),
-            control_id: ui::constants::CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
+            control_id: ui::constants::TS_JOBS_SCOPE,
             checked: true,
         });
-        handler.handle_event(AppEvent::CheckBoxToggled {
+        handler.handle_event(AppEvent::ToggleSwitchToggled {
             window_id: WindowId::new(1),
-            control_id: ui::constants::CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
+            control_id: ui::constants::TS_JOBS_SCOPE,
             checked: false,
         });
 

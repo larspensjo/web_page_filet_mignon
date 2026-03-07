@@ -120,6 +120,20 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: None,
+        control_id: PANEL_TOOLBAR,
+    });
+
+    commands.push(PlatformCommand::CreateToggleSwitch {
+        window_id,
+        parent_control_id: Some(PANEL_TOOLBAR),
+        control_id: TS_JOBS_SCOPE,
+        label: "Since checkpoint".to_string(),
+        checked: false, // initial state; synced by render on first tick
+    });
+
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: None,
         control_id: PANEL_PROGRESS,
     });
 
@@ -334,13 +348,6 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         initial_text: "Job List".to_string(),
         class: LabelClass::Default,
     });
-    commands.push(PlatformCommand::CreateCheckBox {
-        window_id,
-        parent_control_id: Some(PANEL_JOBS),
-        control_id: CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
-        text: "Since checkpoint only".to_string(),
-    });
-
     commands.push(PlatformCommand::CreateTreeView {
         window_id,
         parent_control_id: Some(PANEL_JOBS),
@@ -1147,11 +1154,29 @@ fn build_layout_rules(
         }
     };
     let mut rules = vec![
+        // PANEL_TOOLBAR: topmost docked panel (order 0 = above PANEL_PROGRESS at order 1)
+        LayoutRule {
+            control_id: PANEL_TOOLBAR,
+            parent_control_id: None,
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(40),
+            margin: (0, 0, 0, 0),
+        },
+        // TS_JOBS_SCOPE: docked Left inside toolbar, fixed width 200px
+        LayoutRule {
+            control_id: TS_JOBS_SCOPE,
+            parent_control_id: Some(PANEL_TOOLBAR),
+            dock_style: DockStyle::Left,
+            order: 10,
+            fixed_size: Some(200),
+            margin: (8, 8, 8, 8),
+        },
         LayoutRule {
             control_id: PANEL_PROGRESS,
             parent_control_id: None,
             dock_style: DockStyle::Top,
-            order: 0,
+            order: 1,
             fixed_size: Some(64),
             margin: (0, 0, 0, 0),
         },
@@ -1249,14 +1274,6 @@ fn build_layout_rules(
             order: 0,
             fixed_size: Some(28),
             margin: (0, 0, 4, 0),
-        },
-        LayoutRule {
-            control_id: CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
-            parent_control_id: Some(PANEL_JOBS),
-            dock_style: DockStyle::Top,
-            order: 1,
-            fixed_size: Some(24),
-            margin: (4, 0, 4, 4),
         },
         LayoutRule {
             control_id: TREE_JOBS,
@@ -2054,6 +2071,7 @@ fn build_layout_rules(
 
 fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     for control_id in [
+        PANEL_TOOLBAR,
         PANEL_PROGRESS,
         PANEL_BUTTONS,
         PANEL_INPUT,
@@ -2095,6 +2113,16 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         window_id,
         control_id: PANEL_BOTTOM,
         style_id: StyleId::StatusBarBackground,
+    });
+
+    commands.push(PlatformCommand::SetToggleSwitchStyle {
+        window_id,
+        control_id: TS_JOBS_SCOPE,
+        background: Color { r: 0x2B, g: 0x2B, b: 0x2B },
+        pill_off:   Color { r: 0x4B, g: 0x4F, b: 0x57 },
+        pill_on:    Color { r: 0x00, g: 0x80, b: 0xFF }, // blue accent — same as tab bar
+        knob:       Color { r: 0xF0, g: 0xF0, b: 0xF0 },
+        text:       Color { r: 0xCC, g: 0xCC, b: 0xCC },
     });
 
     commands.push(PlatformCommand::ApplyStyleToControl {
@@ -2225,7 +2253,6 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         });
     }
     for control_id in [
-        CHK_JOBS_SCOPE_SINCE_CHECKPOINT,
         CHK_PROMPT_LAB_SECTION_COMPARE,
         CHK_PROMPT_LAB_SECTION_CONTEXT,
         CHK_PROMPT_LAB_SECTION_TEMPLATE,
@@ -2367,10 +2394,10 @@ mod tests {
         assert!(
             commands.iter().any(|cmd| matches!(
                 cmd,
-                PlatformCommand::CreateCheckBox { control_id, .. }
-                    if *control_id == CHK_JOBS_SCOPE_SINCE_CHECKPOINT
+                PlatformCommand::CreateToggleSwitch { control_id, .. }
+                    if *control_id == TS_JOBS_SCOPE
             )),
-            "jobs scope checkbox should be created"
+            "jobs scope toggle switch should be created"
         );
     }
 
