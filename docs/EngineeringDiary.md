@@ -633,3 +633,12 @@ Evidence: `cargo test -p harvester_core triage_clicked_switches_to_triage_result
 Lessons Learned: Workflow-trigger actions should explicitly drive companion navigation state in the same reducer path; otherwise users can end up in a view that contradicts the active mode.
 Prevention: Add reducer tests for every workflow entry action asserting both effect dispatch and expected pane/tab focus transitions.
 Refs: crates/harvester_core/src/update.rs, update::tests::triage_clicked_switches_to_triage_results_tab_when_triage_can_start
+
+## 2026-03-07 - Prompt Lab briefing runs now use history snapshot without mutating history
+Type: Bug Fix
+Context: Prompt Lab A/B testing for aggregate briefings needs prompt parity with production (`previous_briefings`/time-window guidance) while remaining state-isolated so one candidate run does not alter inputs for subsequent candidates.
+Change: Updated `harvester_core` Prompt Lab aggregate-briefing dispatch to inject `previous_briefings` and `briefing_time_window` as read-only `extra_template_vars` snapshots, and added reducer tests proving Prompt Lab aggregate completion does not emit `SaveBriefingHistory` nor mutate briefing history state.
+Evidence: `cargo test -p harvester_core prompt_lab_aggregate_request_includes_previous_briefings_extra_var -- --nocapture`; `cargo test -p harvester_core prompt_lab_aggregate_completion_does_not_update_history -- --nocapture`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
+Lessons Learned: A/B labs must mirror production prompt inputs via explicit snapshot injection; otherwise quality comparisons are confounded by prompt mismatch rather than model/prompt differences.
+Prevention: For each Prompt Lab stage, add explicit parity tests asserting required production template vars are present and isolation tests asserting no workflow-state mutations (history/checkpoints) on completion.
+Refs: crates/harvester_core/src/update.rs, update::tests::prompt_lab_aggregate_request_includes_previous_briefings_extra_var

@@ -109,6 +109,7 @@ Rules:
 - If something is ambiguous, ask explicit questions.
 - Check with source code to make sure the plan is correct.
 - Elegant, robust and flexible solutions have a high priority.
+- Are there opportunities for simplification or improvement without sacrificing correctness or robustness?
 - See extra instructions in Agents.md.
 
 Output headings:

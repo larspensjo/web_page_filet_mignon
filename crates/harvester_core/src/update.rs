@@ -1802,6 +1802,20 @@ fn dispatch_prompt_lab_run(
         request_id,
         stage
     );
+    let extra_template_vars = if prompt_id == PromptId::AggregateBriefing {
+        vec![
+            (
+                "previous_briefings".to_string(),
+                crate::briefing::format_previous_briefings_block(state.briefing_history()),
+            ),
+            (
+                "briefing_time_window".to_string(),
+                crate::briefing::format_briefing_time_window_label(state.briefing_since_utc()),
+            ),
+        ]
+    } else {
+        vec![]
+    };
     vec![Effect::RequestLlmCompletion {
         request_id,
         prompt_id,
@@ -1810,7 +1824,7 @@ fn dispatch_prompt_lab_run(
         input_content: input_snapshot,
         context,
         template_override: state.prompt_lab().applied_template_override(prompt_id),
-        extra_template_vars: vec![],
+        extra_template_vars,
     }]
 }
 
@@ -4481,8 +4495,16 @@ mod tests {
     #[test]
     fn prompt_lab_aggregate_completion_does_not_update_history() {
         init_logging();
+        use crate::briefing::BriefingHistoryEntry;
         use crate::prompt_lab::PromptLabStage;
-        let state = AppState::new();
+        let mut state = AppState::new();
+        state.push_briefing_history(BriefingHistoryEntry {
+            generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
+            executive_summary: "Old summary content.".to_string(),
+            themes: vec![],
+            article_count: 2,
+        });
+        let history_before = state.briefing_history().to_vec();
         let (state, _) = update(state, Msg::PromptLabOpenRequested);
         let (state, _) = update(
             state,
@@ -4490,15 +4512,96 @@ mod tests {
                 stage: PromptLabStage::Briefing,
             },
         );
-        // Simulate a Prompt Lab run
+        let mut state = state;
+        prepare_type_url_snapshot(&mut state, "article text");
         let (state, effects) = update(state, Msg::PromptLabRunRequested);
-        // Prompt Lab runs shouldn't fire because there's no input, so check we still start cleanly
-        let _ = effects;
-        // No history should be in state (Prompt Lab doesn't touch briefing history)
-        assert!(
-            state.briefing_history().is_empty(),
-            "Prompt Lab runs must not write to briefing history"
+        let request_id = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
+            .expect("expected prompt-lab aggregate briefing request");
+        let (state, completion_effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::Success {
+                    output_json: briefing_json(1),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
+                },
+                metadata: Some(LlmRunMetadata::stub()),
+            },
         );
+        assert!(
+            completion_effects
+                .iter()
+                .all(|e| !matches!(e, Effect::SaveBriefingHistory { .. })),
+            "Prompt Lab completion must not emit SaveBriefingHistory"
+        );
+        assert_eq!(
+            state.briefing_history(),
+            history_before.as_slice(),
+            "Prompt Lab runs must not mutate briefing history"
+        );
+    }
+
+    #[test]
+    fn prompt_lab_aggregate_request_includes_previous_briefings_extra_var() {
+        init_logging();
+        use crate::briefing::BriefingHistoryEntry;
+        use crate::prompt_lab::PromptLabStage;
+        let mut state = AppState::new();
+        state.push_briefing_history(BriefingHistoryEntry {
+            generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
+            executive_summary: "Old summary content.".to_string(),
+            themes: vec![],
+            article_count: 2,
+        });
+        let (state, _) = update(state, Msg::PromptLabOpenRequested);
+        let (state, _) = update(
+            state,
+            Msg::PromptLabStageSelected {
+                stage: PromptLabStage::Briefing,
+            },
+        );
+        let mut state = state;
+        prepare_type_url_snapshot(&mut state, "article text");
+        let (_state, effects) = update(state, Msg::PromptLabRunRequested);
+        match effects.into_iter().find(|effect| {
+            matches!(
+                effect,
+                Effect::RequestLlmCompletion {
+                    prompt_id: PromptId::AggregateBriefing,
+                    ..
+                }
+            )
+        }) {
+            Some(Effect::RequestLlmCompletion {
+                extra_template_vars,
+                ..
+            }) => {
+                let previous = extra_template_vars
+                    .iter()
+                    .find(|(key, _)| key == "previous_briefings");
+                assert!(
+                    previous.is_some(),
+                    "missing previous_briefings in Prompt Lab aggregate request"
+                );
+                let (_, value) = previous.unwrap();
+                assert!(
+                    value.contains("Old summary content."),
+                    "previous_briefings should contain history snapshot: {value}"
+                );
+
+                let window = extra_template_vars
+                    .iter()
+                    .find(|(key, _)| key == "briefing_time_window");
+                assert!(
+                    window.is_some(),
+                    "missing briefing_time_window in Prompt Lab aggregate request"
+                );
+            }
+            _ => panic!("no Prompt Lab AggregateBriefing RequestLlmCompletion effect emitted"),
+        }
     }
 
     // ------------------------------------------------------------------
