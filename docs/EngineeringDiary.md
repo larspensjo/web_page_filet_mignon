@@ -642,3 +642,10 @@ Evidence: `cargo test -p harvester_core prompt_lab_aggregate_request_includes_pr
 Lessons Learned: A/B labs must mirror production prompt inputs via explicit snapshot injection; otherwise quality comparisons are confounded by prompt mismatch rather than model/prompt differences.
 Prevention: For each Prompt Lab stage, add explicit parity tests asserting required production template vars are present and isolation tests asserting no workflow-state mutations (history/checkpoints) on completion.
 Refs: crates/harvester_core/src/update.rs, update::tests::prompt_lab_aggregate_request_includes_previous_briefings_extra_var
+
+## 2026-03-07 - Jobs toolbar now defaults to checkpoint scope and co-locates token bar
+Type: Implementation
+Context: Operators requested a safer default for job scope and a denser top layout so `Since checkpoint` and token usage are visible in one row without scanning multiple header bands.
+Change: Updated `harvester_core` default `JobListScope` to `SinceCheckpoint`, set the UI toggle initial state to enabled, and moved token text/progress controls into the same top toolbar row in `harvester_app` layout rules. Added layout/default regression tests to lock these contracts.
+Evidence: `cargo test -p harvester_core job_list_scope_set_to_since_checkpoint_updates_state -- --nocapture`; `cargo test -p harvester_core job_list_scope_set_same_value_is_noop -- --nocapture`; `cargo test -p harvester_app toolbar_contains_scope_and_token_controls_on_same_row -- --nocapture`; `cargo test -p harvester_app new_controls_created_in_initial_commands -- --nocapture`; `cargo build` blocked by locked `target/debug/harvester_app.exe` (os error 5); `cargo clippy --all-targets -- -D warnings` currently fails in `src/CommanDuctUI/src/controls/toggle_switch_handler.rs` on pre-existing `clippy::too_many_arguments`.
+Refs: crates/harvester_core/src/tabs.rs, crates/harvester_core/src/update.rs, crates/harvester_app/src/platform/ui/layout.rs

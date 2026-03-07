@@ -75,8 +75,8 @@ impl LeftTab {
 /// Scope filter for job-oriented left-pane tabs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum JobListScope {
-    #[default]
     All,
+    #[default]
     SinceCheckpoint,
 }
 
@@ -163,8 +163,8 @@ mod tests {
     }
 
     #[test]
-    fn job_list_scope_default_is_all() {
-        assert_eq!(JobListScope::default(), JobListScope::All);
+    fn job_list_scope_default_is_since_checkpoint() {
+        assert_eq!(JobListScope::default(), JobListScope::SinceCheckpoint);
     }
 
     #[test]

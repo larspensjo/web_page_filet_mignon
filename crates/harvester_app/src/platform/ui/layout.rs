@@ -128,12 +128,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_TOOLBAR),
         control_id: TS_JOBS_SCOPE,
         label: "Since checkpoint".to_string(),
-        checked: false, // initial state; synced by render on first tick
+        checked: true, // initial state; synced by render on first tick
     });
 
     commands.push(PlatformCommand::CreatePanel {
         window_id,
-        parent_control_id: None,
+        parent_control_id: Some(PANEL_TOOLBAR),
         control_id: PANEL_PROGRESS,
     });
 
@@ -1154,16 +1154,16 @@ fn build_layout_rules(
         }
     };
     let mut rules = vec![
-        // PANEL_TOOLBAR: topmost docked panel (order 0 = above PANEL_PROGRESS at order 1)
+        // PANEL_TOOLBAR: topmost docked row for scope filter + token usage.
         LayoutRule {
             control_id: PANEL_TOOLBAR,
             parent_control_id: None,
             dock_style: DockStyle::Top,
             order: 0,
-            fixed_size: Some(40),
+            fixed_size: Some(48),
             margin: (0, 0, 0, 0),
         },
-        // TS_JOBS_SCOPE: docked Left inside toolbar, fixed width 200px
+        // TS_JOBS_SCOPE: left side of toolbar.
         LayoutRule {
             control_id: TS_JOBS_SCOPE,
             parent_control_id: Some(PANEL_TOOLBAR),
@@ -1172,21 +1172,22 @@ fn build_layout_rules(
             fixed_size: Some(200),
             margin: (8, 8, 8, 8),
         },
+        // PANEL_PROGRESS: container for the token controls on the same toolbar row.
         LayoutRule {
             control_id: PANEL_PROGRESS,
-            parent_control_id: None,
-            dock_style: DockStyle::Top,
-            order: 1,
-            fixed_size: Some(64),
+            parent_control_id: Some(PANEL_TOOLBAR),
+            dock_style: DockStyle::Fill,
+            order: 20,
+            fixed_size: None,
             margin: (0, 0, 0, 0),
         },
         LayoutRule {
             control_id: LABEL_TOKEN_PROGRESS,
             parent_control_id: Some(PANEL_PROGRESS),
-            dock_style: DockStyle::Top,
+            dock_style: DockStyle::Left,
             order: 0,
-            fixed_size: Some(22),
-            margin: (8, 8, 4, 8),
+            fixed_size: Some(300),
+            margin: (8, 12, 8, 6),
         },
         LayoutRule {
             control_id: PROGRESS_TOKENS,
@@ -1194,7 +1195,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 1,
             fixed_size: None,
-            margin: (0, 8, 8, 8),
+            margin: (0, 14, 8, 14),
         },
         LayoutRule {
             control_id: PANEL_BOTTOM,
@@ -2394,11 +2395,60 @@ mod tests {
         assert!(
             commands.iter().any(|cmd| matches!(
                 cmd,
-                PlatformCommand::CreateToggleSwitch { control_id, .. }
-                    if *control_id == TS_JOBS_SCOPE
+                PlatformCommand::CreateToggleSwitch {
+                    control_id,
+                    checked: true,
+                    ..
+                } if *control_id == TS_JOBS_SCOPE
             )),
             "jobs scope toggle switch should be created"
         );
+    }
+
+    #[test]
+    fn toolbar_contains_scope_and_token_controls_on_same_row() {
+        let cmd = build_layout_command(
+            WindowId::new(77),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+
+        let panel_progress = rules
+            .iter()
+            .find(|r| r.control_id == PANEL_PROGRESS)
+            .expect("progress panel rule");
+        assert_eq!(panel_progress.parent_control_id, Some(PANEL_TOOLBAR));
+
+        let token_label = rules
+            .iter()
+            .find(|r| r.control_id == LABEL_TOKEN_PROGRESS)
+            .expect("token label rule");
+        assert_eq!(token_label.parent_control_id, Some(PANEL_PROGRESS));
+        assert_eq!(token_label.dock_style, DockStyle::Left);
+
+        let token_bar = rules
+            .iter()
+            .find(|r| r.control_id == PROGRESS_TOKENS)
+            .expect("token bar rule");
+        assert_eq!(token_bar.parent_control_id, Some(PANEL_PROGRESS));
+        assert_eq!(token_bar.dock_style, DockStyle::Fill);
     }
 
     #[test]

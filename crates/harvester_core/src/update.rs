@@ -4874,13 +4874,15 @@ mod tests {
     fn job_list_scope_set_to_since_checkpoint_updates_state() {
         init_logging();
         let state = AppState::new();
-        assert_eq!(state.job_list_scope(), JobListScope::All);
+        assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
         let (state, effects) = update(
             state,
-            Msg::JobListScopeSet { scope: JobListScope::SinceCheckpoint },
+            Msg::JobListScopeSet {
+                scope: JobListScope::All,
+            },
         );
         assert!(effects.is_empty());
-        assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
+        assert_eq!(state.job_list_scope(), JobListScope::All);
         assert!(state.view().dirty);
     }
 
@@ -4888,9 +4890,14 @@ mod tests {
     fn job_list_scope_set_same_value_is_noop() {
         init_logging();
         let state = AppState::new();
-        // Already All; setting All again should not mark dirty.
+        // Already SinceCheckpoint; setting SinceCheckpoint again should not mark dirty.
         let view_before = state.view();
-        let (state, _) = update(state, Msg::JobListScopeSet { scope: JobListScope::All });
+        let (state, _) = update(
+            state,
+            Msg::JobListScopeSet {
+                scope: JobListScope::SinceCheckpoint,
+            },
+        );
         // dirty starts false; setting same scope should leave it false
         assert!(!state.view().dirty, "setting same scope must not mark dirty");
         let _ = view_before;
