@@ -873,6 +873,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if !matches!(state.pre_triage().phase(), PreTriagePhase::ReadyToTriage) {
                 return (state, Vec::new());
             }
+            state.set_left_tab(LeftTab::TriageResults);
             if !state.triage_metadata_ready() {
                 state.mark_triage_metadata_pending();
                 engine_warn!("[triage-cache] metadata not ready; loading metadata before dispatch");
@@ -4819,12 +4820,20 @@ mod tests {
     }
 
     #[test]
-    fn triage_clicked_does_not_force_tab_switch() {
+    fn triage_clicked_switches_to_triage_results_tab_when_triage_can_start() {
         init_logging();
-        let (state, _) = update(AppState::new(), Msg::LeftTabSelected { tab: LeftTab::TriageReview });
-        // TriageClicked should not alter the active left tab.
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, request_id) = tick_until_dispatch(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles: loaded_triage_articles(1),
+            },
+        );
+        let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
         let (state, _) = update(state, Msg::TriageClicked);
-        assert_eq!(state.left_tab(), LeftTab::TriageReview);
+        assert_eq!(state.left_tab(), LeftTab::TriageResults);
     }
 
     // ── Pre-triage refresh coordinator: shared test helpers ──────────────────

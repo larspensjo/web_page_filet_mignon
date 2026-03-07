@@ -624,3 +624,12 @@ Context: Launcher Pester tests contained many assertions that hard-coded configu
 Change: Updated the launcher test strategy to focus on behavior/data flow (state to argv/effects, clamping, and value propagation) and removed constant-only assertions from the data/default sections.
 Evidence: `Invoke-Pester -Path scripts/tests/HarvesterLauncher.Tests.ps1` (130 passed).
 Refs: scripts/tests/HarvesterLauncher.Tests.ps1
+
+## 2026-03-07 - Triage click now opens Triage Results tab
+Type: Bug Fix
+Context: Clicking `Triage articles` from the Jobs tab could leave the left pane on `Jobs`, making it unclear that triage mode is a global workflow transition and not only a background operation.
+Change: Updated `harvester_core` reducer handling for `Msg::TriageClicked` to select `LeftTab::TriageResults` once triage preconditions are satisfied (before metadata-load fallback), and added a reducer test that locks the Jobs -> Triage Results transition when triage starts.
+Evidence: `cargo test -p harvester_core triage_clicked_switches_to_triage_results_tab_when_triage_can_start -- --nocapture`; `cargo test -p harvester_core --test left_tab_scope_integration -- --nocapture`; `cargo clippy --all-targets -- -D warnings`; `cargo build` attempted but blocked by locked `target/debug/harvester_app.exe` (os error 5).
+Lessons Learned: Workflow-trigger actions should explicitly drive companion navigation state in the same reducer path; otherwise users can end up in a view that contradicts the active mode.
+Prevention: Add reducer tests for every workflow entry action asserting both effect dispatch and expected pane/tab focus transitions.
+Refs: crates/harvester_core/src/update.rs, update::tests::triage_clicked_switches_to_triage_results_tab_when_triage_can_start
