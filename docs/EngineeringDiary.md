@@ -663,3 +663,10 @@ Context: Operators want each `harvester_batch` invocation to be inspectable in i
 Change: Updated `harvester_batch` startup to truncate `engine.log` before logger initialization for every batch invocation, not only `--single-shot`.
 Evidence: `cargo build`.
 Refs: crates/harvester_batch/src/main.rs
+
+## 2026-03-07 - Partial batch outcomes no longer return nonzero exit status
+Type: Decision
+Context: Batch runs can complete useful work while still having some per-job failures; treating that as process failure caused `cargo run` to report an error even when the run completed normally.
+Change: Updated `harvester_batch` exit-code policy so `PARTIAL` outcomes return `0`, while nonzero exit remains reserved for total/fatal failure.
+Evidence: `cargo test -p harvester_batch`; `cargo build`.
+Refs: crates/harvester_batch/src/runner.rs

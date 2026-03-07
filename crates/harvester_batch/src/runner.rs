@@ -117,6 +117,14 @@ fn should_stop_after_cycle(single_shot: bool, shutdown_requested: bool) -> bool 
     shutdown_requested || single_shot
 }
 
+fn determine_exit_code(total_failure_cycles: usize) -> i32 {
+    if total_failure_cycles > 0 {
+        1
+    } else {
+        0
+    }
+}
+
 fn should_run_ai_orchestration(
     enable_ai_orchestration: bool,
     require_new_jobs_since: Option<usize>,
@@ -487,7 +495,6 @@ pub fn run(args: Args) -> Result<i32, String> {
     let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
     let mut cycle_count = 0;
     let mut total_cycles = 0;
-    let mut partial_failure_cycles = 0;
     let mut total_failure_cycles = 0;
     let mut cycle_baseline = CycleCounterBaseline::from_observation(&state.batch_observation());
     let mut total_new_articles = 0usize;
@@ -527,7 +534,7 @@ pub fn run(args: Args) -> Result<i32, String> {
         // Track outcome statistics
         match outcome {
             CycleOutcome::Success => {}
-            CycleOutcome::PartialFailure => partial_failure_cycles += 1,
+            CycleOutcome::PartialFailure => {}
             CycleOutcome::TotalFailure => total_failure_cycles += 1,
         }
 
@@ -592,14 +599,7 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     engine_info!("[batch] Shutdown complete");
 
-    // Determine exit code based on outcomes
-    let exit_code = if partial_failure_cycles > 0 || total_failure_cycles > 0 {
-        1 // Partial: work completed with some failures
-    } else {
-        0 // Success: all cycles successful
-    };
-
-    Ok(exit_code)
+    Ok(determine_exit_code(total_failure_cycles))
 }
 
 /// Writes or clears the briefing checkpoint file.
@@ -1348,6 +1348,16 @@ mod tests {
     fn test_should_run_ai_orchestration_when_new_jobs_arrived_since_baseline() {
         let obs = observation_with_totals(11, 0, 0, 0, 0, 0, 0);
         assert!(should_run_ai_orchestration(true, Some(10), &obs));
+    }
+
+    #[test]
+    fn determine_exit_code_returns_zero_when_only_partial_failures_occur() {
+        assert_eq!(determine_exit_code(0), 0);
+    }
+
+    #[test]
+    fn determine_exit_code_returns_nonzero_when_total_failure_occurs() {
+        assert_eq!(determine_exit_code(1), 1);
     }
 
     #[test]
