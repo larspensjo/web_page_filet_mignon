@@ -670,3 +670,10 @@ Context: Batch runs can complete useful work while still having some per-job fai
 Change: Updated `harvester_batch` exit-code policy so `PARTIAL` outcomes return `0`, while nonzero exit remains reserved for total/fatal failure.
 Evidence: `cargo test -p harvester_batch`; `cargo build`.
 Refs: crates/harvester_batch/src/runner.rs
+
+## 2026-03-08 - Launcher import mode now prompts for input folder
+Type: Implementation
+Context: The batch launcher exposed import-mode flags in the right pane, but launching `Import saved webpages` still relied on a prefilled `Import dir` value instead of asking for the folder at the moment the import run started.
+Change: Updated the PowerShell launcher reducer/effects flow so import activation requests an interactive folder prompt, validates the selected directory, and only then exits the TUI and launches `harvester_batch` in import mode. Added Pester coverage for the prompt effect and the new reducer transition.
+Evidence: `Invoke-Pester -Path scripts/tests/HarvesterLauncher.Tests.ps1`; `cargo clippy --workspace --all-targets -- -D warnings`.
+Refs: scripts/Start-HarvesterBatch.ps1, scripts/harvester_launcher/Reducer.psm1, scripts/harvester_launcher/Effects.psm1, scripts/tests/HarvesterLauncher.Tests.ps1

@@ -144,6 +144,56 @@ function Invoke-DatePrompt {
     }
 }
 
+function Invoke-ImportFolderPrompt {
+    param([string]$CurrentValue = '')
+
+    try { [Console]::CursorVisible = $true } catch { $null = $_ }
+    try { [Console]::Clear() } catch { $null = $_ }
+
+    Write-Host 'Import Saved Webpages - enter folder containing saved .htm/.html files:'
+    if ([string]::IsNullOrWhiteSpace($CurrentValue)) {
+        Write-Host '  Press Enter with empty input to cancel.'
+    } else {
+        Write-Host "  Press Enter to keep current: $CurrentValue"
+    }
+
+    $folderInput = Read-Host 'Folder'
+    try { [Console]::CursorVisible = $false } catch { $null = $_ }
+
+    $selected = if ([string]::IsNullOrWhiteSpace($folderInput)) { $CurrentValue } else { $folderInput.Trim() }
+    if ([string]::IsNullOrWhiteSpace($selected)) {
+        return [pscustomobject]@{
+            Type    = 'ImportFolderPromptCompleted'
+            Value   = $null
+            Message = 'Import cancelled: no input folder selected.'
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $selected -PathType Container)) {
+        Write-Host "Folder not found: $selected" -ForegroundColor Red
+        Start-Sleep 2
+        return [pscustomobject]@{
+            Type    = 'ImportFolderPromptCompleted'
+            Value   = $null
+            Message = "Import cancelled: folder not found: $selected"
+        }
+    }
+
+    try {
+        $resolved = (Resolve-Path -LiteralPath $selected -ErrorAction Stop | Select-Object -First 1 -ExpandProperty Path)
+        return [pscustomobject]@{
+            Type  = 'ImportFolderPromptCompleted'
+            Value = $resolved
+        }
+    } catch {
+        return [pscustomobject]@{
+            Type    = 'ImportFolderPromptCompleted'
+            Value   = $null
+            Message = $_.Exception.Message
+        }
+    }
+}
+
 function Invoke-LauncherEffects {
     param([hashtable]$State, [object[]]$Effects)
     $results = [System.Collections.Generic.List[object]]::new()
@@ -169,6 +219,9 @@ function Invoke-LauncherEffects {
             'ReadCheckpointDisplay'     { Invoke-ReadCheckpointDisplay -CheckpointFilePath $chkPath }
             'RunCheckpointCommand'      { Invoke-RunCheckpointCommand -HarvesterCmd $State.Runtime.HarvesterCmd -UseCargoRun $State.Runtime.UseCargoRun -OutputDir $State.Values.OutputDir -ActionId $eff.ActionId -CustomDate $customDate }
             'DatePromptRequested'       { Invoke-DatePrompt }
+            'ImportFolderPromptRequested' {
+                Invoke-ImportFolderPrompt -CurrentValue ([string]$eff.CurrentValue)
+            }
             default                     { $null }
         }
         if ($null -ne $action) { $results.Add($action) }
@@ -178,4 +231,4 @@ function Invoke-LauncherEffects {
 
 Export-ModuleMember -Function Invoke-LauncherEffects, Invoke-LoadDefaults, Invoke-SaveDefaults, `
     Invoke-ProbeCheckpointCliSupport, Invoke-ReadCheckpointDisplay, Invoke-RunCheckpointCommand, `
-    Invoke-DatePrompt
+    Invoke-DatePrompt, Invoke-ImportFolderPrompt

@@ -462,30 +462,59 @@ Describe 'Reducer - Activate' {
         ($r.Effects | Where-Object { $_.Type -eq 'DatePromptRequested' }) | Should -Not -BeNullOrEmpty
         ($r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }) | Should -BeNullOrEmpty
     }
-    It 'Activate on run-import sets IsRunning=false' {
+    It 'Activate on run-import keeps IsRunning=true until folder prompt completes' {
         $s = S; $s.Cursor.LeftIndex = 3   # run-import
-        (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Runtime.IsRunning | Should -Be $false
+        (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Runtime.IsRunning | Should -Be $true
     }
-    It 'Activate on run-import populates LaunchAfterExit' {
+    It 'Activate on run-import emits ImportFolderPromptRequested effect' {
         $s = S; $s.Cursor.LeftIndex = 3
-        $r = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit
+        $eff = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).Effects | Where-Object { $_.Type -eq 'ImportFolderPromptRequested' }
+        $eff | Should -Not -BeNullOrEmpty
+        $eff.CurrentValue | Should -Be ''
+    }
+    It 'ImportFolderPromptCompleted populates LaunchAfterExit' {
+        $s = S
+        $r = (Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value='C:\saved' }).State.Pending.LaunchAfterExit
         $r | Should -Not -BeNullOrEmpty
         $r.FilePath | Should -Be 'hb'
     }
-    It 'Activate on run-import argv includes --import-action' {
-        $s = S; $s.Cursor.LeftIndex = 3
-        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit.Argv
+    It 'ImportFolderPromptCompleted stores selected import folder' {
+        $s = S
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value='C:\saved' }).State.Values.ImportSavedWebDir | Should -Be 'C:\saved'
+    }
+    It 'ImportFolderPromptCompleted exits launcher when folder is selected' {
+        $s = S
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value='C:\saved' }).State.Runtime.IsRunning | Should -Be $false
+    }
+    It 'ImportFolderPromptCompleted argv includes --import-action' {
+        $s = S
+        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value='C:\saved' }).State.Pending.LaunchAfterExit.Argv
         $argv | Should -Contain '--import-action'
     }
-    It 'Activate on run-import argv excludes --sources' {
-        $s = S; $s.Cursor.LeftIndex = 3
-        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit.Argv
+    It 'ImportFolderPromptCompleted argv includes selected --import-saved-web-dir value' {
+        $s = S
+        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value='C:\saved' }).State.Pending.LaunchAfterExit.Argv
+        $idx = [Array]::IndexOf($argv, '--import-saved-web-dir')
+        $idx | Should -BeGreaterThan -1
+        $argv[$idx+1] | Should -Be 'C:\saved'
+    }
+    It 'ImportFolderPromptCompleted argv excludes --sources' {
+        $s = S
+        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value='C:\saved' }).State.Pending.LaunchAfterExit.Argv
         $argv | Should -Not -Contain '--sources'
     }
-    It 'Activate on run-import argv excludes --poll-interval' {
-        $s = S; $s.Cursor.LeftIndex = 3
-        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit.Argv
+    It 'ImportFolderPromptCompleted argv excludes --poll-interval' {
+        $s = S
+        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value='C:\saved' }).State.Pending.LaunchAfterExit.Argv
         $argv | Should -Not -Contain '--poll-interval'
+    }
+    It 'ImportFolderPromptCompleted with null value leaves launcher running and sets warning' {
+        $s = S
+        $r = Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value=$null; Message='cancelled' }
+        $r.State.Runtime.IsRunning | Should -Be $true
+        $r.State.Runtime.LastStatus | Should -Be 'Warn'
+        $r.State.Runtime.LastMessage | Should -Be 'cancelled'
+        $r.State.Pending.LaunchAfterExit | Should -BeNullOrEmpty
     }
 }
 
@@ -580,6 +609,49 @@ Describe 'Effects - Invoke-DatePrompt' {
         $r = Invoke-DatePrompt
         $r.Type  | Should -Be 'DatePromptCompleted'
         $r.Value | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Effects - Invoke-ImportFolderPrompt' {
+    BeforeAll {
+        Import-LauncherEffectsModule
+    }
+
+    It 'returns resolved folder path for valid input' {
+        $tmp = New-Item -ItemType Directory -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), [guid]::NewGuid().ToString())) -Force
+        try {
+            Mock Read-Host { $tmp.FullName } -ModuleName Effects
+            $r = Invoke-ImportFolderPrompt
+            $r.Type  | Should -Be 'ImportFolderPromptCompleted'
+            $r.Value | Should -Be $tmp.FullName
+        } finally {
+            Remove-Item $tmp.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It 'empty input keeps current folder when one exists' {
+        $tmp = New-Item -ItemType Directory -Path ([IO.Path]::Combine([IO.Path]::GetTempPath(), [guid]::NewGuid().ToString())) -Force
+        try {
+            Mock Read-Host { '' } -ModuleName Effects
+            $r = Invoke-ImportFolderPrompt -CurrentValue $tmp.FullName
+            $r.Type  | Should -Be 'ImportFolderPromptCompleted'
+            $r.Value | Should -Be $tmp.FullName
+        } finally {
+            Remove-Item $tmp.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+    It 'empty input without current folder cancels import' {
+        Mock Read-Host { '' } -ModuleName Effects
+        $r = Invoke-ImportFolderPrompt
+        $r.Type    | Should -Be 'ImportFolderPromptCompleted'
+        $r.Value   | Should -BeNullOrEmpty
+        $r.Message | Should -Match 'no input folder selected'
+    }
+    It 'missing folder cancels import with message' {
+        Mock Read-Host { 'Z:\missing-folder-for-launcher-test' } -ModuleName Effects
+        $r = Invoke-ImportFolderPrompt
+        $r.Type    | Should -Be 'ImportFolderPromptCompleted'
+        $r.Value   | Should -BeNullOrEmpty
+        $r.Message | Should -Match 'folder not found'
     }
 }
 

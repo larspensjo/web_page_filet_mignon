@@ -292,9 +292,16 @@ function Invoke-LauncherReducer {
             if ($item.IsSeparator) { break }
 
             if (-not $item.IsCheckpoint) {
-                # Run actions: exit TUI and launch process
-                $s.Pending.LaunchAfterExit = Build-CommandArgs -State $s -DryRun $item.IsDryRun -SingleShot $item.IsSingleShot -ImportMode $item.IsImport
-                $s.Runtime.IsRunning       = $false
+                if ($item.IsImport) {
+                    $effects.Add(@{
+                        Type         = 'ImportFolderPromptRequested'
+                        CurrentValue = [string]$s.Values.ImportSavedWebDir
+                    })
+                } else {
+                    # Run actions: exit TUI and launch process
+                    $s.Pending.LaunchAfterExit = Build-CommandArgs -State $s -DryRun $item.IsDryRun -SingleShot $item.IsSingleShot -ImportMode $item.IsImport
+                    $s.Runtime.IsRunning       = $false
+                }
             } else {
                 # Checkpoint actions
                 if (-not $s.Runtime.CheckpointCliAvailable) {
@@ -347,6 +354,24 @@ function Invoke-LauncherReducer {
             # Value is $null when user cancelled or entered an invalid date
             if ($null -ne $Action.Value) {
                 $effects.Add(@{ Type='RunCheckpointCommand'; ActionId='cp-set-date'; CustomDate=$Action.Value })
+            }
+        }
+        'ImportFolderPromptCompleted' {
+            if ($null -eq $Action.Value) {
+                $message = $null
+                if ($Action -is [hashtable]) {
+                    if ($Action.ContainsKey('Message')) {
+                        $message = [string]$Action['Message']
+                    }
+                } elseif ($Action.PSObject.Properties['Message']) {
+                    $message = [string]$Action.Message
+                }
+                $s.Runtime.LastStatus  = 'Warn'
+                $s.Runtime.LastMessage = if ([string]::IsNullOrWhiteSpace($message)) { 'Import cancelled.' } else { $message }
+            } else {
+                $s.Values.ImportSavedWebDir = [string]$Action.Value
+                $s.Pending.LaunchAfterExit  = Build-CommandArgs -State $s -ImportMode $true
+                $s.Runtime.IsRunning        = $false
             }
         }
 
