@@ -22,11 +22,10 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 
 function Count-Lines {
     param(
-        [Parameter(Mandatory=$true)]
-        [System.IO.FileInfo[]]$Files
+        [System.IO.FileInfo[]]$Files = @()
     )
 
-    if ($Files.Count -eq 0) {
+    if (-not $Files -or $Files.Count -eq 0) {
         return 0
     }
 
@@ -44,11 +43,10 @@ function Count-Lines {
 
 function Count-RustTests {
     param(
-        [Parameter(Mandatory=$true)]
-        [System.IO.FileInfo[]]$Files
+        [System.IO.FileInfo[]]$Files = @()
     )
 
-    if ($Files.Count -eq 0) {
+    if (-not $Files -or $Files.Count -eq 0) {
         return 0
     }
 
@@ -184,29 +182,33 @@ function Get-SubmoduleStats {
 }
 
 function Get-DocumentationStats {
+    param(
+        [string]$RootPath = $projectRoot
+    )
+
     $stats = @{
         Planning = @{Lines = 0; Files = 0}
         Other = @{Lines = 0; Files = 0}
     }
 
-    $docsPath = Join-Path $projectRoot "docs"
+    $docsPath = Join-Path $RootPath "docs"
     if (Test-Path $docsPath) {
         # Planning documents (Plan.*.md)
-        $planFiles = Get-ChildItem -Path $docsPath -Filter "Plan.*.md" -File
+        $planFiles = @(Get-ChildItem -Path $docsPath -Filter "Plan.*.md" -Recurse -File)
         $stats.Planning.Lines = Count-Lines -Files $planFiles
         $stats.Planning.Files = $planFiles.Count
 
         # Other documentation (everything else in docs/)
-        $allDocs = Get-ChildItem -Path $docsPath -Filter "*.md" -Recurse -File
-        $otherDocs = $allDocs | Where-Object {
+        $allDocs = @(Get-ChildItem -Path $docsPath -Filter "*.md" -Recurse -File)
+        $otherDocs = @($allDocs | Where-Object {
             $_.Name -notmatch "^Plan\."
-        }
+        })
         $stats.Other.Lines = Count-Lines -Files $otherDocs
         $stats.Other.Files = $otherDocs.Count
     }
 
     # Include README.md and other top-level docs
-    $readmePath = Join-Path $projectRoot "README.md"
+    $readmePath = Join-Path $RootPath "README.md"
     if (Test-Path $readmePath) {
         $stats.Other.Lines += (Get-Content $readmePath -ErrorAction SilentlyContinue).Count
         $stats.Other.Files += 1
