@@ -21,7 +21,9 @@ use crate::view_model::{
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
-use harvester_engine::{truncate_to_char_boundary, ExtractedLink, LinkKind, SourceId};
+use harvester_engine::{
+    truncate_to_char_boundary, ExtractedLink, ImportedArchiveRef, LinkKind, SourceId,
+};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use url::Url;
@@ -1545,6 +1547,38 @@ impl AppState {
 
     pub(crate) fn revert_preview_to_briefing(&mut self) {
         self.ui.set_preview_mode(PreviewMode::Briefing);
+        self.dirty = true;
+    }
+
+    pub(crate) fn apply_imported_archive_entries(&mut self, entries: &[ImportedArchiveRef]) {
+        if entries.is_empty() {
+            return;
+        }
+
+        for entry in entries {
+            let restored_fetched_utc = chrono::DateTime::parse_from_rfc3339(&entry.fetched_utc)
+                .ok()
+                .map(|dt| dt.with_timezone(&chrono::Utc));
+            let job_id = self.next_job_id;
+            self.next_job_id += 1;
+            self.jobs.insert(
+                job_id,
+                JobState {
+                    url: entry.canonical_url.clone(),
+                    stage: Stage::Done,
+                    outcome: Some(JobResultKind::Success),
+                    tokens: None,
+                    bytes: None,
+                    content_preview: None,
+                    preview_quality: None,
+                    links: Vec::new(),
+                    fetched_utc: restored_fetched_utc,
+                },
+            );
+            self.seen_urls
+                .insert(normalize_url_for_dedupe(&entry.canonical_url));
+        }
+
         self.dirty = true;
     }
 

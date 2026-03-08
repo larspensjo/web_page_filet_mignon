@@ -3,7 +3,8 @@ use crate::lock;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    update, AppState, BatchObservation, ImportAction, ImportPhase, LlmModelUsageView, Msg,
+    update, AppState, BatchObservation, CompletedJobSnapshot, ImportAction, ImportPhase,
+    LlmModelUsageView, Msg,
 };
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
@@ -966,6 +967,7 @@ fn run_import_mode(
     import_dir: std::path::PathBuf,
 ) -> Result<i32, String> {
     engine_info!("[import] Starting import mode");
+    let existing_completed_jobs = load_completed_jobs(&paths.state_path);
 
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let mut state = AppState::new();
@@ -1054,11 +1056,34 @@ fn run_import_mode(
         obs.imports_completed, obs.imports_failed
     );
 
+    drop(effect_runner);
+    let imported_completed_jobs = state.completed_jobs_snapshot();
+    let merged_completed_jobs =
+        merge_completed_jobs_for_import(existing_completed_jobs, imported_completed_jobs);
+    engine_info!(
+        "[import] Persisting completed jobs existing={} imported={} merged={}",
+        merged_completed_jobs
+            .len()
+            .saturating_sub(obs.imports_completed),
+        obs.imports_completed,
+        merged_completed_jobs.len()
+    );
+    persist_completed_jobs(&paths.state_path, &merged_completed_jobs);
+
     Ok(match outcome {
         CycleOutcome::Success => 0,
         CycleOutcome::PartialFailure => 1,
         CycleOutcome::TotalFailure => 1,
     })
+}
+
+fn merge_completed_jobs_for_import(
+    existing_completed_jobs: Vec<CompletedJobSnapshot>,
+    imported_completed_jobs: Vec<CompletedJobSnapshot>,
+) -> Vec<CompletedJobSnapshot> {
+    let mut merged = existing_completed_jobs;
+    merged.extend(imported_completed_jobs);
+    merged
 }
 
 /// Inner dispatch loop for import mode. Uses `should_settle_import_cycle` instead of
@@ -2207,6 +2232,34 @@ mod tests {
             "--trusted-manual-selection",
         ]);
         assert!(args.validate_import_args().is_ok());
+    }
+
+    #[test]
+    fn import_mode_persistence_merge_preserves_existing_jobs_and_appends_imports() {
+        let existing = vec![harvester_core::CompletedJobSnapshot {
+            url: "https://example.com/existing".to_string(),
+            tokens: Some(10),
+            bytes: Some(100),
+            links: Vec::new(),
+            fetched_utc: Some("2026-03-08T06:00:00Z".to_string()),
+        }];
+        let imported = vec![harvester_core::CompletedJobSnapshot {
+            url: "https://example.com/imported".to_string(),
+            tokens: None,
+            bytes: None,
+            links: Vec::new(),
+            fetched_utc: Some("2026-03-08T06:01:56Z".to_string()),
+        }];
+
+        let merged = merge_completed_jobs_for_import(existing, imported);
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].url, "https://example.com/existing");
+        assert_eq!(merged[1].url, "https://example.com/imported");
+        assert_eq!(
+            merged[1].fetched_utc.as_deref(),
+            Some("2026-03-08T06:01:56Z")
+        );
     }
 
     #[test]

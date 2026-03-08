@@ -1803,6 +1803,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.import_session.duplicate_url_count = report.duplicate_url_count;
             state.import_session.duplicate_content_count = report.duplicate_content_count;
             state.import_session.warnings = report.warnings;
+            state.apply_imported_archive_entries(&imported_entries);
+            state.request_pre_triage_refresh_evaluation(false);
 
             // Only emit downstream work if trusted manual selection is active.
             if imported_entries.is_empty() || !trusted {
@@ -5653,6 +5655,54 @@ mod import_tests {
                 .any(|e| matches!(e, Effect::RunImportedCorpusBriefing { .. })),
             "import-only must not emit briefing"
         );
+    }
+
+    #[test]
+    fn import_completion_projects_imported_entries_into_completed_jobs_snapshot() {
+        init();
+        let state = AppState::new();
+        let (state, effects) = start_import(state, ImportAction::ImportOnly);
+        let Effect::ImportSavedWebpages { request_id, .. } = effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ImportSavedWebpages { .. }))
+            .unwrap()
+        else {
+            panic!("expected ImportSavedWebpages effect");
+        };
+
+        let imported_fetched_utc = "2026-03-08T06:01:56Z".to_string();
+        let (state, _effects) = update(
+            state,
+            Msg::ImportSavedWebpagesCompleted {
+                request_id,
+                report: harvester_engine::ImportReport {
+                    scanned_count: 1,
+                    imported_entries: vec![harvester_engine::ImportedArchiveRef {
+                        persisted_path: PathBuf::from("/archive/imported.md"),
+                        canonical_url: "https://example.com/imported".to_string(),
+                        content_hash: "hash-imported".to_string(),
+                        fetched_utc: imported_fetched_utc.clone(),
+                    }],
+                    warnings: Vec::new(),
+                    failures: Vec::new(),
+                    duplicate_url_count: 0,
+                    duplicate_content_count: 0,
+                },
+            },
+        );
+
+        let snapshot = state.completed_jobs_snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].url, "https://example.com/imported");
+        let actual = snapshot[0]
+            .fetched_utc
+            .as_deref()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+        let expected = chrono::DateTime::parse_from_rfc3339(&imported_fetched_utc)
+            .ok()
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+        assert_eq!(actual, expected);
     }
 
     #[test]

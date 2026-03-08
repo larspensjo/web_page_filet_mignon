@@ -677,3 +677,12 @@ Context: The batch launcher exposed import-mode flags in the right pane, but lau
 Change: Updated the PowerShell launcher reducer/effects flow so import activation requests an interactive folder prompt, validates the selected directory, and only then exits the TUI and launches `harvester_batch` in import mode. Added Pester coverage for the prompt effect and the new reducer transition.
 Evidence: `Invoke-Pester -Path scripts/tests/HarvesterLauncher.Tests.ps1`; `cargo clippy --workspace --all-targets -- -D warnings`.
 Refs: scripts/Start-HarvesterBatch.ps1, scripts/harvester_launcher/Reducer.psm1, scripts/harvester_launcher/Effects.psm1, scripts/tests/HarvesterLauncher.Tests.ps1
+
+## 2026-03-08 - Imported articles now persist into app-visible completed jobs
+Type: Bug Fix
+Context: Import mode wrote archive markdown files successfully, but `harvester_app` restores its Jobs list from `.harvester_state.ron`. Because import mode never projected imported archive refs into completed-job snapshots, articles imported after a checkpoint were absent from the app and from the `Since checkpoint` view after restart.
+Change: Updated `harvester_core` import completion to register imported archive refs as successful completed jobs with `fetched_utc`, and updated `harvester_batch` import-mode shutdown to merge those imported snapshots with the previously persisted completed jobs before writing state.
+Evidence: `cargo test -p harvester_core import_completion_projects_imported_entries_into_completed_jobs_snapshot -- --nocapture`; `cargo test -p harvester_batch import_mode_persistence_merge_preserves_existing_jobs_and_appends_imports -- --nocapture`; `cargo clippy --workspace --all-targets -- -D warnings`.
+Lessons Learned: Archive persistence and app-visible state persistence are separate contracts; any feature that writes new corpus entries must explicitly update both paths or the UI will silently diverge from disk contents.
+Prevention: Add a persistence-focused regression test for every non-poll ingestion path asserting that newly created archive entries appear in `CompletedJobSnapshot` output and survive app restart through `.harvester_state.ron`.
+Refs: crates/harvester_core/src/update.rs, crates/harvester_core/src/state.rs, crates/harvester_batch/src/runner.rs
