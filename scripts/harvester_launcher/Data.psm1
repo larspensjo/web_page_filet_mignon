@@ -3,28 +3,32 @@ Set-StrictMode -Version Latest
 
 function Get-LauncherActionItems {
     @(
-        [pscustomobject]@{ Id='run-batch';   Label='Run batch (continuous)';    IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$false }
-        [pscustomobject]@{ Id='run-single';  Label='Run single-shot (one cycle)'; IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$true  }
-        [pscustomobject]@{ Id='run-dry';     Label='Run dry-run (single poll)'; IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$true;  IsSingleShot=$false }
-        [pscustomobject]@{ Id='sep-1';       Label='';                          IsSeparator=$true;  IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$false }
-        [pscustomobject]@{ Id='cp-set-now';  Label='Set checkpoint to now';     IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false }
-        [pscustomobject]@{ Id='cp-set-date'; Label='Set checkpoint to date...'; IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false }
-        [pscustomobject]@{ Id='cp-clear';    Label='Clear checkpoint';          IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false }
-        [pscustomobject]@{ Id='cp-show';     Label='Show current checkpoint';   IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false }
+        [pscustomobject]@{ Id='run-batch';   Label='Run batch (continuous)';       IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$false; IsImport=$false }
+        [pscustomobject]@{ Id='run-single';  Label='Run single-shot (one cycle)';  IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$true;  IsImport=$false }
+        [pscustomobject]@{ Id='run-dry';     Label='Run dry-run (single poll)';    IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$true;  IsSingleShot=$false; IsImport=$false }
+        [pscustomobject]@{ Id='run-import';  Label='Import saved webpages';        IsSeparator=$false; IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$false; IsImport=$true  }
+        [pscustomobject]@{ Id='sep-1';       Label='';                             IsSeparator=$true;  IsCheckpoint=$false; IsDryRun=$false; IsSingleShot=$false; IsImport=$false }
+        [pscustomobject]@{ Id='cp-set-now';  Label='Set checkpoint to now';        IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false; IsImport=$false }
+        [pscustomobject]@{ Id='cp-set-date'; Label='Set checkpoint to date...';    IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false; IsImport=$false }
+        [pscustomobject]@{ Id='cp-clear';    Label='Clear checkpoint';             IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false; IsImport=$false }
+        [pscustomobject]@{ Id='cp-show';     Label='Show current checkpoint';      IsSeparator=$false; IsCheckpoint=$true;  IsDryRun=$false; IsSingleShot=$false; IsImport=$false }
     )
 }
 
 function Get-LauncherParamDefs {
     # Order matters: determines right-pane cursor index
     @(
-        [pscustomobject]@{ Name='LlmConcurrency';   Label='LLM concurrency';   Type='Int';  Min=1;    Max=10;   Unit='';     Flag='--llm-concurrency'           }
-        [pscustomobject]@{ Name='PollInterval';     Label='Poll interval';     Type='Int';  Min=1;    Max=1440; Unit=' min'; Flag='--poll-interval'             }
-        [pscustomobject]@{ Name='ForceUnlock';      Label='Force unlock';      Type='Bool'; Min=$null; Max=$null; Unit='';   Flag='--force-unlock'              }
-        [pscustomobject]@{ Name='AllowUnsupported'; Label='Allow unsupported'; Type='Bool'; Min=$null; Max=$null; Unit='';   Flag='--allow-unsupported-sources' }
-        [pscustomobject]@{ Name='Sources';          Label='Sources file';      Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--sources'                   }
-        [pscustomobject]@{ Name='OutputDir';        Label='Output dir';        Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--output-dir'                }
-        [pscustomobject]@{ Name='ContextsDir';      Label='Contexts dir';      Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--contexts-dir'              }
-        [pscustomobject]@{ Name='PromptsDir';       Label='Prompts dir';       Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--prompts-dir'               }
+        [pscustomobject]@{ Name='LlmConcurrency';      Label='LLM concurrency';      Type='Int';  Min=1;    Max=10;   Unit='';     Flag='--llm-concurrency';           EnumValues=$null }
+        [pscustomobject]@{ Name='PollInterval';        Label='Poll interval';        Type='Int';  Min=1;    Max=1440; Unit=' min'; Flag='--poll-interval';             EnumValues=$null }
+        [pscustomobject]@{ Name='ForceUnlock';         Label='Force unlock';         Type='Bool'; Min=$null; Max=$null; Unit='';   Flag='--force-unlock';              EnumValues=$null }
+        [pscustomobject]@{ Name='AllowUnsupported';    Label='Allow unsupported';    Type='Bool'; Min=$null; Max=$null; Unit='';   Flag='--allow-unsupported-sources'; EnumValues=$null }
+        [pscustomobject]@{ Name='Sources';             Label='Sources file';         Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--sources';                   EnumValues=$null }
+        [pscustomobject]@{ Name='OutputDir';           Label='Output dir';           Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--output-dir';                EnumValues=$null }
+        [pscustomobject]@{ Name='ContextsDir';         Label='Contexts dir';         Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--contexts-dir';              EnumValues=$null }
+        [pscustomobject]@{ Name='PromptsDir';          Label='Prompts dir';          Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--prompts-dir';               EnumValues=$null }
+        [pscustomobject]@{ Name='ImportSavedWebDir';   Label='Import dir';           Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--import-saved-web-dir';      EnumValues=$null }
+        [pscustomobject]@{ Name='TrustedManualSel';    Label='Trusted manual sel';   Type='Bool'; Min=$null; Max=$null; Unit='';   Flag='--trusted-manual-selection';  EnumValues=$null }
+        [pscustomobject]@{ Name='ImportAction';        Label='Import action';        Type='Enum'; Min=$null; Max=$null; Unit='';   Flag='--import-action';             EnumValues=@('import-only','summaries','briefing') }
     )
 }
 
@@ -38,6 +42,9 @@ function New-LauncherDefaults {
         OutputDir        = 'output'
         ContextsDir      = 'contexts'
         PromptsDir       = 'prompts'
+        ImportSavedWebDir = ''
+        TrustedManualSel  = $false
+        ImportAction      = 'import-only'
     }
 }
 

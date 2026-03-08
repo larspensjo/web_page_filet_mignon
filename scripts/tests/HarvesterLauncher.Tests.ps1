@@ -136,17 +136,17 @@ Describe 'Reducer - navigation' {
     It 'MoveDown advances LeftIndex in Left pane' {
         (Reduce (S) 'MoveDown').State.Cursor.LeftIndex | Should -Be 1
     }
-    It 'MoveDown skips separator (index 3) landing on 4' {
-        $s = S; $s.Cursor.LeftIndex = 2
-        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 4
+    It 'MoveDown skips separator (index 4) landing on 5' {
+        $s = S; $s.Cursor.LeftIndex = 3   # run-import; separator is at 4, cp-set-now at 5
+        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 5
     }
-    It 'MoveUp from 4 skips separator landing on 2' {
-        $s = S; $s.Cursor.LeftIndex = 4
-        (Reduce $s 'MoveUp').State.Cursor.LeftIndex | Should -Be 2
+    It 'MoveUp from 5 skips separator landing on 3' {
+        $s = S; $s.Cursor.LeftIndex = 5   # cp-set-now; separator is at 4, run-import at 3
+        (Reduce $s 'MoveUp').State.Cursor.LeftIndex | Should -Be 3
     }
     It 'MoveDown clamps at last action item' {
-        $s = S; $s.Cursor.LeftIndex = 7   # last item (cp-show)
-        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 7
+        $s = S; $s.Cursor.LeftIndex = 8   # last item (cp-show)
+        (Reduce $s 'MoveDown').State.Cursor.LeftIndex | Should -Be 8
     }
     It 'MoveUp clamps at 0' {
         (Reduce (S) 'MoveUp').State.Cursor.LeftIndex | Should -Be 0
@@ -156,15 +156,15 @@ Describe 'Reducer - navigation' {
         (Reduce $s 'MoveDown').State.Cursor.RightIndex | Should -Be 1
     }
     It 'MoveDown clamps RightIndex at last param' {
-        $s = S; $s.Ui.ActivePane = 'Right'; $s.Cursor.RightIndex = 7   # 8 params, index 7
-        (Reduce $s 'MoveDown').State.Cursor.RightIndex | Should -Be 7
+        $s = S; $s.Ui.ActivePane = 'Right'; $s.Cursor.RightIndex = 10   # 11 params, index 10
+        (Reduce $s 'MoveDown').State.Cursor.RightIndex | Should -Be 10
     }
     It 'MoveHome sets LeftIndex to first non-separator' {
         $s = S; $s.Cursor.LeftIndex = 5
         (Reduce $s 'MoveHome').State.Cursor.LeftIndex | Should -Be 0
     }
     It 'MoveEnd sets LeftIndex to last item' {
-        (Reduce (S) 'MoveEnd').State.Cursor.LeftIndex | Should -Be 7
+        (Reduce (S) 'MoveEnd').State.Cursor.LeftIndex | Should -Be 8
     }
     It 'Resize updates TooSmall to true for small terminal' {
         $r = Reduce (S) 'Resize' @{ Width=50; Height=10 }
@@ -300,6 +300,109 @@ Describe 'Reducer - Build-CommandArgs' {
     }
 }
 
+Describe 'Reducer - Build-CommandArgs (import mode)' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        function script:S { New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30 }
+        function script:ImportArgv {
+            $s = S; $s.Values.ImportSavedWebDir = 'C:\saved'
+            (Build-CommandArgs -State $s -ImportMode $true).Argv
+        }
+    }
+
+    It 'FilePath matches HarvesterCmd in import mode' {
+        $s = S; $s.Values.ImportSavedWebDir = 'C:\saved'
+        (Build-CommandArgs -State $s -ImportMode $true).FilePath | Should -Be 'hb'
+    }
+    It 'import mode includes --import-saved-web-dir with value' {
+        $a = ImportArgv
+        $idx = [Array]::IndexOf($a, '--import-saved-web-dir')
+        $idx | Should -BeGreaterThan -1
+        $a[$idx+1] | Should -Be 'C:\saved'
+    }
+    It 'import mode includes --import-action with value' {
+        $a = ImportArgv
+        $idx = [Array]::IndexOf($a, '--import-action')
+        $idx | Should -BeGreaterThan -1
+        $a[$idx+1] | Should -Be 'import-only'
+    }
+    It 'import mode includes --llm-concurrency' {
+        ImportArgv | Should -Contain '--llm-concurrency'
+    }
+    It 'import mode excludes --sources' {
+        ImportArgv | Should -Not -Contain '--sources'
+    }
+    It 'import mode excludes --poll-interval' {
+        ImportArgv | Should -Not -Contain '--poll-interval'
+    }
+    It 'import mode excludes --dry-run' {
+        ImportArgv | Should -Not -Contain '--dry-run'
+    }
+    It 'import mode excludes --single-shot' {
+        ImportArgv | Should -Not -Contain '--single-shot'
+    }
+    It 'import mode includes --trusted-manual-selection when TrustedManualSel is true' {
+        $s = S; $s.Values.ImportSavedWebDir = 'C:\saved'; $s.Values.TrustedManualSel = $true
+        (Build-CommandArgs -State $s -ImportMode $true).Argv | Should -Contain '--trusted-manual-selection'
+    }
+    It 'import mode excludes --trusted-manual-selection when TrustedManualSel is false' {
+        $s = S; $s.Values.ImportSavedWebDir = 'C:\saved'; $s.Values.TrustedManualSel = $false
+        (Build-CommandArgs -State $s -ImportMode $true).Argv | Should -Not -Contain '--trusted-manual-selection'
+    }
+    It 'import mode includes --output-dir' {
+        ImportArgv | Should -Contain '--output-dir'
+    }
+    It 'import mode omits --import-saved-web-dir when ImportSavedWebDir is empty' {
+        $s = S; $s.Values.ImportSavedWebDir = ''
+        (Build-CommandArgs -State $s -ImportMode $true).Argv | Should -Not -Contain '--import-saved-web-dir'
+    }
+    It 'import mode --import-action reflects non-default enum value' {
+        $s = S; $s.Values.ImportSavedWebDir = 'C:\saved'; $s.Values.ImportAction = 'summaries'
+        $a = (Build-CommandArgs -State $s -ImportMode $true).Argv
+        $idx = [Array]::IndexOf($a, '--import-action')
+        $a[$idx+1] | Should -Be 'summaries'
+    }
+}
+
+Describe 'Reducer - ValueToggle (Enum)' {
+    BeforeAll {
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
+        Import-Module "$PSScriptRoot\..\harvester_launcher\Reducer.psm1" -Force
+        # ImportAction is at right-pane param index 10
+        function script:RightState($paramIdx) {
+            $s = New-LauncherState -HarvesterCmd 'hb' -Width 100 -Height 30
+            $s.Ui.ActivePane = 'Right'; $s.Cursor.RightIndex = $paramIdx; $s
+        }
+    }
+
+    It 'ValueToggle on ImportAction cycles import-only -> summaries' {
+        $s = RightState 10   # ImportAction
+        $s.Values.ImportAction = 'import-only'
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueToggle' }).State.Values.ImportAction | Should -Be 'summaries'
+    }
+    It 'ValueToggle on ImportAction cycles summaries -> briefing' {
+        $s = RightState 10
+        $s.Values.ImportAction = 'summaries'
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueToggle' }).State.Values.ImportAction | Should -Be 'briefing'
+    }
+    It 'ValueToggle on ImportAction wraps briefing -> import-only' {
+        $s = RightState 10
+        $s.Values.ImportAction = 'briefing'
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueToggle' }).State.Values.ImportAction | Should -Be 'import-only'
+    }
+    It 'ValueToggle on Enum param does not affect Bool params' {
+        $s = RightState 10
+        $s.Values.ForceUnlock = $false
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueToggle' }).State.Values.ForceUnlock | Should -Be $false
+    }
+    It 'ValueIncrease on Enum param is a no-op' {
+        $s = RightState 10
+        $s.Values.ImportAction = 'import-only'
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.ImportAction | Should -Be 'import-only'
+    }
+}
+
 Describe 'Reducer - Activate' {
     BeforeAll {
         Import-Module "$PSScriptRoot\..\harvester_launcher\Data.psm1"    -Force
@@ -337,27 +440,52 @@ Describe 'Reducer - Activate' {
         (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).Effects.Count | Should -Be 0
     }
     It 'Activate on separator is a no-op' {
-        $s = S; $s.Cursor.LeftIndex = 3   # sep-1
+        $s = S; $s.Cursor.LeftIndex = 4   # sep-1 (index shifted by run-import at 3)
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         $r.State.Runtime.IsRunning | Should -Be $true
     }
     It 'Activate on checkpoint when unavailable sets LastStatus Warn' {
-        $s = S; $s.Cursor.LeftIndex = 4; $s.Runtime.CheckpointCliAvailable = $false  # cp-set-now
+        $s = S; $s.Cursor.LeftIndex = 5; $s.Runtime.CheckpointCliAvailable = $false  # cp-set-now
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         $r.State.Runtime.LastStatus | Should -Be 'Warn'
     }
     It 'Activate on checkpoint when available queues RunCheckpointCommand effect' {
-        $s = S; $s.Cursor.LeftIndex = 4; $s.Runtime.CheckpointCliAvailable = $true
+        $s = S; $s.Cursor.LeftIndex = 5; $s.Runtime.CheckpointCliAvailable = $true
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         $eff = $r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }
         $eff | Should -Not -BeNullOrEmpty
         $eff.ActionId | Should -Be 'cp-set-now'
     }
     It 'Activate on cp-set-date when available emits DatePromptRequested (not RunCheckpointCommand)' {
-        $s = S; $s.Cursor.LeftIndex = 5; $s.Runtime.CheckpointCliAvailable = $true   # cp-set-date
+        $s = S; $s.Cursor.LeftIndex = 6; $s.Runtime.CheckpointCliAvailable = $true   # cp-set-date
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         ($r.Effects | Where-Object { $_.Type -eq 'DatePromptRequested' }) | Should -Not -BeNullOrEmpty
         ($r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }) | Should -BeNullOrEmpty
+    }
+    It 'Activate on run-import sets IsRunning=false' {
+        $s = S; $s.Cursor.LeftIndex = 3   # run-import
+        (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Runtime.IsRunning | Should -Be $false
+    }
+    It 'Activate on run-import populates LaunchAfterExit' {
+        $s = S; $s.Cursor.LeftIndex = 3
+        $r = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit
+        $r | Should -Not -BeNullOrEmpty
+        $r.FilePath | Should -Be 'hb'
+    }
+    It 'Activate on run-import argv includes --import-action' {
+        $s = S; $s.Cursor.LeftIndex = 3
+        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit.Argv
+        $argv | Should -Contain '--import-action'
+    }
+    It 'Activate on run-import argv excludes --sources' {
+        $s = S; $s.Cursor.LeftIndex = 3
+        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit.Argv
+        $argv | Should -Not -Contain '--sources'
+    }
+    It 'Activate on run-import argv excludes --poll-interval' {
+        $s = S; $s.Cursor.LeftIndex = 3
+        $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }).State.Pending.LaunchAfterExit.Argv
+        $argv | Should -Not -Contain '--poll-interval'
     }
 }
 

@@ -118,28 +118,36 @@ function Copy-LauncherState {
 # ── Command builder ───────────────────────────────────────────────────────────
 
 function Build-CommandArgs {
-    param([hashtable]$State, [bool]$DryRun = $false, [bool]$SingleShot = $false)
+    param([hashtable]$State, [bool]$DryRun = $false, [bool]$SingleShot = $false, [bool]$ImportMode = $false)
     $v    = $State.Values
     $argv = [System.Collections.Generic.List[string]]::new()
 
     # All path args — always explicit for reproducibility
-    $argv.AddRange([string[]]@('--sources',      $v.Sources))
     $argv.AddRange([string[]]@('--output-dir',   $v.OutputDir))
     $argv.AddRange([string[]]@('--contexts-dir', $v.ContextsDir))
     $argv.AddRange([string[]]@('--prompts-dir',  $v.PromptsDir))
 
-    # Numeric args — always explicit
-    $argv.AddRange([string[]]@('--llm-concurrency', [string]$v.LlmConcurrency))
-    # Poll interval only matters in continuous mode.
-    if (-not $SingleShot) {
-        $argv.AddRange([string[]]@('--poll-interval', [string]$v.PollInterval))
+    if ($ImportMode) {
+        # Import mode: emit import-specific flags, skip sources/poll-interval
+        $argv.AddRange([string[]]@('--llm-concurrency', [string]$v.LlmConcurrency))
+        if (-not [string]::IsNullOrEmpty($v.ImportSavedWebDir)) {
+            $argv.AddRange([string[]]@('--import-saved-web-dir', $v.ImportSavedWebDir))
+        }
+        $argv.AddRange([string[]]@('--import-action', $v.ImportAction))
+        if ($v.TrustedManualSel) { $argv.Add('--trusted-manual-selection') }
+        if ($v.ForceUnlock)      { $argv.Add('--force-unlock') }
+    } else {
+        # Normal poll/batch/dry-run mode
+        $argv.AddRange([string[]]@('--sources', $v.Sources))
+        $argv.AddRange([string[]]@('--llm-concurrency', [string]$v.LlmConcurrency))
+        if (-not $SingleShot) {
+            $argv.AddRange([string[]]@('--poll-interval', [string]$v.PollInterval))
+        }
+        if ($v.ForceUnlock)      { $argv.Add('--force-unlock') }
+        if ($v.AllowUnsupported) { $argv.Add('--allow-unsupported-sources') }
+        if ($DryRun)             { $argv.Add('--dry-run') }
+        if ($SingleShot -and -not $DryRun) { $argv.Add('--single-shot') }
     }
-
-    # Boolean flags — only when enabled
-    if ($v.ForceUnlock)      { $argv.Add('--force-unlock') }
-    if ($v.AllowUnsupported) { $argv.Add('--allow-unsupported-sources') }
-    if ($DryRun)             { $argv.Add('--dry-run') }
-    if ($SingleShot -and -not $DryRun) { $argv.Add('--single-shot') }
 
     @{ FilePath = $State.Runtime.HarvesterCmd; Argv = $argv.ToArray() }
 }
@@ -271,6 +279,10 @@ function Invoke-LauncherReducer {
                 $p = $s.Data.Params[$s.Cursor.RightIndex]
                 if ($p.Type -eq 'Bool') {
                     $s.Values[$p.Name] = -not [bool]$s.Values[$p.Name]
+                } elseif ($p.Type -eq 'Enum') {
+                    $vals = $p.EnumValues
+                    $cur  = [Array]::IndexOf($vals, [string]$s.Values[$p.Name])
+                    $s.Values[$p.Name] = $vals[($cur + 1) % $vals.Count]
                 }
             }
         }
@@ -281,7 +293,7 @@ function Invoke-LauncherReducer {
 
             if (-not $item.IsCheckpoint) {
                 # Run actions: exit TUI and launch process
-                $s.Pending.LaunchAfterExit = Build-CommandArgs -State $s -DryRun $item.IsDryRun -SingleShot $item.IsSingleShot
+                $s.Pending.LaunchAfterExit = Build-CommandArgs -State $s -DryRun $item.IsDryRun -SingleShot $item.IsSingleShot -ImportMode $item.IsImport
                 $s.Runtime.IsRunning       = $false
             } else {
                 # Checkpoint actions
