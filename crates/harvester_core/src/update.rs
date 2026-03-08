@@ -1804,12 +1804,22 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             match action {
                 crate::import_session::ImportAction::ImportOnly => Vec::new(),
                 crate::import_session::ImportAction::Summaries => {
+                    state.request_summary_preparation();
+                    state.start_summary_cache_run();
+                    state.mark_briefing_metadata_ready();
+                    state.set_briefing(BriefingSession::new_loading(None));
+                    state.clear_briefing_orchestration_request();
                     vec![Effect::RunImportedCorpusSummaries {
                         request_id,
                         imported_entries,
                     }]
                 }
                 crate::import_session::ImportAction::Briefing => {
+                    state.request_briefing_orchestration();
+                    state.start_summary_cache_run();
+                    state.mark_briefing_metadata_ready();
+                    state.set_briefing(BriefingSession::new_loading(None));
+                    state.clear_briefing_orchestration_request();
                     vec![Effect::RunImportedCorpusBriefing {
                         request_id,
                         imported_entries,
