@@ -1,8 +1,8 @@
-use crate::cli::{Args, CheckpointCommand};
+use crate::cli::{Args, CheckpointCommand, ImportActionArg};
 use crate::lock;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
-use harvester_core::{update, AppState, BatchObservation, LlmModelUsageView, Msg};
+use harvester_core::{update, AppState, BatchObservation, ImportAction, ImportPhase, LlmModelUsageView, Msg};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
@@ -37,6 +37,8 @@ struct CycleCounts {
     triage_failed: usize,
     summary_completed: usize,
     summary_failed: usize,
+    imports_completed: usize,
+    imports_failed: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -48,6 +50,8 @@ struct CycleCounterBaseline {
     triage_failed: usize,
     summary_completed: usize,
     summary_failed: usize,
+    imports_completed: usize,
+    imports_failed: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,6 +71,8 @@ impl CycleCounterBaseline {
             triage_failed: obs.triage_failed,
             summary_completed: obs.summary_completed,
             summary_failed: obs.summary_failed,
+            imports_completed: obs.imports_completed,
+            imports_failed: obs.imports_failed,
         }
     }
 
@@ -79,6 +85,8 @@ impl CycleCounterBaseline {
             triage_failed: obs.triage_failed.saturating_sub(self.triage_failed),
             summary_completed: obs.summary_completed.saturating_sub(self.summary_completed),
             summary_failed: obs.summary_failed.saturating_sub(self.summary_failed),
+            imports_completed: obs.imports_completed.saturating_sub(self.imports_completed),
+            imports_failed: obs.imports_failed.saturating_sub(self.imports_failed),
         };
         *self = Self::from_observation(obs);
         counts
@@ -93,6 +101,7 @@ fn should_settle_cycle(obs: &BatchObservation) -> bool {
     // 3. No jobs in flight
     // 4. No triage work in flight
     // 5. No summary work in flight or pending
+    // 6. No import in flight
     !obs.poll_in_progress
         && !matches!(
             obs.triage_phase,
@@ -105,6 +114,19 @@ fn should_settle_cycle(obs: &BatchObservation) -> bool {
         )
         && obs.jobs_in_flight == 0
         && obs.triage_in_flight == 0
+        && obs.summary_in_flight == 0
+        && obs.summary_pending == 0
+        && !obs.import_in_flight
+}
+
+/// Determines if an import-mode cycle should settle.
+/// Import mode ignores poll/triage/job state; only waits for the import and its
+/// downstream work (summaries or briefing) to complete.
+fn should_settle_import_cycle(obs: &BatchObservation) -> bool {
+    // In import mode we don't poll sources, so poll_in_progress is always false.
+    // We settle when the import phase is no longer Importing and all summary work is done.
+    !obs.import_in_flight
+        && !matches!(obs.import_phase, ImportPhase::Importing)
         && obs.summary_in_flight == 0
         && obs.summary_pending == 0
 }
@@ -149,6 +171,21 @@ fn classify_cycle_outcome(obs: &BatchObservation) -> CycleOutcome {
         (true, true) => CycleOutcome::PartialFailure,
         (false, true) => CycleOutcome::TotalFailure,
         (false, false) => CycleOutcome::Success, // Nothing to do is success
+    }
+}
+
+/// Classifies the outcome of a completed import-mode cycle.
+fn classify_import_cycle_outcome(obs: &BatchObservation) -> CycleOutcome {
+    let has_import_success = obs.imports_completed > 0;
+    let has_import_failure = obs.imports_failed > 0
+        || matches!(obs.import_phase, ImportPhase::Failed);
+
+    match (has_import_success, has_import_failure) {
+        (true, false) => CycleOutcome::Success,
+        (true, true) => CycleOutcome::PartialFailure,
+        (false, true) => CycleOutcome::TotalFailure,
+        // Idle means nothing was even attempted — treat as total failure.
+        (false, false) => CycleOutcome::TotalFailure,
     }
 }
 
@@ -375,6 +412,13 @@ pub fn run(args: Args) -> Result<i32, String> {
     if args.dry_run {
         engine_info!("[batch] Dry-run mode: single poll only");
         return run_dry_run(&paths, &args);
+    }
+
+    // Import mode: branch before source loading
+    if let Some(import_dir) = &args.import_saved_web_dir {
+        args.validate_import_args()?;
+        engine_info!("[batch] Import mode: dir={}", import_dir.display());
+        return run_import_mode(&paths, &args, import_dir.clone());
     }
 
     // Validate source configuration
@@ -907,6 +951,181 @@ fn microdollars_to_display(microdollars: u64) -> String {
     format!("${}.{:02}", dollars, remaining_cents)
 }
 
+/// Runs the import-mode workflow for browser-saved webpage imports.
+///
+/// Branches before source loading and drives only the import pipeline.
+/// Exits after the import and any requested downstream work (summaries/briefing) settles.
+fn run_import_mode(
+    paths: &RuntimePaths,
+    args: &Args,
+    import_dir: std::path::PathBuf,
+) -> Result<i32, String> {
+    engine_info!("[import] Starting import mode");
+
+    let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
+    let mut state = AppState::new();
+    state.set_triage_max_in_flight(args.llm_concurrency);
+    state.set_summary_max_in_flight(args.llm_concurrency);
+
+    let enable_ai_orchestration = is_ai_orchestration_enabled();
+    let platform_handler = Box::new(NoOpPlatformHandler);
+    let effect_runner = build_effect_runner(paths, msg_tx.clone(), args.llm_concurrency, platform_handler);
+
+    // Hydrate prompt/template metadata needed for downstream work.
+    effect_runner.enqueue(vec![
+        harvester_core::Effect::LoadPromptTemplateFiles,
+        harvester_core::Effect::LoadLlmMetadata,
+    ]);
+    let (new_state, startup_effects) = update(state, Msg::StartupHydrationRequested);
+    state = new_state;
+    if !startup_effects.is_empty() {
+        effect_runner.enqueue(startup_effects);
+    }
+
+    // Hydrate summary cache for cache-hit reuse during summaries.
+    let summary_cache = load_summary_cache(&paths.summary_cache_path);
+    if !summary_cache.is_empty() {
+        let (new_state, effects) = update(
+            state,
+            Msg::SummaryCacheHydrated { cache: summary_cache },
+        );
+        state = new_state;
+        if !effects.is_empty() {
+            effect_runner.enqueue(effects);
+        }
+    }
+
+    // Dispatch the import request.
+    let import_action = match args.import_action {
+        ImportActionArg::ImportOnly => ImportAction::ImportOnly,
+        ImportActionArg::Summaries => ImportAction::Summaries,
+        ImportActionArg::Briefing => ImportAction::Briefing,
+    };
+    let (new_state, import_effects) = update(
+        state,
+        Msg::ImportSavedWebpagesRequested {
+            dir: import_dir,
+            trusted_manual_selection: args.trusted_manual_selection,
+            action: import_action,
+        },
+    );
+    state = new_state;
+    effect_runner.enqueue(import_effects);
+
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    install_signal_handler(Arc::clone(&shutdown_flag));
+
+    // Run the import dispatch loop until settled.
+    let outcome = run_import_dispatch_loop(
+        &mut state,
+        &msg_tx,
+        &msg_rx,
+        &effect_runner,
+        &shutdown_flag,
+        DispatchLoopOptions {
+            enable_ai_orchestration,
+            require_new_jobs_since: None,
+            tick_interval: Duration::from_millis(75),
+        },
+    )?;
+
+    let obs = state.batch_observation();
+    engine_info!(
+        "[import] Settled: phase={:?} imported={} failed={}",
+        obs.import_phase,
+        obs.imports_completed,
+        obs.imports_failed,
+    );
+
+    println!(
+        "\n-- Import complete: {} imported, {} failed --\n",
+        obs.imports_completed, obs.imports_failed
+    );
+
+    Ok(match outcome {
+        CycleOutcome::Success => 0,
+        CycleOutcome::PartialFailure => 1,
+        CycleOutcome::TotalFailure => 1,
+    })
+}
+
+/// Inner dispatch loop for import mode. Uses `should_settle_import_cycle` instead of
+/// `should_settle_cycle`, and `classify_import_cycle_outcome` for the final result.
+fn run_import_dispatch_loop(
+    state: &mut AppState,
+    _msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_runner: &EffectRunner,
+    shutdown_flag: &Arc<AtomicBool>,
+    options: DispatchLoopOptions,
+) -> Result<CycleOutcome, String> {
+    let timeout = Duration::from_millis(100);
+    let mut iterations = 0;
+    let mut last_tick = Instant::now();
+    const MAX_ITERATIONS: usize = 10_000;
+
+    loop {
+        iterations += 1;
+        if iterations > MAX_ITERATIONS {
+            return Err(format!(
+                "Import dispatch loop exceeded maximum iterations ({})",
+                MAX_ITERATIONS
+            ));
+        }
+
+        if shutdown_flag.load(Ordering::Relaxed) {
+            engine_info!("[import] Shutdown signal detected");
+            let obs = state.batch_observation();
+            return Ok(classify_import_cycle_outcome(&obs));
+        }
+
+        match msg_rx.recv_timeout(timeout) {
+            Ok(first_msg) => {
+                let mut inbox = vec![first_msg];
+                while let Ok(next_msg) = msg_rx.try_recv() {
+                    inbox.push(next_msg);
+                }
+
+                let mut queued_effects = Vec::new();
+                for msg in inbox {
+                    if should_log_batch_msg(&msg) {
+                        engine_debug!("[import] Processing message: {}", summarize_batch_msg(&msg));
+                    }
+                    let (new_state, effects) = update(state.clone(), msg);
+                    *state = new_state;
+                    queued_effects.extend(effects);
+                }
+
+                if !queued_effects.is_empty() {
+                    effect_runner.enqueue(queued_effects);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("Message channel disconnected unexpectedly".to_string());
+            }
+        }
+
+        if options.enable_ai_orchestration && last_tick.elapsed() >= options.tick_interval {
+            let (new_state, tick_effects) = update(state.clone(), Msg::Tick);
+            *state = new_state;
+            if !tick_effects.is_empty() {
+                effect_runner.enqueue(tick_effects);
+            }
+            last_tick = Instant::now();
+        }
+
+        let obs = state.batch_observation();
+        if should_settle_import_cycle(&obs) {
+            engine_info!(
+                "[import] Cycle settled after {} iterations",
+                iterations
+            );
+            return Ok(classify_import_cycle_outcome(&obs));
+        }
+    }
+}
+
 fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
     engine_info!("[dry-run] Starting dry-run mode: single poll, no downloads/triage");
 
@@ -997,6 +1216,9 @@ mod tests {
             set_briefing_since_now: false,
             clear_briefing_since: false,
             show_briefing_since: false,
+            import_saved_web_dir: None,
+            trusted_manual_selection: false,
+            import_action: crate::cli::ImportActionArg::ImportOnly,
         }
     }
 
@@ -1008,6 +1230,31 @@ mod tests {
         triage_failed: usize,
         summary_completed: usize,
         summary_failed: usize,
+    ) -> BatchObservation {
+        observation_with_import(
+            jobs_total,
+            jobs_done,
+            jobs_failed,
+            triage_completed,
+            triage_failed,
+            summary_completed,
+            summary_failed,
+            0,
+            0,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn observation_with_import(
+        jobs_total: usize,
+        jobs_done: usize,
+        jobs_failed: usize,
+        triage_completed: usize,
+        triage_failed: usize,
+        summary_completed: usize,
+        summary_failed: usize,
+        imports_completed: usize,
+        imports_failed: usize,
     ) -> BatchObservation {
         BatchObservation {
             poll_in_progress: false,
@@ -1038,6 +1285,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed,
+            imports_failed,
+            import_in_flight: false,
         }
     }
 
@@ -1124,6 +1375,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert!(should_settle_cycle(&obs));
@@ -1160,6 +1415,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert!(!should_settle_cycle(&obs));
@@ -1196,6 +1455,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert!(!should_settle_cycle(&obs));
@@ -1232,6 +1495,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert!(!should_settle_cycle(&obs));
@@ -1268,6 +1535,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert!(should_settle_cycle(&obs));
@@ -1306,6 +1577,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert!(should_settle_cycle(&obs));
@@ -1377,6 +1652,8 @@ mod tests {
                 triage_failed: 0,
                 summary_completed: 0,
                 summary_failed: 0,
+                imports_completed: 0,
+                imports_failed: 0,
             }
         );
     }
@@ -1552,6 +1829,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::Success);
@@ -1588,6 +1869,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::PartialFailure);
@@ -1624,6 +1909,10 @@ mod tests {
             summary_cache_hits: 0,
             summary_cache_misses: 0,
             summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
         };
 
         assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::TotalFailure);
@@ -1784,5 +2073,191 @@ mod tests {
         let paths = make_checkpoint_test_paths(&temp_dir);
         let val = load_briefing_checkpoint(&paths.briefing_checkpoint_path);
         assert_eq!(val.as_deref().unwrap_or("NONE"), "NONE");
+    }
+
+    // --- Import CLI flag tests ---
+
+    fn idle_import_obs() -> BatchObservation {
+        BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 0,
+            jobs_done: 0,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
+            pre_triage_total: 0,
+            pre_triage_included: 0,
+            pre_triage_review: 0,
+            pre_triage_filtered: 0,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 0,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 0,
+            summary_total: 0,
+            summary_pending: 0,
+            summary_in_flight: 0,
+            summary_completed: 0,
+            summary_failed: 0,
+            triage_cache_hits: 0,
+            triage_cache_misses: 0,
+            triage_cache_key_unavailable: 0,
+            summary_cache_hits: 0,
+            summary_cache_misses: 0,
+            summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
+        }
+    }
+
+    #[test]
+    fn import_saved_web_dir_flag_is_parsed() {
+        let args = crate::cli::Args::parse_from(&[
+            "harvester_batch",
+            "--import-saved-web-dir",
+            "/tmp/saved",
+        ]);
+        assert_eq!(
+            args.import_saved_web_dir,
+            Some(std::path::PathBuf::from("/tmp/saved"))
+        );
+    }
+
+    #[test]
+    fn import_saved_web_dir_conflicts_with_dry_run() {
+        let result = <crate::cli::Args as clap::Parser>::try_parse_from([
+            "harvester_batch",
+            "--import-saved-web-dir",
+            "/tmp/saved",
+            "--dry-run",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn import_saved_web_dir_conflicts_with_single_shot() {
+        let result = <crate::cli::Args as clap::Parser>::try_parse_from([
+            "harvester_batch",
+            "--import-saved-web-dir",
+            "/tmp/saved",
+            "--single-shot",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn import_action_summaries_requires_trusted_manual_selection() {
+        let args = crate::cli::Args::parse_from(&[
+            "harvester_batch",
+            "--import-saved-web-dir",
+            "/tmp/saved",
+            "--import-action",
+            "summaries",
+        ]);
+        let err = args.validate_import_args().unwrap_err();
+        assert!(err.contains("--trusted-manual-selection"));
+    }
+
+    #[test]
+    fn import_action_briefing_requires_trusted_manual_selection() {
+        let args = crate::cli::Args::parse_from(&[
+            "harvester_batch",
+            "--import-saved-web-dir",
+            "/tmp/saved",
+            "--import-action",
+            "briefing",
+        ]);
+        let err = args.validate_import_args().unwrap_err();
+        assert!(err.contains("--trusted-manual-selection"));
+    }
+
+    #[test]
+    fn import_action_import_only_does_not_require_trusted() {
+        let args = crate::cli::Args::parse_from(&[
+            "harvester_batch",
+            "--import-saved-web-dir",
+            "/tmp/saved",
+            "--import-action",
+            "import-only",
+        ]);
+        assert!(args.validate_import_args().is_ok());
+    }
+
+    #[test]
+    fn import_action_summaries_with_trusted_is_valid() {
+        let args = crate::cli::Args::parse_from(&[
+            "harvester_batch",
+            "--import-saved-web-dir",
+            "/tmp/saved",
+            "--import-action",
+            "summaries",
+            "--trusted-manual-selection",
+        ]);
+        assert!(args.validate_import_args().is_ok());
+    }
+
+    #[test]
+    fn should_settle_import_cycle_when_idle() {
+        let obs = idle_import_obs();
+        assert!(should_settle_import_cycle(&obs));
+    }
+
+    #[test]
+    fn should_not_settle_import_cycle_when_in_flight() {
+        let mut obs = idle_import_obs();
+        obs.import_in_flight = true;
+        obs.import_phase = harvester_core::ImportPhase::Importing;
+        assert!(!should_settle_import_cycle(&obs));
+    }
+
+    #[test]
+    fn should_not_settle_import_cycle_when_summaries_pending() {
+        let mut obs = idle_import_obs();
+        obs.import_phase = harvester_core::ImportPhase::Complete;
+        obs.summary_pending = 3;
+        assert!(!should_settle_import_cycle(&obs));
+    }
+
+    #[test]
+    fn should_settle_import_cycle_when_complete_and_no_pending() {
+        let mut obs = idle_import_obs();
+        obs.import_phase = harvester_core::ImportPhase::Complete;
+        obs.imports_completed = 2;
+        assert!(should_settle_import_cycle(&obs));
+    }
+
+    #[test]
+    fn classify_import_cycle_success_when_all_imported() {
+        let mut obs = idle_import_obs();
+        obs.import_phase = harvester_core::ImportPhase::Complete;
+        obs.imports_completed = 3;
+        assert_eq!(classify_import_cycle_outcome(&obs), CycleOutcome::Success);
+    }
+
+    #[test]
+    fn classify_import_cycle_partial_when_some_failed() {
+        let mut obs = idle_import_obs();
+        obs.import_phase = harvester_core::ImportPhase::Complete;
+        obs.imports_completed = 2;
+        obs.imports_failed = 1;
+        assert_eq!(
+            classify_import_cycle_outcome(&obs),
+            CycleOutcome::PartialFailure
+        );
+    }
+
+    #[test]
+    fn classify_import_cycle_total_failure_when_zero_imported() {
+        let mut obs = idle_import_obs();
+        obs.import_phase = harvester_core::ImportPhase::Failed;
+        obs.imports_failed = 2;
+        assert_eq!(
+            classify_import_cycle_outcome(&obs),
+            CycleOutcome::TotalFailure
+        );
     }
 }

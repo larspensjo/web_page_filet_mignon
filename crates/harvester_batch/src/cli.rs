@@ -1,8 +1,22 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
 const DEFAULT_POLL_INTERVAL_MINUTES: u32 = 15;
 const DEFAULT_LLM_CONCURRENCY: usize = 6;
+
+/// Which downstream work to run after a successful import.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ImportActionArg {
+    /// Persist imported archives only.
+    #[value(name = "import-only")]
+    ImportOnly,
+    /// Run per-article summaries for the imported corpus.
+    #[value(name = "summaries")]
+    Summaries,
+    /// Run an aggregate briefing for the imported corpus.
+    #[value(name = "briefing")]
+    Briefing,
+}
 
 /// Harvester batch runner - headless mode for scheduled execution
 #[derive(Parser, Debug)]
@@ -63,6 +77,18 @@ pub struct Args {
     /// Print the current briefing time-filter checkpoint and exit
     #[arg(long)]
     pub show_briefing_since: bool,
+
+    /// Import browser-saved .htm/.html files from this directory (conflicts with --dry-run and --single-shot)
+    #[arg(long, value_name = "PATH", conflicts_with = "dry_run", conflicts_with = "single_shot")]
+    pub import_saved_web_dir: Option<PathBuf>,
+
+    /// Treat the imported corpus as a trusted manual selection (required for --import-action summaries|briefing)
+    #[arg(long)]
+    pub trusted_manual_selection: bool,
+
+    /// Downstream action to run after a successful import (default: import-only)
+    #[arg(long, value_name = "ACTION", default_value = "import-only")]
+    pub import_action: ImportActionArg,
 }
 
 /// A resolved checkpoint management command.
@@ -97,6 +123,26 @@ impl Args {
 
         // Clamp poll_interval to valid range (1 minute to 24 hours)
         self.poll_interval = self.poll_interval.clamp(1, 1440);
+    }
+
+    /// Validate import-related flag combinations.
+    /// Returns `Err` if `--import-action summaries|briefing` is used without `--trusted-manual-selection`.
+    pub fn validate_import_args(&self) -> Result<(), String> {
+        if self.import_saved_web_dir.is_none() {
+            return Ok(());
+        }
+        match self.import_action {
+            ImportActionArg::Summaries | ImportActionArg::Briefing => {
+                if !self.trusted_manual_selection {
+                    return Err(
+                        "--import-action summaries|briefing requires --trusted-manual-selection"
+                            .to_string(),
+                    );
+                }
+            }
+            ImportActionArg::ImportOnly => {}
+        }
+        Ok(())
     }
 
     /// Resolve the checkpoint flags into a single command, or `None` if no flags are set.
