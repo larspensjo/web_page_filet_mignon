@@ -110,7 +110,6 @@ pub enum Effect {
     },
 
     // --- Import saved webpages ---
-
     /// Scan and import browser-saved .htm/.html files from `dir`.
     /// The effect runner resolves the archive dir from its own `RuntimePaths`.
     ImportSavedWebpages {

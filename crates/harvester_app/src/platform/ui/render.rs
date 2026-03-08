@@ -681,12 +681,12 @@ fn render_main_controls_section(
 }
 
 fn jobs_header_text(view: &AppViewModel) -> String {
-    let scoped_jobs: Vec<&JobRowView> = if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint
-    {
-        view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
-    } else {
-        view.jobs.iter().collect()
-    };
+    let scoped_jobs: Vec<&JobRowView> =
+        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+            view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
+        } else {
+            view.jobs.iter().collect()
+        };
     let scope_suffix = if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
         " | Since checkpoint"
     } else {
@@ -694,7 +694,9 @@ fn jobs_header_text(view: &AppViewModel) -> String {
     };
     match view.left_pane.left_tab {
         LeftTab::Jobs => {
-            if scoped_jobs.is_empty() && view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+            if scoped_jobs.is_empty()
+                && view.left_pane.job_list_scope == JobListScope::SinceCheckpoint
+            {
                 format!("Jobs{scope_suffix} (none)")
             } else {
                 format!("Jobs{scope_suffix}")
@@ -703,7 +705,12 @@ fn jobs_header_text(view: &AppViewModel) -> String {
         LeftTab::TriageReview => {
             let review_needed_count = scoped_jobs
                 .iter()
-                .filter(|job| matches!(job.filter_status, Some(JobFilterStatus::ReviewNeeded { .. })))
+                .filter(|job| {
+                    matches!(
+                        job.filter_status,
+                        Some(JobFilterStatus::ReviewNeeded { .. })
+                    )
+                })
                 .count();
             if review_needed_count == 0 {
                 format!("Triage Review{scope_suffix} (no review-needed items)")
@@ -1457,7 +1464,11 @@ fn job_row_presentation(tab: LeftTab) -> JobRowPresentation {
     }
 }
 
-fn job_row_check_policy(tab: LeftTab, is_pre_triage_reviewing: bool, job: &JobRowView) -> CheckState {
+fn job_row_check_policy(
+    tab: LeftTab,
+    is_pre_triage_reviewing: bool,
+    job: &JobRowView,
+) -> CheckState {
     match tab {
         LeftTab::TriageReview if is_pre_triage_reviewing => match job.filter_status {
             Some(JobFilterStatus::HardExcluded { .. })
@@ -1502,8 +1513,16 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
     let jobs_iter: &[&JobRowView] = if matches!(tab, LeftTab::TriageResults) {
         sorted_buf = scope_filtered;
         sorted_buf.sort_by(|a, b| {
-            let p_a = a.triage_annotation.as_ref().map(|t| t.priority).unwrap_or(0);
-            let p_b = b.triage_annotation.as_ref().map(|t| t.priority).unwrap_or(0);
+            let p_a = a
+                .triage_annotation
+                .as_ref()
+                .map(|t| t.priority)
+                .unwrap_or(0);
+            let p_b = b
+                .triage_annotation
+                .as_ref()
+                .map(|t| t.priority)
+                .unwrap_or(0);
             p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
         });
         &sorted_buf
@@ -1674,7 +1693,11 @@ fn job_display_label(job: &JobRowView) -> String {
             .filter(|t| !t.is_empty())
             .unwrap_or("(summary available)");
         let domain = domain_from_url(&job.url);
-        let source = if domain.is_empty() { job.url.as_str() } else { domain.as_str() };
+        let source = if domain.is_empty() {
+            job.url.as_str()
+        } else {
+            domain.as_str()
+        };
         format!("{title} — {source}")
     } else {
         job.url.clone()
@@ -2377,12 +2400,22 @@ mod tests {
 
     #[test]
     fn format_job_row_triage_review_shows_review_needed_prefix() {
-        let mut job = make_job(1, "https://example.com/a", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut job = make_job(
+            1,
+            "https://example.com/a",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         job.has_summary = true;
         job.summary_title = Some("Article Title".to_string());
         job.filter_status = Some(JobFilterStatus::ReviewNeeded { reasons: vec![] });
         let row = format_job_row_triage_review(&job);
-        assert!(row.starts_with("[REVIEW NEEDED] "), "expected review prefix, got: {row}");
+        assert!(
+            row.starts_with("[REVIEW NEEDED] "),
+            "expected review prefix, got: {row}"
+        );
         assert!(row.contains("Article Title"));
     }
 
@@ -2391,12 +2424,22 @@ mod tests {
         let mut job = make_job(2, "https://example.com/b", Stage::Done, None, None, None);
         job.filter_status = Some(JobFilterStatus::ManuallyExcluded);
         let row = format_job_row_triage_review(&job);
-        assert!(row.starts_with("[EXCLUDED] "), "expected excluded prefix, got: {row}");
+        assert!(
+            row.starts_with("[EXCLUDED] "),
+            "expected excluded prefix, got: {row}"
+        );
     }
 
     #[test]
     fn format_job_row_triage_results_shows_annotation() {
-        let mut job = make_job(3, "https://example.com/c", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut job = make_job(
+            3,
+            "https://example.com/c",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         job.has_summary = true;
         job.summary_title = Some("Summary Headline".to_string());
         job.triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -2425,12 +2468,26 @@ mod tests {
         let window_id = WindowId::new(60);
         let mut tree_state = TreeRenderState::new();
 
-        let mut job_in = make_job(1, "https://a.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut job_in = make_job(
+            1,
+            "https://a.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         job_in.is_since_checkpoint = true;
         job_in.has_summary = true;
         job_in.summary_title = Some("In Scope".to_string());
 
-        let mut job_out = make_job(2, "https://b.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut job_out = make_job(
+            2,
+            "https://b.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         job_out.is_since_checkpoint = false;
         job_out.has_summary = true;
         job_out.summary_title = Some("Out of Scope".to_string());
@@ -2439,13 +2496,20 @@ mod tests {
         view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
 
         let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds.iter().find_map(|cmd| match cmd {
-            PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-            _ => None,
-        }).expect("PopulateTreeView emitted");
+        let populated = cmds
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+                _ => None,
+            })
+            .expect("PopulateTreeView emitted");
 
         assert_eq!(populated.len(), 1, "only the in-scope job should appear");
-        assert!(populated[0].text.contains("In Scope"), "wrong item: {}", populated[0].text);
+        assert!(
+            populated[0].text.contains("In Scope"),
+            "wrong item: {}",
+            populated[0].text
+        );
     }
 
     #[test]
@@ -2454,12 +2518,26 @@ mod tests {
         let window_id = WindowId::new(61);
         let mut tree_state = TreeRenderState::new();
 
-        let mut job1 = make_job(1, "https://a.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut job1 = make_job(
+            1,
+            "https://a.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         job1.is_since_checkpoint = true;
         job1.has_summary = true;
         job1.summary_title = Some("Job A".to_string());
 
-        let mut job2 = make_job(2, "https://b.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut job2 = make_job(
+            2,
+            "https://b.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         job2.is_since_checkpoint = false;
         job2.has_summary = true;
         job2.summary_title = Some("Job B".to_string());
@@ -2468,10 +2546,13 @@ mod tests {
         view.left_pane.job_list_scope = JobListScope::All;
 
         let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds.iter().find_map(|cmd| match cmd {
-            PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-            _ => None,
-        }).expect("PopulateTreeView emitted");
+        let populated = cmds
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+                _ => None,
+            })
+            .expect("PopulateTreeView emitted");
 
         assert_eq!(populated.len(), 2, "all jobs should appear with All scope");
     }
@@ -2484,7 +2565,14 @@ mod tests {
         let window_id = WindowId::new(62);
         let mut tree_state = TreeRenderState::new();
 
-        let mut low = make_job(1, "https://low.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut low = make_job(
+            1,
+            "https://low.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         low.has_summary = true;
         low.summary_title = Some("Low Priority".to_string());
         low.triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -2493,7 +2581,14 @@ mod tests {
             tags: vec![],
         });
 
-        let mut high = make_job(2, "https://high.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut high = make_job(
+            2,
+            "https://high.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         high.has_summary = true;
         high.summary_title = Some("High Priority".to_string());
         high.triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -2507,15 +2602,26 @@ mod tests {
         view.left_pane.left_tab = LeftTab::TriageResults;
 
         let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds.iter().find_map(|cmd| match cmd {
-            PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-            _ => None,
-        }).expect("PopulateTreeView emitted");
+        let populated = cmds
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+                _ => None,
+            })
+            .expect("PopulateTreeView emitted");
 
         assert_eq!(populated.len(), 2);
         // TriageResults render must reorder: highest priority (P5) first.
-        assert!(populated[0].text.contains("P5"), "first item should be P5, got: {}", populated[0].text);
-        assert!(populated[1].text.contains("P2"), "second item should be P2, got: {}", populated[1].text);
+        assert!(
+            populated[0].text.contains("P5"),
+            "first item should be P5, got: {}",
+            populated[0].text
+        );
+        assert!(
+            populated[1].text.contains("P2"),
+            "second item should be P2, got: {}",
+            populated[1].text
+        );
     }
 
     #[test]
@@ -2525,7 +2631,14 @@ mod tests {
         let window_id = WindowId::new(63);
         let mut tree_state = TreeRenderState::new();
 
-        let mut low = make_job(1, "https://low.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut low = make_job(
+            1,
+            "https://low.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         low.has_summary = true;
         low.summary_title = Some("Low Priority".to_string());
         low.triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -2534,7 +2647,14 @@ mod tests {
             tags: vec![],
         });
 
-        let mut high = make_job(2, "https://high.com/", Stage::Done, Some(JobResultKind::Success), None, None);
+        let mut high = make_job(
+            2,
+            "https://high.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
         high.has_summary = true;
         high.summary_title = Some("High Priority".to_string());
         high.triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -2547,22 +2667,36 @@ mod tests {
         view.left_pane.left_tab = LeftTab::Jobs; // stable order
 
         let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds.iter().find_map(|cmd| match cmd {
-            PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-            _ => None,
-        }).expect("PopulateTreeView emitted");
+        let populated = cmds
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+                _ => None,
+            })
+            .expect("PopulateTreeView emitted");
 
         assert_eq!(populated.len(), 2);
         // Jobs tab must preserve insertion order (job_id 1 first, then job_id 2).
-        assert!(populated[0].text.contains("Low Priority"), "first should be Low Priority (job 1), got: {}", populated[0].text);
-        assert!(populated[1].text.contains("High Priority"), "second should be High Priority (job 2), got: {}", populated[1].text);
+        assert!(
+            populated[0].text.contains("Low Priority"),
+            "first should be Low Priority (job 1), got: {}",
+            populated[0].text
+        );
+        assert!(
+            populated[1].text.contains("High Priority"),
+            "second should be High Priority (job 2), got: {}",
+            populated[1].text
+        );
     }
 
     // ── Per-tab style policy tests ────────────────────────────────────────────
 
     #[test]
     fn jobs_tab_applies_disabled_style_when_no_summary() {
-        assert_eq!(job_row_style_policy(LeftTab::Jobs, false), Some(StyleId::TreeItemDisabled));
+        assert_eq!(
+            job_row_style_policy(LeftTab::Jobs, false),
+            Some(StyleId::TreeItemDisabled)
+        );
         assert_eq!(job_row_style_policy(LeftTab::Jobs, true), None);
     }
 
@@ -2582,13 +2716,25 @@ mod tests {
         job.filter_status = Some(JobFilterStatus::AutoIncluded);
 
         // TriageReview + interactive → Checked
-        assert_eq!(job_row_check_policy(LeftTab::TriageReview, true, &job), CheckState::Checked);
+        assert_eq!(
+            job_row_check_policy(LeftTab::TriageReview, true, &job),
+            CheckState::Checked
+        );
         // TriageReview + not interactive → Unchecked
-        assert_eq!(job_row_check_policy(LeftTab::TriageReview, false, &job), CheckState::Unchecked);
+        assert_eq!(
+            job_row_check_policy(LeftTab::TriageReview, false, &job),
+            CheckState::Unchecked
+        );
         // Jobs tab → always Unchecked
-        assert_eq!(job_row_check_policy(LeftTab::Jobs, true, &job), CheckState::Unchecked);
+        assert_eq!(
+            job_row_check_policy(LeftTab::Jobs, true, &job),
+            CheckState::Unchecked
+        );
         // TriageResults → always Unchecked
-        assert_eq!(job_row_check_policy(LeftTab::TriageResults, true, &job), CheckState::Unchecked);
+        assert_eq!(
+            job_row_check_policy(LeftTab::TriageResults, true, &job),
+            CheckState::Unchecked
+        );
     }
 
     #[test]

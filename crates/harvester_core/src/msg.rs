@@ -356,7 +356,7 @@ pub enum Msg {
     TrendCategorySelected {
         category: TrendCategory,
     },
-        /// Entity index successfully loaded from disk.
+    /// Entity index successfully loaded from disk.
     EntityIndexLoaded {
         index: crate::entity_index::EntityIndex,
     },
@@ -374,7 +374,6 @@ pub enum Msg {
     },
 
     // --- Import saved webpages ---
-
     /// Request to import browser-saved .htm/.html files from `dir`.
     ImportSavedWebpagesRequested {
         dir: PathBuf,

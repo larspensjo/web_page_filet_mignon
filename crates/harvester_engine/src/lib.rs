@@ -1,7 +1,6 @@
 //! Harvester engine: IO pipeline and effect execution.
 mod blocker_page;
 pub mod briefing;
-pub mod since_filter;
 pub mod content_prep;
 mod convert;
 mod decode;
@@ -20,6 +19,7 @@ mod preview;
 mod quota;
 mod rss_parse;
 mod rss_seen_set;
+pub mod since_filter;
 mod source_config;
 mod source_poll;
 mod text_safety;
@@ -40,7 +40,9 @@ pub use export::{
 };
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher, RetrySettings};
-pub use filename::{deterministic_filename, import_filename_base, resolve_non_overwriting_filename};
+pub use filename::{
+    deterministic_filename, import_filename_base, resolve_non_overwriting_filename,
+};
 pub use frontmatter::{
     build_imported_markdown_document, build_markdown_document, parse_frontmatter,
     unescape_yaml_value, FrontmatterFields, ImportedFrontmatterFields,

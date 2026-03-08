@@ -14,10 +14,10 @@ use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
 use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmCommand, LlmHandle, PromptRegistry};
 use harvester_engine::{
-    build_triage_archive, import_saved_webpages, is_confined_to,
-    load_and_prepare_articles_by_path, load_and_prepare_articles_filtered, poll_curated_source,
-    poll_file_source, scan_archive_article_metadata, EngineConfig, EngineEvent, EngineHandle,
-    ExportOptions, FetchSettings, ImportOptions, SourceType, UrlPolicy,
+    build_triage_archive, import_saved_webpages, is_confined_to, load_and_prepare_articles_by_path,
+    load_and_prepare_articles_filtered, poll_curated_source, poll_file_source,
+    scan_archive_article_metadata, EngineConfig, EngineEvent, EngineHandle, ExportOptions,
+    FetchSettings, ImportOptions, SourceType, UrlPolicy,
 };
 
 use crate::effect_helpers::{
@@ -1099,7 +1099,6 @@ impl EffectRunner {
             }
 
             // --- Import saved webpages ---
-
             Effect::ImportSavedWebpages { dir, request_id } => {
                 let msg_tx = self.msg_tx.clone();
                 let archive_dir = self.paths.output_dir.clone();
@@ -1165,12 +1164,8 @@ impl EffectRunner {
                             });
                         }
                         Err(reason) => {
-                            engine_warn!(
-                                "[import-saved-web] article load failed: {}",
-                                reason
-                            );
-                            let _ = msg_tx
-                                .send(harvester_core::Msg::ArticlesLoadFailed { reason });
+                            engine_warn!("[import-saved-web] article load failed: {}", reason);
+                            let _ = msg_tx.send(harvester_core::Msg::ArticlesLoadFailed { reason });
                         }
                     }
                 });

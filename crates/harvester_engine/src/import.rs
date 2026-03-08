@@ -127,8 +127,13 @@ pub fn scan_saved_webpage_dir(dir: &Path) -> Result<SavedWebpageScanResult, Stri
         .canonicalize()
         .map_err(|e| format!("failed to canonicalize {}: {}", dir.display(), e))?;
 
-    let read_dir = fs::read_dir(&canonical_dir)
-        .map_err(|e| format!("failed to list directory {}: {}", canonical_dir.display(), e))?;
+    let read_dir = fs::read_dir(&canonical_dir).map_err(|e| {
+        format!(
+            "failed to list directory {}: {}",
+            canonical_dir.display(),
+            e
+        )
+    })?;
 
     let mut candidates = Vec::new();
     let mut ignored_directories = 0usize;
@@ -291,8 +296,7 @@ pub fn import_saved_webpages(dir: &Path, options: &ImportOptions) -> ImportRepor
                 // Resolve non-overwriting filename.
                 let base_name =
                     import_filename_base(doc.title.as_deref(), &doc.canonical_url, &timestamp_str);
-                let filename =
-                    resolve_non_overwriting_filename(&options.archive_dir, &base_name);
+                let filename = resolve_non_overwriting_filename(&options.archive_dir, &base_name);
 
                 // Persist.
                 match writer.write(&filename, &markdown_doc) {
@@ -397,9 +401,7 @@ pub fn import_single_saved_webpage(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn extract_webpage_content(
-    path: &Path,
-) -> Result<(ImportedDocument, Vec<String>), ImportFailure> {
+fn extract_webpage_content(path: &Path) -> Result<(ImportedDocument, Vec<String>), ImportFailure> {
     // 1. Pre-flight size guard.
     let metadata = fs::metadata(path).map_err(|e| ImportFailure {
         source_path: path.to_path_buf(),
@@ -437,13 +439,12 @@ fn extract_webpage_content(
     let doc_tree = Html::parse_document(html);
     let mut warnings: Vec<String> = Vec::new();
 
-    let canonical_url = extract_canonical_url(&doc_tree, &raw_bytes).ok_or_else(|| {
-        ImportFailure {
+    let canonical_url =
+        extract_canonical_url(&doc_tree, &raw_bytes).ok_or_else(|| ImportFailure {
             source_path: path.to_path_buf(),
             stage: ImportFailureStage::CanonicalUrlExtraction,
             reason: "canonical URL not recoverable after all fallbacks".to_string(),
-        }
-    })?;
+        })?;
 
     let title = extract_title(&doc_tree, &mut warnings);
     let published_utc = extract_published_utc(&doc_tree);
@@ -750,7 +751,6 @@ fn load_existing_archive_urls(archive_dir: &Path) -> HashSet<String> {
 
 /// Scan the archive directory once and collect all content hashes.
 fn load_existing_archive_hashes(archive_dir: &Path) -> HashSet<String> {
-
     let config = ContentPrepConfig {
         normalization: NormalizationPolicy::default(),
         boilerplate: BoilerplatePolicy::default(),
@@ -842,7 +842,11 @@ mod tests {
         fs::write(dir.path().join("a_page.html"), b"a").unwrap();
         fs::write(dir.path().join("c_page.html"), b"c").unwrap();
         let result = scan_saved_webpage_dir(dir.path()).unwrap();
-        let names: Vec<&str> = result.candidates.iter().map(|c| c.basename.as_str()).collect();
+        let names: Vec<&str> = result
+            .candidates
+            .iter()
+            .map(|c| c.basename.as_str())
+            .collect();
         let mut sorted = names.clone();
         sorted.sort();
         assert_eq!(names, sorted, "candidates must be sorted by path");
@@ -934,7 +938,10 @@ mod tests {
         };
         let result = import_single_saved_webpage(&path, &opts);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().stage, ImportFailureStage::QualityThreshold);
+        assert_eq!(
+            result.unwrap_err().stage,
+            ImportFailureStage::QualityThreshold
+        );
     }
 
     #[test]

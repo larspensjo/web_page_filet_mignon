@@ -2,7 +2,9 @@ use crate::cli::{Args, CheckpointCommand, ImportActionArg};
 use crate::lock;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
-use harvester_core::{update, AppState, BatchObservation, ImportAction, ImportPhase, LlmModelUsageView, Msg};
+use harvester_core::{
+    update, AppState, BatchObservation, ImportAction, ImportPhase, LlmModelUsageView, Msg,
+};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
@@ -177,8 +179,8 @@ fn classify_cycle_outcome(obs: &BatchObservation) -> CycleOutcome {
 /// Classifies the outcome of a completed import-mode cycle.
 fn classify_import_cycle_outcome(obs: &BatchObservation) -> CycleOutcome {
     let has_import_success = obs.imports_completed > 0;
-    let has_import_failure = obs.imports_failed > 0
-        || matches!(obs.import_phase, ImportPhase::Failed);
+    let has_import_failure =
+        obs.imports_failed > 0 || matches!(obs.import_phase, ImportPhase::Failed);
 
     match (has_import_success, has_import_failure) {
         (true, false) => CycleOutcome::Success,
@@ -679,7 +681,14 @@ fn run_dispatch_loop(
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
 ) -> Result<CycleOutcome, String> {
-    run_dispatch_loop_with_tick_interval(state, msg_tx, msg_rx, effect_runner, shutdown_flag, options)
+    run_dispatch_loop_with_tick_interval(
+        state,
+        msg_tx,
+        msg_rx,
+        effect_runner,
+        shutdown_flag,
+        options,
+    )
 }
 
 fn run_dispatch_loop_with_tick_interval(
@@ -854,11 +863,7 @@ fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
 fn print_cycle_table_header() {
     println!(
         "{:<6} {:<9} {:>20} {:>18} {:>21}",
-        "Cycle",
-        "Outcome",
-        "Jobs(new/done/fail)",
-        "Triage(ok/fail)",
-        "Summaries(ok/fail)"
+        "Cycle", "Outcome", "Jobs(new/done/fail)", "Triage(ok/fail)", "Summaries(ok/fail)"
     );
     println!("{}", "-".repeat(78));
 }
@@ -969,7 +974,12 @@ fn run_import_mode(
 
     let enable_ai_orchestration = is_ai_orchestration_enabled();
     let platform_handler = Box::new(NoOpPlatformHandler);
-    let effect_runner = build_effect_runner(paths, msg_tx.clone(), args.llm_concurrency, platform_handler);
+    let effect_runner = build_effect_runner(
+        paths,
+        msg_tx.clone(),
+        args.llm_concurrency,
+        platform_handler,
+    );
 
     // Hydrate prompt/template metadata needed for downstream work.
     effect_runner.enqueue(vec![
@@ -987,7 +997,9 @@ fn run_import_mode(
     if !summary_cache.is_empty() {
         let (new_state, effects) = update(
             state,
-            Msg::SummaryCacheHydrated { cache: summary_cache },
+            Msg::SummaryCacheHydrated {
+                cache: summary_cache,
+            },
         );
         state = new_state;
         if !effects.is_empty() {
@@ -1117,10 +1129,7 @@ fn run_import_dispatch_loop(
 
         let obs = state.batch_observation();
         if should_settle_import_cycle(&obs) {
-            engine_info!(
-                "[import] Cycle settled after {} iterations",
-                iterations
-            );
+            engine_info!("[import] Cycle settled after {} iterations", iterations);
             return Ok(classify_import_cycle_outcome(&obs));
         }
     }
@@ -1637,11 +1646,11 @@ mod tests {
 
     #[test]
     fn cycle_counter_baseline_reports_deltas_not_cumulative_totals() {
-        let mut baseline =
-            CycleCounterBaseline::from_observation(&observation_with_totals(577, 577, 0, 405, 0, 61, 0));
-        let cycle_counts = baseline.measure_cycle_and_advance(&observation_with_totals(
-            578, 578, 0, 406, 0, 61, 0,
+        let mut baseline = CycleCounterBaseline::from_observation(&observation_with_totals(
+            577, 577, 0, 405, 0, 61, 0,
         ));
+        let cycle_counts = baseline
+            .measure_cycle_and_advance(&observation_with_totals(578, 578, 0, 406, 0, 61, 0));
         assert_eq!(
             cycle_counts,
             CycleCounts {

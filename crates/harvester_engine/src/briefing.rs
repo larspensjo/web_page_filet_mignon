@@ -428,7 +428,11 @@ pub fn load_and_prepare_articles_filtered(
         if let Some(package) =
             find_article_package_for_selected_url(output_dir, selected_url, since_utc)?
         {
-            return prepare_loaded_articles_and_collection(vec![package], max_input_bytes, registry);
+            return prepare_loaded_articles_and_collection(
+                vec![package],
+                max_input_bytes,
+                registry,
+            );
         }
         engine_warn!(
             "[briefing-loader] selected url missing from corpus: {}",

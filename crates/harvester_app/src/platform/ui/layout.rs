@@ -1240,7 +1240,11 @@ fn build_layout_rules(
                     left_tab,
                     LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults
                 );
-                if show { DockStyle::Fill } else { DockStyle::Top }
+                if show {
+                    DockStyle::Fill
+                } else {
+                    DockStyle::Top
+                }
             },
             order: 1,
             fixed_size: {
@@ -1248,7 +1252,11 @@ fn build_layout_rules(
                     left_tab,
                     LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults
                 );
-                if show { None } else { Some(0) }
+                if show {
+                    None
+                } else {
+                    Some(0)
+                }
             },
             margin: (0, 0, 0, 0),
         },
@@ -2119,11 +2127,31 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::SetToggleSwitchStyle {
         window_id,
         control_id: TS_JOBS_SCOPE,
-        background: Color { r: 0x2B, g: 0x2B, b: 0x2B },
-        pill_off:   Color { r: 0x4B, g: 0x4F, b: 0x57 },
-        pill_on:    Color { r: 0x00, g: 0x80, b: 0xFF }, // blue accent — same as tab bar
-        knob:       Color { r: 0xF0, g: 0xF0, b: 0xF0 },
-        text:       Color { r: 0xCC, g: 0xCC, b: 0xCC },
+        background: Color {
+            r: 0x2B,
+            g: 0x2B,
+            b: 0x2B,
+        },
+        pill_off: Color {
+            r: 0x4B,
+            g: 0x4F,
+            b: 0x57,
+        },
+        pill_on: Color {
+            r: 0x00,
+            g: 0x80,
+            b: 0xFF,
+        }, // blue accent — same as tab bar
+        knob: Color {
+            r: 0xF0,
+            g: 0xF0,
+            b: 0xF0,
+        },
+        text: Color {
+            r: 0xCC,
+            g: 0xCC,
+            b: 0xCC,
+        },
     });
 
     commands.push(PlatformCommand::ApplyStyleToControl {

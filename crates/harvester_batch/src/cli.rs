@@ -79,7 +79,12 @@ pub struct Args {
     pub show_briefing_since: bool,
 
     /// Import browser-saved .htm/.html files from this directory (conflicts with --dry-run and --single-shot)
-    #[arg(long, value_name = "PATH", conflicts_with = "dry_run", conflicts_with = "single_shot")]
+    #[arg(
+        long,
+        value_name = "PATH",
+        conflicts_with = "dry_run",
+        conflicts_with = "single_shot"
+    )]
     pub import_saved_web_dir: Option<PathBuf>,
 
     /// Treat the imported corpus as a trusted manual selection (required for --import-action summaries|briefing)

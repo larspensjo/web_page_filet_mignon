@@ -134,7 +134,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             extracted_links,
             fetched_utc,
         } => {
-            state.apply_done(job_id, result, content_preview, extracted_links, fetched_utc);
+            state.apply_done(
+                job_id,
+                result,
+                content_preview,
+                extracted_links,
+                fetched_utc,
+            );
             state.request_pre_triage_refresh_evaluation(true);
             Vec::new()
         }
@@ -1749,7 +1755,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
 
         // --- Import saved webpages ---
-
         Msg::ImportSavedWebpagesRequested {
             dir,
             trusted_manual_selection,
@@ -1785,7 +1790,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
 
             let imported_entries = report.imported_entries.clone();
-            let action = state.import_session.action.unwrap_or(crate::import_session::ImportAction::ImportOnly);
+            let action = state
+                .import_session
+                .action
+                .unwrap_or(crate::import_session::ImportAction::ImportOnly);
             let trusted = state.import_session.trusted_manual_selection;
 
             state.import_session.phase = crate::import_session::ImportPhase::Complete;
@@ -1830,9 +1838,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
 
         Msg::ImportSavedWebpagesFailed { request_id, reason } => {
             if !state.import_session.is_authoritative(request_id) {
-                engine_warn!(
-                    "[import-saved-web] stale failure request_id={request_id} — ignored"
-                );
+                engine_warn!("[import-saved-web] stale failure request_id={request_id} — ignored");
                 return (state, Vec::new());
             }
             engine_warn!("[import-saved-web] failed id={request_id} reason={reason}");
@@ -4957,7 +4963,12 @@ mod tests {
         init_logging();
         let state = AppState::new();
         assert_eq!(state.left_tab(), LeftTab::Jobs);
-        let (state, effects) = update(state, Msg::LeftTabSelected { tab: LeftTab::TriageReview });
+        let (state, effects) = update(
+            state,
+            Msg::LeftTabSelected {
+                tab: LeftTab::TriageReview,
+            },
+        );
         assert!(effects.is_empty());
         assert_eq!(state.left_tab(), LeftTab::TriageReview);
         assert!(state.view().dirty);
@@ -4966,7 +4977,12 @@ mod tests {
     #[test]
     fn left_tab_selected_triage_results_updates_tab() {
         init_logging();
-        let (state, _) = update(AppState::new(), Msg::LeftTabSelected { tab: LeftTab::TriageResults });
+        let (state, _) = update(
+            AppState::new(),
+            Msg::LeftTabSelected {
+                tab: LeftTab::TriageResults,
+            },
+        );
         assert_eq!(state.left_tab(), LeftTab::TriageResults);
     }
 
@@ -4999,7 +5015,10 @@ mod tests {
             },
         );
         // dirty starts false; setting same scope should leave it false
-        assert!(!state.view().dirty, "setting same scope must not mark dirty");
+        assert!(
+            !state.view().dirty,
+            "setting same scope must not mark dirty"
+        );
         let _ = view_before;
     }
 
@@ -5009,11 +5028,23 @@ mod tests {
         let state = AppState::new();
         let (state, _) = update(
             state,
-            Msg::JobListScopeSet { scope: JobListScope::SinceCheckpoint },
+            Msg::JobListScopeSet {
+                scope: JobListScope::SinceCheckpoint,
+            },
         );
-        let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::TriageReview });
+        let (state, _) = update(
+            state,
+            Msg::LeftTabSelected {
+                tab: LeftTab::TriageReview,
+            },
+        );
         assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
-        let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::TriageResults });
+        let (state, _) = update(
+            state,
+            Msg::LeftTabSelected {
+                tab: LeftTab::TriageResults,
+            },
+        );
         assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
         let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
         assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
@@ -5535,7 +5566,7 @@ mod tests {
 mod import_tests {
     use super::*;
     use crate::import_session::{ImportAction, ImportPhase};
-    use harvester_engine::{ImportedArchiveRef, ImportReport};
+    use harvester_engine::{ImportReport, ImportedArchiveRef};
     use std::path::PathBuf;
 
     fn init() {
@@ -5593,8 +5624,10 @@ mod import_tests {
         init();
         let state = AppState::new();
         let (state, effects) = start_import(state, ImportAction::ImportOnly);
-        let Effect::ImportSavedWebpages { request_id, .. } =
-            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        let Effect::ImportSavedWebpages { request_id, .. } = effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ImportSavedWebpages { .. }))
+            .unwrap()
         else {
             panic!("expected ImportSavedWebpages effect");
         };
@@ -5627,8 +5660,10 @@ mod import_tests {
         init();
         let state = AppState::new();
         let (state, effects) = start_import(state, ImportAction::Summaries);
-        let Effect::ImportSavedWebpages { request_id, .. } =
-            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        let Effect::ImportSavedWebpages { request_id, .. } = effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ImportSavedWebpages { .. }))
+            .unwrap()
         else {
             panic!();
         };
@@ -5653,8 +5688,10 @@ mod import_tests {
         init();
         let state = AppState::new();
         let (state, effects) = start_import(state, ImportAction::Briefing);
-        let Effect::ImportSavedWebpages { request_id, .. } =
-            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        let Effect::ImportSavedWebpages { request_id, .. } = effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ImportSavedWebpages { .. }))
+            .unwrap()
         else {
             panic!();
         };
@@ -5680,9 +5717,15 @@ mod import_tests {
         let state = AppState::new();
         // Start request A.
         let (state, effects_a) = start_import(state, ImportAction::Summaries);
-        let Effect::ImportSavedWebpages { request_id: rid_a, .. } =
-            effects_a.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
-        else { panic!(); };
+        let Effect::ImportSavedWebpages {
+            request_id: rid_a, ..
+        } = effects_a
+            .into_iter()
+            .find(|e| matches!(e, Effect::ImportSavedWebpages { .. }))
+            .unwrap()
+        else {
+            panic!();
+        };
 
         // Start request B (supersedes A).
         let (state, _) = start_import(state, ImportAction::Summaries);
@@ -5705,9 +5748,13 @@ mod import_tests {
         init();
         let state = AppState::new();
         let (state, effects) = start_import(state, ImportAction::ImportOnly);
-        let Effect::ImportSavedWebpages { request_id, .. } =
-            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
-        else { panic!(); };
+        let Effect::ImportSavedWebpages { request_id, .. } = effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ImportSavedWebpages { .. }))
+            .unwrap()
+        else {
+            panic!();
+        };
 
         let (state, effects) = update(
             state,
@@ -5747,9 +5794,13 @@ mod import_tests {
                 action: ImportAction::Summaries,
             },
         );
-        let Effect::ImportSavedWebpages { request_id, .. } =
-            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
-        else { panic!(); };
+        let Effect::ImportSavedWebpages { request_id, .. } = effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ImportSavedWebpages { .. }))
+            .unwrap()
+        else {
+            panic!();
+        };
 
         let (_state, effects) = update(
             state,
@@ -5769,9 +5820,13 @@ mod import_tests {
         init();
         let state = AppState::new();
         let (state, effects) = start_import(state, ImportAction::Summaries);
-        let Effect::ImportSavedWebpages { request_id, .. } =
-            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
-        else { panic!(); };
+        let Effect::ImportSavedWebpages { request_id, .. } = effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ImportSavedWebpages { .. }))
+            .unwrap()
+        else {
+            panic!();
+        };
 
         let (_state, effects) = update(
             state,

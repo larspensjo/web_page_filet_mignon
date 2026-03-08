@@ -98,12 +98,7 @@ fn burst_updates_with_tab_and_scope_switches_keep_job_rows_unique() {
     );
     state = next;
     state = mark_done(state, 3);
-    let (state, _) = update(
-        state,
-        Msg::LeftTabSelected {
-            tab: LeftTab::Jobs,
-        },
-    );
+    let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
 
     let view = state.view();
     let ids: Vec<u64> = view.jobs.iter().map(|j| j.job_id).collect();
