@@ -356,7 +356,7 @@ pub enum Msg {
     TrendCategorySelected {
         category: TrendCategory,
     },
-    /// Entity index successfully loaded from disk.
+        /// Entity index successfully loaded from disk.
     EntityIndexLoaded {
         index: crate::entity_index::EntityIndex,
     },
@@ -372,6 +372,27 @@ pub enum Msg {
     EntityIndexRebuildFailed {
         reason: String,
     },
+
+    // --- Import saved webpages ---
+
+    /// Request to import browser-saved .htm/.html files from `dir`.
+    ImportSavedWebpagesRequested {
+        dir: PathBuf,
+        trusted_manual_selection: bool,
+        action: crate::import_session::ImportAction,
+    },
+    /// Import batch completed (may include per-file failures).
+    ImportSavedWebpagesCompleted {
+        request_id: u64,
+        report: harvester_engine::ImportReport,
+    },
+    /// Import batch failed at the directory level (scan or setup failure).
+    ImportSavedWebpagesFailed {
+        request_id: u64,
+        reason: String,
+    },
+    /// Clear / reset the current imported corpus session.
+    ImportedCorpusCleared,
 }
 
 /// Result payload returned by the LLM worker.

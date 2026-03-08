@@ -4,6 +4,7 @@ mod cache_utils;
 mod context_draft;
 mod effect;
 pub mod entity_index;
+pub mod import_session;
 mod msg;
 mod pre_triage_coordinator;
 mod pre_triage_filter;
@@ -29,6 +30,7 @@ pub use briefing::{
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
 pub use effect::{Effect, StopPolicy};
+pub use import_session::{ImportAction, ImportPhase, ImportSessionState};
 pub use entity_index::{EntityIndex, EntityIndexEntry};
 pub use harvester_engine::llm::SummaryEntities;
 pub use msg::{LlmResultKind, Msg};
@@ -47,6 +49,7 @@ pub use state::{
     JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
     SessionState, Stage,
 };
+// ImportPhase is re-exported from import_session above; BatchObservation uses it.
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
 };

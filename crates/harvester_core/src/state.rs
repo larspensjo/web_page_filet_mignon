@@ -290,6 +290,14 @@ pub struct BatchObservation {
     pub summary_cache_misses: usize,
     /// Summary cache key-unavailable count during the latest summary cache run.
     pub summary_cache_key_unavailable: usize,
+    /// Phase of the current import session.
+    pub import_phase: crate::import_session::ImportPhase,
+    /// Count of successfully persisted imports in the current session.
+    pub imports_completed: usize,
+    /// Count of per-file import failures in the current session.
+    pub imports_failed: usize,
+    /// True while an import request is in flight.
+    pub import_in_flight: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -363,6 +371,8 @@ pub struct AppState {
     pre_triage_refresh_eval_pending: bool,
     /// Coalesced cause bit for pending pre-triage refresh evaluation.
     pre_triage_refresh_eval_job_done: bool,
+    /// Reducer-owned state for the imported-corpus workflow.
+    pub(crate) import_session: crate::import_session::ImportSessionState,
 }
 
 pub(crate) struct PromptLabPendingRunRegistration {
@@ -437,6 +447,7 @@ impl Default for AppState {
             ),
             pre_triage_refresh_eval_pending: false,
             pre_triage_refresh_eval_job_done: false,
+            import_session: crate::import_session::ImportSessionState::default(),
         }
     }
 }
@@ -535,6 +546,11 @@ impl AppState {
             summary_cache_hits: self.summary_cache_metrics.hits(),
             summary_cache_misses: self.summary_cache_metrics.misses(),
             summary_cache_key_unavailable: self.summary_cache_metrics.key_unavailable(),
+            import_phase: self.import_session.phase,
+            imports_completed: self.import_session.imports_completed,
+            imports_failed: self.import_session.imports_failed,
+            import_in_flight: self.import_session.phase
+                == crate::import_session::ImportPhase::Importing,
         }
     }
 

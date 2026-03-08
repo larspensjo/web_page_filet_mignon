@@ -1747,6 +1747,96 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             engine_warn!("[entity-index] rebuild failed: {reason}");
             Vec::new()
         }
+
+        // --- Import saved webpages ---
+
+        Msg::ImportSavedWebpagesRequested {
+            dir,
+            trusted_manual_selection,
+            action,
+        } => {
+            let request_id = state.allocate_next_llm_request_id();
+            engine_info!(
+                "[import-saved-web] request id={request_id} dir={} trusted={trusted_manual_selection} action={action:?}",
+                dir.display()
+            );
+            state.import_session.start_import(
+                request_id,
+                dir.clone(),
+                trusted_manual_selection,
+                action,
+            );
+            vec![Effect::ImportSavedWebpages { dir, request_id }]
+        }
+
+        Msg::ImportSavedWebpagesCompleted { request_id, report } => {
+            if !state.import_session.is_authoritative(request_id) {
+                engine_warn!(
+                    "[import-saved-web] stale completion request_id={request_id}, current={} — ignored",
+                    state.import_session.request_id
+                );
+                return (state, Vec::new());
+            }
+
+            let imports_completed = report.imported_entries.len();
+            let imports_failed = report.failures.len();
+            engine_info!(
+                "[import-saved-web] completed id={request_id} imported={imports_completed} failed={imports_failed}"
+            );
+
+            let imported_entries = report.imported_entries.clone();
+            let action = state.import_session.action.unwrap_or(crate::import_session::ImportAction::ImportOnly);
+            let trusted = state.import_session.trusted_manual_selection;
+
+            state.import_session.phase = crate::import_session::ImportPhase::Complete;
+            state.import_session.imported_entries = imported_entries.clone();
+            state.import_session.imports_completed = imports_completed;
+            state.import_session.imports_failed = imports_failed;
+            state.import_session.duplicate_url_count = report.duplicate_url_count;
+            state.import_session.duplicate_content_count = report.duplicate_content_count;
+            state.import_session.warnings = report.warnings;
+
+            // Only emit downstream work if trusted manual selection is active.
+            if imported_entries.is_empty() || !trusted {
+                return (state, Vec::new());
+            }
+
+            match action {
+                crate::import_session::ImportAction::ImportOnly => Vec::new(),
+                crate::import_session::ImportAction::Summaries => {
+                    vec![Effect::RunImportedCorpusSummaries {
+                        request_id,
+                        imported_entries,
+                    }]
+                }
+                crate::import_session::ImportAction::Briefing => {
+                    vec![Effect::RunImportedCorpusBriefing {
+                        request_id,
+                        imported_entries,
+                    }]
+                }
+            }
+        }
+
+        Msg::ImportSavedWebpagesFailed { request_id, reason } => {
+            if !state.import_session.is_authoritative(request_id) {
+                engine_warn!(
+                    "[import-saved-web] stale failure request_id={request_id} — ignored"
+                );
+                return (state, Vec::new());
+            }
+            engine_warn!("[import-saved-web] failed id={request_id} reason={reason}");
+            state.import_session.phase = crate::import_session::ImportPhase::Failed;
+            state.import_session.failure_reason = Some(reason);
+            Vec::new()
+        }
+
+        Msg::ImportedCorpusCleared => {
+            engine_info!("[import-saved-web] corpus cleared");
+            state.import_session.clear();
+            Vec::new()
+        }
+
         Msg::Tick => {
             state.advance_tick();
             let tick = state.current_tick();
@@ -5427,6 +5517,262 @@ mod tests {
         assert_eq!(
             request_id, 1,
             "single dispatch with normal quiet window gets request_id=1"
+        );
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+    use crate::import_session::{ImportAction, ImportPhase};
+    use harvester_engine::{ImportedArchiveRef, ImportReport};
+    use std::path::PathBuf;
+
+    fn init() {
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(engine_logging::initialize_for_tests);
+    }
+
+    fn sample_report(n_imported: usize) -> ImportReport {
+        ImportReport {
+            scanned_count: n_imported,
+            imported_entries: (0..n_imported)
+                .map(|i| ImportedArchiveRef {
+                    persisted_path: PathBuf::from(format!("/archive/{i}.md")),
+                    canonical_url: format!("https://example.com/{i}"),
+                    content_hash: format!("hash{i}"),
+                    fetched_utc: "2026-03-08T00:00:00Z".to_string(),
+                })
+                .collect(),
+            warnings: Vec::new(),
+            failures: Vec::new(),
+            duplicate_url_count: 0,
+            duplicate_content_count: 0,
+        }
+    }
+
+    fn import_dir() -> PathBuf {
+        PathBuf::from("/saved-pages")
+    }
+
+    fn start_import(state: AppState, action: ImportAction) -> (AppState, Vec<Effect>) {
+        update(
+            state,
+            Msg::ImportSavedWebpagesRequested {
+                dir: import_dir(),
+                trusted_manual_selection: true,
+                action,
+            },
+        )
+    }
+
+    #[test]
+    fn import_requested_sets_importing_phase_and_emits_effect() {
+        init();
+        let state = AppState::new();
+        let (state, effects) = start_import(state, ImportAction::ImportOnly);
+        assert_eq!(state.import_session.phase, ImportPhase::Importing);
+        assert_eq!(state.import_session.source_dir, Some(import_dir()));
+        assert!(effects
+            .iter()
+            .any(|e| matches!(e, Effect::ImportSavedWebpages { .. })));
+    }
+
+    #[test]
+    fn import_only_completion_does_not_emit_downstream_work() {
+        init();
+        let state = AppState::new();
+        let (state, effects) = start_import(state, ImportAction::ImportOnly);
+        let Effect::ImportSavedWebpages { request_id, .. } =
+            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        else {
+            panic!("expected ImportSavedWebpages effect");
+        };
+
+        let (state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesCompleted {
+                request_id,
+                report: sample_report(2),
+            },
+        );
+        assert_eq!(state.import_session.phase, ImportPhase::Complete);
+        assert_eq!(state.import_session.imports_completed, 2);
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::RunImportedCorpusSummaries { .. })),
+            "import-only must not emit summaries"
+        );
+        assert!(
+            !effects
+                .iter()
+                .any(|e| matches!(e, Effect::RunImportedCorpusBriefing { .. })),
+            "import-only must not emit briefing"
+        );
+    }
+
+    #[test]
+    fn import_with_summaries_action_emits_summaries_effect() {
+        init();
+        let state = AppState::new();
+        let (state, effects) = start_import(state, ImportAction::Summaries);
+        let Effect::ImportSavedWebpages { request_id, .. } =
+            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        else {
+            panic!();
+        };
+
+        let (_state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesCompleted {
+                request_id,
+                report: sample_report(1),
+            },
+        );
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::RunImportedCorpusSummaries { .. })),
+            "trusted Summaries action must emit RunImportedCorpusSummaries"
+        );
+    }
+
+    #[test]
+    fn import_with_briefing_action_emits_briefing_effect() {
+        init();
+        let state = AppState::new();
+        let (state, effects) = start_import(state, ImportAction::Briefing);
+        let Effect::ImportSavedWebpages { request_id, .. } =
+            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        else {
+            panic!();
+        };
+
+        let (_state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesCompleted {
+                request_id,
+                report: sample_report(1),
+            },
+        );
+        assert!(
+            effects
+                .iter()
+                .any(|e| matches!(e, Effect::RunImportedCorpusBriefing { .. })),
+            "trusted Briefing action must emit RunImportedCorpusBriefing"
+        );
+    }
+
+    #[test]
+    fn stale_completion_is_ignored_and_emits_no_effects() {
+        init();
+        let state = AppState::new();
+        // Start request A.
+        let (state, effects_a) = start_import(state, ImportAction::Summaries);
+        let Effect::ImportSavedWebpages { request_id: rid_a, .. } =
+            effects_a.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        else { panic!(); };
+
+        // Start request B (supersedes A).
+        let (state, _) = start_import(state, ImportAction::Summaries);
+
+        // Complete A — should be ignored.
+        let (state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesCompleted {
+                request_id: rid_a,
+                report: sample_report(1),
+            },
+        );
+        assert!(effects.is_empty(), "stale completion must emit no effects");
+        // Phase should still reflect the active (B) session.
+        assert_eq!(state.import_session.phase, ImportPhase::Importing);
+    }
+
+    #[test]
+    fn import_failed_sets_failed_phase() {
+        init();
+        let state = AppState::new();
+        let (state, effects) = start_import(state, ImportAction::ImportOnly);
+        let Effect::ImportSavedWebpages { request_id, .. } =
+            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        else { panic!(); };
+
+        let (state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesFailed {
+                request_id,
+                reason: "scan failed".to_string(),
+            },
+        );
+        assert_eq!(state.import_session.phase, ImportPhase::Failed);
+        assert_eq!(
+            state.import_session.failure_reason.as_deref(),
+            Some("scan failed")
+        );
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn imported_corpus_cleared_resets_state() {
+        init();
+        let state = AppState::new();
+        let (state, _) = start_import(state, ImportAction::ImportOnly);
+        let (state, _) = update(state, Msg::ImportedCorpusCleared);
+        assert_eq!(state.import_session.phase, ImportPhase::Idle);
+        assert!(state.import_session.source_dir.is_none());
+    }
+
+    #[test]
+    fn import_without_trusted_selection_does_not_emit_downstream_work() {
+        init();
+        let state = AppState::new();
+        // Not trusted.
+        let (state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesRequested {
+                dir: import_dir(),
+                trusted_manual_selection: false,
+                action: ImportAction::Summaries,
+            },
+        );
+        let Effect::ImportSavedWebpages { request_id, .. } =
+            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        else { panic!(); };
+
+        let (_state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesCompleted {
+                request_id,
+                report: sample_report(2),
+            },
+        );
+        assert!(
+            effects.is_empty(),
+            "untrusted batch must not emit downstream work even with Summaries action"
+        );
+    }
+
+    #[test]
+    fn zero_imported_entries_does_not_emit_downstream_work() {
+        init();
+        let state = AppState::new();
+        let (state, effects) = start_import(state, ImportAction::Summaries);
+        let Effect::ImportSavedWebpages { request_id, .. } =
+            effects.into_iter().find(|e| matches!(e, Effect::ImportSavedWebpages { .. })).unwrap()
+        else { panic!(); };
+
+        let (_state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesCompleted {
+                request_id,
+                report: sample_report(0),
+            },
+        );
+        assert!(
+            effects.is_empty(),
+            "zero imported entries must not emit summaries/briefing"
         );
     }
 }

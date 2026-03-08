@@ -38,7 +38,7 @@ const BROWSER_COMMENT_SCAN_BYTES: usize = 2048;
 // ---------------------------------------------------------------------------
 
 /// A single candidate file found in a saved-webpage directory.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedWebpageFile {
     pub source_path: PathBuf,
     pub basename: String,
@@ -46,7 +46,7 @@ pub struct SavedWebpageFile {
 }
 
 /// Result of scanning a directory for saved webpage candidates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedWebpageScanResult {
     pub candidates: Vec<SavedWebpageFile>,
     pub ignored_directories: usize,
@@ -54,7 +54,7 @@ pub struct SavedWebpageScanResult {
 }
 
 /// A successfully extracted saved webpage, before persistence.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedDocument {
     pub canonical_url: String,
     pub title: Option<String>,
@@ -89,7 +89,7 @@ pub enum ImportFailureStage {
 }
 
 /// A per-file import failure.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportFailure {
     pub source_path: PathBuf,
     pub stage: ImportFailureStage,
@@ -97,7 +97,7 @@ pub struct ImportFailure {
 }
 
 /// Aggregate result of a batch import operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportReport {
     pub scanned_count: usize,
     pub imported_entries: Vec<ImportedArchiveRef>,
@@ -108,7 +108,7 @@ pub struct ImportReport {
 }
 
 /// Options for a batch import run.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ImportOptions {
     /// Directory where imported markdown files will be written.
     pub archive_dir: PathBuf,

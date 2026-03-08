@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use harvester_engine::llm::dto::SummaryEntities;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
 use harvester_engine::llm::types::ModelId;
+use harvester_engine::ImportedArchiveRef;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -106,6 +107,25 @@ pub enum Effect {
         content_hash: Option<String>,
         summary_entities: Option<SummaryEntities>,
         themes: Option<Vec<String>>,
+    },
+
+    // --- Import saved webpages ---
+
+    /// Scan and import browser-saved .htm/.html files from `dir`.
+    /// The effect runner resolves the archive dir from its own `RuntimePaths`.
+    ImportSavedWebpages {
+        dir: PathBuf,
+        request_id: u64,
+    },
+    /// Run per-article summaries for the exact imported archive entries.
+    RunImportedCorpusSummaries {
+        request_id: u64,
+        imported_entries: Vec<ImportedArchiveRef>,
+    },
+    /// Run an aggregate briefing for the exact imported archive entries.
+    RunImportedCorpusBriefing {
+        request_id: u64,
+        imported_entries: Vec<ImportedArchiveRef>,
     },
 }
 
