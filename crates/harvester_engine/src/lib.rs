@@ -11,6 +11,7 @@ mod extract;
 mod fetch;
 mod filename;
 mod frontmatter;
+pub mod import;
 mod links;
 pub mod llm;
 mod path_policy;
@@ -27,9 +28,9 @@ mod types;
 mod url_policy;
 
 pub use briefing::{
-    load_and_prepare_articles, load_and_prepare_articles_filtered,
-    load_and_prepare_articles_for_triage, scan_archive_article_metadata, ArchiveArticleMeta,
-    LoadedArticle,
+    load_and_prepare_articles, load_and_prepare_articles_by_path,
+    load_and_prepare_articles_filtered, load_and_prepare_articles_for_triage,
+    scan_archive_article_metadata, ArchiveArticleMeta, LoadedArticle,
 };
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};
@@ -39,9 +40,15 @@ pub use export::{
 };
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher, RetrySettings};
-pub use filename::deterministic_filename;
+pub use filename::{deterministic_filename, import_filename_base, resolve_non_overwriting_filename};
 pub use frontmatter::{
-    build_markdown_document, parse_frontmatter, unescape_yaml_value, FrontmatterFields,
+    build_imported_markdown_document, build_markdown_document, parse_frontmatter,
+    unescape_yaml_value, FrontmatterFields, ImportedFrontmatterFields,
+};
+pub use import::{
+    import_saved_webpages, import_single_saved_webpage, scan_saved_webpage_dir, ImportFailure,
+    ImportFailureStage, ImportOptions, ImportReport, ImportedArchiveRef, ImportedDocument,
+    SavedWebpageFile, SavedWebpageScanResult,
 };
 pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKind};
 pub use path_policy::is_confined_to;

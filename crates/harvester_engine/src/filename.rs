@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::text_safety::truncate_to_char_boundary;
 use sha2::{Digest, Sha256};
 
@@ -6,6 +8,36 @@ pub fn deterministic_filename(title: Option<&str>, url: &str) -> String {
     let sanitized = sanitize_title(title.unwrap_or("untitled"));
     let hash = short_hash(url);
     format!("{sanitized}--{hash}.md")
+}
+
+/// Base filename for an imported saved webpage:
+/// `{sanitized_title}--{short_hash(url)}--imported-{timestamp_str}.md`
+///
+/// `timestamp_str` should be formatted as `YYYYMMDDTHHMMSSfffZ` (millisecond precision).
+/// Use `resolve_non_overwriting_filename` to handle collisions.
+pub fn import_filename_base(title: Option<&str>, url: &str, timestamp_str: &str) -> String {
+    let sanitized = sanitize_title(title.unwrap_or("untitled"));
+    let hash = short_hash(url);
+    format!("{sanitized}--{hash}--imported-{timestamp_str}.md")
+}
+
+/// Returns a filename that does not yet exist in `dir`.
+///
+/// If `base_name` is free, returns it unchanged.
+/// Otherwise appends `--2`, `--3`, … to the stem until a free name is found.
+pub fn resolve_non_overwriting_filename(dir: &Path, base_name: &str) -> String {
+    if !dir.join(base_name).exists() {
+        return base_name.to_string();
+    }
+    let stem = base_name.strip_suffix(".md").unwrap_or(base_name);
+    for i in 2u32.. {
+        let candidate = format!("{stem}--{i}.md");
+        if !dir.join(&candidate).exists() {
+            return candidate;
+        }
+    }
+    // Unreachable in practice
+    base_name.to_string()
 }
 
 fn sanitize_title(input: &str) -> String {

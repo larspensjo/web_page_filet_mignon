@@ -592,6 +592,64 @@ pub fn load_and_prepare_articles_for_triage(
     Ok(loaded_articles)
 }
 
+/// Load articles from exact archive file paths (for imported-corpus post-actions).
+///
+/// Unlike `load_and_prepare_articles_filtered`, this function resolves articles by
+/// persisted path rather than URL-based directory scanning, so duplicate canonical URLs
+/// within the same imported batch are all included.
+pub fn load_and_prepare_articles_by_path(
+    paths: &[std::path::PathBuf],
+    max_input_bytes: usize,
+    registry: &PromptRegistry,
+) -> Result<(Vec<LoadedArticle>, String), String> {
+    if paths.is_empty() {
+        return Ok((Vec::new(), String::new()));
+    }
+
+    let config = build_content_prep_config();
+    let mut packages = Vec::with_capacity(paths.len());
+
+    for path in paths {
+        let markdown = fs::read_to_string(path)
+            .map_err(|err| format!("failed to read {}: {}", path.display(), err))?;
+        let fields = match parse_frontmatter(&markdown) {
+            Some(fields) => fields,
+            None => {
+                engine_warn!(
+                    "[briefing-loader] skipping {}: no valid frontmatter",
+                    path.display()
+                );
+                continue;
+            }
+        };
+        let url = match fields
+            .url
+            .as_deref()
+            .map(|u| u.trim())
+            .filter(|u| !u.is_empty())
+        {
+            Some(url) => url.to_string(),
+            None => {
+                engine_warn!(
+                    "[briefing-loader] skipping {}: no url field",
+                    path.display()
+                );
+                continue;
+            }
+        };
+        let fetched_utc = fields.fetched_utc.clone();
+        let clean_text = derive_clean_text(&markdown, &url, fields.title.as_deref(), &config);
+        packages.push(ArticlePackage {
+            url,
+            source_title: fields.title,
+            clean_text,
+            fetched_utc,
+        });
+    }
+
+    prepare_loaded_articles_and_collection(packages, max_input_bytes, registry)
+}
+
 /// Scan `output_dir` for markdown articles and return lightweight metadata for each.
 /// Used by the entity index rebuild procedure to join against the triage/summary caches.
 /// Articles with missing or malformed frontmatter are skipped (logged as warnings by the inner scanner).

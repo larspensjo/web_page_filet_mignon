@@ -3,6 +3,67 @@ use crate::token::TokenCounter;
 
 const FRONTMATTER_VALUE_MAX: usize = 500;
 
+/// Optional import-specific fields written by `build_imported_markdown_document`.
+pub struct ImportedFrontmatterFields {
+    /// Timestamp when the file was imported (same as `fetched_utc`).
+    pub imported_utc: String,
+    /// Original article publication timestamp, if extractable.
+    pub published_utc: Option<String>,
+    /// Source file basename (not a full path).
+    pub source_path_hint: Option<String>,
+}
+
+/// Build an archive markdown document for a browser-saved webpage import.
+///
+/// Writes all standard frontmatter keys plus:
+/// - `import_source: "saved_webpage"`
+/// - `imported_utc`
+/// - `published_utc` (optional)
+/// - `source_path_hint` (optional)
+///
+/// `parse_frontmatter()` silently ignores the extra keys, so existing readers
+/// remain compatible.
+pub fn build_imported_markdown_document(
+    url: &str,
+    title: Option<&str>,
+    encoding: &str,
+    fetched_utc: &str,
+    body_markdown: &str,
+    imported_fields: &ImportedFrontmatterFields,
+    token_counter: &dyn TokenCounter,
+) -> (u32, String) {
+    let token_count = token_counter.count(body_markdown);
+    let title_val = title.unwrap_or("untitled");
+    let sanitized_url = sanitize_yaml_value(url);
+    let sanitized_title = sanitize_yaml_value(title_val);
+    let sanitized_encoding = sanitize_yaml_value(encoding);
+    let sanitized_fetched = sanitize_yaml_value(fetched_utc);
+    let sanitized_imported = sanitize_yaml_value(&imported_fields.imported_utc);
+
+    let mut frontmatter = format!(
+        "---\nurl: {url}\ntitle: {title}\nfetched_utc: {fetched_utc}\nencoding: {encoding}\ntoken_count: {token_count}\nimport_source: \"saved_webpage\"\nimported_utc: {imported_utc}\n",
+        url = sanitized_url,
+        title = sanitized_title,
+        fetched_utc = sanitized_fetched,
+        encoding = sanitized_encoding,
+        token_count = token_count,
+        imported_utc = sanitized_imported,
+    );
+
+    if let Some(pub_utc) = &imported_fields.published_utc {
+        let sanitized = sanitize_yaml_value(pub_utc);
+        frontmatter.push_str(&format!("published_utc: {sanitized}\n"));
+    }
+    if let Some(hint) = &imported_fields.source_path_hint {
+        let sanitized = sanitize_yaml_value(hint);
+        frontmatter.push_str(&format!("source_path_hint: {sanitized}\n"));
+    }
+    frontmatter.push_str("---\n\n");
+
+    let doc = format!("{frontmatter}{body}", body = body_markdown);
+    (token_count, doc)
+}
+
 pub fn build_markdown_document(
     url: &str,
     title: Option<&str>,
