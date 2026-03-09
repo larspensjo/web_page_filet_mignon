@@ -24,8 +24,8 @@ mod view_model;
 
 pub use briefing::{
     format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
-    BriefingHistoryEntry, BriefingHistoryTheme, BriefingPhase, BriefingResult, BriefingSession,
-    BriefingThemeResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
+    BriefingHistoryEntry, BriefingHistoryStory, BriefingPhase, BriefingResult, BriefingSession,
+    BriefingStoryResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
 };
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};

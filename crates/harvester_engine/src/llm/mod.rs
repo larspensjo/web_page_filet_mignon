@@ -15,7 +15,8 @@ pub mod types;
 pub mod validation;
 
 pub use dto::{
-    AggregateBriefing, ArticleSummary, BriefingTheme, SummaryEntities, TriagePriority, TriageResult,
+    AggregateBriefing, ArticleSummary, BriefingStory, SummaryEntities, TriagePriority,
+    TriageResult,
 };
 pub use handle::{
     LlmCommand, LlmCompletionCommand, LlmCompletionError, LlmCompletionResult, LlmConfig, LlmEvent,

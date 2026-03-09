@@ -3103,7 +3103,7 @@ mod tests {
     #[test]
     fn briefing_complete_then_job_selected_shows_summary_not_briefing() {
         use crate::briefing::{
-            ArticleSummaryResult, BriefingResult, BriefingThemeResult, LoadedArticle,
+            ArticleSummaryResult, BriefingResult, BriefingStoryResult, LoadedArticle,
         };
 
         let mut state = AppState::new();
@@ -3145,9 +3145,9 @@ mod tests {
         briefing.set_briefing_request_id(2);
         briefing.complete_briefing(BriefingResult {
             executive_summary: "Executive summary".to_string(),
-            themes: vec![BriefingThemeResult {
-                name: "Theme 1".to_string(),
-                description: "desc".to_string(),
+            top_stories: vec![BriefingStoryResult {
+                headline: "Story 1".to_string(),
+                body: "desc".to_string(),
             }],
             article_count: 1,
             input_tokens: 20,
@@ -3181,7 +3181,7 @@ mod tests {
     #[test]
     fn job_selected_then_briefing_completes_shows_briefing() {
         use crate::briefing::{
-            ArticleSummaryResult, BriefingResult, BriefingThemeResult, LoadedArticle,
+            ArticleSummaryResult, BriefingResult, BriefingStoryResult, LoadedArticle,
         };
 
         let mut state = AppState::new();
@@ -3223,9 +3223,9 @@ mod tests {
         briefing.set_briefing_request_id(2);
         briefing.complete_briefing(BriefingResult {
             executive_summary: "Executive summary".to_string(),
-            themes: vec![BriefingThemeResult {
-                name: "Theme 1".to_string(),
-                description: "desc".to_string(),
+            top_stories: vec![BriefingStoryResult {
+                headline: "Story 1".to_string(),
+                body: "desc".to_string(),
             }],
             article_count: 1,
             input_tokens: 20,
@@ -3253,7 +3253,7 @@ mod tests {
 
     #[test]
     fn no_selection_shows_briefing_when_complete() {
-        use crate::briefing::{BriefingResult, BriefingThemeResult};
+        use crate::briefing::{BriefingResult, BriefingStoryResult};
 
         let mut state = AppState::new();
         let mut briefing = crate::briefing::BriefingSession::new_loading(None);
@@ -3262,9 +3262,9 @@ mod tests {
         briefing.set_briefing_request_id(1);
         briefing.complete_briefing(BriefingResult {
             executive_summary: "Executive summary text".to_string(),
-            themes: vec![BriefingThemeResult {
-                name: "Theme".to_string(),
-                description: "desc".to_string(),
+            top_stories: vec![BriefingStoryResult {
+                headline: "Story".to_string(),
+                body: "desc".to_string(),
             }],
             article_count: 0,
             input_tokens: 10,
@@ -3429,14 +3429,14 @@ mod tests {
         state.select_job(10);
         // Confirm mode is SelectedJobSummary by verifying briefing text is NOT shown
         // even though we manually put a complete briefing in state
-        use crate::briefing::{BriefingResult, BriefingThemeResult};
+        use crate::briefing::{BriefingResult, BriefingStoryResult};
         let mut s2 = make_state_with_summarized_job();
         s2.briefing_mut().set_briefing_request_id(99);
         s2.briefing_mut().complete_briefing(BriefingResult {
             executive_summary: "Exec summary".to_string(),
-            themes: vec![BriefingThemeResult {
-                name: "T".to_string(),
-                description: "d".to_string(),
+            top_stories: vec![BriefingStoryResult {
+                headline: "T".to_string(),
+                body: "d".to_string(),
             }],
             article_count: 1,
             input_tokens: 10,
@@ -3838,7 +3838,7 @@ mod briefing_history_state_tests {
         BriefingHistoryEntry {
             generated_at_utc: ts.to_string(),
             executive_summary: format!("Summary {ts}"),
-            themes: vec![],
+            top_stories: vec![],
             article_count: 1,
         }
     }

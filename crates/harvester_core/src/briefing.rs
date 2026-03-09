@@ -51,25 +51,25 @@ pub struct BriefingArticle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BriefingThemeResult {
-    pub name: String,
-    pub description: String,
+pub struct BriefingStoryResult {
+    pub headline: String,
+    pub body: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BriefingResult {
     pub executive_summary: String,
-    pub themes: Vec<BriefingThemeResult>,
+    pub top_stories: Vec<BriefingStoryResult>,
     pub article_count: u32,
     pub input_tokens: u32,
     pub output_tokens: u32,
 }
 
 impl BriefingResult {
-    pub fn theme_summary(&self) -> String {
+    pub fn story_summary(&self) -> String {
         let mut buffer = String::new();
-        for (idx, theme) in self.themes.iter().enumerate() {
-            let _ = writeln!(buffer, "{}. {}: {}", idx + 1, theme.name, theme.description);
+        for (idx, story) in self.top_stories.iter().enumerate() {
+            let _ = writeln!(buffer, "{}. {}: {}", idx + 1, story.headline, story.body);
         }
         buffer
     }
@@ -81,14 +81,14 @@ impl BriefingResult {
 pub struct BriefingHistoryEntry {
     pub generated_at_utc: String, // RFC3339, UTC
     pub executive_summary: String,
-    pub themes: Vec<BriefingHistoryTheme>,
+    pub top_stories: Vec<BriefingHistoryStory>,
     pub article_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BriefingHistoryTheme {
-    pub name: String,
-    pub description: String,
+pub struct BriefingHistoryStory {
+    pub headline: String,
+    pub body: String,
 }
 
 impl BriefingHistoryEntry {
@@ -102,12 +102,12 @@ impl BriefingHistoryEntry {
         Some(BriefingHistoryEntry {
             generated_at_utc: generated_at_utc.to_string(),
             executive_summary: summary,
-            themes: result
-                .themes
+            top_stories: result
+                .top_stories
                 .iter()
-                .map(|t| BriefingHistoryTheme {
-                    name: t.name.clone(),
-                    description: t.description.clone(),
+                .map(|story| BriefingHistoryStory {
+                    headline: story.headline.clone(),
+                    body: story.body.clone(),
                 })
                 .collect(),
             article_count: result.article_count,
@@ -142,15 +142,15 @@ pub fn format_previous_briefings_block(history: &[BriefingHistoryEntry]) -> Stri
         } else {
             entry.executive_summary.clone()
         };
-        let themes_line = entry
-            .themes
+        let top_stories_line = entry
+            .top_stories
             .iter()
-            .map(|t| format!("{}: {}", t.name, t.description))
+            .map(|story| format!("{}: {}", story.headline, story.body))
             .collect::<Vec<_>>()
             .join("; ");
         parts.push(format!(
-            "[{}]\nSummary: {}\nThemes: {}",
-            entry.generated_at_utc, summary, themes_line
+            "[{}]\nSummary: {}\nTop Stories: {}",
+            entry.generated_at_utc, summary, top_stories_line
         ));
     }
     parts.join("\n\n")
@@ -508,14 +508,25 @@ impl BriefingSession {
                 format!("Summarizing {completed}/{total} articles...")
             }
             BriefingPhase::GeneratingBriefing => "Generating briefing...".to_string(),
+            BriefingPhase::Failed { ref reason } => format!("Briefing failed: {reason}"),
             _ => return None,
         };
         Some(text)
     }
 
     pub fn format_preview(&self) -> Option<String> {
-        if self.phase != BriefingPhase::Complete {
-            return None;
+        match &self.phase {
+            BriefingPhase::Failed { reason } => {
+                let mut sections = Vec::new();
+                sections.push("# Executive Briefing".to_string());
+                sections.push(format!("## Failed\n\n{reason}"));
+                if let Some(label) = self.coverage_window_label.as_deref() {
+                    sections.push(format!("## Session Info\n\nCoverage Window: {label}"));
+                }
+                return Some(truncate_preview(&sections.join("\n\n")));
+            }
+            BriefingPhase::Complete => {}
+            _ => return None,
         }
         let result = match &self.briefing_result {
             Some(result) => result,
@@ -528,22 +539,22 @@ impl BriefingSession {
             result.executive_summary.trim()
         ));
 
-        let mut themes = String::from("## Themes");
-        if result.themes.is_empty() {
-            themes.push_str("\n\n(none)");
+        let mut stories = String::from("## Top Stories");
+        if result.top_stories.is_empty() {
+            stories.push_str("\n\n(none)");
         } else {
-            for (idx, theme) in result.themes.iter().enumerate() {
+            for (idx, story) in result.top_stories.iter().enumerate() {
                 let _ = writeln!(
-                    themes,
-                    "\n{}. **{}** - {}",
+                    stories,
+                    "\n{}. **{}**\n\n{}",
                     idx + 1,
-                    theme.name,
-                    theme.description
+                    story.headline,
+                    story.body
                 );
             }
-            themes.pop();
+            stories.pop();
         }
-        sections.push(themes);
+        sections.push(stories);
 
         sections.push(format!(
             "## Session Info\n\n{}Articles: {} total, {} summarized, {} failed",
@@ -659,7 +670,7 @@ mod tests {
         assert!(session.summary_for_url("https://other.com").is_none());
     }
 
-    fn completed_session_with_themes(themes: Vec<BriefingThemeResult>) -> BriefingSession {
+    fn completed_session_with_stories(top_stories: Vec<BriefingStoryResult>) -> BriefingSession {
         let mut session = BriefingSession::new_loading(None);
         session.set_articles(
             vec![
@@ -688,7 +699,7 @@ mod tests {
         session.set_briefing_request_id(3);
         session.complete_briefing(BriefingResult {
             executive_summary: "Concise executive summary".to_string(),
-            themes,
+            top_stories,
             article_count: 2,
             input_tokens: 20,
             output_tokens: 10,
@@ -698,45 +709,45 @@ mod tests {
 
     #[test]
     fn briefing_format_preview_contains_sections() {
-        let session = completed_session_with_themes(vec![BriefingThemeResult {
-            name: "Theme A".to_string(),
-            description: "Description A".to_string(),
+        let session = completed_session_with_stories(vec![BriefingStoryResult {
+            headline: "Story A".to_string(),
+            body: "Description A".to_string(),
         }]);
         let preview = session.format_preview().expect("preview");
         assert!(preview.contains("# Executive Briefing"));
         assert!(preview.contains("## Executive Summary"));
-        assert!(preview.contains("## Themes"));
+        assert!(preview.contains("## Top Stories"));
         assert!(preview.contains("## Session Info"));
     }
 
     #[test]
-    fn briefing_format_preview_theme_list_stable() {
-        let session = completed_session_with_themes(vec![
-            BriefingThemeResult {
-                name: "First".to_string(),
-                description: "A".to_string(),
+    fn briefing_format_preview_story_list_stable() {
+        let session = completed_session_with_stories(vec![
+            BriefingStoryResult {
+                headline: "First".to_string(),
+                body: "A".to_string(),
             },
-            BriefingThemeResult {
-                name: "Second".to_string(),
-                description: "B".to_string(),
+            BriefingStoryResult {
+                headline: "Second".to_string(),
+                body: "B".to_string(),
             },
         ]);
         let preview = session.format_preview().expect("preview");
-        let first_pos = preview.find("1. **First**").expect("first theme");
-        let second_pos = preview.find("2. **Second**").expect("second theme");
+        let first_pos = preview.find("1. **First**").expect("first story");
+        let second_pos = preview.find("2. **Second**").expect("second story");
         assert!(first_pos < second_pos);
     }
 
     #[test]
     fn briefing_format_preview_counts_correct() {
-        let session = completed_session_with_themes(vec![]);
+        let session = completed_session_with_stories(vec![]);
         let preview = session.format_preview().expect("preview");
         assert!(preview.contains("Articles: 2 total, 1 summarized, 1 failed"));
     }
 
     #[test]
     fn briefing_format_preview_includes_coverage_window_when_present() {
-        let mut session = completed_session_with_themes(vec![]);
+        let mut session = completed_session_with_stories(vec![]);
         session.set_coverage_window_label(
             "Articles fetched on or after 2026-02-24T00:00:00Z (briefing checkpoint filter)."
                 .to_string(),
@@ -763,17 +774,39 @@ mod tests {
     }
 
     #[test]
+    fn briefing_format_preview_shows_failure_reason() {
+        let mut session = BriefingSession::new_loading(None);
+        session.fail("request timed out".to_string());
+
+        let preview = session.format_preview().expect("preview");
+        assert!(preview.contains("# Executive Briefing"));
+        assert!(preview.contains("## Failed"));
+        assert!(preview.contains("request timed out"));
+    }
+
+    #[test]
+    fn briefing_progress_text_shows_failure_reason() {
+        let mut session = BriefingSession::new_loading(None);
+        session.fail("request timed out".to_string());
+
+        assert_eq!(
+            session.progress_text().as_deref(),
+            Some("Briefing failed: request timed out")
+        );
+    }
+
+    #[test]
     fn briefing_format_preview_truncates_at_limit() {
         let long_summary = "a".repeat(MAX_BRIEFING_PREVIEW_CHARS + 500);
-        let mut session = completed_session_with_themes(vec![BriefingThemeResult {
-            name: "Theme".to_string(),
-            description: "Description".to_string(),
+        let mut session = completed_session_with_stories(vec![BriefingStoryResult {
+            headline: "Story".to_string(),
+            body: "Description".to_string(),
         }]);
         session.complete_briefing(BriefingResult {
             executive_summary: long_summary,
-            themes: vec![BriefingThemeResult {
-                name: "Theme".to_string(),
-                description: "Description".to_string(),
+            top_stories: vec![BriefingStoryResult {
+                headline: "Story".to_string(),
+                body: "Description".to_string(),
             }],
             article_count: 2,
             input_tokens: 20,
@@ -881,15 +914,15 @@ mod tests {
 mod history_tests {
     use super::*;
 
-    fn make_entry(ts: &str, summary: &str, themes: &[(&str, &str)]) -> BriefingHistoryEntry {
+    fn make_entry(ts: &str, summary: &str, top_stories: &[(&str, &str)]) -> BriefingHistoryEntry {
         BriefingHistoryEntry {
             generated_at_utc: ts.to_string(),
             executive_summary: summary.to_string(),
-            themes: themes
+            top_stories: top_stories
                 .iter()
-                .map(|(n, d)| BriefingHistoryTheme {
-                    name: n.to_string(),
-                    description: d.to_string(),
+                .map(|(headline, body)| BriefingHistoryStory {
+                    headline: headline.to_string(),
+                    body: body.to_string(),
                 })
                 .collect(),
             article_count: 5,
@@ -903,7 +936,7 @@ mod history_tests {
     }
 
     #[test]
-    fn format_single_entry_contains_timestamp_summary_and_themes() {
+    fn format_single_entry_contains_timestamp_summary_and_top_stories() {
         let entry = make_entry(
             "2026-02-21T08:00:00Z",
             "Markets rose sharply.",
@@ -915,12 +948,12 @@ mod history_tests {
         let block = format_previous_briefings_block(&[entry]);
         assert!(block.contains("2026-02-21T08:00:00Z"), "missing timestamp");
         assert!(block.contains("Markets rose sharply."), "missing summary");
-        assert!(block.contains("Economy"), "missing theme name");
+        assert!(block.contains("Economy"), "missing story headline");
         assert!(
             block.contains("Growth driven by tech."),
-            "missing theme description"
+            "missing story body"
         );
-        assert!(block.contains("Policy"), "missing second theme");
+        assert!(block.contains("Policy"), "missing second story");
     }
 
     #[test]
@@ -944,7 +977,7 @@ mod history_tests {
     fn from_result_rejects_empty_summary() {
         let result = BriefingResult {
             executive_summary: "   ".to_string(),
-            themes: vec![],
+            top_stories: vec![],
             article_count: 0,
             input_tokens: 0,
             output_tokens: 0,

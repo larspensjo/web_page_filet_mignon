@@ -686,3 +686,19 @@ Evidence: `cargo test -p harvester_core import_completion_projects_imported_entr
 Lessons Learned: Archive persistence and app-visible state persistence are separate contracts; any feature that writes new corpus entries must explicitly update both paths or the UI will silently diverge from disk contents.
 Prevention: Add a persistence-focused regression test for every non-poll ingestion path asserting that newly created archive entries appear in `CompletedJobSnapshot` output and survive app restart through `.harvester_state.ron`.
 Refs: crates/harvester_core/src/update.rs, crates/harvester_core/src/state.rs, crates/harvester_batch/src/runner.rs
+
+## 2026-03-09 - Briefing output now uses top stories on gpt-5-mini
+Type: Implementation
+Context: The aggregate briefing needed to stay concise at the top while becoming more operationally useful below the summary. The previous `themes` section was too abstract for day-to-day review compared with a ranked list of concrete stories.
+Change: Added a new aggregate briefing prompt version that keeps the executive summary but returns up to five ranked `top_stories` with a 150-word cap per story, updated the validation/render/history pipeline to use that schema while remaining compatible with older `themes` outputs/history, and set the default briefing model to `gpt-5-mini` in both app and batch flows.
+Evidence: `cargo test -p harvester_engine`; `cargo test -p harvester_core`; `cargo test -p harvester_io`; `cargo test -p harvester_batch`; `cargo check -p harvester_app`; `cargo clippy --all-targets -- -D warnings`; `cargo build` still blocked by locked `target/debug/harvester_app.exe` (os error 5).
+Refs: crates/harvester_engine/src/llm/prompts/briefing.rs, crates/harvester_engine/src/llm/validation.rs, crates/harvester_core/src/briefing.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_batch/src/runner.rs
+
+## 2026-03-09 - Briefing failures now surface in the UI and nano is the default dev model
+Type: Bug Fix
+Context: A requested aggregate briefing could fail at the provider layer and leave the Briefing pane blank, which looked like an empty successful run instead of an error. During prompt and UI iteration, the default briefing model also needed to be cheaper than `gpt-5-mini`.
+Change: Updated `harvester_core` briefing state/rendering so aggregate briefing failures surface an explicit failure message in both progress text and preview markdown, added reducer coverage that successful aggregate briefing completions contribute model token usage to the status bar view data, and switched the default briefing model in `harvester_app` and `harvester_batch` to `gpt-5-nano`.
+Evidence: `cargo test -p harvester_core`; `cargo test -p harvester_io`; `cargo test -p harvester_batch`; `cargo check -p harvester_app`; `cargo clippy --all-targets -- -D warnings`.
+Lessons Learned: For async LLM features, "no content" is not a safe fallback UI state because transport failures become indistinguishable from valid empty results unless the reducer preserves failure information.
+Prevention: Add flow-level tests for both success and failure branches of each LLM-backed feature, including assertions on user-visible status text and usage accounting rather than only internal completion state.
+Refs: crates/harvester_core/src/briefing.rs, crates/harvester_core/src/update.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_batch/src/runner.rs

@@ -6,7 +6,7 @@ use crate::state::TriageCacheLookupResult;
 use crate::tabs::{AppTab, JobListScope, LeftTab};
 use crate::{
     briefing::{
-        ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingThemeResult,
+        ArticleSummaryResult, BriefingPhase, BriefingResult, BriefingSession, BriefingStoryResult,
         CorpusFingerprint,
     },
     calc_left_width, context_hash,
@@ -527,17 +527,17 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         ..
                     } => match validate_briefing(output_json) {
                         Ok(briefing) => {
-                            let themes = briefing
-                                .themes
+                            let top_stories = briefing
+                                .top_stories
                                 .into_iter()
-                                .map(|theme| BriefingThemeResult {
-                                    name: theme.name,
-                                    description: theme.description,
+                                .map(|story| BriefingStoryResult {
+                                    headline: story.headline,
+                                    body: story.body,
                                 })
                                 .collect();
                             let result = BriefingResult {
                                 executive_summary: briefing.executive_summary,
-                                themes,
+                                top_stories,
                                 article_count: briefing.article_count,
                                 input_tokens: *input_tokens,
                                 output_tokens: *output_tokens,
@@ -561,15 +561,27 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         }
                         Err(err) => {
                             engine_warn!("[briefing] briefing validation failed: {err}");
-                            state.briefing_mut().complete_without_briefing();
+                            state
+                                .briefing_mut()
+                                .fail(format!("validation failed: {err}"));
                             state.revert_preview_to_briefing();
                             effects.push(Effect::PersistSummaryCache {
                                 cache: state.summary_cache().clone(),
                             });
                         }
                     },
-                    _ => {
-                        state.briefing_mut().complete_without_briefing();
+                    LlmResultKind::QuotaExhausted { reason }
+                    | LlmResultKind::Failed { reason } => {
+                        state.briefing_mut().fail(reason.clone());
+                        state.revert_preview_to_briefing();
+                        effects.push(Effect::PersistSummaryCache {
+                            cache: state.summary_cache().clone(),
+                        });
+                    }
+                    LlmResultKind::ValidationFailed { reason, .. } => {
+                        state
+                            .briefing_mut()
+                            .fail(format!("validation failed: {reason}"));
                         state.revert_preview_to_briefing();
                         effects.push(Effect::PersistSummaryCache {
                             cache: state.summary_cache().clone(),
@@ -2644,7 +2656,7 @@ mod tests {
 
     use super::*;
     use crate::briefing::{ArticleSummaryState, BriefingPhase, LoadedArticle};
-    use harvester_engine::llm::run_metadata::LlmRunMetadata;
+    use harvester_engine::llm::run_metadata::{CacheStatus, LlmRunMetadata, LlmRunMetadataInit};
 
     fn init_logging() {
         static INIT: Once = Once::new();
@@ -2717,8 +2729,29 @@ mod tests {
 
     fn briefing_json(article_count: u32) -> String {
         format!(
-            "{{\"executive_summary\":\"Exec\",\"themes\":[{{\"name\":\"Theme\",\"description\":\"Desc\"}}],\"article_count\":{article_count}}}"
+            "{{\"executive_summary\":\"Exec\",\"top_stories\":[{{\"headline\":\"Story\",\"body\":\"Desc\"}}],\"article_count\":{article_count}}}"
         )
+    }
+
+    fn aggregate_briefing_metadata(
+        model: &str,
+        input_tokens: u32,
+        output_tokens: u32,
+    ) -> LlmRunMetadata {
+        LlmRunMetadata::new(LlmRunMetadataInit {
+            prompt_id: PromptId::AggregateBriefing,
+            prompt_version: 1,
+            resolved_model: model.to_string(),
+            input_bytes: 100,
+            input_tokens,
+            output_tokens,
+            cost_microdollars: 0,
+            wall_ms: 10,
+            parse_ok: true,
+            validation_error: None,
+            cache_status: CacheStatus::Miss,
+            timestamp_utc: "2026-01-01T00:00:00Z".to_string(),
+        })
     }
 
     fn request_id_for_prompt(effects: &[Effect], prompt_id: PromptId) -> Option<u64> {
@@ -2994,6 +3027,120 @@ mod tests {
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].prompt_version, 1);
         assert_eq!(keys[0].model_id, "test-model");
+    }
+
+    #[test]
+    fn aggregate_briefing_failure_surfaces_reason_in_briefing_ui() {
+        init_logging();
+        let state = AppState::new();
+        let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
+        let (articles, collection_text) = loaded_single_article();
+        let (state, _) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 2,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article A"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
+                },
+                metadata: None,
+            },
+        );
+
+        let aggregate_request_id = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
+            .expect("aggregate briefing request");
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: aggregate_request_id,
+                result: LlmResultKind::Failed {
+                    reason: "request timed out".to_string(),
+                },
+                metadata: None,
+            },
+        );
+
+        assert_eq!(
+            state.briefing().phase(),
+            &BriefingPhase::Failed {
+                reason: "request timed out".to_string()
+            }
+        );
+        let view = state.view();
+        assert_eq!(
+            view.briefing_progress.as_deref(),
+            Some("Briefing failed: request timed out")
+        );
+        assert!(view
+            .right_pane
+            .briefing_markdown
+            .as_deref()
+            .unwrap_or("")
+            .contains("request timed out"));
+    }
+
+    #[test]
+    fn aggregate_briefing_success_records_usage_for_status_bar() {
+        init_logging();
+        let state = AppState::new();
+        let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
+        let (articles, collection_text) = loaded_single_article();
+        let (state, _) = update(
+            state,
+            Msg::ArticlesLoaded {
+                articles,
+                collection_text,
+            },
+        );
+
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: 2,
+                result: LlmResultKind::Success {
+                    output_json: summary_json("Article A"),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    prompt_version: 1,
+                    model_id: "test-model".to_string(),
+                },
+                metadata: None,
+            },
+        );
+
+        let aggregate_request_id = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
+            .expect("aggregate briefing request");
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: aggregate_request_id,
+                result: LlmResultKind::Success {
+                    output_json: briefing_json(1),
+                    input_tokens: 123,
+                    output_tokens: 45,
+                    prompt_version: 1,
+                    model_id: "gpt-5-nano".to_string(),
+                },
+                metadata: Some(aggregate_briefing_metadata("gpt-5-nano", 123, 45)),
+            },
+        );
+
+        let view = state.view();
+        assert_eq!(view.llm_usage_by_model.len(), 1);
+        assert_eq!(view.llm_usage_by_model[0].model, "gpt-5-nano");
+        assert_eq!(view.llm_usage_by_model[0].input_tokens, 123);
+        assert_eq!(view.llm_usage_by_model[0].output_tokens, 45);
     }
 
     #[test]
@@ -4520,7 +4667,7 @@ mod tests {
         let entry = BriefingHistoryEntry {
             generated_at_utc: "2026-02-21T00:00:00Z".to_string(),
             executive_summary: "Test".to_string(),
-            themes: vec![],
+            top_stories: vec![],
             article_count: 1,
         };
         let (state, effects) = update(
@@ -4609,7 +4756,7 @@ mod tests {
         state.push_briefing_history(BriefingHistoryEntry {
             generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
             executive_summary: "Old summary content.".to_string(),
-            themes: vec![],
+            top_stories: vec![],
             article_count: 2,
         });
         let history_before = state.briefing_history().to_vec();
@@ -4661,7 +4808,7 @@ mod tests {
         state.push_briefing_history(BriefingHistoryEntry {
             generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
             executive_summary: "Old summary content.".to_string(),
-            themes: vec![],
+            top_stories: vec![],
             article_count: 2,
         });
         let (state, _) = update(state, Msg::PromptLabOpenRequested);
@@ -4723,7 +4870,7 @@ mod tests {
         state.push_briefing_history(BriefingHistoryEntry {
             generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
             executive_summary: "Old summary content.".to_string(),
-            themes: vec![],
+            top_stories: vec![],
             article_count: 2,
         });
         let block = format_previous_briefings_block(state.briefing_history());
@@ -4740,7 +4887,7 @@ mod tests {
         state.push_briefing_history(BriefingHistoryEntry {
             generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
             executive_summary: "Old summary content.".to_string(),
-            themes: vec![],
+            top_stories: vec![],
             article_count: 2,
         });
         let state = start_briefing_after_triage(state, loaded_single_article().0.clone());

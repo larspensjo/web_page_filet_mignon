@@ -250,15 +250,18 @@ struct PersistedBriefingHistory {
 struct PersistedBriefingEntry {
     generated_at_utc: String,
     executive_summary: String,
-    themes: Vec<PersistedBriefingTheme>,
+    #[serde(default, alias = "themes")]
+    top_stories: Vec<PersistedBriefingStory>,
     #[serde(default)]
     article_count: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedBriefingTheme {
-    name: String,
-    description: String,
+struct PersistedBriefingStory {
+    #[serde(alias = "name")]
+    headline: String,
+    #[serde(alias = "description")]
+    body: String,
 }
 
 /// Loads briefing history from disk. Returns an empty Vec on missing file or parse error.
@@ -289,12 +292,12 @@ pub fn load_briefing_history(path: &Path) -> Vec<harvester_core::BriefingHistory
             Some(harvester_core::BriefingHistoryEntry {
                 generated_at_utc: e.generated_at_utc,
                 executive_summary: e.executive_summary,
-                themes: e
-                    .themes
+                top_stories: e
+                    .top_stories
                     .into_iter()
-                    .map(|t| harvester_core::BriefingHistoryTheme {
-                        name: t.name,
-                        description: t.description,
+                    .map(|story| harvester_core::BriefingHistoryStory {
+                        headline: story.headline,
+                        body: story.body,
                     })
                     .collect(),
                 article_count: e.article_count,
@@ -316,12 +319,12 @@ pub fn save_briefing_history(
             .map(|e| PersistedBriefingEntry {
                 generated_at_utc: e.generated_at_utc.clone(),
                 executive_summary: e.executive_summary.clone(),
-                themes: e
-                    .themes
+                top_stories: e
+                    .top_stories
                     .iter()
-                    .map(|t| PersistedBriefingTheme {
-                        name: t.name.clone(),
-                        description: t.description.clone(),
+                    .map(|story| PersistedBriefingStory {
+                        headline: story.headline.clone(),
+                        body: story.body.clone(),
                     })
                     .collect(),
                 article_count: e.article_count,
@@ -464,16 +467,16 @@ mod briefing_checkpoint_tests {
 #[cfg(test)]
 mod briefing_history_tests {
     use super::*;
-    use harvester_core::{BriefingHistoryEntry, BriefingHistoryTheme};
+    use harvester_core::{BriefingHistoryEntry, BriefingHistoryStory};
     use tempfile::TempDir;
 
     fn make_entry(ts: &str) -> BriefingHistoryEntry {
         BriefingHistoryEntry {
             generated_at_utc: ts.to_string(),
             executive_summary: format!("Summary for {ts}"),
-            themes: vec![BriefingHistoryTheme {
-                name: "Topic".to_string(),
-                description: "Details.".to_string(),
+            top_stories: vec![BriefingHistoryStory {
+                headline: "Topic".to_string(),
+                body: "Details.".to_string(),
             }],
             article_count: 3,
         }
@@ -504,7 +507,7 @@ mod briefing_history_tests {
         let loaded = load_briefing_history(&path);
         assert_eq!(loaded.len(), 3);
         assert_eq!(loaded[0].generated_at_utc, "2026-02-21T10:00:00Z");
-        assert_eq!(loaded[0].themes[0].name, "Topic");
+        assert_eq!(loaded[0].top_stories[0].headline, "Topic");
     }
 
     #[test]

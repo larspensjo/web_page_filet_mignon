@@ -123,7 +123,7 @@ fn executive_summary_over_limit_is_truncated_with_notice() {
     let json = format!(
         r#"{{
             "executive_summary":"{}",
-            "themes":[{{"name":"Theme","description":"Description"}}],
+            "top_stories":[{{"headline":"Story","body":"Description"}}],
             "article_count":1
         }}"#,
         executive_summary
@@ -138,4 +138,40 @@ fn executive_summary_over_limit_is_truncated_with_notice() {
             .contains("[Truncated response: removed"),
         "missing truncation notice in executive summary"
     );
+}
+
+#[test]
+fn briefing_story_body_is_truncated_to_150_words() {
+    let body = (1..=175)
+        .map(|idx| format!("word{idx}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let json = format!(
+        r#"{{
+            "executive_summary":"Exec",
+            "top_stories":[{{"headline":"Story","body":"{}"}}],
+            "article_count":1
+        }}"#,
+        body
+    );
+
+    let validated = validate_briefing(&json).unwrap();
+    assert_eq!(
+        validated.top_stories[0].body.split_whitespace().count(),
+        150
+    );
+}
+
+#[test]
+fn legacy_theme_briefing_is_mapped_to_story_schema() {
+    let json = r#"{
+        "executive_summary":"Exec",
+        "themes":[{"name":"Theme","description":"Description"}],
+        "article_count":1
+    }"#;
+
+    let validated = validate_briefing(json).unwrap();
+    assert_eq!(validated.top_stories.len(), 1);
+    assert_eq!(validated.top_stories[0].headline, "Theme");
+    assert_eq!(validated.top_stories[0].body, "Description");
 }

@@ -89,7 +89,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             default_model: ModelId::new(ProviderKind::OpenAi, "gpt-4o-mini"),
             triage_model: None,
             summary_model: None,
-            briefing_model: None,
+            briefing_model: Some(ModelId::new(ProviderKind::OpenAi, "gpt-5-nano")),
             registry: Arc::clone(&registry),
             quotas: LlmQuotas::default(),
             output_dir: output_dir.clone(),

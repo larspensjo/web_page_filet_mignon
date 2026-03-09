@@ -912,10 +912,10 @@ fn validate_response(prompt_id: PromptId, content: &str) -> Result<String, Valid
             let validated = validate_briefing(content)?;
             let normalized = json!({
                 "executive_summary": validated.executive_summary,
-                "themes": validated.themes.iter().map(|theme| {
+                "top_stories": validated.top_stories.iter().map(|story| {
                     json!({
-                        "name": theme.name,
-                        "description": theme.description,
+                        "headline": story.headline,
+                        "body": story.body,
                     })
                 }).collect::<Vec<_>>(),
                 "article_count": validated.article_count,

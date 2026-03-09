@@ -4,7 +4,8 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::llm::dto::{
-    AggregateBriefing, ArticleSummary, BriefingTheme, SummaryEntities, TriagePriority, TriageResult,
+    AggregateBriefing, ArticleSummary, BriefingStory, SummaryEntities, TriagePriority,
+    TriageResult,
 };
 use crate::text_safety::truncate_to_char_boundary;
 
@@ -17,9 +18,9 @@ const MAX_RESPONSE_SUMMARY_CHARS: usize = 1200;
 const MAX_KEY_POINTS: usize = 8;
 const MAX_KEY_POINT_LEN: usize = 256;
 const MAX_RESPONSE_EXEC_SUMMARY_CHARS: usize = 3000;
-const MAX_THEMES: usize = 10;
-const MAX_THEME_NAME_LEN: usize = 120;
-const MAX_THEME_DESCRIPTION_LEN: usize = 512;
+const MAX_TOP_STORIES: usize = 5;
+const MAX_STORY_HEADLINE_LEN: usize = 160;
+const MAX_STORY_BODY_WORDS: usize = 150;
 
 const FIELD_CATEGORY: &str = "category";
 const FIELD_PRIORITY: &str = "priority";
@@ -29,9 +30,9 @@ const FIELD_TITLE: &str = "title";
 const FIELD_SUMMARY: &str = "summary";
 const FIELD_KEY_POINTS: &str = "key_points";
 const FIELD_EXEC_SUMMARY: &str = "executive_summary";
-const FIELD_THEMES: &str = "themes";
-const FIELD_THEME_NAME: &str = "name";
-const FIELD_THEME_DESCRIPTION: &str = "description";
+const FIELD_TOP_STORIES: &str = "top_stories";
+const FIELD_STORY_HEADLINE: &str = "headline";
+const FIELD_STORY_BODY: &str = "body";
 const FIELD_ARTICLE_COUNT: &str = "article_count";
 const FIELD_ENTITIES: &str = "entities";
 const FIELD_ENTITIES_COMPANIES: &str = "companies";
@@ -191,28 +192,7 @@ pub fn validate_briefing(content: &str) -> Result<AggregateBriefing, ValidationE
     let executive_summary = require_string(&document, FIELD_EXEC_SUMMARY)?;
     let executive_summary = truncate_executive_summary(executive_summary);
 
-    let themes_array = require_array(&document, FIELD_THEMES)?;
-    ensure_max_items(themes_array.len(), MAX_THEMES, FIELD_THEMES)?;
-    let themes = themes_array
-        .iter()
-        .map(|value| {
-            let obj = value.as_object().ok_or_else(|| {
-                ValidationError::SchemaViolation("each theme must be an object".into())
-            })?;
-            let name = require_string(obj, FIELD_THEME_NAME)?;
-            ensure_max_length(name, MAX_THEME_NAME_LEN, FIELD_THEME_NAME)?;
-            let description = require_string(obj, FIELD_THEME_DESCRIPTION)?;
-            ensure_max_length(
-                description,
-                MAX_THEME_DESCRIPTION_LEN,
-                FIELD_THEME_DESCRIPTION,
-            )?;
-            Ok(BriefingTheme {
-                name: name.to_string(),
-                description: description.to_string(),
-            })
-        })
-        .collect::<Result<Vec<_>, ValidationError>>()?;
+    let top_stories = parse_briefing_stories(&document)?;
 
     let article_count_value = require_u64(&document, FIELD_ARTICLE_COUNT)?;
     let article_count = u32::try_from(article_count_value)
@@ -220,9 +200,53 @@ pub fn validate_briefing(content: &str) -> Result<AggregateBriefing, ValidationE
 
     Ok(AggregateBriefing {
         executive_summary,
-        themes,
+        top_stories,
         article_count,
     })
+}
+
+fn parse_briefing_stories(
+    document: &Map<String, Value>,
+) -> Result<Vec<BriefingStory>, ValidationError> {
+    if let Some(stories_value) = document.get(FIELD_TOP_STORIES) {
+        let stories_array = stories_value.as_array().ok_or_else(|| {
+            ValidationError::SchemaViolation(format!("{FIELD_TOP_STORIES} must be an array"))
+        })?;
+        ensure_max_items(stories_array.len(), MAX_TOP_STORIES, FIELD_TOP_STORIES)?;
+        return stories_array
+            .iter()
+            .map(|value| {
+                let obj = value.as_object().ok_or_else(|| {
+                    ValidationError::SchemaViolation("each top story must be an object".into())
+                })?;
+                let headline = require_string(obj, FIELD_STORY_HEADLINE)?;
+                ensure_max_length(headline, MAX_STORY_HEADLINE_LEN, FIELD_STORY_HEADLINE)?;
+                let body = require_string(obj, FIELD_STORY_BODY)?;
+                Ok(BriefingStory {
+                    headline: headline.to_string(),
+                    body: truncate_to_word_limit(body, MAX_STORY_BODY_WORDS),
+                })
+            })
+            .collect::<Result<Vec<_>, ValidationError>>();
+    }
+
+    let themes_array = require_array(document, "themes")?;
+    ensure_max_items(themes_array.len(), MAX_TOP_STORIES, "themes")?;
+    themes_array
+        .iter()
+        .map(|value| {
+            let obj = value.as_object().ok_or_else(|| {
+                ValidationError::SchemaViolation("each theme must be an object".into())
+            })?;
+            let headline = require_string(obj, "name")?;
+            ensure_max_length(headline, MAX_STORY_HEADLINE_LEN, "name")?;
+            let body = require_string(obj, "description")?;
+            Ok(BriefingStory {
+                headline: headline.to_string(),
+                body: truncate_to_word_limit(body, MAX_STORY_BODY_WORDS),
+            })
+        })
+        .collect::<Result<Vec<_>, ValidationError>>()
 }
 
 fn parse_document(content: &str) -> Result<Map<String, Value>, ValidationError> {
@@ -304,6 +328,14 @@ fn truncate_executive_summary(value: &str) -> String {
         }
         removed_chars = recalculated_removed;
     }
+}
+
+fn truncate_to_word_limit(value: &str, max_words: usize) -> String {
+    let words: Vec<&str> = value.split_whitespace().collect();
+    if words.len() <= max_words {
+        return value.trim().to_string();
+    }
+    format!("{}...", words[..max_words].join(" "))
 }
 
 fn ensure_max_items(count: usize, max: usize, field: &'static str) -> Result<(), ValidationError> {

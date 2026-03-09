@@ -1605,14 +1605,18 @@ mod tests {
         let mut effective_models = HashMap::new();
         effective_models.insert(PromptId::ArticleTriage, "gpt-4o-mini".to_string());
         effective_models.insert(PromptId::ArticleSummary, "o3-mini".to_string());
-        effective_models.insert(PromptId::AggregateBriefing, "gpt-4o-mini".to_string());
+        effective_models.insert(PromptId::AggregateBriefing, "gpt-5-nano".to_string());
 
         let models = build_local_model_catalog(Some(ProviderKind::OpenAi), &effective_models);
         let names: Vec<_> = models.iter().map(|m| m.model_name().to_string()).collect();
 
         assert_eq!(
             names,
-            vec!["gpt-4o-mini".to_string(), "o3-mini".to_string()]
+            vec![
+                "gpt-4o-mini".to_string(),
+                "gpt-5-nano".to_string(),
+                "o3-mini".to_string()
+            ]
         );
     }
 

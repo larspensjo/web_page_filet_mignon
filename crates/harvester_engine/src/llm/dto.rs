@@ -44,14 +44,14 @@ pub struct ArticleSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BriefingTheme {
-    pub name: String,
-    pub description: String,
+pub struct BriefingStory {
+    pub headline: String,
+    pub body: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AggregateBriefing {
     pub executive_summary: String,
-    pub themes: Vec<BriefingTheme>,
+    pub top_stories: Vec<BriefingStory>,
     pub article_count: u32,
 }
