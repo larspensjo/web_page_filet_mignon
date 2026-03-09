@@ -2656,7 +2656,10 @@ mod tests {
 
     use super::*;
     use crate::briefing::{ArticleSummaryState, BriefingPhase, LoadedArticle};
-    use harvester_engine::llm::run_metadata::{CacheStatus, LlmRunMetadata, LlmRunMetadataInit};
+    use harvester_engine::llm::{
+        run_metadata::{CacheStatus, LlmRunMetadata, LlmRunMetadataInit},
+        DEFAULT_BRIEFING_MODEL,
+    };
 
     fn init_logging() {
         static INIT: Once = Once::new();
@@ -3130,15 +3133,19 @@ mod tests {
                     input_tokens: 123,
                     output_tokens: 45,
                     prompt_version: 1,
-                    model_id: "gpt-5-nano".to_string(),
+                    model_id: DEFAULT_BRIEFING_MODEL.to_string(),
                 },
-                metadata: Some(aggregate_briefing_metadata("gpt-5-nano", 123, 45)),
+                metadata: Some(aggregate_briefing_metadata(
+                    DEFAULT_BRIEFING_MODEL,
+                    123,
+                    45,
+                )),
             },
         );
 
         let view = state.view();
         assert_eq!(view.llm_usage_by_model.len(), 1);
-        assert_eq!(view.llm_usage_by_model[0].model, "gpt-5-nano");
+        assert_eq!(view.llm_usage_by_model[0].model, DEFAULT_BRIEFING_MODEL);
         assert_eq!(view.llm_usage_by_model[0].input_tokens, 123);
         assert_eq!(view.llm_usage_by_model[0].output_tokens, 45);
     }

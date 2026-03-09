@@ -160,6 +160,7 @@ fn briefing_story_body_is_truncated_to_150_words() {
         validated.top_stories[0].body.split_whitespace().count(),
         150
     );
+    assert!(validated.top_stories[0].body.ends_with("..."));
 }
 
 #[test]

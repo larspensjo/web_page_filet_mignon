@@ -14,6 +14,8 @@ pub mod template_validation;
 pub mod types;
 pub mod validation;
 
+pub const DEFAULT_BRIEFING_MODEL: &str = "gpt-5-nano";
+
 pub use dto::{
     AggregateBriefing, ArticleSummary, BriefingStory, SummaryEntities, TriagePriority,
     TriageResult,
