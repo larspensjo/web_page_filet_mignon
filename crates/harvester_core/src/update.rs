@@ -570,8 +570,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                             });
                         }
                     },
-                    LlmResultKind::QuotaExhausted { reason }
-                    | LlmResultKind::Failed { reason } => {
+                    LlmResultKind::QuotaExhausted { reason } | LlmResultKind::Failed { reason } => {
                         state.briefing_mut().fail(reason.clone());
                         state.revert_preview_to_briefing();
                         effects.push(Effect::PersistSummaryCache {
@@ -3135,11 +3134,7 @@ mod tests {
                     prompt_version: 1,
                     model_id: DEFAULT_BRIEFING_MODEL.to_string(),
                 },
-                metadata: Some(aggregate_briefing_metadata(
-                    DEFAULT_BRIEFING_MODEL,
-                    123,
-                    45,
-                )),
+                metadata: Some(aggregate_briefing_metadata(DEFAULT_BRIEFING_MODEL, 123, 45)),
             },
         );
 

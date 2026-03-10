@@ -4,9 +4,9 @@ use commanductui::{
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppTab, AppViewModel, JobFilterStatus, JobListScope, JobResultKind, JobRowView, LeftTab,
-    LinkDownloadState, LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState, Stage,
-    TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
+    AppTab, AppViewModel, JobFilterStatus, JobListScope, JobResultKind, JobRowView,
+    LayoutViewModel, LeftTab, LinkDownloadState, LlmModelUsageView, PreviewHeaderView,
+    PromptLabStage, SessionState, Stage, TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
@@ -118,6 +118,7 @@ pub struct TreeRenderState {
     prev_prompt_lab_compare_section_open: bool,
     prev_prompt_lab_context_section_open: bool,
     prev_prompt_lab_template_section_open: bool,
+    prev_prompt_lab_run_details_section_open: bool,
     prev_prompt_lab_template_editor_open: bool,
     prev_prompt_lab_status_text: Option<String>,
     prev_prompt_lab_metadata_text: Option<String>,
@@ -195,6 +196,7 @@ impl Default for TreeRenderState {
             prev_prompt_lab_compare_section_open: false,
             prev_prompt_lab_context_section_open: false,
             prev_prompt_lab_template_section_open: false,
+            prev_prompt_lab_run_details_section_open: false,
             prev_prompt_lab_template_editor_open: false,
             prev_prompt_lab_status_text: None,
             prev_prompt_lab_metadata_text: None,
@@ -296,7 +298,12 @@ pub fn render(
     tree_state: &mut TreeRenderState,
 ) -> Vec<PlatformCommand> {
     let mut cmds = Vec::new();
-    render_layout_section(window_id, view, tree_state, &mut cmds);
+    render_layout_section(
+        window_id,
+        &layout_view_from_app_view(view),
+        tree_state,
+        &mut cmds,
+    );
     render_tab_bar_section(window_id, view, tree_state, &mut cmds);
     render_left_tab_bar_section(window_id, view, tree_state, &mut cmds);
     render_status_section(window_id, view, tree_state, &mut cmds);
@@ -309,6 +316,16 @@ pub fn render(
 
     render_preview_section(window_id, view, tree_state, &mut cmds);
 
+    cmds
+}
+
+pub(crate) fn render_layout_only(
+    window_id: WindowId,
+    layout: &LayoutViewModel,
+    tree_state: &mut TreeRenderState,
+) -> Vec<PlatformCommand> {
+    let mut cmds = Vec::new();
+    render_layout_section(window_id, layout, tree_state, &mut cmds);
     cmds
 }
 
@@ -372,26 +389,43 @@ where
     }
 }
 
+fn layout_view_from_app_view(view: &AppViewModel) -> LayoutViewModel {
+    LayoutViewModel {
+        left_panel_width: view.left_panel_width,
+        input_panel_visible: view.input_panel_visible,
+        active_tab: view.right_pane.active_tab,
+        left_tab: view.left_pane.left_tab,
+        prompt_lab_advanced_mode: view.left_pane.prompt_lab.advanced_mode,
+        prompt_lab_compare_section_open: view.left_pane.prompt_lab.compare_section_open,
+        prompt_lab_context_section_open: view.left_pane.prompt_lab.context_section_open,
+        prompt_lab_template_section_open: view.left_pane.prompt_lab.template_section_open,
+        prompt_lab_run_details_section_open: view.left_pane.prompt_lab.run_details_section_open,
+        prompt_lab_template_editor_open: view.left_pane.prompt_lab.template_editor_open,
+    }
+}
+
 fn render_layout_section(
     window_id: WindowId,
-    view: &AppViewModel,
+    layout: &LayoutViewModel,
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
-    let prompt_lab_tab_visible = view.left_pane.left_tab == LeftTab::PromptLab;
-    let layout_changed = view.left_panel_width != tree_state.prev_left_panel_width
-        || view.input_panel_visible != tree_state.prev_input_panel_visible
-        || view.right_pane.active_tab != tree_state.prev_active_tab
-        || view.left_pane.left_tab != tree_state.prev_left_tab
+    let prompt_lab_tab_visible = layout.left_tab == LeftTab::PromptLab;
+    let layout_changed = layout.left_panel_width != tree_state.prev_left_panel_width
+        || layout.input_panel_visible != tree_state.prev_input_panel_visible
+        || layout.active_tab != tree_state.prev_active_tab
+        || layout.left_tab != tree_state.prev_left_tab
         || prompt_lab_tab_visible != tree_state.prev_prompt_lab_visible
-        || view.left_pane.prompt_lab.advanced_mode != tree_state.prev_prompt_lab_advanced_mode
-        || view.left_pane.prompt_lab.compare_section_open
+        || layout.prompt_lab_advanced_mode != tree_state.prev_prompt_lab_advanced_mode
+        || layout.prompt_lab_compare_section_open
             != tree_state.prev_prompt_lab_compare_section_open
-        || view.left_pane.prompt_lab.context_section_open
+        || layout.prompt_lab_context_section_open
             != tree_state.prev_prompt_lab_context_section_open
-        || view.left_pane.prompt_lab.template_section_open
+        || layout.prompt_lab_template_section_open
             != tree_state.prev_prompt_lab_template_section_open
-        || view.left_pane.prompt_lab.template_editor_open
+        || layout.prompt_lab_run_details_section_open
+            != tree_state.prev_prompt_lab_run_details_section_open
+        || layout.prompt_lab_template_editor_open
             != tree_state.prev_prompt_lab_template_editor_open;
     if !layout_changed {
         return;
@@ -399,46 +433,27 @@ fn render_layout_section(
     engine_debug!(
         "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}, active_tab: {:?} -> {:?}",
         tree_state.prev_left_panel_width,
-        view.left_panel_width,
+        layout.left_panel_width,
         tree_state.prev_input_panel_visible,
-        view.input_panel_visible,
+        layout.input_panel_visible,
         tree_state.prev_active_tab,
-        view.right_pane.active_tab,
+        layout.active_tab,
     );
-    if view.left_pane.left_tab != tree_state.prev_left_tab {
-        let visible_count = match view.left_pane.left_tab {
-            LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults => {
-                match view.left_pane.job_list_scope {
-                    JobListScope::SinceCheckpoint => {
-                        view.jobs.iter().filter(|j| j.is_since_checkpoint).count()
-                    }
-                    JobListScope::All => view.jobs.len(),
-                }
-            }
-            LeftTab::PromptLab => 0,
-        };
-        engine_info!(
-            "[jobs-ui] visible rows: {} (tab={:?}, scope={:?})",
-            visible_count,
-            view.left_pane.left_tab,
-            view.left_pane.job_list_scope,
-        );
-    }
     cmds.push(build_layout_command(
         window_id,
         LayoutConfig {
-            left_panel_width: view.left_panel_width,
-            input_panel_visible: view.input_panel_visible,
-            active_tab: view.right_pane.active_tab,
-            left_tab: view.left_pane.left_tab,
+            left_panel_width: layout.left_panel_width,
+            input_panel_visible: layout.input_panel_visible,
+            active_tab: layout.active_tab,
+            left_tab: layout.left_tab,
             prompt_lab: PromptLabLayoutConfig {
                 visible: prompt_lab_tab_visible,
-                advanced_mode: view.left_pane.prompt_lab.advanced_mode,
-                compare_section_open: view.left_pane.prompt_lab.compare_section_open,
-                context_section_open: view.left_pane.prompt_lab.context_section_open,
-                template_section_open: view.left_pane.prompt_lab.template_section_open,
-                run_details_section_open: view.left_pane.prompt_lab.run_details_section_open,
-                template_editor_open: view.left_pane.prompt_lab.template_editor_open,
+                advanced_mode: layout.prompt_lab_advanced_mode,
+                compare_section_open: layout.prompt_lab_compare_section_open,
+                context_section_open: layout.prompt_lab_context_section_open,
+                template_section_open: layout.prompt_lab_template_section_open,
+                run_details_section_open: layout.prompt_lab_run_details_section_open,
+                template_editor_open: layout.prompt_lab_template_editor_open,
             },
         },
     ));
@@ -446,20 +461,18 @@ fn render_layout_section(
         tree_state.prev_prompt_lab_model_catalog = None;
         tree_state.prev_prompt_lab_selected_model = None;
     }
-    tree_state.prev_left_panel_width = view.left_panel_width;
-    tree_state.prev_input_panel_visible = view.input_panel_visible;
-    tree_state.prev_active_tab = view.right_pane.active_tab;
-    tree_state.prev_left_tab = view.left_pane.left_tab;
+    tree_state.prev_left_panel_width = layout.left_panel_width;
+    tree_state.prev_input_panel_visible = layout.input_panel_visible;
+    tree_state.prev_active_tab = layout.active_tab;
+    tree_state.prev_left_tab = layout.left_tab;
     tree_state.prev_prompt_lab_visible = prompt_lab_tab_visible;
-    tree_state.prev_prompt_lab_advanced_mode = view.left_pane.prompt_lab.advanced_mode;
-    tree_state.prev_prompt_lab_compare_section_open =
-        view.left_pane.prompt_lab.compare_section_open;
-    tree_state.prev_prompt_lab_context_section_open =
-        view.left_pane.prompt_lab.context_section_open;
-    tree_state.prev_prompt_lab_template_section_open =
-        view.left_pane.prompt_lab.template_section_open;
-    tree_state.prev_prompt_lab_template_editor_open =
-        view.left_pane.prompt_lab.template_editor_open;
+    tree_state.prev_prompt_lab_advanced_mode = layout.prompt_lab_advanced_mode;
+    tree_state.prev_prompt_lab_compare_section_open = layout.prompt_lab_compare_section_open;
+    tree_state.prev_prompt_lab_context_section_open = layout.prompt_lab_context_section_open;
+    tree_state.prev_prompt_lab_template_section_open = layout.prompt_lab_template_section_open;
+    tree_state.prev_prompt_lab_run_details_section_open =
+        layout.prompt_lab_run_details_section_open;
+    tree_state.prev_prompt_lab_template_editor_open = layout.prompt_lab_template_editor_open;
 }
 
 fn render_tab_bar_section(
@@ -1953,11 +1966,13 @@ mod tests {
     }
 
     fn make_view(jobs: Vec<JobRowView>) -> AppViewModel {
-        AppViewModel {
+        let mut view = AppViewModel {
             job_count: jobs.len(),
             jobs,
             ..AppViewModel::default()
-        }
+        };
+        view.left_pane.job_list_scope = JobListScope::All;
+        view
     }
 
     fn completed_prompt_lab_view() -> PromptLabView {
@@ -2328,6 +2343,36 @@ mod tests {
         assert_eq!(input_width, harvester_core::INPUT_PANEL_FIXED_WIDTH);
         assert_eq!(left_width, 760);
         assert_eq!(jobs_fill, None, "PANEL_JOBS should Fill its parent");
+    }
+
+    #[test]
+    fn render_layout_only_skips_tree_and_preview_updates() {
+        init_logging();
+        let window_id = WindowId::new(6);
+        let mut tree_state = TreeRenderState::new();
+        let view = AppViewModel {
+            left_panel_width: 760,
+            input_panel_visible: true,
+            ..Default::default()
+        };
+        let _ = render(window_id, &view, &mut tree_state);
+
+        let mut layout = layout_view_from_app_view(&view);
+        layout.left_panel_width = 720;
+        let commands = render_layout_only(window_id, &layout, &mut tree_state);
+
+        assert!(commands
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::DefineLayout { .. })));
+        assert!(!commands.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::PopulateTreeView { .. }
+                    | PlatformCommand::UpdateTreeItemText { .. }
+                    | PlatformCommand::UpdateTreeItemVisualState { .. }
+                    | PlatformCommand::SetRichEditContent { .. }
+            )
+        }));
     }
 
     #[test]

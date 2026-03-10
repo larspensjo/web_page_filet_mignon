@@ -15,8 +15,9 @@ use crate::triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, Triage
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
-    AppViewModel, JobFilterStatus, JobRowView, LastPasteStats, LinkRowView, PreviewHeaderView,
-    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
+    AppViewModel, JobFilterStatus, JobRowView, LastPasteStats, LayoutViewModel, LinkRowView,
+    PreviewHeaderView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
+    TOKEN_LIMIT,
 };
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
@@ -709,6 +710,21 @@ impl AppState {
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
             llm_usage_by_model: self.llm_usage_rows(),
             right_pane: self.build_right_pane_view(selected_triage_article_available),
+        }
+    }
+
+    pub fn layout_view(&self) -> LayoutViewModel {
+        LayoutViewModel {
+            left_panel_width: self.ui.left_panel_width(),
+            input_panel_visible: self.ui.input_panel_visible(),
+            active_tab: self.active_tab(),
+            left_tab: self.left_tab(),
+            prompt_lab_advanced_mode: self.prompt_lab.advanced_mode(),
+            prompt_lab_compare_section_open: self.prompt_lab.compare_section_open(),
+            prompt_lab_context_section_open: self.prompt_lab.context_section_open(),
+            prompt_lab_template_section_open: self.prompt_lab.template_section_open(),
+            prompt_lab_run_details_section_open: self.prompt_lab.run_details_section_open(),
+            prompt_lab_template_editor_open: self.prompt_lab.template_editor_open(),
         }
     }
 

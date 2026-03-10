@@ -252,8 +252,12 @@ mod prompt_tests {
 
     #[test]
     fn v7_expected_format_mentions_top_stories() {
-        assert!(BRIEFING_PROMPT_V7.expected_format.contains("\"top_stories\""));
-        assert!(BRIEFING_PROMPT_V7.user_template.contains("150 words or fewer"));
+        assert!(BRIEFING_PROMPT_V7
+            .expected_format
+            .contains("\"top_stories\""));
+        assert!(BRIEFING_PROMPT_V7
+            .user_template
+            .contains("150 words or fewer"));
     }
 
     #[test]

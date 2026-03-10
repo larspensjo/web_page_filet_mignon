@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 
@@ -12,7 +12,8 @@ use commanductui::{
 };
 use harvester_core::{
     update, AppState, AppTab, AppViewModel, Effect, JobFilterStatus, JobListScope, JobResultKind,
-    LeftTab, LinkDownloadState, ManualDecision, Msg, PromptLabStage, TrendCategory,
+    LayoutViewModel, LeftTab, LinkDownloadState, ManualDecision, Msg, PromptLabStage,
+    TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -296,6 +297,71 @@ fn job_id_for_item(item_id: commanductui::TreeItemId) -> Option<harvester_core::
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderMode {
+    Full,
+    LayoutOnly,
+}
+
+enum PendingRender {
+    Full(Box<AppViewModel>),
+    LayoutOnly(LayoutViewModel),
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct GeometryBatchStats {
+    splitter_moves: usize,
+    window_resizes: usize,
+    last_splitter_width: Option<i32>,
+    last_window_width: Option<i32>,
+}
+
+impl GeometryBatchStats {
+    fn observe(&mut self, msg: &Msg) {
+        match msg {
+            Msg::SplitterMoved {
+                desired_left_width_px,
+            } => {
+                self.splitter_moves += 1;
+                self.last_splitter_width = Some(*desired_left_width_px);
+            }
+            Msg::WindowResized { window_width } => {
+                self.window_resizes += 1;
+                self.last_window_width = Some(*window_width);
+            }
+            _ => {}
+        }
+    }
+
+    fn is_empty(self) -> bool {
+        self.splitter_moves == 0 && self.window_resizes == 0
+    }
+}
+
+fn is_geometry_only_message(msg: &Msg) -> bool {
+    matches!(msg, Msg::SplitterMoved { .. } | Msg::WindowResized { .. })
+}
+
+fn select_render_mode(
+    any_dirty: bool,
+    geometry_only_batch: bool,
+    refresh_evaluation_dispatched: bool,
+    clear_input_needed: bool,
+    effect_count: usize,
+) -> Option<RenderMode> {
+    if !any_dirty {
+        return None;
+    }
+    if geometry_only_batch
+        && !refresh_evaluation_dispatched
+        && !clear_input_needed
+        && effect_count == 0
+    {
+        return Some(RenderMode::LayoutOnly);
+    }
+    Some(RenderMode::Full)
+}
+
 impl AppEventHandler {
     fn new(
         window_id: WindowId,
@@ -329,6 +395,11 @@ impl AppEventHandler {
             return;
         }
         let batch_size = inbox.len();
+        let mut geometry_stats = GeometryBatchStats::default();
+        for msg in &inbox {
+            geometry_stats.observe(msg);
+        }
+        let geometry_only_batch = inbox.iter().all(is_geometry_only_message);
 
         let mut clear_input_needed = false;
         let mut persist_completed_needed = false;
@@ -336,7 +407,7 @@ impl AppEventHandler {
         let mut refresh_evaluation_dispatched = false;
         let mut persistence_enqueued = false;
         let mut queued_effects = Vec::new();
-        let maybe_view = {
+        let (maybe_render, render_mode, render_snapshot_ms, rendered_job_count) = {
             let mut guard = self.shared.lock().expect("lock shared state");
             let mut state = std::mem::take(&mut guard.state);
             let mut any_dirty = false;
@@ -389,7 +460,32 @@ impl AppEventHandler {
             } else {
                 None
             };
-            let maybe_view = if any_dirty { Some(state.view()) } else { None };
+            let render_mode = select_render_mode(
+                any_dirty,
+                geometry_only_batch,
+                refresh_evaluation_dispatched,
+                clear_input_needed,
+                queued_effects.len(),
+            );
+            let snapshot_start = Instant::now();
+            let maybe_render = match render_mode {
+                Some(RenderMode::Full) => {
+                    let view = state.view();
+                    let job_count = view.job_count;
+                    (
+                        Some(PendingRender::Full(Box::new(view))),
+                        Some(RenderMode::Full),
+                        job_count,
+                    )
+                }
+                Some(RenderMode::LayoutOnly) => (
+                    Some(PendingRender::LayoutOnly(state.layout_view())),
+                    Some(RenderMode::LayoutOnly),
+                    0,
+                ),
+                None => (None, None, 0),
+            };
+            let render_snapshot_ms = snapshot_start.elapsed().as_millis();
             guard.state = state;
 
             if completed_snapshot.is_some() || overrides_snapshot.is_some() {
@@ -399,13 +495,18 @@ impl AppEventHandler {
                     pre_triage_overrides: overrides_snapshot.unwrap_or_default(),
                 });
             }
-            maybe_view
+            (
+                maybe_render.0,
+                maybe_render.1,
+                render_snapshot_ms,
+                maybe_render.2,
+            )
         };
 
         let effect_count = queued_effects.len();
         self.effect_runner.enqueue(queued_effects);
         let did_work = effect_count > 0
-            || maybe_view.is_some()
+            || maybe_render.is_some()
             || clear_input_needed
             || persistence_enqueued
             || refresh_evaluation_dispatched;
@@ -421,8 +522,33 @@ impl AppEventHandler {
             });
         }
 
-        if let Some(view) = maybe_view {
-            self.enqueue_render(&view);
+        let mut render_enqueue_ms = 0;
+        match maybe_render {
+            Some(PendingRender::Full(view)) => {
+                let render_start = Instant::now();
+                self.enqueue_render(&view);
+                render_enqueue_ms = render_start.elapsed().as_millis();
+            }
+            Some(PendingRender::LayoutOnly(layout)) => {
+                let render_start = Instant::now();
+                self.enqueue_layout_render(&layout);
+                render_enqueue_ms = render_start.elapsed().as_millis();
+            }
+            None => {}
+        }
+
+        if !geometry_stats.is_empty() {
+            engine_info!(
+                "[ui-geometry] splitter_moves={} window_resizes={} last_splitter_width={:?} last_window_width={:?} render_mode={:?} snapshot_ms={} enqueue_ms={} job_count={}",
+                geometry_stats.splitter_moves,
+                geometry_stats.window_resizes,
+                geometry_stats.last_splitter_width,
+                geometry_stats.last_window_width,
+                render_mode,
+                render_snapshot_ms,
+                render_enqueue_ms,
+                rendered_job_count,
+            );
         }
     }
 
@@ -430,6 +556,14 @@ impl AppEventHandler {
         self.commands.extend(ui::render::render(
             self.window_id,
             view,
+            &mut self.tree_render_state,
+        ));
+    }
+
+    fn enqueue_layout_render(&mut self, layout: &LayoutViewModel) {
+        self.commands.extend(ui::render::render_layout_only(
+            self.window_id,
+            layout,
             &mut self.tree_render_state,
         ));
     }
@@ -1030,6 +1164,22 @@ mod tests {
             MAX_LLM_CONCURRENT_REQUESTS
         );
         assert_eq!(parse_llm_max_concurrency_requests(Some(" 2 ")), 2);
+    }
+
+    #[test]
+    fn geometry_only_batches_use_layout_only_render_mode() {
+        assert_eq!(
+            select_render_mode(true, true, false, false, 0),
+            Some(RenderMode::LayoutOnly)
+        );
+        assert_eq!(
+            select_render_mode(true, true, false, false, 1),
+            Some(RenderMode::Full)
+        );
+        assert_eq!(
+            select_render_mode(true, false, false, false, 0),
+            Some(RenderMode::Full)
+        );
     }
 
     #[test]

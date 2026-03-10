@@ -1554,9 +1554,9 @@ fn run_triage_refresh_load(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harvester_engine::llm::DEFAULT_BRIEFING_MODEL;
     use harvester_engine::llm::load_context_file;
     use harvester_engine::llm::types::ProviderKind;
+    use harvester_engine::llm::DEFAULT_BRIEFING_MODEL;
     use harvester_engine::llm::{LlmCompletionError, LlmEvent};
     use std::fs;
     use std::path::Path;
@@ -1606,7 +1606,10 @@ mod tests {
         let mut effective_models = HashMap::new();
         effective_models.insert(PromptId::ArticleTriage, "gpt-4o-mini".to_string());
         effective_models.insert(PromptId::ArticleSummary, "o3-mini".to_string());
-        effective_models.insert(PromptId::AggregateBriefing, DEFAULT_BRIEFING_MODEL.to_string());
+        effective_models.insert(
+            PromptId::AggregateBriefing,
+            DEFAULT_BRIEFING_MODEL.to_string(),
+        );
 
         let models = build_local_model_catalog(Some(ProviderKind::OpenAi), &effective_models);
         let names: Vec<_> = models.iter().map(|m| m.model_name().to_string()).collect();

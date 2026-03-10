@@ -4,8 +4,7 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::llm::dto::{
-    AggregateBriefing, ArticleSummary, BriefingStory, SummaryEntities, TriagePriority,
-    TriageResult,
+    AggregateBriefing, ArticleSummary, BriefingStory, SummaryEntities, TriagePriority, TriageResult,
 };
 use crate::text_safety::truncate_to_char_boundary;
 

@@ -159,6 +159,20 @@ pub struct LeftPaneView {
     pub prompt_lab: PromptLabView,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LayoutViewModel {
+    pub left_panel_width: i32,
+    pub input_panel_visible: bool,
+    pub active_tab: AppTab,
+    pub left_tab: LeftTab,
+    pub prompt_lab_advanced_mode: bool,
+    pub prompt_lab_compare_section_open: bool,
+    pub prompt_lab_context_section_open: bool,
+    pub prompt_lab_template_section_open: bool,
+    pub prompt_lab_run_details_section_open: bool,
+    pub prompt_lab_template_editor_open: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppViewModel {
     pub session: SessionState,
