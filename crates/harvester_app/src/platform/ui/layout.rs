@@ -1092,6 +1092,37 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
             ..Default::default()
         },
     });
+
+    // Selected row: subtle lighter background
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::TreeViewSelectedRow,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x37,
+                g: 0x3E,
+                b: 0x47,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+
+    // Accent bar: blue accent matching TabBar accent
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::TreeViewSelectionAccent,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x00,
+                g: 0x80,
+                b: 0xFF,
+            }),
+            ..Default::default()
+        },
+    });
 }
 
 pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) -> PlatformCommand {
