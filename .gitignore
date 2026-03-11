@@ -19,6 +19,7 @@ target
 /incoming_urls.txt
 /sources.ron
 /target_codex/
+/engine.log/
 # /contexts/
 /.rss_seen_guids.ron
 /testResults.xml
