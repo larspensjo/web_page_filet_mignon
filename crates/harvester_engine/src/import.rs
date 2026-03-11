@@ -16,9 +16,8 @@ use serde_json::Value;
 use crate::content_prep::{
     derive_clean_text, BoilerplatePolicy, ContentPrepConfig, NormalizationPolicy,
 };
-use crate::convert::{Converter, Html2MdConverter};
+use crate::content_extraction::{ExtractionPipeline, ExtractionPolicy};
 use crate::decode::decode_html;
-use crate::extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 use crate::filename::{import_filename_base, resolve_non_overwriting_filename};
 use crate::frontmatter::{build_imported_markdown_document, ImportedFrontmatterFields};
 use crate::persist::AtomicFileWriter;
@@ -450,11 +449,9 @@ fn extract_webpage_content(path: &Path) -> Result<(ImportedDocument, Vec<String>
     let published_utc = extract_published_utc(&doc_tree);
 
     // 5. Extract article body and convert to markdown.
-    let extractor = ReadabilityLikeExtractor;
-    let ExtractedContent { content_html, .. } = extractor.extract(html);
-    let converter = Html2MdConverter;
-    let conversion = converter.to_markdown(&content_html, Some(&canonical_url));
-    let markdown_body = conversion.markdown;
+    let pipeline = ExtractionPipeline::new(ExtractionPolicy::default());
+    let extracted_article = pipeline.extract(html, Some(&canonical_url));
+    let markdown_body = extracted_article.markdown;
 
     // 6. Derive clean text and validate quality threshold.
     let config = ContentPrepConfig {

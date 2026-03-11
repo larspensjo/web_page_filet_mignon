@@ -15,9 +15,8 @@ use harvester_engine::llm::types::{ModelId, ProviderKind};
 use harvester_engine::llm::{LlmCompletionError, LlmEvent, LlmRunMetadata};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
-    poll_rss_source, AtomicFileWriter, Converter, DecodeError, Extractor, FetchSettings,
-    LinkExtractingConverter, ReadabilityLikeExtractor, RssSeenSet, SourceId, UrlPolicy,
-    WhitespaceTokenCounter,
+    poll_rss_source, AtomicFileWriter, DecodeError, ExtractionPipeline, ExtractionPolicy,
+    FetchSettings, RssSeenSet, SourceId, UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
@@ -320,22 +319,20 @@ pub fn download_link_page(
     let decoded =
         decode_html(&bytes, content_type.as_deref()).map_err(|err: DecodeError| err.to_string())?;
 
-    let extractor = ReadabilityLikeExtractor;
-    let extracted = extractor.extract(&decoded.html);
-    let converter = LinkExtractingConverter::new();
-    let conversion = converter.to_markdown(&extracted.content_html, Some(final_url.as_str()));
+    let pipeline = ExtractionPipeline::new(ExtractionPolicy::default());
+    let extracted_article = pipeline.extract(&decoded.html, Some(final_url.as_str()));
     let token_counter = WhitespaceTokenCounter;
     let fetched_utc = Utc::now().to_rfc3339();
     let (_tokens, doc) = build_markdown_document(
         &final_url,
-        extracted.title.as_deref(),
+        extracted_article.title.as_deref(),
         &decoded.encoding_label,
         &fetched_utc,
-        &conversion.markdown,
+        &extracted_article.markdown,
         &token_counter,
     );
 
-    let filename = deterministic_filename(extracted.title.as_deref(), &final_url);
+    let filename = deterministic_filename(extracted_article.title.as_deref(), &final_url);
     let writer = AtomicFileWriter::new(linked_dir);
     writer.write(&filename, &doc).map_err(|err| err.to_string())
 }

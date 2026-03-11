@@ -9,9 +9,8 @@ use tokio::time::{timeout, Duration};
 use tokio_util::sync::CancellationToken;
 
 use crate::blocker_page::detect_blocked_page;
-use crate::convert::Converter;
+use crate::content_extraction::{ExtractionPipeline, ExtractionPolicy};
 use crate::decode::decode_html;
-use crate::extract::Extractor;
 use crate::fetch::{ChannelProgressSink, FetchSettings, Fetcher, ReqwestFetcher};
 use crate::frontmatter::build_markdown_document;
 use crate::persist::AtomicFileWriter;
@@ -40,8 +39,7 @@ pub struct EngineConfig {
     pub url_policy: UrlPolicy,
     pub session_quotas: SessionQuotas,
     pub output_dir: PathBuf,
-    pub extractor: Arc<dyn Extractor>,
-    pub converter: Arc<dyn Converter>,
+    pub extraction_pipeline: Arc<ExtractionPipeline>,
     pub token_counter: Arc<dyn TokenCounter>,
     /// Returns UTC timestamp string. Tests can inject fixed value.
     pub fetched_utc: Arc<dyn Fn() -> String + Send + Sync>,
@@ -58,8 +56,7 @@ impl EngineConfig {
             url_policy: UrlPolicy::default(),
             session_quotas: SessionQuotas::default(),
             output_dir,
-            extractor: Arc::new(crate::ReadabilityLikeExtractor),
-            converter: Arc::new(crate::LinkExtractingConverter::new()),
+            extraction_pipeline: Arc::new(ExtractionPipeline::new(ExtractionPolicy::default())),
             token_counter: Arc::new(crate::WhitespaceTokenCounter),
             fetched_utc: Arc::new(|| "1970-01-01T00:00:00Z".to_string()),
             extract_timeout: Duration::from_secs(30),
@@ -311,33 +308,15 @@ async fn run_job(
         return Err(failure);
     }
 
-    let extracted = match timeout(config.extract_timeout, async {
-        config.extractor.extract(&decoded.html)
-    })
-    .await
-    {
-        Ok(content) => content,
-        Err(_) => {
-            let failure = FailureKind::ProcessingTimeout {
-                stage: Stage::Converting,
-            };
-            let _ = event_tx.send(EngineEvent::JobCompleted {
-                job_id,
-                result: Err(failure.clone()),
-            });
-            return Err(failure);
-        }
-    };
-
-    let conversion = match timeout(config.convert_timeout, async {
-        config.converter.to_markdown(
-            &extracted.content_html,
+    let extracted_article = match timeout(config.extract_timeout, async {
+        config.extraction_pipeline.extract(
+            &decoded.html,
             Some(fetch_output.metadata.final_url.as_str()),
         )
     })
     .await
     {
-        Ok(output) => output,
+        Ok(article) => article,
         Err(_) => {
             let failure = FailureKind::ProcessingTimeout {
                 stage: Stage::Converting,
@@ -350,11 +329,22 @@ async fn run_job(
         }
     };
 
-    let markdown = conversion.markdown;
+    engine_debug!(
+        "[extract-pipeline] job={} candidate={:?} score={:.1} pruned={} cleanup_dropped={} bytes_in={} bytes_out={}",
+        job_id,
+        extracted_article.diagnostics.candidate_kind,
+        extracted_article.diagnostics.candidate_score.unwrap_or(0.0),
+        extracted_article.diagnostics.pruned_by_attr,
+        extracted_article.diagnostics.cleanup_blocks_dropped.total(),
+        extracted_article.diagnostics.original_html_bytes,
+        extracted_article.diagnostics.final_markdown_bytes,
+    );
+
+    let markdown = extracted_article.markdown;
 
     if let Some(reason) = detect_blocked_page(
         fetch_output.metadata.final_url.as_str(),
-        extracted.title.as_deref(),
+        extracted_article.title.as_deref(),
         &markdown,
     ) {
         let failure = FailureKind::BlockedContent {
@@ -431,14 +421,14 @@ async fn run_job(
     let fetched_utc_str = (config.fetched_utc)();
     let (token_count, doc) = build_markdown_document(
         fetch_output.metadata.final_url.as_str(),
-        extracted.title.as_deref(),
+        extracted_article.title.as_deref(),
         &decoded.encoding_label,
         &fetched_utc_str,
         &markdown,
         config.token_counter.as_ref(),
     );
 
-    let filename = deterministic_filename(extracted.title.as_deref(), &url);
+    let filename = deterministic_filename(extracted_article.title.as_deref(), &url);
     let writer = AtomicFileWriter::new(config.output_dir.clone());
 
     let doc_for_write = doc.clone();
@@ -462,7 +452,7 @@ async fn run_job(
                     tokens: Some(token_count),
                     bytes_written: Some(doc_for_write.len() as u64),
                     content_preview: Some(preview_content),
-                    extracted_links: conversion.links,
+                    extracted_links: extracted_article.links,
                     fetched_utc: Some(fetched_utc_str),
                 }),
             });

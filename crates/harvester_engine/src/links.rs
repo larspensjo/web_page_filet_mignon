@@ -4,6 +4,12 @@ use url::Url;
 
 const DEFAULT_MAX_LINKS: usize = 5_000;
 
+/// Statistics about nodes pruned during element-scoped conversion.
+#[derive(Debug, Default)]
+pub struct PruneStats {
+    pub total_pruned: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkKind {
     Hyperlink,
@@ -57,6 +63,22 @@ impl LinkExtractingConverter {
         let (markdown, links) = ctx.into_output();
 
         ConversionOutput { markdown, links }
+    }
+
+    /// Convert starting from a specific element, applying DOM pruning during traversal.
+    /// Returns the conversion output and pruning statistics.
+    pub fn convert_element<'a>(
+        &self,
+        element: ElementRef<'a>,
+        base_url: Option<&str>,
+        should_prune: &dyn Fn(&ElementRef<'_>) -> bool,
+    ) -> (ConversionOutput, PruneStats) {
+        let base_url = base_url.and_then(|b| Url::parse(b).ok());
+        let mut ctx = ConversionContext::new(base_url, self.max_links_per_job);
+        let mut stats = PruneStats::default();
+        self.visit_element_pruned(element, &mut ctx, should_prune, &mut stats);
+        let (markdown, links) = ctx.into_output();
+        (ConversionOutput { markdown, links }, stats)
     }
 
     fn visit_element(&self, element: ElementRef, ctx: &mut ConversionContext) {
@@ -166,6 +188,133 @@ impl LinkExtractingConverter {
         if let Some(src) = element.value().attr("src").map(str::trim) {
             if let Some(url) = resolve_url(src, ctx.base_url.as_ref()) {
                 ctx.add_link(url.into(), String::new(), LinkKind::Image);
+            }
+        }
+    }
+
+    fn visit_element_pruned(
+        &self,
+        element: ElementRef<'_>,
+        ctx: &mut ConversionContext,
+        should_prune: &dyn Fn(&ElementRef<'_>) -> bool,
+        stats: &mut PruneStats,
+    ) {
+        let tag = element.value().name().to_ascii_lowercase();
+        // Always skip scripting/presentation tags regardless of prune policy.
+        if matches!(tag.as_str(), "script" | "style" | "noscript" | "iframe" | "template") {
+            stats.total_pruned += 1;
+            return;
+        }
+        if should_prune(&element) {
+            stats.total_pruned += 1;
+            return;
+        }
+        match tag.as_str() {
+            "a" => self.handle_anchor_pruned(element, ctx, should_prune, stats),
+            "img" => self.handle_image(element, ctx),
+            "br" => ctx.ensure_newline(),
+            "hr" => {
+                ctx.ensure_newline();
+                ctx.append_text("---");
+                ctx.ensure_newline();
+            }
+            "li" => {
+                ctx.ensure_newline();
+                ctx.append_text("- ");
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            "p" | "div" | "section" | "article" | "header" | "footer" | "nav" | "figure"
+            | "figcaption" | "table" | "tr" | "td" | "th" | "blockquote" | "address" => {
+                ctx.ensure_newline();
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            "ul" | "ol" => {
+                ctx.ensure_newline();
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            "h1" => {
+                ctx.ensure_newline();
+                ctx.append_text("# ");
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            "h2" => {
+                ctx.ensure_newline();
+                ctx.append_text("## ");
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            "h3" => {
+                ctx.ensure_newline();
+                ctx.append_text("### ");
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            "h4" => {
+                ctx.ensure_newline();
+                ctx.append_text("#### ");
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            "h5" => {
+                ctx.ensure_newline();
+                ctx.append_text("##### ");
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            "h6" => {
+                ctx.ensure_newline();
+                ctx.append_text("###### ");
+                self.visit_children_pruned(element, ctx, should_prune, stats);
+                ctx.ensure_newline();
+            }
+            _ => self.visit_children_pruned(element, ctx, should_prune, stats),
+        }
+    }
+
+    fn visit_children_pruned(
+        &self,
+        element: ElementRef<'_>,
+        ctx: &mut ConversionContext,
+        should_prune: &dyn Fn(&ElementRef<'_>) -> bool,
+        stats: &mut PruneStats,
+    ) {
+        for child in element.children() {
+            match child.value() {
+                Node::Text(text) => ctx.append_text(text),
+                Node::Element(_) => {
+                    if let Some(child_element) = ElementRef::wrap(child) {
+                        self.visit_element_pruned(child_element, ctx, should_prune, stats);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn handle_anchor_pruned(
+        &self,
+        element: ElementRef<'_>,
+        ctx: &mut ConversionContext,
+        should_prune: &dyn Fn(&ElementRef<'_>) -> bool,
+        stats: &mut PruneStats,
+    ) {
+        let href = element.value().attr("href").map(str::trim);
+        let start = ctx.builder.len();
+        self.visit_children_pruned(element, ctx, should_prune, stats);
+        let end = ctx.builder.len();
+        if let Some(raw) = href {
+            if let Some(url) = resolve_url(raw, ctx.base_url.as_ref()) {
+                let text = ctx.extract_substring(start, end);
+                let kind = if url.scheme() == "mailto" {
+                    LinkKind::Email
+                } else {
+                    LinkKind::Hyperlink
+                };
+                ctx.add_link(url.into(), text, kind);
             }
         }
     }

@@ -712,6 +712,13 @@ Lessons Learned: Interactive resize regressions can come from ordinary read-only
 Prevention: Treat paint and custom-draw callbacks as performance-sensitive APIs, reject `view()` construction or broad collection scans in those paths during review, and validate resize behavior with realistic loaded data instead of empty-state fixtures.
 Refs: crates/harvester_core/src/state.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/render.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/CHANGELOG.md, state::tests::job_filter_status_reads_pre_triage_state_without_building_view
 
+## 2026-03-11 - HTML-to-markdown cleanup hardening
+Type: Implementation
+Context: Large fetched and imported articles were carrying site chrome (nav, social widgets, newsletter blocks, recirculation cards, hydration payloads, CSS-in-JS) into markdown, wasting tokens and degrading preview, triage, and briefing quality. The prior extractor simply picked the first `<article>` or fell back to `<body>`, with no DOM pruning and no post-conversion cleanup. Fetch, import, and linked-page download paths each used different extractors and converters, causing divergent quality.
+Change: Introduced a shared `content_extraction` module in `harvester_engine` with a full extraction pipeline: typed DOM prune policy, scored candidate selection (article/main/content classes with semantic bonus over body), DOM-pruned markdown conversion via an extended `LinkExtractingConverter`, block-oriented markdown cleanup, retention safeguards with pre-cleanup fallback, and per-stage diagnostics. Unified fetch (`engine.rs`), import (`import.rs`), and linked-page download (`effect_helpers.rs`) through one `ExtractionPipeline`. Import now uses `LinkExtractingConverter` instead of `Html2MdConverter`, eliminating converter divergence.
+Evidence: 1038 tests pass; `cargo clippy --all-targets -- -D warnings` clean. 7 new integration fixture tests in `crates/harvester_engine/tests/extraction_pipeline_integration.rs` covering clean article preservation, nav/footer chrome exclusion, newsletter DOM-prune removal, CSS payload suppression, long-article non-regression, diagnostics integrity, and determinism.
+Refs: harvester_engine::content_extraction, harvester_engine::links, harvester_engine::engine, harvester_engine::import, harvester_io::effect_helpers, extraction_pipeline_integration (test suite)
+
 ## 2026-03-11 - Remove --import-action and --trusted-manual-selection flags
 Type: Implementation
 Context: The `--import-action` flag (values: `import-only`, `summaries`, `briefing`) and `--trusted-manual-selection` were never used beyond `import-only`. Dead options added cognitive overhead to the CLI and the launcher TUI right-pane.

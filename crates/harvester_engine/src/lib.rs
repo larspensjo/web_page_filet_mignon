@@ -1,4 +1,5 @@
 //! Harvester engine: IO pipeline and effect execution.
+pub mod content_extraction;
 mod blocker_page;
 pub mod briefing;
 pub mod content_prep;
@@ -74,6 +75,11 @@ pub use url_policy::{UrlPolicy, UrlPolicyViolation};
 
 pub use rss_parse::{parse_feed_content, FeedEntry, FeedParseError, RssPollItem};
 pub use rss_seen_set::RssSeenSet;
+
+pub use content_extraction::{
+    BlockDropCounts, CandidateKind, ExtractionDiagnostics, ExtractionOutcome, ExtractionPolicy,
+    ExtractedArticle, ExtractionPipeline,
+};
 
 pub use content_prep::{
     compute_prompt_overhead, derive_clean_text, truncate_to_budget, BoilerplatePolicy,
