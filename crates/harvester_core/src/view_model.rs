@@ -14,7 +14,8 @@ use harvester_engine::llm::types::ModelId;
 use harvester_engine::LinkKind;
 use std::collections::HashMap;
 
-pub const TOKEN_LIMIT: u64 = 200_000;
+// This token limit is the recommended limit to be used when creating an archive.
+pub const TOKEN_LIMIT: u64 = 100_000;
 
 /// Per-model LLM token usage snapshot for rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
