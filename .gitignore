@@ -25,6 +25,9 @@ target
 /testResults.xml
 /*.log
 
+# Git worktrees
+/.worktrees/
+
 # Coverage analysis outputs
 /tests/coverage_reports/*.json
 /tests/coverage_reports/*.md
