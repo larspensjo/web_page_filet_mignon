@@ -982,16 +982,13 @@ impl UiStateProvider for AppUiStateProvider {
     ) -> TreeItemMarkerKind {
         if let TreeItemKind::Job { job_id } = decode_tree_item_id(item_id) {
             let guard = self.shared.lock().unwrap();
-            let view = guard.state.view();
-            if let Some(job) = view.jobs.iter().find(|job| job.job_id == job_id) {
-                return match job.filter_status {
-                    Some(JobFilterStatus::HardExcluded { .. }) => TreeItemMarkerKind::Red,
-                    Some(JobFilterStatus::ReviewNeeded { .. }) => TreeItemMarkerKind::Yellow,
-                    Some(JobFilterStatus::ManuallyExcluded) => TreeItemMarkerKind::Gray,
-                    Some(JobFilterStatus::ManuallyIncluded) => TreeItemMarkerKind::Blue,
-                    _ => TreeItemMarkerKind::None,
-                };
-            }
+            return match guard.state.job_filter_status(job_id) {
+                Some(JobFilterStatus::HardExcluded { .. }) => TreeItemMarkerKind::Red,
+                Some(JobFilterStatus::ReviewNeeded { .. }) => TreeItemMarkerKind::Yellow,
+                Some(JobFilterStatus::ManuallyExcluded) => TreeItemMarkerKind::Gray,
+                Some(JobFilterStatus::ManuallyIncluded) => TreeItemMarkerKind::Blue,
+                _ => TreeItemMarkerKind::None,
+            };
         }
         if let TreeItemKind::Link { job_id, link_index } = decode_tree_item_id(item_id) {
             let guard = self.shared.lock().unwrap();

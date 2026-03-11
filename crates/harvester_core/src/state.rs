@@ -1744,6 +1744,20 @@ impl AppState {
         })
     }
 
+    pub fn job_filter_status(&self, job_id: JobId) -> Option<JobFilterStatus> {
+        if !matches!(
+            self.pre_triage.phase(),
+            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+        ) {
+            return None;
+        }
+
+        let job = self.jobs.get(&job_id)?;
+        self.pre_triage
+            .entry_for_url(&job.url)
+            .map(map_job_filter_status)
+    }
+
     pub fn set_link_age_estimate(
         &mut self,
         job_id: JobId,
@@ -3794,6 +3808,55 @@ mod tests {
         assert!(content.contains("Triage Assessment"));
         assert!(content.contains("7/10"));
         assert!(content.contains("Test rationale"));
+    }
+
+    #[test]
+    fn job_filter_status_reads_pre_triage_state_without_building_view() {
+        use crate::briefing::LoadedArticle;
+        use crate::pre_triage_filter::PreTriagePolicy;
+
+        let prepared_text = std::iter::repeat_n("useful reporting text", 70)
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let mut state = AppState::new();
+        state.jobs.insert(
+            12,
+            JobState {
+                url: "https://job.example".to_string(),
+                stage: Stage::Done,
+                ..Default::default()
+            },
+        );
+
+        let pre_triage = PreTriageSession::load_articles(
+            vec![LoadedArticle {
+                url: "https://job.example".to_string(),
+                source_title: None,
+                prepared_text: prepared_text.clone(),
+                content_hash: "hash".to_string(),
+                fetched_utc: None,
+            },
+            LoadedArticle {
+                url: "https://job-2.example".to_string(),
+                source_title: None,
+                prepared_text,
+                content_hash: "hash-2".to_string(),
+                fetched_utc: None,
+            }],
+            &PreTriagePolicy::default(),
+        );
+        let key = pre_triage
+            .entry_for_url("https://job.example")
+            .expect("article should produce pre-triage entry")
+            .key
+            .clone();
+        state.set_pre_triage(pre_triage);
+
+        assert_eq!(state.job_filter_status(12), Some(JobFilterStatus::AutoIncluded));
+
+        assert!(state.set_pre_triage_manual_decision(key, ManualDecision::Exclude));
+        assert_eq!(state.job_filter_status(12), Some(JobFilterStatus::ManuallyExcluded));
     }
 
     #[test]
