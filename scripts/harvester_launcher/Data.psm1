@@ -27,8 +27,6 @@ function Get-LauncherParamDefs {
         [pscustomobject]@{ Name='ContextsDir';         Label='Contexts dir';         Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--contexts-dir';              EnumValues=$null }
         [pscustomobject]@{ Name='PromptsDir';          Label='Prompts dir';          Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--prompts-dir';               EnumValues=$null }
         [pscustomobject]@{ Name='ImportSavedWebDir';   Label='Import dir';           Type='Path'; Min=$null; Max=$null; Unit='';   Flag='--import-saved-web-dir';      EnumValues=$null }
-        [pscustomobject]@{ Name='TrustedManualSel';    Label='Trusted manual sel';   Type='Bool'; Min=$null; Max=$null; Unit='';   Flag='--trusted-manual-selection';  EnumValues=$null }
-        [pscustomobject]@{ Name='ImportAction';        Label='Import action';        Type='Enum'; Min=$null; Max=$null; Unit='';   Flag='--import-action';             EnumValues=@('import-only','summaries','briefing') }
     )
 }
 
@@ -43,8 +41,6 @@ function New-LauncherDefaults {
         ContextsDir      = 'contexts'
         PromptsDir       = 'prompts'
         ImportSavedWebDir = ''
-        TrustedManualSel  = $false
-        ImportAction      = 'import-only'
     }
 }
 

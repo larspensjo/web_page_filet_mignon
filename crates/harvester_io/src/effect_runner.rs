@@ -14,7 +14,7 @@ use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
 use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmCommand, LlmHandle, PromptRegistry};
 use harvester_engine::{
-    build_triage_archive, import_saved_webpages, is_confined_to, load_and_prepare_articles_by_path,
+    build_triage_archive, import_saved_webpages, is_confined_to,
     load_and_prepare_articles_filtered, poll_curated_source, poll_file_source,
     scan_archive_article_metadata, EngineConfig, EngineEvent, EngineHandle, ExportOptions,
     FetchSettings, ImportOptions, SourceType, UrlPolicy,
@@ -1121,55 +1121,6 @@ impl EffectRunner {
                 });
             }
 
-            Effect::RunImportedCorpusSummaries {
-                request_id: _,
-                imported_entries,
-            }
-            | Effect::RunImportedCorpusBriefing {
-                request_id: _,
-                imported_entries,
-            } => {
-                let msg_tx = self.msg_tx.clone();
-                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
-                let registry = self.prompt_registry.clone();
-                let paths: Vec<_> = imported_entries
-                    .into_iter()
-                    .map(|e| e.persisted_path)
-                    .collect();
-                thread::spawn(move || {
-                    engine_info!(
-                        "[import-saved-web] loading {} article(s) by path",
-                        paths.len()
-                    );
-                    let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_by_path(&paths, max_input_bytes, &guard) {
-                        Ok((engine_articles, collection_text)) => {
-                            let articles: Vec<LoadedArticle> = engine_articles
-                                .into_iter()
-                                .map(|a| LoadedArticle {
-                                    url: a.url,
-                                    source_title: a.source_title,
-                                    prepared_text: a.prepared_text,
-                                    content_hash: a.content_hash,
-                                    fetched_utc: a.fetched_utc,
-                                })
-                                .collect();
-                            engine_info!(
-                                "[import-saved-web] prepared {} article(s)",
-                                articles.len()
-                            );
-                            let _ = msg_tx.send(harvester_core::Msg::ArticlesLoaded {
-                                articles,
-                                collection_text,
-                            });
-                        }
-                        Err(reason) => {
-                            engine_warn!("[import-saved-web] article load failed: {}", reason);
-                            let _ = msg_tx.send(harvester_core::Msg::ArticlesLoadFailed { reason });
-                        }
-                    }
-                });
-            }
         }
     }
 

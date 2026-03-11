@@ -1,9 +1,9 @@
-use crate::cli::{Args, CheckpointCommand, ImportActionArg};
+use crate::cli::{Args, CheckpointCommand};
 use crate::lock;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    update, AppState, BatchObservation, CompletedJobSnapshot, ImportAction, ImportPhase,
+    update, AppState, BatchObservation, CompletedJobSnapshot, ImportPhase,
     LlmModelUsageView, Msg,
 };
 use harvester_engine::llm::prompt::PromptId;
@@ -419,7 +419,6 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     // Import mode: branch before source loading
     if let Some(import_dir) = &args.import_saved_web_dir {
-        args.validate_import_args()?;
         engine_info!("[batch] Import mode: dir={}", import_dir.display());
         return run_import_mode(&paths, &args, import_dir.clone());
     }
@@ -1010,18 +1009,9 @@ fn run_import_mode(
     }
 
     // Dispatch the import request.
-    let import_action = match args.import_action {
-        ImportActionArg::ImportOnly => ImportAction::ImportOnly,
-        ImportActionArg::Summaries => ImportAction::Summaries,
-        ImportActionArg::Briefing => ImportAction::Briefing,
-    };
     let (new_state, import_effects) = update(
         state,
-        Msg::ImportSavedWebpagesRequested {
-            dir: import_dir,
-            trusted_manual_selection: args.trusted_manual_selection,
-            action: import_action,
-        },
+        Msg::ImportSavedWebpagesRequested { dir: import_dir },
     );
     state = new_state;
     effect_runner.enqueue(import_effects);
@@ -1251,8 +1241,6 @@ mod tests {
             clear_briefing_since: false,
             show_briefing_since: false,
             import_saved_web_dir: None,
-            trusted_manual_selection: false,
-            import_action: crate::cli::ImportActionArg::ImportOnly,
         }
     }
 
@@ -2181,57 +2169,6 @@ mod tests {
             "--single-shot",
         ]);
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn import_action_summaries_requires_trusted_manual_selection() {
-        let args = crate::cli::Args::parse_from(&[
-            "harvester_batch",
-            "--import-saved-web-dir",
-            "/tmp/saved",
-            "--import-action",
-            "summaries",
-        ]);
-        let err = args.validate_import_args().unwrap_err();
-        assert!(err.contains("--trusted-manual-selection"));
-    }
-
-    #[test]
-    fn import_action_briefing_requires_trusted_manual_selection() {
-        let args = crate::cli::Args::parse_from(&[
-            "harvester_batch",
-            "--import-saved-web-dir",
-            "/tmp/saved",
-            "--import-action",
-            "briefing",
-        ]);
-        let err = args.validate_import_args().unwrap_err();
-        assert!(err.contains("--trusted-manual-selection"));
-    }
-
-    #[test]
-    fn import_action_import_only_does_not_require_trusted() {
-        let args = crate::cli::Args::parse_from(&[
-            "harvester_batch",
-            "--import-saved-web-dir",
-            "/tmp/saved",
-            "--import-action",
-            "import-only",
-        ]);
-        assert!(args.validate_import_args().is_ok());
-    }
-
-    #[test]
-    fn import_action_summaries_with_trusted_is_valid() {
-        let args = crate::cli::Args::parse_from(&[
-            "harvester_batch",
-            "--import-saved-web-dir",
-            "/tmp/saved",
-            "--import-action",
-            "summaries",
-            "--trusted-manual-selection",
-        ]);
-        assert!(args.validate_import_args().is_ok());
     }
 
     #[test]

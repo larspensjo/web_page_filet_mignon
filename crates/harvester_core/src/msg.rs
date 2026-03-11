@@ -375,11 +375,7 @@ pub enum Msg {
 
     // --- Import saved webpages ---
     /// Request to import browser-saved .htm/.html files from `dir`.
-    ImportSavedWebpagesRequested {
-        dir: PathBuf,
-        trusted_manual_selection: bool,
-        action: crate::import_session::ImportAction,
-    },
+    ImportSavedWebpagesRequested { dir: PathBuf },
     /// Import batch completed (may include per-file failures).
     ImportSavedWebpagesCompleted {
         request_id: u64,

@@ -4,17 +4,6 @@ use std::path::PathBuf;
 
 use harvester_engine::ImportedArchiveRef;
 
-/// The requested downstream action after a successful import.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ImportAction {
-    /// Persist imported archives only; do not run summaries or briefing.
-    ImportOnly,
-    /// After import, run per-article summaries for the imported corpus.
-    Summaries,
-    /// After import, run an aggregate briefing for the imported corpus.
-    Briefing,
-}
-
 /// Lifecycle phase of an import session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ImportPhase {
@@ -38,10 +27,6 @@ pub struct ImportSessionState {
     pub phase: ImportPhase,
     /// Source directory for the current or most-recently-completed import.
     pub source_dir: Option<PathBuf>,
-    /// Whether trusted manual selection is active (bypasses triage).
-    pub trusted_manual_selection: bool,
-    /// Requested downstream action.
-    pub action: Option<ImportAction>,
     /// Archive refs produced by the authoritative import.
     /// Empty until `ImportSavedWebpagesCompleted` arrives for the current request_id.
     pub imported_entries: Vec<ImportedArchiveRef>,
@@ -61,18 +46,10 @@ pub struct ImportSessionState {
 
 impl ImportSessionState {
     /// Advance to a new authoritative import request.
-    pub fn start_import(
-        &mut self,
-        request_id: u64,
-        source_dir: PathBuf,
-        trusted_manual_selection: bool,
-        action: ImportAction,
-    ) {
+    pub fn start_import(&mut self, request_id: u64, source_dir: PathBuf) {
         self.request_id = request_id;
         self.phase = ImportPhase::Importing;
         self.source_dir = Some(source_dir);
-        self.trusted_manual_selection = trusted_manual_selection;
-        self.action = Some(action);
         self.imported_entries.clear();
         self.imports_completed = 0;
         self.imports_failed = 0;

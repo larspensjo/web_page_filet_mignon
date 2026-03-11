@@ -711,3 +711,10 @@ Evidence: `cargo test` in `src/CommanDuctUI`; `cargo test -p harvester_core job_
 Lessons Learned: Interactive resize regressions can come from ordinary read-only helpers if they are invoked inside native paint loops; the right fix is usually to narrow the hot-path query, not to hide the cost by suspending redraw.
 Prevention: Treat paint and custom-draw callbacks as performance-sensitive APIs, reject `view()` construction or broad collection scans in those paths during review, and validate resize behavior with realistic loaded data instead of empty-state fixtures.
 Refs: crates/harvester_core/src/state.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/render.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/CHANGELOG.md, state::tests::job_filter_status_reads_pre_triage_state_without_building_view
+
+## 2026-03-11 - Remove --import-action and --trusted-manual-selection flags
+Type: Implementation
+Context: The `--import-action` flag (values: `import-only`, `summaries`, `briefing`) and `--trusted-manual-selection` were never used beyond `import-only`. Dead options added cognitive overhead to the CLI and the launcher TUI right-pane.
+Change: Removed both CLI flags and all downstream infrastructure: `ImportActionArg` enum, `ImportAction` core enum, `action`/`trusted_manual_selection` fields from `ImportSessionState` and `Msg::ImportSavedWebpagesRequested`, the trusted-gate and action-dispatch block in the completed-import handler, `RunImportedCorpusSummaries`/`RunImportedCorpusBriefing` effect variants and their runner handlers, and the `TrustedManualSel`/`ImportAction` rows from the PowerShell launcher TUI. Affected crates: harvester_batch, harvester_core, harvester_io, harvester_launcher (PowerShell).
+Evidence: 1012 tests pass; `cargo clippy --all-targets -- -D warnings` clean.
+Refs: crates/harvester_batch/src/cli.rs, crates/harvester_core/src/import_session.rs, crates/harvester_core/src/msg.rs, crates/harvester_core/src/effect.rs, crates/harvester_io/src/effect_runner.rs, scripts/harvester_launcher/Data.psm1, scripts/harvester_launcher/Reducer.psm1

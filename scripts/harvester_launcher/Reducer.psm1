@@ -133,8 +133,6 @@ function Build-CommandArgs {
         if (-not [string]::IsNullOrEmpty($v.ImportSavedWebDir)) {
             $argv.AddRange([string[]]@('--import-saved-web-dir', $v.ImportSavedWebDir))
         }
-        $argv.AddRange([string[]]@('--import-action', $v.ImportAction))
-        if ($v.TrustedManualSel) { $argv.Add('--trusted-manual-selection') }
         if ($v.ForceUnlock)      { $argv.Add('--force-unlock') }
     } else {
         # Normal poll/batch/dry-run mode
