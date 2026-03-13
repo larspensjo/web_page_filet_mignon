@@ -10,6 +10,8 @@ use crate::llm::types::{
     ResponseFormat, TokenUsage,
 };
 
+const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
+
 #[derive(Clone)]
 pub struct OpenAiProvider {
     client: reqwest::Client,
@@ -26,7 +28,6 @@ impl OpenAiProvider {
     }
 
     pub fn new(api_key: String) -> Self {
-        const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
         let client = reqwest::Client::builder()
             .timeout(HTTP_TIMEOUT)
             .build()

@@ -242,7 +242,8 @@ fn parse_response_with_oversized_cached_tokens() {
     let bytes = serde_json::to_vec(&payload).unwrap();
     let response = OpenAiProvider::parse_response_body(&bytes).unwrap();
 
-    // cached_input_tokens must be clamped to prompt_tokens (100)
+    // Clamping is done inside TokenUsage::with_cached_input_tokens, not in the parser;
+    // cached_input_tokens must not exceed prompt_tokens (100)
     assert_eq!(response.usage().cached_input_tokens, 100);
 }
 
