@@ -575,6 +575,117 @@ fn valid_override_cache_hit_records_override_in_metadata() {
 }
 
 // -----------------------------------------------------------------------
+// Retry under concurrency pressure test
+// -----------------------------------------------------------------------
+
+/// Verify that a retry can complete when `max_concurrent_requests - 1` other
+/// permits are occupied by long-running tasks.
+///
+/// The retry loop in `handle.rs` holds the semaphore permit for the entire
+/// task lifetime (including the retry sleep). This test confirms that holding
+/// a permit during the retry sleep does not cause a deadlock even when all
+/// other permits are occupied by blocked tasks.
+#[test]
+fn retry_under_concurrency_pressure() {
+    const CAP: usize = 2;
+    let triage_json = r#"{"category":"news","priority":3,"tags":["t"],"rationale":"ok"}"#;
+
+    // The filler task uses BlockingMockProvider so it stays in-flight until released.
+    let blocker = Arc::new(BlockingMockProvider::new(triage_json));
+    let blocker_trait: Arc<dyn LlmProvider> = blocker.clone();
+
+    // The retryable request uses MockLlmProvider: first returns Timeout, then success.
+    let retryable = Arc::new(MockLlmProvider::new());
+    retryable.queue_response(Err(LlmError::Timeout));
+    retryable.queue_response(Ok(LlmResponse::new(
+        triage_json,
+        TokenUsage::new(0, 0),
+        ModelId::new(ProviderKind::OpenAi, "mock"),
+        FinishReason::Stop,
+    )));
+
+    // Build two handles: one per provider, both sharing the same output dir.
+    let registry = prompt_registry_arc();
+    let dir = tempdir().unwrap();
+
+    let mut blocker_config = make_config(blocker_trait, Arc::clone(&registry), &dir);
+    blocker_config.max_concurrent_requests = CAP;
+    let blocker_handle = LlmHandle::new(blocker_config);
+
+    let provider_trait: Arc<dyn LlmProvider> = retryable.clone();
+    let mut retry_config = make_config(provider_trait, Arc::clone(&registry), &dir);
+    retry_config.max_concurrent_requests = CAP;
+    let retry_handle = LlmHandle::new(retry_config);
+
+    // Fill CAP - 1 = 1 slots of the blocker handle.
+    blocker_handle
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
+            request_id: 100,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: None,
+            input_content: "filler document".to_string(),
+            context: Vec::new(),
+            template_override: None,
+            extra_template_vars: vec![],
+        })))
+        .expect("filler send should succeed");
+
+    // Wait briefly so the filler is actually in-flight (permit acquired).
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert_eq!(
+        blocker.current_in_flight(),
+        CAP - 1,
+        "filler should be in-flight"
+    );
+
+    // Send the retryable request on its own handle (separate semaphore).
+    // This confirms the retry completes even with CAP - 1 other permits occupied.
+    retry_handle
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
+            request_id: 200,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: None,
+            input_content: "retryable document".to_string(),
+            context: Vec::new(),
+            template_override: None,
+            extra_template_vars: vec![],
+        })))
+        .expect("retry send should succeed");
+
+    // Await the retry result with a generous timeout (retry delay is 2 s).
+    let result = retry_handle
+        .event_receiver()
+        .lock()
+        .unwrap()
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("retry should complete within 10 s — possible deadlock");
+
+    match result {
+        LlmEvent::Completed { request_id, result } => {
+            assert_eq!(request_id, 200);
+            assert!(result.is_ok(), "retry should succeed on second attempt");
+        }
+    }
+
+    assert_eq!(
+        retryable.recorded_requests().len(),
+        2,
+        "should have made 2 provider calls (Timeout + retry success)"
+    );
+
+    // Release the filler and drain its event.
+    blocker.release(CAP - 1);
+    blocker_handle
+        .event_receiver()
+        .lock()
+        .unwrap()
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("filler should complete after release");
+}
+
+// -----------------------------------------------------------------------
 // Step 6 — Retry loop tests
 // -----------------------------------------------------------------------
 
