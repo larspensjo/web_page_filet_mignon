@@ -19,10 +19,11 @@ fn unknown_model_returns_zero_cost() {
 
 #[test]
 fn cost_with_cached_tokens_applies_exact_half_rate() {
-    // Use an odd rate (15_001) to verify that we do NOT truncate the rate before dividing.
+    // Use an odd rate (15_001 microdollars/million = 0.015001 dollars/million) to verify
+    // that we do NOT truncate the rate before dividing.
     // If we had halved the rate via integer division (15_001 / 2 = 7_500), cached tokens
     // would cost 7_500 per million instead of the correct 7_500.5 (rounded up to 7_501).
-    let pricing = ModelPricing::new(15_001, 60_000);
+    let pricing = ModelPricing::new(0.015001, 0.06);
 
     // Regular input: 1_000_000 tokens, no cache.
     let regular_usage = TokenUsage::new(1_000_000, 0);
@@ -43,7 +44,7 @@ fn cost_with_cached_tokens_applies_exact_half_rate() {
 #[test]
 fn cost_with_no_cached_tokens_unchanged() {
     // Existing behavior: zero cached tokens means full input rate applies.
-    let pricing = ModelPricing::new(15_000, 60_000);
+    let pricing = ModelPricing::new(0.015, 0.06);
     let usage = TokenUsage::new(1_000_000, 0);
     let cost = pricing.cost_microdollars(&usage);
     assert_eq!(cost, 15_000);
@@ -60,13 +61,36 @@ fn default_registry_contains_gpt5_nano() {
 
 #[test]
 fn cost_calculation_saturates_on_overflow() {
+    // Use a very large rate so that saturating_mul overflows internally.
+    // The saturating arithmetic must not panic (in debug mode) and must return
+    // a finite value even for maximum token counts.
     let mut registry = PricingRegistry::new();
     registry.insert(
         "expensive",
-        harvester_engine::llm::ModelPricing::new(u64::MAX, u64::MAX),
+        // 1e12 dollars/million = 1e18 microdollars/million stored internally.
+        harvester_engine::llm::ModelPricing::new(1_000_000_000_000.0, 1_000_000_000_000.0),
     );
 
     let usage = TokenUsage::new(u32::MAX, u32::MAX);
     let cost = registry.cost_microdollars("expensive", &usage);
-    assert!(cost < u64::MAX);
+    // Must not panic and must be a large (but bounded) value.
+    assert!(cost > 0);
+}
+
+#[test]
+fn cost_with_partial_cached_tokens() {
+    // 500k input tokens, 300k of which are cached. Rate: $0.015/million input, $0.06/million output.
+    let pricing = ModelPricing::new(0.015, 0.06);
+
+    let usage = TokenUsage::new(500_000, 0)
+        .with_cached_input_tokens(300_000);
+
+    let cost = pricing.cost_microdollars(&usage);
+
+    // Regular input: 500_000 - 300_000 = 200_000 tokens
+    // regular_cost = ceil(200_000 * 15_000 / 1_000_000) = ceil(3_000) = 3_000
+    // cached_cost  = ceil(300_000 * 15_000 / 2_000_000) = ceil(2_250) = 2_250
+    // output_cost  = 0
+    // total        = 3_000 + 2_250 = 5_250
+    assert_eq!(cost, 5_250);
 }

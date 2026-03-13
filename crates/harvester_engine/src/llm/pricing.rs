@@ -2,30 +2,33 @@ use std::collections::HashMap;
 
 use crate::llm::types::TokenUsage;
 
-/// Pricing per model in microdollars per 1,000,000 tokens.
+/// Pricing per model; internal fields store microdollars per 1,000,000 tokens.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ModelPricing {
-    pub input_per_million: u64,
-    pub output_per_million: u64,
+    input_per_million: u64,
+    output_per_million: u64,
 }
 
 impl ModelPricing {
-    pub fn new(input_per_million: u64, output_per_million: u64) -> Self {
+    /// Creates a new `ModelPricing` with rates specified in dollars per million tokens.
+    pub fn new(input_dollars_per_million: f64, output_dollars_per_million: f64) -> Self {
         Self {
-            input_per_million,
-            output_per_million,
+            input_per_million: (input_dollars_per_million * 1_000_000.0).round() as u64,
+            output_per_million: (output_dollars_per_million * 1_000_000.0).round() as u64,
         }
     }
 
     pub fn zero() -> Self {
-        Self::new(0, 0)
+        Self::new(0.0, 0.0)
     }
 
     pub fn cost_microdollars(&self, usage: &TokenUsage) -> u64 {
         let regular_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
         let regular_cost = self.cost_component(regular_input, self.input_per_million);
         // Exact 50% discount: ceil(cached * rate / 2_000_000), no rate truncation.
-        let cached_cost = (usage.cached_input_tokens as u64 * self.input_per_million + 1_999_999)
+        let cached_cost = (usage.cached_input_tokens as u64)
+            .saturating_mul(self.input_per_million)
+            .saturating_add(1_999_999)
             / 2_000_000;
         let output_cost = self.cost_component(usage.output_tokens, self.output_per_million);
         regular_cost
@@ -59,12 +62,12 @@ impl PricingRegistry {
 
     pub fn with_defaults() -> Self {
         let mut reg = Self::new();
-        reg.insert("gpt-4o-mini", ModelPricing::new(15_000, 15_000));
-        reg.insert("gpt-4o", ModelPricing::new(50_000, 80_000));
-        reg.insert("gpt-3.5-turbo", ModelPricing::new(6_000, 6_000));
+        reg.insert("gpt-4o-mini", ModelPricing::new(0.015, 0.015));
+        reg.insert("gpt-4o", ModelPricing::new(0.05, 0.08));
+        reg.insert("gpt-3.5-turbo", ModelPricing::new(0.006, 0.006));
         // TODO: replace with published gpt-5-nano rates once the model is available;
         // using gpt-4o-mini rates as a placeholder.
-        reg.insert("gpt-5-nano", ModelPricing::new(15_000, 15_000));
+        reg.insert("gpt-5-nano", ModelPricing::new(0.015, 0.015));
         reg
     }
 
