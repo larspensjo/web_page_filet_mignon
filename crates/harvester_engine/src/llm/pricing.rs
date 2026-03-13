@@ -22,9 +22,15 @@ impl ModelPricing {
     }
 
     pub fn cost_microdollars(&self, usage: &TokenUsage) -> u64 {
-        let input_cost = self.cost_component(usage.input_tokens, self.input_per_million);
+        let regular_input = usage.input_tokens.saturating_sub(usage.cached_input_tokens);
+        let regular_cost = self.cost_component(regular_input, self.input_per_million);
+        // Exact 50% discount: ceil(cached * rate / 2_000_000), no rate truncation.
+        let cached_cost = (usage.cached_input_tokens as u64 * self.input_per_million + 1_999_999)
+            / 2_000_000;
         let output_cost = self.cost_component(usage.output_tokens, self.output_per_million);
-        input_cost.saturating_add(output_cost)
+        regular_cost
+            .saturating_add(cached_cost)
+            .saturating_add(output_cost)
     }
 
     fn cost_component(&self, tokens: u32, per_million: u64) -> u64 {
@@ -56,6 +62,9 @@ impl PricingRegistry {
         reg.insert("gpt-4o-mini", ModelPricing::new(15_000, 15_000));
         reg.insert("gpt-4o", ModelPricing::new(50_000, 80_000));
         reg.insert("gpt-3.5-turbo", ModelPricing::new(6_000, 6_000));
+        // TODO: replace with published gpt-5-nano rates once the model is available;
+        // using gpt-4o-mini rates as a placeholder.
+        reg.insert("gpt-5-nano", ModelPricing::new(15_000, 15_000));
         reg
     }
 
