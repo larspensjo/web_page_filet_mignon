@@ -26,8 +26,9 @@ impl OpenAiProvider {
     }
 
     pub fn new(api_key: String) -> Self {
+        const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
         let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(HTTP_TIMEOUT)
             .build()
             .expect("failed to build OpenAI HTTP client");
 
@@ -96,10 +97,17 @@ impl OpenAiProvider {
             });
         }
 
+        let cached = parsed
+            .usage
+            .prompt_tokens_details
+            .as_ref()
+            .and_then(|d| d.cached_tokens)
+            .unwrap_or(0);
         let usage = TokenUsage::new(
             parsed.usage.prompt_tokens.unwrap_or(0),
             parsed.usage.completion_tokens.unwrap_or(0),
-        );
+        )
+        .with_cached_input_tokens(cached);
         let model_id = ModelId::new(ProviderKind::OpenAi, parsed.model);
 
         Ok(LlmResponse::new(
@@ -309,11 +317,19 @@ pub(crate) struct OpenAiMessage {
 }
 
 #[derive(Deserialize, Default)]
+pub(crate) struct OpenAiPromptTokensDetails {
+    #[serde(default)]
+    cached_tokens: Option<u32>,
+}
+
+#[derive(Deserialize, Default)]
 pub(crate) struct OpenAiUsage {
     #[serde(rename = "prompt_tokens")]
     prompt_tokens: Option<u32>,
     #[serde(rename = "completion_tokens")]
     completion_tokens: Option<u32>,
+    #[serde(default)]
+    prompt_tokens_details: Option<OpenAiPromptTokensDetails>,
 }
 
 #[derive(Deserialize)]

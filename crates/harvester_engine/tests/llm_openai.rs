@@ -180,6 +180,72 @@ async fn integration_round_trip_with_wiremock() {
     assert_eq!(response.usage().output_tokens, 1);
 }
 
+#[test]
+fn parse_response_with_cached_tokens() {
+    let payload = serde_json::json!({
+        "model": "gpt-4.1",
+        "choices": [
+            {
+                "message": { "content": "hello" },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 1000,
+            "completion_tokens": 50,
+            "prompt_tokens_details": { "cached_tokens": 800 }
+        }
+    });
+
+    let bytes = serde_json::to_vec(&payload).unwrap();
+    let response = OpenAiProvider::parse_response_body(&bytes).unwrap();
+
+    assert_eq!(response.usage().cached_input_tokens, 800);
+}
+
+#[test]
+fn parse_response_without_cached_tokens() {
+    let payload = serde_json::json!({
+        "model": "gpt-4.1",
+        "choices": [
+            {
+                "message": { "content": "hello" },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": { "prompt_tokens": 10, "completion_tokens": 5 }
+    });
+
+    let bytes = serde_json::to_vec(&payload).unwrap();
+    let response = OpenAiProvider::parse_response_body(&bytes).unwrap();
+
+    assert_eq!(response.usage().cached_input_tokens, 0);
+}
+
+#[test]
+fn parse_response_with_oversized_cached_tokens() {
+    let payload = serde_json::json!({
+        "model": "gpt-4.1",
+        "choices": [
+            {
+                "message": { "content": "hello" },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "prompt_tokens_details": { "cached_tokens": 9999 }
+        }
+    });
+
+    let bytes = serde_json::to_vec(&payload).unwrap();
+    let response = OpenAiProvider::parse_response_body(&bytes).unwrap();
+
+    // cached_input_tokens must be clamped to prompt_tokens (100)
+    assert_eq!(response.usage().cached_input_tokens, 100);
+}
+
 #[tokio::test]
 #[ignore]
 async fn live_openai_completion() {
