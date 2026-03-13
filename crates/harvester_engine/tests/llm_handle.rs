@@ -5,9 +5,10 @@ use tempfile::tempdir;
 
 use harvester_engine::llm::provider::LlmProvider;
 use harvester_engine::llm::{
-    content_hash, BlockingMockProvider, LlmCommand, LlmCompletionCommand, LlmCompletionError,
-    LlmConfig, LlmEvent, LlmHandle, LlmQuotas, MockLlmProvider, ModelId, PricingRegistry, PromptId,
-    PromptRegistry, ProviderKind, ReplayProvider, ReplayRecord, TokenUsage,
+    content_hash, BlockingMockProvider, FinishReason, LlmCommand, LlmCompletionCommand,
+    LlmCompletionError, LlmConfig, LlmError, LlmEvent, LlmHandle, LlmQuotas, LlmResponse,
+    MockLlmProvider, ModelId, PricingRegistry, PromptId, PromptRegistry, ProviderKind,
+    ReplayProvider, ReplayRecord, TokenUsage,
 };
 
 fn make_config(
@@ -570,5 +571,165 @@ fn valid_override_cache_hit_records_override_in_metadata() {
         provider.recorded_requests().len(),
         0,
         "cache hit must skip provider"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Step 6 — Retry loop tests
+// -----------------------------------------------------------------------
+
+fn make_triage_command(request_id: u64) -> LlmCommand {
+    LlmCommand::Complete(Box::new(LlmCompletionCommand {
+        request_id,
+        prompt_id: PromptId::ArticleTriage,
+        prompt_version: Some(1),
+        model_override: None,
+        input_content: "document text".to_string(),
+        context: vec![],
+        template_override: None,
+        extra_template_vars: vec![],
+    }))
+}
+
+fn valid_triage_response() -> LlmResponse {
+    LlmResponse::new(
+        r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#,
+        TokenUsage::new(10, 5),
+        ModelId::new(ProviderKind::OpenAi, "mock"),
+        FinishReason::Stop,
+    )
+}
+
+#[test]
+fn retry_succeeds_on_transient_timeout() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+
+    // First attempt fails with Timeout, second succeeds.
+    provider.queue_response(Err(LlmError::Timeout));
+    provider.queue_response(Ok(valid_triage_response()));
+
+    let registry = prompt_registry_arc();
+    let dir = tempdir().unwrap();
+    let config = make_config(provider_trait, registry, &dir);
+    let handle = LlmHandle::new(config);
+
+    handle.send(make_triage_command(1)).unwrap();
+
+    match recv_event(&handle) {
+        LlmEvent::Completed { result, .. } => {
+            assert!(result.is_ok(), "should succeed after retry");
+        }
+    }
+
+    assert_eq!(
+        provider.recorded_requests().len(),
+        2,
+        "should have made 2 provider calls (initial + 1 retry)"
+    );
+}
+
+#[test]
+fn retry_exhausted_returns_error() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+
+    // Both attempts fail with Timeout.
+    provider.queue_response(Err(LlmError::Timeout));
+    provider.queue_response(Err(LlmError::Timeout));
+
+    let registry = prompt_registry_arc();
+    let dir = tempdir().unwrap();
+    let config = make_config(provider_trait, registry, &dir);
+    let handle = LlmHandle::new(config);
+
+    handle.send(make_triage_command(2)).unwrap();
+
+    match recv_event(&handle) {
+        LlmEvent::Completed { result, .. } => {
+            assert!(
+                result.is_err(),
+                "should fail after exhausting all attempts"
+            );
+            assert!(
+                matches!(result, Err(LlmCompletionError::ProviderError(LlmError::Timeout))),
+                "should propagate the provider error"
+            );
+        }
+    }
+
+    assert_eq!(
+        provider.recorded_requests().len(),
+        2,
+        "should have made 2 provider calls (both failed)"
+    );
+}
+
+#[test]
+fn no_retry_on_non_transient_error() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+
+    // AuthenticationFailed is not retryable.
+    provider.queue_response(Err(LlmError::AuthenticationFailed));
+
+    let registry = prompt_registry_arc();
+    let dir = tempdir().unwrap();
+    let config = make_config(provider_trait, registry, &dir);
+    let handle = LlmHandle::new(config);
+
+    handle.send(make_triage_command(3)).unwrap();
+
+    match recv_event(&handle) {
+        LlmEvent::Completed { result, .. } => {
+            assert!(result.is_err(), "should fail immediately");
+            assert!(
+                matches!(
+                    result,
+                    Err(LlmCompletionError::ProviderError(
+                        LlmError::AuthenticationFailed
+                    ))
+                ),
+                "should propagate authentication error"
+            );
+        }
+    }
+
+    assert_eq!(
+        provider.recorded_requests().len(),
+        1,
+        "should have made exactly 1 provider call (no retry for non-transient)"
+    );
+}
+
+#[test]
+fn retry_on_http_502() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+
+    // HTTP 502 is retryable; second attempt succeeds.
+    provider.queue_response(Err(LlmError::Http {
+        status: 502,
+        body: "Bad Gateway".to_string(),
+    }));
+    provider.queue_response(Ok(valid_triage_response()));
+
+    let registry = prompt_registry_arc();
+    let dir = tempdir().unwrap();
+    let config = make_config(provider_trait, registry, &dir);
+    let handle = LlmHandle::new(config);
+
+    handle.send(make_triage_command(4)).unwrap();
+
+    match recv_event(&handle) {
+        LlmEvent::Completed { result, .. } => {
+            assert!(result.is_ok(), "should succeed after retrying HTTP 502");
+        }
+    }
+
+    assert_eq!(
+        provider.recorded_requests().len(),
+        2,
+        "should have made 2 provider calls (HTTP 502 retry)"
     );
 }

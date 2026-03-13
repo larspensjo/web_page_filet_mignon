@@ -461,10 +461,10 @@ async fn handle_completion_concurrent(
                     timestamp_utc: record.timestamp_utc.clone(),
                 });
                 engine_info!(
-                    "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=hit_validated",
+                    "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cached_input_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=hit_validated",
                     request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,
                     metadata.input_bytes, metadata.input_tokens, metadata.output_tokens,
-                    metadata.cost_microdollars, metadata.wall_ms
+                    metadata.cached_input_tokens, metadata.cost_microdollars, metadata.wall_ms
                 );
                 let result = LlmCompletionResult {
                     output_json,
@@ -494,7 +494,41 @@ async fn handle_completion_concurrent(
         model.model_name()
     );
 
-    let run_result = config.provider.complete(&request).await;
+    let mut attempt = 1u32;
+    let run_result = loop {
+        match config.provider.complete(&request).await {
+            Ok(resp) => {
+                if attempt > 1 {
+                    engine_info!(
+                        "[llm-retry] request_id={} succeeded on attempt={}",
+                        request_id,
+                        attempt
+                    );
+                }
+                break Ok(resp);
+            }
+            Err(e) if e.is_retryable() && attempt < MAX_ATTEMPTS => {
+                engine_warn!(
+                    "[llm-retry] request_id={} attempt={} error={}",
+                    request_id,
+                    attempt,
+                    e
+                );
+                tokio::time::sleep(RETRY_DELAY).await;
+                attempt += 1;
+            }
+            Err(e) => {
+                if attempt > 1 {
+                    engine_warn!(
+                        "[llm-retry] request_id={} exhausted after {} attempts",
+                        request_id,
+                        attempt
+                    );
+                }
+                break Err(e);
+            }
+        }
+    };
     let wall_ms = start_at.elapsed().as_millis() as u64;
 
     if let Err(err) = run_result {
@@ -652,7 +686,7 @@ async fn handle_completion_concurrent(
                 input_bytes,
                 input_tokens: usage.input_tokens,
                 output_tokens: usage.output_tokens,
-                cached_input_tokens: 0,
+                cached_input_tokens: usage.cached_input_tokens,
                 cost_microdollars: cost,
                 wall_ms,
                 parse_ok: true,
@@ -661,10 +695,10 @@ async fn handle_completion_concurrent(
                 timestamp_utc: timestamp_utc.clone(),
             });
             engine_info!(
-                "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=miss",
+                "[llm-run] request_id={} prompt_id={:?} version={} model={} input_bytes={} input_tokens={} output_tokens={} cached_input_tokens={} cost_microdollars={} wall_ms={} parse_ok=true cache_status=miss",
                 request_id, metadata.prompt_id, metadata.prompt_version, metadata.resolved_model,
                 metadata.input_bytes, metadata.input_tokens, metadata.output_tokens,
-                metadata.cost_microdollars, metadata.wall_ms
+                metadata.cached_input_tokens, metadata.cost_microdollars, metadata.wall_ms
             );
 
             let result = LlmCompletionResult {
@@ -979,6 +1013,8 @@ fn provider_kind_to_str(kind: ProviderKind) -> &'static str {
 
 const LLM_TASK_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 const LLM_RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_ATTEMPTS: u32 = 2; // 1 initial + 1 retry
+const RETRY_DELAY: Duration = Duration::from_secs(2);
 
 #[cfg(test)]
 mod tests {
