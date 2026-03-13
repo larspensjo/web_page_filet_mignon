@@ -452,7 +452,7 @@ async fn handle_completion_concurrent(
                     input_bytes,
                     input_tokens: record.usage.input_tokens,
                     output_tokens: record.usage.output_tokens,
-                    cached_input_tokens: 0,
+                    cached_input_tokens: record.usage.cached_input_tokens,
                     cost_microdollars: record.cost_microdollars,
                     wall_ms,
                     parse_ok: true,
