@@ -1,7 +1,7 @@
 //! Harvester engine: IO pipeline and effect execution.
-pub mod content_extraction;
 mod blocker_page;
 pub mod briefing;
+pub mod content_extraction;
 pub mod content_prep;
 mod convert;
 mod decode;
@@ -77,8 +77,8 @@ pub use rss_parse::{parse_feed_content, FeedEntry, FeedParseError, RssPollItem};
 pub use rss_seen_set::RssSeenSet;
 
 pub use content_extraction::{
-    BlockDropCounts, CandidateKind, ExtractionDiagnostics, ExtractionOutcome, ExtractionPolicy,
-    ExtractedArticle, ExtractionPipeline,
+    BlockDropCounts, CandidateKind, ExtractedArticle, ExtractionDiagnostics, ExtractionOutcome,
+    ExtractionPipeline, ExtractionPolicy,
 };
 
 pub use content_prep::{

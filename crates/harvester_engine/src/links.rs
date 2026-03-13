@@ -201,7 +201,10 @@ impl LinkExtractingConverter {
     ) {
         let tag = element.value().name().to_ascii_lowercase();
         // Always skip scripting/presentation tags regardless of prune policy.
-        if matches!(tag.as_str(), "script" | "style" | "noscript" | "iframe" | "template") {
+        if matches!(
+            tag.as_str(),
+            "script" | "style" | "noscript" | "iframe" | "template"
+        ) {
             stats.total_pruned += 1;
             return;
         }

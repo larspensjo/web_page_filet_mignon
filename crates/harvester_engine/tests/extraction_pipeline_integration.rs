@@ -26,7 +26,10 @@ fn clean_article_content_preserved() {
     let result = make_pipeline().extract(html, Some("https://example.com/memo"));
 
     // Core content preserved
-    assert!(result.markdown.contains("Third Quarter"), "headline missing");
+    assert!(
+        result.markdown.contains("Third Quarter"),
+        "headline missing"
+    );
     assert!(
         result.markdown.contains("Global equity markets"),
         "first paragraph missing"
@@ -133,7 +136,10 @@ fn newsletter_signup_block_removed_by_dom_prune() {
 
     // Newsletter block removed by DOM attribute prune (class token "newsletter"/"signup")
     assert!(
-        !result.markdown.to_lowercase().contains("sign up for our newsletter"),
+        !result
+            .markdown
+            .to_lowercase()
+            .contains("sign up for our newsletter"),
         "newsletter block should have been removed by DOM prune"
     );
 
@@ -250,7 +256,10 @@ fn diagnostics_are_populated_consistently() {
     // Diagnostics should be populated
     let diag = &result.diagnostics;
     assert!(diag.original_html_bytes > 0, "original_html_bytes not set");
-    assert!(diag.final_markdown_bytes > 0, "final_markdown_bytes not set");
+    assert!(
+        diag.final_markdown_bytes > 0,
+        "final_markdown_bytes not set"
+    );
     assert!(diag.candidate_kind.is_some(), "candidate_kind not set");
     assert!(diag.candidate_score.is_some(), "candidate_score not set");
     assert!(diag.outcome.is_some(), "outcome not set");
@@ -258,11 +267,7 @@ fn diagnostics_are_populated_consistently() {
     // Retention ratio is reasonable
     if let Some(ratio) = diag.retention_ratio {
         assert!(ratio > 0.0, "retention_ratio should be positive");
-        assert!(
-            ratio <= 2.0,
-            "retention_ratio too high: {}",
-            ratio
-        ); // pre-cleanup to post shouldn't more than double
+        assert!(ratio <= 2.0, "retention_ratio too high: {}", ratio); // pre-cleanup to post shouldn't more than double
     }
 
     // original_html_bytes matches input

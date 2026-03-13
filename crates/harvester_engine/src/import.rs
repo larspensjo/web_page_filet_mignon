@@ -13,10 +13,10 @@ use engine_logging::{engine_info, engine_warn};
 use scraper::{Html, Selector};
 use serde_json::Value;
 
+use crate::content_extraction::{ExtractionPipeline, ExtractionPolicy};
 use crate::content_prep::{
     derive_clean_text, BoilerplatePolicy, ContentPrepConfig, NormalizationPolicy,
 };
-use crate::content_extraction::{ExtractionPipeline, ExtractionPolicy};
 use crate::decode::decode_html;
 use crate::filename::{import_filename_base, resolve_non_overwriting_filename};
 use crate::frontmatter::{build_imported_markdown_document, ImportedFrontmatterFields};

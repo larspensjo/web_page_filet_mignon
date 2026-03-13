@@ -3830,20 +3830,22 @@ mod tests {
         );
 
         let pre_triage = PreTriageSession::load_articles(
-            vec![LoadedArticle {
-                url: "https://job.example".to_string(),
-                source_title: None,
-                prepared_text: prepared_text.clone(),
-                content_hash: "hash".to_string(),
-                fetched_utc: None,
-            },
-            LoadedArticle {
-                url: "https://job-2.example".to_string(),
-                source_title: None,
-                prepared_text,
-                content_hash: "hash-2".to_string(),
-                fetched_utc: None,
-            }],
+            vec![
+                LoadedArticle {
+                    url: "https://job.example".to_string(),
+                    source_title: None,
+                    prepared_text: prepared_text.clone(),
+                    content_hash: "hash".to_string(),
+                    fetched_utc: None,
+                },
+                LoadedArticle {
+                    url: "https://job-2.example".to_string(),
+                    source_title: None,
+                    prepared_text,
+                    content_hash: "hash-2".to_string(),
+                    fetched_utc: None,
+                },
+            ],
             &PreTriagePolicy::default(),
         );
         let key = pre_triage
@@ -3853,10 +3855,16 @@ mod tests {
             .clone();
         state.set_pre_triage(pre_triage);
 
-        assert_eq!(state.job_filter_status(12), Some(JobFilterStatus::AutoIncluded));
+        assert_eq!(
+            state.job_filter_status(12),
+            Some(JobFilterStatus::AutoIncluded)
+        );
 
         assert!(state.set_pre_triage_manual_decision(key, ManualDecision::Exclude));
-        assert_eq!(state.job_filter_status(12), Some(JobFilterStatus::ManuallyExcluded));
+        assert_eq!(
+            state.job_filter_status(12),
+            Some(JobFilterStatus::ManuallyExcluded)
+        );
     }
 
     #[test]

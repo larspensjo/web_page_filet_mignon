@@ -9,7 +9,10 @@ pub struct BlockDropCounts {
 
 impl BlockDropCounts {
     pub fn total(&self) -> usize {
-        self.css_blocks + self.script_payloads + self.subscription_blocks + self.recirculation_blocks
+        self.css_blocks
+            + self.script_payloads
+            + self.subscription_blocks
+            + self.recirculation_blocks
     }
 }
 

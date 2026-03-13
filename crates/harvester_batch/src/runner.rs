@@ -3,8 +3,7 @@ use crate::lock;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    update, AppState, BatchObservation, CompletedJobSnapshot, ImportPhase,
-    LlmModelUsageView, Msg,
+    update, AppState, BatchObservation, CompletedJobSnapshot, ImportPhase, LlmModelUsageView, Msg,
 };
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
@@ -1009,10 +1008,8 @@ fn run_import_mode(
     }
 
     // Dispatch the import request.
-    let (new_state, import_effects) = update(
-        state,
-        Msg::ImportSavedWebpagesRequested { dir: import_dir },
-    );
+    let (new_state, import_effects) =
+        update(state, Msg::ImportSavedWebpagesRequested { dir: import_dir });
     state = new_state;
     effect_runner.enqueue(import_effects);
 

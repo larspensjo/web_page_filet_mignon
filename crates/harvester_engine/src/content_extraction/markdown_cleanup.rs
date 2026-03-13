@@ -3,7 +3,10 @@ use crate::content_extraction::policy::MarkdownCleanupPolicy;
 
 /// Clean up a markdown string by dropping blocks that match noise patterns.
 /// Returns (cleaned_markdown, per_reason_drop_counts).
-pub fn cleanup_markdown(markdown: &str, policy: &MarkdownCleanupPolicy) -> (String, BlockDropCounts) {
+pub fn cleanup_markdown(
+    markdown: &str,
+    policy: &MarkdownCleanupPolicy,
+) -> (String, BlockDropCounts) {
     let blocks: Vec<&str> = markdown.split("\n\n").collect();
     let mut kept = Vec::with_capacity(blocks.len());
     let mut counts = BlockDropCounts::default();
@@ -15,7 +18,8 @@ pub fn cleanup_markdown(markdown: &str, policy: &MarkdownCleanupPolicy) -> (Stri
             counts.script_payloads += 1;
         } else if policy.drop_subscription_blocks && looks_like_subscription_block(block) {
             counts.subscription_blocks += 1;
-        } else if policy.drop_recirculation_blocks && looks_like_recirculation_block(block, policy) {
+        } else if policy.drop_recirculation_blocks && looks_like_recirculation_block(block, policy)
+        {
             counts.recirculation_blocks += 1;
         } else {
             kept.push(block);
@@ -39,9 +43,7 @@ fn looks_like_css_block(block: &str) -> bool {
 }
 
 fn looks_like_script_payload(block: &str) -> bool {
-    if block.contains("__NEXT_DATA__")
-        || block.contains("window.__")
-        || block.contains("hydration")
+    if block.contains("__NEXT_DATA__") || block.contains("window.__") || block.contains("hydration")
     {
         return true;
     }
@@ -116,9 +118,7 @@ mod tests {
         // Payload must be 500+ chars with 3+ "": sequences to pass the tighter heuristic
         let json_blob = format!(
             "Normal intro.\n\n{}\n\nNormal outro.",
-            "{".to_owned()
-                + &"\"key\": \"value\", ".repeat(32)
-                + "\"end\": true}"
+            "{".to_owned() + &"\"key\": \"value\", ".repeat(32) + "\"end\": true}"
         );
         let (result, counts) = cleanup_markdown(&json_blob, &all_enabled());
         assert_eq!(counts.script_payloads, 1);

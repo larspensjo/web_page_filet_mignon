@@ -11,7 +11,10 @@ pub struct CandidateInfo {
 type CandidateSpec = (&'static str, fn(&str) -> CandidateKind, f64);
 
 /// Score and select the best article container from the document.
-pub fn select_candidate<'a>(doc: &'a Html, policy: &CandidatePolicy) -> (ElementRef<'a>, CandidateInfo) {
+pub fn select_candidate<'a>(
+    doc: &'a Html,
+    policy: &CandidatePolicy,
+) -> (ElementRef<'a>, CandidateInfo) {
     // These compile once per extraction; cost is negligible vs. DOM traversal
     let para_sel = Selector::parse("p").expect("valid selector");
     let a_sel = Selector::parse("a").expect("valid selector");
@@ -20,12 +23,36 @@ pub fn select_candidate<'a>(doc: &'a Html, policy: &CandidatePolicy) -> (Element
         ("article", |_| CandidateKind::Article, 2.0),
         ("main", |_| CandidateKind::Main, 1.8),
         ("[role=main]", |_| CandidateKind::RoleMain, 1.8),
-        (".article-body", |s| CandidateKind::ContentClass(s.into()), 1.3),
-        (".entry-content", |s| CandidateKind::ContentClass(s.into()), 1.3),
-        (".post-content", |s| CandidateKind::ContentClass(s.into()), 1.3),
-        (".story-body", |s| CandidateKind::ContentClass(s.into()), 1.3),
-        (".article-content", |s| CandidateKind::ContentClass(s.into()), 1.3),
-        (".article__body", |s| CandidateKind::ContentClass(s.into()), 1.3),
+        (
+            ".article-body",
+            |s| CandidateKind::ContentClass(s.into()),
+            1.3,
+        ),
+        (
+            ".entry-content",
+            |s| CandidateKind::ContentClass(s.into()),
+            1.3,
+        ),
+        (
+            ".post-content",
+            |s| CandidateKind::ContentClass(s.into()),
+            1.3,
+        ),
+        (
+            ".story-body",
+            |s| CandidateKind::ContentClass(s.into()),
+            1.3,
+        ),
+        (
+            ".article-content",
+            |s| CandidateKind::ContentClass(s.into()),
+            1.3,
+        ),
+        (
+            ".article__body",
+            |s| CandidateKind::ContentClass(s.into()),
+            1.3,
+        ),
         (".post-body", |s| CandidateKind::ContentClass(s.into()), 1.3),
     ];
 
@@ -67,7 +94,9 @@ pub fn select_candidate<'a>(doc: &'a Html, policy: &CandidatePolicy) -> (Element
             // semantic_bonus prefers specific containers (article, main) over generic ones (body)
             let score = text_score * para_bonus * link_penalty * semantic_bonus;
 
-            let is_better = best_info.as_ref().is_none_or(|b: &CandidateInfo| score > b.score);
+            let is_better = best_info
+                .as_ref()
+                .is_none_or(|b: &CandidateInfo| score > b.score);
             if is_better {
                 best_element = Some(element);
                 best_info = Some(CandidateInfo {
@@ -86,9 +115,21 @@ pub fn select_candidate<'a>(doc: &'a Html, policy: &CandidatePolicy) -> (Element
     // Fall back to body, or the virtual root if the document has no <body> element.
     // This is the ultimate fallback — score 0.0 signals no meaningful candidate was found.
     if let Some(body) = doc.select(&body_sel).next() {
-        return (body, CandidateInfo { kind: CandidateKind::Body, score: 0.0 });
+        return (
+            body,
+            CandidateInfo {
+                kind: CandidateKind::Body,
+                score: 0.0,
+            },
+        );
     }
-    (doc.root_element(), CandidateInfo { kind: CandidateKind::Body, score: 0.0 })
+    (
+        doc.root_element(),
+        CandidateInfo {
+            kind: CandidateKind::Body,
+            score: 0.0,
+        },
+    )
 }
 
 fn count_text_chars(element: ElementRef<'_>) -> usize {
@@ -136,18 +177,22 @@ mod tests {
     fn high_link_density_element_gets_penalized() {
         let link_text = r##"<a href="#">link</a> "##.repeat(60);
         let plain_text = "Some real content here. ".repeat(5);
-        let html = format!(
-            "<html><body><article><p>{plain_text}</p>{link_text}</article></body></html>"
-        );
+        let html =
+            format!("<html><body><article><p>{plain_text}</p>{link_text}</article></body></html>");
         let doc = Html::parse_document(&html);
         let (_, info) = select_candidate(&doc, &policy());
         // Article is selected but the score is penalized
-        assert!(matches!(info.kind, CandidateKind::Article | CandidateKind::Body));
+        assert!(matches!(
+            info.kind,
+            CandidateKind::Article | CandidateKind::Body
+        ));
         // With link_penalty=0.3, para_bonus≈1.0 (0 paragraphs gives 1.0), semantic_bonus=2.0,
         // the penalized score should be roughly 0.3 * 2.0 * total_chars = 0.6 * total_chars,
         // which is well below total_chars itself.
         let total_chars = count_text_chars(
-            doc.select(&Selector::parse("article").unwrap()).next().unwrap()
+            doc.select(&Selector::parse("article").unwrap())
+                .next()
+                .unwrap(),
         );
         assert!(info.score < total_chars as f64);
     }

@@ -5744,7 +5744,10 @@ mod import_tests {
         );
         assert_eq!(state.import_session.phase, ImportPhase::Complete);
         assert_eq!(state.import_session.imports_completed, 2);
-        assert!(effects.is_empty(), "import completion must emit no downstream work");
+        assert!(
+            effects.is_empty(),
+            "import completion must emit no downstream work"
+        );
     }
 
     #[test]
@@ -5864,5 +5867,4 @@ mod import_tests {
         assert_eq!(state.import_session.phase, ImportPhase::Idle);
         assert!(state.import_session.source_dir.is_none());
     }
-
 }
