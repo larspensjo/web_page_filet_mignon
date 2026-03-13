@@ -90,6 +90,10 @@ pub enum FinishReason {
 pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Portion of `input_tokens` served from the provider's prompt cache.
+    /// Always <= `input_tokens`; zero when the provider does not report cache hits.
+    #[serde(default)]
+    pub cached_input_tokens: u32,
 }
 
 impl TokenUsage {
@@ -97,7 +101,15 @@ impl TokenUsage {
         Self {
             input_tokens,
             output_tokens,
+            cached_input_tokens: 0,
         }
+    }
+
+    /// Builder that sets `cached_input_tokens`, clamping the value to `input_tokens`
+    /// so that the invariant `cached_input_tokens <= input_tokens` always holds.
+    pub fn with_cached_input_tokens(mut self, cached: u32) -> Self {
+        self.cached_input_tokens = cached.min(self.input_tokens);
+        self
     }
 
     pub fn total(&self) -> u32 {
@@ -237,4 +249,26 @@ pub enum LlmError {
 
     #[error("content filtered by provider policy")]
     ContentFiltered,
+}
+
+impl LlmError {
+    /// Returns `true` when the error is transient and the request may be retried.
+    ///
+    /// Retryable: `Timeout`, `Network`, and `Http` with status 500/502/503/504.
+    /// Non-retryable: `AuthenticationFailed`, `RateLimited`, `QuotaExhausted`,
+    /// `Configuration`, `InvalidResponse`, `ContentFiltered`.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            LlmError::Timeout | LlmError::Network { .. } => true,
+            LlmError::Http { status, .. } => {
+                matches!(status, 500 | 502 | 503 | 504)
+            }
+            LlmError::RateLimited { .. }
+            | LlmError::AuthenticationFailed
+            | LlmError::InvalidResponse { .. }
+            | LlmError::QuotaExhausted { .. }
+            | LlmError::Configuration { .. }
+            | LlmError::ContentFiltered => false,
+        }
+    }
 }
