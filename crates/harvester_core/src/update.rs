@@ -2703,6 +2703,7 @@ mod tests {
             input_bytes: 100,
             input_tokens,
             output_tokens,
+            cached_input_tokens: 0,
             cost_microdollars: 0,
             wall_ms: 10,
             parse_ok: true,

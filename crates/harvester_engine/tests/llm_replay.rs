@@ -2,6 +2,7 @@ use harvester_engine::llm::{
     content_hash, load_replay_record, persist_replay_record, PromptId, ReplayProvider,
     ReplayRecord, TokenUsage,
 };
+use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -68,6 +69,27 @@ fn persist_appends_suffix_when_collision() {
     assert_ne!(first, second);
     assert!(first.exists());
     assert!(second.exists());
+}
+
+#[test]
+fn llm_run_metadata_old_artifact_cached_input_tokens_defaults_to_zero() {
+    // JSON without `cached_input_tokens` (pre-Step-5 artifact format).
+    let json = r#"{
+        "prompt_id": "ArticleTriage",
+        "prompt_version": 1,
+        "resolved_model": "gpt-4o-mini",
+        "input_bytes": 100,
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "cost_microdollars": 300,
+        "wall_ms": 50,
+        "parse_ok": true,
+        "validation_error": null,
+        "cache_status": "miss",
+        "timestamp_utc": "2026-01-01T00:00:00Z"
+    }"#;
+    let metadata: LlmRunMetadata = serde_json::from_str(json).expect("should deserialize");
+    assert_eq!(metadata.cached_input_tokens, 0);
 }
 
 #[test]

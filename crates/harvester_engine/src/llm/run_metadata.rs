@@ -41,6 +41,10 @@ pub struct LlmRunMetadata {
     pub input_bytes: usize,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Number of input tokens served from the provider's prompt cache.
+    /// Zero when the provider does not support caching or the cache was not hit.
+    #[serde(default)]
+    pub cached_input_tokens: u32,
     /// Cost in microdollars (1 USD = 1,000,000 µ$).
     pub cost_microdollars: u64,
     /// Measured wall time in milliseconds covering the full request span.
@@ -63,6 +67,7 @@ pub struct LlmRunMetadataInit {
     pub input_bytes: usize,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    pub cached_input_tokens: u32,
     pub cost_microdollars: u64,
     pub wall_ms: u64,
     pub parse_ok: bool,
@@ -81,6 +86,7 @@ impl LlmRunMetadata {
             input_bytes: init.input_bytes,
             input_tokens: init.input_tokens,
             output_tokens: init.output_tokens,
+            cached_input_tokens: init.cached_input_tokens,
             cost_microdollars: init.cost_microdollars,
             wall_ms: init.wall_ms,
             parse_ok: init.parse_ok,
@@ -99,6 +105,7 @@ impl LlmRunMetadata {
             input_bytes: 100,
             input_tokens: 10,
             output_tokens: 20,
+            cached_input_tokens: 0,
             cost_microdollars: 300,
             wall_ms: 50,
             parse_ok: true,
@@ -158,6 +165,7 @@ impl From<LlmFailureMetadata> for LlmRunMetadata {
             input_bytes: f.input_bytes,
             input_tokens: 0,
             output_tokens: 0,
+            cached_input_tokens: 0,
             cost_microdollars: 0,
             wall_ms: f.wall_ms.unwrap_or(0),
             parse_ok: false,
