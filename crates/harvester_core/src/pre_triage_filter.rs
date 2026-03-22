@@ -351,6 +351,22 @@ impl PreTriageSession {
         *self = Self::default();
     }
 
+    /// Construct a session that is directly in `ReadyToTriage` phase with no entries.
+    ///
+    /// This state is unreachable via normal transitions (the phase derivation logic
+    /// transitions to `Failed` when the resolved included URL set is empty). This
+    /// constructor exists solely to exercise the defensive guard in `working_corpus`
+    /// that prevents mis-classification if state is ever constructed directly in tests.
+    #[cfg(test)]
+    pub fn ready_to_triage_empty_for_test() -> Self {
+        Self {
+            phase: PreTriagePhase::ReadyToTriage,
+            entries: Vec::new(),
+            job_key_by_id: HashMap::new(),
+            loaded_by_url: HashMap::new(),
+        }
+    }
+
     fn derive_phase_after_load(&self) -> PreTriagePhase {
         if self.entries.is_empty() {
             return PreTriagePhase::Failed {

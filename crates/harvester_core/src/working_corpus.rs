@@ -443,6 +443,32 @@ mod tests {
         assert!(corpus.is_empty());
     }
 
+    // -----------------------------------------------------------------------------------------
+    // Test: ready pre-triage but empty resolved URLs → Unavailable (defensive guard)
+    // -----------------------------------------------------------------------------------------
+    #[test]
+    fn ready_pre_triage_empty_urls_yields_unavailable() {
+        init_logging();
+        // NOTE: `ReadyToTriage` with zero included URLs is unreachable via normal transitions —
+        // `derive_phase_after_load` and `set_manual_decision` both transition to `Failed` when
+        // the resolved set is empty.  The test-only constructor bypasses that invariant to
+        // exercise the defensive guard at working_corpus.rs lines 64–70.
+        let pre_triage = PreTriageSession::ready_to_triage_empty_for_test();
+        assert_eq!(pre_triage.phase(), &PreTriagePhase::ReadyToTriage);
+
+        let triage = complete_triage(&["https://t.com"], 5);
+
+        let corpus = CurrentWorkingCorpus::select(&pre_triage, &triage, default_policy());
+
+        assert_eq!(
+            corpus.source(),
+            CurrentWorkingCorpusSource::Unavailable,
+            "ReadyToTriage with empty resolved URLs must yield Unavailable, not fall through to triage"
+        );
+        assert!(corpus.is_empty());
+        assert!(!corpus.is_ready_for_actions());
+    }
+
     #[test]
     fn triage_complete_but_all_below_cutoff_yields_unavailable() {
         init_logging();
