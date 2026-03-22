@@ -42,6 +42,14 @@ fn is_safe_archive_basename(name: &str) -> bool {
     !std::path::Path::new(name).is_absolute()
 }
 
+fn archive_ordered_urls(state: &AppState) -> Vec<String> {
+    let ready_pre_triage_urls = state.pre_triage().resolved_included_urls();
+    if !ready_pre_triage_urls.is_empty() {
+        return ready_pre_triage_urls;
+    }
+    state.briefing_triage_policy().eligible_urls(state.triage())
+}
+
 /// Pure update function: applies a message to state and returns any effects.
 #[allow(
     clippy::too_many_lines,
@@ -96,8 +104,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::ArchiveClicked => {
             let request_id = state.allocate_next_archive_request_id();
-            let policy = state.briefing_triage_policy();
-            let ordered_urls = policy.eligible_urls(state.triage());
+            let ordered_urls = archive_ordered_urls(&state);
             let article_count = ordered_urls.len();
             let since_utc = state.briefing_since_utc();
             vec![Effect::OpenArchiveDialog {
@@ -903,7 +910,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 );
                 return (state, Vec::new());
             }
-            let ordered_urls = state.briefing_triage_policy().eligible_urls(state.triage());
+            let ordered_urls = archive_ordered_urls(&state);
             let since_utc = state.briefing_since_utc();
             let requested_checkpoint = set_checkpoint.then_some(submitted_at);
             vec![Effect::ArchiveRequested {
@@ -5332,6 +5339,24 @@ mod tests {
     }
 
     #[test]
+    fn archive_clicked_uses_ready_pre_triage_urls_for_article_count() {
+        init_logging();
+        let state = ready_pre_triage_state(&["https://example.com/1"]);
+        let (state, effects) = update(state, Msg::ArchiveClicked);
+        assert_eq!(state.archive_request_id(), 1);
+        let effect = effects
+            .into_iter()
+            .find(|effect| matches!(effect, Effect::OpenArchiveDialog { .. }))
+            .expect("OpenArchiveDialog effect expected");
+        match effect {
+            Effect::OpenArchiveDialog { article_count, .. } => {
+                assert_eq!(article_count, 1);
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
     fn archive_dialog_ready_ignores_stale_request() {
         init_logging();
         let state = AppState::new();
@@ -5428,6 +5453,44 @@ mod tests {
                 assert_eq!(ordered_urls.len(), 0);
                 assert!(since_utc.is_none());
                 assert_eq!(requested_checkpoint, Some(since));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn archive_dialog_submitted_uses_ready_pre_triage_urls() {
+        init_logging();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let state = ready_pre_triage_state(&["https://example.com/1"]);
+        let (state, _) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+
+        let (_state, effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".to_string(),
+                set_checkpoint: false,
+                submitted_at: since,
+            },
+        );
+        let effect = effects
+            .into_iter()
+            .find(|effect| matches!(effect, Effect::ArchiveRequested { .. }))
+            .expect("ArchiveRequested effect expected");
+        match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                since_utc,
+                requested_checkpoint,
+                ..
+            } => {
+                assert_eq!(ordered_urls, vec!["https://example.com/1".to_string()]);
+                assert!(since_utc.is_none());
+                assert_eq!(requested_checkpoint, None);
             }
             _ => unreachable!(),
         }
@@ -5532,6 +5595,40 @@ mod tests {
         } else {
             state
         }
+    }
+
+    fn loaded_pre_triage_articles(urls: &[&str]) -> Vec<LoadedArticle> {
+        urls.iter()
+            .map(|url| LoadedArticle {
+                url: (*url).to_string(),
+                source_title: None,
+                prepared_text: std::iter::repeat_n("pre-triage-content", 220)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                content_hash: format!("hash-{url}"),
+                fetched_utc: None,
+            })
+            .collect()
+    }
+
+    fn ready_pre_triage_state(urls: &[&str]) -> AppState {
+        let mut state = AppState::new();
+        for url in urls {
+            state = add_completed_job_for_test(state, url);
+        }
+        let (state, request_id) = tick_until_dispatch(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles: loaded_pre_triage_articles(urls),
+            },
+        );
+        assert!(matches!(
+            state.pre_triage().phase(),
+            crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
+        ));
+        state
     }
 
     // ── Pre-triage refresh coordinator: Slice 1+2 tests ──────────────────────
