@@ -865,6 +865,16 @@ impl AppState {
         self.pinned_archive_corpus.as_ref()
     }
 
+    /// Clears the pinned corpus after the archive dialog session ends (submit, export
+    /// completion, or export failure).
+    ///
+    /// Note: there is no `ArchiveCancelled` message dispatched when the user cancels the
+    /// dialog (the UI returns early without dispatching), so we cannot clear on cancel.
+    /// A subsequent `ArchiveClicked` will naturally overwrite the pin.
+    pub fn clear_pinned_archive_corpus(&mut self) {
+        self.pinned_archive_corpus = None;
+    }
+
     /// Records LLM token usage from a completed run.
     /// Only CacheStatus::Miss runs are counted; empty or whitespace-only model names are ignored.
     pub fn record_llm_usage_from_metadata(&mut self, metadata: &LlmRunMetadata) {

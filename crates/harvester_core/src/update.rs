@@ -914,14 +914,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let (ordered_urls, fingerprint) = match pinned {
                 Some(corpus) => (corpus.ordered_urls().to_vec(), corpus.fingerprint()),
                 None => {
+                    // Unreachable in normal operation: ArchiveClicked always precedes
+                    // ArchiveDialogSubmitted.  Guard defensively rather than emit an empty
+                    // archive file to disk.
                     engine_warn!(
                         "[archive-dialog] no pinned corpus at submit time request_id={}; \
-                         emitting empty export",
+                         dropping submit",
                         request_id
                     );
-                    (Vec::new(), 0)
+                    return (state, Vec::new());
                 }
             };
+            state.clear_pinned_archive_corpus();
             engine_info!(
                 "[working-corpus] archive submitted request_id={} article_count={} fingerprint={:x}",
                 request_id,
@@ -946,6 +950,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if request_id != state.archive_request_id() {
                 return (state, Vec::new());
             }
+            // Clear any residual pin (idempotent — normally already cleared at submit time).
+            state.clear_pinned_archive_corpus();
             if let Some(checkpoint) = requested_checkpoint {
                 vec![Effect::SaveBriefingCheckpoint {
                     since_utc: Some(checkpoint),
@@ -968,6 +974,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 basename,
                 reason
             );
+            // Clear any residual pin (idempotent — normally already cleared at submit time).
+            state.clear_pinned_archive_corpus();
             Vec::new()
         }
         Msg::ArticlesLoaded {
