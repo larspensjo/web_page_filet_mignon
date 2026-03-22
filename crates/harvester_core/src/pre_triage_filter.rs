@@ -319,6 +319,16 @@ impl PreTriageSession {
         self.resolved_included_urls_internal()
     }
 
+    /// Returns the URLs that would be included based on current auto-verdicts and manual
+    /// decisions, without requiring the session to be in `ReadyToTriage` phase.
+    ///
+    /// Used during the `Reviewing` phase to show a provisional corpus before all review
+    /// items are settled. Manual decisions override auto-verdicts; `HardExclude` auto-verdicts
+    /// without a manual override are excluded; everything else is tentatively included.
+    pub(crate) fn tentative_included_urls(&self) -> Vec<String> {
+        self.resolved_included_urls_internal()
+    }
+
     pub fn resolved_included_articles(&self) -> Vec<LoadedArticle> {
         self.resolved_included_urls_internal()
             .into_iter()
@@ -442,7 +452,7 @@ fn markdown_link_density(markdown: &str) -> f64 {
     links as f64 / word_count as f64
 }
 
-fn stable_hash_u64(input: &str) -> u64 {
+pub(crate) fn stable_hash_u64(input: &str) -> u64 {
     let mut hash: u64 = 0xcbf29ce484222325;
     for byte in input.as_bytes() {
         hash ^= u64::from(*byte);
