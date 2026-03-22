@@ -964,6 +964,17 @@ impl AppState {
         &self.pre_triage
     }
 
+    /// Returns the current working corpus by applying source-precedence rules.
+    ///
+    /// See [`crate::working_corpus`] for the full precedence description.
+    pub fn current_working_corpus(&self) -> crate::working_corpus::CurrentWorkingCorpus {
+        crate::working_corpus::CurrentWorkingCorpus::select(
+            self.pre_triage(),
+            self.triage(),
+            self.briefing_triage_policy(),
+        )
+    }
+
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
         self.pre_triage = pre_triage;
         self.dirty = true;
