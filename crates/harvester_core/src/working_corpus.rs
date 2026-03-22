@@ -122,6 +122,29 @@ impl CurrentWorkingCorpus {
         }
     }
 
+    /// Select the archive corpus: only `TriageComplete` articles.
+    ///
+    /// Archive exports curated articles only. Pre-triage articles (`ReadyToTriage`,
+    /// `Reviewing`) are intentionally excluded — they require triage before archiving.
+    pub(crate) fn select_for_archive(
+        triage: &TriageSession,
+        triage_policy: TriageSelectionPolicy,
+    ) -> Self {
+        if matches!(triage.phase(), TriagePhase::Complete) {
+            let urls = triage_policy.eligible_urls(triage);
+            if !urls.is_empty() {
+                return Self {
+                    source: CurrentWorkingCorpusSource::TriageComplete,
+                    ordered_urls: urls,
+                };
+            }
+        }
+        Self {
+            source: CurrentWorkingCorpusSource::Unavailable,
+            ordered_urls: Vec::new(),
+        }
+    }
+
     /// Number of articles in this corpus.
     pub fn count(&self) -> usize {
         self.ordered_urls.len()

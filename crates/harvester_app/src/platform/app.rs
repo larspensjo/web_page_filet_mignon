@@ -414,7 +414,7 @@ fn build_archive_form_descriptor(
     default_basename: String,
     default_file_exists: bool,
     export_dir: PathBuf,
-    _pending_pre_triage_count: usize,
+    pending_pre_triage_count: usize,
 ) -> FormDialogDescriptor {
     let mut rows = Vec::new();
     let articles_label = if since_utc.is_some() {
@@ -444,6 +444,16 @@ fn build_archive_form_descriptor(
     } else if default_file_exists {
         rows.push(FormRow::Note {
             text: "file already exists - will be overwritten".to_string(),
+            severity: MessageSeverity::Warning,
+        });
+    }
+    if pending_pre_triage_count > 0 {
+        rows.push(FormRow::Note {
+            text: format!(
+                "{} article{} await triage and are not included in this export.",
+                pending_pre_triage_count,
+                if pending_pre_triage_count == 1 { "" } else { "s" }
+            ),
             severity: MessageSeverity::Warning,
         });
     }
