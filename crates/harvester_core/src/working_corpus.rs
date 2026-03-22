@@ -602,4 +602,90 @@ mod tests {
             "identical corpus must produce the same fingerprint"
         );
     }
+
+    // ── select_for_archive tests ─
+
+    // -----------------------------------------------------------------------------------------
+    // Test: select_for_archive with TriageComplete and eligible URLs → returns TriageComplete
+    // -----------------------------------------------------------------------------------------
+    #[test]
+    fn select_for_archive_with_complete_triage_and_eligible_urls() {
+        init_logging();
+        let triage = complete_triage(&["https://a.com", "https://b.com"], 5);
+        assert_eq!(triage.phase(), &TriagePhase::Complete);
+
+        let corpus = CurrentWorkingCorpus::select_for_archive(&triage, default_policy());
+
+        assert_eq!(
+            corpus.source(),
+            CurrentWorkingCorpusSource::TriageComplete,
+            "select_for_archive must return TriageComplete when triage is complete with eligible URLs"
+        );
+        assert_eq!(
+            corpus.ordered_urls(),
+            &["https://a.com".to_string(), "https://b.com".to_string()]
+        );
+        assert!(corpus.is_ready_for_actions());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Test: select_for_archive when triage is not Complete → returns Unavailable
+    // -----------------------------------------------------------------------------------------
+    #[test]
+    fn select_for_archive_when_triage_not_complete() {
+        init_logging();
+        // Test with idle (LoadingArticles) triage
+        let triage = idle_triage();
+        assert_ne!(triage.phase(), &TriagePhase::Complete);
+
+        let corpus = CurrentWorkingCorpus::select_for_archive(&triage, default_policy());
+
+        assert_eq!(
+            corpus.source(),
+            CurrentWorkingCorpusSource::Unavailable,
+            "select_for_archive must return Unavailable when triage is not Complete"
+        );
+        assert!(corpus.is_empty());
+        assert!(!corpus.is_ready_for_actions());
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Test: select_for_archive ignores pre-triage state (pre-triage not passed to function)
+    // -----------------------------------------------------------------------------------------
+    #[test]
+    fn select_for_archive_ignores_pre_triage() {
+        init_logging();
+        // Even if pre-triage would normally take precedence in select(),
+        // select_for_archive() does not receive it and always checks only triage.
+        // This test verifies that the function signature excludes pre_triage.
+
+        let triage = complete_triage(&["https://archive.com"], 3);
+        let corpus = CurrentWorkingCorpus::select_for_archive(&triage, default_policy());
+
+        assert_eq!(
+            corpus.source(),
+            CurrentWorkingCorpusSource::TriageComplete,
+            "archive corpus must use triage articles regardless of pre-triage state"
+        );
+        assert_eq!(corpus.ordered_urls(), &["https://archive.com".to_string()]);
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Test: select_for_archive with Complete triage but all articles below cutoff → Unavailable
+    // -----------------------------------------------------------------------------------------
+    #[test]
+    fn select_for_archive_triage_complete_but_below_cutoff() {
+        init_logging();
+        let triage = complete_triage(&["https://low.com"], 0); // priority 0, cutoff 0 → not eligible
+        assert_eq!(triage.phase(), &TriagePhase::Complete);
+
+        let corpus = CurrentWorkingCorpus::select_for_archive(&triage, default_policy());
+
+        assert_eq!(
+            corpus.source(),
+            CurrentWorkingCorpusSource::Unavailable,
+            "archive corpus must return Unavailable when no articles pass the selection policy"
+        );
+        assert!(corpus.is_empty());
+    }
 }

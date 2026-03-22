@@ -1003,7 +1003,7 @@ impl AppState {
     /// Returns the corpus for archive export: triage-completed articles only.
     ///
     /// Pre-triage articles (even when ready) are excluded — they need triage first.
-    pub fn archive_corpus(&self) -> crate::working_corpus::CurrentWorkingCorpus {
+    pub(crate) fn archive_corpus(&self) -> crate::working_corpus::CurrentWorkingCorpus {
         crate::working_corpus::CurrentWorkingCorpus::select_for_archive(
             self.triage(),
             self.briefing_triage_policy(),
