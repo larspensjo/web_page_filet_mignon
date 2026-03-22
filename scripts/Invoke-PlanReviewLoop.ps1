@@ -192,6 +192,7 @@ function Set-Utf8ProcessEncoding {
   $global:OutputEncoding = $utf8NoBom
 }
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute]
 function Ensure-Dir([string]$DirPath) {
   if (-not (Test-Path -LiteralPath $DirPath)) {
     New-Item -ItemType Directory -Path $DirPath | Out-Null
@@ -228,6 +229,7 @@ function Add-LogLine([string]$LogPath, [string]$Line) {
   }
 }
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute]
 function Normalize-Text([object]$Output) {
   $s = ($Output | Out-String)
   # Trim only excessive leading/trailing whitespace; keep interior formatting.
