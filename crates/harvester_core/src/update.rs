@@ -797,7 +797,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] summary-prep requested");
-            // INTENTIONAL EXCEPTION: same rationale as GenerateBriefingClicked above —
+            // INTENTIONAL EXCEPTION: same rationale as GenerateBriefingClicked —
             // briefing uses all completed jobs as its starting feed, then applies
             // TriageSelectionPolicy cutoff semantics, bypassing the shared selector.
             let ordered_urls = state.ordered_completed_job_urls_snapshot();
@@ -2180,9 +2180,11 @@ fn dispatch_pre_triage_if_due(
 fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
     // Reads resolved_included_articles() directly from pre-triage, which is the
     // correct corpus source for manual triage start. The caller (TriageClicked) already
-    // guards that pre-triage is in ReadyToTriage phase — the same condition the shared
-    // working-corpus selector uses. We access pre-triage directly here because triage
-    // needs full LoadedArticle data (content, hashes, timestamps), not just URLs.
+    // guards that pre-triage is in ReadyToTriage phase — the same phase condition the
+    // shared working-corpus selector uses for PreTriageReady. Unlike the selector, an
+    // empty URL set is treated as an error here (triage fails) rather than falling
+    // through to Unavailable. We access pre-triage directly here because triage needs
+    // full LoadedArticle data (content, hashes, timestamps), not just URLs.
     let included = state.pre_triage().resolved_included_articles();
     if included.is_empty() {
         state
