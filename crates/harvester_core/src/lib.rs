@@ -21,6 +21,7 @@ mod ui_geometry;
 mod update;
 mod url_age;
 mod view_model;
+pub mod working_corpus;
 
 pub use briefing::{
     format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
@@ -65,6 +66,7 @@ pub use triage::{
 pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCacheKeyError};
 pub use ui_geometry::calc_left_width;
 pub use update::update;
+pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
 pub use view_model::{
     AppViewModel, CategoryTrendView, EntityLineView, JobFilterStatus, JobRowView, LayoutViewModel,
     LeftPaneView, LinkRowView, LlmModelUsageView, PreviewHeaderView, PromptLabCompareBatchView,

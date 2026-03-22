@@ -42,14 +42,6 @@ fn is_safe_archive_basename(name: &str) -> bool {
     !std::path::Path::new(name).is_absolute()
 }
 
-fn archive_ordered_urls(state: &AppState) -> Vec<String> {
-    let ready_pre_triage_urls = state.pre_triage().resolved_included_urls();
-    if !ready_pre_triage_urls.is_empty() {
-        return ready_pre_triage_urls;
-    }
-    state.briefing_triage_policy().eligible_urls(state.triage())
-}
-
 /// Pure update function: applies a message to state and returns any effects.
 #[allow(
     clippy::too_many_lines,
@@ -104,14 +96,26 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::ArchiveClicked => {
             let request_id = state.allocate_next_archive_request_id();
-            let ordered_urls = archive_ordered_urls(&state);
-            let article_count = ordered_urls.len();
+            let corpus = state.archive_corpus();   // triage-only; pre-triage excluded
+            let article_count = corpus.count();
+            let fingerprint = corpus.fingerprint();
+            let source = corpus.source();
+            engine_info!(
+                "[working-corpus] source={:?} count={} fingerprint={:#010x} caller=archive-open request_id={}",
+                source,
+                article_count,
+                fingerprint,
+                request_id,
+            );
+            let pending_pre_triage_count = state.pre_triage().resolved_included_urls().len();
+            state.pin_archive_corpus(corpus);
             let since_utc = state.briefing_since_utc();
             vec![Effect::OpenArchiveDialog {
                 request_id,
                 article_count,
                 since_utc,
                 default_basename: "archive.md".to_string(),
+                pending_pre_triage_count,
             }]
         }
         Msg::ToggleInputPanel => {
@@ -250,6 +254,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             ordered_urls,
             triggered_by_job_done,
         } => {
+            // INTENTIONAL EXCEPTION: pre-triage refresh is the mechanism that BUILDS
+            // the candidate corpus — it runs before the shared working-corpus selector
+            // has anything to select from. It reads from completed jobs (upstream of
+            // the selector) and loads article content so that the pre-triage session
+            // can be populated. Using the shared selector here would be circular: the
+            // selector cannot produce a ReadyToTriage corpus until this refresh finishes.
             let reason = if triggered_by_job_done {
                 crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone
             } else {
@@ -759,6 +769,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] generate requested");
+            // INTENTIONAL EXCEPTION: briefing article loading does NOT use the shared
+            // working-corpus selector. Briefing starts from all completed jobs, then
+            // runs a fresh triage pass with TriageSelectionPolicy cutoff semantics to
+            // select which articles are worth summarizing. The shared selector's
+            // pre-triage results (which use a different filter set) are not appropriate
+            // here — briefing wants priority-ranked triage results, not just "ready to
+            // triage" candidates.
             let ordered_urls = state.ordered_completed_job_urls_snapshot();
             let since_utc = state.briefing_since_utc();
             vec![
@@ -784,6 +801,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] summary-prep requested");
+            // INTENTIONAL EXCEPTION: same rationale as GenerateBriefingClicked —
+            // briefing uses all completed jobs as its starting feed, then applies
+            // TriageSelectionPolicy cutoff semantics, bypassing the shared selector.
             let ordered_urls = state.ordered_completed_job_urls_snapshot();
             let since_utc = state.briefing_since_utc();
             vec![
@@ -798,6 +818,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::BriefingPrereqArticlesLoaded { articles } => {
             engine_info!("[briefing-triage] prereq loaded count={}", articles.len());
+            // INTENTIONAL EXCEPTION: briefing builds its own ephemeral pre-triage pass
+            // from the freshly loaded prerequisite articles (all completed jobs). This
+            // is not the shared working-corpus pre-triage session — it is a transient
+            // filter step that feeds the briefing-owned triage run (with
+            // TriageSelectionPolicy cutoff semantics applied afterwards). The shared
+            // selector's ReadyToTriage session is irrelevant here because briefing
+            // needs to score articles for priority, not just include ready ones.
             let policy = PreTriagePolicy::default();
             let pre_triage = PreTriageSession::load_articles(articles, &policy);
             let filtered_articles = pre_triage.resolved_included_articles();
@@ -880,6 +907,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             default_basename,
             default_file_exists,
             export_dir,
+            pending_pre_triage_count,
         } => {
             if request_id != state.archive_request_id() {
                 return (state, Vec::new());
@@ -891,6 +919,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 default_basename,
                 default_file_exists,
                 export_dir,
+                pending_pre_triage_count,
             }]
         }
         Msg::ArchiveDialogSubmitted {
@@ -910,7 +939,28 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 );
                 return (state, Vec::new());
             }
-            let ordered_urls = archive_ordered_urls(&state);
+            let pinned = state.pinned_archive_corpus();
+            let (ordered_urls, fingerprint) = match pinned {
+                Some(corpus) => (corpus.ordered_urls().to_vec(), corpus.fingerprint()),
+                None => {
+                    // Unreachable in normal operation: ArchiveClicked always precedes
+                    // ArchiveDialogSubmitted.  Guard defensively rather than emit an empty
+                    // archive file to disk.
+                    engine_warn!(
+                        "[archive-dialog] no pinned corpus at submit time request_id={}; \
+                         dropping submit",
+                        request_id
+                    );
+                    return (state, Vec::new());
+                }
+            };
+            state.clear_pinned_archive_corpus();
+            engine_info!(
+                "[working-corpus] source=pinned count={} fingerprint={:#010x} caller=archive-submit request_id={}",
+                ordered_urls.len(),
+                fingerprint,
+                request_id,
+            );
             let since_utc = state.briefing_since_utc();
             let requested_checkpoint = set_checkpoint.then_some(submitted_at);
             vec![Effect::ArchiveRequested {
@@ -929,6 +979,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if request_id != state.archive_request_id() {
                 return (state, Vec::new());
             }
+            // Clear any residual pin (idempotent — normally already cleared at submit time).
+            state.clear_pinned_archive_corpus();
             if let Some(checkpoint) = requested_checkpoint {
                 vec![Effect::SaveBriefingCheckpoint {
                     since_utc: Some(checkpoint),
@@ -951,6 +1003,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 basename,
                 reason
             );
+            // Clear any residual pin (idempotent — normally already cleared at submit time).
+            state.clear_pinned_archive_corpus();
             Vec::new()
         }
         Msg::ArticlesLoaded {
@@ -2130,6 +2184,13 @@ fn dispatch_pre_triage_if_due(
 }
 
 fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
+    // Reads resolved_included_articles() directly from pre-triage, which is the
+    // correct corpus source for manual triage start. The caller (TriageClicked) already
+    // guards that pre-triage is in ReadyToTriage phase — the same phase condition the
+    // shared working-corpus selector uses for PreTriageReady. Unlike the selector, an
+    // empty URL set is treated as an error here (triage fails) rather than falling
+    // through to Unavailable. We access pre-triage directly here because triage needs
+    // full LoadedArticle data (content, hashes, timestamps), not just URLs.
     let included = state.pre_triage().resolved_included_articles();
     if included.is_empty() {
         state
@@ -2304,6 +2365,12 @@ fn on_triage_settled_for_briefing(state: &mut AppState, effects: &mut Vec<Effect
     if !state.briefing_orchestration_requested() {
         return;
     }
+    // INTENTIONAL EXCEPTION: briefing article selection applies TriageSelectionPolicy
+    // cutoff semantics on top of the briefing-owned triage results — only articles with
+    // sufficient priority are included. This is distinct from the shared working-corpus
+    // selector: the selector picks what is "ready to act on now", while this step picks
+    // what is "worth summarizing in this briefing run". Using the shared selector here
+    // would ignore the priority cutoff and could include low-signal articles.
     let policy = state.briefing_triage_policy();
     let ordered_urls = policy.eligible_urls(state.triage());
     engine_info!(
@@ -5328,6 +5395,7 @@ mod tests {
                 article_count,
                 since_utc,
                 default_basename,
+                ..
             } => {
                 assert_eq!(request_id, 1);
                 assert_eq!(article_count, 0);
@@ -5339,21 +5407,127 @@ mod tests {
     }
 
     #[test]
-    fn archive_clicked_uses_ready_pre_triage_urls_for_article_count() {
+    fn archive_clicked_with_triage_complete_and_pre_triage_ready_sets_pending_count() {
         init_logging();
-        let state = ready_pre_triage_state(&["https://example.com/1"]);
-        let (state, effects) = update(state, Msg::ArchiveClicked);
-        assert_eq!(state.archive_request_id(), 1);
-        let effect = effects
-            .into_iter()
-            .find(|effect| matches!(effect, Effect::OpenArchiveDialog { .. }))
-            .expect("OpenArchiveDialog effect expected");
-        match effect {
-            Effect::OpenArchiveDialog { article_count, .. } => {
-                assert_eq!(article_count, 1);
-            }
-            _ => unreachable!(),
-        }
+        // Build state: TriageComplete (1 article) + PreTriageReady (1 new article).
+        let state = complete_triage_state_for_test(1);
+        let url = "https://pending.com/1";
+        let state = add_completed_job_for_test(state, url);
+        let (state, request_id) = tick_until_dispatch(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles: loaded_pre_triage_articles(&[url]),
+            },
+        );
+        // Sanity: live working corpus is PreTriageReady (pre-triage takes precedence).
+        assert_eq!(
+            state.current_working_corpus().source(),
+            crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
+            "working corpus should be PreTriageReady — archive corpus is different"
+        );
+
+        let (_, effects) = update(state, Msg::ArchiveClicked);
+        let (article_count, pending_count) = effects.iter().find_map(|e| {
+            if let Effect::OpenArchiveDialog { article_count, pending_pre_triage_count, .. } = e {
+                Some((*article_count, *pending_pre_triage_count))
+            } else { None }
+        }).expect("expected OpenArchiveDialog effect");
+        assert_eq!(article_count, 1, "archive must use TriageComplete (1 article), not pre-triage");
+        assert!(pending_count > 0, "pending_pre_triage_count must be > 0, got {}", pending_count);
+    }
+
+    #[test]
+    fn archive_clicked_with_only_pre_triage_ready_has_zero_article_count() {
+        init_logging();
+        // No triage done — only pre-triage ready. Archive must show 0, Export disabled.
+        let state = ready_pre_triage_state(&["https://example.com/a", "https://example.com/b"]);
+        let (_, effects) = update(state, Msg::ArchiveClicked);
+        let (article_count, pending_count) = effects.iter().find_map(|e| {
+            if let Effect::OpenArchiveDialog { article_count, pending_pre_triage_count, .. } = e {
+                Some((*article_count, *pending_pre_triage_count))
+            } else { None }
+        }).expect("expected OpenArchiveDialog effect");
+        assert_eq!(article_count, 0, "no triage done → archive article_count must be 0");
+        assert_eq!(pending_count, 2, "both pre-triage articles must appear in pending count");
+    }
+
+    #[test]
+    fn archive_clicked_with_triage_complete_and_no_pre_triage_has_zero_pending_count() {
+        init_logging();
+        // Triage done, pre-triage idle — no pending articles, no warning.
+        let state = complete_triage_state_for_test(2);
+        let (_, effects) = update(state, Msg::ArchiveClicked);
+        let (article_count, pending_count) = effects.iter().find_map(|e| {
+            if let Effect::OpenArchiveDialog { article_count, pending_pre_triage_count, .. } = e {
+                Some((*article_count, *pending_pre_triage_count))
+            } else { None }
+        }).expect("expected OpenArchiveDialog effect");
+        assert_eq!(article_count, 2, "TriageComplete corpus must supply 2 articles");
+        assert_eq!(pending_count, 0, "no pre-triage ready → pending count must be 0");
+    }
+
+    #[test]
+    fn archive_clicked_with_pre_triage_reviewing_has_zero_pending_count() {
+        init_logging();
+        // Reviewing phase: resolved_included_urls() returns empty (articles not yet settled).
+        // pending_pre_triage_count must be 0 — no warning shown while user is mid-review.
+        //
+        // Build reviewing state: load two "review-verdict" articles (word count ~100 words,
+        // in SmallMediumContent band), then set a manual decision on one. The other stays
+        // unresolved → Reviewing phase.
+        let state = complete_triage_state_for_test(1);
+        let review_content: String = std::iter::repeat_n("longword", 100)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let url1 = "https://review.com/1";
+        let url2 = "https://review.com/2";
+        let state = add_completed_job_for_test(state, url1);
+        let state = add_completed_job_for_test(state, url2);
+        let (state, request_id) = tick_until_dispatch(state);
+        let articles = vec![
+            LoadedArticle {
+                url: url1.to_string(),
+                source_title: None,
+                prepared_text: review_content.clone(),
+                content_hash: format!("hash-{url1}"),
+                fetched_utc: None,
+            },
+            LoadedArticle {
+                url: url2.to_string(),
+                source_title: None,
+                prepared_text: review_content,
+                content_hash: format!("hash-{url2}"),
+                fetched_utc: None,
+            },
+        ];
+        let (state, _) = update(state, Msg::TriageArticlesLoaded { request_id, articles });
+        assert!(
+            matches!(state.pre_triage().phase(), crate::pre_triage_filter::PreTriagePhase::ReadyToTriage),
+            "must be ReadyToTriage after loading review articles"
+        );
+        // Set a manual decision on the first article → Reviewing phase.
+        let key = state.pre_triage().entries()[0].key.clone();
+        let (state, _) = update(
+            state,
+            Msg::PreTriageDecisionSet {
+                key,
+                decision: crate::pre_triage_filter::ManualDecision::Include,
+            },
+        );
+        assert!(
+            matches!(state.pre_triage().phase(), crate::pre_triage_filter::PreTriagePhase::Reviewing),
+            "must be Reviewing after first decision with second still unresolved"
+        );
+
+        let (_, effects) = update(state, Msg::ArchiveClicked);
+        let pending_count = effects.iter().find_map(|e| {
+            if let Effect::OpenArchiveDialog { pending_pre_triage_count, .. } = e {
+                Some(*pending_pre_triage_count)
+            } else { None }
+        }).expect("expected OpenArchiveDialog effect");
+        assert_eq!(pending_count, 0, "Reviewing phase → resolved_included_urls() is empty → pending count must be 0");
     }
 
     #[test]
@@ -5369,6 +5543,7 @@ mod tests {
                 default_basename: "archive.md".to_string(),
                 default_file_exists: false,
                 export_dir: std::path::PathBuf::from("/tmp"),
+                pending_pre_triage_count: 0,
             },
         );
         assert!(effects.is_empty());
@@ -5390,6 +5565,7 @@ mod tests {
                 default_basename: "archive.md".to_string(),
                 default_file_exists: false,
                 export_dir: std::path::PathBuf::from("/tmp"),
+                pending_pre_triage_count: 0,
             },
         );
         assert_eq!(state.archive_request_id(), 1);
@@ -5405,6 +5581,7 @@ mod tests {
                 default_basename,
                 default_file_exists,
                 export_dir,
+                ..
             } => {
                 assert_eq!(request_id, 1);
                 assert_eq!(article_count, 1);
@@ -5459,7 +5636,7 @@ mod tests {
     }
 
     #[test]
-    fn archive_dialog_submitted_uses_ready_pre_triage_urls() {
+    fn archive_dialog_submitted_with_only_pre_triage_ready_exports_zero_urls() {
         init_logging();
         let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
             .unwrap()
@@ -5488,7 +5665,7 @@ mod tests {
                 requested_checkpoint,
                 ..
             } => {
-                assert_eq!(ordered_urls, vec!["https://example.com/1".to_string()]);
+                assert_eq!(ordered_urls, Vec::<String>::new());
                 assert!(since_utc.is_none());
                 assert_eq!(requested_checkpoint, None);
             }
@@ -5535,6 +5712,412 @@ mod tests {
             vec![Effect::SaveBriefingCheckpoint {
                 since_utc: Some(checkpoint)
             }]
+        );
+    }
+
+    // ── Archive: pinned corpus tests (9 & 10) ────────────────────────────────
+
+    /// Test 9: archive open and submit use identical pinned corpus.
+    ///
+    /// Verifies that `ArchiveClicked` pins the triage corpus at open time and that
+    /// `ArchiveDialogSubmitted` exports exactly the same URLs without re-selecting.
+    #[test]
+    fn archive_open_and_submit_use_identical_pinned_corpus() {
+        init_logging();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        // Use TriageComplete state with 2 articles — archive corpus uses triage-only.
+        let state = complete_triage_state_for_test(2);
+
+        // Open the archive dialog — triage corpus is pinned here.
+        let (state, open_effects) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+
+        // Verify article_count in OpenArchiveDialog reflects the pinned corpus.
+        let open_effect = open_effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::OpenArchiveDialog { .. }))
+            .expect("OpenArchiveDialog effect expected");
+        let open_count = match open_effect {
+            Effect::OpenArchiveDialog { article_count, .. } => article_count,
+            _ => unreachable!(),
+        };
+        assert_eq!(open_count, 2, "open dialog should report 2 pinned triage articles");
+
+        // Submit — should export the same 2 triage URLs.
+        let (_state, submit_effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".to_string(),
+                set_checkpoint: false,
+                submitted_at: since,
+            },
+        );
+        let submit_effect = submit_effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ArchiveRequested { .. }))
+            .expect("ArchiveRequested effect expected");
+        match submit_effect {
+            Effect::ArchiveRequested { ordered_urls, .. } => {
+                assert_eq!(
+                    ordered_urls,
+                    vec![
+                        "https://triage-complete.com/0".to_string(),
+                        "https://triage-complete.com/1".to_string()
+                    ],
+                    "submitted export must use the pinned triage corpus"
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// Test 10: refresh between open and submit still uses the pinned snapshot.
+    ///
+    /// Simulates a pre-triage refresh arriving while the archive dialog is open.
+    /// The submitted export must still use the corpus that was pinned at open time
+    /// (triage-only), not the updated live state (which includes pre-triage).
+    #[test]
+    fn refresh_between_open_and_submit_uses_pinned_snapshot() {
+        init_logging();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        // Start with TriageComplete (1 article) and no pre-triage.
+        let triage_url = "https://triage-complete.com/0"; // URL produced by complete_triage_state_for_test(1)
+        let state = complete_triage_state_for_test(1);
+
+        // Open the dialog — triage corpus (1 URL) is pinned.
+        let (state, open_effects) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+        let open_count = open_effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::OpenArchiveDialog { article_count, .. } => Some(article_count),
+                _ => None,
+            })
+            .expect("OpenArchiveDialog effect expected");
+        assert_eq!(open_count, 1, "open dialog must see 1 triage article");
+
+        // Simulate a pre-triage refresh that adds a new article while the dialog is open.
+        let pre_triage_url = "https://pretriage.com/1";
+        let state = add_completed_job_for_test(state, pre_triage_url);
+        let (state, request_id2) = tick_until_dispatch(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: request_id2,
+                articles: loaded_pre_triage_articles(&[pre_triage_url]),
+            },
+        );
+        // Pre-triage is now ReadyToTriage; live working corpus has 1 pre-triage article.
+        // But the archive corpus (triage-only) still has 1 triage article.
+        assert_eq!(
+            state.archive_corpus().count(),
+            1,
+            "archive corpus must still see 1 triage article after pre-triage refresh"
+        );
+
+        // Submit the dialog — must export exactly the 1 triage URL pinned at open time.
+        let (_state, submit_effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".to_string(),
+                set_checkpoint: false,
+                submitted_at: since,
+            },
+        );
+        let submit_effect = submit_effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ArchiveRequested { .. }))
+            .expect("ArchiveRequested effect expected");
+        match submit_effect {
+            Effect::ArchiveRequested { ordered_urls, .. } => {
+                assert_eq!(
+                    ordered_urls,
+                    vec![triage_url.to_string()],
+                    "submit must use pinned triage corpus from open time, not pre-triage"
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    // ── Corpus selector parity tests ─────────────────────────────────────────
+
+    /// Helper: build a state where triage has completed with `n` articles (all at priority 3).
+    ///
+    /// Pre-triage is left in its default idle state so the corpus source is `TriageComplete`.
+    /// This bypasses the reducer path for triage loading to avoid triggering the pre-triage
+    /// coordinator (which would set `PreTriageReady` and shadow the triage corpus).
+    ///
+    /// Articles are assigned priority 3, which is above the default `cutoff_exclusive` of 1,
+    /// ensuring all articles appear in the `TriageSelectionPolicy` result. If the default
+    /// cutoff is changed, update this helper accordingly.
+    fn complete_triage_state_for_test(n: usize) -> AppState {
+        assert!(n > 0, "n must be > 0 for a useful complete triage state");
+        let mut session = crate::triage::TriageSession::new_loading(None);
+        let articles: Vec<_> = (0..n)
+            .map(|i| LoadedArticle {
+                url: format!("https://triage-complete.com/{i}"),
+                source_title: None,
+                prepared_text: std::iter::repeat_n("triage-content", 220)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                content_hash: format!("hash-tc-{i}"),
+                fetched_utc: None,
+            })
+            .collect();
+        session.set_articles(articles);
+        session.transition_to_triaging();
+        for i in 0..n {
+            session.complete_article(
+                i,
+                crate::triage::ArticleTriageResult {
+                    category: "tech".to_string(),
+                    priority: 3,
+                    tags: vec![],
+                    rationale: "r".to_string(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            );
+        }
+        session.complete();
+        assert!(
+            matches!(session.phase(), crate::triage::TriagePhase::Complete),
+            "triage must be Complete after completing all {n} articles"
+        );
+
+        let mut state = AppState::new();
+        state.set_triage(session);
+        state
+    }
+
+    /// Parity test A: for a `PreTriageReady` state with N articles (no triage done),
+    /// the archive article_count must be 0 (pre-triage excluded from archive),
+    /// and the pending_pre_triage_count must equal N.
+    #[test]
+    fn parity_a_pre_triage_ready_archive_count_is_zero_pending_count_is_nonzero() {
+        init_logging();
+        let urls = &["https://parity-a.com/1", "https://parity-a.com/2"];
+        let state = ready_pre_triage_state(urls);
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        // Assert live corpus properties before any action.
+        let corpus = state.current_working_corpus();
+        assert_eq!(
+            corpus.source(),
+            crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
+            "source must be PreTriageReady"
+        );
+
+        let (state, open_effects) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+        let (archive_count, pending_count) = open_effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::OpenArchiveDialog { article_count, pending_pre_triage_count, .. } =>
+                    Some((article_count, pending_pre_triage_count)),
+                _ => None,
+            })
+            .expect("OpenArchiveDialog effect expected");
+        assert_eq!(archive_count, 0, "archive must be empty when only pre-triage is ready");
+        assert_eq!(pending_count, urls.len(), "pending count must equal the number of pre-triage ready articles");
+
+        let (_state, submit_effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".to_string(),
+                set_checkpoint: false,
+                submitted_at: since,
+            },
+        );
+        let submit_urls = submit_effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::ArchiveRequested { ordered_urls, .. } => Some(ordered_urls),
+                _ => None,
+            })
+            .expect("ArchiveRequested effect expected");
+        assert_eq!(submit_urls, Vec::<String>::new(), "submit must export zero URLs when only pre-triage is ready");
+    }
+
+    /// Parity test B: for a `TriageComplete` state with N articles (no ready pre-triage) the
+    /// visible corpus count, the `OpenArchiveDialog` article_count, and the `ArchiveRequested`
+    /// URL count are all N and all sourced from the same `TriageComplete` corpus.
+    #[test]
+    fn parity_b_triage_complete_corpus_count_dialog_count_urls_match() {
+        init_logging();
+        let state = complete_triage_state_for_test(2);
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        // Assert live corpus properties before any action.
+        let corpus = state.current_working_corpus();
+        assert_eq!(
+            corpus.source(),
+            crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
+            "source must be TriageComplete when pre-triage is idle"
+        );
+        let expected_count = corpus.count();
+        let expected_urls: Vec<String> = corpus.ordered_urls().to_vec();
+        assert!(
+            expected_count > 0,
+            "corpus must be non-empty for a meaningful parity test"
+        );
+
+        // Drive ArchiveClicked → assert OpenArchiveDialog article_count == expected_count.
+        let (state, open_effects) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+        let dialog_count = open_effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::OpenArchiveDialog { article_count, .. } => Some(article_count),
+                _ => None,
+            })
+            .expect("OpenArchiveDialog effect expected");
+        assert_eq!(
+            dialog_count, expected_count,
+            "OpenArchiveDialog article_count must equal corpus.count()"
+        );
+
+        // Drive ArchiveDialogSubmitted → assert ArchiveRequested URLs match corpus.ordered_urls().
+        let (_state, submit_effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".to_string(),
+                set_checkpoint: false,
+                submitted_at: since,
+            },
+        );
+        let submit_urls = submit_effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::ArchiveRequested { ordered_urls, .. } => Some(ordered_urls),
+                _ => None,
+            })
+            .expect("ArchiveRequested effect expected");
+        assert_eq!(
+            submit_urls.len(),
+            expected_count,
+            "ArchiveRequested url count must equal corpus.count()"
+        );
+        assert_eq!(
+            submit_urls, expected_urls,
+            "ArchiveRequested URLs must match corpus.ordered_urls()"
+        );
+    }
+
+    /// Test 8: checkpoint-scoped corpus with non-zero visible count.
+    ///
+    /// When a briefing checkpoint (`since_utc`) is set, the corpus count (number of articles
+    /// available for export) must be independent of the checkpoint timestamp. The checkpoint
+    /// controls the archive time window, NOT which articles are in the corpus.  This test
+    /// verifies that the dialog's `article_count` equals `corpus.count()` even when a
+    /// checkpoint is active.
+    #[test]
+    fn checkpoint_set_does_not_reduce_corpus_count_to_zero() {
+        init_logging();
+        // Build a TriageComplete state with 2 articles.
+        let mut state = complete_triage_state_for_test(2);
+
+        // Set a briefing checkpoint so since_utc is non-None.
+        let checkpoint = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        state.set_briefing_since_utc(Some(checkpoint));
+        assert_eq!(
+            state.briefing_since_utc(),
+            Some(checkpoint),
+            "checkpoint must be set before the test"
+        );
+
+        // Assert corpus is non-empty and TriageComplete despite the checkpoint.
+        let corpus = state.current_working_corpus();
+        assert_eq!(
+            corpus.source(),
+            crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
+            "corpus source must be TriageComplete"
+        );
+        assert!(
+            corpus.count() > 0,
+            "corpus count must be non-zero even when briefing checkpoint is set"
+        );
+        let expected_count = corpus.count();
+        let expected_urls: Vec<String> = corpus.ordered_urls().to_vec();
+
+        // Drive ArchiveClicked → the dialog must report the same non-zero count.
+        let (state, open_effects) = update(state, Msg::ArchiveClicked);
+        let dialog_since_utc = open_effects
+            .iter()
+            .find_map(|e| match e {
+                Effect::OpenArchiveDialog { since_utc, .. } => Some(*since_utc),
+                _ => None,
+            })
+            .expect("OpenArchiveDialog effect expected");
+        let dialog_count = open_effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::OpenArchiveDialog { article_count, .. } => Some(article_count),
+                _ => None,
+            })
+            .expect("OpenArchiveDialog effect (article_count) expected");
+
+        // The checkpoint is passed through as since_utc for the archive time window.
+        assert_eq!(
+            dialog_since_utc,
+            Some(checkpoint),
+            "OpenArchiveDialog must propagate the briefing checkpoint as since_utc"
+        );
+        // The corpus count is NOT affected by the checkpoint.
+        assert_eq!(
+            dialog_count, expected_count,
+            "OpenArchiveDialog article_count must equal corpus.count() — checkpoint must not reduce it"
+        );
+        assert!(
+            dialog_count > 0,
+            "article_count must be non-zero when checkpoint is set and triage has completed articles"
+        );
+
+        // Submit and confirm URLs also match.
+        let request_id = state.archive_request_id();
+        let submit_since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (_state, submit_effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".to_string(),
+                set_checkpoint: false,
+                submitted_at: submit_since,
+            },
+        );
+        let submit_urls = submit_effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::ArchiveRequested { ordered_urls, .. } => Some(ordered_urls),
+                _ => None,
+            })
+            .expect("ArchiveRequested effect expected");
+        assert_eq!(
+            submit_urls.len(),
+            expected_count,
+            "ArchiveRequested url count must equal corpus.count() even with checkpoint set"
+        );
+        assert_eq!(
+            submit_urls, expected_urls,
+            "submit URLs must match corpus URLs even with checkpoint set"
         );
     }
 

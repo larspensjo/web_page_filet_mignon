@@ -315,6 +315,7 @@ pub struct AppState {
     next_job_id: JobId,
     next_llm_request_id: u64,
     archive_request_id: u64,
+    pinned_archive_corpus: Option<crate::working_corpus::CurrentWorkingCorpus>,
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
     briefing_history: Vec<crate::briefing::BriefingHistoryEntry>,
@@ -409,6 +410,7 @@ impl Default for AppState {
             next_job_id: 1,
             next_llm_request_id: 1,
             archive_request_id: 0,
+            pinned_archive_corpus: None,
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
             briefing_history: vec![],
@@ -850,6 +852,29 @@ impl AppState {
         self.archive_request_id
     }
 
+    /// Pin a corpus snapshot for the current archive dialog session.
+    ///
+    /// Called when the archive dialog is opened so that both the open and submit
+    /// handlers operate on the identical corpus the user saw when confirming.
+    pub fn pin_archive_corpus(&mut self, corpus: crate::working_corpus::CurrentWorkingCorpus) {
+        self.pinned_archive_corpus = Some(corpus);
+    }
+
+    /// Returns the corpus pinned at archive-open time, or `None` if no dialog is active.
+    pub fn pinned_archive_corpus(&self) -> Option<&crate::working_corpus::CurrentWorkingCorpus> {
+        self.pinned_archive_corpus.as_ref()
+    }
+
+    /// Clears the pinned corpus after the archive dialog session ends (submit, export
+    /// completion, or export failure).
+    ///
+    /// Note: there is no `ArchiveCancelled` message dispatched when the user cancels the
+    /// dialog (the UI returns early without dispatching), so we cannot clear on cancel.
+    /// A subsequent `ArchiveClicked` will naturally overwrite the pin.
+    pub fn clear_pinned_archive_corpus(&mut self) {
+        self.pinned_archive_corpus = None;
+    }
+
     /// Records LLM token usage from a completed run.
     /// Only CacheStatus::Miss runs are counted; empty or whitespace-only model names are ignored.
     pub fn record_llm_usage_from_metadata(&mut self, metadata: &LlmRunMetadata) {
@@ -962,6 +987,27 @@ impl AppState {
 
     pub(crate) fn pre_triage(&self) -> &PreTriageSession {
         &self.pre_triage
+    }
+
+    /// Returns the current working corpus by applying source-precedence rules.
+    ///
+    /// See [`crate::working_corpus`] for the full precedence description.
+    pub fn current_working_corpus(&self) -> crate::working_corpus::CurrentWorkingCorpus {
+        crate::working_corpus::CurrentWorkingCorpus::select(
+            self.pre_triage(),
+            self.triage(),
+            self.briefing_triage_policy(),
+        )
+    }
+
+    /// Returns the corpus for archive export: triage-completed articles only.
+    ///
+    /// Pre-triage articles (even when ready) are excluded — they need triage first.
+    pub(crate) fn archive_corpus(&self) -> crate::working_corpus::CurrentWorkingCorpus {
+        crate::working_corpus::CurrentWorkingCorpus::select_for_archive(
+            self.triage(),
+            self.briefing_triage_policy(),
+        )
     }
 
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
