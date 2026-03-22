@@ -42,14 +42,6 @@ fn is_safe_archive_basename(name: &str) -> bool {
     !std::path::Path::new(name).is_absolute()
 }
 
-fn archive_ordered_urls(state: &AppState) -> Vec<String> {
-    let ready_pre_triage_urls = state.pre_triage().resolved_included_urls();
-    if !ready_pre_triage_urls.is_empty() {
-        return ready_pre_triage_urls;
-    }
-    state.briefing_triage_policy().eligible_urls(state.triage())
-}
-
 /// Pure update function: applies a message to state and returns any effects.
 #[allow(
     clippy::too_many_lines,
@@ -104,8 +96,16 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::ArchiveClicked => {
             let request_id = state.allocate_next_archive_request_id();
-            let ordered_urls = archive_ordered_urls(&state);
-            let article_count = ordered_urls.len();
+            let corpus = state.current_working_corpus();
+            let article_count = corpus.count();
+            let fingerprint = corpus.fingerprint();
+            engine_info!(
+                "[working-corpus] archive opened request_id={} article_count={} fingerprint={:x}",
+                request_id,
+                article_count,
+                fingerprint
+            );
+            state.pin_archive_corpus(corpus);
             let since_utc = state.briefing_since_utc();
             vec![Effect::OpenArchiveDialog {
                 request_id,
@@ -910,7 +910,24 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 );
                 return (state, Vec::new());
             }
-            let ordered_urls = archive_ordered_urls(&state);
+            let pinned = state.pinned_archive_corpus();
+            let (ordered_urls, fingerprint) = match pinned {
+                Some(corpus) => (corpus.ordered_urls().to_vec(), corpus.fingerprint()),
+                None => {
+                    engine_warn!(
+                        "[archive-dialog] no pinned corpus at submit time request_id={}; \
+                         emitting empty export",
+                        request_id
+                    );
+                    (Vec::new(), 0)
+                }
+            };
+            engine_info!(
+                "[working-corpus] archive submitted request_id={} article_count={} fingerprint={:x}",
+                request_id,
+                ordered_urls.len(),
+                fingerprint
+            );
             let since_utc = state.briefing_since_utc();
             let requested_checkpoint = set_checkpoint.then_some(submitted_at);
             vec![Effect::ArchiveRequested {
@@ -5536,6 +5553,145 @@ mod tests {
                 since_utc: Some(checkpoint)
             }]
         );
+    }
+
+    // ── Archive: pinned corpus tests (9 & 10) ────────────────────────────────
+
+    /// Test 9: archive open and submit use identical pinned corpus.
+    ///
+    /// Verifies that `ArchiveClicked` pins the corpus at open time and that
+    /// `ArchiveDialogSubmitted` exports exactly the same URLs without re-selecting.
+    #[test]
+    fn archive_open_and_submit_use_identical_pinned_corpus() {
+        init_logging();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let state = ready_pre_triage_state(&["https://pinned.com/1", "https://pinned.com/2"]);
+
+        // Open the archive dialog — corpus is pinned here.
+        let (state, open_effects) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+
+        // Verify article_count in OpenArchiveDialog reflects the pinned corpus.
+        let open_effect = open_effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::OpenArchiveDialog { .. }))
+            .expect("OpenArchiveDialog effect expected");
+        let open_count = match open_effect {
+            Effect::OpenArchiveDialog { article_count, .. } => article_count,
+            _ => unreachable!(),
+        };
+        assert_eq!(open_count, 2, "open dialog should report 2 pinned articles");
+
+        // Submit — should export the same 2 URLs.
+        let (_state, submit_effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".to_string(),
+                set_checkpoint: false,
+                submitted_at: since,
+            },
+        );
+        let submit_effect = submit_effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ArchiveRequested { .. }))
+            .expect("ArchiveRequested effect expected");
+        match submit_effect {
+            Effect::ArchiveRequested { ordered_urls, .. } => {
+                assert_eq!(
+                    ordered_urls,
+                    vec![
+                        "https://pinned.com/1".to_string(),
+                        "https://pinned.com/2".to_string()
+                    ],
+                    "submitted export must use the pinned corpus, not live state"
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    /// Test 10: refresh between open and submit still uses the pinned snapshot.
+    ///
+    /// Simulates a pre-triage refresh arriving while the archive dialog is open.
+    /// The submitted export must still use the corpus that was pinned at open time,
+    /// not the updated live state.
+    #[test]
+    fn refresh_between_open_and_submit_uses_pinned_snapshot() {
+        init_logging();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        // Start with one article in the ready pre-triage corpus.
+        let state = ready_pre_triage_state(&["https://original.com/1"]);
+
+        // Open the dialog — corpus with 1 URL is pinned.
+        let (state, open_effects) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+        let open_count = open_effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::OpenArchiveDialog { article_count, .. } => Some(article_count),
+                _ => None,
+            })
+            .expect("OpenArchiveDialog effect expected");
+        assert_eq!(open_count, 1, "open dialog should see 1 article");
+
+        // Simulate a pre-triage refresh that adds a new article while the dialog is open.
+        // Adding a new completed job triggers JobDone → coordinator schedules a new dispatch.
+        let state = add_completed_job_for_test(state, "https://new.com/2");
+        let (state, request_id2) = tick_until_dispatch(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: request_id2,
+                articles: loaded_pre_triage_articles(&[
+                    "https://original.com/1",
+                    "https://new.com/2",
+                ]),
+            },
+        );
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
+            ),
+            "pre-triage must be ReadyToTriage after refresh"
+        );
+        // Confirm live corpus now has 2 URLs.
+        assert_eq!(
+            state.current_working_corpus().count(),
+            2,
+            "live corpus must now have 2 URLs after refresh"
+        );
+
+        // Submit the dialog — must still export only the 1 URL pinned at open time.
+        let (_state, submit_effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "archive.md".to_string(),
+                set_checkpoint: false,
+                submitted_at: since,
+            },
+        );
+        let submit_effect = submit_effects
+            .into_iter()
+            .find(|e| matches!(e, Effect::ArchiveRequested { .. }))
+            .expect("ArchiveRequested effect expected");
+        match submit_effect {
+            Effect::ArchiveRequested { ordered_urls, .. } => {
+                assert_eq!(
+                    ordered_urls,
+                    vec!["https://original.com/1".to_string()],
+                    "submit must use pinned corpus from open time, not refreshed live state"
+                );
+            }
+            _ => unreachable!(),
+        }
     }
 
     // ── Pre-triage refresh coordinator: shared test helpers ──────────────────
