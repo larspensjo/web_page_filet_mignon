@@ -193,9 +193,11 @@ fn archive_click_emits_effect_without_state_change() {
     assert_eq!(next.view(), before);
     assert_eq!(
         effects,
-        vec![Effect::ArchiveRequested {
-            ordered_urls: vec![],
+        vec![Effect::OpenArchiveDialog {
+            request_id: 1,
+            article_count: 0,
             since_utc: None,
+            default_basename: "archive.md".to_string(),
         }]
     );
 }

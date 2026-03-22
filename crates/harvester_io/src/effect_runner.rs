@@ -216,26 +216,89 @@ impl EffectRunner {
                 let immediate = matches!(policy, StopPolicy::Immediate);
                 self.engine.stop(immediate);
             }
+            Effect::OpenArchiveDialog {
+                request_id,
+                article_count,
+                since_utc,
+                default_basename,
+            } => {
+                let msg_tx = self.msg_tx.clone();
+                let output_dir = self.paths.output_dir.clone();
+                thread::spawn(move || {
+                    let default_file_exists = output_dir.join(&default_basename).exists();
+                    engine_info!(
+                        "[archive-dialog] open requested request_id={} article_count={} default_basename={} default_file_exists={}",
+                        request_id,
+                        article_count,
+                        default_basename,
+                        default_file_exists
+                    );
+                    let _ = msg_tx.send(Msg::ArchiveDialogReady {
+                        request_id,
+                        article_count,
+                        since_utc,
+                        default_basename,
+                        default_file_exists,
+                        export_dir: output_dir,
+                    });
+                });
+            }
             Effect::ArchiveRequested {
+                request_id,
+                basename,
                 ordered_urls,
                 since_utc,
+                requested_checkpoint,
             } => {
+                let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
                 thread::spawn(move || {
                     let options = ExportOptions {
-                        output_filename: "archive.md".to_string(),
+                        output_filename: basename.clone(),
                         manifest_filename: None,
                         ..ExportOptions::default()
                     };
-                    match build_triage_archive(&output_dir, &ordered_urls, since_utc, options) {
-                        Ok(summary) => engine_info!(
-                            "[archive] archive written docs={} path={}",
-                            summary.doc_count,
-                            summary.output_path.display()
-                        ),
-                        Err(err) => engine_warn!("[archive] archive failed: {}", err),
+                    match build_triage_archive(
+                        &output_dir,
+                        &basename,
+                        &ordered_urls,
+                        since_utc,
+                        options,
+                    ) {
+                        Ok(summary) => {
+                            engine_info!(
+                                "[archive-dialog] export completed request_id={} docs={} path={}",
+                                request_id,
+                                summary.doc_count,
+                                summary.output_path.display()
+                            );
+                            let _ = msg_tx.send(Msg::ArchiveExportCompleted {
+                                request_id,
+                                path: summary.output_path,
+                                doc_count: summary.doc_count,
+                                requested_checkpoint,
+                            });
+                        }
+                        Err(err) => {
+                            engine_warn!(
+                                "[archive-dialog] export failed request_id={} basename={} reason={}",
+                                request_id,
+                                basename,
+                                err
+                            );
+                            let _ = msg_tx.send(Msg::ArchiveExportFailed {
+                                request_id,
+                                basename,
+                                reason: err.to_string(),
+                            });
+                        }
                     }
                 });
+            }
+            Effect::ShowArchiveDialog { .. } => {
+                engine_warn!(
+                    "[archive-dialog] ShowArchiveDialog reached effect runner unexpectedly"
+                );
             }
             Effect::OpenUrlInBrowser { url } => {
                 self.platform_handler.open_url(&url);
@@ -2042,8 +2105,11 @@ mod tests {
 
         let (runner, _rx) = runner_with_receiver(output);
         runner.enqueue(vec![Effect::ArchiveRequested {
+            request_id: 7,
+            basename: "archive.md".to_string(),
             ordered_urls: vec!["https://example.com/b".to_string()],
             since_utc: None,
+            requested_checkpoint: None,
         }]);
 
         let mut archive_path = None;
@@ -2054,7 +2120,7 @@ mod tests {
                     let is_archive = path
                         .file_name()
                         .and_then(|n| n.to_str())
-                        .map(|n| n.starts_with("archive-") && n.ends_with(".md"))
+                        .map(|n| n == "archive.md")
                         .unwrap_or(false);
                     if is_archive {
                         archive_path = Some(path);
@@ -2068,9 +2134,9 @@ mod tests {
             thread::sleep(Duration::from_millis(25));
         }
 
-        let archive_path = archive_path.expect("archive-[FROM]-[TO].md should be written");
+        let archive_path = archive_path.expect("archive.md should be written");
         let archive_name = archive_path.file_name().and_then(|n| n.to_str()).unwrap();
-        assert_eq!(archive_name, "archive-all-2026-02-11.md");
+        assert_eq!(archive_name, "archive.md");
         let archive = fs::read_to_string(&archive_path).expect("read archive");
         assert!(!archive.contains("url: https://example.com/b\n"));
         assert!(!archive.contains("url: https://example.com/a\n"));

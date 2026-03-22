@@ -1,11 +1,15 @@
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
 
-use commanductui::types::{MenuActionId, TreeItemMarkerKind};
+use commanductui::types::{
+    FormButtons, FormDialogDescriptor, FormField, FormFieldValue, FormFileExistsWarning, FormRow,
+    FormTextValidation, MenuActionId, MessageSeverity, TreeItemMarkerKind,
+};
 use commanductui::{
     AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface,
     UiStateProvider, WindowConfig, WindowId,
@@ -38,6 +42,9 @@ use super::Win32PlatformHandler;
 const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
 const MENU_ACTION_ARCHIVE: MenuActionId = MenuActionId(2);
 const MENU_ACTION_PROMPT_LAB: MenuActionId = MenuActionId(3);
+const ARCHIVE_DIALOG_CONTEXT_PREFIX: &str = "archive:";
+const ARCHIVE_DIALOG_FILENAME_FIELD_ID: &str = "archive.basename";
+const ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID: &str = "archive.set_checkpoint";
 const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
 const LLM_MAX_CONCURRENT_REQUESTS_ENV: &str = "LLM_MAX_CONCURRENT_REQUESTS";
 const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
@@ -362,6 +369,113 @@ fn select_render_mode(
     Some(RenderMode::Full)
 }
 
+fn archive_dialog_context_tag(request_id: u64) -> String {
+    format!("{ARCHIVE_DIALOG_CONTEXT_PREFIX}{request_id}")
+}
+
+fn parse_archive_dialog_request_id(context_tag: &str) -> Option<u64> {
+    context_tag
+        .strip_prefix(ARCHIVE_DIALOG_CONTEXT_PREFIX)
+        .and_then(|raw| raw.parse::<u64>().ok())
+}
+
+fn archive_field_text(field_values: &[FormFieldValue], field_id: &str) -> Option<String> {
+    field_values.iter().find_map(|value| match value {
+        FormFieldValue::Text {
+            field_id: value_field_id,
+            value,
+        } if value_field_id == field_id => Some(value.clone()),
+        _ => None,
+    })
+}
+
+fn archive_field_checked(field_values: &[FormFieldValue], field_id: &str) -> Option<bool> {
+    field_values.iter().find_map(|value| match value {
+        FormFieldValue::CheckBox {
+            field_id: value_field_id,
+            checked,
+        } if value_field_id == field_id => Some(*checked),
+        _ => None,
+    })
+}
+
+fn format_archive_since_label(since_utc: Option<chrono::DateTime<Utc>>) -> Option<String> {
+    since_utc.map(|since| {
+        let now = Utc::now();
+        let days = (now - since).num_days().max(0);
+        format!("{} ({} days ago)", since.format("%Y-%m-%d"), days)
+    })
+}
+
+fn build_archive_form_descriptor(
+    request_id: u64,
+    article_count: usize,
+    since_utc: Option<chrono::DateTime<Utc>>,
+    default_basename: String,
+    default_file_exists: bool,
+    export_dir: PathBuf,
+) -> FormDialogDescriptor {
+    let mut rows = Vec::new();
+    let articles_label = if since_utc.is_some() {
+        format!("{article_count} URLs (since checkpoint)")
+    } else {
+        format!("{article_count} URLs (all)")
+    };
+    rows.push(FormRow::ReadOnlyText {
+        label: "Articles".to_string(),
+        value: articles_label,
+    });
+    if let Some(checkpoint) = format_archive_since_label(since_utc) {
+        rows.push(FormRow::ReadOnlyText {
+            label: "Checkpoint".to_string(),
+            value: checkpoint,
+        });
+    }
+    rows.push(FormRow::ReadOnlyText {
+        label: "Up to".to_string(),
+        value: Utc::now().format("%Y-%m-%d %H:%M UTC").to_string(),
+    });
+    if article_count == 0 {
+        rows.push(FormRow::Note {
+            text: "No articles match the current filter.".to_string(),
+            severity: MessageSeverity::Warning,
+        });
+    } else if default_file_exists {
+        rows.push(FormRow::Note {
+            text: "file already exists - will be overwritten".to_string(),
+            severity: MessageSeverity::Warning,
+        });
+    }
+
+    FormDialogDescriptor {
+        title: "Archive Export".to_string(),
+        context_tag: archive_dialog_context_tag(request_id),
+        rows,
+        fields: vec![
+            FormField::TextInput {
+                field_id: ARCHIVE_DIALOG_FILENAME_FIELD_ID.to_string(),
+                label: "Output file".to_string(),
+                value: default_basename,
+                validation: FormTextValidation::PathSegment,
+                live_warning: Some(FormFileExistsWarning {
+                    base_dir: export_dir,
+                    message: "file already exists - will be overwritten".to_string(),
+                }),
+            },
+            FormField::CheckBox {
+                field_id: ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID.to_string(),
+                label: "Set checkpoint to now after export".to_string(),
+                checked: true,
+            },
+        ],
+        buttons: FormButtons {
+            confirm_label: "Export".to_string(),
+            cancel_label: "Cancel".to_string(),
+            confirm_enabled: article_count > 0,
+        },
+    }
+}
+
 impl AppEventHandler {
     fn new(
         window_id: WindowId,
@@ -404,6 +518,7 @@ impl AppEventHandler {
         let mut clear_input_needed = false;
         let mut persist_completed_needed = false;
         let mut persist_overrides_needed = false;
+        let mut archive_failure_notice: Option<(String, String)> = None;
         let mut refresh_evaluation_dispatched = false;
         let mut persistence_enqueued = false;
         let mut queued_effects = Vec::new();
@@ -427,6 +542,17 @@ impl AppEventHandler {
                     msg_for_flags,
                     Msg::PreTriageDecisionSet { .. } | Msg::PreTriageResetClicked
                 );
+                if let Msg::ArchiveExportFailed {
+                    basename,
+                    reason,
+                    ..
+                } = msg_for_flags
+                {
+                    archive_failure_notice = Some((
+                        format!("Archive export failed: {basename}"),
+                        reason,
+                    ));
+                }
                 clear_input_needed |= effects
                     .iter()
                     .any(|effect| matches!(effect, Effect::EnqueueUrl { .. }));
@@ -503,8 +629,36 @@ impl AppEventHandler {
             )
         };
 
-        let effect_count = queued_effects.len();
-        self.effect_runner.enqueue(queued_effects);
+        let mut effect_runner_effects = Vec::new();
+        for effect in queued_effects {
+            match effect {
+                Effect::ShowArchiveDialog {
+                    request_id,
+                    article_count,
+                    since_utc,
+                    default_basename,
+                    default_file_exists,
+                    export_dir,
+                } => {
+                    let form = build_archive_form_descriptor(
+                        request_id,
+                        article_count,
+                        since_utc,
+                        default_basename,
+                        default_file_exists,
+                        export_dir,
+                    );
+                    self.commands.push_back(PlatformCommand::ShowFormDialog {
+                        window_id: self.window_id,
+                        form,
+                    });
+                }
+                other => effect_runner_effects.push(other),
+            }
+        }
+
+        let effect_count = effect_runner_effects.len();
+        self.effect_runner.enqueue(effect_runner_effects);
         let did_work = effect_count > 0
             || maybe_render.is_some()
             || clear_input_needed
@@ -519,6 +673,15 @@ impl AppEventHandler {
                 window_id: self.window_id,
                 control_id: ui::constants::INPUT_URLS,
                 text: String::new(),
+            });
+        }
+
+        if let Some((title, message)) = archive_failure_notice {
+            self.commands.push_back(PlatformCommand::ShowMessageBox {
+                window_id: self.window_id,
+                title,
+                message,
+                severity: MessageSeverity::Error,
             });
         }
 
@@ -845,6 +1008,42 @@ impl PlatformEventHandler for AppEventHandler {
             }
             AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_PROMPT_LAB => {
                 self.toggle_prompt_lab_from_menu();
+            }
+            AppEvent::FormDialogCompleted {
+                window_id,
+                context_tag,
+                confirmed,
+                field_values,
+            } if window_id == self.window_id => {
+                if !confirmed {
+                    return;
+                }
+                let Some(request_id) = parse_archive_dialog_request_id(&context_tag) else {
+                    engine_warn!(
+                        "[archive-dialog] ignoring form dialog result with unrecognized context_tag={}",
+                        context_tag
+                    );
+                    return;
+                };
+                let basename = archive_field_text(&field_values, ARCHIVE_DIALOG_FILENAME_FIELD_ID)
+                    .unwrap_or_default();
+                let set_checkpoint = archive_field_checked(
+                    &field_values,
+                    ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID,
+                )
+                .unwrap_or(true);
+                engine_info!(
+                    "[archive-dialog] submitted request_id={} basename={} set_checkpoint={}",
+                    request_id,
+                    basename,
+                    set_checkpoint
+                );
+                let _ = self.msg_tx.send(Msg::ArchiveDialogSubmitted {
+                    request_id,
+                    basename,
+                    set_checkpoint,
+                    submitted_at: Utc::now(),
+                });
             }
             AppEvent::InputTextChanged {
                 control_id, text, ..

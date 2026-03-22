@@ -61,8 +61,25 @@ pub enum Effect {
         policy: StopPolicy,
     },
     ArchiveRequested {
+        request_id: u64,
+        basename: String,
         ordered_urls: Vec<String>,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
+        requested_checkpoint: Option<chrono::DateTime<chrono::Utc>>,
+    },
+    OpenArchiveDialog {
+        request_id: u64,
+        article_count: usize,
+        since_utc: Option<chrono::DateTime<chrono::Utc>>,
+        default_basename: String,
+    },
+    ShowArchiveDialog {
+        request_id: u64,
+        article_count: usize,
+        since_utc: Option<chrono::DateTime<chrono::Utc>>,
+        default_basename: String,
+        default_file_exists: bool,
+        export_dir: PathBuf,
     },
     DownloadLinkedPage {
         job_id: crate::JobId,

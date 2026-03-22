@@ -32,6 +32,16 @@ const MIN_PREVIEW_WIDTH: i32 = 200;
 // Total width occupied by splitter (width + margins)
 const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
 
+fn is_safe_archive_basename(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." {
+        return false;
+    }
+    if name.contains(['/', '\\', '\0']) {
+        return false;
+    }
+    !std::path::Path::new(name).is_absolute()
+}
+
 /// Pure update function: applies a message to state and returns any effects.
 #[allow(
     clippy::too_many_lines,
@@ -85,12 +95,16 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
         }
         Msg::ArchiveClicked => {
+            let request_id = state.allocate_next_archive_request_id();
             let policy = state.briefing_triage_policy();
             let ordered_urls = policy.eligible_urls(state.triage());
+            let article_count = ordered_urls.len();
             let since_utc = state.briefing_since_utc();
-            vec![Effect::ArchiveRequested {
-                ordered_urls,
+            vec![Effect::OpenArchiveDialog {
+                request_id,
+                article_count,
                 since_utc,
+                default_basename: "archive.md".to_string(),
             }]
         }
         Msg::ToggleInputPanel => {
@@ -851,6 +865,86 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             state.set_briefing_since_utc(parsed);
             vec![Effect::SaveBriefingCheckpoint { since_utc: parsed }]
+        }
+        Msg::ArchiveDialogReady {
+            request_id,
+            article_count,
+            since_utc,
+            default_basename,
+            default_file_exists,
+            export_dir,
+        } => {
+            if request_id != state.archive_request_id() {
+                return (state, Vec::new());
+            }
+            vec![Effect::ShowArchiveDialog {
+                request_id,
+                article_count,
+                since_utc,
+                default_basename,
+                default_file_exists,
+                export_dir,
+            }]
+        }
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename,
+            set_checkpoint,
+            submitted_at,
+        } => {
+            if request_id != state.archive_request_id() {
+                return (state, Vec::new());
+            }
+            if !is_safe_archive_basename(&basename) {
+                engine_warn!(
+                    "[archive-dialog] rejecting invalid basename request_id={} basename={}",
+                    request_id,
+                    basename
+                );
+                return (state, Vec::new());
+            }
+            let ordered_urls = state.briefing_triage_policy().eligible_urls(state.triage());
+            let since_utc = state.briefing_since_utc();
+            let requested_checkpoint = set_checkpoint.then_some(submitted_at);
+            vec![Effect::ArchiveRequested {
+                request_id,
+                basename,
+                ordered_urls,
+                since_utc,
+                requested_checkpoint,
+            }]
+        }
+        Msg::ArchiveExportCompleted {
+            request_id,
+            requested_checkpoint,
+            ..
+        } => {
+            if request_id != state.archive_request_id() {
+                return (state, Vec::new());
+            }
+            if let Some(checkpoint) = requested_checkpoint {
+                vec![Effect::SaveBriefingCheckpoint {
+                    since_utc: Some(checkpoint),
+                }]
+            } else {
+                Vec::new()
+            }
+        }
+        Msg::ArchiveExportFailed {
+            request_id,
+            basename,
+            reason,
+        } => {
+            if request_id != state.archive_request_id() {
+                return (state, Vec::new());
+            }
+            engine_warn!(
+                "[archive-dialog] export failed request_id={} basename={} reason={}",
+                request_id,
+                basename,
+                reason
+            );
+            Vec::new()
         }
         Msg::ArticlesLoaded {
             articles,
@@ -5209,6 +5303,176 @@ mod tests {
         }
 
         panic!("no LoadArticlesForTriage dispatch within 200 ticks");
+    }
+
+    #[test]
+    fn archive_clicked_emits_open_dialog_with_request_id_and_article_count() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, effects) = update(state, Msg::ArchiveClicked);
+        assert_eq!(state.archive_request_id(), 1);
+        let effect = effects
+            .into_iter()
+            .find(|effect| matches!(effect, Effect::OpenArchiveDialog { .. }))
+            .expect("OpenArchiveDialog effect expected");
+        match effect {
+            Effect::OpenArchiveDialog {
+                request_id,
+                article_count,
+                since_utc,
+                default_basename,
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(article_count, 0);
+                assert!(since_utc.is_none());
+                assert_eq!(default_basename, "archive.md");
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn archive_dialog_ready_ignores_stale_request() {
+        init_logging();
+        let state = AppState::new();
+        let (state, effects) = update(
+            state,
+            Msg::ArchiveDialogReady {
+                request_id: 99,
+                article_count: 0,
+                since_utc: None,
+                default_basename: "archive.md".to_string(),
+                default_file_exists: false,
+                export_dir: std::path::PathBuf::from("/tmp"),
+            },
+        );
+        assert!(effects.is_empty());
+        assert_eq!(state.archive_request_id(), 0);
+    }
+
+    #[test]
+    fn archive_dialog_ready_emits_show_dialog_for_current_request() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, _) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+        let (state, effects) = update(
+            state,
+            Msg::ArchiveDialogReady {
+                request_id,
+                article_count: 1,
+                since_utc: None,
+                default_basename: "archive.md".to_string(),
+                default_file_exists: false,
+                export_dir: std::path::PathBuf::from("/tmp"),
+            },
+        );
+        assert_eq!(state.archive_request_id(), 1);
+        let effect = effects
+            .into_iter()
+            .find(|effect| matches!(effect, Effect::ShowArchiveDialog { .. }))
+            .expect("ShowArchiveDialog effect expected");
+        match effect {
+            Effect::ShowArchiveDialog {
+                request_id,
+                article_count,
+                since_utc,
+                default_basename,
+                default_file_exists,
+                export_dir,
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(article_count, 1);
+                assert!(since_utc.is_none());
+                assert_eq!(default_basename, "archive.md");
+                assert!(!default_file_exists);
+                assert_eq!(export_dir, std::path::PathBuf::from("/tmp"));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
+        init_logging();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, _) = update(state, Msg::ArchiveClicked);
+        let request_id = state.archive_request_id();
+
+        let (_state, effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id,
+                basename: "custom-archive.md".to_string(),
+                set_checkpoint: true,
+                submitted_at: since,
+            },
+        );
+        let effect = effects
+            .into_iter()
+            .find(|effect| matches!(effect, Effect::ArchiveRequested { .. }))
+            .expect("ArchiveRequested effect expected");
+        match effect {
+            Effect::ArchiveRequested {
+                request_id,
+                basename,
+                ordered_urls,
+                since_utc,
+                requested_checkpoint,
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(basename, "custom-archive.md");
+                assert_eq!(ordered_urls.len(), 0);
+                assert!(since_utc.is_none());
+                assert_eq!(requested_checkpoint, Some(since));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn archive_dialog_submitted_rejects_invalid_basename() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, _) = update(state, Msg::ArchiveClicked);
+        let (_, effects) = update(
+            state,
+            Msg::ArchiveDialogSubmitted {
+                request_id: 1,
+                basename: "../bad.md".to_string(),
+                set_checkpoint: true,
+                submitted_at: chrono::Utc::now(),
+            },
+        );
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn archive_export_completed_only_saves_checkpoint_for_current_request() {
+        init_logging();
+        let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        let (state, _) = update(state, Msg::ArchiveClicked);
+        let checkpoint = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (_, effects) = update(
+            state,
+            Msg::ArchiveExportCompleted {
+                request_id: 1,
+                path: std::path::PathBuf::from("archive.md"),
+                doc_count: 1,
+                requested_checkpoint: Some(checkpoint),
+            },
+        );
+        assert_eq!(
+            effects,
+            vec![Effect::SaveBriefingCheckpoint {
+                since_utc: Some(checkpoint)
+            }]
+        );
     }
 
     // ── Pre-triage refresh coordinator: shared test helpers ──────────────────

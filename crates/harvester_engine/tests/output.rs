@@ -152,6 +152,7 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
     };
     let summary = build_triage_archive(
         dir,
+        "custom-archive.md",
         &["https://b".to_string(), "https://a".to_string()],
         None,
         options,
@@ -163,7 +164,7 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap(),
-        "archive-all-2026-02-02.md"
+        "custom-archive.md"
     );
     assert_eq!(summary.doc_count, 2);
     assert_eq!(summary.total_tokens, 5);
@@ -200,6 +201,7 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
     };
     let summary = build_triage_archive(
         dir,
+        "archive.md",
         &["https://old".to_string(), "https://bad".to_string()],
         Some(since),
         options,
@@ -211,7 +213,7 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap(),
-        "archive-2025-01-01-2025-01-01.md"
+        "archive.md"
     );
 
     assert_eq!(summary.doc_count, 1);
@@ -239,16 +241,37 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
         manifest_filename: None,
         ..ExportOptions::default()
     };
-    let summary = build_triage_archive(dir, &["https://keep".to_string()], None, options).unwrap();
+    let summary =
+        build_triage_archive(dir, "archive.md", &["https://keep".to_string()], None, options)
+            .unwrap();
     assert_eq!(
         summary
             .output_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap(),
-        "archive-all-2026-02-15.md"
+        "archive.md"
     );
     assert_eq!(summary.doc_count, 1);
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
     assert!(archive.contains("url: \"https://keep\""));
+}
+
+#[test]
+fn concatenated_export_ignores_custom_archive_artifacts_by_content() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md = "---\nurl: \"https://keep\"\ntitle: \"Keep\"\ntoken_count: 1\nfetched_utc: \"2026-02-15T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nkeep\n";
+    std::fs::write(dir.join("keep.md"), md).unwrap();
+    std::fs::write(
+        dir.join("old-custom.md"),
+        "===== DOC START =====\n---\nurl: \"https://ignore\"\ntitle: \"Ignore\"\ntoken_count: 1\nfetched_utc: \"2026-02-14T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nignore\n",
+    )
+    .unwrap();
+
+    let summary = build_concatenated_export(dir, ExportOptions::default()).unwrap();
+    assert_eq!(summary.doc_count, 1);
+    let export = std::fs::read_to_string(summary.output_path).unwrap();
+    assert!(export.contains("url: https://keep"));
+    assert!(!export.contains("url: https://ignore"));
 }

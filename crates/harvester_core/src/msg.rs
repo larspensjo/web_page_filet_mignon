@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use chrono::{DateTime, Utc};
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::types::ModelId;
@@ -35,6 +36,35 @@ pub enum Msg {
     StopFinishClicked,
     /// User clicked Archive.
     ArchiveClicked,
+    /// Archive dialog data is ready for the UI to render.
+    ArchiveDialogReady {
+        request_id: u64,
+        article_count: usize,
+        since_utc: Option<DateTime<Utc>>,
+        default_basename: String,
+        default_file_exists: bool,
+        export_dir: PathBuf,
+    },
+    /// Archive dialog was confirmed by the user.
+    ArchiveDialogSubmitted {
+        request_id: u64,
+        basename: String,
+        set_checkpoint: bool,
+        submitted_at: DateTime<Utc>,
+    },
+    /// Archive export completed successfully.
+    ArchiveExportCompleted {
+        request_id: u64,
+        path: PathBuf,
+        doc_count: usize,
+        requested_checkpoint: Option<DateTime<Utc>>,
+    },
+    /// Archive export failed.
+    ArchiveExportFailed {
+        request_id: u64,
+        basename: String,
+        reason: String,
+    },
     /// User toggled visibility of the URL input/dropbox panel.
     ToggleInputPanel,
     /// UI/render tick to coalesce rendering.

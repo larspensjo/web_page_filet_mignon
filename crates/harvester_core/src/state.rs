@@ -314,6 +314,7 @@ pub struct AppState {
     dirty: bool,
     next_job_id: JobId,
     next_llm_request_id: u64,
+    archive_request_id: u64,
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
     briefing_history: Vec<crate::briefing::BriefingHistoryEntry>,
@@ -407,6 +408,7 @@ impl Default for AppState {
             dirty: false,
             next_job_id: 1,
             next_llm_request_id: 1,
+            archive_request_id: 0,
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
             briefing_history: vec![],
@@ -837,6 +839,15 @@ impl AppState {
         let id = self.next_llm_request_id;
         self.next_llm_request_id = self.next_llm_request_id.saturating_add(1);
         id
+    }
+
+    pub fn allocate_next_archive_request_id(&mut self) -> u64 {
+        self.archive_request_id = self.archive_request_id.saturating_add(1);
+        self.archive_request_id
+    }
+
+    pub fn archive_request_id(&self) -> u64 {
+        self.archive_request_id
     }
 
     /// Records LLM token usage from a completed run.

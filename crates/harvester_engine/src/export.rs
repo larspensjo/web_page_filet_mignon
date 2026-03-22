@@ -63,7 +63,12 @@ pub fn build_concatenated_export(
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     let mut entries = collect_archive_md_files(output_dir)?;
-    exclude_export_artifacts(&mut entries, output_dir, &options);
+    exclude_export_artifacts(
+        &mut entries,
+        output_dir,
+        &options.output_filename,
+        &options.manifest_filename,
+    );
     entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
 
     let mut docs = Vec::new();
@@ -118,13 +123,19 @@ pub fn build_concatenated_export(
 
 pub fn build_triage_archive(
     output_dir: &Path,
+    basename: &str,
     ordered_urls: &[String],
     since_utc: Option<DateTime<Utc>>,
     options: ExportOptions,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     let mut entries = collect_archive_md_files(output_dir)?;
-    exclude_export_artifacts(&mut entries, output_dir, &options);
+    exclude_export_artifacts(
+        &mut entries,
+        output_dir,
+        basename,
+        &options.manifest_filename,
+    );
     entries.sort_by_key(|path| path.file_name().map(|name| name.to_os_string()));
 
     let mut docs_by_url: HashMap<String, DocMeta> = HashMap::new();
@@ -171,8 +182,7 @@ pub fn build_triage_archive(
         buffer.push_str("\n\n");
     }
 
-    let archive_filename = archive_filename_for_range(since_utc, latest_fetched_utc(&docs));
-    let output_path = write_export_file(output_dir, &archive_filename, &buffer)?;
+    let output_path = write_export_file(output_dir, basename, &buffer)?;
     let manifest_path =
         write_manifest(output_dir, &options.manifest_filename, &docs, total_tokens)?;
 
@@ -196,16 +206,14 @@ fn collect_archive_md_files(output_dir: &Path) -> Result<Vec<PathBuf>, ExportErr
 fn exclude_export_artifacts(
     entries: &mut Vec<PathBuf>,
     output_dir: &Path,
-    options: &ExportOptions,
+    output_filename: &str,
+    manifest_filename: &Option<String>,
 ) {
-    let output_artifact = output_dir.join(&options.output_filename);
-    let manifest_artifact = options
-        .manifest_filename
-        .as_ref()
-        .map(|name| output_dir.join(name));
+    let output_artifact = output_dir.join(output_filename);
+    let manifest_artifact = manifest_filename.as_ref().map(|name| output_dir.join(name));
 
     entries.retain(|path| {
-        if is_archive_artifact(path, output_dir) {
+        if is_archive_artifact(path, output_dir, output_filename) {
             return false;
         }
         if *path == output_artifact {
@@ -220,34 +228,22 @@ fn exclude_export_artifacts(
     });
 }
 
-fn is_archive_artifact(path: &Path, output_dir: &Path) -> bool {
+fn is_archive_artifact(path: &Path, output_dir: &Path, output_filename: &str) -> bool {
     if path.parent() != Some(output_dir) {
         return false;
     }
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
     };
-    name == "archive.md" || (name.starts_with("archive-") && name.ends_with(".md"))
-}
-
-fn archive_filename_for_range(
-    since_utc: Option<DateTime<Utc>>,
-    latest_fetched_utc: Option<DateTime<Utc>>,
-) -> String {
-    let from = since_utc
-        .map(|dt| dt.format("%Y-%m-%d").to_string())
-        .unwrap_or_else(|| "all".to_string());
-    let to = latest_fetched_utc
-        .map(|dt| dt.format("%Y-%m-%d").to_string())
-        .unwrap_or_else(|| from.clone());
-    format!("archive-{from}-{to}.md")
-}
-
-fn latest_fetched_utc(docs: &[DocMeta]) -> Option<DateTime<Utc>> {
-    docs.iter()
-        .filter_map(|doc| DateTime::parse_from_rfc3339(&doc.fetched_utc).ok())
-        .map(|dt| dt.with_timezone(&Utc))
-        .max()
+    if name == output_filename || name == "archive.md" {
+        return true;
+    }
+    if name.starts_with("archive-") && name.ends_with(".md") {
+        return true;
+    }
+    fs::read(path)
+        .map(|bytes| bytes.starts_with(b"===== DOC START ====="))
+        .unwrap_or(false)
 }
 
 fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
