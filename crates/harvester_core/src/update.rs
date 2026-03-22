@@ -250,6 +250,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             ordered_urls,
             triggered_by_job_done,
         } => {
+            // INTENTIONAL EXCEPTION: pre-triage refresh is the mechanism that BUILDS
+            // the candidate corpus — it runs before the shared working-corpus selector
+            // has anything to select from. It reads from completed jobs (upstream of
+            // the selector) and loads article content so that the pre-triage session
+            // can be populated. Using the shared selector here would be circular: the
+            // selector cannot produce a ReadyToTriage corpus until this refresh finishes.
             let reason = if triggered_by_job_done {
                 crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone
             } else {
@@ -759,6 +765,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] generate requested");
+            // INTENTIONAL EXCEPTION: briefing article loading does NOT use the shared
+            // working-corpus selector. Briefing starts from all completed jobs, then
+            // runs a fresh triage pass with TriageSelectionPolicy cutoff semantics to
+            // select which articles are worth summarizing. The shared selector's
+            // pre-triage results (which use a different filter set) are not appropriate
+            // here — briefing wants priority-ranked triage results, not just "ready to
+            // triage" candidates.
             let ordered_urls = state.ordered_completed_job_urls_snapshot();
             let since_utc = state.briefing_since_utc();
             vec![
@@ -784,6 +797,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             snapshot_briefing_coverage_window(&mut state);
             state.revert_preview_to_briefing();
             engine_info!("[briefing-triage] summary-prep requested");
+            // INTENTIONAL EXCEPTION: same rationale as GenerateBriefingClicked above —
+            // briefing uses all completed jobs as its starting feed, then applies
+            // TriageSelectionPolicy cutoff semantics, bypassing the shared selector.
             let ordered_urls = state.ordered_completed_job_urls_snapshot();
             let since_utc = state.briefing_since_utc();
             vec![
@@ -798,6 +814,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::BriefingPrereqArticlesLoaded { articles } => {
             engine_info!("[briefing-triage] prereq loaded count={}", articles.len());
+            // INTENTIONAL EXCEPTION: briefing builds its own ephemeral pre-triage pass
+            // from the freshly loaded prerequisite articles (all completed jobs). This
+            // is not the shared working-corpus pre-triage session — it is a transient
+            // filter step that feeds the briefing-owned triage run (with
+            // TriageSelectionPolicy cutoff semantics applied afterwards). The shared
+            // selector's ReadyToTriage session is irrelevant here because briefing
+            // needs to score articles for priority, not just include ready ones.
             let policy = PreTriagePolicy::default();
             let pre_triage = PreTriageSession::load_articles(articles, &policy);
             let filtered_articles = pre_triage.resolved_included_articles();
@@ -2155,6 +2178,11 @@ fn dispatch_pre_triage_if_due(
 }
 
 fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
+    // Reads resolved_included_articles() directly from pre-triage, which is the
+    // correct corpus source for manual triage start. The caller (TriageClicked) already
+    // guards that pre-triage is in ReadyToTriage phase — the same condition the shared
+    // working-corpus selector uses. We access pre-triage directly here because triage
+    // needs full LoadedArticle data (content, hashes, timestamps), not just URLs.
     let included = state.pre_triage().resolved_included_articles();
     if included.is_empty() {
         state
@@ -2329,6 +2357,12 @@ fn on_triage_settled_for_briefing(state: &mut AppState, effects: &mut Vec<Effect
     if !state.briefing_orchestration_requested() {
         return;
     }
+    // INTENTIONAL EXCEPTION: briefing article selection applies TriageSelectionPolicy
+    // cutoff semantics on top of the briefing-owned triage results — only articles with
+    // sufficient priority are included. This is distinct from the shared working-corpus
+    // selector: the selector picks what is "ready to act on now", while this step picks
+    // what is "worth summarizing in this briefing run". Using the shared selector here
+    // would ignore the priority cutoff and could include low-signal articles.
     let policy = state.briefing_triage_policy();
     let ordered_urls = policy.eligible_urls(state.triage());
     engine_info!(
