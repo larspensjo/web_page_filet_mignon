@@ -102,7 +102,7 @@ impl CurrentWorkingCorpus {
                     source: CurrentWorkingCorpusSource::TriageComplete,
                     ordered_urls: urls,
                 };
-                engine_logging::engine_debug!(
+                engine_logging::engine_info!(
                     "[working-corpus] fallthrough source={:?} reason=pre_triage_not_ready count={} fingerprint={:#010x}",
                     CurrentWorkingCorpusSource::TriageComplete,
                     count,
