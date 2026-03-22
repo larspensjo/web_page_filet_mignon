@@ -99,11 +99,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let corpus = state.current_working_corpus();
             let article_count = corpus.count();
             let fingerprint = corpus.fingerprint();
+            let source = corpus.source();
             engine_info!(
-                "[working-corpus] archive opened request_id={} article_count={} fingerprint={:x}",
-                request_id,
+                "[working-corpus] source={:?} count={} fingerprint={:#010x} caller=archive-open request_id={}",
+                source,
                 article_count,
-                fingerprint
+                fingerprint,
+                request_id,
             );
             state.pin_archive_corpus(corpus);
             let since_utc = state.briefing_since_utc();
@@ -950,10 +952,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             };
             state.clear_pinned_archive_corpus();
             engine_info!(
-                "[working-corpus] archive submitted request_id={} article_count={} fingerprint={:x}",
-                request_id,
+                "[working-corpus] source=pinned count={} fingerprint={:#010x} caller=archive-submit request_id={}",
                 ordered_urls.len(),
-                fingerprint
+                fingerprint,
+                request_id,
             );
             let since_utc = state.briefing_since_utc();
             let requested_checkpoint = set_checkpoint.then_some(submitted_at);

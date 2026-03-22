@@ -74,6 +74,11 @@ impl CurrentWorkingCorpus {
             // Even if provisionally empty we still report PreTriageReviewing — the user is
             // actively working through the list; there is no corpus to fall back to while
             // they are mid-review.
+            engine_logging::engine_debug!(
+                "[working-corpus] source={:?} count={} (informational only; manual review pending)",
+                CurrentWorkingCorpusSource::PreTriageReviewing,
+                urls.len(),
+            );
             return Self {
                 source: CurrentWorkingCorpusSource::PreTriageReviewing,
                 ordered_urls: urls,
@@ -92,13 +97,25 @@ impl CurrentWorkingCorpus {
         if matches!(triage.phase(), TriagePhase::Complete) {
             let urls = triage_policy.eligible_urls(triage);
             if !urls.is_empty() {
-                return Self {
+                let count = urls.len();
+                let result = Self {
                     source: CurrentWorkingCorpusSource::TriageComplete,
                     ordered_urls: urls,
                 };
+                engine_logging::engine_debug!(
+                    "[working-corpus] fallthrough source={:?} reason=pre_triage_not_ready count={} fingerprint={:#010x}",
+                    CurrentWorkingCorpusSource::TriageComplete,
+                    count,
+                    result.fingerprint(),
+                );
+                return result;
             }
         }
 
+        engine_logging::engine_debug!(
+            "[working-corpus] source={:?} count=0 (no actionable corpus available)",
+            CurrentWorkingCorpusSource::Unavailable,
+        );
         Self {
             source: CurrentWorkingCorpusSource::Unavailable,
             ordered_urls: Vec::new(),
