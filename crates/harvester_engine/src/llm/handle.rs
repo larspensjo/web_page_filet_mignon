@@ -1020,6 +1020,7 @@ const RETRY_DELAY: Duration = Duration::from_secs(2);
 mod tests {
     use super::*;
     use crate::llm::mock_provider::MockLlmProvider;
+    use crate::llm::OPENAI_MODEL_GPT_4O_MINI;
 
     /// Simulate the TemplateVars construction that handle_completion_concurrent does,
     /// then verify that extra_template_vars are NOT folded into {{context}}.
@@ -1089,7 +1090,7 @@ mod tests {
         {
             LlmConfig {
                 provider,
-                default_model: ModelId::new(ProviderKind::OpenAi, "gpt-4o-mini"),
+                default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O_MINI),
                 triage_model: None,
                 summary_model: None,
                 briefing_model: None,

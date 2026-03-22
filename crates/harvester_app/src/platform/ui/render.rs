@@ -1988,7 +1988,7 @@ mod tests {
                 output_tokens: Some(20),
                 cost_microdollars: Some(30),
                 wall_ms: Some(40),
-                resolved_model: Some("gpt-4o-mini".to_string()),
+                resolved_model: Some(harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI.to_string()),
                 parse_ok: Some(true),
                 cache_status: Some("miss".to_string()),
             }),
@@ -3183,7 +3183,10 @@ mod tests {
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
         view.left_pane.prompt_lab.model_catalog = vec![
-            ModelId::new(harvester_engine::llm::ProviderKind::OpenAi, "gpt-4o-mini"),
+            ModelId::new(
+                harvester_engine::llm::ProviderKind::OpenAi,
+                harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI,
+            ),
             ModelId::new(harvester_engine::llm::ProviderKind::OpenAi, "o3-mini"),
         ];
 
@@ -3199,7 +3202,7 @@ mod tests {
                 } if *control_id == COMBO_PROMPT_LAB_MODEL_SELECTOR
                     && items == &vec![
                         "Default".to_string(),
-                        "gpt-4o-mini".to_string(),
+                        harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI.to_string(),
                         "o3-mini".to_string(),
                     ]
             )
@@ -3214,7 +3217,7 @@ mod tests {
         view.left_pane.left_tab = LeftTab::PromptLab;
         view.left_pane.prompt_lab.model_catalog = vec![ModelId::new(
             harvester_engine::llm::ProviderKind::OpenAi,
-            "gpt-4o-mini",
+            harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI,
         )];
 
         let initial_cmds = render(window_id, &view, &mut tree_state);
@@ -3250,7 +3253,7 @@ mod tests {
         view.left_pane.prompt_lab.visible = true;
         view.left_pane.prompt_lab.model_catalog = vec![ModelId::new(
             harvester_engine::llm::ProviderKind::OpenAi,
-            "gpt-4o-mini",
+            harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI,
         )];
 
         let _ = render(window_id, &view, &mut tree_state);
@@ -3363,12 +3366,18 @@ mod tests {
     #[test]
     fn status_bar_includes_llm_usage_segment() {
         let rows = vec![LlmModelUsageView {
-            model: "gpt-4o-mini".to_string(),
+            model: harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI.to_string(),
             input_tokens: 12_000,
             output_tokens: 3_000,
         }];
         let result = format_llm_usage_status(&rows);
-        assert_eq!(result, Some("gpt-4o-mini: in=12K out=3K".to_string()));
+        assert_eq!(
+            result,
+            Some(format!(
+                "{}: in=12K out=3K",
+                harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI
+            ))
+        );
     }
 
     #[test]

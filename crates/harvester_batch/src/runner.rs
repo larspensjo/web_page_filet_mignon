@@ -10,6 +10,7 @@ use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
     LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
     ProviderKind, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL,
+    OPENAI_MODEL_GPT_4O_MINI,
 };
 use harvester_io::{
     load_briefing_checkpoint, load_completed_jobs, load_sources, load_summary_cache,
@@ -248,7 +249,7 @@ fn build_effect_runner(
         let registry = Arc::new(RwLock::new(registry));
         let config = LlmConfig {
             provider,
-            default_model: ModelId::new(ProviderKind::OpenAi, "gpt-4o-mini"),
+            default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O_MINI),
             triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
             summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
             briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
@@ -1997,20 +1998,26 @@ mod tests {
     fn format_llm_usage_lines_sorted_and_stable() {
         let rows = vec![
             LlmModelUsageView {
-                model: "gpt-4o-mini".to_string(),
+                model: OPENAI_MODEL_GPT_4O_MINI.to_string(),
                 input_tokens: 12_345,
                 output_tokens: 3_100,
             },
             LlmModelUsageView {
-                model: "gpt-4o".to_string(),
+                model: harvester_engine::llm::OPENAI_MODEL_GPT_4O.to_string(),
                 input_tokens: 500,
                 output_tokens: 80,
             },
         ];
         let lines = format_llm_usage_lines(&rows);
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "  gpt-4o-mini: in=12K out=3K");
-        assert_eq!(lines[1], "  gpt-4o: in=500 out=80");
+        assert_eq!(
+            lines[0],
+            format!("  {}: in=12K out=3K", OPENAI_MODEL_GPT_4O_MINI)
+        );
+        assert_eq!(
+            lines[1],
+            format!("  {}: in=500 out=80", harvester_engine::llm::OPENAI_MODEL_GPT_4O)
+        );
     }
 
     #[test]

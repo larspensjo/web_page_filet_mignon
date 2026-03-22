@@ -62,12 +62,10 @@ impl PricingRegistry {
 
     pub fn with_defaults() -> Self {
         let mut reg = Self::new();
-        reg.insert("gpt-4o-mini", ModelPricing::new(0.015, 0.015));
-        reg.insert("gpt-4o", ModelPricing::new(0.05, 0.08));
-        reg.insert("gpt-3.5-turbo", ModelPricing::new(0.006, 0.006));
-        // TODO: replace with published gpt-5-nano rates once the model is available;
-        // using gpt-4o-mini rates as a placeholder.
-        reg.insert("gpt-5-nano", ModelPricing::new(0.015, 0.015));
+        reg.insert("gpt-5.4", ModelPricing::new(2.50, 15.00));
+        reg.insert("gpt-5.4-mini", ModelPricing::new(0.75, 4.50));
+        reg.insert("gpt-5.4-nano", ModelPricing::new(0.20, 1.25));
+        reg.insert("gpt-5.4-pro", ModelPricing::new(30.00, 180.00));
         reg
     }
 

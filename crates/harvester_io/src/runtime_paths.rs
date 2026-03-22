@@ -65,6 +65,7 @@ mod tests {
     use crate::{load_summary_cache, persist_summary_cache};
     use chrono::Utc;
     use harvester_core::{ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
+    use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
     use harvester_engine::llm::prompt::PromptId;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -104,7 +105,7 @@ mod tests {
             "hash",
             PromptId::ArticleSummary,
             Some(1),
-            Some("gpt-4o-mini"),
+            Some(OPENAI_MODEL_GPT_4O_MINI),
             &[],
         )
         .expect("key");

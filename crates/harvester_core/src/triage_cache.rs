@@ -176,6 +176,7 @@ impl Default for TriageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
     use crate::triage::ArticleTriageResult;
     fn sample_result() -> ArticleTriageResult {
         ArticleTriageResult {
@@ -207,7 +208,7 @@ mod tests {
             "hash",
             PromptId::ArticleTriage,
             Some(1),
-            Some("gpt-4o-mini"),
+            Some(OPENAI_MODEL_GPT_4O_MINI),
             &context,
         )
         .unwrap();
@@ -224,7 +225,7 @@ mod tests {
                 "hash",
                 PromptId::ArticleSummary,
                 Some(1),
-                Some("gpt-4o-mini"),
+                Some(OPENAI_MODEL_GPT_4O_MINI),
                 &context,
             ),
             Err(TriageCacheKeyError::InvalidPromptId)
@@ -238,7 +239,7 @@ mod tests {
         let context_hash = context_hash(&context);
         let stored_key = build_key("hash", "gpt-4o-mini-2024-07-18", &context_hash);
         cache.insert(stored_key, sample_result());
-        let lookup_key = build_key("hash", "gpt-4o-mini", &context_hash);
+        let lookup_key = build_key("hash", OPENAI_MODEL_GPT_4O_MINI, &context_hash);
         assert!(cache.lookup(&lookup_key).is_some());
     }
 

@@ -2793,7 +2793,7 @@ mod tests {
     use crate::briefing::{ArticleSummaryState, BriefingPhase, LoadedArticle};
     use harvester_engine::llm::{
         run_metadata::{CacheStatus, LlmRunMetadata, LlmRunMetadataInit},
-        DEFAULT_BRIEFING_MODEL,
+        DEFAULT_BRIEFING_MODEL, OPENAI_MODEL_GPT_4O, OPENAI_MODEL_GPT_4O_MINI,
     };
 
     fn init_logging() {
@@ -3585,10 +3585,13 @@ mod tests {
     #[test]
     fn summary_cache_model_id_compatibility_accepts_resolved_suffix() {
         assert!(summary_cache_model_ids_compatible(
-            "gpt-4o-mini",
+            OPENAI_MODEL_GPT_4O_MINI,
             "gpt-4o-mini-2024-07-18",
         ));
-        assert!(!summary_cache_model_ids_compatible("gpt-4o-mini", "gpt-4o",));
+        assert!(!summary_cache_model_ids_compatible(
+            OPENAI_MODEL_GPT_4O_MINI,
+            OPENAI_MODEL_GPT_4O,
+        ));
     }
 
     #[test]
@@ -4546,7 +4549,7 @@ mod tests {
         use harvester_engine::llm::{ModelId, ProviderKind};
         let mut state = AppState::new();
         prepare_type_url_snapshot(&mut state, "some text");
-        let override_model = ModelId::new(ProviderKind::OpenAi, "gpt-4o");
+        let override_model = ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O);
         state
             .prompt_lab_mut()
             .set_model_override(Some(override_model.clone()));
@@ -4585,7 +4588,7 @@ mod tests {
         use harvester_engine::llm::{ModelId, ProviderKind};
         let mut state = AppState::new();
         prepare_type_url_snapshot(&mut state, "some text");
-        let override_model = ModelId::new(ProviderKind::OpenAi, "gpt-4o");
+        let override_model = ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O);
         state
             .prompt_lab_mut()
             .set_model_override(Some(override_model.clone()));

@@ -1,12 +1,15 @@
-use harvester_engine::llm::{ModelPricing, PricingRegistry, TokenUsage};
+use harvester_engine::llm::{
+    ModelPricing, PricingRegistry, TokenUsage, OPENAI_MODEL_GPT_5_4, OPENAI_MODEL_GPT_5_4_MINI,
+    OPENAI_MODEL_GPT_5_4_NANO, OPENAI_MODEL_GPT_5_4_PRO,
+};
 
 #[test]
 fn default_pricing_matches_expected_costs() {
     let registry = PricingRegistry::with_defaults();
     let usage = TokenUsage::new(10_000, 5_000);
 
-    let microdollars = registry.cost_microdollars("gpt-3.5-turbo", &usage);
-    assert_eq!(microdollars, 90);
+    let microdollars = registry.cost_microdollars(OPENAI_MODEL_GPT_5_4_MINI, &usage);
+    assert_eq!(microdollars, 30_000);
 }
 
 #[test]
@@ -51,12 +54,21 @@ fn cost_with_no_cached_tokens_unchanged() {
 }
 
 #[test]
-fn default_registry_contains_gpt5_nano() {
+fn default_registry_contains_gpt54_nano() {
     let registry = PricingRegistry::with_defaults();
     assert!(
-        registry.get("gpt-5-nano").is_some(),
-        "gpt-5-nano must be present in the default pricing registry"
+        registry.get(OPENAI_MODEL_GPT_5_4_NANO).is_some(),
+        "gpt-5.4-nano must be present in the default pricing registry"
     );
+}
+
+#[test]
+fn default_registry_contains_gpt54_family() {
+    let registry = PricingRegistry::with_defaults();
+    assert!(registry.get(OPENAI_MODEL_GPT_5_4).is_some());
+    assert!(registry.get(OPENAI_MODEL_GPT_5_4_MINI).is_some());
+    assert!(registry.get(OPENAI_MODEL_GPT_5_4_NANO).is_some());
+    assert!(registry.get(OPENAI_MODEL_GPT_5_4_PRO).is_some());
 }
 
 #[test]

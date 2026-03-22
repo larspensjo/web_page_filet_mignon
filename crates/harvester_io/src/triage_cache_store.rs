@@ -179,6 +179,7 @@ pub fn persist_triage_cache(cache: &TriageCache, path: &Path) -> Result<(), Pers
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
     use tempfile::tempdir;
 
     #[test]
@@ -200,7 +201,7 @@ mod tests {
             "hash",
             PromptId::ArticleTriage,
             Some(1),
-            Some("gpt-4o-mini"),
+            Some(OPENAI_MODEL_GPT_4O_MINI),
             &[("k".to_string(), "v".to_string())],
         )
         .unwrap();

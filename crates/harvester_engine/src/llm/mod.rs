@@ -14,9 +14,16 @@ pub mod template_validation;
 pub mod types;
 pub mod validation;
 
-pub const DEFAULT_TRIAGE_MODEL: &str = "gpt-5-nano";
-pub const DEFAULT_SUMMARY_MODEL: &str = "gpt-5-mini";
-pub const DEFAULT_BRIEFING_MODEL: &str = "gpt-5-mini";
+pub const OPENAI_MODEL_GPT_4O: &str = "gpt-4o";
+pub const OPENAI_MODEL_GPT_4O_MINI: &str = "gpt-4o-mini";
+pub const OPENAI_MODEL_GPT_5_4: &str = "gpt-5.4";
+pub const OPENAI_MODEL_GPT_5_4_MINI: &str = "gpt-5.4-mini";
+pub const OPENAI_MODEL_GPT_5_4_NANO: &str = "gpt-5.4-nano";
+pub const OPENAI_MODEL_GPT_5_4_PRO: &str = "gpt-5.4-pro";
+
+pub const DEFAULT_TRIAGE_MODEL: &str = OPENAI_MODEL_GPT_5_4_NANO;
+pub const DEFAULT_SUMMARY_MODEL: &str = OPENAI_MODEL_GPT_5_4_MINI;
+pub const DEFAULT_BRIEFING_MODEL: &str = OPENAI_MODEL_GPT_5_4_MINI;
 
 pub use dto::{
     AggregateBriefing, ArticleSummary, BriefingStory, SummaryEntities, TriagePriority, TriageResult,

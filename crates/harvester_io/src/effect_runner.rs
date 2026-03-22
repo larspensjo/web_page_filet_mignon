@@ -1574,7 +1574,7 @@ mod tests {
     use super::*;
     use harvester_engine::llm::load_context_file;
     use harvester_engine::llm::types::ProviderKind;
-    use harvester_engine::llm::DEFAULT_BRIEFING_MODEL;
+    use harvester_engine::llm::{DEFAULT_BRIEFING_MODEL, OPENAI_MODEL_GPT_4O_MINI};
     use harvester_engine::llm::{LlmCompletionError, LlmEvent};
     use std::fs;
     use std::path::Path;
@@ -1630,7 +1630,7 @@ mod tests {
     #[test]
     fn build_local_model_catalog_uses_effective_models_with_dedup_and_sort() {
         let mut effective_models = HashMap::new();
-        effective_models.insert(PromptId::ArticleTriage, "gpt-4o-mini".to_string());
+        effective_models.insert(PromptId::ArticleTriage, OPENAI_MODEL_GPT_4O_MINI.to_string());
         effective_models.insert(PromptId::ArticleSummary, "o3-mini".to_string());
         effective_models.insert(
             PromptId::AggregateBriefing,
@@ -1643,7 +1643,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
-                "gpt-4o-mini".to_string(),
+                OPENAI_MODEL_GPT_4O_MINI.to_string(),
                 DEFAULT_BRIEFING_MODEL.to_string(),
                 "o3-mini".to_string()
             ]
@@ -1653,7 +1653,7 @@ mod tests {
     #[test]
     fn build_local_model_catalog_returns_empty_without_provider_kind() {
         let mut effective_models = HashMap::new();
-        effective_models.insert(PromptId::ArticleTriage, "gpt-4o-mini".to_string());
+        effective_models.insert(PromptId::ArticleTriage, OPENAI_MODEL_GPT_4O_MINI.to_string());
 
         let models = build_local_model_catalog(None, &effective_models);
 
@@ -1950,7 +1950,7 @@ mod tests {
         LlmFailureMetadata {
             prompt_id: PromptId::ArticleTriage,
             prompt_version: 1,
-            resolved_model: Some("gpt-4o-mini".to_string()),
+            resolved_model: Some(OPENAI_MODEL_GPT_4O_MINI.to_string()),
             input_bytes: 100,
             wall_ms: Some(200),
             timestamp_utc: "2026-02-15T00:00:00Z".to_string(),

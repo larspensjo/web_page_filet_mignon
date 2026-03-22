@@ -27,6 +27,7 @@ use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
     LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
     ProviderKind, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL,
+    OPENAI_MODEL_GPT_5_4_NANO,
 };
 use harvester_io::{
     load_completed_jobs, load_pre_triage_overrides, load_summary_cache, load_triage_cache,
@@ -94,7 +95,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         let registry = Arc::new(RwLock::new(registry));
         let config = LlmConfig {
             provider,
-            default_model: ModelId::new(ProviderKind::OpenAi, "gpt-5-nano"),
+            default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_5_4_NANO),
             triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
             summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
             briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),

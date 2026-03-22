@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::llm::prompt::{PromptId, PromptVersion};
+use crate::llm::OPENAI_MODEL_GPT_4O_MINI;
 
 // ---------------------------------------------------------------------------
 // CacheStatus
@@ -101,7 +102,7 @@ impl LlmRunMetadata {
         Self::new(LlmRunMetadataInit {
             prompt_id: PromptId::ArticleTriage,
             prompt_version: 1,
-            resolved_model: "gpt-4o-mini".to_string(),
+            resolved_model: OPENAI_MODEL_GPT_4O_MINI.to_string(),
             input_bytes: 100,
             input_tokens: 10,
             output_tokens: 20,
