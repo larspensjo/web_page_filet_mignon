@@ -2,6 +2,7 @@
 
 **Date:** 2026-03-22
 **Status:** Approved
+**Depends on:** `feature/working-corpus-selector` — requires `CurrentWorkingCorpus`, `CurrentWorkingCorpusSource`, and `AppState::current_working_corpus()` introduced in that branch. Must be implemented on top of that branch or after it is merged.
 
 ## Problem
 
@@ -57,6 +58,8 @@ Rendered as `FormRow::Note` with `MessageSeverity::Warning` (same styling as the
 
 ### Tests
 
-- `ArchiveClicked` with `TriageComplete` corpus + non-empty pre-triage → `OpenArchiveDialog` has `pending_pre_triage_count > 0`
-- `ArchiveClicked` with `PreTriageReady` corpus → `pending_pre_triage_count == 0`
+- `ArchiveClicked` with `TriageComplete` corpus + non-empty pre-triage ready → `OpenArchiveDialog` has `pending_pre_triage_count > 0`
+- `ArchiveClicked` with `PreTriageReady` corpus → `pending_pre_triage_count == 0` (pre-triage articles are already included in the export)
 - `ArchiveClicked` with `TriageComplete` corpus + empty pre-triage → `pending_pre_triage_count == 0`
+- `ArchiveClicked` with `PreTriageReviewing` corpus (user mid-review) → `pending_pre_triage_count == 0` (reviewing phase: `resolved_included_urls()` returns empty since articles are not yet resolved; no warning shown)
+- `ArchiveClicked` with `Unavailable` corpus → `pending_pre_triage_count == 0`
