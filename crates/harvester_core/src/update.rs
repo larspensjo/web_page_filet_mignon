@@ -107,7 +107,17 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 fingerprint,
                 request_id,
             );
-            let pending_pre_triage_count = state.pre_triage().resolved_included_urls().len();
+            // Count only pre-triage articles not already in the triage session.
+            // After the user clicks Triage, pre-triage stays ReadyToTriage but those
+            // articles are now in TriageComplete — they must not count as "pending".
+            let triage_url_set: std::collections::HashSet<&str> =
+                state.triage().articles().iter().map(|a| a.url.as_str()).collect();
+            let pending_pre_triage_count = state
+                .pre_triage()
+                .resolved_included_urls()
+                .into_iter()
+                .filter(|url| !triage_url_set.contains(url.as_str()))
+                .count();
             state.pin_archive_corpus(corpus);
             let since_utc = state.briefing_since_utc();
             vec![Effect::OpenArchiveDialog {
@@ -5466,6 +5476,73 @@ mod tests {
         }).expect("expected OpenArchiveDialog effect");
         assert_eq!(article_count, 2, "TriageComplete corpus must supply 2 articles");
         assert_eq!(pending_count, 0, "no pre-triage ready → pending count must be 0");
+    }
+
+    #[test]
+    fn archive_clicked_after_triaging_pre_triage_articles_has_zero_pending_count() {
+        init_logging();
+        // Scenario: user polls sources → pre-triage ReadyToTriage with URL X →
+        // user clicks Triage → TriageComplete also has URL X → user clicks Archive.
+        // Pre-triage stays ReadyToTriage after triage completes, but those articles
+        // have already been triaged. pending_pre_triage_count must be 0.
+        let url = "https://shared.com/1";
+
+        // Build pre-triage ReadyToTriage with url.
+        let state = add_completed_job_for_test(AppState::new(), url);
+        let (state, request_id) = tick_until_dispatch(state);
+        let (mut state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles: loaded_pre_triage_articles(&[url]),
+            },
+        );
+        assert!(matches!(
+            state.pre_triage().phase(),
+            crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
+        ));
+
+        // Inject TriageComplete with the same URL (simulating triage of pre-triage articles).
+        let mut triage_session = crate::triage::TriageSession::new_loading(None);
+        triage_session.set_articles(vec![LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: std::iter::repeat_n("triage-content", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: "hash-shared-1".to_string(),
+            fetched_utc: None,
+        }]);
+        triage_session.transition_to_triaging();
+        triage_session.complete_article(
+            0,
+            crate::triage::ArticleTriageResult {
+                category: "tech".to_string(),
+                priority: 3,
+                tags: vec![],
+                rationale: "r".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+        triage_session.complete();
+        state.set_triage(triage_session);
+
+        let (_, effects) = update(state, Msg::ArchiveClicked);
+        let pending_count = effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::OpenArchiveDialog { pending_pre_triage_count, .. } = e {
+                    Some(*pending_pre_triage_count)
+                } else {
+                    None
+                }
+            })
+            .expect("expected OpenArchiveDialog effect");
+        assert_eq!(
+            pending_count, 0,
+            "pre-triage articles already in TriageComplete must not count as pending"
+        );
     }
 
     #[test]
