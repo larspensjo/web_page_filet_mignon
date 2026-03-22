@@ -8,6 +8,18 @@ Some instructions here doesn't hold for the CommanDuctUI submodule.
 *
 * Maintain an engineering diary in `docs/EngineeringDiary.md` (see "Engineering Diary" section below).
 
+## CommanDuctUI Boundary
+`CommanDuctUI` is a generic UI toolkit submodule. Treat it as domain-agnostic infrastructure, not as part of the Harvester domain.
+
+* Do not add Harvester-specific concepts, command names, dialog names, event names, labels, or validation rules to `CommanDuctUI`.
+* If Harvester needs new UI behavior, first ask whether it can be expressed as a generic toolkit primitive. Put only the reusable primitive in `CommanDuctUI`; keep Harvester semantics in `harvester_app` / `harvester_core`.
+* When writing plans, explicitly check this boundary before proposing changes to `CommanDuctUI`. A plan must not introduce app-specific terminology into the submodule API.
+* Preserve existing dark-theme support for any `CommanDuctUI` changes. New generic controls/dialogs must continue to use the toolkit's dark-theme styling path and must be verified in dark mode.
+* If a `CommanDuctUI` change is made:
+* Increase the version number in `src/CommanDuctUI/Cargo.toml`
+* Update `src/CommanDuctUI/CHANGELOG.md`
+* Call out any breaking changes clearly
+
 ## Bugs
 * Is there a lessons learned here? A design issue? Lack of robustness? That is, I want to find similar problems and prevent future problems of the same type.
 * When fixing bugs, make sure to add a unit test that locks functionality in and prevents it from happening again.
