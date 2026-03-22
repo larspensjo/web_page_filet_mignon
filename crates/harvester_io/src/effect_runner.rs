@@ -752,6 +752,7 @@ impl EffectRunner {
             Effect::LoadArticlesForTriage {
                 request_id,
                 ordered_urls,
+                since_utc,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
@@ -761,6 +762,7 @@ impl EffectRunner {
                     run_triage_refresh_load(
                         request_id,
                         ordered_urls,
+                        since_utc,
                         msg_tx,
                         output_dir,
                         registry,
@@ -1445,6 +1447,7 @@ fn run_entity_index_worker(rx: mpsc::Receiver<EntityIndexWorkerMsg>, path: PathB
 fn run_triage_refresh_load(
     request_id: u64,
     ordered_urls: Vec<String>,
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
     msg_tx: mpsc::Sender<Msg>,
     output_dir: PathBuf,
     registry: Arc<RwLock<PromptRegistry>>,
@@ -1463,7 +1466,7 @@ fn run_triage_refresh_load(
         max_input_bytes,
         &guard,
         &ordered_urls,
-        None,
+        since_utc,
     ) {
         Ok((engine_articles, _)) => {
             let articles: Vec<LoadedArticle> = engine_articles
@@ -1548,6 +1551,14 @@ mod tests {
             "body",
             &counter,
         );
+        fs::write(dir.join(filename), markdown).expect("write markdown");
+    }
+
+    fn write_markdown_with_fetched_utc(dir: &Path, filename: &str, url: &str, fetched_utc: &str) {
+        use harvester_engine::{build_markdown_document, WhitespaceTokenCounter};
+        let counter = WhitespaceTokenCounter;
+        let (_, markdown) =
+            build_markdown_document(url, Some("Title"), "utf-8", fetched_utc, "body", &counter);
         fs::write(dir.join(filename), markdown).expect("write markdown");
     }
 
@@ -1792,6 +1803,51 @@ mod tests {
             Msg::BriefingPrereqArticlesLoaded { articles } => {
                 assert_eq!(articles.len(), 1);
                 assert_eq!(articles[0].url, "https://example.com/a");
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn load_articles_for_triage_respects_since_utc_filter() {
+        let temp = tempdir().expect("tempdir");
+        write_markdown_with_fetched_utc(
+            temp.path(),
+            "old.md",
+            "https://example.com/old",
+            "2026-03-20T00:00:00Z",
+        );
+        write_markdown_with_fetched_utc(
+            temp.path(),
+            "new.md",
+            "https://example.com/new",
+            "2026-03-22T00:00:00Z",
+        );
+        let (runner, rx) = runner_with_receiver(temp.path());
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        runner.enqueue(vec![Effect::LoadArticlesForTriage {
+            request_id: 1,
+            ordered_urls: vec![
+                "https://example.com/old".to_string(),
+                "https://example.com/new".to_string(),
+            ],
+            since_utc: Some(since),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected triage loaded message");
+        match msg {
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles,
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(articles.len(), 1);
+                assert_eq!(articles[0].url, "https://example.com/new");
             }
             other => panic!("unexpected message: {:?}", other),
         }

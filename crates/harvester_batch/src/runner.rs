@@ -9,7 +9,7 @@ use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
     LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
-    ProviderKind, DEFAULT_BRIEFING_MODEL,
+    ProviderKind, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL,
 };
 use harvester_io::{
     load_briefing_checkpoint, load_completed_jobs, load_sources, load_summary_cache,
@@ -249,8 +249,8 @@ fn build_effect_runner(
         let config = LlmConfig {
             provider,
             default_model: ModelId::new(ProviderKind::OpenAi, "gpt-4o-mini"),
-            triage_model: None,
-            summary_model: None,
+            triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
+            summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
             briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
             registry: Arc::clone(&registry),
             quotas: LlmQuotas::default(),

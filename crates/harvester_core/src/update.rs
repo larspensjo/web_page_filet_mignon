@@ -2011,6 +2011,7 @@ fn dispatch_pre_triage_if_due(
 
     let request_id = dispatch.request_id;
     let ordered_urls = dispatch.ordered_urls;
+    let since_utc = state.briefing_since_utc();
 
     // Keep Slice 1 in-flight tracker in sync with the coordinator.
     state.set_triage_in_flight(request_id);
@@ -2023,6 +2024,7 @@ fn dispatch_pre_triage_if_due(
     vec![Effect::LoadArticlesForTriage {
         request_id,
         ordered_urls,
+        since_utc,
     }]
 }
 
@@ -5183,6 +5185,30 @@ mod tests {
         let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
         let (state, _) = update(state, Msg::TriageClicked);
         assert_eq!(state.left_tab(), LeftTab::TriageResults);
+    }
+
+    #[test]
+    fn pre_triage_refresh_dispatch_includes_briefing_checkpoint_since_utc() {
+        init_logging();
+        let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let mut state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+        state.set_briefing_since_utc(Some(since));
+
+        for _ in 0..200 {
+            let (next, effects) = update(state, Msg::Tick);
+            state = next;
+            if let Some(effect_since_utc) = effects.iter().find_map(|e| match e {
+                Effect::LoadArticlesForTriage { since_utc, .. } => *since_utc,
+                _ => None,
+            }) {
+                assert_eq!(effect_since_utc, since);
+                return;
+            }
+        }
+
+        panic!("no LoadArticlesForTriage dispatch within 200 ticks");
     }
 
     // ── Pre-triage refresh coordinator: shared test helpers ──────────────────
