@@ -5745,6 +5745,10 @@ mod tests {
     /// Pre-triage is left in its default idle state so the corpus source is `TriageComplete`.
     /// This bypasses the reducer path for triage loading to avoid triggering the pre-triage
     /// coordinator (which would set `PreTriageReady` and shadow the triage corpus).
+    ///
+    /// Articles are assigned priority 3, which is above the default `cutoff_exclusive` of 1,
+    /// ensuring all articles appear in the `TriageSelectionPolicy` result. If the default
+    /// cutoff is changed, update this helper accordingly.
     fn complete_triage_state_for_test(n: usize) -> AppState {
         assert!(n > 0, "n must be > 0 for a useful complete triage state");
         let mut session = crate::triage::TriageSession::new_loading(None);
@@ -5959,6 +5963,7 @@ mod tests {
             "corpus count must be non-zero even when briefing checkpoint is set"
         );
         let expected_count = corpus.count();
+        let expected_urls: Vec<String> = corpus.ordered_urls().to_vec();
 
         // Drive ArchiveClicked → the dialog must report the same non-zero count.
         let (state, open_effects) = update(state, Msg::ArchiveClicked);
@@ -6018,6 +6023,10 @@ mod tests {
             submit_urls.len(),
             expected_count,
             "ArchiveRequested url count must equal corpus.count() even with checkpoint set"
+        );
+        assert_eq!(
+            submit_urls, expected_urls,
+            "submit URLs must match corpus URLs even with checkpoint set"
         );
     }
 
