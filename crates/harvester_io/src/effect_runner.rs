@@ -221,6 +221,7 @@ impl EffectRunner {
                 article_count,
                 since_utc,
                 default_basename,
+                pending_pre_triage_count,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
@@ -240,6 +241,7 @@ impl EffectRunner {
                         default_basename,
                         default_file_exists,
                         export_dir: output_dir,
+                        pending_pre_triage_count,
                     });
                 });
             }

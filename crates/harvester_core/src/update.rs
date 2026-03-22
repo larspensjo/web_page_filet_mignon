@@ -114,6 +114,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 article_count,
                 since_utc,
                 default_basename: "archive.md".to_string(),
+                pending_pre_triage_count: 0,
             }]
         }
         Msg::ToggleInputPanel => {
@@ -905,6 +906,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             default_basename,
             default_file_exists,
             export_dir,
+            pending_pre_triage_count,
         } => {
             if request_id != state.archive_request_id() {
                 return (state, Vec::new());
@@ -916,6 +918,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 default_basename,
                 default_file_exists,
                 export_dir,
+                pending_pre_triage_count,
             }]
         }
         Msg::ArchiveDialogSubmitted {
@@ -5391,6 +5394,7 @@ mod tests {
                 article_count,
                 since_utc,
                 default_basename,
+                ..
             } => {
                 assert_eq!(request_id, 1);
                 assert_eq!(article_count, 0);
@@ -5432,6 +5436,7 @@ mod tests {
                 default_basename: "archive.md".to_string(),
                 default_file_exists: false,
                 export_dir: std::path::PathBuf::from("/tmp"),
+                pending_pre_triage_count: 0,
             },
         );
         assert!(effects.is_empty());
@@ -5453,6 +5458,7 @@ mod tests {
                 default_basename: "archive.md".to_string(),
                 default_file_exists: false,
                 export_dir: std::path::PathBuf::from("/tmp"),
+                pending_pre_triage_count: 0,
             },
         );
         assert_eq!(state.archive_request_id(), 1);
@@ -5468,6 +5474,7 @@ mod tests {
                 default_basename,
                 default_file_exists,
                 export_dir,
+                ..
             } => {
                 assert_eq!(request_id, 1);
                 assert_eq!(article_count, 1);

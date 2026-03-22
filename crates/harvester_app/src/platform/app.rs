@@ -414,6 +414,7 @@ fn build_archive_form_descriptor(
     default_basename: String,
     default_file_exists: bool,
     export_dir: PathBuf,
+    _pending_pre_triage_count: usize,
 ) -> FormDialogDescriptor {
     let mut rows = Vec::new();
     let articles_label = if since_utc.is_some() {
@@ -639,6 +640,7 @@ impl AppEventHandler {
                     default_basename,
                     default_file_exists,
                     export_dir,
+                    pending_pre_triage_count,
                 } => {
                     let form = build_archive_form_descriptor(
                         request_id,
@@ -647,6 +649,7 @@ impl AppEventHandler {
                         default_basename,
                         default_file_exists,
                         export_dir,
+                        pending_pre_triage_count,
                     );
                     self.commands.push_back(PlatformCommand::ShowFormDialog {
                         window_id: self.window_id,

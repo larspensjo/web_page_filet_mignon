@@ -198,6 +198,7 @@ fn archive_click_emits_effect_without_state_change() {
             article_count: 0,
             since_utc: None,
             default_basename: "archive.md".to_string(),
+            pending_pre_triage_count: 0,
         }]
     );
 }

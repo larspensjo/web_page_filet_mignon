@@ -72,6 +72,7 @@ pub enum Effect {
         article_count: usize,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
         default_basename: String,
+        pending_pre_triage_count: usize,
     },
     ShowArchiveDialog {
         request_id: u64,
@@ -80,6 +81,7 @@ pub enum Effect {
         default_basename: String,
         default_file_exists: bool,
         export_dir: PathBuf,
+        pending_pre_triage_count: usize,
     },
     DownloadLinkedPage {
         job_id: crate::JobId,

@@ -44,6 +44,7 @@ pub enum Msg {
         default_basename: String,
         default_file_exists: bool,
         export_dir: PathBuf,
+        pending_pre_triage_count: usize,
     },
     /// Archive dialog was confirmed by the user.
     ArchiveDialogSubmitted {
