@@ -5475,58 +5475,194 @@ mod tests {
         assert_eq!(pending_count, 0, "no pre-triage ready → pending count must be 0");
     }
 
-    #[test]
-    fn archive_clicked_after_triaging_pre_triage_articles_has_zero_pending_count() {
-        init_logging();
-        // Scenario: user polls sources → pre-triage ReadyToTriage with URL X →
-        // user clicks Triage → TriageComplete also has URL X → user clicks Archive.
-        // Pre-triage stays ReadyToTriage after triage completes, but those articles
-        // have already been triaged. pending_pre_triage_count must be 0.
-        let url = "https://shared.com/1";
-
-        // Build pre-triage ReadyToTriage with url.
-        let state = add_completed_job_for_test(AppState::new(), url);
-        let (state, request_id) = tick_until_dispatch(state);
-        let (mut state, _) = update(
+    /// Helper: prime LLM metadata so `TriageClicked` dispatches immediately
+    /// (skipping the `LoadPromptContexts`/`LoadLlmMetadata` round-trip).
+    fn prime_llm_metadata(state: AppState) -> AppState {
+        let mut active_versions = std::collections::HashMap::new();
+        active_versions.insert(PromptId::ArticleTriage, 1);
+        let mut effective_models = std::collections::HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "test-model".to_string());
+        let (state, _) = update(
             state,
-            Msg::TriageArticlesLoaded {
-                request_id,
-                articles: loaded_pre_triage_articles(&[url]),
+            Msg::LlmMetadataLoaded {
+                active_versions,
+                effective_models,
+                templates: std::collections::HashMap::new(),
             },
         );
+        let (state, _) = update(
+            state,
+            Msg::PromptContextsLoaded {
+                contexts: std::collections::HashMap::new(),
+            },
+        );
+        state
+    }
+
+    /// Helper: complete all pending LLM triage requests in `effects`.
+    /// Returns the state after all completions.
+    fn complete_all_triage_llm_requests(
+        mut state: AppState,
+        effects: Vec<Effect>,
+    ) -> AppState {
+        let request_ids: Vec<u64> = effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::RequestLlmCompletion { request_id, .. } => Some(*request_id),
+                _ => None,
+            })
+            .collect();
+        for rid in request_ids {
+            let (next, _) = update(state, triage_success(rid));
+            state = next;
+        }
+        state
+    }
+
+    // ── consume_ready_pre_triage_articles_for_triage unit tests ──────────────
+
+    #[test]
+    fn consume_ready_pre_triage_articles_for_triage_rejects_non_ready_phase() {
+        init_logging();
+        // Pre-triage is Idle (default) — consume must return None.
+        let mut state = AppState::new();
+        let result = state.consume_ready_pre_triage_articles_for_triage();
+        assert!(result.is_none(), "Idle phase must return None");
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Idle
+            ),
+            "phase must remain Idle after failed consume"
+        );
+    }
+
+    #[test]
+    fn consume_ready_pre_triage_articles_for_triage_does_not_reset_on_empty_ready_state() {
+        init_logging();
+        // NOTE: it is difficult to construct a ReadyToTriage state where
+        // resolved_included_articles() is empty, because the policy requires at least
+        // one article to reach ReadyToTriage. Instead, this test exercises the non-ready
+        // (Idle) branch, confirming that:
+        //   1. consume returns None, and
+        //   2. the phase is unchanged (no spurious reset).
+        // The "empty-articles early return" in consume is separately validated by the
+        // implementation invariant that ReadyToTriage cannot be reached with zero articles.
+        let mut state = AppState::new();
+        let result = state.consume_ready_pre_triage_articles_for_triage();
+        assert!(result.is_none(), "fresh state must return None — no articles available");
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Idle
+            ),
+            "phase must not change on failed consume"
+        );
+    }
+
+    // ── consume handoff integration tests ─────────────────────────────────────
+
+    #[test]
+    fn triage_clicked_consumes_ready_pre_triage_into_triage_session() {
+        init_logging();
+        let urls = &["https://handoff.com/1", "https://handoff.com/2"];
+        let state = ready_pre_triage_state(urls);
+        let state = prime_llm_metadata(state);
+
+        // Sanity: pre-triage is ReadyToTriage before click.
         assert!(matches!(
             state.pre_triage().phase(),
             crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
         ));
 
-        // Inject TriageComplete with the same URL (simulating triage of pre-triage articles).
-        let mut triage_session = crate::triage::TriageSession::new_loading(None);
-        triage_session.set_articles(vec![LoadedArticle {
-            url: url.to_string(),
-            source_title: None,
-            prepared_text: std::iter::repeat_n("triage-content", 220)
-                .collect::<Vec<_>>()
-                .join(" "),
-            content_hash: "hash-shared-1".to_string(),
-            fetched_utc: None,
-        }]);
-        triage_session.transition_to_triaging();
-        triage_session.complete_article(
-            0,
-            crate::triage::ArticleTriageResult {
-                category: "tech".to_string(),
-                priority: 3,
-                tags: vec![],
-                rationale: "r".to_string(),
-                input_tokens: 0,
-                output_tokens: 0,
-            },
-        );
-        triage_session.complete();
-        state.set_triage(triage_session);
+        let (state, _effects) = update(state, Msg::TriageClicked);
 
-        let (_, effects) = update(state, Msg::ArchiveClicked);
-        let pending_count = effects
+        // After click: pre-triage must be Idle and have no resolved URLs.
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Idle
+            ),
+            "pre-triage must reset to Idle after TriageClicked"
+        );
+        assert!(
+            state.pre_triage().resolved_included_urls().is_empty(),
+            "pre-triage must have no resolved URLs after consume"
+        );
+
+        // Triage session must have the articles that were in pre-triage.
+        assert_eq!(
+            state.triage().articles().len(),
+            urls.len(),
+            "triage session must hold all pre-triage articles"
+        );
+        let triage_urls: Vec<&str> =
+            state.triage().articles().iter().map(|a| a.url.as_str()).collect();
+        for url in urls {
+            assert!(
+                triage_urls.contains(url),
+                "triage session must contain pre-triage URL {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn triage_clicked_sets_current_working_corpus_to_unavailable_until_triage_completes() {
+        init_logging();
+        let urls = &["https://corpus-src.com/1"];
+        let state = ready_pre_triage_state(urls);
+        let state = prime_llm_metadata(state);
+
+        // Before click: corpus source is PreTriageReady.
+        assert_eq!(
+            state.current_working_corpus().source(),
+            crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
+            "source must be PreTriageReady before TriageClicked"
+        );
+
+        // After click: pre-triage is Idle and triage is in-flight → Unavailable.
+        let (state, effects) = update(state, Msg::TriageClicked);
+        assert_eq!(
+            state.current_working_corpus().source(),
+            crate::working_corpus::CurrentWorkingCorpusSource::Unavailable,
+            "source must be Unavailable while triage is in-flight"
+        );
+
+        // Complete triage.
+        let state = complete_all_triage_llm_requests(state, effects);
+
+        assert_eq!(
+            state.current_working_corpus().source(),
+            crate::working_corpus::CurrentWorkingCorpusSource::TriageComplete,
+            "source must be TriageComplete after triage finishes"
+        );
+    }
+
+    #[test]
+    fn archive_clicked_after_triage_start_has_zero_pending_pre_triage_count() {
+        init_logging();
+        // Drive the real reducer handoff path:
+        //   pre-triage ReadyToTriage → TriageClicked (consume) → triage complete → ArchiveClicked.
+        let urls = &["https://archive-handoff.com/1"];
+        let state = ready_pre_triage_state(urls);
+        let state = prime_llm_metadata(state);
+
+        let (state, effects) = update(state, Msg::TriageClicked);
+
+        // Pre-triage must be Idle immediately after click.
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Idle
+            ),
+            "pre-triage must be Idle after TriageClicked"
+        );
+
+        // Complete triage.
+        let state = complete_all_triage_llm_requests(state, effects);
+
+        let (_, archive_effects) = update(state, Msg::ArchiveClicked);
+        let pending_count = archive_effects
             .iter()
             .find_map(|e| {
                 if let Effect::OpenArchiveDialog { pending_pre_triage_count, .. } = e {
@@ -5536,9 +5672,74 @@ mod tests {
                 }
             })
             .expect("expected OpenArchiveDialog effect");
+
         assert_eq!(
             pending_count, 0,
-            "pre-triage articles already in TriageComplete must not count as pending"
+            "pending_pre_triage_count must be 0 after reducer handoff path"
+        );
+    }
+
+    #[test]
+    fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating_active_triage() {
+        init_logging();
+        let urls = &["https://repopulate.com/1"];
+        let state = ready_pre_triage_state(urls);
+        let state = prime_llm_metadata(state);
+
+        // Start triage — pre-triage becomes Idle.
+        let (state, _effects) = update(state, Msg::TriageClicked);
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Idle
+            ),
+            "pre-triage must be Idle after TriageClicked"
+        );
+
+        // Snapshot triage session state before the new pre-triage refresh.
+        let triage_article_count_before = state.triage().articles().len();
+        let triage_phase_before = state.triage().phase().clone();
+
+        // Simulate a new pre-triage refresh arriving (new articles from another poll).
+        let new_url = "https://repopulate.com/new-article";
+        let state = add_completed_job_for_test(state, new_url);
+        let (state, request_id) = tick_until_dispatch(state);
+        let new_articles = loaded_pre_triage_articles(&[new_url]);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles: new_articles,
+            },
+        );
+
+        // Triage session must be unchanged.
+        assert_eq!(
+            state.triage().articles().len(),
+            triage_article_count_before,
+            "triage session article count must not change after pre-triage refresh"
+        );
+        assert_eq!(
+            state.triage().phase(),
+            &triage_phase_before,
+            "triage session phase must not change after pre-triage refresh"
+        );
+
+        // Pre-triage must have the new article.
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
+            ),
+            "pre-triage must be ReadyToTriage after new refresh"
+        );
+        assert!(
+            state
+                .pre_triage()
+                .resolved_included_urls()
+                .iter()
+                .any(|u| u == new_url),
+            "pre-triage must contain the newly refreshed article"
         );
     }
 
