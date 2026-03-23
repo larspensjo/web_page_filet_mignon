@@ -10,7 +10,9 @@
 
 Archive itself is not broken — it uses `archive_corpus()` which is triage-only via `select_for_archive()`. The real bug is a session-lifecycle invariant violation: pre-triage claims to be action-ready when its articles have already been consumed.
 
-**Architecture:** Add an atomic `AppState` helper that extracts the pre-triage articles *and* resets pre-triage to `Idle` in a single operation. This keeps the invariant inside `AppState` rather than spreading it across call sites. Then simplify the `ArchiveClicked` pending-count logic to rely on this invariant.
+**Architecture:** Add a phase-guarded consume helper on `AppState` that extracts pre-triage articles *only* when the phase is `ReadyToTriage` and the article set is non-empty, then resets pre-triage to `Idle`. Returns `Option<Vec<LoadedArticle>>` so the caller cannot accidentally consume from a non-ready phase. This keeps the invariant inside `AppState` rather than spreading it across call sites. Then simplify the `ArchiveClicked` pending-count logic to rely on this invariant.
+
+**Why phase-guard in the helper:** `resolved_included_articles()` is *not* phase-gated (unlike `resolved_included_urls()` which is). Without the guard in the helper, it could return tentative articles from non-ready phases, reintroducing the hidden precondition the plan aims to eliminate.
 
 **Override persistence decision:** Manual overrides (include/exclude decisions) are persisted by content-derived key and reapplied when articles load. They persist across triage consumption — if the same article reappears in a later pre-triage run, the prior decision is reused. This is the current behavior and the intended contract.
 
@@ -22,47 +24,106 @@ Archive itself is not broken — it uses `archive_corpus()` which is triage-only
 - Request-id gating already rejects stale load results; the pinned archive corpus snapshot is unaffected by later pre-triage changes
 - Tests must lock these interactions
 
+**Draft diary entry:**
+
+```md
+## 2026-03-23 - Consume pre-triage when manual triage starts
+Type: Bug Fix
+Context: Manual triage could start from `PreTriageReady` while leaving the pre-triage session
+in the same action-ready state afterward. That stale state forced archive-warning logic to
+subtract URLs already present in triage and left the working-corpus selector vulnerable to
+reporting an already-consumed pre-triage corpus as current.
+Change: harvester_core — manual triage start now atomically consumes pre-triage articles and
+resets the session to Idle via `consume_ready_pre_triage_articles_for_triage()`. Archive
+pending-count logic simplified to rely on this invariant instead of set subtraction.
+Evidence: Tests: triage_clicked_consumes_ready_pre_triage_into_triage_session,
+triage_clicked_sets_current_working_corpus_to_unavailable_until_triage_completes,
+archive_clicked_after_triage_start_has_zero_pending_pre_triage_count,
+pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating_active_triage,
+consume_rejects_non_ready_phase, consume_does_not_reset_on_empty_ready_state.
+cargo build, cargo clippy --all-targets -- -D warnings.
+Lessons Learned: Lifecycle handoff bugs are best fixed at the producer/consumer boundary;
+downstream subtraction logic hides the symptom but leaves the state model inconsistent.
+Prevention: Introduce domain-level consume/reset helpers for workflow handoffs and require
+parity tests for every selector that reads corpus state after such transitions.
+Refs: harvester_core::state, harvester_core::update, harvester_core::working_corpus
+```
+
 ---
 
-### Task 1: Add atomic consume helper to `AppState` and use it in `start_triage_from_pretriage`
+### Task 1: Add phase-guarded consume helper to `AppState` and use it in `start_triage_from_pretriage`
 
 **Files:**
-- Modify: `crates/harvester_core/src/state.rs` — add `take_pre_triage_included_articles_for_triage()` method
-- Modify: `crates/harvester_core/src/update.rs` — use new method in `start_triage_from_pretriage`
+- Modify: `crates/harvester_core/src/state.rs` — add `consume_ready_pre_triage_articles_for_triage()` method
+- Modify: `crates/harvester_core/src/update.rs` — use new method in `start_triage_from_pretriage`, add handoff log
 
 **Steps:**
 
-- [ ] **Step 1: Add `take_pre_triage_included_articles_for_triage()` to `AppState`**
+- [ ] **Step 1: Add `consume_ready_pre_triage_articles_for_triage()` to `AppState`**
 
-In `state.rs`, add a `pub(crate)` method that atomically extracts included articles and resets pre-triage:
+In `state.rs`, add a `pub(crate)` method that enforces the `ReadyToTriage` phase gate and non-empty article set before consuming:
 ```rust
 /// Consumes the pre-triage included articles for use in a triage session,
-/// resetting pre-triage to Idle. This is a one-way transition that ensures
-/// pre-triage cannot remain action-ready after its articles have been handed off.
-pub(crate) fn take_pre_triage_included_articles_for_triage(
+/// resetting pre-triage to Idle. Returns `None` if pre-triage is not in
+/// `ReadyToTriage` phase or has no resolved articles. This is a one-way
+/// transition that ensures pre-triage cannot remain action-ready after its
+/// articles have been handed off.
+pub(crate) fn consume_ready_pre_triage_articles_for_triage(
     &mut self,
-) -> Vec<LoadedArticle> {
+) -> Option<Vec<LoadedArticle>> {
+    if !matches!(self.pre_triage.phase(), PreTriagePhase::ReadyToTriage) {
+        return None;
+    }
     let articles = self.pre_triage.resolved_included_articles();
+    if articles.is_empty() {
+        return None;
+    }
     self.pre_triage.reset();
     self.dirty = true;
-    articles
+    Some(articles)
 }
 ```
 
-Note: `PreTriageSession::reset()` already exists and sets the session back to `Default` (Idle phase).
+Note: `PreTriageSession::reset()` already exists and sets the session back to `Default` (Idle phase). The phase guard is essential because `resolved_included_articles()` is not phase-gated (unlike `resolved_included_urls()`).
 
 - [ ] **Step 2: Use the new method in `start_triage_from_pretriage`**
 
 In `update.rs`, replace the direct read:
 ```rust
 let included = state.pre_triage().resolved_included_articles();
+if included.is_empty() {
+    state
+        .triage_mut()
+        .fail("no completed articles found".to_string());
+    state.mark_dirty();
+    return Vec::new();
+}
 ```
 With:
 ```rust
-let included = state.take_pre_triage_included_articles_for_triage();
+let included = match state.consume_ready_pre_triage_articles_for_triage() {
+    Some(articles) => articles,
+    None => {
+        state
+            .triage_mut()
+            .fail("no completed articles found".to_string());
+        state.mark_dirty();
+        return Vec::new();
+    }
+};
 ```
 
-The empty check and subsequent triage setup remain unchanged.
+The subsequent triage setup remains unchanged. The `TriageClicked` handler's existing phase guard (`ReadyToTriage`) is now redundant but harmless — the helper enforces the same contract.
+
+- [ ] **Step 3: Add handoff log**
+
+After the consume call succeeds, add a trace log:
+```rust
+engine_info!(
+    "[triage] consumed pre-triage for triage start count={}",
+    included.len(),
+);
+```
 
 ---
 
@@ -95,7 +156,9 @@ With:
 let pending_pre_triage_count = state.pre_triage().resolved_included_urls().len();
 ```
 
-This is correct because `resolved_included_urls()` returns empty when pre-triage is `Idle` (which it will be after triage consumes its articles).
+This is correct because:
+- After triage consumes pre-triage, the phase is `Idle` and `resolved_included_urls()` returns empty
+- During `Reviewing` phase, `resolved_included_urls()` also returns empty (phase-gated), so `pending_pre_triage_count` stays `0` — archive warnings are only for settled ready articles
 
 ---
 
@@ -106,11 +169,11 @@ This is correct because `resolved_included_urls()` returns empty when pre-triage
 
 **Steps:**
 
-- [ ] **Step 1: Add test — pre-triage resets to Idle after triage starts**
+- [ ] **Step 1: Add test — consume hands articles to triage and resets pre-triage**
 
 ```rust
 #[test]
-fn triage_clicked_consumes_pre_triage_and_resets_phase_to_idle() {
+fn triage_clicked_consumes_ready_pre_triage_into_triage_session() {
     // Setup: pre-triage in ReadyToTriage with articles
     // Action: trigger TriageClicked
     // Assert: pre_triage().phase() == PreTriagePhase::Idle
@@ -119,30 +182,29 @@ fn triage_clicked_consumes_pre_triage_and_resets_phase_to_idle() {
 }
 ```
 
-- [ ] **Step 2: Add test — working-corpus source transitions after triage consumption**
+- [ ] **Step 2: Add test — working-corpus source is `Unavailable` after consumption, `TriageComplete` after triage finishes**
 
 ```rust
 #[test]
-fn triage_clicked_consumes_pre_triage_so_current_working_corpus_is_not_pre_triage_ready() {
+fn triage_clicked_sets_current_working_corpus_to_unavailable_until_triage_completes() {
     // Setup: pre-triage in ReadyToTriage
     // Assert before: current_working_corpus source is PreTriageReady
     // Action: trigger TriageClicked
-    // Assert after: current_working_corpus source is NOT PreTriageReady
+    // Assert after: current_working_corpus source is Unavailable (pre-triage Idle, triage in-flight)
     // Complete triage
     // Assert: current_working_corpus source is TriageComplete
 }
 ```
 
-- [ ] **Step 3: Update `archive_clicked_after_triaging_pre_triage_articles_has_zero_pending_count`**
+- [ ] **Step 3: Replace archive regression test with real reducer handoff path**
 
-This test currently validates via the set-difference path. After the fix, the same scenario should still produce `pending_pre_triage_count == 0`, but now because pre-triage is `Idle` (not because of set subtraction). Verify the test still passes — update comments to explain the new mechanism.
-
-- [ ] **Step 4: Add test — archive pending count is zero without set subtraction**
+Replace/rewrite `archive_clicked_after_triaging_pre_triage_articles_has_zero_pending_count` to drive the real handoff:
 
 ```rust
 #[test]
-fn triage_clicked_consumes_pre_triage_so_archive_pending_count_is_zero_without_set_difference() {
-    // Setup: pre-triage ReadyToTriage with articles -> TriageClicked
+fn archive_clicked_after_triage_start_has_zero_pending_pre_triage_count() {
+    // Setup: pre-triage ReadyToTriage with articles
+    // Action: TriageClicked (consume pre-triage via reducer, not synthetic state)
     // Complete triage
     // Action: ArchiveClicked
     // Assert: pending_pre_triage_count == 0
@@ -150,7 +212,7 @@ fn triage_clicked_consumes_pre_triage_so_archive_pending_count_is_zero_without_s
 }
 ```
 
-- [ ] **Step 5: Add test — new poll after triage does not affect triage session**
+- [ ] **Step 4: Add test — new poll after triage does not affect triage session**
 
 ```rust
 #[test]
@@ -162,9 +224,34 @@ fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating
 }
 ```
 
-- [ ] **Step 6: Run tests and clippy**
+- [ ] **Step 5: Add test — consume rejects non-ready phase**
+
+```rust
+#[test]
+fn consume_ready_pre_triage_articles_for_triage_rejects_non_ready_phase() {
+    // Setup: pre-triage in Idle/Reviewing/LoadingArticles/Failed
+    // Action: consume_ready_pre_triage_articles_for_triage()
+    // Assert: returns None
+    // Assert: pre-triage phase unchanged (no reset side-effect)
+}
+```
+
+- [ ] **Step 6: Add test — consume does not reset on empty ready state**
+
+```rust
+#[test]
+fn consume_ready_pre_triage_articles_for_triage_does_not_reset_on_empty_ready_state() {
+    // Setup: pre-triage in ReadyToTriage with zero resolved articles
+    // Action: consume_ready_pre_triage_articles_for_triage()
+    // Assert: returns None
+    // Assert: pre-triage phase is still ReadyToTriage (not reset)
+}
+```
+
+- [ ] **Step 7: Run tests and clippy**
 
 ```bash
+cargo build
 cargo nextest run
 cargo clippy --all-targets -- -D warnings
 ```
@@ -176,34 +263,14 @@ cargo clippy --all-targets -- -D warnings
 **Files:**
 - Modify: `docs/EngineeringDiary.md`
 
-**Draft entry:**
-
-```md
-## 2026-03-22 - Consume pre-triage when manual triage starts
-Type: Bug Fix
-Context: Manual triage could start from `PreTriageReady` while leaving the pre-triage session
-in the same action-ready state afterward. That stale state forced archive-warning logic to
-subtract URLs already present in triage and left the working-corpus selector vulnerable to
-reporting an already-consumed pre-triage corpus as current.
-Change: harvester_core — manual triage start now atomically consumes pre-triage articles and
-resets the session to Idle via `take_pre_triage_included_articles_for_triage()`. Archive
-pending-count logic simplified to rely on this invariant instead of set subtraction.
-Evidence: Reducer tests cover pre-triage consumption, working-corpus source transitions,
-archive warning counts, and refresh-after-triage behavior.
-Lessons Learned: Lifecycle handoff bugs are best fixed at the producer/consumer boundary;
-downstream subtraction logic hides the symptom but leaves the state model inconsistent.
-Prevention: Introduce domain-level consume/reset helpers for workflow handoffs and require
-parity tests for every selector that reads corpus state after such transitions.
-Refs: harvester_core::state, harvester_core::update, harvester_core::working_corpus
-```
-
-- [ ] **Step 1: Append entry to `docs/EngineeringDiary.md`**
+- [ ] **Step 1: Finalize and append diary entry from draft above**
 
 ---
 
 ## Verification
 
-1. `cargo nextest run` — all tests pass
-2. `cargo clippy --all-targets -- -D warnings` — no warnings
-3. Manual test: Poll Sources → Triage → Archive → pending count should be 0 with no warning
-4. Manual test: Poll Sources → Archive (without Triage) → pending count shows correct number
+1. `cargo build`
+2. `cargo nextest run` — all tests pass
+3. `cargo clippy --all-targets -- -D warnings` — no warnings
+4. Manual test: Poll Sources → Triage → Archive → pending count should be 0 with no warning
+5. Manual test: Poll Sources → Archive (without Triage) → pending count shows correct number
