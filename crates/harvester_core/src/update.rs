@@ -5538,25 +5538,33 @@ mod tests {
     }
 
     #[test]
-    fn consume_ready_pre_triage_articles_for_triage_does_not_reset_on_empty_ready_state() {
+    fn consume_ready_pre_triage_articles_for_triage_returns_articles_and_resets_to_idle() {
         init_logging();
-        // NOTE: it is difficult to construct a ReadyToTriage state where
-        // resolved_included_articles() is empty, because the policy requires at least
-        // one article to reach ReadyToTriage. Instead, this test exercises the non-ready
-        // (Idle) branch, confirming that:
-        //   1. consume returns None, and
-        //   2. the phase is unchanged (no spurious reset).
-        // The "empty-articles early return" in consume is separately validated by the
-        // implementation invariant that ReadyToTriage cannot be reached with zero articles.
-        let mut state = AppState::new();
-        let result = state.consume_ready_pre_triage_articles_for_triage();
-        assert!(result.is_none(), "fresh state must return None — no articles available");
+        // Setup: ReadyToTriage state with articles
+        let urls = &["https://example.com/a", "https://example.com/b"];
+        let mut state = ready_pre_triage_state(urls);
+        assert!(matches!(
+            state.pre_triage().phase(),
+            crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
+        ));
+
+        // Action: consume articles
+        let articles = state.consume_ready_pre_triage_articles_for_triage();
+
+        // Assert: returns Some with the articles
+        let articles = articles.expect("should return Some in ReadyToTriage with articles");
+        assert_eq!(articles.len(), urls.len(), "should return all resolved articles");
+
+        // Assert: pre-triage is now Idle
+        assert!(matches!(
+            state.pre_triage().phase(),
+            crate::pre_triage_filter::PreTriagePhase::Idle
+        ), "phase must be Idle after consuming");
+
+        // Assert: resolved URLs are now empty
         assert!(
-            matches!(
-                state.pre_triage().phase(),
-                crate::pre_triage_filter::PreTriagePhase::Idle
-            ),
-            "phase must not change on failed consume"
+            state.pre_triage().resolved_included_urls().is_empty(),
+            "no URLs should remain in pre-triage after consuming"
         );
     }
 
@@ -5575,6 +5583,7 @@ mod tests {
             crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
         ));
 
+        // Effects (LLM requests) are not the focus of this test — state transitions are.
         let (state, _effects) = update(state, Msg::TriageClicked);
 
         // After click: pre-triage must be Idle and have no resolved URLs.
@@ -5648,15 +5657,6 @@ mod tests {
         let state = prime_llm_metadata(state);
 
         let (state, effects) = update(state, Msg::TriageClicked);
-
-        // Pre-triage must be Idle immediately after click.
-        assert!(
-            matches!(
-                state.pre_triage().phase(),
-                crate::pre_triage_filter::PreTriagePhase::Idle
-            ),
-            "pre-triage must be Idle after TriageClicked"
-        );
 
         // Complete triage.
         let state = complete_all_triage_llm_requests(state, effects);
