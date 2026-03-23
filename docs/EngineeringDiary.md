@@ -780,3 +780,25 @@ Context: Production model names had started to drift across app, batch, IO, and 
 Change: harvester_engine, harvester_app, harvester_batch, harvester_io, harvester_core — added shared OpenAI model-name constants in `harvester_engine::llm`, switched production/default model selection to those constants, and moved the GPT-5 defaults from undotted aliases to `gpt-5.4-*`. Intentional raw fixture strings in compatibility/provider tests were left literal where the test is about parsing external model identifiers.
 Evidence: `cargo build`; `cargo test -p harvester_engine --test llm_pricing`; `cargo test -p harvester_core --test llm_usage`; `cargo test -p harvester_io build_local_model_catalog_uses_effective_models_with_dedup_and_sort -- --nocapture`; `cargo test -p harvester_app status_bar_includes_llm_usage_segment -- --nocapture`; `cargo clippy --all-targets -- -D warnings`.
 Refs: harvester_engine::llm::mod, harvester_engine::llm::pricing, harvester_app::platform::app, harvester_batch::runner, harvester_io::effect_runner
+
+## 2026-03-23 - Consume pre-triage when manual triage starts
+Type: Bug Fix
+Context: Manual triage could start from `PreTriageReady` while leaving the pre-triage session
+in the same action-ready state afterward. That stale state forced archive-warning logic to
+subtract URLs already present in triage and left the working-corpus selector vulnerable to
+reporting an already-consumed pre-triage corpus as current.
+Change: harvester_core — manual triage start now atomically consumes pre-triage articles and
+resets the session to Idle via `consume_ready_pre_triage_articles_for_triage()`. Archive
+pending-count logic simplified to rely on this invariant instead of set subtraction.
+Evidence: Tests: triage_clicked_consumes_ready_pre_triage_into_triage_session,
+triage_clicked_sets_current_working_corpus_to_unavailable_until_triage_completes,
+archive_clicked_after_triage_start_has_zero_pending_pre_triage_count,
+pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating_active_triage,
+consume_ready_pre_triage_articles_for_triage_rejects_non_ready_phase,
+consume_ready_pre_triage_articles_for_triage_returns_articles_and_resets_to_idle.
+cargo build, cargo clippy --all-targets -- -D warnings passed.
+Lessons Learned: Lifecycle handoff bugs are best fixed at the producer/consumer boundary;
+downstream subtraction logic hides the symptom but leaves the state model inconsistent.
+Prevention: Introduce domain-level consume/reset helpers for workflow handoffs and require
+parity tests for every selector that reads corpus state after such transitions.
+Refs: harvester_core::state, harvester_core::update, harvester_core::working_corpus
