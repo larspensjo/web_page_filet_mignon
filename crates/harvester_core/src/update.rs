@@ -107,17 +107,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 fingerprint,
                 request_id,
             );
-            // Count only pre-triage articles not already in the triage session.
-            // After the user clicks Triage, pre-triage stays ReadyToTriage but those
-            // articles are now in TriageComplete — they must not count as "pending".
-            let triage_url_set: std::collections::HashSet<&str> =
-                state.triage().articles().iter().map(|a| a.url.as_str()).collect();
-            let pending_pre_triage_count = state
-                .pre_triage()
-                .resolved_included_urls()
-                .into_iter()
-                .filter(|url| !triage_url_set.contains(url.as_str()))
-                .count();
+            // Count pre-triage articles ready for review. resolved_included_urls() is phase-gated:
+            // returns empty when phase is Idle (after consume) or during Reviewing (phase-gated).
+            let pending_pre_triage_count = state.pre_triage().resolved_included_urls().len();
             state.pin_archive_corpus(corpus);
             let since_utc = state.briefing_since_utc();
             vec![Effect::OpenArchiveDialog {
