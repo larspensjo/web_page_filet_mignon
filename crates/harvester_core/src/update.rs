@@ -2194,21 +2194,23 @@ fn dispatch_pre_triage_if_due(
 }
 
 fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
-    // Reads resolved_included_articles() directly from pre-triage, which is the
-    // correct corpus source for manual triage start. The caller (TriageClicked) already
-    // guards that pre-triage is in ReadyToTriage phase — the same phase condition the
-    // shared working-corpus selector uses for PreTriageReady. Unlike the selector, an
-    // empty URL set is treated as an error here (triage fails) rather than falling
-    // through to Unavailable. We access pre-triage directly here because triage needs
-    // full LoadedArticle data (content, hashes, timestamps), not just URLs.
-    let included = state.pre_triage().resolved_included_articles();
-    if included.is_empty() {
-        state
-            .triage_mut()
-            .fail("no completed articles found".to_string());
-        state.mark_dirty();
-        return Vec::new();
-    }
+    // Consumes the pre-triage articles via a phase-guarded helper that atomically
+    // resets pre-triage to Idle, ensuring it cannot remain action-ready after
+    // its articles have been handed off to triage.
+    let included = match state.consume_ready_pre_triage_articles_for_triage() {
+        Some(articles) => articles,
+        None => {
+            state
+                .triage_mut()
+                .fail("no completed articles found".to_string());
+            state.mark_dirty();
+            return Vec::new();
+        }
+    };
+    engine_info!(
+        "[triage] consumed pre-triage for triage start count={}",
+        included.len(),
+    );
     state.set_triage(TriageSession::new_loading(None));
     state.triage_mut().set_articles(included);
     state.triage_mut().transition_to_triaging();

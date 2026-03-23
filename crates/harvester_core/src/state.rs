@@ -989,6 +989,26 @@ impl AppState {
         &self.pre_triage
     }
 
+    /// Consumes the pre-triage included articles for use in a triage session,
+    /// resetting pre-triage to Idle. Returns `None` if pre-triage is not in
+    /// `ReadyToTriage` phase or has no resolved articles. This is a one-way
+    /// transition that ensures pre-triage cannot remain action-ready after its
+    /// articles have been handed off.
+    pub(crate) fn consume_ready_pre_triage_articles_for_triage(
+        &mut self,
+    ) -> Option<Vec<crate::briefing::LoadedArticle>> {
+        if !matches!(self.pre_triage.phase(), PreTriagePhase::ReadyToTriage) {
+            return None;
+        }
+        let articles = self.pre_triage.resolved_included_articles();
+        if articles.is_empty() {
+            return None;
+        }
+        self.pre_triage.reset();
+        self.dirty = true;
+        Some(articles)
+    }
+
     /// Returns the current working corpus by applying source-precedence rules.
     ///
     /// See [`crate::working_corpus`] for the full precedence description.

@@ -301,7 +301,9 @@ fn triage_all_completed_transitions_to_complete() {
     );
     assert_persist_triage_cache_effect(&effects, &state);
     let view = state.view();
-    assert!(view.triage_can_start);
+    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
+    assert!(!view.triage_can_start);
 }
 
 #[test]
@@ -325,7 +327,9 @@ fn triage_all_failed_transitions_to_failed() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    assert!(state.view().triage_can_start);
+    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
+    assert!(!state.view().triage_can_start);
     assert!(state.view().jobs[0].triage_annotation.is_none());
 }
 
@@ -350,7 +354,9 @@ fn triage_partial_failure_still_completes() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    assert!(state.view().triage_can_start);
+    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
+    assert!(!state.view().triage_can_start);
     assert!(state.view().jobs[0].triage_annotation.is_some());
 }
 
@@ -367,13 +373,21 @@ fn triage_quota_exhaustion_fails_remaining() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    assert!(state.view().triage_can_start);
+    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
+    assert!(!state.view().triage_can_start);
 }
 
 #[test]
 fn triage_rerun_after_complete_reuses_cache_when_available() {
     init_logging();
-    let (state, _articles) = triage_flow_with_two_articles();
+    // Build a fresh state with pre-triage ready (two articles loaded).
+    let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let state = with_triage_metadata_ready(state);
+    let articles = sample_articles(&["https://one.example", "https://two.example"]);
+    let state = simulate_triage_loaded(state, articles);
+    // First triage run: TriageClicked consumes pre-triage and starts triage.
+    let (state, _) = update(state, Msg::TriageClicked);
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
@@ -390,11 +404,23 @@ fn triage_rerun_after_complete_reuses_cache_when_available() {
             metadata: None,
         },
     );
+    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Idle. Trigger a fresh pre-triage evaluation so the coordinator dispatches
+    // a new LoadArticlesForTriage, then load the same articles to verify cache reuse.
+    let (state, _) = update(
+        state,
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls: vec!["https://one.example".to_string()],
+            triggered_by_job_done: false,
+        },
+    );
+    let articles = sample_articles(&["https://one.example", "https://two.example"]);
+    let state = simulate_triage_loaded(state, articles);
     let (state, effects) = update(state, Msg::TriageClicked);
     assert!(!effects
         .iter()
         .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
-    assert!(state.view().triage_can_start);
+    assert!(!state.view().triage_can_start);
 }
 
 #[test]
