@@ -811,3 +811,9 @@ Evidence: `cargo test -p harvester_app loose_ordered_list_item_body_starts_on_ne
 Lessons Learned: Markdown list rendering cannot rely on list markers alone; once generated content uses loose list items, the renderer also needs item-local paragraph state to keep structure readable.
 Prevention: Keep regression tests for every markdown shape emitted by app-generated views, especially ordered-list items with multiple paragraphs and mixed emphasis.
 Refs: harvester_app::platform::ui::markdown_to_rtf, loose_ordered_list_item_body_starts_on_new_paragraph
+
+## 2026-03-24 - Persist window size across launches
+Type: Implementation
+Context: The main window opened at hardcoded 960x720 every launch, requiring manual resize each session.
+Change: Persist outer window dimensions in `.harvester_state.ron` via two new `Option<i32>` fields. Save triggers on `WM_EXITSIZEMOVE` (once per drag, not continuous `WM_SIZE`). Restore at startup with a minimum-size guard (both dimensions must be >= 960x720). Fixed `persist_runtime_state` to carry forward window size fields so job/override saves don't clobber persisted dimensions. CommanDuctUI 0.9.0 adds `AppEvent::WindowResizeCompleted` with outer dimensions from `GetWindowRect`.
+Refs: harvester_io::persistence::{load_window_size, persist_window_size}, CommanDuctUI 0.9.0 CHANGELOG, docs/superpowers/specs/2026-03-24-persist-window-size-design.md
