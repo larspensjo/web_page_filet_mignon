@@ -28,6 +28,10 @@ struct PersistedState {
     completed: Vec<PersistedJob>,
     #[serde(default)]
     pre_triage_overrides: Vec<PersistedPreTriageOverride>,
+    #[serde(default)]
+    window_width: Option<i32>,
+    #[serde(default)]
+    window_height: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +139,52 @@ pub fn load_pre_triage_overrides(
         .collect()
 }
 
+pub fn load_window_size(state_path: &Path) -> Option<(i32, i32)> {
+    let content = match fs::read_to_string(state_path) {
+        Ok(text) => text,
+        Err(_) => return None,
+    };
+    let state: PersistedState = match ron::from_str(&content) {
+        Ok(s) => s,
+        Err(_) => return None,
+    };
+    match (state.window_width, state.window_height) {
+        (Some(w), Some(h)) => Some((w, h)),
+        _ => None,
+    }
+}
+
+pub fn persist_window_size(state_path: &Path, width: i32, height: i32) {
+    let content = fs::read_to_string(state_path).unwrap_or_default();
+    let mut state: PersistedState = ron::from_str(&content).unwrap_or_default();
+    state.window_width = Some(width);
+    state.window_height = Some(height);
+
+    let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
+    if let Err(err) = ensure_output_dir(output_dir) {
+        engine_error!("Failed to ensure output dir {:?}: {}", output_dir, err);
+        return;
+    }
+
+    let pretty = ron::ser::PrettyConfig::new();
+    let serialized = match ron::ser::to_string_pretty(&state, pretty) {
+        Ok(text) => text,
+        Err(err) => {
+            engine_error!("Failed to serialize window size: {}", err);
+            return;
+        }
+    };
+
+    let writer = AtomicFileWriter::new(PathBuf::from(output_dir));
+    let filename = state_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(".harvester_state.ron");
+    if let Err(err) = writer.write(filename, &serialized) {
+        engine_error!("Failed to write window size to {:?}: {}", state_path, err);
+    }
+}
+
 fn sanitize_downloaded_path(path: Option<String>) -> Option<String> {
     match path {
         Some(value) if is_safe_downloaded_path(&value) => Some(value),
@@ -185,6 +235,12 @@ pub fn persist_runtime_state(
         return;
     }
 
+    // Carry forward window size from existing state to avoid clobbering.
+    let existing: PersistedState = fs::read_to_string(state_path)
+        .ok()
+        .and_then(|text| ron::from_str(&text).ok())
+        .unwrap_or_default();
+
     let state = PersistedState {
         completed: completed
             .iter()
@@ -211,6 +267,8 @@ pub fn persist_runtime_state(
                 include: matches!(decision, ManualDecision::Include),
             })
             .collect(),
+        window_width: existing.window_width,
+        window_height: existing.window_height,
     };
 
     let pretty = ron::ser::PrettyConfig::new();
@@ -589,6 +647,74 @@ mod tests {
         let loaded = load_completed_jobs(&state_path(temp.path()));
 
         assert_eq!(loaded, snapshot);
+    }
+
+    #[test]
+    fn load_state_without_window_size_deserializes_to_none() {
+        let temp = tempdir().expect("tempdir");
+        let content = r#"
+(
+  completed: [
+    (
+      url: "https://example.com",
+      tokens: Some(42u32),
+      bytes: Some(1024u64),
+    ),
+  ],
+)
+"#;
+        write_state(temp.path(), content);
+        let path = state_path(temp.path());
+        let text = fs::read_to_string(&path).unwrap();
+        let state: super::PersistedState = ron::from_str(&text).unwrap();
+        assert_eq!(state.window_width, None);
+        assert_eq!(state.window_height, None);
+    }
+
+    #[test]
+    fn persist_and_load_window_size_roundtrips() {
+        let temp = tempdir().expect("tempdir");
+        let path = state_path(temp.path());
+        persist_window_size(&path, 1200, 900);
+        let loaded = load_window_size(&path);
+        assert_eq!(loaded, Some((1200, 900)));
+    }
+
+    #[test]
+    fn persist_window_size_preserves_existing_jobs() {
+        let temp = tempdir().expect("tempdir");
+        let path = state_path(temp.path());
+        let snapshot = vec![CompletedJobSnapshot {
+            url: "https://example.com".to_string(),
+            tokens: Some(10),
+            bytes: Some(512),
+            links: vec![],
+            fetched_utc: None,
+        }];
+        persist_completed_jobs(&path, &snapshot);
+        persist_window_size(&path, 1200, 900);
+        let loaded_jobs = load_completed_jobs(&path);
+        assert_eq!(loaded_jobs.len(), 1);
+        assert_eq!(loaded_jobs[0].url, "https://example.com");
+        let loaded_size = load_window_size(&path);
+        assert_eq!(loaded_size, Some((1200, 900)));
+    }
+
+    #[test]
+    fn persist_runtime_state_preserves_window_size() {
+        let temp = tempdir().expect("tempdir");
+        let path = state_path(temp.path());
+        persist_window_size(&path, 1200, 900);
+        let jobs = vec![CompletedJobSnapshot {
+            url: "https://example.com".to_string(),
+            tokens: Some(10),
+            bytes: Some(512),
+            links: vec![],
+            fetched_utc: None,
+        }];
+        persist_completed_jobs(&path, &jobs);
+        let loaded_size = load_window_size(&path);
+        assert_eq!(loaded_size, Some((1200, 900)));
     }
 
     #[test]
