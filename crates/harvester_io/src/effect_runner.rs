@@ -1167,7 +1167,16 @@ impl EffectRunner {
 
             // --- Window size persistence ---
             Effect::PersistWindowSize { width, height } => {
-                engine_info!("[window-size] persist {width}x{height} (not yet implemented)");
+                let path = self.paths.state_path.clone();
+                thread::spawn(move || {
+                    crate::persist_window_size(&path, width, height);
+                    engine_info!(
+                        "[window-size] Persisted {}x{} to {:?}",
+                        width,
+                        height,
+                        path
+                    );
+                });
             }
 
             // --- Import saved webpages ---

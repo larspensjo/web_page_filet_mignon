@@ -1166,6 +1166,16 @@ impl PlatformEventHandler for AppEventHandler {
                     window_width: width,
                 });
             }
+            AppEvent::WindowResizeCompleted {
+                window_id,
+                outer_width,
+                outer_height,
+            } if window_id == self.window_id => {
+                let _ = self.msg_tx.send(Msg::WindowResizeCompleted {
+                    outer_width,
+                    outer_height,
+                });
+            }
             _ => {}
         }
     }
