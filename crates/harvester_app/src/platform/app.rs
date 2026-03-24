@@ -31,7 +31,7 @@ use harvester_engine::llm::{
 };
 use harvester_io::{
     load_completed_jobs, load_pre_triage_overrides, load_summary_cache, load_triage_cache,
-    EffectRunner, PersistenceSnapshot, PersistenceWorker, RuntimePaths,
+    load_window_size, EffectRunner, PersistenceSnapshot, PersistenceWorker, RuntimePaths,
 };
 
 use super::effects;
@@ -54,11 +54,29 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     logging::initialize(LogDestination::Both);
     engine_info!("Logger initialized. Starting harvester_app...");
 
+    const DEFAULT_WINDOW_WIDTH: i32 = 960;
+    const DEFAULT_WINDOW_HEIGHT: i32 = 720;
+
+    let output_dir = effects::default_output_dir();
+    let paths = RuntimePaths::new(
+        output_dir.clone(),
+        effects::default_source_config_path(),
+        effects::contexts_directory(),
+        effects::prompts_directory(),
+    );
+
+    // Restore persisted window size, falling back to defaults.
+    // Both dimensions must meet the minimum; otherwise use defaults for both.
+    let (initial_width, initial_height) =
+        load_window_size(&paths.state_path)
+            .filter(|&(w, h)| w >= DEFAULT_WINDOW_WIDTH && h >= DEFAULT_WINDOW_HEIGHT)
+            .unwrap_or((DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT));
+
     let platform = PlatformInterface::new("harvester_app".to_string())?;
     let window_id = platform.create_window(WindowConfig {
         title: "Harvester",
-        width: 960,
-        height: 720,
+        width: initial_width,
+        height: initial_height,
     })?;
 
     let shared_state = Arc::new(Mutex::new(SharedState::default()));
@@ -77,13 +95,6 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         llm_max_concurrent_requests
     );
 
-    let output_dir = effects::default_output_dir();
-    let paths = RuntimePaths::new(
-        output_dir.clone(),
-        effects::default_source_config_path(),
-        effects::contexts_directory(),
-        effects::prompts_directory(),
-    );
     let platform_handler = Box::new(Win32PlatformHandler);
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let effect_runner = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
