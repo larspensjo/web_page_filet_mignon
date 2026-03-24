@@ -802,3 +802,12 @@ downstream subtraction logic hides the symptom but leaves the state model incons
 Prevention: Introduce domain-level consume/reset helpers for workflow handoffs and require
 parity tests for every selector that reads corpus state after such transitions.
 Refs: harvester_core::state, harvester_core::update, harvester_core::working_corpus
+
+## 2026-03-24 - Briefing top-story body paragraphs need explicit list-item paragraph handling
+Type: Bug Fix
+Context: The briefing viewer rendered each top-story headline in bold but collapsed the following body paragraph onto the same visual line, reducing scanability in the highest-value section of the briefing.
+Change: harvester_app — updated RichEdit markdown-to-RTF conversion so loose paragraphs inside ordered and unordered list items preserve list-item indentation while forcing later paragraphs onto their own line. Added a renderer regression test for the `1. **Headline**` plus body layout.
+Evidence: `cargo test -p harvester_app loose_ordered_list_item_body_starts_on_new_paragraph -- --nocapture`; `cargo build`; `cargo clippy --all-targets -- -D warnings`.
+Lessons Learned: Markdown list rendering cannot rely on list markers alone; once generated content uses loose list items, the renderer also needs item-local paragraph state to keep structure readable.
+Prevention: Keep regression tests for every markdown shape emitted by app-generated views, especially ordered-list items with multiple paragraphs and mixed emphasis.
+Refs: harvester_app::platform::ui::markdown_to_rtf, loose_ordered_list_item_body_starts_on_new_paragraph

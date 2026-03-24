@@ -1021,13 +1021,13 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 b: 0x22,
             }),
             text_color: Some(Color {
-                r: 0xD8,
-                g: 0xDE,
-                b: 0xE9,
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
             }),
             font: Some(FontDescription {
                 name: Some("Segoe UI".to_string()),
-                size: Some(10),
+                size: Some(11),
                 weight: Some(FontWeight::Normal),
             }),
         },

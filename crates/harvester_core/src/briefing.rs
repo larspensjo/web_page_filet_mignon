@@ -544,12 +544,13 @@ impl BriefingSession {
             stories.push_str("\n\n(none)");
         } else {
             for (idx, story) in result.top_stories.iter().enumerate() {
+                let indented_body = indent_markdown_list_item_body(&story.body);
                 let _ = writeln!(
                     stories,
                     "\n{}. **{}**\n\n{}",
                     idx + 1,
                     story.headline,
-                    story.body
+                    indented_body
                 );
             }
             stories.pop();
@@ -570,6 +571,19 @@ impl BriefingSession {
         let preview = sections.join("\n\n");
         Some(truncate_preview(&preview))
     }
+}
+
+fn indent_markdown_list_item_body(body: &str) -> String {
+    body.lines()
+        .map(|line| {
+            if line.is_empty() {
+                "   ".to_string()
+            } else {
+                format!("   {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn truncate_preview(text: &str) -> String {
@@ -736,6 +750,18 @@ mod tests {
         let first_pos = preview.find("1. **First**").expect("first story");
         let second_pos = preview.find("2. **Second**").expect("second story");
         assert!(first_pos < second_pos);
+        assert!(preview.contains("1. **First**\n\n   A"));
+        assert!(preview.contains("2. **Second**\n\n   B"));
+    }
+
+    #[test]
+    fn briefing_format_preview_indents_multiline_story_body_under_list_item() {
+        let session = completed_session_with_stories(vec![BriefingStoryResult {
+            headline: "First".to_string(),
+            body: "Line one\n\nLine two".to_string(),
+        }]);
+        let preview = session.format_preview().expect("preview");
+        assert!(preview.contains("1. **First**\n\n   Line one\n   \n   Line two"));
     }
 
     #[test]

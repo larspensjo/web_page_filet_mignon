@@ -4,6 +4,10 @@ pub const FONT_BODY: usize = 0;
 pub const FONT_CODE: usize = 1;
 pub const MAX_RTF_NESTING_DEPTH: usize = 20;
 pub const RTF_TRUNCATE_MARKER: &str = "[display truncated]";
+const BODY_FONT_SIZE_HALF_POINTS: usize = 22;
+const COLOR_BODY_TEXT_RTF: &str = "\\red224\\green229\\blue236;";
+const COLOR_BACKGROUND_RTF: &str = "\\red26\\green29\\blue34;";
+const COLOR_LINK_RTF: &str = "\\red88\\green166\\blue255;}";
 
 pub fn convert_markdown_to_rtf(markdown: &str) -> String {
     let mut rtf = String::new();
@@ -12,10 +16,12 @@ pub fn convert_markdown_to_rtf(markdown: &str) -> String {
         "{{\\fonttbl{{\\f{FONT_BODY} Segoe UI;}}{{\\f{FONT_CODE} Consolas;}}}}"
     ));
     rtf.push_str("{\\colortbl;");
-    rtf.push_str("\\red216\\green222\\blue233;");
-    rtf.push_str("\\red26\\green29\\blue34;");
-    rtf.push_str("\\red88\\green166\\blue255;}");
-    rtf.push_str("\\viewkind4\\uc1\\pard\\cf1\\cb2\\f0\\fs20 ");
+    rtf.push_str(COLOR_BODY_TEXT_RTF);
+    rtf.push_str(COLOR_BACKGROUND_RTF);
+    rtf.push_str(COLOR_LINK_RTF);
+    rtf.push_str(&format!(
+        "\\viewkind4\\uc1\\pard\\cf1\\cb2\\f0\\fs{BODY_FONT_SIZE_HALF_POINTS} "
+    ));
 
     let parser = Parser::new_ext(markdown, Options::all());
     let mut list_stack: Vec<ListState> = Vec::new();
@@ -60,8 +66,63 @@ pub fn convert_markdown_to_rtf(markdown: &str) -> String {
 
 #[derive(Debug, Clone, Copy)]
 enum ListState {
-    Unordered,
-    Ordered { next: u64 },
+    Unordered { item_paragraph_count: Option<usize> },
+    Ordered {
+        next: u64,
+        item_paragraph_count: Option<usize>,
+    },
+}
+
+impl ListState {
+    fn unordered() -> Self {
+        Self::Unordered {
+            item_paragraph_count: None,
+        }
+    }
+
+    fn ordered(next: u64) -> Self {
+        Self::Ordered {
+            next,
+            item_paragraph_count: None,
+        }
+    }
+
+    fn start_item(&mut self) {
+        match self {
+            Self::Unordered {
+                item_paragraph_count,
+            }
+            | Self::Ordered {
+                item_paragraph_count, ..
+            } => *item_paragraph_count = Some(0),
+        }
+    }
+
+    fn finish_item(&mut self) {
+        match self {
+            Self::Unordered {
+                item_paragraph_count,
+            }
+            | Self::Ordered {
+                item_paragraph_count, ..
+            } => *item_paragraph_count = None,
+        }
+    }
+
+    fn next_item_paragraph_index(&mut self) -> Option<usize> {
+        match self {
+            Self::Unordered {
+                item_paragraph_count,
+            }
+            | Self::Ordered {
+                item_paragraph_count, ..
+            } => item_paragraph_count.as_mut().map(|count| {
+                let current = *count;
+                *count += 1;
+                current
+            }),
+        }
+    }
 }
 
 fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListState>) {
@@ -74,20 +135,31 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
             };
             rtf.push_str(&format!("\\pard\\sa120\\sb60\\b\\fs{size} "));
         }
-        Tag::Paragraph => rtf.push_str("\\pard\\sa60\\sb0 "),
+        Tag::Paragraph => match list_stack.last_mut().and_then(ListState::next_item_paragraph_index) {
+            Some(0) => rtf.push_str("\\sa60\\sb0 "),
+            Some(_) => rtf.push_str("\\par\\pard\\li360\\sa60\\sb0 "),
+            None => rtf.push_str("\\pard\\sa60\\sb0 "),
+        },
         Tag::Strong => rtf.push_str("\\b "),
         Tag::Emphasis => rtf.push_str("\\i "),
         Tag::List(start) => match start {
-            Some(start) => list_stack.push(ListState::Ordered { next: *start }),
-            None => list_stack.push(ListState::Unordered),
+            Some(start) => list_stack.push(ListState::ordered(*start)),
+            None => list_stack.push(ListState::unordered()),
         },
         Tag::Item => {
             rtf.push_str("\\par\\pard\\li360\\fi-180 ");
             match list_stack.last_mut() {
-                Some(ListState::Unordered) => rtf.push_str("\\bullet\\tab "),
-                Some(ListState::Ordered { next }) => {
+                Some(list_state @ ListState::Unordered { .. }) => {
+                    list_state.start_item();
+                    rtf.push_str("\\bullet\\tab ");
+                }
+                Some(ListState::Ordered {
+                    next,
+                    item_paragraph_count,
+                }) => {
                     let current = *next;
                     *next = next.saturating_add(1);
+                    *item_paragraph_count = Some(0);
                     rtf.push_str(&format!("{current}.\\tab "));
                 }
                 None => rtf.push_str("\\bullet\\tab "),
@@ -100,14 +172,23 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
 
 fn handle_end_tag(rtf: &mut String, tag_end: TagEnd, list_stack: &mut Vec<ListState>) {
     match tag_end {
-        TagEnd::Heading(_) => rtf.push_str("\\b0\\fs20\\par\\pard\\sa60\\sb0 "),
+        TagEnd::Heading(_) => {
+            rtf.push_str(&format!(
+                "\\b0\\fs{BODY_FONT_SIZE_HALF_POINTS}\\par\\pard\\sa60\\sb0 "
+            ));
+        }
         TagEnd::Paragraph => rtf.push_str("\\par "),
         TagEnd::Strong => rtf.push_str("\\b0 "),
         TagEnd::Emphasis => rtf.push_str("\\i0 "),
         TagEnd::List(_) => {
             let _ = list_stack.pop();
         }
-        TagEnd::Item => rtf.push_str("\\pard "),
+        TagEnd::Item => {
+            if let Some(list_state) = list_stack.last_mut() {
+                list_state.finish_item();
+            }
+            rtf.push_str("\\pard ");
+        }
         TagEnd::Link => rtf.push_str("\\cf1 "),
         _ => {}
     }
@@ -194,8 +275,22 @@ mod tests {
         let rtf = convert_markdown_to_rtf(markdown);
         assert_eq!(
             rtf,
-            "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}{\\f1 Consolas;}}{\\colortbl;\\red216\\green222\\blue233;\\red26\\green29\\blue34;\\red88\\green166\\blue255;}\\viewkind4\\uc1\\pard\\cf1\\cb2\\f0\\fs20 \\pard\\sa120\\sb60\\b\\fs36 Header\\b0\\fs20\\par\\pard\\sa60\\sb0 \\par\\pard\\li360\\fi-180 \\bullet\\tab \\b Item\\b0 \\pard \\pard\\sa60\\sb0 Paragraph\\par }"
+            "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}{\\f1 Consolas;}}{\\colortbl;\\red224\\green229\\blue236;\\red26\\green29\\blue34;\\red88\\green166\\blue255;}\\viewkind4\\uc1\\pard\\cf1\\cb2\\f0\\fs22 \\pard\\sa120\\sb60\\b\\fs36 Header\\b0\\fs22\\par\\pard\\sa60\\sb0 \\par\\pard\\li360\\fi-180 \\bullet\\tab \\b Item\\b0 \\pard \\pard\\sa60\\sb0 Paragraph\\par }"
         );
+    }
+
+    #[test]
+    fn default_palette_and_body_size_match_readable_viewer_theme() {
+        let rtf = convert_markdown_to_rtf("Body");
+        assert!(rtf.contains(COLOR_BODY_TEXT_RTF));
+        assert!(rtf.contains(COLOR_BACKGROUND_RTF));
+        assert!(rtf.contains("\\fs22 "));
+    }
+
+    #[test]
+    fn loose_ordered_list_item_body_starts_on_new_paragraph() {
+        let rtf = convert_markdown_to_rtf("1. **Headline**\n\n   Body text");
+        assert!(rtf.contains("1.\\tab \\sa60\\sb0 \\b Headline\\b0 \\par \\par\\pard\\li360\\sa60\\sb0 Body text"));
     }
 
     #[test]
