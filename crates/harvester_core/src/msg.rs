@@ -121,6 +121,11 @@ pub enum Msg {
     WindowResized {
         window_width: i32,
     },
+    /// Window resize drag completed. Carries outer (frame) dimensions for persistence.
+    WindowResizeCompleted {
+        outer_width: i32,
+        outer_height: i32,
+    },
     /// Fallback for placeholder wiring.
     NoOp,
     /// User requested an LLM completion.

@@ -135,6 +135,11 @@ pub enum Effect {
         dir: PathBuf,
         request_id: u64,
     },
+    /// Persist the window's outer dimensions to disk.
+    PersistWindowSize {
+        width: i32,
+        height: i32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

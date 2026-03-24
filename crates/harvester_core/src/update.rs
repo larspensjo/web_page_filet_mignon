@@ -297,6 +297,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             Vec::new()
         }
+        Msg::WindowResizeCompleted {
+            outer_width,
+            outer_height,
+        } => {
+            vec![Effect::PersistWindowSize {
+                width: outer_width,
+                height: outer_height,
+            }]
+        }
         Msg::RequestLlmCompletion {
             prompt_id,
             prompt_version,
@@ -7112,5 +7121,24 @@ mod import_tests {
         let (state, _) = update(state, Msg::ImportedCorpusCleared);
         assert_eq!(state.import_session.phase, ImportPhase::Idle);
         assert!(state.import_session.source_dir.is_none());
+    }
+
+    #[test]
+    fn window_resize_completed_emits_persist_effect() {
+        let state = AppState::default();
+        let (_, effects) = update(
+            state,
+            Msg::WindowResizeCompleted {
+                outer_width: 1200,
+                outer_height: 900,
+            },
+        );
+        assert_eq!(
+            effects,
+            vec![Effect::PersistWindowSize {
+                width: 1200,
+                height: 900,
+            }]
+        );
     }
 }

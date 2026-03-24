@@ -1165,6 +1165,11 @@ impl EffectRunner {
                 }
             }
 
+            // --- Window size persistence ---
+            Effect::PersistWindowSize { width, height } => {
+                engine_info!("[window-size] persist {width}x{height} (not yet implemented)");
+            }
+
             // --- Import saved webpages ---
             Effect::ImportSavedWebpages { dir, request_id } => {
                 let msg_tx = self.msg_tx.clone();
