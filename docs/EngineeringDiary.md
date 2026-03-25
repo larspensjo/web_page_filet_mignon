@@ -817,3 +817,10 @@ Type: Implementation
 Context: The main window opened at hardcoded 960x720 every launch, requiring manual resize each session.
 Change: Persist outer window dimensions in `.harvester_state.ron` via two new `Option<i32>` fields. Save triggers on `WM_EXITSIZEMOVE` (once per drag, not continuous `WM_SIZE`). Restore at startup with a minimum-size guard (both dimensions must be >= 960x720). Fixed `persist_runtime_state` to carry forward window size fields so job/override saves don't clobber persisted dimensions. CommanDuctUI 0.9.0 adds `AppEvent::WindowResizeCompleted` with outer dimensions from `GetWindowRect`.
 Refs: harvester_io::persistence::{load_window_size, persist_window_size}, CommanDuctUI 0.9.0 CHANGELOG, docs/superpowers/specs/2026-03-24-persist-window-size-design.md
+
+## 2026-03-25 - Remove duplicate archive overwrite warning
+Type: Bug Fix
+Context: The archive export dialog showed the overwrite warning twice when the default output file already existed, once as a top-level note and again as the filename field's live warning.
+Change: harvester_app — removed the redundant top-level archive dialog warning and renamed the File menu action to `Archive...` so the UI better signals that opening the dialog does not immediately export.
+Evidence: `cargo build`; `cargo clippy --all-targets -- -D warnings`.
+Refs: harvester_app::platform::app, harvester_app::platform::ui::layout

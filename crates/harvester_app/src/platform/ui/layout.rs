@@ -100,17 +100,17 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
             children: vec![
                 MenuItemConfig {
                     action: Some(MENU_ACTION_ADD_URL),
-                    text: "Add URL\tCtrl+L".to_string(),
+                    text: "Add URL...\tCtrl+L".to_string(),
                     children: Vec::new(),
                 },
                 MenuItemConfig {
                     action: Some(MENU_ACTION_ARCHIVE),
-                    text: "Archive".to_string(),
+                    text: "Archive...".to_string(),
                     children: Vec::new(),
                 },
                 MenuItemConfig {
                     action: Some(MENU_ACTION_PROMPT_LAB),
-                    text: "Prompt Lab".to_string(),
+                    text: "Prompt Lab...".to_string(),
                     children: Vec::new(),
                 },
             ],

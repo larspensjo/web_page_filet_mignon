@@ -427,7 +427,7 @@ fn build_archive_form_descriptor(
     article_count: usize,
     since_utc: Option<chrono::DateTime<Utc>>,
     default_basename: String,
-    default_file_exists: bool,
+    _default_file_exists: bool,
     export_dir: PathBuf,
     pending_pre_triage_count: usize,
 ) -> FormDialogDescriptor {
@@ -454,11 +454,6 @@ fn build_archive_form_descriptor(
     if article_count == 0 {
         rows.push(FormRow::Note {
             text: "No articles match the current filter.".to_string(),
-            severity: MessageSeverity::Warning,
-        });
-    } else if default_file_exists {
-        rows.push(FormRow::Note {
-            text: "file already exists - will be overwritten".to_string(),
             severity: MessageSeverity::Warning,
         });
     }
