@@ -376,8 +376,12 @@ fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
             label: el.label.clone(),
             weekly_counts: el.weekly_counts.clone(),
             color: COLORS[i],
-            end_label: None,
-            emphasis: ChartLineEmphasis::Primary,
+            end_label: Some(el.label.clone()),
+            emphasis: if i < 2 {
+                ChartLineEmphasis::Primary
+            } else {
+                ChartLineEmphasis::Secondary
+            },
         })
         .collect();
     ChartDataPacket {
@@ -386,7 +390,7 @@ fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
         is_loading: false,
         show_x_axis_labels: true,
         show_y_axis_labels: true,
-        show_end_labels: false,
+        show_end_labels: true,
     }
 }
 
@@ -3544,6 +3548,105 @@ mod tests {
         assert!(chart_cmd.is_some(), "SetChartData not emitted");
         if let Some(PlatformCommand::SetChartData { data, .. }) = chart_cmd {
             assert_eq!(data.lines.len(), 5, "expected at most 5 lines from take(5)");
+        }
+    }
+
+    fn make_five_line_trends_view() -> AppViewModel {
+        use harvester_core::{CategoryTrendView, EntityLineView, TrendCategory, TrendsTabView};
+        let mut view = AppViewModel::default();
+        let lines: Vec<EntityLineView> = (0..5)
+            .map(|i| EntityLineView {
+                label: format!("Entity{i}"),
+                weekly_counts: vec![i as u32, i as u32 + 1],
+                total_count: (2 * i) as u32,
+            })
+            .collect();
+        view.right_pane.trends = TrendsTabView {
+            is_loading: false,
+            active_category: TrendCategory::Companies,
+            category_data: Some(CategoryTrendView {
+                weeks: vec!["W1".to_string(), "W2".to_string()],
+                lines,
+                total_entity_count: 5,
+            }),
+        };
+        view
+    }
+
+    #[test]
+    fn trends_top_two_lines_are_primary_emphasis() {
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let view = make_five_line_trends_view();
+        let cmds = render(window_id, &view, &mut state);
+        if let Some(PlatformCommand::SetChartData { data, .. }) = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        }) {
+            assert!(
+                matches!(data.lines[0].emphasis, ChartLineEmphasis::Primary),
+                "line 0 should be Primary"
+            );
+            assert!(
+                matches!(data.lines[1].emphasis, ChartLineEmphasis::Primary),
+                "line 1 should be Primary"
+            );
+        } else {
+            panic!("SetChartData not emitted");
+        }
+    }
+
+    #[test]
+    fn trends_lines_2_to_4_are_secondary_emphasis() {
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let view = make_five_line_trends_view();
+        let cmds = render(window_id, &view, &mut state);
+        if let Some(PlatformCommand::SetChartData { data, .. }) = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        }) {
+            for i in 2..5 {
+                assert!(
+                    matches!(data.lines[i].emphasis, ChartLineEmphasis::Secondary),
+                    "line {i} should be Secondary"
+                );
+            }
+        } else {
+            panic!("SetChartData not emitted");
+        }
+    }
+
+    #[test]
+    fn trends_all_lines_have_end_label() {
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let view = make_five_line_trends_view();
+        let cmds = render(window_id, &view, &mut state);
+        if let Some(PlatformCommand::SetChartData { data, .. }) = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        }) {
+            for (i, line) in data.lines.iter().enumerate() {
+                assert!(
+                    line.end_label.is_some(),
+                    "line {i} should have end_label set"
+                );
+            }
+        } else {
+            panic!("SetChartData not emitted");
+        }
+    }
+
+    #[test]
+    fn trends_show_end_labels_is_true() {
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let view = make_five_line_trends_view();
+        let cmds = render(window_id, &view, &mut state);
+        if let Some(PlatformCommand::SetChartData { data, .. }) = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        }) {
+            assert!(data.show_end_labels, "show_end_labels should be true");
+        } else {
+            panic!("SetChartData not emitted");
         }
     }
 }
