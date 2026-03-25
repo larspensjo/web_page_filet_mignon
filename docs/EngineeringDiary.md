@@ -7,7 +7,7 @@ How to use:
 - Add an entry for every bug fix, including lessons learned and prevention.
 - Add an entry for important decisions and tradeoffs.
 - Keep entries concise and reference concrete artifacts.
-- New entries goes to the end of the file
+- New entries goes to the end of the file.
 
 ## Entry Template
 
@@ -824,3 +824,11 @@ Context: The archive export dialog showed the overwrite warning twice when the d
 Change: harvester_app — removed the redundant top-level archive dialog warning and renamed the File menu action to `Archive...` so the UI better signals that opening the dialog does not immediately export.
 Evidence: `cargo build`; `cargo clippy --all-targets -- -D warnings`.
 Refs: harvester_app::platform::app, harvester_app::platform::ui::layout
+
+## 2026-03-25 - TreeView selection accent restored
+Type: Bug Fix
+Context: The jobs tree still defined `TreeViewSelectionAccent`, but the blue left-edge accent was no longer visible for selected rows.
+Change: Fixed CommanDuctUI TreeView post-paint selection accent drawing to resolve the selected row from the caret item after pre-paint suppresses the native selected state; added regression coverage for the accent draw decision and updated the CommanDuctUI changelog/version.
+Lessons Learned: When custom draw mutates native state flags to suppress default rendering, later paint stages cannot safely reuse those flags as the source of truth.
+Prevention: Keep draw-stage decisions in small pure helpers and add tests around the selection/accent gating logic whenever TreeView custom draw changes.
+Refs: src/CommanDuctUI/src/controls/treeview_handler.rs, src/CommanDuctUI/CHANGELOG.md, docs/EngineeringDiary.md
