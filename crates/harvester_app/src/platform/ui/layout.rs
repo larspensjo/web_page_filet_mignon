@@ -340,6 +340,14 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_TAB_TRENDS),
         control_id: CHART_TRENDS,
     });
+    // Static description label shown below the trend-category selector bar.
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_TRENDS),
+        control_id: LABEL_TRENDS_DESCRIPTION,
+        initial_text: "Top 5 products by recent activity, last 13 weeks".to_string(),
+        class: LabelClass::Default,
+    });
 
     commands.push(PlatformCommand::CreateLabel {
         window_id,
@@ -1440,11 +1448,20 @@ fn build_layout_rules(
             fixed_size: Some(28),
             margin: (0, 0, 2, 0),
         },
+        // Static description label between the category selector and the chart.
+        LayoutRule {
+            control_id: LABEL_TRENDS_DESCRIPTION,
+            parent_control_id: Some(PANEL_TAB_TRENDS),
+            dock_style: DockStyle::Top,
+            order: 1,
+            fixed_size: Some(20),
+            margin: (4, 4, 2, 4),
+        },
         LayoutRule {
             control_id: CHART_TRENDS,
             parent_control_id: Some(PANEL_TAB_TRENDS),
             dock_style: DockStyle::Fill,
-            order: 1,
+            order: 2,
             fixed_size: None,
             margin: (0, 0, 0, 0),
         },
@@ -2193,6 +2210,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_JOBS_HEADER,
+        style_id: StyleId::HeaderLabel,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_TRENDS_DESCRIPTION,
         style_id: StyleId::HeaderLabel,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {

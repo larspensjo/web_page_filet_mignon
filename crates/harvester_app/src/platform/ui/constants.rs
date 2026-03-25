@@ -60,6 +60,7 @@ pub const LABEL_TOKEN_PROGRESS: ControlId = ControlId::new(3003);
 pub const LABEL_PREVIEW_HEADER: ControlId = ControlId::new(3004);
 pub const LABEL_JOBS_HEADER: ControlId = ControlId::new(3005);
 
+pub const LABEL_TRENDS_DESCRIPTION: ControlId = ControlId::new(3014);
 pub const LABEL_PROMPT_LAB_STATUS: ControlId = ControlId::new(3010);
 pub const LABEL_PROMPT_LAB_METADATA: ControlId = ControlId::new(3011);
 pub const LABEL_PROMPT_LAB_CONTEXT_STATUS: ControlId = ControlId::new(3012);
