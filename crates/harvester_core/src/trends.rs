@@ -103,6 +103,21 @@ pub fn choose_display_label(occurrences: &[(String, u32)]) -> String {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+/// Compute a recency-weighted score for ranking entities.
+///
+/// Weights the most recent weeks more heavily so that currently active entities
+/// rank above entities that had a spike in the distant past.
+///
+/// Formula: `latest*100 + prev1*40 + prev2*20 + total`
+pub(crate) fn compute_recency_score(counts: &[u32]) -> u64 {
+    let n = counts.len();
+    let latest = counts.last().copied().unwrap_or(0) as u64;
+    let prev1 = if n >= 2 { counts[n - 2] as u64 } else { 0 };
+    let prev2 = if n >= 3 { counts[n - 3] as u64 } else { 0 };
+    let total: u64 = counts.iter().map(|&c| c as u64).sum();
+    latest * 100 + prev1 * 40 + prev2 * 20 + total
+}
+
 /// Return the ISO Monday (week start) for the given date.
 fn week_start_for_date(date: NaiveDate) -> NaiveDate {
     let days_from_monday = date.weekday().num_days_from_monday() as i64;
@@ -213,15 +228,12 @@ where
         })
         .collect();
 
-    // Sort: total_count desc → latest_week_count desc → display_label asc.
-    lines.sort_unstable_by(|a, b| {
-        b.total_count
-            .cmp(&a.total_count)
-            .then_with(|| {
-                let a_last = a.weekly_counts.last().copied().unwrap_or(0);
-                let b_last = b.weekly_counts.last().copied().unwrap_or(0);
-                b_last.cmp(&a_last)
-            })
+    // Sort: recency-weighted score desc → display_label asc (deterministic tie-break).
+    lines.sort_by(|a, b| {
+        let score_a = compute_recency_score(&a.weekly_counts);
+        let score_b = compute_recency_score(&b.weekly_counts);
+        score_b
+            .cmp(&score_a)
             .then_with(|| a.display_label.cmp(&b.display_label))
     });
 
@@ -492,5 +504,245 @@ mod tests {
         let data = compute_trends_as_of(&index, 4, 2, ref_date());
         assert_eq!(data.companies.total_entity_count, 5);
         assert_eq!(data.companies.top_entities.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // compute_recency_score
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn recent_mover_outranks_stale_spike() {
+        // "Stale" had a spike 5 weeks ago; "Recent" has activity in the last 2 weeks.
+        // With total-count-first sorting, "Stale" would win (total=100 vs 15).
+        // With recency-weighted scoring, "Recent" should win because the stale spike
+        // is in week0 (oldest) and contributes only to `total` (weight=1),
+        // while Recent's 10 in the latest week contributes 10*100=1000.
+        //
+        // Window: 5 weeks ending 2025-02-10 (ref_date).
+        //   Week 0: 2025-01-13, Week 1: 2025-01-20, Week 2: 2025-01-27,
+        //   Week 3: 2025-02-03, Week 4: 2025-02-10
+        //
+        // "Stale": spike of 100 in week 0 (2025-01-13), zero elsewhere.
+        //   score = 0*100 + 0*40 + 0*20 + 100 = 100
+        // "Recent": 5 in week 3, 10 in week 4.
+        //   score = 10*100 + 5*40 + 0*20 + 15 = 1215
+
+        // Build "Stale": 100 articles in 2025-01-14 (week starting 2025-01-13)
+        let mut stale_entries: Vec<(String, EntityIndexEntry)> = (0..100)
+            .map(|i| {
+                let url = format!("https://stale.example.com/{i}");
+                let entry = entry_with_companies("2025-01-14T00:00:00Z", vec!["Stale"]);
+                (url, entry)
+            })
+            .collect();
+
+        // Build "Recent": 5 articles in 2025-02-04 (week starting 2025-02-03)
+        let recent_w3: Vec<(String, EntityIndexEntry)> = (0..5)
+            .map(|i| {
+                let url = format!("https://recent-w3.example.com/{i}");
+                let entry = entry_with_companies("2025-02-04T00:00:00Z", vec!["Recent"]);
+                (url, entry)
+            })
+            .collect();
+
+        // 10 articles in 2025-02-11 (week starting 2025-02-10)
+        let recent_w4: Vec<(String, EntityIndexEntry)> = (0..10)
+            .map(|i| {
+                let url = format!("https://recent-w4.example.com/{i}");
+                let entry = entry_with_companies("2025-02-11T00:00:00Z", vec!["Recent"]);
+                (url, entry)
+            })
+            .collect();
+
+        stale_entries.extend(recent_w3);
+        stale_entries.extend(recent_w4);
+
+        let index = EntityIndex {
+            schema_version: 1,
+            entries: stale_entries.into_iter().collect::<BTreeMap<_, _>>(),
+        };
+
+        // ref_date() is 2025-02-10 (Monday). Use 5-week window.
+        // The week containing 2025-02-11 starts 2025-02-10, which IS within the window.
+        let data = compute_trends_as_of(&index, 5, 5, ref_date());
+        let labels: Vec<_> = data
+            .companies
+            .top_entities
+            .iter()
+            .map(|e| e.display_label.as_str())
+            .collect();
+        assert_eq!(
+            labels[0], "Recent",
+            "Recent mover should outrank stale spike; got order: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn identical_latest_falls_back_to_weighted_recent() {
+        // "A" and "B" both have latest=3, but A has a larger prev1 (5 vs 1).
+        // Recency score: A = 3*100 + 5*40 + 10*20 + 18 = 300+200+200+18 = 718
+        //                B = 3*100 + 1*40 + 0*20 + 4  = 300+40+0+4   = 344
+        // So A should rank higher.
+        //
+        // Window: 5 weeks ending ref_date. counts are [w0, w1, w2, w3, w4].
+        // A: [0, 0, 10, 5, 3]  — 10 articles in w2, 5 in w3, 3 in w4
+        // B: [0, 0, 0,  1, 3]  — 1 article in w3, 3 in w4
+
+        let mut entries: Vec<(String, EntityIndexEntry)> = Vec::new();
+
+        // A: 10 in week2 (2025-01-27), 5 in week3 (2025-02-03), 3 in week4 (2025-02-10)
+        for i in 0..10 {
+            entries.push((
+                format!("https://a-w2.example.com/{i}"),
+                entry_with_companies("2025-01-28T00:00:00Z", vec!["A"]),
+            ));
+        }
+        for i in 0..5 {
+            entries.push((
+                format!("https://a-w3.example.com/{i}"),
+                entry_with_companies("2025-02-04T00:00:00Z", vec!["A"]),
+            ));
+        }
+        for i in 0..3 {
+            entries.push((
+                format!("https://a-w4.example.com/{i}"),
+                entry_with_companies("2025-02-11T00:00:00Z", vec!["A"]),
+            ));
+        }
+
+        // B: 1 in week3, 3 in week4
+        entries.push((
+            "https://b-w3.example.com/0".to_string(),
+            entry_with_companies("2025-02-04T00:00:00Z", vec!["B"]),
+        ));
+        for i in 0..3 {
+            entries.push((
+                format!("https://b-w4.example.com/{i}"),
+                entry_with_companies("2025-02-11T00:00:00Z", vec!["B"]),
+            ));
+        }
+
+        let index = EntityIndex {
+            schema_version: 1,
+            entries: entries.into_iter().collect::<BTreeMap<_, _>>(),
+        };
+
+        let data = compute_trends_as_of(&index, 5, 5, ref_date());
+        let labels: Vec<_> = data
+            .companies
+            .top_entities
+            .iter()
+            .map(|e| e.display_label.as_str())
+            .collect();
+        assert_eq!(
+            labels[0], "A",
+            "A should rank above B due to larger prev1; got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn ordering_is_deterministic_on_equal_scores() {
+        // "Alpha" and "Beta" have identical counts → same recency score.
+        // Tie-break should put "Alpha" before "Beta" (label ascending).
+        let mut entries: Vec<(String, EntityIndexEntry)> = Vec::new();
+        for i in 0..5 {
+            entries.push((
+                format!("https://alpha.example.com/{i}"),
+                entry_with_companies("2025-02-11T00:00:00Z", vec!["Alpha"]),
+            ));
+        }
+        for i in 0..5 {
+            entries.push((
+                format!("https://beta.example.com/{i}"),
+                entry_with_companies("2025-02-11T00:00:00Z", vec!["Beta"]),
+            ));
+        }
+
+        let index = EntityIndex {
+            schema_version: 1,
+            entries: entries.into_iter().collect::<BTreeMap<_, _>>(),
+        };
+
+        let data = compute_trends_as_of(&index, 5, 5, ref_date());
+        let labels: Vec<_> = data
+            .companies
+            .top_entities
+            .iter()
+            .map(|e| e.display_label.as_str())
+            .collect();
+        assert_eq!(
+            labels[0], "Alpha",
+            "Alpha should come before Beta on equal scores; got: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn short_window_ranks_deterministically() {
+        // 2-week window. "X" has count in week0, "Y" has count in week1 (latest).
+        // Y should rank higher because latest > 0 while X's latest == 0.
+        //
+        // 2-week window ending ref_date (2025-02-10):
+        //   week0: 2025-02-03, week1: 2025-02-10
+        // X: article on 2025-02-04 → week0
+        // Y: article on 2025-02-11 → week1
+
+        let index = make_index(vec![
+            (
+                "https://x.example.com",
+                entry_with_companies("2025-02-04T00:00:00Z", vec!["X"]),
+            ),
+            (
+                "https://y.example.com",
+                entry_with_companies("2025-02-11T00:00:00Z", vec!["Y"]),
+            ),
+        ]);
+
+        let data = compute_trends_as_of(&index, 2, 5, ref_date());
+        let labels: Vec<_> = data
+            .companies
+            .top_entities
+            .iter()
+            .map(|e| e.display_label.as_str())
+            .collect();
+        assert_eq!(
+            labels[0], "Y",
+            "Y (latest week activity) should rank above X (older week); got: {labels:?}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // compute_recency_score unit tests (direct)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn recency_score_weights_latest_most() {
+        // A large spike in the oldest position only adds to total (score=100).
+        // Modest recent activity scores much higher due to latest/prev1 weights.
+        let stale = compute_recency_score(&[100, 0, 0, 0, 0]);
+        let recent = compute_recency_score(&[0, 0, 0, 5, 10]);
+        assert!(
+            recent > stale,
+            "recent score {recent} should exceed stale score {stale}"
+        );
+    }
+
+    #[test]
+    fn recency_score_short_slice() {
+        // 2 elements: latest=10, no prev2
+        let score = compute_recency_score(&[5, 10]);
+        // latest*100 + prev1*40 + total = 1000 + 200 + 15 = 1215
+        assert_eq!(score, 1215);
+    }
+
+    #[test]
+    fn recency_score_single_element() {
+        let score = compute_recency_score(&[7]);
+        // latest*100 + total = 700 + 7 = 707
+        assert_eq!(score, 707);
+    }
+
+    #[test]
+    fn recency_score_empty_slice() {
+        assert_eq!(compute_recency_score(&[]), 0);
     }
 }
