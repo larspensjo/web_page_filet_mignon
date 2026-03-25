@@ -848,3 +848,9 @@ Change: Added a mode-scoped preview header text override so the Briefing tab now
 Lessons Learned: Shared chrome above a multi-mode pane must be driven by the visible mode, not by preserved selection context from another mode.
 Prevention: When a pane can override selected-item content, expose explicit header text in the view model instead of implicitly deriving all headers from selection.
 Refs: crates/harvester_core/src/state.rs, crates/harvester_core/src/view_model.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-03-25 - Trends tab high-value pass
+Type: Implementation
+Context: Trends chart lacked axis labels, showed 10 undifferentiated lines, and ranked by stale total counts. Implemented Plan.TrendsHighValuePass.md.
+Change: (A) CommanDuctUI 0.10.0 — ChartLineData gains end_label/emphasis; ChartDataPacket gains show_x/y_axis_labels + show_end_labels; chart_handler renders axis tick labels with measured left margin and stride-skipped x labels. (B) CommanDuctUI 0.10.1 — place_end_labels helper with deterministic y-spread and x/y clamping; Secondary lines muted via mute_color + 1px pen; single-point series drawn as dots; legend replaced by endpoint labels when show_end_labels=true. (C) harvester_core — recency score = latest*100 + prev1*40 + prev2*20 + total (u64); compute_category_trend sorted by score desc, display_label asc tie-break. (D) harvester_app layout — static "Top 5 products by recent activity, last 13 weeks" label above chart.
+Refs: src/CommanDuctUI/src/controls/chart_handler.rs, src/CommanDuctUI/src/types.rs, crates/harvester_core/src/trends.rs, crates/harvester_app/src/platform/ui/render.rs, docs/plans/Plan.TrendsHighValuePass.md
