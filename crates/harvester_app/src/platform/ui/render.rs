@@ -1327,9 +1327,9 @@ fn render_preview_section(
     });
 
     let header_text = view
-        .preview_header
-        .as_ref()
-        .map(format_preview_header)
+        .preview_header_text
+        .clone()
+        .or_else(|| view.preview_header.as_ref().map(format_preview_header))
         .unwrap_or_else(|| "(no selection)".to_string());
     emit_if_changed(
         &mut tree_state.prev_header_text,
@@ -2032,6 +2032,37 @@ mod tests {
             format_preview_header(&header),
             "dense.example | 0 headings | Converting | [nav-heavy]"
         );
+    }
+
+    #[test]
+    fn preview_header_text_override_wins_over_article_header() {
+        init_logging();
+        let window_id = WindowId::new(1);
+        let mut tree_state = TreeRenderState::new();
+        let view = AppViewModel {
+            preview_header: Some(PreviewHeaderView {
+                domain: "example.com".to_string(),
+                tokens: Some(123),
+                bytes: Some(456),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                heading_count: 2,
+                link_density: 0.0,
+                nav_heavy: false,
+            }),
+            preview_header_text: Some("Executive Briefing | 3 articles | Done".to_string()),
+            ..AppViewModel::default()
+        };
+
+        let commands = render(window_id, &view, &mut tree_state);
+
+        let header = commands.iter().find_map(|cmd| match cmd {
+            PlatformCommand::SetControlText {
+                control_id, text, ..
+            } if *control_id == LABEL_PREVIEW_HEADER => Some(text.as_str()),
+            _ => None,
+        });
+        assert_eq!(header, Some("Executive Briefing | 3 articles | Done"));
     }
 
     #[test]

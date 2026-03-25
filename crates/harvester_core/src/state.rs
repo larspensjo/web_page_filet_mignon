@@ -1,5 +1,6 @@
 use crate::briefing::BriefingSession;
 use crate::context_hash;
+use crate::briefing::BriefingPhase;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
@@ -654,6 +655,11 @@ impl AppState {
                     nav_heavy: quality.nav_heavy(),
                 }
             });
+        let preview_header_text = if self.active_tab() == AppTab::Briefing {
+            Some(self.format_briefing_preview_header())
+        } else {
+            None
+        };
         let selected_triage_article_available = self
             .ui
             .selected_job_id()
@@ -682,6 +688,7 @@ impl AppState {
             token_limit: TOKEN_LIMIT,
             preview_text,
             preview_header,
+            preview_header_text,
             preview_source,
             briefing_can_start: self.briefing.can_start(),
             briefing_progress: self.briefing.progress_text(),
@@ -714,6 +721,34 @@ impl AppState {
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
             llm_usage_by_model: self.llm_usage_rows(),
             right_pane: self.build_right_pane_view(selected_triage_article_available),
+        }
+    }
+
+    fn format_briefing_preview_header(&self) -> String {
+        let total = self.briefing.articles().len();
+        let scope = if self.briefing_since_utc().is_some() {
+            "Since checkpoint"
+        } else {
+            "All articles"
+        };
+        let status = match self.briefing.phase() {
+            BriefingPhase::Idle => "Idle".to_string(),
+            BriefingPhase::WaitingForTriage => "Waiting for triage".to_string(),
+            BriefingPhase::LoadingArticles => "Loading articles".to_string(),
+            BriefingPhase::Summarizing => {
+                let settled =
+                    self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
+                format!("Summaries {settled}/{total}")
+            }
+            BriefingPhase::GeneratingBriefing => "Generating briefing".to_string(),
+            BriefingPhase::Complete => "Done".to_string(),
+            BriefingPhase::Failed { .. } => "Failed".to_string(),
+        };
+
+        if total == 0 {
+            format!("Executive Briefing | {scope} | {status}")
+        } else {
+            format!("Executive Briefing | {total} articles | {scope} | {status}")
         }
     }
 
@@ -3990,6 +4025,31 @@ mod tests {
 
         let (kind, _) = state.resolve_best_preview(url);
         assert_eq!(kind, PreviewContentKind::Summary);
+    }
+
+    #[test]
+    fn briefing_tab_view_uses_briefing_header_text_instead_of_selected_article_header() {
+        use crate::briefing::{BriefingResult, BriefingSession};
+
+        let mut state = AppState::new();
+        let mut briefing = BriefingSession::new_loading(None);
+        briefing.set_articles(vec![], "collection".to_string());
+        briefing.complete_briefing(BriefingResult {
+            executive_summary: "Summary".to_string(),
+            top_stories: vec![],
+            article_count: 0,
+            input_tokens: 10,
+            output_tokens: 5,
+        });
+        state.set_briefing(briefing);
+        state.select_tab(AppTab::Briefing);
+
+        let view = state.view();
+
+        assert_eq!(
+            view.preview_header_text.as_deref(),
+            Some("Executive Briefing | All articles | Done")
+        );
     }
 }
 

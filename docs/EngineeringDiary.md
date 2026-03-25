@@ -840,3 +840,11 @@ Change: Routed user-driven TreeView selection changes through `TVN_SELCHANGEDW` 
 Lessons Learned: If equivalent user interactions travel through different Win32 notifications, UI behavior will drift unless the app chooses one authoritative event path.
 Prevention: Prefer native selection-changed notifications over hit-test click inference for controls that support keyboard navigation, and keep mouse-only handlers focused on non-selection interactions such as checkbox toggles.
 Refs: src/CommanDuctUI/src/controls/treeview_handler.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/CHANGELOG.md
+
+## 2026-03-25 - Briefing tab header no longer leaks selected article metadata
+Type: Bug Fix
+Context: The preview header kept showing the last selected tree item while the Briefing tab displayed aggregate briefing content, which conflicted with the actual pane content.
+Change: Added a mode-scoped preview header text override so the Briefing tab now renders an aggregate header (`Executive Briefing | N articles | scope | status`) while article-specific headers remain on Triage and Summary.
+Lessons Learned: Shared chrome above a multi-mode pane must be driven by the visible mode, not by preserved selection context from another mode.
+Prevention: When a pane can override selected-item content, expose explicit header text in the view model instead of implicitly deriving all headers from selection.
+Refs: crates/harvester_core/src/state.rs, crates/harvester_core/src/view_model.rs, crates/harvester_app/src/platform/ui/render.rs
