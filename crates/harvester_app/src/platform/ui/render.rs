@@ -3514,4 +3514,36 @@ mod tests {
             assert!(data.lines.is_empty());
         }
     }
+
+    #[test]
+    fn trends_chart_data_truncates_to_five_lines() {
+        use harvester_core::{CategoryTrendView, EntityLineView, TrendCategory, TrendsTabView};
+        let window_id = WindowId::new(99);
+        let mut state = TreeRenderState::default();
+        let mut view = AppViewModel::default();
+        let lines: Vec<EntityLineView> = (0..10)
+            .map(|i| EntityLineView {
+                label: format!("Entity{i}"),
+                weekly_counts: vec![i as u32, i as u32 + 1],
+                total_count: (2 * i) as u32,
+            })
+            .collect();
+        view.right_pane.trends = TrendsTabView {
+            is_loading: false,
+            active_category: TrendCategory::Companies,
+            category_data: Some(CategoryTrendView {
+                weeks: vec!["W1".to_string(), "W2".to_string()],
+                lines,
+                total_entity_count: 10,
+            }),
+        };
+        let cmds = render(window_id, &view, &mut state);
+        let chart_cmd = cmds.iter().find(|c| {
+            matches!(c, PlatformCommand::SetChartData { control_id, .. } if *control_id == CHART_TRENDS)
+        });
+        assert!(chart_cmd.is_some(), "SetChartData not emitted");
+        if let Some(PlatformCommand::SetChartData { data, .. }) = chart_cmd {
+            assert_eq!(data.lines.len(), 5, "expected at most 5 lines from take(5)");
+        }
+    }
 }
