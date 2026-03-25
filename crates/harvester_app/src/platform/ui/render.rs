@@ -1,6 +1,7 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{
-    ChartDataPacket, ChartLineData, CheckState, MessageSeverity, PlatformCommand, StyleId, WindowId,
+    ChartDataPacket, ChartLineData, ChartLineEmphasis, CheckState, MessageSeverity, PlatformCommand,
+    StyleId, WindowId,
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
@@ -351,6 +352,9 @@ fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
             lines: vec![],
             week_labels: vec![],
             is_loading: true,
+            show_x_axis_labels: true,
+            show_y_axis_labels: true,
+            show_end_labels: false,
         };
     }
     let Some(cat_data) = &trends.category_data else {
@@ -358,23 +362,31 @@ fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
             lines: vec![],
             week_labels: vec![],
             is_loading: false,
+            show_x_axis_labels: true,
+            show_y_axis_labels: true,
+            show_end_labels: false,
         };
     };
     let lines = cat_data
         .lines
         .iter()
-        .take(10)
+        .take(5)
         .enumerate()
         .map(|(i, el)| ChartLineData {
             label: el.label.clone(),
             weekly_counts: el.weekly_counts.clone(),
             color: COLORS[i],
+            end_label: None,
+            emphasis: ChartLineEmphasis::Primary,
         })
         .collect();
     ChartDataPacket {
         lines,
         week_labels: cat_data.weeks.clone(),
         is_loading: false,
+        show_x_axis_labels: true,
+        show_y_axis_labels: true,
+        show_end_labels: false,
     }
 }
 
