@@ -832,3 +832,11 @@ Change: Fixed CommanDuctUI TreeView post-paint selection accent drawing to resol
 Lessons Learned: When custom draw mutates native state flags to suppress default rendering, later paint stages cannot safely reuse those flags as the source of truth.
 Prevention: Keep draw-stage decisions in small pure helpers and add tests around the selection/accent gating logic whenever TreeView custom draw changes.
 Refs: src/CommanDuctUI/src/controls/treeview_handler.rs, src/CommanDuctUI/CHANGELOG.md, docs/EngineeringDiary.md
+
+## 2026-03-25 - TreeView keyboard selection updates preview
+Type: Bug Fix
+Context: Arrow-key navigation moved the TreeView selection, but only mouse clicks emitted the selection event that updates the preview pane.
+Change: Routed user-driven TreeView selection changes through `TVN_SELCHANGEDW` and removed duplicate label-click selection dispatch from `NM_CLICK`, so mouse and keyboard navigation now share the same selection event path.
+Lessons Learned: If equivalent user interactions travel through different Win32 notifications, UI behavior will drift unless the app chooses one authoritative event path.
+Prevention: Prefer native selection-changed notifications over hit-test click inference for controls that support keyboard navigation, and keep mouse-only handlers focused on non-selection interactions such as checkbox toggles.
+Refs: src/CommanDuctUI/src/controls/treeview_handler.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/CHANGELOG.md
