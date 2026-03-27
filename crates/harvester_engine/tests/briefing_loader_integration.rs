@@ -461,3 +461,56 @@ fn filtered_loader_single_selection_ignores_unrelated_invalid_markdown() {
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/a");
 }
+
+/// Archive files (multi-doc format, starting with `===== DOC START =====`) live in the same
+/// output directory as articles. The scan must skip them without preventing valid articles
+/// from loading.
+#[test]
+fn archive_format_file_in_output_dir_does_not_block_article_scan() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    write_markdown_file(
+        tmp.path(),
+        "article.md",
+        "https://example.com/article",
+        Some("Article"),
+        "body text",
+    );
+    // Simulate an archive file: starts with the multi-doc separator, not a frontmatter block.
+    let archive_content = "===== DOC START =====\n---\nurl: \"https://example.com/old\"\ntitle: \"Old\"\n---\n\nold body\n";
+    fs::write(tmp.path().join("archive.md"), archive_content).unwrap();
+
+    let (articles, _) =
+        load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, "https://example.com/article");
+}
+
+/// When `since_utc` is set and all selected URLs belong to articles older than the cutoff,
+/// none of them appear in the date-filtered corpus. The function must return an empty result
+/// without error — this is expected behaviour, not a data-integrity problem.
+#[test]
+fn filtered_loader_selected_urls_older_than_since_utc_produce_empty_result() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    // FETCHED constant is "2026-02-09T00:00:00Z" — well before the cutoff below.
+    write_markdown_file(
+        tmp.path(),
+        "old.md",
+        "https://example.com/old",
+        Some("Old"),
+        "old body",
+    );
+
+    let since_utc: chrono::DateTime<chrono::Utc> = "2026-03-01T00:00:00Z"
+        .parse::<chrono::DateTime<chrono::Utc>>()
+        .unwrap();
+    let selected = vec!["https://example.com/old".to_string()];
+    let (articles, collection) =
+        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, Some(since_utc))
+            .unwrap();
+
+    assert!(articles.is_empty());
+    assert!(collection.is_empty());
+}

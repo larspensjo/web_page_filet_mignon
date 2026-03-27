@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use engine_logging::{engine_info, engine_warn};
+use engine_logging::{engine_debug, engine_info, engine_warn};
 use url::Url;
 
 use crate::content_prep::{
@@ -126,10 +126,20 @@ fn scan_and_prepare_articles(
         let fields = match parse_frontmatter(&markdown) {
             Some(fields) => fields,
             None => {
-                engine_warn!(
-                    "[briefing-loader] skipping {}: no valid frontmatter",
-                    path.display()
-                );
+                // Archive files (multi-doc format) start with "=====" and live in the
+                // same output directory as article files — skip them silently at DEBUG.
+                // Any other .md file without valid frontmatter is unexpected and warrants a WARN.
+                if markdown.starts_with("=====") {
+                    engine_debug!(
+                        "[briefing-loader] skipping {}: archive format (not an article)",
+                        path.display()
+                    );
+                } else {
+                    engine_warn!(
+                        "[briefing-loader] skipping {}: no valid frontmatter",
+                        path.display()
+                    );
+                }
                 continue;
             }
         };
@@ -434,10 +444,19 @@ pub fn load_and_prepare_articles_filtered(
                 registry,
             );
         }
-        engine_warn!(
-            "[briefing-loader] selected url missing from corpus: {}",
-            selected_url
-        );
+        // When a since_utc checkpoint is active, old articles are intentionally excluded
+        // from the corpus — a missing URL is expected, not a data-integrity problem.
+        if since_utc.is_some() {
+            engine_debug!(
+                "[briefing-loader] selected url not in corpus (outside checkpoint window): {}",
+                selected_url
+            );
+        } else {
+            engine_warn!(
+                "[briefing-loader] selected url missing from corpus: {}",
+                selected_url
+            );
+        }
         return Ok((Vec::new(), String::new()));
     }
 
@@ -467,10 +486,19 @@ pub fn load_and_prepare_articles_filtered(
                 fetched_utc: package.fetched_utc.clone(),
             }),
             None => {
-                engine_warn!(
-                    "[briefing-loader] selected url missing from corpus: {}",
-                    url
-                );
+                // When a since_utc checkpoint is active, old articles are intentionally excluded
+                // from the corpus — a missing URL is expected, not a data-integrity problem.
+                if since_utc.is_some() {
+                    engine_debug!(
+                        "[briefing-loader] selected url not in corpus (outside checkpoint window): {}",
+                        url
+                    );
+                } else {
+                    engine_warn!(
+                        "[briefing-loader] selected url missing from corpus: {}",
+                        url
+                    );
+                }
             }
         }
     }
