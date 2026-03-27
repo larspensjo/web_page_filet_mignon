@@ -109,6 +109,7 @@ pub enum Effect {
     LoadBriefingCheckpoint,
     /// Save (or clear) the briefing time checkpoint.
     SaveBriefingCheckpoint {
+        save_id: u64,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
     /// Open a URL in the user's default web browser.

@@ -1034,12 +1034,26 @@ impl EffectRunner {
                     let _ = msg_tx.send(Msg::BriefingCheckpointLoaded { since_utc });
                 });
             }
-            Effect::SaveBriefingCheckpoint { since_utc } => {
+            Effect::SaveBriefingCheckpoint { save_id, since_utc } => {
+                let msg_tx = self.msg_tx.clone();
                 let path = self.paths.briefing_checkpoint_path.clone();
                 thread::spawn(move || {
                     let s = since_utc.map(|dt| dt.to_rfc3339());
-                    if let Err(e) = crate::save_briefing_checkpoint(&path, s.as_deref()) {
-                        engine_error!("[briefing-checkpoint] save failed: {}", e);
+                    match crate::save_briefing_checkpoint(&path, s.as_deref()) {
+                        Ok(()) => {
+                            let _ = msg_tx.send(Msg::BriefingCheckpointSaveSucceeded { save_id });
+                        }
+                        Err(e) => {
+                            engine_error!(
+                                "[briefing-checkpoint] save failed save_id={}: {}",
+                                save_id,
+                                e
+                            );
+                            let _ = msg_tx.send(Msg::BriefingCheckpointSaveFailed {
+                                save_id,
+                                reason: e,
+                            });
+                        }
                     }
                 });
             }
@@ -1826,6 +1840,57 @@ mod tests {
             Msg::PromptLabContextSaveFailed { prompt_id, reason } => {
                 assert_eq!(prompt_id, PromptId::ArticleTriage);
                 assert!(reason.contains("failed to read existing context"));
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn save_briefing_checkpoint_dispatches_success_ack() {
+        let temp = tempdir().expect("tempdir");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        let since_utc = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        runner.enqueue(vec![Effect::SaveBriefingCheckpoint {
+            save_id: 7,
+            since_utc: Some(since_utc),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected checkpoint saved msg");
+
+        match msg {
+            Msg::BriefingCheckpointSaveSucceeded { save_id } => {
+                assert_eq!(save_id, 7);
+            }
+            other => panic!("unexpected message: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn save_briefing_checkpoint_dispatches_failure_ack() {
+        let temp = tempdir().expect("tempdir");
+        fs::create_dir_all(temp.path().join(".briefing_checkpoint.ron"))
+            .expect("create conflicting checkpoint directory");
+        let (runner, rx) = runner_with_receiver(temp.path());
+        let since_utc = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        runner.enqueue(vec![Effect::SaveBriefingCheckpoint {
+            save_id: 9,
+            since_utc: Some(since_utc),
+        }]);
+
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected checkpoint save failed msg");
+
+        match msg {
+            Msg::BriefingCheckpointSaveFailed { save_id, reason } => {
+                assert_eq!(save_id, 9);
+                assert!(!reason.is_empty());
             }
             other => panic!("unexpected message: {:?}", other),
         }

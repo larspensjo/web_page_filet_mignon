@@ -36,6 +36,7 @@ const MAX_EXTRACTED_LINKS: usize = 5_000;
 const LINK_ROW_LIMIT: usize = 200;
 const LINK_LABEL_MAX: usize = 80;
 const LINK_LABEL_TRUNCATE_MARKER: &str = "…";
+const CHECKPOINT_SAVING_STATUS_MESSAGE: &str = "Checkpoint saving...";
 
 fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSnapshot> {
     let registry = PromptRegistry::with_defaults();
@@ -78,6 +79,21 @@ struct TriageCacheMetadataSnapshot {
     prompt_version: PromptVersion,
     model_id: String,
     context_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingBriefingCheckpointSave {
+    save_id: u64,
+    previous_since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    pending_since_utc: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PendingBriefingCheckpointSaveSnapshot {
+    pub save_id: u64,
+    pub previous_since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    pub pending_since_utc: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub(crate) enum TriageCacheLookupResult<'a> {
@@ -316,11 +332,14 @@ pub struct AppState {
     next_job_id: JobId,
     next_llm_request_id: u64,
     archive_request_id: u64,
+    next_briefing_checkpoint_save_id: u64,
     pinned_archive_corpus: Option<crate::working_corpus::CurrentWorkingCorpus>,
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
     briefing_history: Vec<crate::briefing::BriefingHistoryEntry>,
     briefing_since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    pending_briefing_checkpoint_save: Option<PendingBriefingCheckpointSave>,
+    briefing_checkpoint_status_message: Option<String>,
     triage: TriageSession,
     pre_triage: PreTriageSession,
     pre_triage_manual_overrides: HashMap<ArticleFilterKey, ManualDecision>,
@@ -411,11 +430,14 @@ impl Default for AppState {
             next_job_id: 1,
             next_llm_request_id: 1,
             archive_request_id: 0,
+            next_briefing_checkpoint_save_id: 1,
             pinned_archive_corpus: None,
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
             briefing_history: vec![],
             briefing_since_utc: None,
+            pending_briefing_checkpoint_save: None,
+            briefing_checkpoint_status_message: None,
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
             pre_triage_manual_overrides: HashMap::new(),
@@ -704,6 +726,7 @@ impl AppState {
                 self.session,
                 SessionState::Idle | SessionState::Running
             ) && !self.source_states.is_poll_in_progress(),
+            checkpoint_status_message: self.briefing_checkpoint_status_message.clone(),
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
             window_width: self.ui.window_width(),
@@ -887,6 +910,13 @@ impl AppState {
         self.archive_request_id
     }
 
+    pub(crate) fn allocate_next_briefing_checkpoint_save_id(&mut self) -> u64 {
+        let save_id = self.next_briefing_checkpoint_save_id;
+        self.next_briefing_checkpoint_save_id =
+            self.next_briefing_checkpoint_save_id.saturating_add(1);
+        save_id
+    }
+
     /// Pin a corpus snapshot for the current archive dialog session.
     ///
     /// Called when the archive dialog is opened so that both the open and submit
@@ -990,6 +1020,77 @@ impl AppState {
 
     pub(crate) fn set_briefing_since_utc(&mut self, v: Option<chrono::DateTime<chrono::Utc>>) {
         self.briefing_since_utc = v;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_briefing_checkpoint_save(
+        &self,
+    ) -> Option<PendingBriefingCheckpointSaveSnapshot> {
+        self.pending_briefing_checkpoint_save
+            .as_ref()
+            .map(|pending| PendingBriefingCheckpointSaveSnapshot {
+                save_id: pending.save_id,
+                previous_since_utc: pending.previous_since_utc,
+                pending_since_utc: pending.pending_since_utc,
+            })
+    }
+
+    pub(crate) fn begin_briefing_checkpoint_save(
+        &mut self,
+        pending_since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> u64 {
+        let save_id = self.allocate_next_briefing_checkpoint_save_id();
+        // A newer user-driven checkpoint change replaces any older pending save.
+        // Matching is done by save_id, so late acks for older requests are dropped.
+        self.pending_briefing_checkpoint_save = Some(PendingBriefingCheckpointSave {
+            save_id,
+            previous_since_utc: self.briefing_since_utc,
+            pending_since_utc,
+        });
+        self.briefing_since_utc = pending_since_utc;
+        self.briefing_checkpoint_status_message =
+            Some(CHECKPOINT_SAVING_STATUS_MESSAGE.to_string());
+        save_id
+    }
+
+    pub(crate) fn finish_briefing_checkpoint_save_success(
+        &mut self,
+        save_id: u64,
+    ) -> bool {
+        match self.pending_briefing_checkpoint_save.as_ref() {
+            Some(pending) if pending.save_id == save_id => {
+                self.pending_briefing_checkpoint_save = None;
+                self.briefing_checkpoint_status_message = None;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn finish_briefing_checkpoint_save_failure(
+        &mut self,
+        save_id: u64,
+        reason: &str,
+    ) -> bool {
+        match self.pending_briefing_checkpoint_save.as_ref() {
+            Some(pending) if pending.save_id == save_id => {
+                self.briefing_since_utc = pending.previous_since_utc;
+                self.pending_briefing_checkpoint_save = None;
+                self.briefing_checkpoint_status_message =
+                    Some(format!("Checkpoint save failed: {reason}"));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn clear_briefing_checkpoint_save_tracking(&mut self) {
+        self.pending_briefing_checkpoint_save = None;
+        self.briefing_checkpoint_status_message = None;
+    }
+
+    pub fn briefing_checkpoint_status_message(&self) -> Option<&str> {
+        self.briefing_checkpoint_status_message.as_deref()
     }
 
     /// Backfills `fetched_utc` on jobs that have it as `None`, keyed by URL.

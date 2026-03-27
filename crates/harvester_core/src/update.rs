@@ -891,6 +891,27 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                         }
                     });
             state.set_briefing_since_utc(parsed);
+            state.clear_briefing_checkpoint_save_tracking();
+            vec![]
+        }
+        Msg::BriefingCheckpointSaveSucceeded { save_id } => {
+            if !state.finish_briefing_checkpoint_save_success(save_id) {
+                return (state, vec![]);
+            }
+            engine_info!("[briefing-checkpoint] save succeeded save_id={}", save_id);
+            state.mark_dirty();
+            vec![]
+        }
+        Msg::BriefingCheckpointSaveFailed { save_id, reason } => {
+            if !state.finish_briefing_checkpoint_save_failure(save_id, &reason) {
+                return (state, vec![]);
+            }
+            engine_warn!(
+                "[briefing-checkpoint] save failed save_id={} reason={}; reverted in-memory checkpoint",
+                save_id,
+                reason
+            );
+            state.mark_dirty();
             vec![]
         }
         Msg::BriefingCheckpointSet(since) => {
@@ -908,8 +929,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if since.is_some() && parsed.is_none() {
                 return (state, vec![]);
             }
-            state.set_briefing_since_utc(parsed);
-            vec![Effect::SaveBriefingCheckpoint { since_utc: parsed }]
+            let save_id = state.begin_briefing_checkpoint_save(parsed);
+            state.mark_dirty();
+            vec![Effect::SaveBriefingCheckpoint {
+                save_id,
+                since_utc: parsed,
+            }]
         }
         Msg::ArchiveDialogReady {
             request_id,
@@ -993,7 +1018,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             // Clear any residual pin (idempotent — normally already cleared at submit time).
             state.clear_pinned_archive_corpus();
             if let Some(checkpoint) = requested_checkpoint {
+                let save_id = state.begin_briefing_checkpoint_save(Some(checkpoint));
+                state.mark_dirty();
                 vec![Effect::SaveBriefingCheckpoint {
+                    save_id,
                     since_utc: Some(checkpoint),
                 }]
             } else {
@@ -5982,7 +6010,7 @@ mod tests {
         let checkpoint = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        let (_, effects) = update(
+        let (state, effects) = update(
             state,
             Msg::ArchiveExportCompleted {
                 request_id: 1,
@@ -5994,8 +6022,155 @@ mod tests {
         assert_eq!(
             effects,
             vec![Effect::SaveBriefingCheckpoint {
+                save_id: 1,
                 since_utc: Some(checkpoint)
             }]
+        );
+        assert_eq!(state.briefing_since_utc(), Some(checkpoint));
+        assert_eq!(
+            state.briefing_checkpoint_status_message(),
+            Some("Checkpoint saving...")
+        );
+    }
+
+    #[test]
+    fn briefing_checkpoint_save_success_clears_pending_status() {
+        init_logging();
+        let checkpoint = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (state, effects) = update(
+            AppState::new(),
+            Msg::BriefingCheckpointSet(Some("2026-03-22T00:00:00Z".to_string())),
+        );
+        assert_eq!(
+            effects,
+            vec![Effect::SaveBriefingCheckpoint {
+                save_id: 1,
+                since_utc: Some(checkpoint)
+            }]
+        );
+        assert_eq!(
+            state.pending_briefing_checkpoint_save(),
+            Some(crate::state::PendingBriefingCheckpointSaveSnapshot {
+                save_id: 1,
+                previous_since_utc: None,
+                pending_since_utc: Some(checkpoint),
+            })
+        );
+
+        let (state, follow_up) = update(
+            state,
+            Msg::BriefingCheckpointSaveSucceeded { save_id: 1 },
+        );
+        assert!(follow_up.is_empty());
+        assert_eq!(state.briefing_since_utc(), Some(checkpoint));
+        assert_eq!(state.pending_briefing_checkpoint_save(), None);
+        assert_eq!(state.briefing_checkpoint_status_message(), None);
+    }
+
+    #[test]
+    fn briefing_checkpoint_save_failure_reverts_in_memory_state() {
+        init_logging();
+        let initial = chrono::DateTime::parse_from_rfc3339("2026-03-20T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let mut state = AppState::new();
+        state.set_briefing_since_utc(Some(initial));
+        let (state, effects) = update(
+            state,
+            Msg::BriefingCheckpointSet(Some("2026-03-22T00:00:00Z".to_string())),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::SaveBriefingCheckpoint { save_id: 1, .. }]
+        ));
+        let (state, follow_up) = update(
+            state,
+            Msg::BriefingCheckpointSaveFailed {
+                save_id: 1,
+                reason: "disk full".to_string(),
+            },
+        );
+        assert!(follow_up.is_empty());
+        assert_eq!(state.briefing_since_utc(), Some(initial));
+        assert_eq!(state.pending_briefing_checkpoint_save(), None);
+        assert_eq!(
+            state.briefing_checkpoint_status_message(),
+            Some("Checkpoint save failed: disk full")
+        );
+    }
+
+    #[test]
+    fn briefing_checkpoint_loaded_clears_pending_save_tracking() {
+        init_logging();
+        let checkpoint = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (state, _) = update(
+            AppState::new(),
+            Msg::BriefingCheckpointSet(Some("2026-03-22T00:00:00Z".to_string())),
+        );
+        assert!(state.pending_briefing_checkpoint_save().is_some());
+
+        let (state, follow_up) = update(
+            state,
+            Msg::BriefingCheckpointLoaded {
+                since_utc: Some("2026-03-25T00:00:00Z".to_string()),
+            },
+        );
+        assert!(follow_up.is_empty());
+        assert_eq!(
+            state.briefing_since_utc(),
+            Some(
+                chrono::DateTime::parse_from_rfc3339("2026-03-25T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            )
+        );
+        assert_eq!(state.pending_briefing_checkpoint_save(), None);
+        assert_eq!(state.briefing_checkpoint_status_message(), None);
+        assert_ne!(state.briefing_since_utc(), Some(checkpoint));
+    }
+
+    #[test]
+    fn stale_checkpoint_save_failure_is_ignored_when_newer_save_is_pending() {
+        init_logging();
+        let first_checkpoint = chrono::DateTime::parse_from_rfc3339("2026-03-20T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let latest_checkpoint = chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let (state, _) = update(
+            AppState::new(),
+            Msg::BriefingCheckpointSet(Some("2026-03-20T00:00:00Z".to_string())),
+        );
+        let (state, effects) = update(
+            state,
+            Msg::BriefingCheckpointSet(Some("2026-03-22T00:00:00Z".to_string())),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::SaveBriefingCheckpoint { save_id: 2, .. }]
+        ));
+
+        let (state, follow_up) = update(
+            state,
+            Msg::BriefingCheckpointSaveFailed {
+                save_id: 1,
+                reason: "stale failure".to_string(),
+            },
+        );
+        assert!(follow_up.is_empty());
+        assert_eq!(state.briefing_since_utc(), Some(latest_checkpoint));
+        assert_eq!(
+            state.pending_briefing_checkpoint_save(),
+            Some(crate::state::PendingBriefingCheckpointSaveSnapshot {
+                save_id: 2,
+                previous_since_utc: Some(first_checkpoint),
+                pending_since_utc: Some(latest_checkpoint),
+            })
         );
     }
 

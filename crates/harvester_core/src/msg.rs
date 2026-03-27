@@ -206,6 +206,15 @@ pub enum Msg {
     BriefingCheckpointLoaded {
         since_utc: Option<String>,
     },
+    /// Briefing time checkpoint persisted successfully.
+    BriefingCheckpointSaveSucceeded {
+        save_id: u64,
+    },
+    /// Briefing time checkpoint persistence failed.
+    BriefingCheckpointSaveFailed {
+        save_id: u64,
+        reason: String,
+    },
     /// Request to update the in-memory briefing checkpoint (and persist it).
     /// Raw wire type; the reducer validates the string before storing.
     BriefingCheckpointSet(Option<String>),

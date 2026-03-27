@@ -549,6 +549,9 @@ fn render_status_section(
     if let Some(progress) = view.triage_progress.as_deref() {
         status_parts.push(progress.to_string());
     }
+    if let Some(status) = view.checkpoint_status_message.as_deref() {
+        status_parts.push(status.to_string());
+    }
     if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
         status_parts.push(usage);
     }
