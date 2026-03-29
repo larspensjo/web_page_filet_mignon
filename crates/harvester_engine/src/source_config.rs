@@ -59,11 +59,24 @@ impl<'de> Deserialize<'de> for SourceId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BraveNewsSourceConfig {
+    pub query: String,
+    pub api_key_env: String,
+    /// Request size — how many results to fetch from Brave (1..=50).
+    /// This is NOT the emit cap; `max_urls_per_poll` on `SourceConfig` controls that.
+    pub count: Option<usize>,
+    /// Freshness filter: `pd` (past day), `pw` (past week), `pm` (past month),
+    /// `py` (past year), or `YYYY-MM-DDtoYYYY-MM-DD`.
+    pub freshness: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceType {
     File { path: PathBuf },
     Script { command: String, args: Vec<String> },
     CuratedList { urls: Vec<String> },
     Rss { feed_url: String },
+    BraveNews(BraveNewsSourceConfig),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +118,7 @@ impl SourceType {
             SourceType::Rss { feed_url } => SourceType::Rss {
                 feed_url: feed_url.clone(),
             },
+            SourceType::BraveNews(_) => self.clone(),
         }
     }
 }
@@ -148,6 +162,29 @@ impl SourceRegistry {
                     }
                 })?;
             }
+
+            if let SourceType::BraveNews(cfg) = &source.source_type {
+                if cfg.query.trim().is_empty() {
+                    return Err(SourceRegistryValidationError::InvalidBraveConfig {
+                        source_id: source.id.clone(),
+                        reason: "query cannot be empty".to_string(),
+                    });
+                }
+                if cfg.api_key_env.trim().is_empty() {
+                    return Err(SourceRegistryValidationError::InvalidBraveConfig {
+                        source_id: source.id.clone(),
+                        reason: "api_key_env cannot be empty".to_string(),
+                    });
+                }
+                if let Some(count) = cfg.count {
+                    if !(1..=50).contains(&count) {
+                        return Err(SourceRegistryValidationError::InvalidBraveConfig {
+                            source_id: source.id.clone(),
+                            reason: format!("count must be 1..=50, got {}", count),
+                        });
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -177,6 +214,8 @@ pub enum SourceRegistryValidationError {
     DuplicateSourceId(SourceId),
     #[error("rss source '{source_id}' has invalid feed url: {reason}")]
     InvalidFeedUrl { source_id: SourceId, reason: String },
+    #[error("brave source '{source_id}' config invalid: {reason}")]
+    InvalidBraveConfig { source_id: SourceId, reason: String },
 }
 
 #[cfg(test)]
@@ -304,6 +343,88 @@ mod tests {
             registry.validate(),
             Err(SourceRegistryValidationError::InvalidFeedUrl { .. })
         ));
+    }
+
+    fn brave_source(query: &str, api_key_env: &str, count: Option<usize>) -> SourceRegistry {
+        SourceRegistry {
+            sources: vec![SourceConfig {
+                id: SourceId::new("brave").unwrap(),
+                source_type: SourceType::BraveNews(BraveNewsSourceConfig {
+                    query: query.to_string(),
+                    api_key_env: api_key_env.to_string(),
+                    count,
+                    freshness: None,
+                }),
+                enabled: true,
+                max_urls_per_poll: None,
+                description: String::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn brave_news_source_round_trips_through_ron() {
+        let config = SourceConfig {
+            id: SourceId::new("brave-test").unwrap(),
+            source_type: SourceType::BraveNews(BraveNewsSourceConfig {
+                query: "\"AI\" AND \"data center\"".to_string(),
+                api_key_env: "BRAVE_API_KEY".to_string(),
+                count: Some(10),
+                freshness: Some("pd".to_string()),
+            }),
+            enabled: true,
+            max_urls_per_poll: Some(10),
+            description: "test".to_string(),
+        };
+
+        let ron_str = ron::to_string(&config).expect("serialize");
+        let parsed: SourceConfig = ron::from_str(&ron_str).expect("deserialize");
+        assert_eq!(parsed, config);
+    }
+
+    #[test]
+    fn brave_news_rejects_empty_query() {
+        assert!(brave_source("", "KEY", None).validate().is_err());
+    }
+
+    #[test]
+    fn brave_news_rejects_empty_api_key_env() {
+        assert!(brave_source("test", "", None).validate().is_err());
+    }
+
+    #[test]
+    fn brave_news_rejects_count_over_50() {
+        assert!(brave_source("test", "KEY", Some(51)).validate().is_err());
+    }
+
+    #[test]
+    fn brave_news_rejects_count_zero() {
+        assert!(brave_source("test", "KEY", Some(0)).validate().is_err());
+    }
+
+    #[test]
+    fn brave_news_accepts_valid_config() {
+        assert!(brave_source("AI news", "BRAVE_API_KEY", Some(10))
+            .validate()
+            .is_ok());
+    }
+
+    #[test]
+    fn brave_news_resolve_paths_is_noop() {
+        let config = SourceConfig {
+            id: SourceId::new("brave").unwrap(),
+            source_type: SourceType::BraveNews(BraveNewsSourceConfig {
+                query: "test".to_string(),
+                api_key_env: "KEY".to_string(),
+                count: None,
+                freshness: None,
+            }),
+            enabled: true,
+            max_urls_per_poll: None,
+            description: String::new(),
+        };
+        let resolved = config.resolve_paths(Path::new("/tmp"));
+        assert_eq!(resolved, config);
     }
 
     #[test]

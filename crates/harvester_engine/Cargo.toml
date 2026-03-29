@@ -33,3 +33,4 @@ toml.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 wiremock = "0.6"
 pretty_assertions = "1"
+ron = "0.12.0"

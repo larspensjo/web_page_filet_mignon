@@ -21,6 +21,7 @@ mod quota;
 mod rss_parse;
 mod rss_seen_set;
 pub mod since_filter;
+mod brave_poll;
 mod source_config;
 mod source_poll;
 mod text_safety;
@@ -57,9 +58,10 @@ pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKi
 pub use path_policy::is_confined_to;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 pub use quota::{QuotaTracker, SessionQuotas};
+pub use brave_poll::{parse_brave_news_response, BraveNewsItem, BravePollError};
 pub use source_config::{
-    SourceConfig, SourceId, SourceIdError, SourceRegistry, SourceRegistryValidationError,
-    SourceType,
+    BraveNewsSourceConfig, SourceConfig, SourceId, SourceIdError, SourceRegistry,
+    SourceRegistryValidationError, SourceType,
 };
 pub use source_poll::{
     poll_curated_source, poll_file_source, poll_rss_source, validate_source_file_path,
