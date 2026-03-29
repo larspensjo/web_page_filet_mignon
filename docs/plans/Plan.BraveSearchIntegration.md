@@ -4,16 +4,20 @@
 
 **Goal:** Add Brave Search News API as a first-class source type so the existing poll-triage-summarize pipeline can actively hunt for articles by query, not only passively consume RSS feeds.
 
-**Architecture:** A new `SourceType::BraveSearch` variant slots into the existing `SourceRegistry` / `execute_poll_all_sources` loop. The pure poll function lives in `harvester_engine` (parses raw JSON bytes → `SourcePollResult`); the HTTP call and API-key resolution live in `harvester_io`. A dedicated `BraveSeenSet` prevents cross-cycle duplicates. No reducer changes are needed — the existing `SourcePollCompleted`/`SourcePollFailed` messages carry the results into the standard `ingest_urls → EnqueueUrl` pipeline.
+**Architecture:** A new `SourceType::BraveNews(BraveNewsSourceConfig)` variant slots into the existing `SourceRegistry` / `execute_poll_all_sources` loop. The pure poll function lives in `harvester_engine` (parses raw Brave News API JSON bytes → `Vec<BraveNewsItem>`); the HTTP call and API-key resolution live in `harvester_io`. Cross-cycle dedup reuses `harvester_core::normalize_url_for_dedupe` (the same identity function the reducer uses) to avoid semantic drift. Brave metadata (title, description, published date) is persisted in a sidecar store so downstream features can use it without another cross-crate refactor. No reducer changes are needed — the existing `SourcePollCompleted`/`SourcePollFailed` messages carry the results into the standard `ingest_urls → EnqueueUrl` pipeline.
 
 **Tech Stack:** Rust, `reqwest` (blocking, already depended on in `harvester_io`), `serde_json` (already in `harvester_engine`), RON config, `harvester_batch` CLI.
 
 **Related FutureIdeas entries this plan partially addresses:**
-- `FI-Ingestion-SourceDryRun-0006` — dry-run already exists (`--dry-run` flag); Brave sources will honour it.
-- `FI-Observability-SourceHealth-0006` — per-source timing logs added as part of the poll loop.
-- `FI-Storage-ContentFingerprinting-0001` — Phase 2 adds URL-based dedup via `BraveSeenSet`; content fingerprinting remains future work.
-- `FI-Security-KeyManagement-0001` — env-var indirection for API keys (not encrypted store, but a step forward).
-- `FI-Ingestion-RssTriage-0003` — Phase 2+ dedup is a lightweight analogue of pre-download triage.
+- `FI-Observability-SourceHealth-0006` — per-source timing logs added as part of the poll loop. Note: logs alone do not close this item; it asks for recorded per-source telemetry.
+- `FI-Security-KeyManagement-0001` — env-var indirection for API keys (not encrypted store, but a step forward). Note: does not close this item; the backlog asks for more than env-var indirection.
+- `FI-Ingestion-RssTriage-0003` — Brave metadata preservation is a strong enabler for metadata-first triage.
+- `FI-Ingestion-SourcePreview-0007` — Brave metadata (title, snippet) enables source preview without downloading.
+- `FI-Performance-Polling-0008` — parallel source polling would help when many Brave queries are configured.
+
+**Explicitly NOT addressed:**
+- `FI-Ingestion-SourceDryRun-0006` — dry-run honours Brave sources, but does not yet provide a real would-be-enqueued source report.
+- `FI-Storage-ContentFingerprinting-0001` — that idea is about normalized content fingerprints, not source URL memory.
 
 ---
 
@@ -21,41 +25,41 @@
 
 | File | Action | Responsibility |
 |---|---|---|
-| `crates/harvester_engine/src/source_config.rs` | Modify | Add `BraveSearch` variant to `SourceType`; validation |
-| `crates/harvester_engine/src/brave_poll.rs` | **Create** | Pure parse function: JSON bytes → `SourcePollResult` |
-| `crates/harvester_engine/src/brave_seen_set.rs` | **Create** | URL-keyed dedup set with bounded capacity and eviction |
+| `crates/harvester_engine/src/source_config.rs` | Modify | Add `BraveNews(BraveNewsSourceConfig)` variant to `SourceType`; validation |
+| `crates/harvester_engine/src/brave_poll.rs` | **Create** | Pure parse function: Brave News JSON bytes → `Vec<BraveNewsItem>` |
+| `crates/harvester_engine/src/brave_seen_set.rs` | **Create** | URL-keyed dedup set using `normalize_url_for_dedupe`; bounded capacity with eviction |
 | `crates/harvester_engine/src/lib.rs` | Modify | Expose new modules and re-exports |
 | `crates/harvester_io/src/effect_helpers.rs` | Modify | Add `fetch_brave_results` (HTTP GET) and `handle_brave_source_poll` |
-| `crates/harvester_io/src/effect_runner.rs` | Modify | Wire `BraveSearch` arm in `execute_poll_all_sources` |
-| `crates/harvester_io/src/seen_set_store.rs` | Modify | Add `load_brave_seen_set` / `persist_brave_seen_set` |
-| `crates/harvester_io/src/runtime_paths.rs` | Modify | Add `brave_seen_set_path` field |
+| `crates/harvester_io/src/effect_runner.rs` | Modify | Wire `BraveNews` arm in `execute_poll_all_sources`; fix test helper `RuntimePaths` struct literal |
+| `crates/harvester_io/src/seen_set_store.rs` | Modify | Add `load_brave_seen_set` / `persist_brave_seen_set` and sidecar metadata store |
+| `crates/harvester_io/src/runtime_paths.rs` | Modify | Add `brave_seen_set_path` and `brave_metadata_path` fields |
 | `crates/harvester_io/src/lib.rs` | Modify | Re-export new public items |
 | `scripts/Start-HarvesterBatch.ps1` | No change | No new CLI flags required (Brave sources are configured in `sources.ron`) |
 
 ---
 
-## Phase 1: Foundation — BraveSearch as a source type
+## Phase 1: Foundation — BraveNews as a source type
 
-### Task 1: Add `BraveSearch` variant to `SourceType`
+### Task 1: Add `BraveNews` variant to `SourceType`
 
 **Files:**
 - Modify: `crates/harvester_engine/src/source_config.rs`
 
-- [ ] **Step 1: Write the failing test — BraveSearch round-trips through RON**
+- [ ] **Step 1: Write the failing test — BraveNews round-trips through RON**
 
 Add at the bottom of the existing `mod tests` block in `source_config.rs`:
 
 ```rust
 #[test]
-fn brave_search_source_round_trips_through_ron() {
+fn brave_news_source_round_trips_through_ron() {
     let config = SourceConfig {
         id: SourceId::new("brave-test").unwrap(),
-        source_type: SourceType::BraveSearch {
+        source_type: SourceType::BraveNews(BraveNewsSourceConfig {
             query: "\"AI\" AND \"data center\"".to_string(),
             api_key_env: "BRAVE_API_KEY".to_string(),
             count: Some(10),
             freshness: Some("pd".to_string()),
-        },
+        }),
         enabled: true,
         max_urls_per_poll: Some(10),
         description: "test".to_string(),
@@ -69,33 +73,40 @@ fn brave_search_source_round_trips_through_ron() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo nextest run -p harvester_engine brave_search_source_round_trips`
-Expected: FAIL — `BraveSearch` is not a variant of `SourceType`.
+Run: `cargo nextest run -p harvester_engine brave_news_source_round_trips`
+Expected: FAIL — `BraveNews` is not a variant of `SourceType`.
 
-- [ ] **Step 3: Add the variant and resolve_paths**
+- [ ] **Step 3: Add the config struct, variant, and resolve_paths**
 
-In `source_config.rs`, add the new variant to the `SourceType` enum:
+In `source_config.rs`, add the dedicated config struct and the new variant:
 
 ```rust
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BraveNewsSourceConfig {
+    pub query: String,
+    pub api_key_env: String,
+    /// Request size — how many results to fetch from Brave (1..=50).
+    /// This is NOT the emit cap; `max_urls_per_poll` on `SourceConfig` controls that.
+    pub count: Option<usize>,
+    /// Freshness filter: `pd` (past day), `pw` (past week), `pm` (past month),
+    /// `py` (past year), or `YYYY-MM-DDtoYYYY-MM-DD`.
+    pub freshness: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceType {
     File { path: PathBuf },
     Script { command: String, args: Vec<String> },
     CuratedList { urls: Vec<String> },
     Rss { feed_url: String },
-    BraveSearch {
-        query: String,
-        api_key_env: String,
-        count: Option<usize>,
-        freshness: Option<String>,
-    },
+    BraveNews(BraveNewsSourceConfig),
 }
 ```
 
 In `SourceType::resolve_paths`, add a pass-through arm:
 
 ```rust
-SourceType::BraveSearch { .. } => self.clone(),
+SourceType::BraveNews(_) => self.clone(),
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -103,20 +114,77 @@ SourceType::BraveSearch { .. } => self.clone(),
 Run: `cargo nextest run -p harvester_engine brave_search_source_round_trips`
 Expected: PASS
 
-- [ ] **Step 5: Write validation test — empty query is rejected**
+- [ ] **Step 5: Write validation tests — empty query, empty api_key_env, invalid count, invalid freshness**
 
 ```rust
 #[test]
-fn brave_search_rejects_empty_query() {
+fn brave_news_rejects_empty_query() {
     let registry = SourceRegistry {
         sources: vec![SourceConfig {
             id: SourceId::new("brave").unwrap(),
-            source_type: SourceType::BraveSearch {
+            source_type: SourceType::BraveNews(BraveNewsSourceConfig {
                 query: "".to_string(),
                 api_key_env: "KEY".to_string(),
                 count: None,
                 freshness: None,
-            },
+            }),
+            enabled: true,
+            max_urls_per_poll: None,
+            description: String::new(),
+        }],
+    };
+    assert!(registry.validate().is_err());
+}
+
+#[test]
+fn brave_news_rejects_empty_api_key_env() {
+    let registry = SourceRegistry {
+        sources: vec![SourceConfig {
+            id: SourceId::new("brave").unwrap(),
+            source_type: SourceType::BraveNews(BraveNewsSourceConfig {
+                query: "test".to_string(),
+                api_key_env: "".to_string(),
+                count: None,
+                freshness: None,
+            }),
+            enabled: true,
+            max_urls_per_poll: None,
+            description: String::new(),
+        }],
+    };
+    assert!(registry.validate().is_err());
+}
+
+#[test]
+fn brave_news_rejects_count_over_50() {
+    let registry = SourceRegistry {
+        sources: vec![SourceConfig {
+            id: SourceId::new("brave").unwrap(),
+            source_type: SourceType::BraveNews(BraveNewsSourceConfig {
+                query: "test".to_string(),
+                api_key_env: "KEY".to_string(),
+                count: Some(51),
+                freshness: None,
+            }),
+            enabled: true,
+            max_urls_per_poll: None,
+            description: String::new(),
+        }],
+    };
+    assert!(registry.validate().is_err());
+}
+
+#[test]
+fn brave_news_rejects_count_zero() {
+    let registry = SourceRegistry {
+        sources: vec![SourceConfig {
+            id: SourceId::new("brave").unwrap(),
+            source_type: SourceType::BraveNews(BraveNewsSourceConfig {
+                query: "test".to_string(),
+                api_key_env: "KEY".to_string(),
+                count: Some(0),
+                freshness: None,
+            }),
             enabled: true,
             max_urls_per_poll: None,
             description: String::new(),
@@ -131,13 +199,28 @@ fn brave_search_rejects_empty_query() {
 In `SourceRegistry::validate`, after the existing RSS validation block, add:
 
 ```rust
-if let SourceType::BraveSearch { query, .. } = &source.source_type {
-    if query.trim().is_empty() {
-        return Err(SourceRegistryValidationError::InvalidBraveQuery {
+if let SourceType::BraveNews(cfg) = &source.source_type {
+    if cfg.query.trim().is_empty() {
+        return Err(SourceRegistryValidationError::InvalidBraveConfig {
             source_id: source.id.clone(),
             reason: "query cannot be empty".to_string(),
         });
     }
+    if cfg.api_key_env.trim().is_empty() {
+        return Err(SourceRegistryValidationError::InvalidBraveConfig {
+            source_id: source.id.clone(),
+            reason: "api_key_env cannot be empty".to_string(),
+        });
+    }
+    if let Some(count) = cfg.count {
+        if !(1..=50).contains(&count) {
+            return Err(SourceRegistryValidationError::InvalidBraveConfig {
+                source_id: source.id.clone(),
+                reason: format!("count must be 1..=50, got {}", count),
+            });
+        }
+    }
+    // Optionally validate freshness format in the future (pd|pw|pm|py|YYYY-MM-DDtoYYYY-MM-DD)
 }
 ```
 
@@ -150,8 +233,8 @@ pub enum SourceRegistryValidationError {
     DuplicateSourceId(SourceId),
     #[error("rss source '{source_id}' has invalid feed url: {reason}")]
     InvalidFeedUrl { source_id: SourceId, reason: String },
-    #[error("brave source '{source_id}' has invalid query: {reason}")]
-    InvalidBraveQuery { source_id: SourceId, reason: String },
+    #[error("brave source '{source_id}' config invalid: {reason}")]
+    InvalidBraveConfig { source_id: SourceId, reason: String },
 }
 ```
 
@@ -164,7 +247,7 @@ Expected: all pass
 
 ```bash
 git add crates/harvester_engine/src/source_config.rs
-git commit -m "feat: add BraveSearch variant to SourceType with validation"
+git commit -m "feat: add BraveNews variant to SourceType with validation"
 ```
 
 ---
@@ -175,44 +258,37 @@ git commit -m "feat: add BraveSearch variant to SourceType with validation"
 - Create: `crates/harvester_engine/src/brave_poll.rs`
 - Modify: `crates/harvester_engine/src/lib.rs`
 
-The Brave Web Search API returns JSON with this structure (simplified):
-
-```json
-{
-  "web": {
-    "results": [
-      { "url": "https://...", "title": "...", "description": "..." },
-      ...
-    ]
-  }
-}
-```
-
-The Brave **News** Search API returns:
+The Brave **News** Search API (`/res/v1/news/search`) returns:
 
 ```json
 {
   "results": [
-    { "url": "https://...", "title": "...", "description": "..." },
+    { "url": "https://...", "title": "...", "description": "...", "age": "2 hours ago" },
     ...
   ]
 }
 ```
 
-We support both by checking for both shapes.
+We parse **only** the documented News Search shape (`results[]`). If Web Search support is needed later, add a separate source type or endpoint enum rather than silently accepting both shapes.
 
-- [ ] **Step 1: Write the failing test — parses valid JSON into SourcePollResult**
+The parser returns `Vec<BraveNewsItem>` (not `SourcePollResult`) — the caller is responsible for dedup and limiting. This keeps the parser pure and composable.
+
+- [ ] **Step 1: Write the failing test — parses valid News JSON into BraveNewsItems**
 
 Create `crates/harvester_engine/src/brave_poll.rs`:
 
 ```rust
-use crate::{SourceId, SourcePollResult};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone)]
-pub struct BravePollItem {
+/// A single item parsed from a Brave News Search API response.
+/// Preserves metadata for downstream use (triage, preview, provenance).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BraveNewsItem {
     pub url: String,
     pub title: String,
     pub description: String,
+    /// Raw age string from the API, e.g. "2 hours ago".
+    pub age: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -223,26 +299,22 @@ pub enum BravePollError {
     UnexpectedStructure(String),
 }
 
-/// Parse raw Brave Search API JSON bytes into a `SourcePollResult`.
+/// Parse raw Brave News Search API JSON bytes into a list of items.
 ///
-/// Accepts both the Web Search shape (`web.results[]`) and the
-/// News Search shape (`results[]`). Returns URLs from whichever
-/// shape is present, capped at `max_urls` if provided.
-pub fn parse_brave_response(
-    source_id: SourceId,
+/// Only accepts the News Search shape (`results[]`).
+/// Does NOT apply any limit or dedup — the caller handles that.
+pub fn parse_brave_news_response(
     json_bytes: &[u8],
-    max_urls: Option<usize>,
-) -> Result<(SourcePollResult, Vec<BravePollItem>), BravePollError> {
+) -> Result<Vec<BraveNewsItem>, BravePollError> {
     let value: serde_json::Value =
         serde_json::from_slice(json_bytes).map_err(|e| BravePollError::JsonParse(e.to_string()))?;
 
     let results_array = value
         .get("results")
-        .or_else(|| value.get("web").and_then(|w| w.get("results")))
         .and_then(|v| v.as_array())
         .ok_or_else(|| {
             BravePollError::UnexpectedStructure(
-                "expected 'results' or 'web.results' array".to_string(),
+                "expected 'results' array in News Search response".to_string(),
             )
         })?;
 
@@ -259,19 +331,20 @@ pub fn parse_brave_response(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            items.push(BravePollItem {
+            let age = entry
+                .get("age")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            items.push(BraveNewsItem {
                 url: url.to_string(),
                 title,
                 description,
+                age,
             });
         }
     }
 
-    let limit = max_urls.unwrap_or(items.len());
-    let selected: Vec<BravePollItem> = items.into_iter().take(limit).collect();
-    let urls = selected.iter().map(|item| item.url.clone()).collect();
-
-    Ok((SourcePollResult { source_id, urls }, selected))
+    Ok(items)
 }
 
 #[cfg(test)]
@@ -297,53 +370,44 @@ mod tests {
             ("https://example.com/1", "Title 1"),
             ("https://example.com/2", "Title 2"),
         ]);
-        let (result, items) =
-            parse_brave_response(SourceId::new("brave").unwrap(), &json, None).unwrap();
-        assert_eq!(result.urls.len(), 2);
-        assert_eq!(result.urls[0], "https://example.com/1");
+        let items = parse_brave_news_response(&json).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].url, "https://example.com/1");
         assert_eq!(items[0].title, "Title 1");
     }
 
     #[test]
-    fn parses_web_api_response() {
+    fn rejects_web_search_shape() {
         let json = br#"{"web":{"results":[{"url":"https://a.com","title":"A","description":"d"}]}}"#;
-        let (result, _) =
-            parse_brave_response(SourceId::new("brave").unwrap(), json, None).unwrap();
-        assert_eq!(result.urls, vec!["https://a.com"]);
-    }
-
-    #[test]
-    fn respects_max_urls() {
-        let json = news_json(&[
-            ("https://a.com", "A"),
-            ("https://b.com", "B"),
-            ("https://c.com", "C"),
-        ]);
-        let (result, _) =
-            parse_brave_response(SourceId::new("brave").unwrap(), &json, Some(2)).unwrap();
-        assert_eq!(result.urls.len(), 2);
+        let err = parse_brave_news_response(json).unwrap_err();
+        assert!(matches!(err, BravePollError::UnexpectedStructure(_)));
     }
 
     #[test]
     fn rejects_invalid_json() {
-        let err =
-            parse_brave_response(SourceId::new("brave").unwrap(), b"not json", None).unwrap_err();
+        let err = parse_brave_news_response(b"not json").unwrap_err();
         assert!(matches!(err, BravePollError::JsonParse(_)));
     }
 
     #[test]
     fn rejects_missing_results_key() {
-        let err =
-            parse_brave_response(SourceId::new("brave").unwrap(), b"{}", None).unwrap_err();
+        let err = parse_brave_news_response(b"{}").unwrap_err();
         assert!(matches!(err, BravePollError::UnexpectedStructure(_)));
     }
 
     #[test]
     fn skips_entries_without_url() {
         let json = br#"{"results":[{"title":"no url"},{"url":"https://a.com","title":"A"}]}"#;
-        let (result, _) =
-            parse_brave_response(SourceId::new("brave").unwrap(), json, None).unwrap();
-        assert_eq!(result.urls, vec!["https://a.com"]);
+        let items = parse_brave_news_response(json).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].url, "https://a.com");
+    }
+
+    #[test]
+    fn preserves_age_field() {
+        let json = br#"{"results":[{"url":"https://a.com","title":"A","description":"d","age":"2 hours ago"}]}"#;
+        let items = parse_brave_news_response(json).unwrap();
+        assert_eq!(items[0].age.as_deref(), Some("2 hours ago"));
     }
 }
 ```
@@ -359,7 +423,7 @@ mod brave_poll;
 And add to the public exports:
 
 ```rust
-pub use brave_poll::{parse_brave_response, BravePollError, BravePollItem};
+pub use brave_poll::{parse_brave_news_response, BravePollError, BraveNewsItem};
 ```
 
 - [ ] **Step 3: Run tests**
@@ -376,18 +440,20 @@ git commit -m "feat: add pure Brave API JSON parser with tests"
 
 ---
 
-### Task 3: Wire BraveSearch into the effect runner poll loop
+### Task 3: Wire BraveNews into the effect runner poll loop
 
 **Files:**
 - Modify: `crates/harvester_io/src/effect_helpers.rs`
 - Modify: `crates/harvester_io/src/effect_runner.rs`
+
+**Key design point:** The `count` config field controls the Brave API request size (how many results to fetch). The `max_urls_per_poll` on `SourceConfig` controls the emit cap (how many URLs enter the pipeline). These are intentionally separate. The flow is: fetch → parse → dedup → limit → emit.
 
 - [ ] **Step 1: Add `fetch_brave_results` to effect_helpers.rs**
 
 At the end of `effect_helpers.rs` (before the last closing brace or after `map_llm_event`), add:
 
 ```rust
-pub(crate) const BRAVE_SEARCH_API_URL: &str = "https://api.search.brave.com/res/v1/news/search";
+pub(crate) const BRAVE_NEWS_API_URL: &str = "https://api.search.brave.com/res/v1/news/search";
 pub(crate) const MAX_BRAVE_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 
 pub fn fetch_brave_results(
@@ -405,7 +471,7 @@ pub fn fetch_brave_results(
         .map_err(|err| err.to_string())?;
 
     let mut request = client
-        .get(BRAVE_SEARCH_API_URL)
+        .get(BRAVE_NEWS_API_URL)
         .header("X-Subscription-Token", api_key)
         .header(ACCEPT, "application/json")
         .query(&[("q", query)]);
@@ -421,7 +487,8 @@ pub fn fetch_brave_results(
 
     let status = response.status();
     if !status.is_success() {
-        return Err(format!("Brave API HTTP {}", status));
+        let kind = if status.as_u16() == 429 { "rate-limited" } else { "error" };
+        return Err(format!("Brave API HTTP {} ({})", status, kind));
     }
 
     let mut buffer = Vec::new();
@@ -445,48 +512,48 @@ pub fn fetch_brave_results(
     Ok(buffer)
 }
 
+/// Handle a single Brave News source poll.
+///
+/// Flow: resolve API key → fetch → parse → (dedup and limit applied by caller in Task 7).
+/// For the initial wiring (before BraveSeenSet integration), emits all parsed URLs.
 pub fn handle_brave_source_poll(
     source_id: &SourceId,
-    query: &str,
-    api_key_env: &str,
-    count: Option<usize>,
-    freshness: Option<&str>,
+    cfg: &harvester_engine::BraveNewsSourceConfig,
     max_urls_per_poll: Option<usize>,
     fetch_settings: &FetchSettings,
     msg_tx: &mpsc::Sender<Msg>,
 ) {
-    let api_key = match std::env::var(api_key_env) {
+    let api_key = match std::env::var(&cfg.api_key_env) {
         Ok(key) if !key.is_empty() => key,
         Ok(_) => {
             engine_warn!(
                 "[brave-poll] {} env var is empty for source {}",
-                api_key_env,
+                cfg.api_key_env,
                 source_id
             );
             let _ = msg_tx.send(Msg::SourcePollFailed {
                 source_id: source_id.clone(),
-                error: format!("environment variable {} is empty", api_key_env),
+                error: format!("environment variable {} is empty", cfg.api_key_env),
             });
             return;
         }
         Err(_) => {
             engine_warn!(
                 "[brave-poll] {} env var not set for source {}",
-                api_key_env,
+                cfg.api_key_env,
                 source_id
             );
             let _ = msg_tx.send(Msg::SourcePollFailed {
                 source_id: source_id.clone(),
-                error: format!("environment variable {} is not set", api_key_env),
+                error: format!("environment variable {} is not set", cfg.api_key_env),
             });
             return;
         }
     };
 
-    // Brave's count param caps per-request results; max_urls_per_poll caps what we emit.
-    let effective_max = max_urls_per_poll.or(count);
-
-    let bytes = match fetch_brave_results(query, &api_key, count, freshness, fetch_settings) {
+    let bytes = match fetch_brave_results(
+        &cfg.query, &api_key, cfg.count, cfg.freshness.as_deref(), fetch_settings,
+    ) {
         Ok(bytes) => bytes,
         Err(reason) => {
             engine_warn!("[brave-poll] fetch failed for {}: {}", source_id, reason);
@@ -498,16 +565,22 @@ pub fn handle_brave_source_poll(
         }
     };
 
-    match harvester_engine::parse_brave_response(source_id.clone(), &bytes, effective_max) {
-        Ok((result, _items)) => {
+    match harvester_engine::parse_brave_news_response(&bytes) {
+        Ok(items) => {
+            // No dedup yet (Task 7 adds BraveSeenSet).
+            // Apply max_urls_per_poll as the emit cap.
+            let limit = max_urls_per_poll.unwrap_or(items.len());
+            let urls: Vec<String> = items.iter().take(limit).map(|i| i.url.clone()).collect();
+
             engine_info!(
-                "[brave-poll] {} => {} URL(s)",
+                "[brave-poll] {} => {} parsed, {} emitted",
                 source_id,
-                result.urls.len()
+                items.len(),
+                urls.len()
             );
             let _ = msg_tx.send(Msg::SourcePollCompleted {
                 source_id: source_id.clone(),
-                urls: result.urls,
+                urls,
             });
         }
         Err(err) => {
@@ -526,18 +599,10 @@ pub fn handle_brave_source_poll(
 In the `match config.source_type` block inside `execute_poll_all_sources` (around line 1393), add a new arm after the `Rss` arm:
 
 ```rust
-SourceType::BraveSearch {
-    query,
-    api_key_env,
-    count,
-    freshness,
-} => {
+SourceType::BraveNews(ref cfg) => {
     handle_brave_source_poll(
         &source_id,
-        &query,
-        &api_key_env,
-        count,
-        freshness.as_deref(),
+        cfg,
         config.max_urls_per_poll,
         &fetch_settings,
         &msg_tx,
@@ -570,23 +635,23 @@ Expected: all pass
 
 ```bash
 git add crates/harvester_io/src/effect_helpers.rs crates/harvester_io/src/effect_runner.rs
-git commit -m "feat: wire BraveSearch into poll loop with HTTP fetch and error handling"
+git commit -m "feat: wire BraveNews into poll loop with HTTP fetch and error handling"
 ```
 
 ---
 
-### Task 4: Source loader recognizes BraveSearch in RON
+### Task 4: Source loader recognizes BraveNews in RON
 
 **Files:**
 - Modify: `crates/harvester_io/src/source_loader.rs`
 
-- [ ] **Step 1: Write the failing test — BraveSearch source loads from RON**
+- [ ] **Step 1: Write the failing test — BraveNews source loads from RON**
 
 Add to the existing `mod tests` in `source_loader.rs`:
 
 ```rust
 #[test]
-fn loads_brave_search_source_from_ron() {
+fn loads_brave_news_source_from_ron() {
     init_logging();
     let temp = TempDir::new().expect("temp");
     let config_path = temp.path().join("sources.ron");
@@ -595,12 +660,12 @@ SourceRegistry(
     sources: [
         SourceConfig(
             id: "brave-test",
-            source_type: BraveSearch(
+            source_type: BraveNews((
                 query: "\"AI\" AND \"chips\"",
                 api_key_env: "BRAVE_API_KEY",
                 count: Some(10),
                 freshness: Some("pd"),
-            ),
+            )),
             enabled: true,
             max_urls_per_poll: Some(10),
             description: "test brave source",
@@ -614,21 +679,21 @@ SourceRegistry(
     assert_eq!(registry.sources.len(), 1);
     assert!(matches!(
         registry.sources[0].source_type,
-        SourceType::BraveSearch { .. }
+        SourceType::BraveNews(_)
     ));
 }
 ```
 
 - [ ] **Step 2: Run test to verify it passes (should work already)**
 
-Run: `cargo nextest run -p harvester_io loads_brave_search_source`
+Run: `cargo nextest run -p harvester_io loads_brave_news_source`
 Expected: PASS — the RON deserializer picks up the new variant automatically because `SourceType` already derives `Deserialize`. If it fails, investigate.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add crates/harvester_io/src/source_loader.rs
-git commit -m "test: verify BraveSearch source loads from RON config"
+git commit -m "test: verify BraveNews source loads from RON config"
 ```
 
 ---
@@ -643,21 +708,25 @@ git commit -m "test: verify BraveSearch source loads from RON config"
 
 The `BraveSeenSet` stores normalized URLs to prevent re-ingesting the same article across poll cycles. Unlike `RssSeenSet` which keys on GUIDs, this keys on normalized URLs since Brave results don't have stable GUIDs.
 
+**Important:** This set reuses `harvester_core::normalize_url_for_dedupe` — the same URL identity function the reducer uses — to avoid two canonicalization paths that can drift. If stronger canonicalization (e.g. tracking param stripping) is needed later, it should be added to the shared function and versioned explicitly.
+
 - [ ] **Step 1: Create the module with tests**
 
 Create `crates/harvester_engine/src/brave_seen_set.rs`:
 
 ```rust
+use harvester_core::normalize_url_for_dedupe;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
 const MAX_ENTRIES: usize = 10_000;
 const EVICT_BATCH: usize = MAX_ENTRIES / 5;
 
-/// Tracks seen URLs for Brave Search sources to prevent reprocessing.
+/// Tracks seen URLs for Brave News sources to prevent reprocessing.
 ///
-/// URLs are normalized (lowercased, trailing slash stripped, tracking params removed)
-/// before insertion. Capacity is bounded with FIFO eviction.
+/// URLs are normalized via `harvester_core::normalize_url_for_dedupe`
+/// (the same function used by the reducer) to ensure consistent identity.
+/// Capacity is bounded with FIFO eviction.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BraveSeenSet {
     #[serde(default)]
@@ -700,11 +769,12 @@ impl BraveSeenSet {
     }
 
     /// Filter a list of URLs, returning only those not previously seen.
-    /// All URLs are marked as seen (even those already present).
+    /// Uses the shared `normalize_url_for_dedupe` for consistent identity.
+    /// All URLs are checked and new ones are marked as seen.
     pub fn filter_unseen(&mut self, urls: Vec<String>) -> Vec<String> {
         let mut unseen = Vec::new();
         for url in urls {
-            let normalized = normalize_brave_url(&url);
+            let normalized = normalize_url_for_dedupe(&url);
             if self.mark_seen(&normalized) {
                 unseen.push(url);
             }
@@ -720,52 +790,6 @@ impl BraveSeenSet {
             }
         }
     }
-}
-
-/// Normalize a URL for dedup: lowercase, strip trailing slash, remove common
-/// tracking parameters (utm_*, ref, fbclid, gclid, etc.).
-pub fn normalize_brave_url(url: &str) -> String {
-    let trimmed = url.trim();
-    let lowered = trimmed.to_lowercase();
-
-    // Try to parse as a URL; if it fails, just do basic normalization
-    let Ok(mut parsed) = url::Url::parse(&lowered) else {
-        return lowered.trim_end_matches('/').to_string();
-    };
-
-    // Remove tracking parameters
-    let tracking_prefixes = ["utm_", "ref", "fbclid", "gclid", "mc_", "mkt_tok"];
-    let filtered_pairs: Vec<(String, String)> = parsed
-        .query_pairs()
-        .filter(|(key, _)| {
-            !tracking_prefixes
-                .iter()
-                .any(|prefix| key.starts_with(prefix))
-        })
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-
-    if filtered_pairs.is_empty() {
-        parsed.set_query(None);
-    } else {
-        let mut new_query = parsed.query_pairs_mut();
-        new_query.clear();
-        for (k, v) in &filtered_pairs {
-            new_query.append_pair(k, v);
-        }
-        // drop borrow
-        drop(new_query);
-    }
-
-    // Remove fragment
-    parsed.set_fragment(None);
-
-    let mut result = parsed.to_string();
-    // Strip trailing slash (but not for root paths)
-    if result.ends_with('/') && parsed.path() != "/" {
-        result.pop();
-    }
-    result
 }
 
 #[cfg(test)]
@@ -788,13 +812,24 @@ mod tests {
     #[test]
     fn filter_unseen_removes_duplicates() {
         let mut set = BraveSeenSet::new();
-        set.mark_seen(&normalize_brave_url("https://example.com/old"));
+        set.mark_seen(&normalize_url_for_dedupe("https://example.com/old"));
         let urls = vec![
             "https://example.com/old".to_string(),
             "https://example.com/new".to_string(),
         ];
         let unseen = set.filter_unseen(urls);
         assert_eq!(unseen, vec!["https://example.com/new"]);
+    }
+
+    #[test]
+    fn filter_unseen_uses_same_normalization_as_reducer() {
+        // Verify that BraveSeenSet and the reducer agree on URL identity
+        let mut set = BraveSeenSet::new();
+        set.mark_seen(&normalize_url_for_dedupe("https://Example.COM/Article/"));
+        // Same URL with different casing and trailing slash should be seen
+        let urls = vec!["https://example.com/article".to_string()];
+        let unseen = set.filter_unseen(urls);
+        assert!(unseen.is_empty(), "should match despite casing/slash differences");
     }
 
     #[test]
@@ -809,46 +844,6 @@ mod tests {
             "https://example.com/{}",
             MAX_ENTRIES
         )));
-    }
-
-    #[test]
-    fn normalize_strips_utm_params() {
-        let url = "https://example.com/article?utm_source=twitter&utm_medium=social&real=1";
-        let normalized = normalize_brave_url(url);
-        assert!(normalized.contains("real=1"));
-        assert!(!normalized.contains("utm_"));
-    }
-
-    #[test]
-    fn normalize_strips_trailing_slash() {
-        assert_eq!(
-            normalize_brave_url("https://example.com/article/"),
-            "https://example.com/article"
-        );
-    }
-
-    #[test]
-    fn normalize_preserves_root_slash() {
-        assert_eq!(
-            normalize_brave_url("https://example.com/"),
-            "https://example.com/"
-        );
-    }
-
-    #[test]
-    fn normalize_strips_fragment() {
-        assert_eq!(
-            normalize_brave_url("https://example.com/page#section"),
-            "https://example.com/page"
-        );
-    }
-
-    #[test]
-    fn normalize_lowercases() {
-        assert_eq!(
-            normalize_brave_url("https://Example.COM/Article"),
-            "https://example.com/Article".to_lowercase()
-        );
     }
 
     #[test]
@@ -879,8 +874,10 @@ mod brave_seen_set;
 And add to exports:
 
 ```rust
-pub use brave_seen_set::{normalize_brave_url, BraveSeenSet};
+pub use brave_seen_set::BraveSeenSet;
 ```
+
+Note: no `normalize_brave_url` export — we reuse `harvester_core::normalize_url_for_dedupe` everywhere.
 
 - [ ] **Step 3: Run tests**
 
@@ -896,28 +893,30 @@ git commit -m "feat: add BraveSeenSet with URL normalization and bounded evictio
 
 ---
 
-### Task 6: Persist BraveSeenSet — storage layer
+### Task 6: Persist BraveSeenSet and metadata sidecar — storage layer
 
 **Files:**
 - Modify: `crates/harvester_io/src/seen_set_store.rs`
 - Modify: `crates/harvester_io/src/runtime_paths.rs`
 - Modify: `crates/harvester_io/src/lib.rs`
 
-- [ ] **Step 1: Add `brave_seen_set_path` to RuntimePaths**
+- [ ] **Step 1: Add `brave_seen_set_path` and `brave_metadata_path` to RuntimePaths**
 
-In `runtime_paths.rs`, add the field to the struct:
+In `runtime_paths.rs`, add the fields to the struct:
 
 ```rust
 pub brave_seen_set_path: PathBuf,
+pub brave_metadata_path: PathBuf,
 ```
 
 In `RuntimePaths::new`, add:
 
 ```rust
 let brave_seen_set_path = output_dir.join(".brave_seen_set.ron");
+let brave_metadata_path = output_dir.join(".brave_metadata.ron");
 ```
 
-And include it in the `Self { ... }` initialization.
+And include both in the `Self { ... }` initialization.
 
 - [ ] **Step 2: Add load/persist functions to seen_set_store.rs**
 
@@ -970,21 +969,80 @@ pub fn persist_brave_seen_set(set: &BraveSeenSet, path: &Path) -> io::Result<()>
 }
 ```
 
-Add at the top of the file:
+- [ ] **Step 3: Add metadata sidecar persistence**
+
+The metadata sidecar persists `BraveNewsItem` data (title, description, age) keyed by URL so downstream features (preview, triage, provenance) can access it without another refactor. Append to `seen_set_store.rs`:
 
 ```rust
-use harvester_engine::BraveSeenSet;
+use harvester_engine::{BraveSeenSet, BraveNewsItem};
+use harvester_engine::SourceId;
+
+/// Persist Brave metadata for emitted items. Appends to an existing file.
+/// This is a sidecar store — the pipeline still runs on URLs only,
+/// but metadata is preserved for future use.
+pub fn persist_brave_metadata(
+    items: &[&BraveNewsItem],
+    source_id: &SourceId,
+    path: &Path,
+) -> io::Result<()> {
+    if items.is_empty() {
+        return Ok(());
+    }
+    let existing: Vec<BraveMetadataEntry> = match fs::read_to_string(path) {
+        Ok(contents) => ron::from_str(&contents).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+
+    let mut entries = existing;
+    for item in items {
+        entries.push(BraveMetadataEntry {
+            url: item.url.clone(),
+            title: item.title.clone(),
+            description: item.description.clone(),
+            age: item.age.clone(),
+            source_id: source_id.clone(),
+        });
+    }
+
+    // Keep bounded (e.g. last 5000 entries)
+    const MAX_METADATA_ENTRIES: usize = 5_000;
+    if entries.len() > MAX_METADATA_ENTRIES {
+        entries.drain(..entries.len() - MAX_METADATA_ENTRIES);
+    }
+
+    let pretty = PrettyConfig::new();
+    let content = ron::ser::to_string_pretty(&entries, pretty)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid metadata path"))?;
+
+    let writer = AtomicFileWriter::new(dir.to_path_buf());
+    writer.write(file_name, &content).map(|_| ()).map_err(io::Error::other)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BraveMetadataEntry {
+    pub url: String,
+    pub title: String,
+    pub description: String,
+    pub age: Option<String>,
+    pub source_id: SourceId,
+}
 ```
 
-- [ ] **Step 3: Add re-exports to `crates/harvester_io/src/lib.rs`**
+- [ ] **Step 4: Add re-exports to `crates/harvester_io/src/lib.rs`**
 
 Add to the existing public exports:
 
 ```rust
-pub use seen_set_store::{load_brave_seen_set, persist_brave_seen_set};
+pub use seen_set_store::{load_brave_seen_set, persist_brave_seen_set, persist_brave_metadata};
 ```
 
-- [ ] **Step 4: Write a roundtrip test**
+- [ ] **Step 5: Write a roundtrip test**
 
 Add to the existing `mod tests` in `seen_set_store.rs`:
 
@@ -1023,11 +1081,13 @@ git commit -m "feat: add BraveSeenSet persistence and RuntimePaths integration"
 
 ---
 
-### Task 7: Integrate BraveSeenSet into the poll loop
+### Task 7: Integrate BraveSeenSet into the poll loop (dedup before limit)
 
 **Files:**
 - Modify: `crates/harvester_io/src/effect_runner.rs`
 - Modify: `crates/harvester_io/src/effect_helpers.rs`
+
+**Critical design point:** The flow must match RSS semantics: **parse → dedup → limit → emit**. The `max_urls_per_poll` cap is applied *after* dedup, not before. This prevents under-filling polls when many results are already seen.
 
 - [ ] **Step 1: Load and pass BraveSeenSet in `execute_poll_all_sources`**
 
@@ -1035,6 +1095,7 @@ In `execute_poll_all_sources`, after the existing `let mut seen_set = load_seen_
 
 ```rust
 let brave_seen_set_path = self.paths.brave_seen_set_path.clone();
+let brave_metadata_path = self.paths.brave_metadata_path.clone();
 ```
 
 Inside the `thread::spawn` closure, after `let mut seen_set = load_seen_set(&seen_set_path);`, add:
@@ -1043,32 +1104,38 @@ Inside the `thread::spawn` closure, after `let mut seen_set = load_seen_set(&see
 let mut brave_seen_set = crate::load_brave_seen_set(&brave_seen_set_path);
 ```
 
-- [ ] **Step 2: Update `handle_brave_source_poll` to accept and use BraveSeenSet**
+- [ ] **Step 2: Update `handle_brave_source_poll` to dedup before limit**
 
-Modify the `handle_brave_source_poll` signature in `effect_helpers.rs` to accept a mutable reference:
+Modify the `handle_brave_source_poll` signature in `effect_helpers.rs` to accept BraveSeenSet and metadata path:
 
 ```rust
 pub fn handle_brave_source_poll(
     source_id: &SourceId,
-    query: &str,
-    api_key_env: &str,
-    count: Option<usize>,
-    freshness: Option<&str>,
+    cfg: &harvester_engine::BraveNewsSourceConfig,
     max_urls_per_poll: Option<usize>,
     fetch_settings: &FetchSettings,
     brave_seen_set: &mut BraveSeenSet,
     brave_seen_set_path: &Path,
+    brave_metadata_path: &Path,
     msg_tx: &mpsc::Sender<Msg>,
 ) {
 ```
 
-After `parse_brave_response` succeeds, filter through the seen set before sending:
+After `parse_brave_news_response` succeeds, apply the correct order — **dedup first, then limit**:
 
 ```rust
-Ok((result, _items)) => {
-    let deduped_urls = brave_seen_set.filter_unseen(result.urls);
+Ok(items) => {
+    let parsed_count = items.len();
 
-    // Persist after each successful poll
+    // Step 1: Extract URLs and dedup through seen set (BEFORE limit).
+    let all_urls: Vec<String> = items.iter().map(|i| i.url.clone()).collect();
+    let deduped_urls = brave_seen_set.filter_unseen(all_urls);
+
+    // Step 2: Apply max_urls_per_poll AFTER dedup (matches RSS semantics).
+    let limit = max_urls_per_poll.unwrap_or(deduped_urls.len());
+    let emitted_urls: Vec<String> = deduped_urls.into_iter().take(limit).collect();
+
+    // Step 3: Persist seen set after successful poll.
     if let Err(err) = crate::persist_brave_seen_set(brave_seen_set, brave_seen_set_path) {
         engine_warn!(
             "[brave-poll] failed to persist seen set for {}: {}",
@@ -1077,40 +1144,47 @@ Ok((result, _items)) => {
         );
     }
 
+    // Step 4: Persist metadata sidecar for emitted items (title, description, age).
+    let emitted_items: Vec<&harvester_engine::BraveNewsItem> = items
+        .iter()
+        .filter(|i| emitted_urls.contains(&i.url))
+        .collect();
+    if let Err(err) = crate::persist_brave_metadata(&emitted_items, source_id, brave_metadata_path) {
+        engine_warn!(
+            "[brave-poll] failed to persist metadata for {}: {}",
+            source_id,
+            err
+        );
+    }
+
     engine_info!(
-        "[brave-poll] {} => {} URL(s) ({} after dedup)",
+        "[brave-poll] {} => {} parsed, {} after dedup, {} emitted",
         source_id,
-        deduped_urls.len(),
-        deduped_urls.len()
+        parsed_count,
+        emitted_urls.len() + (parsed_count - items.len()), // approximate
+        emitted_urls.len()
     );
     let _ = msg_tx.send(Msg::SourcePollCompleted {
         source_id: source_id.clone(),
-        urls: deduped_urls,
+        urls: emitted_urls,
     });
 }
 ```
 
 - [ ] **Step 3: Update the call site in effect_runner.rs**
 
-Pass the new args in the `BraveSearch` arm:
+Pass the new args in the `BraveNews` arm:
 
 ```rust
-SourceType::BraveSearch {
-    query,
-    api_key_env,
-    count,
-    freshness,
-} => {
+SourceType::BraveNews(ref cfg) => {
     handle_brave_source_poll(
         &source_id,
-        &query,
-        &api_key_env,
-        count,
-        freshness.as_deref(),
+        cfg,
         config.max_urls_per_poll,
         &fetch_settings,
         &mut brave_seen_set,
         &brave_seen_set_path,
+        &brave_metadata_path,
         &msg_tx,
     );
     engine_info!(
@@ -1121,40 +1195,148 @@ SourceType::BraveSearch {
 }
 ```
 
-- [ ] **Step 4: Build and verify**
+- [ ] **Step 4: Add dedup-before-limit regression test**
 
-Run: `cargo build`
-Expected: compiles
+In `crates/harvester_engine/src/brave_seen_set.rs`, add a test that mirrors `poll_rss_source_applies_max_after_dedup`:
 
-- [ ] **Step 5: Commit**
+```rust
+#[test]
+fn filter_unseen_then_limit_matches_rss_semantics() {
+    // Simulate: 4 results from Brave, 2 already seen, max_urls_per_poll=1.
+    // Expected: 1 fresh URL emitted (not 0, which would happen if limit applied first).
+    let mut set = BraveSeenSet::new();
+    set.mark_seen(&normalize_url_for_dedupe("https://example.com/old-1"));
+    set.mark_seen(&normalize_url_for_dedupe("https://example.com/old-2"));
+
+    let urls = vec![
+        "https://example.com/old-1".to_string(),
+        "https://example.com/old-2".to_string(),
+        "https://example.com/new-1".to_string(),
+        "https://example.com/new-2".to_string(),
+    ];
+
+    // Dedup first
+    let deduped = set.filter_unseen(urls);
+    assert_eq!(deduped.len(), 2); // old-1 and old-2 filtered out
+
+    // Then apply limit
+    let max_urls_per_poll = 1;
+    let emitted: Vec<_> = deduped.into_iter().take(max_urls_per_poll).collect();
+    assert_eq!(emitted, vec!["https://example.com/new-1"]);
+}
+```
+
+- [ ] **Step 5: Build and verify**
+
+Run: `cargo build && cargo nextest run -p harvester_engine filter_unseen_then_limit`
+Expected: compiles and test passes
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add crates/harvester_io/src/effect_runner.rs crates/harvester_io/src/effect_helpers.rs
-git commit -m "feat: integrate BraveSeenSet dedup into poll loop"
+git add crates/harvester_io/src/effect_runner.rs crates/harvester_io/src/effect_helpers.rs crates/harvester_engine/src/brave_seen_set.rs
+git commit -m "feat: integrate BraveSeenSet with dedup-before-limit semantics and metadata sidecar"
 ```
 
 ---
 
-### Task 8: Batch runner runtime paths fix-up
+### Task 8: Runtime paths fix-up and wiremock tests
 
 **Files:**
+- Modify: `crates/harvester_io/src/runtime_paths.rs` (add new fields)
+- Modify: `crates/harvester_io/src/effect_runner.rs` (fix test helper `RuntimePaths` struct literal)
 - Modify: `crates/harvester_batch/src/runner.rs` (if RuntimePaths construction needs updating)
+- Modify: `crates/harvester_io/src/effect_helpers.rs` (add wiremock tests)
 
-The batch runner constructs `RuntimePaths::new(...)` with explicit args. Since we added a new field (`brave_seen_set_path`), it should be automatically derived inside `RuntimePaths::new`. Verify this compiles.
+Adding `brave_seen_set_path` and `brave_metadata_path` to `RuntimePaths` affects every site that constructs the struct. Known touch points:
+- `crates/harvester_io/src/runtime_paths.rs` — `RuntimePaths::new()` constructor
+- `crates/harvester_io/src/effect_runner.rs` — test helper `make_test_runtime_paths` (struct literal, ~line 1614)
+- `crates/harvester_batch/src/runner.rs` — test helper `make_checkpoint_test_paths` (uses `RuntimePaths::new()`, should be fine)
 
-- [ ] **Step 1: Build the batch crate**
+- [ ] **Step 1: Update `make_test_runtime_paths` in effect_runner.rs**
 
-Run: `cargo build -p harvester_batch`
-Expected: compiles without errors (the `brave_seen_set_path` is derived in `RuntimePaths::new`).
+The test helper at ~line 1614 constructs `RuntimePaths` with a struct literal. Add the new fields:
 
-- [ ] **Step 2: Run all batch tests**
+```rust
+brave_seen_set_path: base.join(".brave_seen_set.ron"),
+brave_metadata_path: base.join(".brave_metadata.ron"),
+```
 
-Run: `cargo nextest run -p harvester_batch`
+- [ ] **Step 2: Build all crates**
+
+Run: `cargo build --workspace`
+Expected: compiles. If any other `RuntimePaths { ... }` struct literals fail, fix them.
+
+- [ ] **Step 3: Run all batch and IO tests**
+
+Run: `cargo nextest run -p harvester_batch && cargo nextest run -p harvester_io`
 Expected: all pass
 
-- [ ] **Step 3: Commit (if any changes were needed)**
+- [ ] **Step 4: Add wiremock tests for Brave HTTP layer**
 
-Only commit if a fix was required. Otherwise skip.
+Add to `crates/harvester_io/src/effect_helpers.rs` test module (or create a dedicated test file):
+
+```rust
+#[cfg(test)]
+mod brave_fetch_tests {
+    use super::*;
+    use wiremock::{MockServer, Mock, ResponseTemplate};
+    use wiremock::matchers::{method, path, header, query_param};
+
+    #[test]
+    fn fetch_sends_correct_headers_and_query() {
+        // Verify X-Subscription-Token header, Accept: application/json,
+        // q= query param, count= and freshness= when provided
+    }
+
+    #[test]
+    fn fetch_maps_401_to_error() {
+        // Mock returns 401, verify error message
+    }
+
+    #[test]
+    fn fetch_maps_403_to_error() {
+        // Mock returns 403, verify error message
+    }
+
+    #[test]
+    fn fetch_maps_429_to_rate_limit_error() {
+        // Mock returns 429, verify error message contains "rate-limited"
+    }
+
+    #[test]
+    fn fetch_rejects_oversized_response() {
+        // Mock returns >2MB body, verify MAX_BRAVE_RESPONSE_BYTES error
+    }
+
+    #[test]
+    fn fetch_handles_malformed_json_gracefully() {
+        // Mock returns 200 with invalid JSON body
+    }
+
+    #[test]
+    fn handle_brave_poll_fails_with_missing_env_var() {
+        // Unset env var, verify SourcePollFailed message
+    }
+
+    #[test]
+    fn handle_brave_poll_fails_with_empty_env_var() {
+        // Set env var to "", verify SourcePollFailed message
+    }
+}
+```
+
+- [ ] **Step 5: Run wiremock tests**
+
+Run: `cargo nextest run -p harvester_io brave_fetch`
+Expected: all pass
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/harvester_io/src/effect_runner.rs crates/harvester_io/src/effect_helpers.rs
+git commit -m "fix: update RuntimePaths struct literals and add wiremock tests for Brave HTTP layer"
+```
 
 ---
 
@@ -1286,9 +1468,33 @@ git commit -m "chore: clippy and fmt cleanup for Brave Search integration"
 
 ## Design Decisions and Rationale
 
+### Why `BraveNews(BraveNewsSourceConfig)` instead of inline enum fields?
+
+A dedicated config struct gives the source type a stable home for future API options (`country`, `search_lang`, `safesearch`, `offset`, etc.) without repeated enum churn. The struct can grow without touching `SourceType` match arms elsewhere.
+
 ### Why a separate `BraveSeenSet` instead of reusing `RssSeenSet`?
 
 `RssSeenSet` keys on GUIDs (from RSS `<guid>` elements). Brave results have no stable GUIDs — they have URLs and titles. Forcing GUID semantics onto URL-based dedup would be a leaky abstraction. A future `ArticleSeenSet` could unify them, but that's premature until we see whether the two data shapes genuinely converge.
+
+### Why reuse `normalize_url_for_dedupe` instead of a separate Brave normalization?
+
+Cross-cycle dedup (`BraveSeenSet`) and in-session dedup (reducer) must agree on URL identity. Adding a second canonicalization function would create semantic drift — a URL could be "seen" in one layer and "new" in another. If stronger canonicalization (tracking param stripping, fragment removal) is needed later, it should be added to the shared function in `harvester_core` and versioned explicitly.
+
+### Why dedup before limit (matching RSS semantics)?
+
+If `max_urls_per_poll` is applied before dedup, already-seen URLs consume limit slots, causing under-fill. Example: 10 Brave results, 7 already seen, `max_urls_per_poll=10` → only 3 fresh URLs emitted. The correct flow is: parse → dedup → limit → emit. This matches `poll_rss_source` and is covered by a regression test.
+
+### Why `count` is request size, not emit size?
+
+`count` controls how many results Brave returns per API call (1..=50). `max_urls_per_poll` on `SourceConfig` controls how many URLs enter the pipeline. Keeping them separate allows overfetch to compensate for dedup losses.
+
+### Why parse only News Search shape?
+
+The source type is `BraveNews` — it targets `/res/v1/news/search`. Silently accepting `web.results[]` would hide endpoint misconfiguration. If Web Search is needed, add a separate `BraveWeb` source type or an explicit endpoint enum.
+
+### Why persist metadata in a sidecar store?
+
+Brave's main advantage over passive RSS is metadata-rich results (title, description, age). Dropping metadata at the `Msg` boundary paints the system into a URL-only corner. The sidecar store preserves metadata without changing the reducer's pure message contract. This enables future features: metadata-first triage (`FI-Ingestion-RssTriage-0003`), source preview (`FI-Ingestion-SourcePreview-0007`), and provenance display.
 
 ### Why `freshness` as an optional field?
 
@@ -1298,16 +1504,16 @@ Brave's API supports `freshness=pd` (past day), `pw` (past week), etc. This is t
 
 This follows the existing pattern (LLM providers also use env-vars). It avoids secrets in config files, works in CI, and aligns with FutureIdea `FI-Security-KeyManagement-0001` as a stepping stone.
 
-### Why parse both `results[]` and `web.results[]`?
-
-Brave has separate endpoints for News (`/res/v1/news/search`) and Web (`/res/v1/web/search`). The response shapes differ slightly. Supporting both makes the parser robust to endpoint changes and lets the user choose either API.
-
 ### Two dedup layers
 
 1. **`BraveSeenSet`** (in `harvester_io`) — persisted to disk, survives restarts, prevents cross-cycle re-fetches.
 2. **`state.ingest_urls` / `seen_urls`** (in `harvester_core`) — in-memory, prevents intra-session duplicates across all source types.
 
 Both are needed: the BraveSeenSet catches "I already fetched this URL yesterday" while `seen_urls` catches "two different Brave queries returned the same URL in one poll cycle."
+
+### BraveSeenSet scoping: global vs. per-source
+
+This plan uses a **global** `BraveSeenSet` (shared across all Brave sources). This matches the existing archive-by-URL worldview — if two Brave queries find the same article, it should only be ingested once. If query provenance needs to be preserved later, the set can be keyed by `source_id`.
 
 ---
 
@@ -1321,6 +1527,12 @@ These are noted for context but explicitly deferred:
 
 3. **Rate limiting / circuit breaker** — if Brave returns 429/403, the current code emits `SourcePollFailed` and continues with other sources. A future enhancement could add exponential backoff per-source (aligns with `FI-Observability-SourceHealth-0007`).
 
-4. **Parallel source polling** — currently sources are polled sequentially in one thread. A bounded thread pool (`FI-Performance-Polling-0001`) would help when many Brave queries are configured.
+4. **Parallel source polling** — currently sources are polled sequentially in one thread. A bounded thread pool (`FI-Performance-Polling-0008`) would help when many Brave queries are configured.
 
 5. **HTTP caching** — Brave's API may support `ETag` / `Cache-Control`. Could reduce API quota usage (`FI-Networking-HttpCaching-0005`).
+
+6. **Stronger URL canonicalization** — tracking param stripping (`utm_*`, `fbclid`, etc.) and fragment removal. Should be added to the shared `normalize_url_for_dedupe` in `harvester_core`, not as a Brave-specific function.
+
+7. **Source metadata preservation across pollers** — Generalize the Brave metadata sidecar into a generic `SourcePollItem { url, title, summary, published_at, source_kind }` contract that all pollers can use. Avoids repeated cross-crate refactors.
+
+8. **Optional API parameters** — `country`, `search_lang`, `safesearch` on `BraveNewsSourceConfig`. Add when real usage shows they're needed, not speculatively.
