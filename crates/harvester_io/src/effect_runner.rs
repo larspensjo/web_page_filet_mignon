@@ -22,8 +22,8 @@ use harvester_engine::{
 
 use crate::effect_helpers::{
     build_local_model_catalog, download_link_page, handle_brave_source_poll,
-    handle_rss_source_poll, map_llm_event, map_stage, prompt_context_filename, PollGuard,
-    RssPollContext,
+    handle_rss_source_poll, map_llm_event, map_stage, prompt_context_filename, BravePollContext,
+    PollGuard, RssPollContext,
 };
 use crate::{load_seen_set, load_sources, RuntimePaths};
 
@@ -1368,6 +1368,8 @@ impl EffectRunner {
         let msg_tx = self.msg_tx.clone();
         let sources_path = self.paths.sources_path.clone();
         let seen_set_path = self.paths.seen_set_path.clone();
+        let brave_seen_set_path = self.paths.brave_seen_set_path.clone();
+        let brave_metadata_path = self.paths.brave_metadata_path.clone();
         let output_dir = self.paths.output_dir.clone();
         let url_policy = self.url_policy.clone();
         let fetch_settings = self.fetch_settings.clone();
@@ -1385,6 +1387,7 @@ impl EffectRunner {
             let allowed_dirs = vec![config_dir.clone(), output_dir.clone()];
 
             let mut seen_set = load_seen_set(&seen_set_path);
+            let mut brave_seen_set = crate::load_brave_seen_set(&brave_seen_set_path);
 
             let mut enabled_sources = 0usize;
             for config in registry.sources.into_iter().filter(|s| s.enabled) {
@@ -1482,12 +1485,18 @@ impl EffectRunner {
                         );
                     }
                     SourceType::BraveNews(ref cfg) => {
+                        let mut context = BravePollContext {
+                            brave_seen_set: &mut brave_seen_set,
+                            brave_seen_set_path: &brave_seen_set_path,
+                            brave_metadata_path: &brave_metadata_path,
+                            msg_tx: &msg_tx,
+                        };
                         handle_brave_source_poll(
                             &source_id,
                             cfg,
                             config.max_urls_per_poll,
                             &fetch_settings,
-                            &msg_tx,
+                            &mut context,
                         );
                         engine_info!(
                             "[poll-all-timing] source={} kind=brave elapsed_ms={}",
@@ -1638,6 +1647,8 @@ mod tests {
             briefing_history_path: base.join(".briefing_history.ron"),
             briefing_checkpoint_path: base.join(".briefing_checkpoint.ron"),
             entity_index_path: base.join(".entity_index.ron"),
+            brave_seen_set_path: base.join(".brave_seen_set.ron"),
+            brave_metadata_path: base.join(".brave_metadata.ron"),
         }
     }
 

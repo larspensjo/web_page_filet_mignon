@@ -23,7 +23,10 @@ pub use persistence::{
 pub use persistence_worker::{PersistenceSnapshot, PersistenceWorker};
 pub use prompt_template_store::{load_prompt_templates, save_prompt_template};
 pub use runtime_paths::RuntimePaths;
-pub use seen_set_store::{load_seen_set, persist_seen_set};
+pub use seen_set_store::{
+    load_brave_seen_set, load_seen_set, persist_brave_metadata, persist_brave_seen_set,
+    persist_seen_set, BraveMetadataEntry,
+};
 pub use source_loader::load_sources;
 pub use summary_cache_store::{load_summary_cache, persist_summary_cache};
 pub use triage_cache_store::{load_triage_cache, persist_triage_cache};

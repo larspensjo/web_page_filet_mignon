@@ -15,6 +15,8 @@ pub struct RuntimePaths {
     pub briefing_history_path: PathBuf,
     pub briefing_checkpoint_path: PathBuf,
     pub entity_index_path: PathBuf,
+    pub brave_seen_set_path: PathBuf,
+    pub brave_metadata_path: PathBuf,
 }
 
 impl RuntimePaths {
@@ -32,6 +34,8 @@ impl RuntimePaths {
         let briefing_history_path = output_dir.join(".briefing_history.ron");
         let briefing_checkpoint_path = output_dir.join(".briefing_checkpoint.ron");
         let entity_index_path = output_dir.join(".entity_index.ron");
+        let brave_seen_set_path = output_dir.join(".brave_seen_set.ron");
+        let brave_metadata_path = output_dir.join(".brave_metadata.ron");
 
         Self {
             output_dir,
@@ -45,6 +49,8 @@ impl RuntimePaths {
             briefing_history_path,
             briefing_checkpoint_path,
             entity_index_path,
+            brave_seen_set_path,
+            brave_metadata_path,
         }
     }
 

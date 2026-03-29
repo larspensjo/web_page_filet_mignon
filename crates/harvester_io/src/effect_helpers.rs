@@ -15,8 +15,8 @@ use harvester_engine::llm::types::{ModelId, ProviderKind};
 use harvester_engine::llm::{LlmCompletionError, LlmEvent, LlmRunMetadata};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
-    poll_rss_source, AtomicFileWriter, DecodeError, ExtractionPipeline, ExtractionPolicy,
-    FetchSettings, RssSeenSet, SourceId, UrlPolicy, WhitespaceTokenCounter,
+    poll_rss_source, AtomicFileWriter, BraveSeenSet, DecodeError, ExtractionPipeline,
+    ExtractionPolicy, FetchSettings, RssSeenSet, SourceId, UrlPolicy, WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
@@ -51,6 +51,13 @@ pub fn prompt_context_filename(prompt_id: PromptId) -> &'static str {
         PromptId::ArticleSummary => "article_summary.toml",
         PromptId::AggregateBriefing => "aggregate_briefing.toml",
     }
+}
+
+pub struct BravePollContext<'a> {
+    pub brave_seen_set: &'a mut BraveSeenSet,
+    pub brave_seen_set_path: &'a Path,
+    pub brave_metadata_path: &'a Path,
+    pub msg_tx: &'a mpsc::Sender<Msg>,
 }
 
 pub struct RssPollContext<'a> {
@@ -509,8 +516,12 @@ pub fn handle_brave_source_poll(
     cfg: &harvester_engine::BraveNewsSourceConfig,
     max_urls_per_poll: Option<usize>,
     fetch_settings: &FetchSettings,
-    msg_tx: &mpsc::Sender<Msg>,
+    context: &mut BravePollContext,
 ) {
+    let msg_tx = context.msg_tx;
+    let brave_seen_set = &mut context.brave_seen_set;
+    let brave_seen_set_path = context.brave_seen_set_path;
+    let brave_metadata_path = context.brave_metadata_path;
     let api_key = match std::env::var(&cfg.api_key_env) {
         Ok(key) if !key.is_empty() => key,
         Ok(_) => {
@@ -559,17 +570,49 @@ pub fn handle_brave_source_poll(
 
     match harvester_engine::parse_brave_news_response(&bytes) {
         Ok(items) => {
-            let limit = max_urls_per_poll.unwrap_or(items.len());
-            let urls: Vec<String> = items.iter().take(limit).map(|i| i.url.clone()).collect();
+            let parsed_count = items.len();
+
+            // Dedup first (matches RSS semantics: dedup → limit → emit).
+            let all_urls: Vec<String> = items.iter().map(|i| i.url.clone()).collect();
+            let deduped_urls = brave_seen_set.filter_unseen(all_urls);
+            let deduped_count = deduped_urls.len();
+
+            // Apply max_urls_per_poll cap after dedup.
+            let limit = max_urls_per_poll.unwrap_or(deduped_count);
+            let emitted_urls: Vec<String> = deduped_urls.into_iter().take(limit).collect();
+
+            // Persist seen set after successful dedup.
+            if let Err(err) = crate::persist_brave_seen_set(brave_seen_set, brave_seen_set_path) {
+                engine_warn!(
+                    "[brave-poll] failed to persist seen set for {}: {}",
+                    source_id,
+                    err
+                );
+            }
+
+            // Persist metadata sidecar for emitted items.
+            let emitted_items: Vec<&harvester_engine::BraveNewsItem> =
+                items.iter().filter(|i| emitted_urls.contains(&i.url)).collect();
+            if let Err(err) =
+                crate::persist_brave_metadata(&emitted_items, source_id, brave_metadata_path)
+            {
+                engine_warn!(
+                    "[brave-poll] failed to persist metadata for {}: {}",
+                    source_id,
+                    err
+                );
+            }
+
             engine_info!(
-                "[brave-poll] {} => {} parsed, {} emitted",
+                "[brave-poll] {} => {} parsed, {} after dedup, {} emitted",
                 source_id,
-                items.len(),
-                urls.len()
+                parsed_count,
+                deduped_count,
+                emitted_urls.len()
             );
             let _ = msg_tx.send(Msg::SourcePollCompleted {
                 source_id: source_id.clone(),
-                urls,
+                urls: emitted_urls,
             });
         }
         Err(err) => {
