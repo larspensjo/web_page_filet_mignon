@@ -21,8 +21,9 @@ use harvester_engine::{
 };
 
 use crate::effect_helpers::{
-    build_local_model_catalog, download_link_page, handle_rss_source_poll, map_llm_event,
-    map_stage, prompt_context_filename, PollGuard, RssPollContext,
+    build_local_model_catalog, download_link_page, handle_brave_source_poll,
+    handle_rss_source_poll, map_llm_event, map_stage, prompt_context_filename, PollGuard,
+    RssPollContext,
 };
 use crate::{load_seen_set, load_sources, RuntimePaths};
 
@@ -1480,11 +1481,18 @@ impl EffectRunner {
                             source_started.elapsed().as_millis()
                         );
                     }
-                    SourceType::BraveNews(_) => {
-                        // Not yet implemented — wired in Slice B.
+                    SourceType::BraveNews(ref cfg) => {
+                        handle_brave_source_poll(
+                            &source_id,
+                            cfg,
+                            config.max_urls_per_poll,
+                            &fetch_settings,
+                            &msg_tx,
+                        );
                         engine_info!(
-                            "[poll-all] source={} kind=brave-news skipped (not yet implemented)",
+                            "[poll-all-timing] source={} kind=brave elapsed_ms={}",
                             source_id,
+                            source_started.elapsed().as_millis()
                         );
                     }
                 }

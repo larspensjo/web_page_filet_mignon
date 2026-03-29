@@ -435,3 +435,149 @@ fn llm_error_reason(error: LlmCompletionError) -> String {
         LlmCompletionError::ValidationFailed { .. } => unreachable!(),
     }
 }
+
+pub(crate) const BRAVE_NEWS_API_URL: &str = "https://api.search.brave.com/res/v1/news/search";
+pub(crate) const MAX_BRAVE_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
+
+pub fn fetch_brave_results(
+    query: &str,
+    api_key: &str,
+    count: Option<usize>,
+    freshness: Option<&str>,
+    fetch_settings: &FetchSettings,
+) -> Result<Vec<u8>, String> {
+    let client = Client::builder()
+        .connect_timeout(fetch_settings.connect_timeout)
+        .timeout(fetch_settings.request_timeout)
+        .user_agent(fetch_settings.user_agent.clone())
+        .build()
+        .map_err(|err| err.to_string())?;
+
+    let mut url = reqwest::Url::parse(BRAVE_NEWS_API_URL).map_err(|e| e.to_string())?;
+    url.query_pairs_mut().append_pair("q", query);
+    if let Some(c) = count {
+        url.query_pairs_mut().append_pair("count", &c.to_string());
+    }
+    if let Some(f) = freshness {
+        url.query_pairs_mut().append_pair("freshness", f);
+    }
+
+    let mut response = client
+        .get(url)
+        .header("X-Subscription-Token", api_key)
+        .header(ACCEPT, "application/json")
+        .send()
+        .map_err(|err| err.to_string())?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let kind = if status.as_u16() == 429 {
+            "rate-limited"
+        } else {
+            "error"
+        };
+        return Err(format!("Brave API HTTP {} ({})", status, kind));
+    }
+
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let mut total = 0;
+    loop {
+        let read = response.read(&mut chunk).map_err(|err| err.to_string())?;
+        if read == 0 {
+            break;
+        }
+        total += read;
+        if total > MAX_BRAVE_RESPONSE_BYTES {
+            return Err(format!(
+                "Brave API response exceeded {} bytes",
+                MAX_BRAVE_RESPONSE_BYTES
+            ));
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+    }
+
+    Ok(buffer)
+}
+
+/// Handle a single Brave News source poll.
+///
+/// Flow: resolve API key → fetch → parse → limit → emit.
+/// Dedup (BraveSeenSet) is added in Slice C (Task 7).
+pub fn handle_brave_source_poll(
+    source_id: &SourceId,
+    cfg: &harvester_engine::BraveNewsSourceConfig,
+    max_urls_per_poll: Option<usize>,
+    fetch_settings: &FetchSettings,
+    msg_tx: &mpsc::Sender<Msg>,
+) {
+    let api_key = match std::env::var(&cfg.api_key_env) {
+        Ok(key) if !key.is_empty() => key,
+        Ok(_) => {
+            engine_warn!(
+                "[brave-poll] {} env var is empty for source {}",
+                cfg.api_key_env,
+                source_id
+            );
+            let _ = msg_tx.send(Msg::SourcePollFailed {
+                source_id: source_id.clone(),
+                error: format!("environment variable {} is empty", cfg.api_key_env),
+            });
+            return;
+        }
+        Err(_) => {
+            engine_warn!(
+                "[brave-poll] {} env var not set for source {}",
+                cfg.api_key_env,
+                source_id
+            );
+            let _ = msg_tx.send(Msg::SourcePollFailed {
+                source_id: source_id.clone(),
+                error: format!("environment variable {} is not set", cfg.api_key_env),
+            });
+            return;
+        }
+    };
+
+    let bytes = match fetch_brave_results(
+        &cfg.query,
+        &api_key,
+        cfg.count,
+        cfg.freshness.as_deref(),
+        fetch_settings,
+    ) {
+        Ok(bytes) => bytes,
+        Err(reason) => {
+            engine_warn!("[brave-poll] fetch failed for {}: {}", source_id, reason);
+            let _ = msg_tx.send(Msg::SourcePollFailed {
+                source_id: source_id.clone(),
+                error: reason,
+            });
+            return;
+        }
+    };
+
+    match harvester_engine::parse_brave_news_response(&bytes) {
+        Ok(items) => {
+            let limit = max_urls_per_poll.unwrap_or(items.len());
+            let urls: Vec<String> = items.iter().take(limit).map(|i| i.url.clone()).collect();
+            engine_info!(
+                "[brave-poll] {} => {} parsed, {} emitted",
+                source_id,
+                items.len(),
+                urls.len()
+            );
+            let _ = msg_tx.send(Msg::SourcePollCompleted {
+                source_id: source_id.clone(),
+                urls,
+            });
+        }
+        Err(err) => {
+            engine_warn!("[brave-poll] {} parse failed: {}", source_id, err);
+            let _ = msg_tx.send(Msg::SourcePollFailed {
+                source_id: source_id.clone(),
+                error: err.to_string(),
+            });
+        }
+    }
+}

@@ -143,4 +143,36 @@ SourceRegistry(
         let registry = load_sources(&config_path);
         assert!(registry.sources.is_empty());
     }
+
+    #[test]
+    fn loads_brave_news_source_from_ron() {
+        init_logging();
+        let temp = TempDir::new().expect("temp");
+        let config_path = temp.path().join("sources.ron");
+        let contents = r#"
+SourceRegistry(
+    sources: [
+        SourceConfig(
+            id: "brave-test",
+            source_type: BraveNews((
+                query: "\"AI\" AND \"chips\"",
+                api_key_env: "BRAVE_API_KEY",
+                count: Some(10),
+                freshness: Some("pd"),
+            )),
+            enabled: true,
+            max_urls_per_poll: Some(10),
+            description: "test brave source",
+        ),
+    ],
+)
+"#;
+        fs::write(&config_path, contents).expect("write config");
+        let registry = load_sources(&config_path);
+        assert_eq!(registry.sources.len(), 1);
+        assert!(matches!(
+            registry.sources[0].source_type,
+            SourceType::BraveNews(_)
+        ));
+    }
 }
