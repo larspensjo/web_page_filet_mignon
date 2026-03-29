@@ -1480,6 +1480,13 @@ impl EffectRunner {
                             source_started.elapsed().as_millis()
                         );
                     }
+                    SourceType::BraveNews(_) => {
+                        // Not yet implemented — wired in Slice B.
+                        engine_info!(
+                            "[poll-all] source={} kind=brave-news skipped (not yet implemented)",
+                            source_id,
+                        );
+                    }
                 }
             }
             engine_info!(
