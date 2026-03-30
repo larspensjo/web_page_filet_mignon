@@ -1252,14 +1252,14 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::SourcePollCompleted { source_id, urls, kind, parsed, dedup_filtered } => {
             engine_info!("[source-poll] {} returned {} urls", source_id, urls.len());
             state.record_source_poll(&source_id, urls.len());
+            let ingest = state.ingest_urls(urls);
             state.record_poll_stat(crate::SourcePollStat {
                 source_id: source_id.clone(),
                 kind,
                 parsed,
                 dedup_filtered,
-                emitted: urls.len(),
+                emitted: ingest.enqueued,
             });
-            let ingest = state.ingest_urls(urls);
             ingest.effects
         }
         Msg::SourcePollFailed { source_id, error } => {
@@ -7321,6 +7321,71 @@ mod import_tests {
                 width: 1200,
                 height: 900,
             }]
+        );
+    }
+
+    #[test]
+    fn source_poll_completed_emitted_reflects_ingest_dedup() {
+        // If the reducer receives two SourcePollCompleted messages with the same URL,
+        // the second one should record emitted=0 because ingest_urls drops the duplicate.
+        let state = AppState::new();
+        let source_id = harvester_engine::SourceId::new("rss").unwrap();
+
+        let (state, _) = update(
+            state,
+            Msg::SourcePollCompleted {
+                source_id: source_id.clone(),
+                urls: vec!["https://example.com/1".to_string()],
+                kind: harvester_engine::SourceKind::Rss,
+                parsed: 1,
+                dedup_filtered: 0,
+            },
+        );
+        let stat = state.source_states().poll_stats().last().unwrap();
+        assert_eq!(stat.emitted, 1, "first poll: URL should be enqueued");
+
+        let (state, _) = update(
+            state,
+            Msg::SourcePollCompleted {
+                source_id: source_id.clone(),
+                urls: vec!["https://example.com/1".to_string()],
+                kind: harvester_engine::SourceKind::Rss,
+                parsed: 1,
+                dedup_filtered: 0,
+            },
+        );
+        let stat = state.source_states().poll_stats().last().unwrap();
+        assert_eq!(stat.emitted, 0, "second poll: duplicate URL must not be counted as emitted");
+    }
+
+    #[test]
+    fn poll_stats_cleared_when_new_poll_starts() {
+        let state = AppState::new();
+        let source_id = harvester_engine::SourceId::new("rss").unwrap();
+
+        // First poll cycle: accumulate a stat.
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+        let (state, _) = update(
+            state,
+            Msg::SourcePollCompleted {
+                source_id: source_id.clone(),
+                urls: vec!["https://example.com/1".to_string()],
+                kind: harvester_engine::SourceKind::Rss,
+                parsed: 1,
+                dedup_filtered: 0,
+            },
+        );
+        assert_eq!(state.source_states().poll_stats().len(), 1);
+
+        // Simulate poll ended so a second PollSourcesClicked is accepted.
+        let (state, _) = update(state, Msg::AllSourcesPollEnded);
+        assert!(!state.is_poll_in_progress());
+
+        // Second poll cycle: stats should be cleared.
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+        assert!(
+            state.source_states().poll_stats().is_empty(),
+            "poll_stats must be cleared when a new poll starts"
         );
     }
 }

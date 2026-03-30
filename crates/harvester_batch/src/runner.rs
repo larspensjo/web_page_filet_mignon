@@ -902,7 +902,7 @@ fn print_poll_stats(stats: &[harvester_core::SourcePollStat]) {
                 println!("  {}: 0 parsed", s.source_id);
             } else {
                 println!(
-                    "  {}: {} parsed → {} filtered → {} emitted",
+                    "  {}: {} parsed → {} dedup-filtered → {} emitted",
                     s.source_id, s.parsed, s.dedup_filtered, s.emitted
                 );
             }
