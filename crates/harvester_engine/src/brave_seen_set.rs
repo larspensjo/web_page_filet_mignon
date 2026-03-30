@@ -6,7 +6,7 @@ const EVICT_BATCH: usize = MAX_ENTRIES / 5;
 
 /// Tracks seen URLs for Brave News sources to prevent reprocessing.
 ///
-/// URLs are normalized via `normalize_for_dedupe` which mirrors
+/// URLs are normalized via `normalize_url_for_dedupe` which mirrors
 /// `harvester_core::normalize_url_for_dedupe` — the same logic used by
 /// the reducer. If that function changes, this one must be updated too.
 /// Capacity is bounded with FIFO eviction.
@@ -56,7 +56,7 @@ impl BraveSeenSet {
     pub fn filter_unseen(&mut self, urls: Vec<String>) -> Vec<String> {
         let mut unseen = Vec::new();
         for url in urls {
-            let normalized = normalize_for_dedupe(&url);
+            let normalized = normalize_url_for_dedupe(&url);
             if self.mark_seen(&normalized) {
                 unseen.push(url);
             }
@@ -74,9 +74,11 @@ impl BraveSeenSet {
     }
 }
 
-/// Mirrors `harvester_core::normalize_url_for_dedupe` exactly.
-/// Must be kept in sync if that function changes.
-pub fn normalize_for_dedupe(url: &str) -> String {
+/// Normalize a URL for deduplication: trim whitespace, lowercase, strip trailing `/`.
+///
+/// This is the canonical implementation shared by `BraveSeenSet` and the reducer.
+/// `harvester_core` re-exports it from here.
+pub fn normalize_url_for_dedupe(url: &str) -> String {
     url.trim().to_lowercase().trim_end_matches('/').to_owned()
 }
 
@@ -100,7 +102,7 @@ mod tests {
     #[test]
     fn filter_unseen_removes_duplicates() {
         let mut set = BraveSeenSet::new();
-        set.mark_seen(&normalize_for_dedupe("https://example.com/old"));
+        set.mark_seen(&normalize_url_for_dedupe("https://example.com/old"));
         let urls = vec![
             "https://example.com/old".to_string(),
             "https://example.com/new".to_string(),
@@ -112,10 +114,13 @@ mod tests {
     #[test]
     fn filter_unseen_uses_same_normalization_as_reducer() {
         let mut set = BraveSeenSet::new();
-        set.mark_seen(&normalize_for_dedupe("https://Example.COM/Article/"));
+        set.mark_seen(&normalize_url_for_dedupe("https://Example.COM/Article/"));
         let urls = vec!["https://example.com/article".to_string()];
         let unseen = set.filter_unseen(urls);
-        assert!(unseen.is_empty(), "should match despite casing/slash differences");
+        assert!(
+            unseen.is_empty(),
+            "should match despite casing/slash differences"
+        );
     }
 
     #[test]
@@ -147,8 +152,8 @@ mod tests {
     fn filter_unseen_then_limit_matches_rss_semantics() {
         // 4 results, 2 already seen, max=1 → should still emit 1 (not 0).
         let mut set = BraveSeenSet::new();
-        set.mark_seen(&normalize_for_dedupe("https://example.com/old-1"));
-        set.mark_seen(&normalize_for_dedupe("https://example.com/old-2"));
+        set.mark_seen(&normalize_url_for_dedupe("https://example.com/old-1"));
+        set.mark_seen(&normalize_url_for_dedupe("https://example.com/old-2"));
 
         let urls = vec![
             "https://example.com/old-1".to_string(),

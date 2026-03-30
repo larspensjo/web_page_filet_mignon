@@ -305,7 +305,9 @@ fn summarize_batch_msg(msg: &Msg) -> String {
     match msg {
         Msg::PollSourcesClicked => "PollSourcesClicked".to_string(),
         Msg::AllSourcesPollEnded => "AllSourcesPollEnded".to_string(),
-        Msg::SourcePollCompleted { source_id, urls, .. } => {
+        Msg::SourcePollCompleted {
+            source_id, urls, ..
+        } => {
             format!(
                 "SourcePollCompleted {{ source_id: {}, urls: {} }}",
                 source_id,
@@ -415,7 +417,10 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Install signal handler immediately after lock acquisition so Ctrl-C always
     // removes the lock file, regardless of which execution path follows.
     let shutdown_flag = Arc::new(AtomicBool::new(false));
-    install_signal_handler(Arc::clone(&shutdown_flag), lock_guard.lock_path().to_path_buf());
+    install_signal_handler(
+        Arc::clone(&shutdown_flag),
+        lock_guard.lock_path().to_path_buf(),
+    );
 
     if args.dry_run {
         engine_info!("[batch] Dry-run mode: single poll only");
@@ -425,7 +430,12 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Import mode: branch before source loading
     if let Some(import_dir) = &args.import_saved_web_dir {
         engine_info!("[batch] Import mode: dir={}", import_dir.display());
-        return run_import_mode(&paths, &args, import_dir.clone(), Arc::clone(&shutdown_flag));
+        return run_import_mode(
+            &paths,
+            &args,
+            import_dir.clone(),
+            Arc::clone(&shutdown_flag),
+        );
     }
 
     // Validate source configuration
@@ -2064,7 +2074,10 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            format!("  {}: in=500 out=80", harvester_engine::llm::OPENAI_MODEL_GPT_4O)
+            format!(
+                "  {}: in=500 out=80",
+                harvester_engine::llm::OPENAI_MODEL_GPT_4O
+            )
         );
     }
 

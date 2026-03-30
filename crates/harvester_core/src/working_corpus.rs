@@ -210,7 +210,9 @@ mod tests {
         LoadedArticle {
             url: url.to_string(),
             source_title: None,
-            prepared_text: std::iter::repeat_n("word", 300).collect::<Vec<_>>().join(" "),
+            prepared_text: std::iter::repeat_n("word", 300)
+                .collect::<Vec<_>>()
+                .join(" "),
             content_hash: format!("hash-{url}"),
             fetched_utc: None,
         }
@@ -398,10 +400,7 @@ mod tests {
 
         let corpus = CurrentWorkingCorpus::select(&pre_triage, &triage, default_policy());
 
-        assert_eq!(
-            corpus.source(),
-            CurrentWorkingCorpusSource::TriageComplete
-        );
+        assert_eq!(corpus.source(), CurrentWorkingCorpusSource::TriageComplete);
         assert!(corpus.is_ready_for_actions());
         assert_eq!(corpus.count(), 2);
     }
@@ -555,9 +554,7 @@ mod tests {
         );
         // The triage article must not leak through.
         assert!(
-            !corpus
-                .ordered_urls()
-                .contains(&"https://t.com".to_string()),
+            !corpus.ordered_urls().contains(&"https://t.com".to_string()),
             "triage article must not appear in corpus while Reviewing"
         );
     }
@@ -578,9 +575,18 @@ mod tests {
         let corpus_a = CurrentWorkingCorpus::select(&pre_triage_a, &triage, policy);
         let corpus_ba = CurrentWorkingCorpus::select(&pre_triage_ba, &triage, policy);
 
-        assert_eq!(corpus_ab.source(), CurrentWorkingCorpusSource::PreTriageReady);
-        assert_eq!(corpus_a.source(), CurrentWorkingCorpusSource::PreTriageReady);
-        assert_eq!(corpus_ba.source(), CurrentWorkingCorpusSource::PreTriageReady);
+        assert_eq!(
+            corpus_ab.source(),
+            CurrentWorkingCorpusSource::PreTriageReady
+        );
+        assert_eq!(
+            corpus_a.source(),
+            CurrentWorkingCorpusSource::PreTriageReady
+        );
+        assert_eq!(
+            corpus_ba.source(),
+            CurrentWorkingCorpusSource::PreTriageReady
+        );
 
         // Different membership → different fingerprint.
         assert_ne!(

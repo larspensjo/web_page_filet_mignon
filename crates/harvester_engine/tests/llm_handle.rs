@@ -758,12 +758,12 @@ fn retry_exhausted_returns_error() {
 
     match recv_event(&handle) {
         LlmEvent::Completed { result, .. } => {
+            assert!(result.is_err(), "should fail after exhausting all attempts");
             assert!(
-                result.is_err(),
-                "should fail after exhausting all attempts"
-            );
-            assert!(
-                matches!(result, Err(LlmCompletionError::ProviderError(LlmError::Timeout))),
+                matches!(
+                    result,
+                    Err(LlmCompletionError::ProviderError(LlmError::Timeout))
+                ),
                 "should propagate the provider error"
             );
         }

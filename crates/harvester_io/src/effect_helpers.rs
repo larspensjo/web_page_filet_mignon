@@ -458,6 +458,24 @@ pub fn fetch_brave_results(
     freshness: Option<&str>,
     fetch_settings: &FetchSettings,
 ) -> Result<Vec<u8>, String> {
+    fetch_brave_results_with_url(
+        BRAVE_NEWS_API_URL,
+        query,
+        api_key,
+        count,
+        freshness,
+        fetch_settings,
+    )
+}
+
+pub(crate) fn fetch_brave_results_with_url(
+    base_url: &str,
+    query: &str,
+    api_key: &str,
+    count: Option<usize>,
+    freshness: Option<&str>,
+    fetch_settings: &FetchSettings,
+) -> Result<Vec<u8>, String> {
     let client = Client::builder()
         .connect_timeout(fetch_settings.connect_timeout)
         .timeout(fetch_settings.request_timeout)
@@ -465,7 +483,7 @@ pub fn fetch_brave_results(
         .build()
         .map_err(|err| err.to_string())?;
 
-    let mut url = reqwest::Url::parse(BRAVE_NEWS_API_URL).map_err(|e| e.to_string())?;
+    let mut url = reqwest::Url::parse(base_url).map_err(|e| e.to_string())?;
     url.query_pairs_mut().append_pair("q", query);
     if let Some(c) = count {
         url.query_pairs_mut().append_pair("count", &c.to_string());
@@ -596,8 +614,10 @@ pub fn handle_brave_source_poll(
             }
 
             // Persist metadata sidecar for emitted items.
-            let emitted_items: Vec<&harvester_engine::BraveNewsItem> =
-                items.iter().filter(|i| emitted_urls.contains(&i.url)).collect();
+            let emitted_items: Vec<&harvester_engine::BraveNewsItem> = items
+                .iter()
+                .filter(|i| emitted_urls.contains(&i.url))
+                .collect();
             if let Err(err) =
                 crate::persist_brave_metadata(&emitted_items, source_id, brave_metadata_path)
             {
@@ -630,6 +650,157 @@ pub fn handle_brave_source_poll(
                 source_id: source_id.clone(),
                 error: err.to_string(),
             });
+        }
+    }
+}
+
+#[cfg(test)]
+mod brave_fetch_tests {
+    use super::*;
+    use wiremock::matchers::{header, method, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn default_settings() -> FetchSettings {
+        FetchSettings::default()
+    }
+
+    // wiremock 0.6 is async; reqwest blocking must run in spawn_blocking
+    // to avoid nesting a blocking runtime inside a tokio runtime.
+
+    #[tokio::test]
+    async fn fetch_sends_auth_header_and_query_param() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(header("X-Subscription-Token", "test-key"))
+            .and(header("Accept", "application/json"))
+            .and(query_param("q", "AI chips"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(br#"{"results":[]}"#))
+            .mount(&server)
+            .await;
+
+        let uri = server.uri();
+        let result = tokio::task::spawn_blocking(move || {
+            fetch_brave_results_with_url(
+                &uri,
+                "AI chips",
+                "test-key",
+                None,
+                None,
+                &default_settings(),
+            )
+        })
+        .await
+        .unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn fetch_includes_count_param_when_provided() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(query_param("count", "20"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(br#"{"results":[]}"#))
+            .mount(&server)
+            .await;
+
+        let uri = server.uri();
+        let result = tokio::task::spawn_blocking(move || {
+            fetch_brave_results_with_url(&uri, "q", "key", Some(20), None, &default_settings())
+        })
+        .await
+        .unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn fetch_includes_freshness_param_when_provided() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(query_param("freshness", "pd"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(br#"{"results":[]}"#))
+            .mount(&server)
+            .await;
+
+        let uri = server.uri();
+        let result = tokio::task::spawn_blocking(move || {
+            fetch_brave_results_with_url(&uri, "q", "key", None, Some("pd"), &default_settings())
+        })
+        .await
+        .unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn fetch_maps_429_to_rate_limit_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(429))
+            .mount(&server)
+            .await;
+
+        let uri = server.uri();
+        let err = tokio::task::spawn_blocking(move || {
+            fetch_brave_results_with_url(&uri, "q", "key", None, None, &default_settings())
+        })
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(
+            err.contains("rate-limited"),
+            "expected 'rate-limited' in: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_maps_401_to_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let uri = server.uri();
+        let err = tokio::task::spawn_blocking(move || {
+            fetch_brave_results_with_url(&uri, "q", "key", None, None, &default_settings())
+        })
+        .await
+        .unwrap()
+        .unwrap_err();
+        assert!(err.contains("401"), "expected 401 in: {err}");
+    }
+
+    #[test]
+    fn handle_brave_poll_fails_with_missing_env_var() {
+        use std::sync::mpsc;
+        let (tx, rx) = mpsc::channel();
+        let source_id = harvester_engine::SourceId::new("brave-test").unwrap();
+        let cfg = harvester_engine::BraveNewsSourceConfig {
+            query: "test".to_string(),
+            api_key_env: "BRAVE_KEY_DEFINITELY_NOT_SET_XYZ".to_string(),
+            count: None,
+            freshness: None,
+        };
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut seen_set = harvester_engine::BraveSeenSet::new();
+        let mut context = BravePollContext {
+            brave_seen_set: &mut seen_set,
+            brave_seen_set_path: &temp.path().join(".brave_seen_set.ron"),
+            brave_metadata_path: &temp.path().join(".brave_metadata.ron"),
+            msg_tx: &tx,
+        };
+        handle_brave_source_poll(
+            &source_id,
+            &cfg,
+            None,
+            &FetchSettings::default(),
+            &mut context,
+        );
+
+        match rx.try_recv().unwrap() {
+            harvester_core::Msg::SourcePollFailed { source_id: id, .. } => {
+                assert_eq!(id, source_id);
+            }
+            other => panic!("expected SourcePollFailed, got {other:?}"),
         }
     }
 }

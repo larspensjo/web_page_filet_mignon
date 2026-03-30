@@ -480,8 +480,7 @@ fn archive_format_file_in_output_dir_does_not_block_article_scan() {
     let archive_content = "===== DOC START =====\n---\nurl: \"https://example.com/old\"\ntitle: \"Old\"\n---\n\nold body\n";
     fs::write(tmp.path().join("archive.md"), archive_content).unwrap();
 
-    let (articles, _) =
-        load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/article");
@@ -507,9 +506,14 @@ fn filtered_loader_selected_urls_older_than_since_utc_produce_empty_result() {
         .parse::<chrono::DateTime<chrono::Utc>>()
         .unwrap();
     let selected = vec!["https://example.com/old".to_string()];
-    let (articles, collection) =
-        load_and_prepare_articles_filtered(tmp.path(), 10_000, &registry, &selected, Some(since_utc))
-            .unwrap();
+    let (articles, collection) = load_and_prepare_articles_filtered(
+        tmp.path(),
+        10_000,
+        &registry,
+        &selected,
+        Some(since_utc),
+    )
+    .unwrap();
 
     assert!(articles.is_empty());
     assert!(collection.is_empty());

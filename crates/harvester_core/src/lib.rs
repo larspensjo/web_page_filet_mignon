@@ -66,7 +66,6 @@ pub use triage::{
 pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCacheKeyError};
 pub use ui_geometry::calc_left_width;
 pub use update::update;
-pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
 pub use view_model::{
     AppViewModel, CategoryTrendView, EntityLineView, JobFilterStatus, JobRowView, LayoutViewModel,
     LeftPaneView, LinkRowView, LlmModelUsageView, PreviewHeaderView, PromptLabCompareBatchView,
@@ -75,3 +74,4 @@ pub use view_model::{
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
     INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };
+pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};

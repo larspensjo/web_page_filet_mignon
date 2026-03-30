@@ -7,25 +7,71 @@ use harvester_engine::llm::{
 fn is_retryable_for_each_variant() {
     // Retryable variants
     assert!(LlmError::Timeout.is_retryable());
-    assert!(LlmError::Network { detail: "connection reset".into() }.is_retryable());
-    assert!(LlmError::Http { status: 500, body: "internal server error".into() }.is_retryable());
-    assert!(LlmError::Http { status: 502, body: "bad gateway".into() }.is_retryable());
-    assert!(LlmError::Http { status: 503, body: "service unavailable".into() }.is_retryable());
-    assert!(LlmError::Http { status: 504, body: "gateway timeout".into() }.is_retryable());
+    assert!(LlmError::Network {
+        detail: "connection reset".into()
+    }
+    .is_retryable());
+    assert!(LlmError::Http {
+        status: 500,
+        body: "internal server error".into()
+    }
+    .is_retryable());
+    assert!(LlmError::Http {
+        status: 502,
+        body: "bad gateway".into()
+    }
+    .is_retryable());
+    assert!(LlmError::Http {
+        status: 503,
+        body: "service unavailable".into()
+    }
+    .is_retryable());
+    assert!(LlmError::Http {
+        status: 504,
+        body: "gateway timeout".into()
+    }
+    .is_retryable());
 
     // Non-retryable variants
     assert!(!LlmError::AuthenticationFailed.is_retryable());
-    assert!(!LlmError::RateLimited { retry_after_secs: Some(60) }.is_retryable());
-    assert!(!LlmError::RateLimited { retry_after_secs: None }.is_retryable());
-    assert!(!LlmError::QuotaExhausted { description: "monthly limit reached".into() }.is_retryable());
-    assert!(!LlmError::Configuration { detail: "missing api key".into() }.is_retryable());
-    assert!(!LlmError::InvalidResponse { detail: "expected json".into() }.is_retryable());
+    assert!(!LlmError::RateLimited {
+        retry_after_secs: Some(60)
+    }
+    .is_retryable());
+    assert!(!LlmError::RateLimited {
+        retry_after_secs: None
+    }
+    .is_retryable());
+    assert!(!LlmError::QuotaExhausted {
+        description: "monthly limit reached".into()
+    }
+    .is_retryable());
+    assert!(!LlmError::Configuration {
+        detail: "missing api key".into()
+    }
+    .is_retryable());
+    assert!(!LlmError::InvalidResponse {
+        detail: "expected json".into()
+    }
+    .is_retryable());
     assert!(!LlmError::ContentFiltered.is_retryable());
 
     // HTTP status codes that are NOT retryable
-    assert!(!LlmError::Http { status: 400, body: "bad request".into() }.is_retryable());
-    assert!(!LlmError::Http { status: 401, body: "unauthorized".into() }.is_retryable());
-    assert!(!LlmError::Http { status: 429, body: "too many requests".into() }.is_retryable());
+    assert!(!LlmError::Http {
+        status: 400,
+        body: "bad request".into()
+    }
+    .is_retryable());
+    assert!(!LlmError::Http {
+        status: 401,
+        body: "unauthorized".into()
+    }
+    .is_retryable());
+    assert!(!LlmError::Http {
+        status: 429,
+        body: "too many requests".into()
+    }
+    .is_retryable());
 }
 
 #[test]

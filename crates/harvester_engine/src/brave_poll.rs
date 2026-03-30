@@ -23,9 +23,7 @@ pub enum BravePollError {
 ///
 /// Only accepts the News Search shape (`results[]`).
 /// Does NOT apply any limit or dedup — the caller handles that.
-pub fn parse_brave_news_response(
-    json_bytes: &[u8],
-) -> Result<Vec<BraveNewsItem>, BravePollError> {
+pub fn parse_brave_news_response(json_bytes: &[u8]) -> Result<Vec<BraveNewsItem>, BravePollError> {
     let value: serde_json::Value =
         serde_json::from_slice(json_bytes).map_err(|e| BravePollError::JsonParse(e.to_string()))?;
 
@@ -98,7 +96,8 @@ mod tests {
 
     #[test]
     fn rejects_web_search_shape() {
-        let json = br#"{"web":{"results":[{"url":"https://a.com","title":"A","description":"d"}]}}"#;
+        let json =
+            br#"{"web":{"results":[{"url":"https://a.com","title":"A","description":"d"}]}}"#;
         let err = parse_brave_news_response(json).unwrap_err();
         assert!(matches!(err, BravePollError::UnexpectedStructure(_)));
     }

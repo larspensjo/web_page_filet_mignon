@@ -71,8 +71,8 @@ mod tests {
     use crate::{load_summary_cache, persist_summary_cache};
     use chrono::Utc;
     use harvester_core::{ArticleSummaryResult, SummaryCache, SummaryCacheEntry, SummaryCacheKey};
-    use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
     use harvester_engine::llm::prompt::PromptId;
+    use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
     use std::path::PathBuf;
     use tempfile::tempdir;
 

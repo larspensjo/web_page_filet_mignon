@@ -94,8 +94,7 @@ fn cost_with_partial_cached_tokens() {
     // 500k input tokens, 300k of which are cached. Rate: $0.015/million input, $0.06/million output.
     let pricing = ModelPricing::new(0.015, 0.06);
 
-    let usage = TokenUsage::new(500_000, 0)
-        .with_cached_input_tokens(300_000);
+    let usage = TokenUsage::new(500_000, 0).with_cached_input_tokens(300_000);
 
     let cost = pricing.cost_microdollars(&usage);
 

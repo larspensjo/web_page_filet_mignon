@@ -96,7 +96,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::ArchiveClicked => {
             let request_id = state.allocate_next_archive_request_id();
-            let corpus = state.archive_corpus();   // triage-only; pre-triage excluded
+            let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
             let article_count = corpus.count();
             let fingerprint = corpus.fingerprint();
             let source = corpus.source();
@@ -1249,7 +1249,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Vec::new()
             }
         }
-        Msg::SourcePollCompleted { source_id, urls, kind, parsed, dedup_filtered } => {
+        Msg::SourcePollCompleted {
+            source_id,
+            urls,
+            kind,
+            parsed,
+            dedup_filtered,
+        } => {
             engine_info!("[source-poll] {} returned {} urls", source_id, urls.len());
             state.record_source_poll(&source_id, urls.len());
             let ingest = state.ingest_urls(urls);
@@ -5480,13 +5486,30 @@ mod tests {
         );
 
         let (_, effects) = update(state, Msg::ArchiveClicked);
-        let (article_count, pending_count) = effects.iter().find_map(|e| {
-            if let Effect::OpenArchiveDialog { article_count, pending_pre_triage_count, .. } = e {
-                Some((*article_count, *pending_pre_triage_count))
-            } else { None }
-        }).expect("expected OpenArchiveDialog effect");
-        assert_eq!(article_count, 1, "archive must use TriageComplete (1 article), not pre-triage");
-        assert!(pending_count > 0, "pending_pre_triage_count must be > 0, got {}", pending_count);
+        let (article_count, pending_count) = effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::OpenArchiveDialog {
+                    article_count,
+                    pending_pre_triage_count,
+                    ..
+                } = e
+                {
+                    Some((*article_count, *pending_pre_triage_count))
+                } else {
+                    None
+                }
+            })
+            .expect("expected OpenArchiveDialog effect");
+        assert_eq!(
+            article_count, 1,
+            "archive must use TriageComplete (1 article), not pre-triage"
+        );
+        assert!(
+            pending_count > 0,
+            "pending_pre_triage_count must be > 0, got {}",
+            pending_count
+        );
     }
 
     #[test]
@@ -5495,13 +5518,29 @@ mod tests {
         // No triage done — only pre-triage ready. Archive must show 0, Export disabled.
         let state = ready_pre_triage_state(&["https://example.com/a", "https://example.com/b"]);
         let (_, effects) = update(state, Msg::ArchiveClicked);
-        let (article_count, pending_count) = effects.iter().find_map(|e| {
-            if let Effect::OpenArchiveDialog { article_count, pending_pre_triage_count, .. } = e {
-                Some((*article_count, *pending_pre_triage_count))
-            } else { None }
-        }).expect("expected OpenArchiveDialog effect");
-        assert_eq!(article_count, 0, "no triage done → archive article_count must be 0");
-        assert_eq!(pending_count, 2, "both pre-triage articles must appear in pending count");
+        let (article_count, pending_count) = effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::OpenArchiveDialog {
+                    article_count,
+                    pending_pre_triage_count,
+                    ..
+                } = e
+                {
+                    Some((*article_count, *pending_pre_triage_count))
+                } else {
+                    None
+                }
+            })
+            .expect("expected OpenArchiveDialog effect");
+        assert_eq!(
+            article_count, 0,
+            "no triage done → archive article_count must be 0"
+        );
+        assert_eq!(
+            pending_count, 2,
+            "both pre-triage articles must appear in pending count"
+        );
     }
 
     #[test]
@@ -5510,13 +5549,29 @@ mod tests {
         // Triage done, pre-triage idle — no pending articles, no warning.
         let state = complete_triage_state_for_test(2);
         let (_, effects) = update(state, Msg::ArchiveClicked);
-        let (article_count, pending_count) = effects.iter().find_map(|e| {
-            if let Effect::OpenArchiveDialog { article_count, pending_pre_triage_count, .. } = e {
-                Some((*article_count, *pending_pre_triage_count))
-            } else { None }
-        }).expect("expected OpenArchiveDialog effect");
-        assert_eq!(article_count, 2, "TriageComplete corpus must supply 2 articles");
-        assert_eq!(pending_count, 0, "no pre-triage ready → pending count must be 0");
+        let (article_count, pending_count) = effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::OpenArchiveDialog {
+                    article_count,
+                    pending_pre_triage_count,
+                    ..
+                } = e
+                {
+                    Some((*article_count, *pending_pre_triage_count))
+                } else {
+                    None
+                }
+            })
+            .expect("expected OpenArchiveDialog effect");
+        assert_eq!(
+            article_count, 2,
+            "TriageComplete corpus must supply 2 articles"
+        );
+        assert_eq!(
+            pending_count, 0,
+            "no pre-triage ready → pending count must be 0"
+        );
     }
 
     /// Helper: prime LLM metadata so `TriageClicked` dispatches immediately
@@ -5545,10 +5600,7 @@ mod tests {
 
     /// Helper: complete all pending LLM triage requests in `effects`.
     /// Returns the state after all completions.
-    fn complete_all_triage_llm_requests(
-        mut state: AppState,
-        effects: Vec<Effect>,
-    ) -> AppState {
+    fn complete_all_triage_llm_requests(mut state: AppState, effects: Vec<Effect>) -> AppState {
         let request_ids: Vec<u64> = effects
             .iter()
             .filter_map(|e| match e {
@@ -5597,13 +5649,20 @@ mod tests {
 
         // Assert: returns Some with the articles
         let articles = articles.expect("should return Some in ReadyToTriage with articles");
-        assert_eq!(articles.len(), urls.len(), "should return all resolved articles");
+        assert_eq!(
+            articles.len(),
+            urls.len(),
+            "should return all resolved articles"
+        );
 
         // Assert: pre-triage is now Idle
-        assert!(matches!(
-            state.pre_triage().phase(),
-            crate::pre_triage_filter::PreTriagePhase::Idle
-        ), "phase must be Idle after consuming");
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Idle
+            ),
+            "phase must be Idle after consuming"
+        );
 
         // Assert: resolved URLs are now empty
         assert!(
@@ -5649,8 +5708,12 @@ mod tests {
             urls.len(),
             "triage session must hold all pre-triage articles"
         );
-        let triage_urls: Vec<&str> =
-            state.triage().articles().iter().map(|a| a.url.as_str()).collect();
+        let triage_urls: Vec<&str> = state
+            .triage()
+            .articles()
+            .iter()
+            .map(|a| a.url.as_str())
+            .collect();
         for url in urls {
             assert!(
                 triage_urls.contains(url),
@@ -5709,7 +5772,11 @@ mod tests {
         let pending_count = archive_effects
             .iter()
             .find_map(|e| {
-                if let Effect::OpenArchiveDialog { pending_pre_triage_count, .. } = e {
+                if let Effect::OpenArchiveDialog {
+                    pending_pre_triage_count,
+                    ..
+                } = e
+                {
                     Some(*pending_pre_triage_count)
                 } else {
                     None
@@ -5724,7 +5791,8 @@ mod tests {
     }
 
     #[test]
-    fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating_active_triage() {
+    fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating_active_triage()
+    {
         init_logging();
         let urls = &["https://repopulate.com/1"];
         let state = ready_pre_triage_state(urls);
@@ -5821,9 +5889,18 @@ mod tests {
                 fetched_utc: None,
             },
         ];
-        let (state, _) = update(state, Msg::TriageArticlesLoaded { request_id, articles });
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles,
+            },
+        );
         assert!(
-            matches!(state.pre_triage().phase(), crate::pre_triage_filter::PreTriagePhase::ReadyToTriage),
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
+            ),
             "must be ReadyToTriage after loading review articles"
         );
         // Set a manual decision on the first article → Reviewing phase.
@@ -5836,17 +5913,32 @@ mod tests {
             },
         );
         assert!(
-            matches!(state.pre_triage().phase(), crate::pre_triage_filter::PreTriagePhase::Reviewing),
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Reviewing
+            ),
             "must be Reviewing after first decision with second still unresolved"
         );
 
         let (_, effects) = update(state, Msg::ArchiveClicked);
-        let pending_count = effects.iter().find_map(|e| {
-            if let Effect::OpenArchiveDialog { pending_pre_triage_count, .. } = e {
-                Some(*pending_pre_triage_count)
-            } else { None }
-        }).expect("expected OpenArchiveDialog effect");
-        assert_eq!(pending_count, 0, "Reviewing phase → resolved_included_urls() is empty → pending count must be 0");
+        let pending_count = effects
+            .iter()
+            .find_map(|e| {
+                if let Effect::OpenArchiveDialog {
+                    pending_pre_triage_count,
+                    ..
+                } = e
+                {
+                    Some(*pending_pre_triage_count)
+                } else {
+                    None
+                }
+            })
+            .expect("expected OpenArchiveDialog effect");
+        assert_eq!(
+            pending_count, 0,
+            "Reviewing phase → resolved_included_urls() is empty → pending count must be 0"
+        );
     }
 
     #[test]
@@ -6066,10 +6158,7 @@ mod tests {
             })
         );
 
-        let (state, follow_up) = update(
-            state,
-            Msg::BriefingCheckpointSaveSucceeded { save_id: 1 },
-        );
+        let (state, follow_up) = update(state, Msg::BriefingCheckpointSaveSucceeded { save_id: 1 });
         assert!(follow_up.is_empty());
         assert_eq!(state.briefing_since_utc(), Some(checkpoint));
         assert_eq!(state.pending_briefing_checkpoint_save(), None);
@@ -6209,7 +6298,10 @@ mod tests {
             Effect::OpenArchiveDialog { article_count, .. } => article_count,
             _ => unreachable!(),
         };
-        assert_eq!(open_count, 2, "open dialog should report 2 pinned triage articles");
+        assert_eq!(
+            open_count, 2,
+            "open dialog should report 2 pinned triage articles"
+        );
 
         // Submit — should export the same 2 triage URLs.
         let (_state, submit_effects) = update(
@@ -6389,13 +6481,23 @@ mod tests {
         let (archive_count, pending_count) = open_effects
             .into_iter()
             .find_map(|e| match e {
-                Effect::OpenArchiveDialog { article_count, pending_pre_triage_count, .. } =>
-                    Some((article_count, pending_pre_triage_count)),
+                Effect::OpenArchiveDialog {
+                    article_count,
+                    pending_pre_triage_count,
+                    ..
+                } => Some((article_count, pending_pre_triage_count)),
                 _ => None,
             })
             .expect("OpenArchiveDialog effect expected");
-        assert_eq!(archive_count, 0, "archive must be empty when only pre-triage is ready");
-        assert_eq!(pending_count, urls.len(), "pending count must equal the number of pre-triage ready articles");
+        assert_eq!(
+            archive_count, 0,
+            "archive must be empty when only pre-triage is ready"
+        );
+        assert_eq!(
+            pending_count,
+            urls.len(),
+            "pending count must equal the number of pre-triage ready articles"
+        );
 
         let (_state, submit_effects) = update(
             state,
@@ -6413,7 +6515,11 @@ mod tests {
                 _ => None,
             })
             .expect("ArchiveRequested effect expected");
-        assert_eq!(submit_urls, Vec::<String>::new(), "submit must export zero URLs when only pre-triage is ready");
+        assert_eq!(
+            submit_urls,
+            Vec::<String>::new(),
+            "submit must export zero URLs when only pre-triage is ready"
+        );
     }
 
     /// Parity test B: for a `TriageComplete` state with N articles (no ready pre-triage) the
@@ -7355,7 +7461,10 @@ mod import_tests {
             },
         );
         let stat = state.source_states().poll_stats().last().unwrap();
-        assert_eq!(stat.emitted, 0, "second poll: duplicate URL must not be counted as emitted");
+        assert_eq!(
+            stat.emitted, 0,
+            "second poll: duplicate URL must not be counted as emitted"
+        );
     }
 
     #[test]

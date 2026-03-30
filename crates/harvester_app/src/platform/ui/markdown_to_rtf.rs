@@ -66,7 +66,9 @@ pub fn convert_markdown_to_rtf(markdown: &str) -> String {
 
 #[derive(Debug, Clone, Copy)]
 enum ListState {
-    Unordered { item_paragraph_count: Option<usize> },
+    Unordered {
+        item_paragraph_count: Option<usize>,
+    },
     Ordered {
         next: u64,
         item_paragraph_count: Option<usize>,
@@ -93,7 +95,8 @@ impl ListState {
                 item_paragraph_count,
             }
             | Self::Ordered {
-                item_paragraph_count, ..
+                item_paragraph_count,
+                ..
             } => *item_paragraph_count = Some(0),
         }
     }
@@ -104,7 +107,8 @@ impl ListState {
                 item_paragraph_count,
             }
             | Self::Ordered {
-                item_paragraph_count, ..
+                item_paragraph_count,
+                ..
             } => *item_paragraph_count = None,
         }
     }
@@ -115,7 +119,8 @@ impl ListState {
                 item_paragraph_count,
             }
             | Self::Ordered {
-                item_paragraph_count, ..
+                item_paragraph_count,
+                ..
             } => item_paragraph_count.as_mut().map(|count| {
                 let current = *count;
                 *count += 1;
@@ -135,7 +140,10 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
             };
             rtf.push_str(&format!("\\pard\\sa120\\sb60\\b\\fs{size} "));
         }
-        Tag::Paragraph => match list_stack.last_mut().and_then(ListState::next_item_paragraph_index) {
+        Tag::Paragraph => match list_stack
+            .last_mut()
+            .and_then(ListState::next_item_paragraph_index)
+        {
             Some(0) => rtf.push_str("\\sa60\\sb0 "),
             Some(_) => rtf.push_str("\\par\\pard\\li360\\sa60\\sb0 "),
             None => rtf.push_str("\\pard\\sa60\\sb0 "),
@@ -290,7 +298,9 @@ mod tests {
     #[test]
     fn loose_ordered_list_item_body_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("1. **Headline**\n\n   Body text");
-        assert!(rtf.contains("1.\\tab \\sa60\\sb0 \\b Headline\\b0 \\par \\par\\pard\\li360\\sa60\\sb0 Body text"));
+        assert!(rtf.contains(
+            "1.\\tab \\sa60\\sb0 \\b Headline\\b0 \\par \\par\\pard\\li360\\sa60\\sb0 Body text"
+        ));
     }
 
     #[test]

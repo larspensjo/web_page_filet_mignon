@@ -1,5 +1,7 @@
 //! Harvester engine: IO pipeline and effect execution.
 mod blocker_page;
+mod brave_poll;
+mod brave_seen_set;
 pub mod briefing;
 pub mod content_extraction;
 pub mod content_prep;
@@ -21,8 +23,6 @@ mod quota;
 mod rss_parse;
 mod rss_seen_set;
 pub mod since_filter;
-mod brave_poll;
-mod brave_seen_set;
 mod source_config;
 mod source_poll;
 mod text_safety;
@@ -30,6 +30,8 @@ mod token;
 mod types;
 mod url_policy;
 
+pub use brave_poll::{parse_brave_news_response, BraveNewsItem, BravePollError};
+pub use brave_seen_set::{normalize_url_for_dedupe, BraveSeenSet};
 pub use briefing::{
     load_and_prepare_articles, load_and_prepare_articles_by_path,
     load_and_prepare_articles_filtered, load_and_prepare_articles_for_triage,
@@ -59,8 +61,6 @@ pub use links::{ConversionOutput, ExtractedLink, LinkExtractingConverter, LinkKi
 pub use path_policy::is_confined_to;
 pub use persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 pub use quota::{QuotaTracker, SessionQuotas};
-pub use brave_poll::{parse_brave_news_response, BraveNewsItem, BravePollError};
-pub use brave_seen_set::{normalize_for_dedupe, BraveSeenSet};
 pub use source_config::{
     BraveNewsSourceConfig, SourceConfig, SourceId, SourceIdError, SourceKind, SourceRegistry,
     SourceRegistryValidationError, SourceType,

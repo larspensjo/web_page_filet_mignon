@@ -1050,10 +1050,8 @@ impl EffectRunner {
                                 save_id,
                                 e
                             );
-                            let _ = msg_tx.send(Msg::BriefingCheckpointSaveFailed {
-                                save_id,
-                                reason: e,
-                            });
+                            let _ = msg_tx
+                                .send(Msg::BriefingCheckpointSaveFailed { save_id, reason: e });
                         }
                     }
                 });
@@ -1185,12 +1183,7 @@ impl EffectRunner {
                 let path = self.paths.state_path.clone();
                 thread::spawn(move || {
                     crate::persist_window_size(&path, width, height);
-                    engine_info!(
-                        "[window-size] Persisted {}x{} to {:?}",
-                        width,
-                        height,
-                        path
-                    );
+                    engine_info!("[window-size] Persisted {}x{} to {:?}", width, height, path);
                 });
             }
 
@@ -1632,8 +1625,8 @@ mod tests {
     use super::*;
     use harvester_engine::llm::load_context_file;
     use harvester_engine::llm::types::ProviderKind;
-    use harvester_engine::llm::{DEFAULT_BRIEFING_MODEL, OPENAI_MODEL_GPT_4O_MINI};
     use harvester_engine::llm::{LlmCompletionError, LlmEvent};
+    use harvester_engine::llm::{DEFAULT_BRIEFING_MODEL, OPENAI_MODEL_GPT_4O_MINI};
     use std::fs;
     use std::path::Path;
     use std::sync::mpsc;
@@ -1690,7 +1683,10 @@ mod tests {
     #[test]
     fn build_local_model_catalog_uses_effective_models_with_dedup_and_sort() {
         let mut effective_models = HashMap::new();
-        effective_models.insert(PromptId::ArticleTriage, OPENAI_MODEL_GPT_4O_MINI.to_string());
+        effective_models.insert(
+            PromptId::ArticleTriage,
+            OPENAI_MODEL_GPT_4O_MINI.to_string(),
+        );
         effective_models.insert(PromptId::ArticleSummary, "o3-mini".to_string());
         effective_models.insert(
             PromptId::AggregateBriefing,
@@ -1713,7 +1709,10 @@ mod tests {
     #[test]
     fn build_local_model_catalog_returns_empty_without_provider_kind() {
         let mut effective_models = HashMap::new();
-        effective_models.insert(PromptId::ArticleTriage, OPENAI_MODEL_GPT_4O_MINI.to_string());
+        effective_models.insert(
+            PromptId::ArticleTriage,
+            OPENAI_MODEL_GPT_4O_MINI.to_string(),
+        );
 
         let models = build_local_model_catalog(None, &effective_models);
 

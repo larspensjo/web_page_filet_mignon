@@ -1,9 +1,9 @@
 use std::sync::Once;
 
 use harvester_core::{update, AppState, LlmResultKind, Msg};
-use harvester_engine::llm::{OPENAI_MODEL_GPT_4O, OPENAI_MODEL_GPT_4O_MINI};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::run_metadata::{CacheStatus, LlmRunMetadata, LlmRunMetadataInit};
+use harvester_engine::llm::{OPENAI_MODEL_GPT_4O, OPENAI_MODEL_GPT_4O_MINI};
 
 fn init_logging() {
     static INIT: Once = Once::new();
@@ -82,8 +82,13 @@ fn llm_usage_accumulates_across_completions() {
 fn llm_usage_ignores_hit_validated() {
     init_logging();
     let state = AppState::new();
-    let state =
-        send_llm_completed(state, OPENAI_MODEL_GPT_4O_MINI, 100, 50, CacheStatus::HitValidated);
+    let state = send_llm_completed(
+        state,
+        OPENAI_MODEL_GPT_4O_MINI,
+        100,
+        50,
+        CacheStatus::HitValidated,
+    );
     assert!(state.llm_usage_rows().is_empty());
 }
 

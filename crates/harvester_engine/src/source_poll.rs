@@ -89,7 +89,12 @@ pub fn poll_file_source(
     }
     let parsed = all_urls.len();
     let urls: Vec<String> = all_urls.into_iter().take(limit).collect();
-    Ok(SourcePollResult { source_id, urls, parsed, dedup_filtered: 0 })
+    Ok(SourcePollResult {
+        source_id,
+        urls,
+        parsed,
+        dedup_filtered: 0,
+    })
 }
 
 pub fn poll_curated_source(

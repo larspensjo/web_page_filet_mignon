@@ -1,6 +1,6 @@
+use crate::briefing::BriefingPhase;
 use crate::briefing::BriefingSession;
 use crate::context_hash;
-use crate::briefing::BriefingPhase;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
@@ -1056,10 +1056,7 @@ impl AppState {
         save_id
     }
 
-    pub(crate) fn finish_briefing_checkpoint_save_success(
-        &mut self,
-        save_id: u64,
-    ) -> bool {
+    pub(crate) fn finish_briefing_checkpoint_save_success(&mut self, save_id: u64) -> bool {
         match self.pending_briefing_checkpoint_save.as_ref() {
             Some(pending) if pending.save_id == save_id => {
                 self.pending_briefing_checkpoint_save = None;
@@ -2417,11 +2414,9 @@ impl AppState {
 }
 
 /// Normalize URL for deduplication: trim whitespace, lowercase, strip trailing `/`.
-pub fn normalize_url_for_dedupe(url: &str) -> String {
-    let trimmed = url.trim();
-    let lowercased = trimmed.to_lowercase();
-    lowercased.trim_end_matches('/').to_owned()
-}
+///
+/// Re-exported from `harvester_engine` so both layers share the same canonical implementation.
+pub use harvester_engine::normalize_url_for_dedupe;
 
 fn normalize_extracted_link(link: &str) -> String {
     let trimmed = link.trim();

@@ -176,8 +176,8 @@ impl Default for TriageCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
     use crate::triage::ArticleTriageResult;
+    use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
     fn sample_result() -> ArticleTriageResult {
         ArticleTriageResult {
             category: "cat".to_string(),

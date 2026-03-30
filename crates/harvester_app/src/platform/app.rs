@@ -67,10 +67,9 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
 
     // Restore persisted window size, falling back to defaults.
     // Both dimensions must meet the minimum; otherwise use defaults for both.
-    let (initial_width, initial_height) =
-        load_window_size(&paths.state_path)
-            .filter(|&(w, h)| w >= DEFAULT_WINDOW_WIDTH && h >= DEFAULT_WINDOW_HEIGHT)
-            .unwrap_or((DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT));
+    let (initial_width, initial_height) = load_window_size(&paths.state_path)
+        .filter(|&(w, h)| w >= DEFAULT_WINDOW_WIDTH && h >= DEFAULT_WINDOW_HEIGHT)
+        .unwrap_or((DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT));
 
     let platform = PlatformInterface::new("harvester_app".to_string())?;
     let window_id = platform.create_window(WindowConfig {
@@ -462,7 +461,11 @@ fn build_archive_form_descriptor(
             text: format!(
                 "{} article{} await triage and are not included in this export.",
                 pending_pre_triage_count,
-                if pending_pre_triage_count == 1 { "" } else { "s" }
+                if pending_pre_triage_count == 1 {
+                    ""
+                } else {
+                    "s"
+                }
             ),
             severity: MessageSeverity::Warning,
         });
@@ -564,15 +567,11 @@ impl AppEventHandler {
                     Msg::PreTriageDecisionSet { .. } | Msg::PreTriageResetClicked
                 );
                 if let Msg::ArchiveExportFailed {
-                    basename,
-                    reason,
-                    ..
+                    basename, reason, ..
                 } = msg_for_flags
                 {
-                    archive_failure_notice = Some((
-                        format!("Archive export failed: {basename}"),
-                        reason,
-                    ));
+                    archive_failure_notice =
+                        Some((format!("Archive export failed: {basename}"), reason));
                 }
                 clear_input_needed |= effects
                     .iter()
@@ -1050,11 +1049,9 @@ impl PlatformEventHandler for AppEventHandler {
                 };
                 let basename = archive_field_text(&field_values, ARCHIVE_DIALOG_FILENAME_FIELD_ID)
                     .unwrap_or_default();
-                let set_checkpoint = archive_field_checked(
-                    &field_values,
-                    ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID,
-                )
-                .unwrap_or(true);
+                let set_checkpoint =
+                    archive_field_checked(&field_values, ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID)
+                        .unwrap_or(true);
                 engine_info!(
                     "[archive-dialog] submitted request_id={} basename={} set_checkpoint={}",
                     request_id,

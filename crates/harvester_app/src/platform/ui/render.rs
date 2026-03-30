@@ -1,7 +1,7 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{
-    ChartDataPacket, ChartLineData, ChartLineEmphasis, CheckState, MessageSeverity, PlatformCommand,
-    StyleId, WindowId,
+    ChartDataPacket, ChartLineData, ChartLineEmphasis, CheckState, MessageSeverity,
+    PlatformCommand, StyleId, WindowId,
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{

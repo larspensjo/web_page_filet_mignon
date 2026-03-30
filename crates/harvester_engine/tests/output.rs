@@ -241,9 +241,14 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
         manifest_filename: None,
         ..ExportOptions::default()
     };
-    let summary =
-        build_triage_archive(dir, "archive.md", &["https://keep".to_string()], None, options)
-            .unwrap();
+    let summary = build_triage_archive(
+        dir,
+        "archive.md",
+        &["https://keep".to_string()],
+        None,
+        options,
+    )
+    .unwrap();
     assert_eq!(
         summary
             .output_path
