@@ -410,7 +410,12 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
 
     engine_info!("[batch] Acquiring lock");
-    let _lock_guard = lock::acquire_lock(&paths.output_dir, args.force_unlock)?;
+    let lock_guard = lock::acquire_lock(&paths.output_dir, args.force_unlock)?;
+
+    // Install signal handler immediately after lock acquisition so Ctrl-C always
+    // removes the lock file, regardless of which execution path follows.
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    install_signal_handler(Arc::clone(&shutdown_flag), lock_guard.lock_path().to_path_buf());
 
     if args.dry_run {
         engine_info!("[batch] Dry-run mode: single poll only");
@@ -420,7 +425,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Import mode: branch before source loading
     if let Some(import_dir) = &args.import_saved_web_dir {
         engine_info!("[batch] Import mode: dir={}", import_dir.display());
-        return run_import_mode(&paths, &args, import_dir.clone());
+        return run_import_mode(&paths, &args, import_dir.clone(), Arc::clone(&shutdown_flag));
     }
 
     // Validate source configuration
@@ -532,10 +537,6 @@ pub fn run(args: Args) -> Result<i32, String> {
             effect_runner.enqueue(effects);
         }
     }
-
-    // Install signal handler for graceful shutdown
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-    install_signal_handler(Arc::clone(&shutdown_flag));
 
     // Outer cycle loop - poll repeatedly until shutdown
     let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
@@ -968,35 +969,20 @@ fn sleep_interruptible(duration: Duration, shutdown_flag: &Arc<AtomicBool>) -> b
     false
 }
 
-/// Installs a signal handler for SIGINT/SIGTERM to set the shutdown flag.
-fn install_signal_handler(shutdown_flag: Arc<AtomicBool>) {
-    #[cfg(unix)]
-    {
-        use std::sync::Mutex;
-        static HANDLER_INSTALLED: Mutex<bool> = Mutex::new(false);
+/// Installs a signal handler for SIGINT/SIGTERM.
+///
+/// On interrupt the handler removes the lock file (so a subsequent run does not
+/// need --force-unlock) and exits immediately with code 130 (128 + SIGINT).
+fn install_signal_handler(shutdown_flag: Arc<AtomicBool>, lock_path: std::path::PathBuf) {
+    let handler = move || {
+        // Best-effort lock removal; ignore errors (lock may already be gone).
+        let _ = std::fs::remove_file(&lock_path);
+        shutdown_flag.store(true, Ordering::Relaxed);
+        eprintln!("harvester_batch: interrupted — lock released");
+        std::process::exit(130);
+    };
 
-        let mut installed = HANDLER_INSTALLED.lock().unwrap();
-        if *installed {
-            return;
-        }
-
-        ctrlc::set_handler(move || {
-            engine_info!("[batch] Received shutdown signal (SIGINT/SIGTERM)");
-            shutdown_flag.store(true, Ordering::Relaxed);
-        })
-        .expect("Error setting signal handler");
-
-        *installed = true;
-    }
-
-    #[cfg(windows)]
-    {
-        ctrlc::set_handler(move || {
-            engine_info!("[batch] Received shutdown signal (Ctrl-C)");
-            shutdown_flag.store(true, Ordering::Relaxed);
-        })
-        .expect("Error setting signal handler");
-    }
+    ctrlc::set_handler(handler).expect("Error setting signal handler");
 }
 
 /// Converts microdollars to a human-readable dollar string with exact rounding.
@@ -1017,6 +1003,7 @@ fn run_import_mode(
     paths: &RuntimePaths,
     args: &Args,
     import_dir: std::path::PathBuf,
+    shutdown_flag: Arc<AtomicBool>,
 ) -> Result<i32, String> {
     engine_info!("[import] Starting import mode");
     let existing_completed_jobs = load_completed_jobs(&paths.state_path);
@@ -1066,9 +1053,6 @@ fn run_import_mode(
         update(state, Msg::ImportSavedWebpagesRequested { dir: import_dir });
     state = new_state;
     effect_runner.enqueue(import_effects);
-
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
-    install_signal_handler(Arc::clone(&shutdown_flag));
 
     // Run the import dispatch loop until settled.
     let outcome = run_import_dispatch_loop(

@@ -24,6 +24,12 @@ pub struct LockGuard {
     owner: String,
 }
 
+impl LockGuard {
+    pub fn lock_path(&self) -> &std::path::Path {
+        &self.lock_path
+    }
+}
+
 impl Drop for LockGuard {
     fn drop(&mut self) {
         // Verify ownership before removing lock

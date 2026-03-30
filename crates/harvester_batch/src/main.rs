@@ -28,6 +28,7 @@ fn main() {
         Ok(code) => code,
         Err(err) => {
             engine_error!("[batch] Fatal error: {}", err);
+            eprintln!("harvester_batch: {}", err);
             2
         }
     };
