@@ -1,6 +1,19 @@
 use chrono::{DateTime, Utc};
-use harvester_engine::SourceId;
+use harvester_engine::{SourceId, SourceKind};
 use std::collections::BTreeMap;
+
+/// Per-source poll statistics for a single poll cycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourcePollStat {
+    pub source_id: SourceId,
+    pub kind: SourceKind,
+    /// Raw count from the API or feed before any filtering.
+    pub parsed: usize,
+    /// Count filtered by the seen-set (cross-cycle dedup).
+    pub dedup_filtered: usize,
+    /// Final count emitted into the pipeline (after dedup + limit cap).
+    pub emitted: usize,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SourceInstanceState {
@@ -13,6 +26,8 @@ pub struct SourceInstanceState {
 pub struct SourceStateIndex {
     states: BTreeMap<SourceId, SourceInstanceState>,
     poll_in_progress: bool,
+    /// Stats accumulated for the current poll cycle; cleared when a new poll starts.
+    poll_stats: Vec<SourcePollStat>,
 }
 
 impl SourceStateIndex {
@@ -21,6 +36,14 @@ impl SourceStateIndex {
         entry.last_polled = Some(Utc::now());
         entry.last_url_count = url_count;
         entry.last_error = None;
+    }
+
+    pub fn record_poll_stat(&mut self, stat: SourcePollStat) {
+        self.poll_stats.push(stat);
+    }
+
+    pub fn poll_stats(&self) -> &[SourcePollStat] {
+        &self.poll_stats
     }
 
     pub fn record_source_error(&mut self, id: &SourceId, error: String) {
@@ -38,6 +61,7 @@ impl SourceStateIndex {
             false
         } else {
             self.poll_in_progress = true;
+            self.poll_stats.clear();
             true
         }
     }

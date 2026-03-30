@@ -10,6 +10,10 @@ use std::path::{Path, PathBuf};
 pub struct SourcePollResult {
     pub source_id: SourceId,
     pub urls: Vec<String>,
+    /// Raw count from the feed/file before any filtering.
+    pub parsed: usize,
+    /// Count filtered by the seen-set (cross-cycle dedup). Zero for source types without dedup.
+    pub dedup_filtered: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -71,7 +75,7 @@ pub fn poll_file_source(
     })?;
     let reader = BufReader::new(file);
     let limit = max_urls_per_poll.unwrap_or(usize::MAX);
-    let mut urls = Vec::new();
+    let mut all_urls = Vec::new();
     for line in reader.lines() {
         let line = line.map_err(|err| SourcePollError::Io {
             path: canonical.clone(),
@@ -81,12 +85,11 @@ pub fn poll_file_source(
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        urls.push(trimmed.to_string());
-        if urls.len() >= limit {
-            break;
-        }
+        all_urls.push(trimmed.to_string());
     }
-    Ok(SourcePollResult { source_id, urls })
+    let parsed = all_urls.len();
+    let urls: Vec<String> = all_urls.into_iter().take(limit).collect();
+    Ok(SourcePollResult { source_id, urls, parsed, dedup_filtered: 0 })
 }
 
 pub fn poll_curated_source(
@@ -94,11 +97,14 @@ pub fn poll_curated_source(
     urls: &[String],
     max_urls_per_poll: Option<usize>,
 ) -> SourcePollResult {
-    let limit = max_urls_per_poll.unwrap_or(urls.len());
+    let parsed = urls.len();
+    let limit = max_urls_per_poll.unwrap_or(parsed);
     let selected = urls.iter().take(limit).cloned().collect::<Vec<_>>();
     SourcePollResult {
         source_id,
         urls: selected,
+        parsed,
+        dedup_filtered: 0,
     }
 }
 
@@ -117,7 +123,9 @@ pub fn poll_rss_source(
         }
     })?;
 
+    let parsed = entries.len();
     let unseen_entries = seen_set.filter_unseen_entries(source_id.as_str(), entries);
+    let dedup_filtered = parsed - unseen_entries.len();
     let poll_items: Vec<RssPollItem> = unseen_entries
         .into_iter()
         .filter_map(|entry| entry.into_poll_item())
@@ -133,6 +141,8 @@ pub fn poll_rss_source(
     Ok(SourcePollResult {
         source_id,
         urls: selected_urls,
+        parsed,
+        dedup_filtered,
     })
 }
 

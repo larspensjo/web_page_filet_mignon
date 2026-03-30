@@ -1249,9 +1249,16 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Vec::new()
             }
         }
-        Msg::SourcePollCompleted { source_id, urls } => {
+        Msg::SourcePollCompleted { source_id, urls, kind, parsed, dedup_filtered } => {
             engine_info!("[source-poll] {} returned {} urls", source_id, urls.len());
             state.record_source_poll(&source_id, urls.len());
+            state.record_poll_stat(crate::SourcePollStat {
+                source_id: source_id.clone(),
+                kind,
+                parsed,
+                dedup_filtered,
+                emitted: urls.len(),
+            });
             let ingest = state.ingest_urls(urls);
             ingest.effects
         }

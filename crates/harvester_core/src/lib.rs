@@ -44,7 +44,7 @@ pub use prompt_lab::{
     ModelCatalogSource, PromptLabInputSource, PromptLabRunId, PromptLabRunRecord,
     PromptLabRunStatus, PromptLabStage, PromptLabTemplateSnapshot,
 };
-pub use source_state::{SourceInstanceState, SourceStateIndex};
+pub use source_state::{SourceInstanceState, SourcePollStat, SourceStateIndex};
 pub use state::{
     normalize_url_for_dedupe, AppState, BatchObservation, CompletedJobSnapshot, JobId,
     JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,

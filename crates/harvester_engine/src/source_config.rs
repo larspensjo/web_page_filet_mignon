@@ -70,6 +70,16 @@ pub struct BraveNewsSourceConfig {
     pub freshness: Option<String>,
 }
 
+/// Discriminant for a source type — used in poll stats and summaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SourceKind {
+    Rss,
+    Brave,
+    File,
+    Curated,
+    Script,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceType {
     File { path: PathBuf },
@@ -77,6 +87,18 @@ pub enum SourceType {
     CuratedList { urls: Vec<String> },
     Rss { feed_url: String },
     BraveNews(BraveNewsSourceConfig),
+}
+
+impl SourceType {
+    pub fn kind(&self) -> SourceKind {
+        match self {
+            SourceType::File { .. } => SourceKind::File,
+            SourceType::Script { .. } => SourceKind::Script,
+            SourceType::CuratedList { .. } => SourceKind::Curated,
+            SourceType::Rss { .. } => SourceKind::Rss,
+            SourceType::BraveNews(_) => SourceKind::Brave,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

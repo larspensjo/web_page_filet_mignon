@@ -318,6 +318,8 @@ pub struct BatchObservation {
     pub imports_failed: usize,
     /// True while an import request is in flight.
     pub import_in_flight: bool,
+    /// Per-source poll statistics for the most recent poll cycle.
+    pub source_poll_stats: Vec<crate::SourcePollStat>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -581,6 +583,7 @@ impl AppState {
             imports_failed: self.import_session.imports_failed,
             import_in_flight: self.import_session.phase
                 == crate::import_session::ImportPhase::Importing,
+            source_poll_stats: self.source_states.poll_stats().to_vec(),
         }
     }
 
@@ -1289,6 +1292,11 @@ impl AppState {
     #[allow(dead_code)]
     pub(crate) fn record_source_poll(&mut self, id: &SourceId, url_count: usize) {
         self.source_states.record_source_poll(id, url_count);
+        self.dirty = true;
+    }
+
+    pub(crate) fn record_poll_stat(&mut self, stat: crate::SourcePollStat) {
+        self.source_states.record_poll_stat(stat);
         self.dirty = true;
     }
 

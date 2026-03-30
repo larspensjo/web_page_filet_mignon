@@ -305,7 +305,7 @@ fn summarize_batch_msg(msg: &Msg) -> String {
     match msg {
         Msg::PollSourcesClicked => "PollSourcesClicked".to_string(),
         Msg::AllSourcesPollEnded => "AllSourcesPollEnded".to_string(),
-        Msg::SourcePollCompleted { source_id, urls } => {
+        Msg::SourcePollCompleted { source_id, urls, .. } => {
             format!(
                 "SourcePollCompleted {{ source_id: {}, urls: {} }}",
                 source_id,
@@ -594,6 +594,7 @@ pub fn run(args: Args) -> Result<i32, String> {
             print_cycle_table_header();
         }
         print_cycle_summary(cycle_count, &outcome, &cycle_counts);
+        print_poll_stats(&state.batch_observation().source_poll_stats);
         for line in format_llm_usage_lines(&state.llm_usage_rows()) {
             println!("{}", line);
         }
@@ -858,6 +859,58 @@ fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
             )
         })
         .collect()
+}
+
+/// Prints a grouped poll-stats summary (RSS / Brave / other source types).
+fn print_poll_stats(stats: &[harvester_core::SourcePollStat]) {
+    use harvester_engine::SourceKind;
+
+    if stats.is_empty() {
+        return;
+    }
+
+    let groups: &[(SourceKind, &str)] = &[
+        (SourceKind::Rss, "RSS"),
+        (SourceKind::Brave, "Brave"),
+        (SourceKind::File, "File"),
+        (SourceKind::Curated, "Curated"),
+        (SourceKind::Script, "Script"),
+    ];
+
+    let mut printed_any = false;
+    for (kind, label) in groups {
+        let group: Vec<_> = stats.iter().filter(|s| s.kind == *kind).collect();
+        if group.is_empty() {
+            continue;
+        }
+        if !printed_any {
+            println!("\n--- Poll summary ---");
+            printed_any = true;
+        }
+        let total_emitted: usize = group.iter().map(|s| s.emitted).sum();
+        let total_filtered: usize = group.iter().map(|s| s.dedup_filtered).sum();
+        println!(
+            "{} ({} source{}): {} emitted, {} dedup-filtered",
+            label,
+            group.len(),
+            if group.len() == 1 { "" } else { "s" },
+            total_emitted,
+            total_filtered,
+        );
+        for s in &group {
+            if s.parsed == 0 {
+                println!("  {}: 0 parsed", s.source_id);
+            } else {
+                println!(
+                    "  {}: {} parsed → {} filtered → {} emitted",
+                    s.source_id, s.parsed, s.dedup_filtered, s.emitted
+                );
+            }
+        }
+    }
+    if printed_any {
+        println!("--------------------");
+    }
 }
 
 fn print_cycle_table_header() {
@@ -1210,6 +1263,7 @@ fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
         obs.triage_total, obs.triage_completed, obs.triage_failed, obs.triage_pending
     );
     println!("Session state: {:?}", obs.session_state);
+    print_poll_stats(&obs.source_poll_stats);
     println!("======================\n");
 
     engine_info!("[dry-run] Dry-run complete (no state modifications)");
@@ -1309,6 +1363,7 @@ mod tests {
             imports_completed,
             imports_failed,
             import_in_flight: false,
+            source_poll_stats: vec![],
         }
     }
 
@@ -1399,6 +1454,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert!(should_settle_cycle(&obs));
@@ -1439,6 +1495,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert!(!should_settle_cycle(&obs));
@@ -1479,6 +1536,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert!(!should_settle_cycle(&obs));
@@ -1519,6 +1577,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert!(!should_settle_cycle(&obs));
@@ -1559,6 +1618,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert!(should_settle_cycle(&obs));
@@ -1601,6 +1661,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert!(should_settle_cycle(&obs));
@@ -1853,6 +1914,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::Success);
@@ -1893,6 +1955,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::PartialFailure);
@@ -1933,6 +1996,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         };
 
         assert_eq!(classify_cycle_outcome(&obs), CycleOutcome::TotalFailure);
@@ -2137,6 +2201,7 @@ mod tests {
             imports_completed: 0,
             imports_failed: 0,
             import_in_flight: false,
+            source_poll_stats: vec![],
         }
     }
 

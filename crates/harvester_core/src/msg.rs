@@ -164,6 +164,11 @@ pub enum Msg {
     SourcePollCompleted {
         source_id: harvester_engine::SourceId,
         urls: Vec<String>,
+        kind: harvester_engine::SourceKind,
+        /// Raw count from the API or feed before any filtering.
+        parsed: usize,
+        /// Count filtered by the seen-set (cross-cycle dedup).
+        dedup_filtered: usize,
     },
     /// Polling failed for a source.
     SourcePollFailed {

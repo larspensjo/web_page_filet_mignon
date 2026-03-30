@@ -113,13 +113,18 @@ pub fn handle_rss_source_poll(
     }
 
     engine_info!(
-        "[rss-poll] {} => {} new URL(s)",
+        "[rss-poll] {} => {} parsed, {} after dedup, {} emitted",
         source_id,
+        result.parsed,
+        result.parsed - result.dedup_filtered,
         result.urls.len()
     );
     let _ = context.msg_tx.send(Msg::SourcePollCompleted {
         source_id: source_id.clone(),
         urls: result.urls,
+        kind: harvester_engine::SourceKind::Rss,
+        parsed: result.parsed,
+        dedup_filtered: result.dedup_filtered,
     });
 }
 
@@ -610,9 +615,13 @@ pub fn handle_brave_source_poll(
                 deduped_count,
                 emitted_urls.len()
             );
+            let dedup_filtered = parsed_count - deduped_count;
             let _ = msg_tx.send(Msg::SourcePollCompleted {
                 source_id: source_id.clone(),
                 urls: emitted_urls,
+                kind: harvester_engine::SourceKind::Brave,
+                parsed: parsed_count,
+                dedup_filtered,
             });
         }
         Err(err) => {

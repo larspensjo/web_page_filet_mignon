@@ -62,7 +62,7 @@ pub use quota::{QuotaTracker, SessionQuotas};
 pub use brave_poll::{parse_brave_news_response, BraveNewsItem, BravePollError};
 pub use brave_seen_set::{normalize_for_dedupe, BraveSeenSet};
 pub use source_config::{
-    BraveNewsSourceConfig, SourceConfig, SourceId, SourceIdError, SourceRegistry,
+    BraveNewsSourceConfig, SourceConfig, SourceId, SourceIdError, SourceKind, SourceRegistry,
     SourceRegistryValidationError, SourceType,
 };
 pub use source_poll::{

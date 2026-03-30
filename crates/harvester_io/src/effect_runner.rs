@@ -1417,6 +1417,9 @@ impl EffectRunner {
                             let _ = msg_tx.send(Msg::SourcePollCompleted {
                                 source_id,
                                 urls: result.urls,
+                                kind: harvester_engine::SourceKind::File,
+                                parsed: result.parsed,
+                                dedup_filtered: result.dedup_filtered,
                             });
                         }
                         Err(err) => {
@@ -1450,6 +1453,9 @@ impl EffectRunner {
                         let _ = msg_tx.send(Msg::SourcePollCompleted {
                             source_id,
                             urls: result.urls,
+                            kind: harvester_engine::SourceKind::Curated,
+                            parsed: result.parsed,
+                            dedup_filtered: result.dedup_filtered,
                         });
                     }
                     SourceType::Script { .. } => {
