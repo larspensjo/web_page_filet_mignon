@@ -21,6 +21,23 @@
 
 ---
 
+## Slice Progress
+
+| Slice | Tasks | Branch | Status |
+|---|---|---|---|
+| **A** | 1, 2, 4 | `feature/brave-slice-a` | ✅ Done |
+| **B** | 3 | `feature/brave-slice-a` | ✅ Done |
+| **C** | 5, 6, 7 | `feature/brave-slice-a` | ✅ Done |
+| **D** | normalize refactor + 8, 9, 10 | `feature/brave-slice-a` | 🔲 Pending |
+
+**Slice D scope:**
+1. Refactor `normalize_url_for_dedupe` — move the canonical function from `harvester_core` into `harvester_engine` so `BraveSeenSet` can use it directly instead of an inlined copy. `harvester_core` then imports it from `harvester_engine` (already allowed).
+2. Task 8: Implement wiremock tests for the Brave HTTP layer (`fetch_brave_results`). Note: `make_test_runtime_paths` struct literal fix and RuntimePaths fields were already applied in Slice C.
+3. Task 9: Integration test — Brave source end-to-end through the reducer.
+4. Task 10: Final workspace lint, format, diary entry, and branch close.
+
+---
+
 ## File Map
 
 | File | Action | Responsibility |
@@ -1240,102 +1257,257 @@ git commit -m "feat: integrate BraveSeenSet with dedup-before-limit semantics an
 
 ---
 
-### Task 8: Runtime paths fix-up and wiremock tests
+## Slice D — Hardening and cleanup
+
+### Task 8a: Refactor `normalize_url_for_dedupe` — move to `harvester_engine`
+
+**Context:** In Slice C, `BraveSeenSet` needed `normalize_url_for_dedupe` but `harvester_engine` cannot depend on `harvester_core` (circular — `harvester_core` already depends on `harvester_engine`). The workaround was to inline an identical 2-line copy called `normalize_for_dedupe` with a comment tying it to the canonical source. The proper fix is to move the canonical function *down* to `harvester_engine`, so both layers can import it from the lower crate.
 
 **Files:**
-- Modify: `crates/harvester_io/src/runtime_paths.rs` (add new fields)
-- Modify: `crates/harvester_io/src/effect_runner.rs` (fix test helper `RuntimePaths` struct literal)
-- Modify: `crates/harvester_batch/src/runner.rs` (if RuntimePaths construction needs updating)
-- Modify: `crates/harvester_io/src/effect_helpers.rs` (add wiremock tests)
+- Modify: `crates/harvester_engine/src/brave_seen_set.rs` — remove inlined copy, use imported function
+- Modify: `crates/harvester_engine/src/lib.rs` — export `normalize_url_for_dedupe`
+- Modify: `crates/harvester_core/src/` — replace local definition with re-export from `harvester_engine`
 
-Adding `brave_seen_set_path` and `brave_metadata_path` to `RuntimePaths` affects every site that constructs the struct. Known touch points:
-- `crates/harvester_io/src/runtime_paths.rs` — `RuntimePaths::new()` constructor
-- `crates/harvester_io/src/effect_runner.rs` — test helper `make_test_runtime_paths` (struct literal, ~line 1614)
-- `crates/harvester_batch/src/runner.rs` — test helper `make_checkpoint_test_paths` (uses `RuntimePaths::new()`, should be fine)
+- [ ] **Step 1: Find the current definition in `harvester_core`**
 
-- [ ] **Step 1: Update `make_test_runtime_paths` in effect_runner.rs**
-
-The test helper at ~line 1614 constructs `RuntimePaths` with a struct literal. Add the new fields:
-
-```rust
-brave_seen_set_path: base.join(".brave_seen_set.ron"),
-brave_metadata_path: base.join(".brave_metadata.ron"),
+```bash
+grep -rn "fn normalize_url_for_dedupe" crates/harvester_core/src/
 ```
 
-- [ ] **Step 2: Build all crates**
+Note the file and line. The function is a pure 2-line string transformation (trim → lowercase → strip trailing `/`).
 
-Run: `cargo build --workspace`
-Expected: compiles. If any other `RuntimePaths { ... }` struct literals fail, fix them.
+- [ ] **Step 2: Move the function body to `harvester_engine`**
 
-- [ ] **Step 3: Run all batch and IO tests**
+In `crates/harvester_engine/src/brave_seen_set.rs`, replace the inlined `normalize_for_dedupe` function with the canonical name and a `pub` modifier:
 
-Run: `cargo nextest run -p harvester_batch && cargo nextest run -p harvester_io`
-Expected: all pass
+```rust
+/// Normalize a URL for deduplication: trim whitespace, lowercase, strip trailing slash.
+/// This is the canonical implementation shared by `BraveSeenSet` and the reducer.
+pub fn normalize_url_for_dedupe(url: &str) -> String {
+    url.trim().to_lowercase().trim_end_matches('/').to_owned()
+}
+```
 
-- [ ] **Step 4: Add wiremock tests for Brave HTTP layer**
+Update the internal `use` and any calls to reference the new name.
 
-Add to `crates/harvester_io/src/effect_helpers.rs` test module (or create a dedicated test file):
+- [ ] **Step 3: Export from `harvester_engine::lib.rs`**
+
+Add to the public exports:
+
+```rust
+pub use brave_seen_set::normalize_url_for_dedupe;
+```
+
+- [ ] **Step 4: Update `harvester_core` to import from `harvester_engine`**
+
+In the `harvester_core` file that currently defines `normalize_url_for_dedupe`, delete the local `fn` and replace with:
+
+```rust
+pub use harvester_engine::normalize_url_for_dedupe;
+```
+
+All existing `harvester_core` callers continue to work through the re-export. No call-site changes needed.
+
+- [ ] **Step 5: Build and run all tests**
+
+```bash
+cargo build --workspace && cargo nextest run
+```
+
+Expected: all tests pass. The function behavior is identical so no test changes needed.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add crates/harvester_engine/src/brave_seen_set.rs crates/harvester_engine/src/lib.rs
+git add $(grep -rl "fn normalize_url_for_dedupe" crates/harvester_core/src/)
+git commit -m "refactor: move normalize_url_for_dedupe to harvester_engine; harvester_core re-exports"
+```
+
+---
+
+### Task 8: Wiremock tests for Brave HTTP layer
+
+**Status of sub-tasks from original plan:**
+- ✅ `RuntimePaths` fields `brave_seen_set_path` / `brave_metadata_path` added (done in Slice C)
+- ✅ `make_test_runtime_paths` struct literal updated (done in Slice C)
+- 🔲 Wiremock tests for `fetch_brave_results` — still needed
+
+**Note:** `reqwest`'s blocking client does not support `.query()` with the feature flags in use (`default-features = false, features = ["rustls", "blocking"]`). The implementation uses `reqwest::Url::query_pairs_mut()` to build URLs manually. Wiremock tests must verify the URL the client actually constructs, not what the plan's stub assumed.
+
+**Files:**
+- Modify: `crates/harvester_io/src/effect_helpers.rs` (add wiremock tests)
+- Modify: `crates/harvester_io/Cargo.toml` (add `wiremock` as dev-dependency if not present)
+
+- [ ] **Step 1: Check if `wiremock` is already a dev-dependency**
+
+```bash
+grep wiremock crates/harvester_io/Cargo.toml
+```
+
+If missing, add:
+
+```toml
+[dev-dependencies]
+wiremock = "0.6"
+```
+
+- [ ] **Step 2: Make `fetch_brave_results` accept a base URL override for testing**
+
+`fetch_brave_results` currently hardcodes `BRAVE_NEWS_API_URL`. To test against a wiremock server, the function needs to accept an optional base URL. Preferred pattern: add a `base_url: Option<&str>` parameter, or extract a private `fetch_brave_results_with_url(base_url, ...)` that the public function delegates to.
+
+```rust
+pub(crate) fn fetch_brave_results_with_url(
+    base_url: &str,
+    query: &str,
+    api_key: &str,
+    count: Option<usize>,
+    freshness: Option<&str>,
+    fetch_settings: &FetchSettings,
+) -> Result<Vec<u8>, String> { /* existing body, using base_url */ }
+
+pub fn fetch_brave_results(
+    query: &str,
+    api_key: &str,
+    count: Option<usize>,
+    freshness: Option<&str>,
+    fetch_settings: &FetchSettings,
+) -> Result<Vec<u8>, String> {
+    fetch_brave_results_with_url(BRAVE_NEWS_API_URL, query, api_key, count, freshness, fetch_settings)
+}
+```
+
+- [ ] **Step 3: Implement the wiremock tests**
+
+Add to `crates/harvester_io/src/effect_helpers.rs`:
 
 ```rust
 #[cfg(test)]
 mod brave_fetch_tests {
     use super::*;
-    use wiremock::{MockServer, Mock, ResponseTemplate};
-    use wiremock::matchers::{method, path, header, query_param};
+    use wiremock::matchers::{header, method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    #[test]
-    fn fetch_sends_correct_headers_and_query() {
-        // Verify X-Subscription-Token header, Accept: application/json,
-        // q= query param, count= and freshness= when provided
+    fn default_settings() -> FetchSettings {
+        FetchSettings::default()
     }
 
     #[test]
-    fn fetch_maps_401_to_error() {
-        // Mock returns 401, verify error message
+    fn fetch_sends_auth_header_and_query_param() {
+        let server = MockServer::start_blocking();
+        Mock::given(method("GET"))
+            .and(path("/res/v1/news/search"))
+            .and(header("X-Subscription-Token", "test-key"))
+            .and(header("Accept", "application/json"))
+            .and(query_param("q", "AI chips"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(br#"{"results":[]}"#))
+            .mount_blocking(&server);
+
+        let result = fetch_brave_results_with_url(
+            &server.uri(),
+            "AI chips", "test-key", None, None, &default_settings(),
+        );
+        assert!(result.is_ok());
     }
 
     #[test]
-    fn fetch_maps_403_to_error() {
-        // Mock returns 403, verify error message
+    fn fetch_includes_count_param_when_provided() {
+        let server = MockServer::start_blocking();
+        Mock::given(method("GET"))
+            .and(query_param("count", "20"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(br#"{"results":[]}"#))
+            .mount_blocking(&server);
+
+        let result = fetch_brave_results_with_url(
+            &server.uri(), "q", "key", Some(20), None, &default_settings(),
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn fetch_includes_freshness_param_when_provided() {
+        let server = MockServer::start_blocking();
+        Mock::given(method("GET"))
+            .and(query_param("freshness", "pd"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(br#"{"results":[]}"#))
+            .mount_blocking(&server);
+
+        let result = fetch_brave_results_with_url(
+            &server.uri(), "q", "key", None, Some("pd"), &default_settings(),
+        );
+        assert!(result.is_ok());
     }
 
     #[test]
     fn fetch_maps_429_to_rate_limit_error() {
-        // Mock returns 429, verify error message contains "rate-limited"
+        let server = MockServer::start_blocking();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(429))
+            .mount_blocking(&server);
+
+        let err = fetch_brave_results_with_url(
+            &server.uri(), "q", "key", None, None, &default_settings(),
+        ).unwrap_err();
+        assert!(err.contains("rate-limited"), "expected 'rate-limited' in: {err}");
     }
 
     #[test]
-    fn fetch_rejects_oversized_response() {
-        // Mock returns >2MB body, verify MAX_BRAVE_RESPONSE_BYTES error
-    }
+    fn fetch_maps_401_to_error() {
+        let server = MockServer::start_blocking();
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount_blocking(&server);
 
-    #[test]
-    fn fetch_handles_malformed_json_gracefully() {
-        // Mock returns 200 with invalid JSON body
+        let err = fetch_brave_results_with_url(
+            &server.uri(), "q", "key", None, None, &default_settings(),
+        ).unwrap_err();
+        assert!(err.contains("401"), "expected 401 in: {err}");
     }
 
     #[test]
     fn handle_brave_poll_fails_with_missing_env_var() {
-        // Unset env var, verify SourcePollFailed message
-    }
+        use std::sync::mpsc;
+        let (tx, rx) = mpsc::channel();
+        let source_id = harvester_engine::SourceId::new("brave-test").unwrap();
+        let cfg = harvester_engine::BraveNewsSourceConfig {
+            query: "test".to_string(),
+            api_key_env: "BRAVE_KEY_DEFINITELY_NOT_SET_XYZ".to_string(),
+            count: None,
+            freshness: None,
+        };
+        let temp = tempfile::TempDir::new().unwrap();
+        let mut seen_set = harvester_engine::BraveSeenSet::new();
+        let mut context = BravePollContext {
+            brave_seen_set: &mut seen_set,
+            brave_seen_set_path: &temp.path().join(".brave_seen_set.ron"),
+            brave_metadata_path: &temp.path().join(".brave_metadata.ron"),
+            msg_tx: &tx,
+        };
+        handle_brave_source_poll(&source_id, &cfg, None, &FetchSettings::default(), &mut context);
 
-    #[test]
-    fn handle_brave_poll_fails_with_empty_env_var() {
-        // Set env var to "", verify SourcePollFailed message
+        match rx.try_recv().unwrap() {
+            harvester_engine::Msg::SourcePollFailed { source_id: id, .. } => {
+                assert_eq!(id, source_id);
+            }
+            other => panic!("expected SourcePollFailed, got {other:?}"),
+        }
     }
 }
 ```
 
-- [ ] **Step 5: Run wiremock tests**
-
-Run: `cargo nextest run -p harvester_io brave_fetch`
-Expected: all pass
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Run wiremock tests**
 
 ```bash
-git add crates/harvester_io/src/effect_runner.rs crates/harvester_io/src/effect_helpers.rs
-git commit -m "fix: update RuntimePaths struct literals and add wiremock tests for Brave HTTP layer"
+cargo nextest run -p harvester_io brave_fetch
+```
+
+Expected: all pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add crates/harvester_io/src/effect_helpers.rs crates/harvester_io/Cargo.toml
+git commit -m "test: add wiremock tests for Brave HTTP fetch layer"
 ```
 
 ---
@@ -1439,9 +1611,9 @@ git commit -m "test: add reducer-level integration tests for Brave source pollin
 
 ---
 
-### Task 10: Final lint, format, and workspace check
+### Task 10: Final lint, format, diary, and branch close
 
-**Files:** Entire workspace
+**Files:** Entire workspace + `docs/EngineeringDiary.md`
 
 - [ ] **Step 1: Run clippy across the workspace**
 
@@ -1457,12 +1629,25 @@ Run: `cargo fmt`
 Run: `cargo nextest run`
 Expected: all tests pass
 
-- [ ] **Step 4: Final commit if any fixes were needed**
+- [ ] **Step 4: Update `docs/EngineeringDiary.md`**
+
+Per `Agents.md` policy. Add a concise entry covering:
+- What was added (Brave News API as first-class source type)
+- Two dedup layers and why (BraveSeenSet cross-cycle + reducer in-session)
+- The normalize_url_for_dedupe refactor and why it belongs in `harvester_engine`
+- The BravePollContext struct workaround for clippy's 7-arg limit
+- The reqwest `.query()` / `query_pairs_mut()` gotcha (blocked by feature flags)
+
+- [ ] **Step 5: Final commit if any fixes were needed**
 
 ```bash
 git add -A
 git commit -m "chore: clippy and fmt cleanup for Brave Search integration"
 ```
+
+- [ ] **Step 6: Close the branch**
+
+Use `superpowers:finishing-a-development-branch` to present merge/PR options.
 
 ---
 
@@ -1478,7 +1663,9 @@ A dedicated config struct gives the source type a stable home for future API opt
 
 ### Why reuse `normalize_url_for_dedupe` instead of a separate Brave normalization?
 
-Cross-cycle dedup (`BraveSeenSet`) and in-session dedup (reducer) must agree on URL identity. Adding a second canonicalization function would create semantic drift — a URL could be "seen" in one layer and "new" in another. If stronger canonicalization (tracking param stripping, fragment removal) is needed later, it should be added to the shared function in `harvester_core` and versioned explicitly.
+Cross-cycle dedup (`BraveSeenSet`) and in-session dedup (reducer) must agree on URL identity. Adding a second canonicalization function would create semantic drift — a URL could be "seen" in one layer and "new" in another. If stronger canonicalization (tracking param stripping, fragment removal) is needed later, it should be added to the shared function and versioned explicitly.
+
+The canonical home is `harvester_engine` (moved there in Task 8a from `harvester_core`). `harvester_core` re-exports it. This avoids the circular dependency that would arise if `harvester_engine` tried to import from `harvester_core`.
 
 ### Why dedup before limit (matching RSS semantics)?
 
