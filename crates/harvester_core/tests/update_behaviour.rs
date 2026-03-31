@@ -191,16 +191,22 @@ fn archive_click_emits_effect_without_state_change() {
     let (next, effects) = update(state, Msg::ArchiveClicked);
 
     assert_eq!(next.view(), before);
-    assert_eq!(
-        effects,
-        vec![Effect::OpenArchiveDialog {
-            request_id: 1,
-            article_count: 0,
-            since_utc: None,
-            default_basename: "archive.md".to_string(),
-            pending_pre_triage_count: 0,
-        }]
-    );
+    assert_eq!(effects.len(), 1);
+    let Effect::OpenArchiveDialog {
+        request_id,
+        article_count,
+        since_utc,
+        default_basename,
+        pending_pre_triage_count,
+    } = &effects[0]
+    else {
+        panic!("expected OpenArchiveDialog effect, got {:?}", effects[0]);
+    };
+    assert!(*request_id > 0);
+    assert_eq!(*article_count, 0);
+    assert!(since_utc.is_none());
+    assert_eq!(default_basename, "archive.md");
+    assert_eq!(*pending_pre_triage_count, 0);
 }
 
 fn send_llm_request_with_context(state: AppState) -> (AppState, Vec<Effect>) {

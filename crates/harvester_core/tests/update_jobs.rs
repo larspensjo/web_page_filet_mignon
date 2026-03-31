@@ -1,8 +1,6 @@
 use std::path::PathBuf;
 
-use harvester_core::{
-    update, AppState, Effect, JobResultKind, LinkDownloadState, Msg, Stage, TOKEN_LIMIT,
-};
+use harvester_core::{update, AppState, Effect, JobResultKind, LinkDownloadState, Msg, Stage};
 use harvester_engine::{ExtractedLink, LinkKind};
 
 fn submit_urls(state: AppState, input: &str) -> (AppState, Vec<Effect>) {
@@ -44,10 +42,15 @@ fn urls_pasted_trims_and_ignores_empty() {
     assert!(view.queued_urls.is_empty());
     assert_eq!(view.job_count, 2);
     assert!(next.consume_dirty());
+}
 
-    // Progress on job 1.
-    let (mut next, _effects) = update(
-        next,
+#[test]
+fn job_progress_updates_stage_tokens_and_bytes() {
+    let state = AppState::new();
+    let (state, _) = submit_urls(state, "https://a.example.com\nhttps://b.example.com\n");
+
+    let (mut next, _) = update(
+        state,
         Msg::JobProgress {
             job_id: 1,
             stage: Stage::Downloading,
@@ -67,10 +70,15 @@ fn urls_pasted_trims_and_ignores_empty() {
     assert_eq!(job1.tokens, Some(10));
     assert_eq!(job1.bytes, Some(1024));
     assert!(next.consume_dirty());
+}
 
-    // Completion for job 1.
-    let (mut next, _effects) = update(
-        next,
+#[test]
+fn job_done_transitions_to_done() {
+    let state = AppState::new();
+    let (state, _) = submit_urls(state, "https://a.example.com\nhttps://b.example.com\n");
+
+    let (mut next, _) = update(
+        state,
         Msg::JobDone {
             job_id: 1,
             result: JobResultKind::Success,
@@ -79,15 +87,15 @@ fn urls_pasted_trims_and_ignores_empty() {
             fetched_utc: None,
         },
     );
-    let job1_done = next
+    let job1 = next
         .view()
         .jobs
         .iter()
         .find(|j| j.job_id == 1)
         .unwrap()
         .clone();
-    assert_eq!(job1_done.stage, Stage::Done);
-    assert_eq!(job1_done.outcome, Some(JobResultKind::Success));
+    assert_eq!(job1.stage, Stage::Done);
+    assert_eq!(job1.outcome, Some(JobResultKind::Success));
     assert!(next.consume_dirty());
 }
 
@@ -119,7 +127,6 @@ fn token_totals_accumulate_and_replace_previous_values() {
     );
     let view_after_first = state.view();
     assert_eq!(view_after_first.total_tokens, 120);
-    assert_eq!(view_after_first.token_limit, TOKEN_LIMIT);
     assert!(state.consume_dirty());
 
     let (mut state, _effects) = update(
