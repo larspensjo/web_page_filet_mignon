@@ -922,3 +922,11 @@ Context: `blocker_page` exposed free-form reason strings as its primary result, 
 Change: Replaced `Option<String>` with `Option<BlockedPageKind>` in `blocker_page`, implemented `Display` for log/user text, updated engine handling to format the enum into `FailureKind::BlockedContent`, and added regression coverage for generic consent and captcha-content cases.
 Refs: crates/harvester_engine/src/blocker_page.rs, crates/harvester_engine/src/engine.rs
 
+## 2026-03-31 - Rewrite chunk 7 tests around boundary semantics instead of formatting details
+Type: Bug Fix
+Context: Chunk 7 unit-test review found IO, UI, and batch tests asserting serializer details, exact copy, and log-string wording that could change under safe refactors without any behavioral regression.
+Change: Reworked the affected tests to assert prompt save round-trips, archive export completion plus selected-document inclusion/exclusion, markdown viewer structure via minimal RTF markers, UI state changes via rendered control semantics, and batch log helpers via compaction/truncation behavior rather than exact phrasing.
+Lessons Learned: The root cause was treating the easiest observable string as the contract instead of first choosing the narrowest stable boundary; once tests lock raw representations, harmless formatting drift looks like a correctness failure.
+Prevention: Use correctness by construction in tests by preferring typed round-trip loads, request/ack messages, and semantic render helpers over raw file substrings or full snapshots; if a format string is truly a contract, isolate it in one compatibility-focused test and document why it is stable.
+Refs: crates/harvester_io/src/effect_runner.rs, crates/harvester_app/src/platform/ui/markdown_to_rtf.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_batch/src/runner.rs, docs/plans/Findings.UnitTestReviewChunk7.md
+

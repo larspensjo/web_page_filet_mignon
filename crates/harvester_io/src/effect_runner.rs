@@ -1840,9 +1840,11 @@ mod tests {
                 version,
             } => {
                 assert_eq!(received, prompt_id);
-                assert_eq!(version, 1);
                 let saved =
                     load_context_file(&std::path::PathBuf::from(&path)).expect("load saved");
+                assert_eq!(saved.meta.prompt_id, prompt_id.to_string());
+                assert_eq!(saved.meta.schema_version, 1);
+                assert_eq!(version, saved.meta.version as u64);
                 assert_eq!(saved.variables.get("foo").map(String::as_str), Some("bar"));
             }
             other => panic!("unexpected message: {:?}", other),
@@ -1932,12 +1934,16 @@ mod tests {
         let temp = tempdir().expect("tempdir");
         let (runner, rx) = runner_with_receiver(temp.path());
         let prompt_id = PromptId::ArticleTriage;
+        let system_template = "system {{context}}".to_string();
+        let user_template = "user {{context}}".to_string();
+        let description = "desc".to_string();
+        let expected_format = "json".to_string();
         runner.enqueue(vec![Effect::SavePromptTemplateFile {
             prompt_id,
-            system_template: "system {{context}}".to_string(),
-            user_template: "user {{context}}".to_string(),
-            description: "desc".to_string(),
-            expected_format: "json".to_string(),
+            system_template: system_template.clone(),
+            user_template: user_template.clone(),
+            description: description.clone(),
+            expected_format: expected_format.clone(),
         }]);
 
         let msg = rx
@@ -1951,11 +1957,25 @@ mod tests {
                 path,
             } => {
                 assert_eq!(received, prompt_id);
-                assert_eq!(version, 1);
-                let file = fs::read_to_string(std::path::PathBuf::from(&path))
-                    .expect("read saved template file");
-                assert!(file.contains("system {{context}}"));
-                assert!(file.contains("user {{context}}"));
+                let template_path = std::path::PathBuf::from(&path);
+                let prompts_dir = template_path
+                    .parent()
+                    .and_then(|dir| dir.parent())
+                    .expect("template file stored under prompts/<prompt_id>");
+                let loaded = crate::load_prompt_templates(prompts_dir)
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()
+                    .expect("load saved templates");
+                let saved = loaded
+                    .into_iter()
+                    .find(|template| template.path == template_path)
+                    .expect("saved template present");
+                assert_eq!(saved.prompt_id, prompt_id);
+                assert_eq!(saved.template_file.version, version);
+                assert_eq!(saved.template_file.system_template, system_template);
+                assert_eq!(saved.template_file.user_template, user_template);
+                assert_eq!(saved.template_file.description, description);
+                assert_eq!(saved.template_file.expected_format, expected_format);
             }
             other => panic!("unexpected message: {:?}", other),
         }
@@ -2215,7 +2235,7 @@ mod tests {
         fs::write(output.join("a.md"), md_a).expect("write a");
         fs::write(output.join("b.md"), md_b).expect("write b");
 
-        let (runner, _rx) = runner_with_receiver(output);
+        let (runner, rx) = runner_with_receiver(output);
         runner.enqueue(vec![Effect::ArchiveRequested {
             request_id: 7,
             basename: "archive.md".to_string(),
@@ -2224,35 +2244,32 @@ mod tests {
             requested_checkpoint: None,
         }]);
 
-        let mut archive_path = None;
-        for _ in 0..40 {
-            if let Ok(entries) = fs::read_dir(output) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let is_archive = path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .map(|n| n == "archive.md")
-                        .unwrap_or(false);
-                    if is_archive {
-                        archive_path = Some(path);
-                        break;
-                    }
-                }
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected archive export completed message");
+        let archive_path = match msg {
+            Msg::ArchiveExportCompleted {
+                request_id,
+                path,
+                doc_count,
+                requested_checkpoint,
+            } => {
+                assert_eq!(request_id, 7);
+                assert_eq!(doc_count, 1);
+                assert_eq!(requested_checkpoint, None);
+                path
             }
-            if archive_path.is_some() {
-                break;
-            }
-            thread::sleep(Duration::from_millis(25));
-        }
-
-        let archive_path = archive_path.expect("archive.md should be written");
-        let archive_name = archive_path.file_name().and_then(|n| n.to_str()).unwrap();
-        assert_eq!(archive_name, "archive.md");
+            other => panic!("unexpected message: {:?}", other),
+        };
+        assert_eq!(
+            archive_path.file_name().and_then(|n| n.to_str()),
+            Some("archive.md")
+        );
         let archive = fs::read_to_string(&archive_path).expect("read archive");
-        assert!(!archive.contains("url: https://example.com/b\n"));
-        assert!(!archive.contains("url: https://example.com/a\n"));
-        assert!(archive.contains("url: \"https://example.com/b\""));
-        assert!(!archive.contains("url: \"https://example.com/a\""));
+        assert!(archive.starts_with("===== DOC START ====="));
+        assert!(archive.contains("https://example.com/b"));
+        assert!(archive.contains("B body"));
+        assert!(!archive.contains("https://example.com/a"));
+        assert!(!archive.contains("A body"));
     }
 }

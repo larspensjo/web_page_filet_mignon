@@ -1697,17 +1697,19 @@ mod tests {
             request_id: 1,
             articles: Vec::new(),
         };
-        assert_eq!(
-            summarize_batch_msg(&msg),
-            "TriageArticlesLoaded { articles: 0 }"
-        );
+        let summary = summarize_batch_msg(&msg);
+        assert!(summary.contains("TriageArticlesLoaded"));
+        assert!(summary.contains("articles: 0"));
+        assert!(!summary.contains("request_id"));
     }
 
     #[test]
     fn test_truncate_for_log_appends_ellipsis() {
         let input = "abcdefghijklmnopqrstuvwxyz";
         let output = truncate_for_log(input, 10);
-        assert_eq!(output, "abcdefghij...");
+        assert!(output.starts_with("abcdefghij"));
+        assert!(output.ends_with("..."));
+        assert_eq!(output.chars().count(), 13);
     }
 
     #[test]
@@ -2011,32 +2013,27 @@ mod tests {
     }
 
     #[test]
-    fn format_llm_usage_lines_sorted_and_stable() {
+    fn format_llm_usage_lines_formats_rows_compactly() {
         let rows = vec![
             LlmModelUsageView {
-                model: OPENAI_MODEL_GPT_4O_MINI.to_string(),
+                model: "alpha".to_string(),
                 input_tokens: 12_345,
                 output_tokens: 3_100,
             },
             LlmModelUsageView {
-                model: harvester_engine::llm::OPENAI_MODEL_GPT_4O.to_string(),
+                model: "beta".to_string(),
                 input_tokens: 500,
                 output_tokens: 80,
             },
         ];
         let lines = format_llm_usage_lines(&rows);
         assert_eq!(lines.len(), 2);
-        assert_eq!(
-            lines[0],
-            format!("  {}: in=12K out=3K", OPENAI_MODEL_GPT_4O_MINI)
-        );
-        assert_eq!(
-            lines[1],
-            format!(
-                "  {}: in=500 out=80",
-                harvester_engine::llm::OPENAI_MODEL_GPT_4O
-            )
-        );
+        assert!(lines[0].contains("alpha"));
+        assert!(lines[0].contains("in=12K"));
+        assert!(lines[0].contains("out=3K"));
+        assert!(lines[1].contains("beta"));
+        assert!(lines[1].contains("in=500"));
+        assert!(lines[1].contains("out=80"));
     }
 
     #[test]

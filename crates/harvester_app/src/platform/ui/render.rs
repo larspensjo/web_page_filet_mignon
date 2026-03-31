@@ -2965,19 +2965,14 @@ mod tests {
         let mut view = make_view(vec![]);
         view.left_pane.prompt_lab.template_editor_open = true;
         view.left_pane.prompt_lab.template_validation_errors = vec![
-            "missing {{context}}".to_string(),
-            "unknown {{foo}}".to_string(),
+            "first validation problem".to_string(),
+            "second validation problem".to_string(),
         ];
         let cmds = render(window_id, &view, &mut tree_state);
-        assert!(cmds.iter().any(|cmd| {
-            matches!(
-                cmd,
-                PlatformCommand::SetControlText { control_id, text, .. }
-                if *control_id == LABEL_PROMPT_LAB_TEMPLATE_STATUS
-                    && text.contains("missing {{context}}")
-                    && text.contains("unknown {{foo}}")
-            )
-        }));
+        let status = control_text(&cmds, LABEL_PROMPT_LAB_TEMPLATE_STATUS)
+            .expect("template status text rendered");
+        assert!(status.contains("first validation problem"));
+        assert!(status.contains("second validation problem"));
     }
 
     #[test]
@@ -3135,10 +3130,10 @@ mod tests {
     }
 
     #[test]
-    fn triage_results_header_shows_placeholder_without_triage_data() {
+    fn triage_results_header_changes_when_triage_data_appears() {
         let window_id = WindowId::new(40);
         let mut tree_state = TreeRenderState::new();
-        let mut view = make_view(vec![JobRowView {
+        let empty_view = make_view(vec![JobRowView {
             job_id: 1,
             url: "https://example.com".to_string(),
             stage: Stage::Done,
@@ -3155,16 +3150,24 @@ mod tests {
             has_analysis: false,
             is_since_checkpoint: true,
         }]);
-        view.left_pane.left_tab = LeftTab::TriageResults;
-        let cmds = render(window_id, &view, &mut tree_state);
-        assert!(cmds.iter().any(|cmd| {
-            matches!(
-                cmd,
-                PlatformCommand::SetControlText { control_id, text, .. }
-                if *control_id == LABEL_JOBS_HEADER
-                    && text.contains("no triage results yet")
-            )
-        }));
+        let mut empty_view = empty_view;
+        empty_view.left_pane.left_tab = LeftTab::TriageResults;
+        let empty_cmds = render(window_id, &empty_view, &mut tree_state);
+        let empty_header =
+            control_text(&empty_cmds, LABEL_JOBS_HEADER).expect("empty triage header rendered");
+        assert!(empty_header.contains("Triage Results"));
+
+        let mut populated_view = empty_view.clone();
+        populated_view.jobs[0].triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 1,
+            category: "keep".to_string(),
+            tags: vec![],
+        });
+        let populated_cmds = render(window_id, &populated_view, &mut tree_state);
+        let populated_header = control_text(&populated_cmds, LABEL_JOBS_HEADER)
+            .expect("populated triage header rendered");
+        assert!(populated_header.contains("Triage Results"));
+        assert_ne!(empty_header, populated_header);
     }
 
     #[test]
@@ -3425,6 +3428,20 @@ mod tests {
             .any(|cmd| matches!(cmd, PlatformCommand::SetRichEditContent { .. })));
     }
 
+    fn control_text(
+        cmds: &[PlatformCommand],
+        control_id: commanductui::types::ControlId,
+    ) -> Option<&str> {
+        cmds.iter().find_map(|cmd| match cmd {
+            PlatformCommand::SetControlText {
+                control_id: rendered_id,
+                text,
+                ..
+            } if *rendered_id == control_id => Some(text.as_str()),
+            _ => None,
+        })
+    }
+
     #[test]
     fn status_bar_omits_llm_usage_when_empty() {
         assert_eq!(format_llm_usage_status(&[]), None);
@@ -3433,18 +3450,15 @@ mod tests {
     #[test]
     fn status_bar_includes_llm_usage_segment() {
         let rows = vec![LlmModelUsageView {
-            model: harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI.to_string(),
+            model: "alpha".to_string(),
             input_tokens: 12_000,
             output_tokens: 3_000,
         }];
-        let result = format_llm_usage_status(&rows);
-        assert_eq!(
-            result,
-            Some(format!(
-                "{}: in=12K out=3K",
-                harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI
-            ))
-        );
+        let result = format_llm_usage_status(&rows).expect("Some");
+        assert!(result.contains("alpha"));
+        assert!(result.contains("in=12K"));
+        assert!(result.contains("out=3K"));
+        assert!(!result.contains('+'));
     }
 
     #[test]
