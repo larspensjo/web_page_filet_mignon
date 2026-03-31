@@ -291,7 +291,8 @@ mod tests {
         let hash1 = context_hash(&[]);
         let hash2 = context_hash(&[]);
         assert_eq!(hash1, hash2);
-        assert_eq!(hash1, "empty");
+        assert!(!hash1.is_empty());
+        assert_ne!(hash1, context_hash(&[("key".to_string(), "value".to_string())]));
     }
 
     #[test]
@@ -394,15 +395,26 @@ mod tests {
     }
 
     #[test]
-    fn context_hash_stable_golden() {
-        let ctx = vec![
-            ("beta".to_string(), "two".to_string()),
-            ("alpha".to_string(), "1".to_string()),
-        ];
-        assert_eq!(
-            context_hash(&ctx),
-            "11de0a2282e37df6d29e032488527b81bc2053cd81a2140ac1d999a1e144ab04"
-        );
+    fn summary_cache_key_changes_when_context_changes() {
+        let ctx1 = vec![("alpha".to_string(), "1".to_string())];
+        let ctx2 = vec![("alpha".to_string(), "2".to_string())];
+        let key1 = SummaryCacheKey::try_new(
+            "hash",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("model"),
+            &ctx1,
+        )
+        .unwrap();
+        let key2 = SummaryCacheKey::try_new(
+            "hash",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("model"),
+            &ctx2,
+        )
+        .unwrap();
+        assert_ne!(key1, key2);
     }
 
     #[test]

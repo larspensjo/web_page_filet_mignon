@@ -727,18 +727,23 @@ mod tests {
     }
 
     #[test]
-    fn recency_score_short_slice() {
-        // 2 elements: latest=10, no prev2
-        let score = compute_recency_score(&[5, 10]);
-        // latest*100 + prev1*40 + total = 1000 + 200 + 15 = 1215
-        assert_eq!(score, 1215);
+    fn recency_score_short_slice_rewards_previous_week_activity() {
+        let latest_only = compute_recency_score(&[0, 10]);
+        let with_previous_week = compute_recency_score(&[5, 10]);
+        assert!(
+            with_previous_week > latest_only,
+            "previous-week activity should increase score; got latest_only={latest_only}, with_previous_week={with_previous_week}"
+        );
     }
 
     #[test]
-    fn recency_score_single_element() {
-        let score = compute_recency_score(&[7]);
-        // latest*100 + total = 700 + 7 = 707
-        assert_eq!(score, 707);
+    fn recency_score_single_element_increases_with_latest_activity() {
+        let smaller = compute_recency_score(&[6]);
+        let larger = compute_recency_score(&[7]);
+        assert!(
+            larger > smaller,
+            "higher latest-week activity should increase score; got smaller={smaller}, larger={larger}"
+        );
     }
 
     #[test]

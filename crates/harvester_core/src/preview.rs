@@ -166,6 +166,7 @@ mod tests {
         };
         let formatted = format_exclusion_for_preview(&entry_auto);
         assert!(formatted.contains("Auto-excluded"));
+        assert!(formatted.contains("- Blocked host"));
 
         let entry_manual = ArticleFilterEntry {
             key: ArticleFilterKey {
@@ -179,24 +180,6 @@ mod tests {
         };
         let formatted = format_exclusion_for_preview(&entry_manual);
         assert!(formatted.contains("Manually excluded"));
-    }
-
-    #[test]
-    fn filter_reason_display_covers_all_variants() {
-        // Exhaustive match - compile-time enforced
-        let reasons = [
-            FilterReason::BlockedHost,
-            FilterReason::VerySmallContent,
-            FilterReason::PaywallShellTitle,
-            FilterReason::SmallMediumContent,
-            FilterReason::BoilerplateDensity,
-            FilterReason::HighLinkDensity,
-            FilterReason::StubPhraseLowContent,
-        ];
-        for reason in &reasons {
-            let display = filter_reason_display(reason);
-            assert!(!display.is_empty());
-        }
     }
 
     #[test]

@@ -177,7 +177,10 @@ impl Default for TriageCache {
 mod tests {
     use super::*;
     use crate::triage::ArticleTriageResult;
-    use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
+
+    const TEST_MODEL_ID: &str = "test-model-mini";
+    const TEST_MODEL_VARIANT_ID: &str = "test-model-mini-2026-03-31";
+
     fn sample_result() -> ArticleTriageResult {
         ArticleTriageResult {
             category: "cat".to_string(),
@@ -208,7 +211,7 @@ mod tests {
             "hash",
             PromptId::ArticleTriage,
             Some(1),
-            Some(OPENAI_MODEL_GPT_4O_MINI),
+            Some(TEST_MODEL_ID),
             &context,
         )
         .unwrap();
@@ -225,7 +228,7 @@ mod tests {
                 "hash",
                 PromptId::ArticleSummary,
                 Some(1),
-                Some(OPENAI_MODEL_GPT_4O_MINI),
+                Some(TEST_MODEL_ID),
                 &context,
             ),
             Err(TriageCacheKeyError::InvalidPromptId)
@@ -237,9 +240,9 @@ mod tests {
         let mut cache = TriageCache::new();
         let context = vec![("k".to_string(), "v".to_string())];
         let context_hash = context_hash(&context);
-        let stored_key = build_key("hash", "gpt-4o-mini-2024-07-18", &context_hash);
+        let stored_key = build_key("hash", TEST_MODEL_ID, &context_hash);
         cache.insert(stored_key, sample_result());
-        let lookup_key = build_key("hash", OPENAI_MODEL_GPT_4O_MINI, &context_hash);
+        let lookup_key = build_key("hash", TEST_MODEL_VARIANT_ID, &context_hash);
         assert!(cache.lookup(&lookup_key).is_some());
     }
 
