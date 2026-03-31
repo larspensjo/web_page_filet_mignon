@@ -529,19 +529,36 @@ mod tests {
     #[test]
     fn manual_include_overrides_hard_exclude() {
         let policy = PreTriagePolicy::default();
+        let normal_body = std::iter::repeat_n("word", 300)
+            .collect::<Vec<_>>()
+            .join(" ");
+        // Load a mix: one hard-excluded article and one naturally-included article.
+        // The naturally-included article puts the session in ReadyToTriage, which
+        // is the only interactive phase reachable via public API.
         let mut session = PreTriageSession::load_articles(
-            vec![article("https://youtube.com/watch?v=1", None, "x")],
+            vec![
+                article("https://youtube.com/watch?v=1", None, "x"),
+                article("https://example.com/normal", None, &normal_body),
+            ],
             &policy,
         );
-        let key = session.entries()[0].key.clone();
-        session.phase = PreTriagePhase::Reviewing;
+        assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
+        let youtube_key = session
+            .entries()
+            .iter()
+            .find(|e| e.key.url.contains("youtube"))
+            .unwrap()
+            .key
+            .clone();
         assert!(session
-            .set_manual_decision(&key, ManualDecision::Include)
+            .set_manual_decision(&youtube_key, ManualDecision::Include)
             .is_ok());
         assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
-        assert_eq!(
-            session.resolved_included_urls(),
-            vec!["https://youtube.com/watch?v=1".to_string()]
+        assert!(
+            session
+                .resolved_included_urls()
+                .contains(&"https://youtube.com/watch?v=1".to_string()),
+            "manual Include must override the hard-exclude verdict"
         );
     }
 
@@ -551,11 +568,13 @@ mod tests {
         let body = std::iter::repeat_n("word", 300)
             .collect::<Vec<_>>()
             .join(" ");
+        // A 300-word article gets AutoVerdict::Include, so load_articles yields
+        // ReadyToTriage — an interactive phase — without any phase mutation.
         let mut session = PreTriageSession::load_articles(
             vec![article("https://example.com", None, &body)],
             &policy,
         );
-        session.phase = PreTriagePhase::Reviewing;
+        assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
         let key = session.entries()[0].key.clone();
         assert!(session
             .set_manual_decision(&key, ManualDecision::Exclude)
@@ -611,11 +630,14 @@ mod tests {
         let body = std::iter::repeat_n("contentword", 100)
             .collect::<Vec<_>>()
             .join(" ");
+        // A 100-word article lands in the Review range (SmallMediumContent), which
+        // derive_phase_after_load treats as included → ReadyToTriage. No phase
+        // mutation needed.
         let mut session = PreTriageSession::load_articles(
             vec![article("https://example.com", None, &body)],
             &policy,
         );
-        session.phase = PreTriagePhase::ReadyToTriage;
+        assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
         let before = session.corpus_fingerprint();
         let key = session.entries()[0].key.clone();
         session

@@ -3033,10 +3033,11 @@ mod tests {
         );
 
         assert_eq!(effects.len(), 1);
+        let summary_req_id =
+            request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
         assert!(matches!(
             &effects[0],
             Effect::RequestLlmCompletion {
-                request_id: 3,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
                 model_override: None,
@@ -3052,7 +3053,7 @@ mod tests {
         ));
         assert!(matches!(
             state.briefing().articles()[0].summary_state,
-            ArticleSummaryState::InProgress { request_id: 3 }
+            ArticleSummaryState::InProgress { request_id } if request_id == summary_req_id
         ));
     }
 
@@ -3062,18 +3063,23 @@ mod tests {
         let state = AppState::new();
         let state = start_briefing_after_triage(state, loaded_articles().0.clone());
         let (articles, collection_text) = loaded_articles();
-        let (state, _effects) = update(
+
+        // Capture the Article A summary request ID from the effect so the test
+        // does not depend on prior allocation counts inside the setup helpers.
+        let (state, articles_effects) = update(
             state,
             Msg::ArticlesLoaded {
                 articles,
                 collection_text,
             },
         );
+        let req_a = request_id_for_prompt(&articles_effects, PromptId::ArticleSummary)
+            .expect("Article A summary request");
 
         let (state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 3,
+                request_id: req_a,
                 result: LlmResultKind::Success {
                     output_json: summary_json("Article A"),
                     input_tokens: 10,
@@ -3088,10 +3094,12 @@ mod tests {
         // effects[0] = UpsertEntityIndexEntry for Article A
         // effects[1] = RequestLlmCompletion for Article B
         assert_eq!(effects.len(), 2);
+        let req_b = request_id_for_prompt(&effects, PromptId::ArticleSummary)
+            .expect("Article B summary request");
+        assert_ne!(req_b, req_a, "each summary request must have a distinct id");
         assert!(matches!(
             &effects[1],
             Effect::RequestLlmCompletion {
-                request_id: 4,
                 prompt_id: PromptId::ArticleSummary,
                 prompt_version: None,
                 model_override: None,
@@ -3105,7 +3113,7 @@ mod tests {
         let (state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 4,
+                request_id: req_b,
                 result: LlmResultKind::Success {
                     output_json: summary_json("Article B"),
                     input_tokens: 10,
@@ -3120,9 +3128,11 @@ mod tests {
         // effects[0] = UpsertEntityIndexEntry for Article B
         // effects[1] = RequestLlmCompletion for AggregateBriefing
         assert_eq!(effects.len(), 2);
+        let req_c = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
+            .expect("aggregate briefing request");
+        assert_ne!(req_c, req_b, "briefing request must have a distinct id from last summary");
         match &effects[1] {
             Effect::RequestLlmCompletion {
-                request_id,
                 prompt_id,
                 prompt_version,
                 model_override,
@@ -3130,8 +3140,8 @@ mod tests {
                 context,
                 template_override,
                 extra_template_vars,
+                ..
             } => {
-                assert_eq!(*request_id, 5);
                 assert_eq!(*prompt_id, PromptId::AggregateBriefing);
                 assert_eq!(*prompt_version, None);
                 assert_eq!(*model_override, None);
@@ -3151,7 +3161,7 @@ mod tests {
         let (state, effects) = update(
             state,
             Msg::LlmCompleted {
-                request_id: 5,
+                request_id: req_c,
                 result: LlmResultKind::Success {
                     output_json: briefing_json(2),
                     input_tokens: 20,
@@ -6938,10 +6948,11 @@ mod tests {
             1,
             "burst of 3 JobDones must yield exactly one triage load"
         );
-        let request_id = extract_triage_load_request_id(&effects).unwrap();
-        assert_eq!(
-            request_id, 1,
-            "first dispatch gets request_id=1 from coordinator"
+        // Verify a valid request_id was emitted; the exact value depends on prior
+        // allocations and is an implementation detail of the coordinator counter.
+        assert!(
+            extract_triage_load_request_id(&effects).is_some(),
+            "first dispatch must emit a triage load with a request id"
         );
     }
 
@@ -7011,7 +7022,10 @@ mod tests {
 
         // Now the queued demand should dispatch.
         let (state, request_id) = tick_until_dispatch(state);
-        assert_eq!(request_id, 2, "second dispatch gets request_id=2");
+        assert_ne!(
+            request_id, first_request_id,
+            "second dispatch must use a distinct request id"
+        );
         let _ = state;
     }
 
@@ -7100,8 +7114,7 @@ mod tests {
         let (state, _) = update(state, Msg::AllSourcesPollEnded);
 
         // Tick until the single post-burst dispatch.
-        let (state, request_id) = tick_until_dispatch(state);
-        assert_eq!(request_id, 1, "first and only dispatch gets request_id=1");
+        let (state, _request_id) = tick_until_dispatch(state);
 
         // No second dispatch in the next few ticks.
         let (state, extra) = advance_ticks(state, QUIET_TICKS_NORMAL as usize + 5);
@@ -7161,8 +7174,8 @@ mod tests {
         );
 
         // Tick until dispatch — should fire exactly one triage load now.
-        let (_state, request_id) = tick_until_dispatch(state);
-        assert_eq!(request_id, 1, "single dispatch after engine jobs drained");
+        // A dispatch must occur; the exact request_id value is an implementation detail.
+        let (_state, _request_id) = tick_until_dispatch(state);
     }
 
     /// Poll burst with no completed jobs must not dispatch any triage load.
@@ -7204,11 +7217,9 @@ mod tests {
         );
 
         // Should dispatch at or after QUIET_TICKS_NORMAL.
-        let (_state, request_id) = tick_until_dispatch(state);
-        assert_eq!(
-            request_id, 1,
-            "single dispatch with normal quiet window gets request_id=1"
-        );
+        // A dispatch must occur after the quiet window; exact request_id is an
+        // implementation detail of the coordinator counter.
+        let (_state, _request_id) = tick_until_dispatch(state);
     }
 }
 
