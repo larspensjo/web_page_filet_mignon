@@ -241,6 +241,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
             "Summary".to_string(),
             "Briefing".to_string(),
             "Trends".to_string(),
+            "Poll Stats".to_string(),
         ],
     });
     commands.push(PlatformCommand::SetTabBarStyle {
@@ -347,6 +348,17 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: LABEL_TRENDS_DESCRIPTION,
         initial_text: "Top 5 products by recent activity, last 13 weeks".to_string(),
         class: LabelClass::Default,
+    });
+
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_TAB_POLL_STATS,
+    });
+    commands.push(PlatformCommand::CreateRichEdit {
+        window_id,
+        parent_control_id: Some(PANEL_TAB_POLL_STATS),
+        control_id: VIEWER_POLL_STATS,
     });
 
     commands.push(PlatformCommand::CreateLabel {
@@ -1466,6 +1478,22 @@ fn build_layout_rules(
             margin: (0, 0, 0, 0),
         },
         LayoutRule {
+            control_id: PANEL_TAB_POLL_STATS,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: tab_dock(AppTab::PollStats),
+            order: 6,
+            fixed_size: tab_size(AppTab::PollStats),
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: VIEWER_POLL_STATS,
+            parent_control_id: Some(PANEL_TAB_POLL_STATS),
+            dock_style: DockStyle::Fill,
+            order: 0,
+            fixed_size: None,
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
             control_id: LABEL_PROMPT_LAB_STATUS,
             parent_control_id: Some(PANEL_PROMPT_LAB),
             dock_style: DockStyle::Top,
@@ -2258,7 +2286,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
         style_id: StyleId::ComboBox,
     });
-    for control_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING] {
+    for control_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING, VIEWER_POLL_STATS] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
             control_id,
@@ -2676,7 +2704,7 @@ mod tests {
             .expect("summary tab panel rule");
         assert_eq!(summary_tab.fixed_size, None);
         // Other content tabs should also be collapsed.
-        for &control_id in &[PANEL_TAB_TRIAGE, PANEL_TAB_BRIEFING, PANEL_TAB_TRENDS] {
+        for &control_id in &[PANEL_TAB_TRIAGE, PANEL_TAB_BRIEFING, PANEL_TAB_TRENDS, PANEL_TAB_POLL_STATS] {
             let tab = rules
                 .iter()
                 .find(|r| r.control_id == control_id)
@@ -2719,6 +2747,7 @@ mod tests {
             PANEL_TAB_SUMMARY,
             PANEL_TAB_BRIEFING,
             PANEL_TAB_TRENDS,
+            PANEL_TAB_POLL_STATS,
         ];
 
         let fill_count = rules
@@ -3051,6 +3080,28 @@ mod tests {
                  WM_CTLCOLOR will fall back to system default (light) colors. \
                  Add it to the style application loop in initial_commands().",
                 id
+            );
+        }
+    }
+
+    #[test]
+    fn all_right_pane_viewers_receive_viewer_readable_style() {
+        let cmds = initial_commands(WindowId::new(99));
+        for viewer_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING, VIEWER_POLL_STATS] {
+            let has_style = cmds.iter().any(|cmd| {
+                matches!(
+                    cmd,
+                    PlatformCommand::ApplyStyleToControl {
+                        control_id,
+                        style_id: StyleId::ViewerReadable,
+                        ..
+                    } if *control_id == viewer_id
+                )
+            });
+            assert!(
+                has_style,
+                "VIEWER {:?} should receive ViewerReadable style",
+                viewer_id
             );
         }
     }
