@@ -65,20 +65,20 @@
 
 **Focus:** Public pipeline behavior, persisted output, policy enforcement, and security boundaries.
 
-- [ ] `crates/harvester_engine/tests/extract_convert.rs`
-- [ ] `crates/harvester_engine/tests/extraction_pipeline_integration.rs`
-- [ ] `crates/harvester_engine/tests/content_prep_integration.rs`
-- [ ] `crates/harvester_engine/tests/triage_loader_integration.rs`
-- [ ] `crates/harvester_engine/tests/briefing_loader_integration.rs`
-- [ ] `crates/harvester_engine/tests/fetch.rs`
-- [ ] `crates/harvester_engine/tests/persist.rs`
-- [ ] `crates/harvester_engine/tests/output.rs`
-- [ ] `crates/harvester_engine/tests/converter_links.rs`
-- [ ] `crates/harvester_engine/tests/frontmatter_security.rs`
-- [ ] `crates/harvester_engine/tests/security.rs`
-- [ ] `crates/harvester_engine/tests/path_policy.rs`
-- [ ] `crates/harvester_engine/tests/url_policy.rs`
-- [ ] `crates/harvester_engine/tests/quota.rs`
+- [x] `crates/harvester_engine/tests/extract_convert.rs`
+- [x] `crates/harvester_engine/tests/extraction_pipeline_integration.rs`
+- [x] `crates/harvester_engine/tests/content_prep_integration.rs`
+- [x] `crates/harvester_engine/tests/triage_loader_integration.rs`
+- [x] `crates/harvester_engine/tests/briefing_loader_integration.rs`
+- [x] `crates/harvester_engine/tests/fetch.rs`
+- [x] `crates/harvester_engine/tests/persist.rs`
+- [x] `crates/harvester_engine/tests/output.rs`
+- [x] `crates/harvester_engine/tests/converter_links.rs`
+- [x] `crates/harvester_engine/tests/frontmatter_security.rs`
+- [x] `crates/harvester_engine/tests/security.rs`
+- [x] `crates/harvester_engine/tests/path_policy.rs`
+- [x] `crates/harvester_engine/tests/url_policy.rs`
+- [x] `crates/harvester_engine/tests/quota.rs`
 
 ## Chunk 5: `harvester_engine` inline content and policy modules
 
