@@ -49,17 +49,17 @@
 
 **Focus:** Public contract and output-shape tests are valid here if the output is user-visible or persisted.
 
-- [ ] `crates/harvester_core/src/briefing.rs`
-- [ ] `crates/harvester_core/src/view_model.rs`
-- [ ] `crates/harvester_core/src/preview.rs`
-- [ ] `crates/harvester_core/src/context_draft.rs`
-- [ ] `crates/harvester_core/src/summary_cache.rs`
-- [ ] `crates/harvester_core/src/triage_cache.rs`
-- [ ] `crates/harvester_core/src/cache_utils.rs`
-- [ ] `crates/harvester_core/src/tabs.rs`
-- [ ] `crates/harvester_core/src/trends.rs`
-- [ ] `crates/harvester_core/src/ui_geometry.rs`
-- [ ] `crates/harvester_core/src/url_age.rs`
+- [x] `crates/harvester_core/src/briefing.rs`
+- [x] `crates/harvester_core/src/view_model.rs`
+- [x] `crates/harvester_core/src/preview.rs`
+- [x] `crates/harvester_core/src/context_draft.rs`
+- [x] `crates/harvester_core/src/summary_cache.rs`
+- [x] `crates/harvester_core/src/triage_cache.rs`
+- [x] `crates/harvester_core/src/cache_utils.rs`
+- [x] `crates/harvester_core/src/tabs.rs`
+- [x] `crates/harvester_core/src/trends.rs`
+- [x] `crates/harvester_core/src/ui_geometry.rs`
+- [x] `crates/harvester_core/src/url_age.rs`
 
 ## Chunk 4: `harvester_engine` content pipeline and safety integration tests
 
