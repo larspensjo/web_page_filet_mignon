@@ -36,11 +36,11 @@ pub use entity_index::{EntityIndex, EntityIndexEntry};
 pub use harvester_engine::llm::SummaryEntities;
 pub use import_session::{ImportPhase, ImportSessionState};
 pub use msg::{LlmResultKind, Msg};
+pub use poll_stats_fmt::format_poll_stats;
 pub use pre_triage_filter::{
     ArticleFilterEntry, ArticleFilterKey, AutoVerdict, FilterReason, ManualDecision,
     PreTriagePhase, PreTriagePolicy, PreTriageSession,
 };
-pub use poll_stats_fmt::format_poll_stats;
 pub use preview::PreviewContentKind;
 pub use prompt_lab::{
     ModelCatalogSource, PromptLabInputSource, PromptLabRunId, PromptLabRunRecord,
