@@ -583,7 +583,7 @@ impl AppState {
             imports_failed: self.import_session.imports_failed,
             import_in_flight: self.import_session.phase
                 == crate::import_session::ImportPhase::Importing,
-            source_poll_stats: self.source_states.poll_stats().to_vec(),
+            source_poll_stats: self.source_states.last_completed_poll_stats().to_vec(),
         }
     }
 
@@ -682,6 +682,8 @@ impl AppState {
             });
         let preview_header_text = if self.active_tab() == AppTab::Briefing {
             Some(self.format_briefing_preview_header())
+        } else if self.active_tab() == AppTab::PollStats {
+            Some("Poll Stats | last poll".to_string())
         } else {
             None
         };
@@ -885,13 +887,22 @@ impl AppState {
             self.active_trend_category,
         );
 
+        let poll_stats_markdown = {
+            let stats = self.source_states.last_completed_poll_stats();
+            if stats.is_empty() {
+                None
+            } else {
+                Some(crate::poll_stats_fmt::format_poll_stats(stats))
+            }
+        };
+
         RightPaneView {
             active_tab: self.active_tab,
             triage_markdown: effective_triage_markdown,
             summary_markdown: effective_summary_markdown,
             briefing_markdown: effective_briefing_markdown,
             trends,
-            poll_stats_markdown: None,
+            poll_stats_markdown,
         }
     }
 
@@ -4205,5 +4216,29 @@ mod briefing_history_state_tests {
             state.briefing_history()[0].generated_at_utc,
             "2026-02-24T00:00:00Z"
         );
+    }
+}
+
+#[cfg(test)]
+mod poll_stats_view_tests {
+    use super::*;
+
+    #[test]
+    fn poll_stats_header_override_when_tab_active() {
+        let mut state = AppState::new();
+        state.select_tab(AppTab::PollStats);
+        let view = state.view();
+        assert_eq!(
+            view.preview_header_text.as_deref(),
+            Some("Poll Stats | last poll")
+        );
+    }
+
+    #[test]
+    fn poll_stats_header_not_overridden_on_other_tabs() {
+        let mut state = AppState::new();
+        state.select_tab(AppTab::Triage);
+        let view = state.view();
+        assert_eq!(view.preview_header_text, None);
     }
 }
