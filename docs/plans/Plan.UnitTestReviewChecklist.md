@@ -84,28 +84,28 @@
 
 **Focus:** Prefer tests of exported behavior and policy outcomes over helper-by-helper assertions.
 
-- [ ] `crates/harvester_engine/src/blocker_page.rs`
-- [ ] `crates/harvester_engine/src/brave_poll.rs`
-- [ ] `crates/harvester_engine/src/brave_seen_set.rs`
-- [ ] `crates/harvester_engine/src/frontmatter.rs`
-- [ ] `crates/harvester_engine/src/import.rs`
-- [ ] `crates/harvester_engine/src/preview.rs`
-- [ ] `crates/harvester_engine/src/rss_parse.rs`
-- [ ] `crates/harvester_engine/src/rss_seen_set.rs`
-- [ ] `crates/harvester_engine/src/since_filter.rs`
-- [ ] `crates/harvester_engine/src/source_config.rs`
-- [ ] `crates/harvester_engine/src/source_poll.rs`
-- [ ] `crates/harvester_engine/src/text_safety.rs`
-- [ ] `crates/harvester_engine/src/content_extraction/candidate_select.rs`
-- [ ] `crates/harvester_engine/src/content_extraction/dom_prune.rs`
-- [ ] `crates/harvester_engine/src/content_extraction/markdown_cleanup.rs`
-- [ ] `crates/harvester_engine/src/content_extraction/pipeline.rs`
-- [ ] `crates/harvester_engine/src/content_prep/boilerplate.rs`
-- [ ] `crates/harvester_engine/src/content_prep/budget.rs`
-- [ ] `crates/harvester_engine/src/content_prep/derive.rs`
-- [ ] `crates/harvester_engine/src/content_prep/normalize.rs`
-- [ ] `crates/harvester_engine/src/content_prep/truncation.rs`
-- [ ] `crates/harvester_engine/src/content_prep/types.rs`
+- [x] `crates/harvester_engine/src/blocker_page.rs`
+- [x] `crates/harvester_engine/src/brave_poll.rs`
+- [x] `crates/harvester_engine/src/brave_seen_set.rs`
+- [x] `crates/harvester_engine/src/frontmatter.rs`
+- [x] `crates/harvester_engine/src/import.rs`
+- [x] `crates/harvester_engine/src/preview.rs`
+- [x] `crates/harvester_engine/src/rss_parse.rs`
+- [x] `crates/harvester_engine/src/rss_seen_set.rs`
+- [x] `crates/harvester_engine/src/since_filter.rs`
+- [x] `crates/harvester_engine/src/source_config.rs`
+- [x] `crates/harvester_engine/src/source_poll.rs`
+- [x] `crates/harvester_engine/src/text_safety.rs`
+- [x] `crates/harvester_engine/src/content_extraction/candidate_select.rs`
+- [x] `crates/harvester_engine/src/content_extraction/dom_prune.rs`
+- [x] `crates/harvester_engine/src/content_extraction/markdown_cleanup.rs`
+- [x] `crates/harvester_engine/src/content_extraction/pipeline.rs`
+- [x] `crates/harvester_engine/src/content_prep/boilerplate.rs`
+- [x] `crates/harvester_engine/src/content_prep/budget.rs`
+- [x] `crates/harvester_engine/src/content_prep/derive.rs`
+- [x] `crates/harvester_engine/src/content_prep/normalize.rs`
+- [x] `crates/harvester_engine/src/content_prep/truncation.rs`
+- [x] `crates/harvester_engine/src/content_prep/types.rs`
 
 ## Chunk 6: `harvester_engine` LLM public contracts
 
