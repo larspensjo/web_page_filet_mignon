@@ -176,25 +176,18 @@ mod tests {
     #[test]
     fn high_link_density_element_gets_penalized() {
         let link_text = r##"<a href="#">link</a> "##.repeat(60);
-        let plain_text = "Some real content here. ".repeat(5);
-        let html =
-            format!("<html><body><article><p>{plain_text}</p>{link_text}</article></body></html>");
+        let article_text = "Some real content here. ".repeat(5);
+        let main_text = "Primary article body text with analysis and context. ".repeat(8);
+        let html = format!(
+            "<html><body><article><p>{article_text}</p>{link_text}</article><main><p>{main_text}</p></main></body></html>"
+        );
         let doc = Html::parse_document(&html);
         let (_, info) = select_candidate(&doc, &policy());
-        // Article is selected but the score is penalized
-        assert!(matches!(
-            info.kind,
-            CandidateKind::Article | CandidateKind::Body
-        ));
-        // With link_penalty=0.3, para_bonus≈1.0 (0 paragraphs gives 1.0), semantic_bonus=2.0,
-        // the penalized score should be roughly 0.3 * 2.0 * total_chars = 0.6 * total_chars,
-        // which is well below total_chars itself.
-        let total_chars = count_text_chars(
-            doc.select(&Selector::parse("article").unwrap())
-                .next()
-                .unwrap(),
+        assert!(
+            matches!(info.kind, CandidateKind::Main),
+            "expected lower-link-density main content to beat link-heavy article, got {:?}",
+            info.kind
         );
-        assert!(info.score < total_chars as f64);
     }
 
     #[test]
@@ -202,21 +195,20 @@ mod tests {
         // Very short text - below min_text_chars
         let html = "<html><body><article><p>Short.</p></article></body></html>";
         let doc = Html::parse_document(html);
-        let (_, info) = select_candidate(&doc, &policy());
+        let (element, info) = select_candidate(&doc, &policy());
         assert!(matches!(info.kind, CandidateKind::Body));
-        assert_eq!(info.score, 0.0);
+        assert_eq!(element.value().name(), "body");
+        assert!(element.text().collect::<String>().contains("Short."));
     }
 
     #[test]
-    fn main_preferred_when_scores_are_similar() {
+    fn main_selected_when_it_is_the_only_viable_named_candidate() {
         let text = long_text(300);
-        // Both main and a content class, main should win due to selector priority
         let html = format!(
-            r#"<html><body><main><p>{text}</p></main><div class="article-body"><p>{text}</p></div></body></html>"#
+            r#"<html><body><main><p>{text}</p></main><div class="article-body"><p>Short.</p></div></body></html>"#
         );
         let doc = Html::parse_document(&html);
         let (_, info) = select_candidate(&doc, &policy());
-        // main comes before .article-body in selector priority, so when scores are equal, first wins
         assert!(matches!(info.kind, CandidateKind::Main));
     }
 }

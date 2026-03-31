@@ -894,3 +894,11 @@ Lessons Learned: Tests that observe behavior through serialized intermediates dr
 Prevention: Prefer typed assertions and semantic fixtures; when representation format must be locked, isolate that in a narrow formatting test with an explicit compatibility rationale.
 Refs: crates/harvester_engine/tests/content_prep_integration.rs, crates/harvester_engine/tests/briefing_loader_integration.rs, crates/harvester_engine/tests/fetch.rs, crates/harvester_engine/tests/output.rs, docs/plans/Findings.UnitTestReviewChunk4.md
 
+## 2026-03-31 - Relax helper-heavy engine tests to stable behavioral contracts
+Type: Bug Fix
+Context: Chunk 5 unit-test review found several `harvester_engine` tests asserting detector label strings, prompt wrapper text, selector score/tie-break internals, and upstream parser wording. Those checks created churn under safe heuristic refactors without protecting user-visible behavior.
+Change: Reworked the affected tests to assert boilerplate removal plus recorded detection, prepared-collection article count/content ordering, candidate-selection outcomes and fallback behavior, and RSS parse failure category with non-empty context rather than dependency-specific wording.
+Lessons Learned: The root cause was asserting whichever internal diagnostic was easiest to read from helper tests instead of first choosing the narrowest stable contract. Heuristic modules are especially prone to this because labels, scores, and selector order feel observable while still being tuning details.
+Prevention: Use correctness by construction for tests by separating stable outcomes from diagnostics: expose typed outcomes/variants for durable contracts, keep diagnostic strings and numeric scores as optional observability, and require each heuristic test to answer "would this still pass after safe tuning with identical extraction output?" before locking an assertion.
+Refs: crates/harvester_engine/src/content_prep/boilerplate.rs, crates/harvester_engine/src/content_prep/budget.rs, crates/harvester_engine/src/content_extraction/candidate_select.rs, crates/harvester_engine/src/rss_parse.rs, docs/plans/Findings.UnitTestReviewChunk5.md
+
