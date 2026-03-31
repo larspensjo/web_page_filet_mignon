@@ -902,3 +902,15 @@ Lessons Learned: The root cause was asserting whichever internal diagnostic was 
 Prevention: Use correctness by construction for tests by separating stable outcomes from diagnostics: expose typed outcomes/variants for durable contracts, keep diagnostic strings and numeric scores as optional observability, and require each heuristic test to answer "would this still pass after safe tuning with identical extraction output?" before locking an assertion.
 Refs: crates/harvester_engine/src/content_prep/boilerplate.rs, crates/harvester_engine/src/content_prep/budget.rs, crates/harvester_engine/src/content_extraction/candidate_select.rs, crates/harvester_engine/src/rss_parse.rs, docs/plans/Findings.UnitTestReviewChunk5.md
 
+## 2026-03-31 - Candidate selection now separates contract from diagnostics
+Type: Implementation
+Context: Follow-up to the Chunk 5 test review. `candidate_select` returned one struct mixing durable selection facts with tuning diagnostics, which made both production code and tests treat heuristic score details like part of the contract.
+Change: Introduced `CandidateSelection` and `CandidateSelectionDiagnostics` in `candidate_select`, with `SelectedCandidate` bundling the DOM element plus the split data. The stable contract now answers "what kind of container was selected?" and "was body fallback used?" while the numeric score remains diagnostic-only. `ExtractionPipeline` was updated to consume the split result and still populate extraction diagnostics/logging.
+Refs: crates/harvester_engine/src/content_extraction/candidate_select.rs, crates/harvester_engine/src/content_extraction/pipeline.rs
+
+## 2026-03-31 - Blocked-page detection now uses typed blocker kinds
+Type: Implementation
+Context: `blocker_page` exposed free-form reason strings as its primary result, which made wording look like the contract even though the durable fact is the blocker class.
+Change: Replaced `Option<String>` with `Option<BlockedPageKind>` in `blocker_page`, implemented `Display` for log/user text, updated engine handling to format the enum into `FailureKind::BlockedContent`, and added regression coverage for generic consent and captcha-content cases.
+Refs: crates/harvester_engine/src/blocker_page.rs, crates/harvester_engine/src/engine.rs
+

@@ -46,7 +46,9 @@ impl ExtractionPipeline {
 
         let title = extract_title_from_doc(&doc);
 
-        let (candidate_element, info) = select_candidate(&doc, &self.policy.candidate);
+        let selected_candidate = select_candidate(&doc, &self.policy.candidate);
+        let (candidate_element, selection, selection_diagnostics) =
+            selected_candidate.into_parts();
 
         let prune_policy = self.policy.prune.clone();
         let prune_closure = |el: &scraper::ElementRef<'_>| should_prune_element(el, &prune_policy);
@@ -77,8 +79,8 @@ impl ExtractionPipeline {
 
         engine_debug!(
             "[extract-pipeline] candidate={:?} score={:.1} pruned={} cleanup_dropped={} bytes_in={} bytes_out={}",
-            info.kind,
-            info.score,
+            selection.kind(),
+            selection_diagnostics.score,
             prune_stats.total_pruned,
             block_drop_counts.total(),
             html.len(),
@@ -86,8 +88,8 @@ impl ExtractionPipeline {
         );
 
         let diagnostics = ExtractionDiagnostics {
-            candidate_kind: Some(info.kind),
-            candidate_score: Some(info.score),
+            candidate_kind: Some(selection.kind().clone()),
+            candidate_score: Some(selection_diagnostics.score),
             pruned_by_tag: 0,
             pruned_by_attr: prune_stats.total_pruned,
             cleanup_blocks_dropped: block_drop_counts,
@@ -101,7 +103,7 @@ impl ExtractionPipeline {
                 }
             } else {
                 ExtractionOutcome::BestCandidate {
-                    score: info.score,
+                    score: selection_diagnostics.score,
                     pruned_nodes: prune_stats.total_pruned,
                 }
             }),

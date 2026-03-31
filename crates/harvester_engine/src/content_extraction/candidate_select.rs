@@ -3,18 +3,49 @@ use scraper::{ElementRef, Html, Selector};
 use crate::content_extraction::diagnostics::CandidateKind;
 use crate::content_extraction::policy::CandidatePolicy;
 
-pub struct CandidateInfo {
-    pub kind: CandidateKind,
+#[derive(Debug, Clone)]
+pub struct CandidateSelection {
+    kind: CandidateKind,
+    used_body_fallback: bool,
+}
+
+impl CandidateSelection {
+    pub fn kind(&self) -> &CandidateKind {
+        &self.kind
+    }
+
+    pub fn used_body_fallback(&self) -> bool {
+        self.used_body_fallback
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CandidateSelectionDiagnostics {
     pub score: f64,
+}
+
+pub struct SelectedCandidate<'a> {
+    element: ElementRef<'a>,
+    selection: CandidateSelection,
+    diagnostics: CandidateSelectionDiagnostics,
+}
+
+impl<'a> SelectedCandidate<'a> {
+    pub fn into_parts(
+        self,
+    ) -> (
+        ElementRef<'a>,
+        CandidateSelection,
+        CandidateSelectionDiagnostics,
+    ) {
+        (self.element, self.selection, self.diagnostics)
+    }
 }
 
 type CandidateSpec = (&'static str, fn(&str) -> CandidateKind, f64);
 
 /// Score and select the best article container from the document.
-pub fn select_candidate<'a>(
-    doc: &'a Html,
-    policy: &CandidatePolicy,
-) -> (ElementRef<'a>, CandidateInfo) {
+pub fn select_candidate<'a>(doc: &'a Html, policy: &CandidatePolicy) -> SelectedCandidate<'a> {
     // These compile once per extraction; cost is negligible vs. DOM traversal
     let para_sel = Selector::parse("p").expect("valid selector");
     let a_sel = Selector::parse("a").expect("valid selector");
@@ -57,7 +88,8 @@ pub fn select_candidate<'a>(
     ];
 
     let mut best_element: Option<ElementRef<'a>> = None;
-    let mut best_info: Option<CandidateInfo> = None;
+    let mut best_selection: Option<CandidateSelection> = None;
+    let mut best_diagnostics: Option<CandidateSelectionDiagnostics> = None;
     let mut evaluated = 0usize;
 
     'outer: for (selector_str, kind_fn, semantic_bonus) in named_candidates {
@@ -94,42 +126,52 @@ pub fn select_candidate<'a>(
             // semantic_bonus prefers specific containers (article, main) over generic ones (body)
             let score = text_score * para_bonus * link_penalty * semantic_bonus;
 
-            let is_better = best_info
+            let is_better = best_diagnostics
                 .as_ref()
-                .is_none_or(|b: &CandidateInfo| score > b.score);
+                .is_none_or(|b: &CandidateSelectionDiagnostics| score > b.score);
             if is_better {
                 best_element = Some(element);
-                best_info = Some(CandidateInfo {
+                best_selection = Some(CandidateSelection {
                     kind: kind_fn(selector_str),
-                    score,
+                    used_body_fallback: false,
                 });
+                best_diagnostics = Some(CandidateSelectionDiagnostics { score });
             }
         }
     }
 
-    if let (Some(element), Some(info)) = (best_element, best_info) {
-        return (element, info);
+    if let (Some(element), Some(selection), Some(diagnostics)) =
+        (best_element, best_selection, best_diagnostics)
+    {
+        return SelectedCandidate {
+            element,
+            selection,
+            diagnostics,
+        };
     }
+
+    let fallback_selection = CandidateSelection {
+        kind: CandidateKind::Body,
+        used_body_fallback: true,
+    };
+    let fallback_diagnostics = CandidateSelectionDiagnostics { score: 0.0 };
 
     let body_sel = Selector::parse("body").expect("valid selector");
     // Fall back to body, or the virtual root if the document has no <body> element.
     // This is the ultimate fallback — score 0.0 signals no meaningful candidate was found.
     if let Some(body) = doc.select(&body_sel).next() {
-        return (
-            body,
-            CandidateInfo {
-                kind: CandidateKind::Body,
-                score: 0.0,
-            },
-        );
+        return SelectedCandidate {
+            element: body,
+            selection: fallback_selection,
+            diagnostics: fallback_diagnostics,
+        };
     }
-    (
-        doc.root_element(),
-        CandidateInfo {
-            kind: CandidateKind::Body,
-            score: 0.0,
-        },
-    )
+
+    SelectedCandidate {
+        element: doc.root_element(),
+        selection: fallback_selection,
+        diagnostics: fallback_diagnostics,
+    }
 }
 
 fn count_text_chars(element: ElementRef<'_>) -> usize {
@@ -168,9 +210,10 @@ mod tests {
             text
         );
         let doc = Html::parse_document(&html);
-        let (_, info) = select_candidate(&doc, &policy());
-        assert!(matches!(info.kind, CandidateKind::Article));
-        assert!(info.score > 0.0);
+        let (_, selection, diagnostics) = select_candidate(&doc, &policy()).into_parts();
+        assert!(matches!(selection.kind(), CandidateKind::Article));
+        assert!(!selection.used_body_fallback());
+        assert!(diagnostics.score > 0.0);
     }
 
     #[test]
@@ -182,11 +225,11 @@ mod tests {
             "<html><body><article><p>{article_text}</p>{link_text}</article><main><p>{main_text}</p></main></body></html>"
         );
         let doc = Html::parse_document(&html);
-        let (_, info) = select_candidate(&doc, &policy());
+        let (_, selection, _) = select_candidate(&doc, &policy()).into_parts();
         assert!(
-            matches!(info.kind, CandidateKind::Main),
+            matches!(selection.kind(), CandidateKind::Main),
             "expected lower-link-density main content to beat link-heavy article, got {:?}",
-            info.kind
+            selection.kind()
         );
     }
 
@@ -195,8 +238,9 @@ mod tests {
         // Very short text - below min_text_chars
         let html = "<html><body><article><p>Short.</p></article></body></html>";
         let doc = Html::parse_document(html);
-        let (element, info) = select_candidate(&doc, &policy());
-        assert!(matches!(info.kind, CandidateKind::Body));
+        let (element, selection, _) = select_candidate(&doc, &policy()).into_parts();
+        assert!(matches!(selection.kind(), CandidateKind::Body));
+        assert!(selection.used_body_fallback());
         assert_eq!(element.value().name(), "body");
         assert!(element.text().collect::<String>().contains("Short."));
     }
@@ -208,7 +252,8 @@ mod tests {
             r#"<html><body><main><p>{text}</p></main><div class="article-body"><p>Short.</p></div></body></html>"#
         );
         let doc = Html::parse_document(&html);
-        let (_, info) = select_candidate(&doc, &policy());
-        assert!(matches!(info.kind, CandidateKind::Main));
+        let (_, selection, _) = select_candidate(&doc, &policy()).into_parts();
+        assert!(matches!(selection.kind(), CandidateKind::Main));
+        assert!(!selection.used_body_fallback());
     }
 }

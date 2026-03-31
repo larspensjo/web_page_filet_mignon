@@ -342,20 +342,20 @@ async fn run_job(
 
     let markdown = extracted_article.markdown;
 
-    if let Some(reason) = detect_blocked_page(
+    if let Some(blocked_kind) = detect_blocked_page(
         fetch_output.metadata.final_url.as_str(),
         extracted_article.title.as_deref(),
         &markdown,
     ) {
         let failure = FailureKind::BlockedContent {
-            description: reason.clone(),
+            description: blocked_kind.to_string(),
         };
         engine_info!(
             "[fetch-blocker] job_id={} original_url={} final_url={} reason={}",
             job_id,
             truncate_url_for_log(&url),
             truncate_url_for_log(fetch_output.metadata.final_url.as_str()),
-            reason
+            blocked_kind
         );
         let _ = event_tx.send(EngineEvent::JobCompleted {
             job_id,

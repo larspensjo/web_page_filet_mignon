@@ -1,24 +1,53 @@
+use std::fmt;
+
 use url::Url;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BlockedPageKind {
+    YahooConsentInterstitial,
+    ConsentInterstitial,
+    CaptchaChallengeInterstitial,
+    BrowserVerificationInterstitial,
+    CaptchaInterstitialContent,
+}
+
+impl fmt::Display for BlockedPageKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlockedPageKind::YahooConsentInterstitial => write!(f, "yahoo consent interstitial"),
+            BlockedPageKind::ConsentInterstitial => write!(f, "consent interstitial"),
+            BlockedPageKind::CaptchaChallengeInterstitial => {
+                write!(f, "captcha challenge interstitial")
+            }
+            BlockedPageKind::BrowserVerificationInterstitial => {
+                write!(f, "browser verification interstitial")
+            }
+            BlockedPageKind::CaptchaInterstitialContent => {
+                write!(f, "captcha interstitial content")
+            }
+        }
+    }
+}
 
 pub(crate) fn detect_blocked_page(
     final_url: &str,
     title: Option<&str>,
     markdown: &str,
-) -> Option<String> {
+) -> Option<BlockedPageKind> {
     if let Ok(parsed) = Url::parse(final_url) {
         let host = parsed.host_str().unwrap_or_default().to_ascii_lowercase();
         let path = parsed.path().to_ascii_lowercase();
 
         if host == "consent.yahoo.com" && path.contains("collectconsent") {
-            return Some("yahoo consent interstitial".to_string());
+            return Some(BlockedPageKind::YahooConsentInterstitial);
         }
 
         if host.starts_with("consent.") && path.contains("consent") {
-            return Some(format!("consent interstitial host={host}"));
+            return Some(BlockedPageKind::ConsentInterstitial);
         }
 
         if path.contains("client_captcha/challenge") || path.contains("captcha/challenge") {
-            return Some("captcha challenge interstitial".to_string());
+            return Some(BlockedPageKind::CaptchaChallengeInterstitial);
         }
     }
 
@@ -32,7 +61,7 @@ pub(crate) fn detect_blocked_page(
     let shortish = lower.chars().take(5000).count() == lower.chars().count();
 
     if shortish && lower.contains("just a moment") && lower.contains("verify you are human") {
-        return Some("browser verification interstitial".to_string());
+        return Some(BlockedPageKind::BrowserVerificationInterstitial);
     }
 
     if shortish
@@ -43,7 +72,7 @@ pub(crate) fn detect_blocked_page(
             || lower.contains("ray id")
             || lower.contains("enable javascript and cookies"))
     {
-        return Some("captcha interstitial content".to_string());
+        return Some(BlockedPageKind::CaptchaInterstitialContent);
     }
 
     None
@@ -51,7 +80,7 @@ pub(crate) fn detect_blocked_page(
 
 #[cfg(test)]
 mod tests {
-    use super::detect_blocked_page;
+    use super::{detect_blocked_page, BlockedPageKind};
 
     #[test]
     fn detects_yahoo_consent_url() {
@@ -60,10 +89,17 @@ mod tests {
             Some("Yahoo"),
             "consent form",
         );
-        assert!(matches!(
-            result.as_deref(),
-            Some("yahoo consent interstitial")
-        ));
+        assert_eq!(result, Some(BlockedPageKind::YahooConsentInterstitial));
+    }
+
+    #[test]
+    fn detects_generic_consent_url() {
+        let result = detect_blocked_page(
+            "https://consent.example.com/consent?sessionId=abc",
+            Some("Consent"),
+            "consent form",
+        );
+        assert_eq!(result, Some(BlockedPageKind::ConsentInterstitial));
     }
 
     #[test]
@@ -73,10 +109,7 @@ mod tests {
             Some("Captcha"),
             "challenge",
         );
-        assert!(matches!(
-            result.as_deref(),
-            Some("captcha challenge interstitial")
-        ));
+        assert_eq!(result, Some(BlockedPageKind::CaptchaChallengeInterstitial));
     }
 
     #[test]
@@ -86,10 +119,17 @@ mod tests {
             Some("Just a moment..."),
             "Please verify you are human before continuing.",
         );
-        assert!(matches!(
-            result.as_deref(),
-            Some("browser verification interstitial")
-        ));
+        assert_eq!(result, Some(BlockedPageKind::BrowserVerificationInterstitial));
+    }
+
+    #[test]
+    fn detects_captcha_interstitial_from_content() {
+        let result = detect_blocked_page(
+            "https://example.com/article",
+            Some("Security Check"),
+            "Captcha required. Verify you are human and note the Ray ID before continuing.",
+        );
+        assert_eq!(result, Some(BlockedPageKind::CaptchaInterstitialContent));
     }
 
     #[test]
