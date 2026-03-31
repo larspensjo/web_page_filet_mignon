@@ -908,6 +908,14 @@ Context: Follow-up to the Chunk 5 test review. `candidate_select` returned one s
 Change: Introduced `CandidateSelection` and `CandidateSelectionDiagnostics` in `candidate_select`, with `SelectedCandidate` bundling the DOM element plus the split data. The stable contract now answers "what kind of container was selected?" and "was body fallback used?" while the numeric score remains diagnostic-only. `ExtractionPipeline` was updated to consume the split result and still populate extraction diagnostics/logging.
 Refs: crates/harvester_engine/src/content_extraction/candidate_select.rs, crates/harvester_engine/src/content_extraction/pipeline.rs
 
+## 2026-03-31 - Rework LLM tests around stable contracts instead of shipped revisions and catalog snapshots
+Type: Bug Fix
+Context: Chunk 6 unit-test review found LLM tests asserting exact prompt revision counts, prompt wording, current OpenAI model ids, and default price-table literals. Those checks created churn under safe prompt/catalog updates and also exposed a validation gap: aggregate briefing template validation did not include the runtime vars for `previous_briefings` and `briefing_time_window`.
+Change: Reworked the affected `harvester_engine` tests to assert registry consistency, active-latest prompt behavior, older-version accessibility, schema/variable validation, and provider category filtering with synthetic ids. Extended `validate_template()` synthetic aggregate-briefing vars so built-in briefing prompts validate through the same contract used by Prompt Lab.
+Lessons Learned: The root cause was letting mutable policy data and copy revisions masquerade as unit contracts. When tests observe whichever literal is easiest to assert, prompt/version churn and provider catalog churn become false regressions.
+Prevention: Use correctness by construction for prompt/catalog tests by separating stable contracts from mutable data: validate built-in prompts through one shared template-validation boundary with all supported runtime vars, express default-registry tests in terms of repo-owned defaults and exported aliases, and use synthetic fixtures for provider category rules instead of live catalog names.
+Refs: crates/harvester_engine/tests/llm_pricing.rs, crates/harvester_engine/tests/llm_prompt.rs, crates/harvester_engine/tests/llm_openai.rs, crates/harvester_engine/src/llm/prompts/briefing.rs, crates/harvester_engine/src/llm/prompts/mod.rs, crates/harvester_engine/src/llm/template_validation.rs, docs/plans/Findings.UnitTestReviewChunk6.md
+
 ## 2026-03-31 - Blocked-page detection now uses typed blocker kinds
 Type: Implementation
 Context: `blocker_page` exposed free-form reason strings as its primary result, which made wording look like the contract even though the durable fact is the blocker class.

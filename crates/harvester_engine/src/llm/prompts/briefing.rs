@@ -210,58 +210,48 @@ pub const BRIEFING_PROMPT_V7: PromptTemplate = PromptTemplate {
 #[cfg(test)]
 mod prompt_tests {
     use super::*;
+    use crate::llm::validate_template;
 
     #[test]
-    fn v5_system_template_contains_previous_briefings_slot() {
-        assert!(
-            BRIEFING_PROMPT_V5
-                .system_template
-                .contains("{{previous_briefings}}"),
-            "V5 system template must have a {{{{previous_briefings}}}} slot"
+    fn v5_template_validates_briefing_variables() {
+        let errors = validate_template(
+            BRIEFING_PROMPT_V5.id,
+            BRIEFING_PROMPT_V5.system_template,
+            BRIEFING_PROMPT_V5.user_template,
         );
+        assert!(errors.is_empty(), "v5 should render with supported vars");
     }
 
     #[test]
-    fn v6_system_template_contains_briefing_time_window_slot() {
-        assert!(
-            BRIEFING_PROMPT_V6
-                .system_template
-                .contains("{{briefing_time_window}}"),
-            "V6 system template must have a {{{{briefing_time_window}}}} slot"
+    fn v6_template_validates_briefing_variables() {
+        let errors = validate_template(
+            BRIEFING_PROMPT_V6.id,
+            BRIEFING_PROMPT_V6.system_template,
+            BRIEFING_PROMPT_V6.user_template,
         );
+        assert!(errors.is_empty(), "v6 should render with supported vars");
     }
 
     #[test]
-    fn v5_user_template_mentions_new_or_changed() {
-        let tmpl = BRIEFING_PROMPT_V5.user_template;
-        assert!(
-            tmpl.contains("NEW or CHANGED") || tmpl.contains("new or changed"),
-            "V5 user template must instruct model to focus on new/changed info"
+    fn v7_template_validates_briefing_variables() {
+        let errors = validate_template(
+            BRIEFING_PROMPT_V7.id,
+            BRIEFING_PROMPT_V7.system_template,
+            BRIEFING_PROMPT_V7.user_template,
         );
+        assert!(errors.is_empty(), "v7 should render with supported vars");
     }
 
     #[test]
-    fn v5_version_is_5() {
-        assert_eq!(BRIEFING_PROMPT_V5.version, 5);
-    }
-
-    #[test]
-    fn v6_version_is_6() {
-        assert_eq!(BRIEFING_PROMPT_V6.version, 6);
-    }
-
-    #[test]
-    fn v7_expected_format_mentions_top_stories() {
+    fn v7_expected_format_captures_top_story_schema() {
+        assert!(BRIEFING_PROMPT_V7
+            .expected_format
+            .contains("\"executive_summary\""));
         assert!(BRIEFING_PROMPT_V7
             .expected_format
             .contains("\"top_stories\""));
         assert!(BRIEFING_PROMPT_V7
-            .user_template
-            .contains("150 words or fewer"));
-    }
-
-    #[test]
-    fn v7_version_is_7() {
-        assert_eq!(BRIEFING_PROMPT_V7.version, 7);
+            .expected_format
+            .contains("\"article_count\""));
     }
 }

@@ -1,15 +1,27 @@
 use harvester_engine::llm::{
-    ModelPricing, PricingRegistry, TokenUsage, OPENAI_MODEL_GPT_5_4, OPENAI_MODEL_GPT_5_4_MINI,
-    OPENAI_MODEL_GPT_5_4_NANO, OPENAI_MODEL_GPT_5_4_PRO,
+    ModelPricing, PricingRegistry, TokenUsage, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL,
+    DEFAULT_TRIAGE_MODEL,
 };
 
 #[test]
-fn default_pricing_matches_expected_costs() {
+fn default_pricing_covers_configured_default_models() {
     let registry = PricingRegistry::with_defaults();
     let usage = TokenUsage::new(10_000, 5_000);
 
-    let microdollars = registry.cost_microdollars(OPENAI_MODEL_GPT_5_4_MINI, &usage);
-    assert_eq!(microdollars, 30_000);
+    for model in [
+        DEFAULT_TRIAGE_MODEL,
+        DEFAULT_SUMMARY_MODEL,
+        DEFAULT_BRIEFING_MODEL,
+    ] {
+        assert!(
+            registry.get(model).is_some(),
+            "default model {model} must have pricing"
+        );
+        assert!(
+            registry.cost_microdollars(model, &usage) > 0,
+            "default model {model} should cost more than zero for non-zero usage"
+        );
+    }
 }
 
 #[test]
@@ -51,24 +63,6 @@ fn cost_with_no_cached_tokens_unchanged() {
     let usage = TokenUsage::new(1_000_000, 0);
     let cost = pricing.cost_microdollars(&usage);
     assert_eq!(cost, 15_000);
-}
-
-#[test]
-fn default_registry_contains_gpt54_nano() {
-    let registry = PricingRegistry::with_defaults();
-    assert!(
-        registry.get(OPENAI_MODEL_GPT_5_4_NANO).is_some(),
-        "gpt-5.4-nano must be present in the default pricing registry"
-    );
-}
-
-#[test]
-fn default_registry_contains_gpt54_family() {
-    let registry = PricingRegistry::with_defaults();
-    assert!(registry.get(OPENAI_MODEL_GPT_5_4).is_some());
-    assert!(registry.get(OPENAI_MODEL_GPT_5_4_MINI).is_some());
-    assert!(registry.get(OPENAI_MODEL_GPT_5_4_NANO).is_some());
-    assert!(registry.get(OPENAI_MODEL_GPT_5_4_PRO).is_some());
 }
 
 #[test]

@@ -265,29 +265,27 @@ async fn live_openai_completion() {
 }
 
 #[tokio::test]
-async fn list_models_filters_to_chat_models_only() {
+async fn list_models_filters_supported_rolling_chat_categories() {
     let server = MockServer::start().await;
 
     let models_response = serde_json::json!({
         "data": [
-            { "id": "gpt-4" },
-            { "id": "gpt-4-turbo" },
-            { "id": "gpt-4-0613" },  // Dated snapshot - should be filtered
-            { "id": "gpt-4-turbo-2024-08-06" },  // Dated snapshot - should be filtered
-            { "id": "gpt-3.5-turbo" },
-            { "id": "gpt-3.5-turbo-1106" },  // Dated snapshot - should be filtered
-            { "id": "o1-preview" },
-            { "id": "o1-mini" },
-            { "id": "o3-mini" },
-            { "id": "o4-preview" },
-            { "id": "whisper-1" },  // Audio - should be filtered
-            { "id": "gpt-4-audio-preview" },  // Audio - should be filtered
-            { "id": "gpt-4-realtime-preview" },  // Realtime - should be filtered
-            { "id": "dall-e-3" },  // Image generation - should be filtered
-            { "id": "tts-1" },  // Text-to-speech - should be filtered
-            { "id": "text-embedding-ada-002" },  // Embedding - should be filtered
-            { "id": "text-davinci-003" },  // Not in allow-list - should be filtered
-            { "id": "gpt-3.5-turbo-instruct" },  // Instruct - should be filtered
+            { "id": "gpt-synthetic-chat" },
+            { "id": "o1-synthetic-preview" },
+            { "id": "o3-synthetic-mini" },
+            { "id": "o4-synthetic-general" },
+            { "id": "gpt-synthetic-chat-0613" },
+            { "id": "gpt-synthetic-chat-2024-08-06" },
+            { "id": "whisper-synthetic" },
+            { "id": "gpt-synthetic-audio-preview" },
+            { "id": "gpt-synthetic-realtime-preview" },
+            { "id": "dall-e-synthetic" },
+            { "id": "tts-synthetic" },
+            { "id": "text-embedding-synthetic" },
+            { "id": "gpt-synthetic-transcribe" },
+            { "id": "gpt-synthetic-search-preview" },
+            { "id": "gpt-synthetic-instruct" },
+            { "id": "text-davinci-synthetic" }
         ]
     });
 
@@ -302,45 +300,13 @@ async fn list_models_filters_to_chat_models_only() {
         OpenAiProvider::new("test-key".into()).with_base_url(format!("{}/v1", server.uri()));
     let models = provider.list_models().await.unwrap();
 
-    // Should only include current rolling chat models
-    let expected = vec![
-        "gpt-4",
-        "gpt-4-turbo",
-        "gpt-3.5-turbo",
-        "o1-preview",
-        "o1-mini",
-        "o3-mini",
-        "o4-preview",
-    ];
-
-    assert_eq!(models.len(), expected.len(), "Model count mismatch");
-    for model in &expected {
-        assert!(
-            models.contains(&model.to_string()),
-            "Missing expected model: {}",
-            model
-        );
-    }
-
-    // Verify filtered models are NOT present
-    let filtered_out = vec![
-        "gpt-4-0613",
-        "gpt-4-turbo-2024-08-06",
-        "gpt-3.5-turbo-1106",
-        "whisper-1",
-        "gpt-4-audio-preview",
-        "gpt-4-realtime-preview",
-        "dall-e-3",
-        "tts-1",
-        "text-embedding-ada-002",
-        "text-davinci-003",
-        "gpt-3.5-turbo-instruct",
-    ];
-    for model in &filtered_out {
-        assert!(
-            !models.contains(&model.to_string()),
-            "Should have filtered out: {}",
-            model
-        );
-    }
+    assert_eq!(
+        models,
+        vec![
+            "gpt-synthetic-chat".to_string(),
+            "o1-synthetic-preview".to_string(),
+            "o3-synthetic-mini".to_string(),
+            "o4-synthetic-general".to_string(),
+        ]
+    );
 }

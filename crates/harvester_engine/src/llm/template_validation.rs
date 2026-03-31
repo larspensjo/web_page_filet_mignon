@@ -22,6 +22,8 @@ fn synthetic_vars(prompt_id: PromptId) -> HashMap<String, String> {
     match prompt_id {
         PromptId::AggregateBriefing => {
             vars.set_document("collection", "Doc A\nDoc B");
+            vars.insert("previous_briefings", "(none)");
+            vars.insert("briefing_time_window", "All available articles");
         }
         _ => {
             vars.set_document("content", "Sample article text");
@@ -133,6 +135,16 @@ mod tests {
             PromptId::ArticleTriage,
             "System uses {{context}}",
             "User {{content}}",
+        );
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn aggregate_briefing_supports_briefing_specific_variables() {
+        let errors = validate_template(
+            PromptId::AggregateBriefing,
+            "System {{context}} {{previous_briefings}} {{briefing_time_window}}",
+            "User {{collection}}",
         );
         assert!(errors.is_empty());
     }

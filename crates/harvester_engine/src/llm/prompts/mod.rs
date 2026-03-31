@@ -43,36 +43,41 @@ mod tests {
     use crate::llm::PromptRegistry;
 
     #[test]
-    fn aggregate_briefing_active_version_is_v7() {
+    fn register_defaults_activates_exported_default_aliases() {
         let mut registry = PromptRegistry::new();
         register_defaults(&mut registry);
-        let active = registry
-            .active(PromptId::AggregateBriefing)
-            .expect("active AggregateBriefing prompt");
-        assert_eq!(active.version, 7);
+        assert_eq!(
+            registry
+                .active(PromptId::ArticleTriage)
+                .expect("active ArticleTriage prompt")
+                .version,
+            TRIAGE_PROMPT.version
+        );
+        assert_eq!(
+            registry
+                .active(PromptId::ArticleSummary)
+                .expect("active ArticleSummary prompt")
+                .version,
+            SUMMARY_PROMPT.version
+        );
+        assert_eq!(
+            registry
+                .active(PromptId::AggregateBriefing)
+                .expect("active AggregateBriefing prompt")
+                .version,
+            BRIEFING_PROMPT.version
+        );
     }
 
     #[test]
-    fn register_defaults_registers_seven_aggregate_briefing_versions() {
+    fn register_defaults_keeps_older_exported_versions_addressable() {
         let mut registry = PromptRegistry::new();
         register_defaults(&mut registry);
-        assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 7);
-    }
-
-    #[test]
-    fn article_summary_active_version_is_v4() {
-        let mut registry = PromptRegistry::new();
-        register_defaults(&mut registry);
-        let active = registry
-            .active(PromptId::ArticleSummary)
-            .expect("active ArticleSummary prompt");
-        assert_eq!(active.version, 4);
-    }
-
-    #[test]
-    fn register_defaults_registers_four_article_summary_versions() {
-        let mut registry = PromptRegistry::new();
-        register_defaults(&mut registry);
-        assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 4);
+        for template in [TRIAGE_PROMPT_V1, SUMMARY_PROMPT_V1, BRIEFING_PROMPT_V1] {
+            let registered = registry
+                .get(template.id, template.version)
+                .expect("older exported template should remain registered");
+            assert_eq!(registered.description, template.description);
+        }
     }
 }

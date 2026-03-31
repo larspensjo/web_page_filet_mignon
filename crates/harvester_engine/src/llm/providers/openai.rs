@@ -386,32 +386,32 @@ mod tests {
 
     #[test]
     fn dated_snapshot_detects_mmdd_format() {
-        assert!(is_dated_snapshot("gpt-4-0613"));
-        assert!(is_dated_snapshot("gpt-3.5-turbo-1106"));
-        assert!(is_dated_snapshot("o1-preview-0912"));
+        assert!(is_dated_snapshot("chat-family-0613"));
+        assert!(is_dated_snapshot("rolling-model-1106"));
+        assert!(is_dated_snapshot("preview-series-0912"));
     }
 
     #[test]
     fn dated_snapshot_detects_yyyy_mm_dd_format() {
-        assert!(is_dated_snapshot("gpt-4-turbo-2024-08-06"));
-        assert!(is_dated_snapshot("gpt-4-2024-01-25"));
-        assert!(is_dated_snapshot("o3-mini-2025-02-14"));
+        assert!(is_dated_snapshot("chat-family-2024-08-06"));
+        assert!(is_dated_snapshot("rolling-model-2024-01-25"));
+        assert!(is_dated_snapshot("reasoner-series-2025-02-14"));
     }
 
     #[test]
     fn dated_snapshot_rejects_current_rolling_versions() {
-        assert!(!is_dated_snapshot("gpt-4"));
-        assert!(!is_dated_snapshot("gpt-4-turbo"));
-        assert!(!is_dated_snapshot("gpt-3.5-turbo"));
-        assert!(!is_dated_snapshot("o1-preview"));
-        assert!(!is_dated_snapshot("o1-mini"));
+        assert!(!is_dated_snapshot("chat-family"));
+        assert!(!is_dated_snapshot("chat-family-preview"));
+        assert!(!is_dated_snapshot("rolling-model"));
+        assert!(!is_dated_snapshot("reasoner-preview"));
+        assert!(!is_dated_snapshot("reasoner-mini"));
     }
 
     #[test]
     fn dated_snapshot_rejects_non_date_suffixes() {
-        assert!(!is_dated_snapshot("gpt-4-vision"));
-        assert!(!is_dated_snapshot("gpt-4-32k"));
-        assert!(!is_dated_snapshot("text-embedding-ada"));
+        assert!(!is_dated_snapshot("chat-family-vision"));
+        assert!(!is_dated_snapshot("chat-family-preview"));
+        assert!(!is_dated_snapshot("embedding-family"));
     }
 
     #[test]

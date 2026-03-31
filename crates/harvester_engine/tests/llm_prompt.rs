@@ -71,18 +71,35 @@ fn prompt_id_from_str_rejects_unknown() {
 }
 
 #[test]
-fn registry_with_defaults_has_restart_scope() {
+fn registry_with_defaults_exposes_active_latest_template_for_each_prompt() {
     let registry = PromptRegistry::with_defaults();
-    assert_eq!(registry.active(PromptId::ArticleTriage).unwrap().version, 3);
-    assert_eq!(registry.versions(PromptId::ArticleSummary).len(), 4);
-    assert_eq!(
-        registry
-            .active(PromptId::AggregateBriefing)
-            .unwrap()
-            .version,
-        7
-    );
-    assert_eq!(registry.versions(PromptId::AggregateBriefing).len(), 7);
+    for prompt_id in [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::AggregateBriefing,
+    ] {
+        let versions = registry.versions(prompt_id);
+        assert!(
+            !versions.is_empty(),
+            "expected at least one registered template for {prompt_id}"
+        );
+        let active = registry
+            .active(prompt_id)
+            .expect("default prompt should have an active template");
+        let latest = versions
+            .iter()
+            .copied()
+            .max()
+            .expect("registered versions should be non-empty");
+        assert!(
+            versions.contains(&active.version),
+            "active version should be registered for {prompt_id}"
+        );
+        assert_eq!(
+            active.version, latest,
+            "default active template should track the latest registered version for {prompt_id}"
+        );
+    }
 }
 
 #[test]
@@ -95,21 +112,19 @@ fn triage_prompt_v1_still_accessible_by_version() {
 }
 
 #[test]
-fn triage_prompt_v2_user_template_accepts_document_vars() {
+fn triage_active_prompt_renders_document_vars() {
     let registry = PromptRegistry::with_defaults();
     let template = registry
         .active(PromptId::ArticleTriage)
-        .expect("v2 should be active");
+        .expect("triage prompt should be active");
     let mut vars = TemplateVars::new();
     let payload = "Important article content.";
     vars.set_document("content", payload);
-    let rendered_content = vars.to_map().get("content").unwrap().clone();
-    let rendered = template
-        .user_template
-        .replace("{{content}}", &rendered_content);
-    assert!(rendered.contains("Document:"));
+    let rendered = render_template(template.user_template, &vars.to_map())
+        .expect("active triage prompt should render with document vars");
+    assert!(rendered.contains(payload));
     assert!(rendered.contains("</document-"));
-    assert!(rendered.contains("Analyze this article and return your triage assessment as JSON."));
+    assert!(rendered.contains("<document-"));
 }
 
 #[test]
