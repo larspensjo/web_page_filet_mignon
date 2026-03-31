@@ -36,14 +36,14 @@
 
 **Focus:** Keep tests centered on stable domain behavior, not helper structure.
 
-- [ ] `crates/harvester_core/src/update.rs`
-- [ ] `crates/harvester_core/src/state.rs`
-- [ ] `crates/harvester_core/src/source_state.rs`
-- [ ] `crates/harvester_core/src/triage.rs`
-- [ ] `crates/harvester_core/src/pre_triage_coordinator.rs`
-- [ ] `crates/harvester_core/src/pre_triage_filter.rs`
-- [ ] `crates/harvester_core/src/working_corpus.rs`
-- [ ] `crates/harvester_core/src/prompt_lab.rs`
+- [x] `crates/harvester_core/src/update.rs`
+- [x] `crates/harvester_core/src/state.rs`
+- [x] `crates/harvester_core/src/source_state.rs`
+- [x] `crates/harvester_core/src/triage.rs`
+- [x] `crates/harvester_core/src/pre_triage_coordinator.rs`
+- [x] `crates/harvester_core/src/pre_triage_filter.rs`
+- [x] `crates/harvester_core/src/working_corpus.rs`
+- [x] `crates/harvester_core/src/prompt_lab.rs`
 
 ## Chunk 3: `harvester_core` view, briefing, preview, and cache contracts
 
