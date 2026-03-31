@@ -891,6 +891,7 @@ impl AppState {
             summary_markdown: effective_summary_markdown,
             briefing_markdown: effective_briefing_markdown,
             trends,
+            poll_stats_markdown: None,
         }
     }
 

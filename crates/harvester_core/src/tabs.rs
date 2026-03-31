@@ -8,6 +8,7 @@ pub enum AppTab {
     Summary,
     Briefing,
     Trends,
+    PollStats,
 }
 
 impl AppTab {
@@ -18,6 +19,7 @@ impl AppTab {
             AppTab::Summary => 1,
             AppTab::Briefing => 2,
             AppTab::Trends => 3,
+            AppTab::PollStats => 4,
         }
     }
 
@@ -28,6 +30,7 @@ impl AppTab {
             1 => Some(AppTab::Summary),
             2 => Some(AppTab::Briefing),
             3 => Some(AppTab::Trends),
+            4 => Some(AppTab::PollStats),
             _ => {
                 engine_warn!("[tabs] AppTab::from_index: out-of-range index {index}");
                 None
@@ -127,6 +130,7 @@ mod tests {
             AppTab::Summary,
             AppTab::Briefing,
             AppTab::Trends,
+            AppTab::PollStats,
         ];
         for tab in variants {
             assert_eq!(AppTab::from_index(tab.to_index()), Some(tab));
@@ -135,7 +139,7 @@ mod tests {
 
     #[test]
     fn app_tab_from_index_out_of_range_returns_none() {
-        assert_eq!(AppTab::from_index(4), None);
+        assert_eq!(AppTab::from_index(5), None);
         assert_eq!(AppTab::from_index(usize::MAX), None);
     }
 

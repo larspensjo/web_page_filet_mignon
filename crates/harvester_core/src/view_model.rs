@@ -99,6 +99,8 @@ pub struct RightPaneView {
     pub briefing_markdown: Option<String>,
     /// Trends tab view data.
     pub trends: TrendsTabView,
+    /// Formatted text for the Poll Stats tab. None until the first poll completes.
+    pub poll_stats_markdown: Option<String>,
 }
 
 fn category_trend_to_view(trend: &CategoryTrend) -> CategoryTrendView {
