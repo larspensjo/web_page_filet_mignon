@@ -180,13 +180,13 @@
 
 **Focus:** Reducer/render behavior and script contracts, not literal formatting constants unless they are part of the public interface.
 
-- [ ] `scripts/tests/HarvesterLauncher.Tests.ps1`
-- [ ] `scripts/tests/project-stats.Tests.ps1`
-- [ ] `ministry-of-future-plans/tests/Reducer.Tests.ps1`
-- [ ] `ministry-of-future-plans/tests/Render.Tests.ps1`
-- [ ] `ministry-of-future-plans/tests/Layout.Tests.ps1`
-- [ ] `ministry-of-future-plans/tests/Filtering.Tests.ps1`
-- [ ] `ministry-of-future-plans/tests/IdeaDocCore.Tests.ps1`
+- [x] `scripts/tests/HarvesterLauncher.Tests.ps1`
+- [x] `scripts/tests/project-stats.Tests.ps1`
+- [x] `ministry-of-future-plans/tests/Reducer.Tests.ps1`
+- [x] `ministry-of-future-plans/tests/Render.Tests.ps1`
+- [x] `ministry-of-future-plans/tests/Layout.Tests.ps1`
+- [x] `ministry-of-future-plans/tests/Filtering.Tests.ps1`
+- [x] `ministry-of-future-plans/tests/IdeaDocCore.Tests.ps1`
 
 ## Expected outputs from the review
 
