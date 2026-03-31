@@ -1,12 +1,14 @@
 use harvester_engine::SourceKind;
 
+use crate::SourcePollStat;
+
 /// Formats a grouped poll-stats summary (RSS / Brave / other source types) as a
 /// multi-line string.
 ///
 /// Returns `"No poll data yet."` when `stats` is empty.
 /// Source kinds with no stats are omitted.
 /// No surrounding banner is included; that is the caller's responsibility.
-pub fn format_poll_stats(stats: &[crate::SourcePollStat]) -> String {
+pub fn format_poll_stats(stats: &[SourcePollStat]) -> String {
     if stats.is_empty() {
         return "No poll data yet.".to_string();
     }
