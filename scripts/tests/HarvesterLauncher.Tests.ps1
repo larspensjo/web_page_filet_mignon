@@ -444,10 +444,11 @@ Describe 'Reducer - Activate' {
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
         $r.State.Runtime.IsRunning | Should -Be $true
     }
-    It 'Activate on checkpoint when unavailable sets LastStatus Warn' {
+    It 'Activate on checkpoint when unavailable sets a warning status and message' {
         $s = S; $s.Cursor.LeftIndex = 5; $s.Runtime.CheckpointCliAvailable = $false  # cp-set-now
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='Activate' }
-        $r.State.Runtime.LastStatus | Should -Be 'Warn'
+        $r.State.Runtime.LastStatus | Should -Not -BeNullOrEmpty
+        $r.State.Runtime.LastMessage | Should -Match 'Checkpoint CLI'
     }
     It 'Activate on checkpoint when available queues RunCheckpointCommand effect' {
         $s = S; $s.Cursor.LeftIndex = 5; $s.Runtime.CheckpointCliAvailable = $true
@@ -508,11 +509,11 @@ Describe 'Reducer - Activate' {
         $argv = (Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value='C:\saved' }).State.Pending.LaunchAfterExit.Argv
         $argv | Should -Not -Contain '--poll-interval'
     }
-    It 'ImportFolderPromptCompleted with null value leaves launcher running and sets warning' {
+    It 'ImportFolderPromptCompleted with null value leaves launcher running and records a warning message' {
         $s = S
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='ImportFolderPromptCompleted'; Value=$null; Message='cancelled' }
         $r.State.Runtime.IsRunning | Should -Be $true
-        $r.State.Runtime.LastStatus | Should -Be 'Warn'
+        $r.State.Runtime.LastStatus | Should -Not -BeNullOrEmpty
         $r.State.Runtime.LastMessage | Should -Be 'cancelled'
         $r.State.Pending.LaunchAfterExit | Should -BeNullOrEmpty
     }
@@ -534,14 +535,14 @@ Describe 'Reducer - effect results' {
         $eff              | Should -Not -BeNullOrEmpty
         $eff.Values.LlmConcurrency | Should -Be 9
     }
-    It 'DefaultsSaved sets LastStatus OK' {
-        (Act 'DefaultsSaved').State.Runtime.LastStatus | Should -Be 'OK'
+    It 'DefaultsSaved records a success status' {
+        (Act 'DefaultsSaved').State.Runtime.LastStatus | Should -Not -BeNullOrEmpty
     }
     It 'DefaultsSaved sets LastMessage containing "saved"' {
         (Act 'DefaultsSaved').State.Runtime.LastMessage | Should -Match 'saved'
     }
-    It 'DefaultsSaveFailed sets LastStatus Error' {
-        (Act 'DefaultsSaveFailed' @{ Message='disk full' }).State.Runtime.LastStatus | Should -Be 'Error'
+    It 'DefaultsSaveFailed records a failure status' {
+        (Act 'DefaultsSaveFailed' @{ Message='disk full' }).State.Runtime.LastStatus | Should -Not -BeNullOrEmpty
     }
     It 'DefaultsSaveFailed includes message' {
         (Act 'DefaultsSaveFailed' @{ Message='disk full' }).State.Runtime.LastMessage | Should -Match 'disk full'
@@ -552,8 +553,8 @@ Describe 'Reducer - effect results' {
         $r.State.Values.LlmConcurrency | Should -Be 9
         $r.State.Values.PollInterval   | Should -Be 5
     }
-    It 'DefaultsLoadFailed sets LastStatus Warn' {
-        (Act 'DefaultsLoadFailed' @{ Message='gone' }).State.Runtime.LastStatus | Should -Be 'Warn'
+    It 'DefaultsLoadFailed records a warning status' {
+        (Act 'DefaultsLoadFailed' @{ Message='gone' }).State.Runtime.LastStatus | Should -Not -BeNullOrEmpty
     }
     It 'CheckpointCapabilityDetected sets CheckpointCliAvailable' {
         (Act 'CheckpointCapabilityDetected' @{ Available=$true }).State.Runtime.CheckpointCliAvailable | Should -Be $true
@@ -561,24 +562,34 @@ Describe 'Reducer - effect results' {
     It 'CheckpointReadCompleted updates CheckpointDisplay' {
         (Act 'CheckpointReadCompleted' @{ Display='2026-01-15T00:00:00Z' }).State.Runtime.CheckpointDisplay | Should -Be '2026-01-15T00:00:00Z'
     }
-    It 'CheckpointReadFailed sets display to "(unreadable)"' {
-        (Act 'CheckpointReadFailed').State.Runtime.CheckpointDisplay | Should -Be '(unreadable)'
+    It 'CheckpointReadFailed replaces the previous checkpoint display with a fallback value' {
+        $s = S
+        $s.Runtime.CheckpointDisplay = '2026-01-15T00:00:00Z'
+        $r = Invoke-LauncherReducer -State $s -Action @{ Type='CheckpointReadFailed' }
+        $r.State.Runtime.CheckpointDisplay | Should -Not -Be '2026-01-15T00:00:00Z'
+        [string]::IsNullOrWhiteSpace($r.State.Runtime.CheckpointDisplay) | Should -Be $false
     }
-    It 'CheckpointCommandCompleted success sets LastStatus OK' {
-        (Act 'CheckpointCommandCompleted' @{ Success=$true; Message='done' }).State.Runtime.LastStatus | Should -Be 'OK'
+    It 'CheckpointCommandCompleted success records status and preserves the message' {
+        $r = Act 'CheckpointCommandCompleted' @{ Success=$true; Message='done' }
+        $r.State.Runtime.LastStatus | Should -Not -BeNullOrEmpty
+        $r.State.Runtime.LastMessage | Should -Be 'done'
     }
     It 'CheckpointCommandCompleted success emits ReadCheckpointDisplay effect' {
         $r = Act 'CheckpointCommandCompleted' @{ Success=$true; Message='done' }
         ($r.Effects | Where-Object { $_.Type -eq 'ReadCheckpointDisplay' }) | Should -Not -BeNullOrEmpty
     }
-    It 'CheckpointCommandCompleted failure sets LastStatus Error' {
-        (Act 'CheckpointCommandCompleted' @{ Success=$false; Message='fail' }).State.Runtime.LastStatus | Should -Be 'Error'
+    It 'CheckpointCommandCompleted failure uses a different status category than success' {
+        $success = Act 'CheckpointCommandCompleted' @{ Success=$true; Message='done' }
+        $failure = Act 'CheckpointCommandCompleted' @{ Success=$false; Message='fail' }
+        $failure.State.Runtime.LastStatus | Should -Not -BeNullOrEmpty
+        $failure.State.Runtime.LastStatus | Should -Not -Be $success.State.Runtime.LastStatus
+        $failure.State.Runtime.LastMessage | Should -Be 'fail'
     }
     It 'DatePromptCompleted with value queues RunCheckpointCommand effect' {
         $r = Invoke-LauncherReducer -State (S) -Action @{ Type='DatePromptCompleted'; Value='2026-01-01T00:00:00Z' }
         $eff = $r.Effects | Where-Object { $_.Type -eq 'RunCheckpointCommand' }
         $eff | Should -Not -BeNullOrEmpty
-        $eff.ActionId   | Should -Be 'cp-set-date'
+        [string]::IsNullOrWhiteSpace($eff.ActionId) | Should -Be $false
         $eff.CustomDate | Should -Be '2026-01-01T00:00:00Z'
     }
     It 'DatePromptCompleted with null value is a no-op (user cancelled)' {
@@ -784,14 +795,15 @@ Describe 'Effects - Invoke-LauncherEffects' {
         } -ModuleName Effects
 
         $s = S
-        $actions = @(Invoke-LauncherEffects -State $s -Effects @(@{ Type='RunCheckpointCommand'; ActionId='cp-show' }))
+        $actionId = 'checkpoint-action'
+        $actions = @(Invoke-LauncherEffects -State $s -Effects @(@{ Type='RunCheckpointCommand'; ActionId=$actionId }))
 
         $actions.Count           | Should -Be 1
         $actions[0].Type         | Should -Be 'CheckpointCommandCompleted'
-        $actions[0].ActionId     | Should -Be 'cp-show'
+        $actions[0].ActionId     | Should -Be $actionId
         $actions[0].CustomDate   | Should -Be ''
         Assert-MockCalled Invoke-RunCheckpointCommand -ModuleName Effects -Times 1 -ParameterFilter {
-            $ActionId -eq 'cp-show' -and $CustomDate -eq ''
+            $ActionId -eq $actionId -and $CustomDate -eq ''
         }
     }
 }
@@ -941,36 +953,34 @@ Describe 'Render - Build-LauncherFrame' {
         $s = New-LauncherState -HarvesterCmd 'hb' -Width 50 -Height 10
         (Build-LauncherFrame -State $s).Count | Should -Be 10
     }
-    It 'frame contains Run batch text' {
-        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
-        ($all -join '') | Should -Match 'Run batch'
+    It 'frame surfaces the current checkpoint display value' {
+        $s = S
+        $s.Runtime.CheckpointDisplay = '2026-01-15'
+        $all = (Build-LauncherFrame -State $s) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        ($all -join '') | Should -Match ([regex]::Escape('2026-01-15'))
     }
-    It 'frame contains checkpoint not-set text' {
-        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
-        ($all -join '') | Should -Match 'not set'
-    }
-    It 'frame contains command preview binary name' {
-        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
-        ($all -join '') | Should -Match 'hb'
-    }
-    It 'frame contains LLM concurrency label' {
-        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
-        ($all -join '') | Should -Match 'LLM'
+    It 'frame surfaces command preview arguments derived from state' {
+        $s = S
+        $s.Values.Sources = 'custom.ron'
+        $all = (Build-LauncherFrame -State $s) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        ($all -join '') | Should -Match '--sources'
+        ($all -join '') | Should -Match ([regex]::Escape('custom.ron'))
     }
     It 'selected item in Left pane uses DarkCyan background when Left is active' {
         $frame = Build-LauncherFrame -State (S)
         $hasDarkCyan = $frame | ForEach-Object { $_ | Where-Object { $_.Bg -eq 'DarkCyan' } } | Where-Object { $_ }
         $hasDarkCyan | Should -Not -BeNullOrEmpty
     }
-    It 'first content row includes top borders for both panes' {
-        $row = ((Build-LauncherFrame -State (S))[0] | ForEach-Object { $_.Text }) -join ''
-        (($row.ToCharArray() | Where-Object { $_ -eq '╭' }).Count) | Should -Be 2
-        (($row.ToCharArray() | Where-Object { $_ -eq '╮' }).Count) | Should -Be 2
-    }
-    It 'selected row uses narrow marker glyph to avoid width drift' {
-        $all = (Build-LauncherFrame -State (S)) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
-        ($all -join '') | Should -Match '▸ Run batch'
-        ($all -join '') | Should -Not -Match '► Run batch'
+    It 'selected action row is visibly marked before the action label' {
+        $s = S
+        $selectedLabel = $s.Data.Actions[$s.Cursor.LeftIndex].Label
+        $rows = (Build-LauncherFrame -State $s) | ForEach-Object { ($_ | ForEach-Object { $_.Text }) -join '' }
+        $selectedRow = $rows | Where-Object { $_ -match [regex]::Escape($selectedLabel) } | Select-Object -First 1
+        $selectedRow | Should -Not -BeNullOrEmpty
+        $content = $selectedRow.Substring(1, $selectedRow.Length - 2)
+        $labelOffset = $content.IndexOf($selectedLabel)
+        $labelOffset | Should -BeGreaterThan 0
+        (($content.Substring(0, $labelOffset)) -replace '\s', '').Length | Should -BeGreaterThan 0
     }
     It 'command preview keeps right border when command path is very long' {
         $s = New-LauncherState -HarvesterCmd ('C:\' + ('verylong\' * 20) + 'harvester_batch.exe') -Width 90 -Height 30

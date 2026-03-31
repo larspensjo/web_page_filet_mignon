@@ -938,3 +938,11 @@ Lessons Learned: The root cause was test data and assertions being chosen for co
 Prevention: Use correctness by construction for infrastructure tests by giving generic modules generic fixture builders, asserting typed invariants or invariant-bearing fields before display text, and isolating any true formatting-compatibility requirement in a narrowly named test with an explicit rationale.
 Refs: src/CommanDuctUI/src/controls/menu_handler.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/app.rs, src/CommanDuctUI/src/controls/tab_bar_handler.rs, docs/plans/Findings.UnitTestReviewChunk8.md
 
+## 2026-03-31 - Rework chunk 9 PowerShell/TUI tests toward semantic boundaries
+Type: Bug Fix
+Context: Chunk 9 unit-test review found launcher and browser TUI tests pinning current status words, checkpoint action ids, selection glyphs, helper serialization strings, and empty-state copy even though the durable contracts are reducer/effect behavior, visible selection, layout shape, and user-supplied render data.
+Change: Relaxed the affected Pester tests to assert runtime state transitions, effect emission, forwarded custom dates, visible selection markers, command-preview/checkpoint values derived from state, and non-empty empty-state rendering instead of current copy or helper string formats.
+Lessons Learned: The root cause was using whichever string or glyph was easiest to observe from a TUI test, which turned transient presentation and internal dispatch ids into accidental contracts.
+Prevention: Use correctness by construction for these suites by deriving expectations from reducer-owned state and source-of-truth data tables, adding semantic helper assertions for visible selection/empty states, and only locking exact text or ids when they are intentional public protocols.
+Refs: scripts/tests/HarvesterLauncher.Tests.ps1, ministry-of-future-plans/tests/Render.Tests.ps1, docs/plans/Findings.UnitTestReviewChunk9.md
+
