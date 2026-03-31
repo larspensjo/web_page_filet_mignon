@@ -28,6 +28,8 @@ pub struct SourceStateIndex {
     poll_in_progress: bool,
     /// Stats accumulated for the current poll cycle; cleared when a new poll starts.
     poll_stats: Vec<SourcePollStat>,
+    /// Snapshot of stats from the last *completed* poll cycle. Persists across poll starts.
+    last_completed_poll_stats: Vec<SourcePollStat>,
 }
 
 impl SourceStateIndex {
@@ -67,11 +69,16 @@ impl SourceStateIndex {
     }
 
     pub fn end_poll(&mut self) {
+        self.last_completed_poll_stats = self.poll_stats.clone();
         self.poll_in_progress = false;
     }
 
     pub fn is_poll_in_progress(&self) -> bool {
         self.poll_in_progress
+    }
+
+    pub fn last_completed_poll_stats(&self) -> &[SourcePollStat] {
+        &self.last_completed_poll_stats
     }
 }
 
@@ -108,5 +115,64 @@ mod tests {
         let state = index.source_state(&id).expect("present");
         assert_eq!(state.last_error.as_deref(), Some("boom"));
         assert!(state.last_polled.is_some());
+    }
+
+    fn make_stat(source_id: &str, emitted: usize) -> SourcePollStat {
+        SourcePollStat {
+            source_id: SourceId::new(source_id).expect("valid"),
+            kind: SourceKind::Rss,
+            parsed: emitted,
+            dedup_filtered: 0,
+            emitted,
+        }
+    }
+
+    #[test]
+    fn last_completed_poll_stats_empty_before_any_poll() {
+        let index = SourceStateIndex::default();
+        assert!(index.last_completed_poll_stats().is_empty());
+    }
+
+    #[test]
+    fn last_completed_poll_stats_set_after_end_poll() {
+        let mut index = SourceStateIndex::default();
+        index.start_poll();
+        index.record_poll_stat(make_stat("s1", 3));
+        index.end_poll();
+        let stats = index.last_completed_poll_stats();
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].emitted, 3);
+    }
+
+    #[test]
+    fn last_completed_poll_stats_preserved_during_next_poll() {
+        let mut index = SourceStateIndex::default();
+        // First poll
+        index.start_poll();
+        index.record_poll_stat(make_stat("s1", 3));
+        index.end_poll();
+        // Second poll starts — live accumulator clears, snapshot must remain
+        index.start_poll();
+        assert!(index.poll_stats().is_empty(), "live accumulator should be cleared");
+        let stats = index.last_completed_poll_stats();
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].emitted, 3);
+    }
+
+    #[test]
+    fn last_completed_poll_stats_replaced_after_second_end_poll() {
+        let mut index = SourceStateIndex::default();
+        // First poll
+        index.start_poll();
+        index.record_poll_stat(make_stat("s1", 3));
+        index.end_poll();
+        // Second poll
+        index.start_poll();
+        index.record_poll_stat(make_stat("s2", 7));
+        index.end_poll();
+        let stats = index.last_completed_poll_stats();
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].source_id, SourceId::new("s2").expect("valid"));
+        assert_eq!(stats[0].emitted, 7);
     }
 }
