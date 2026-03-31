@@ -190,6 +190,7 @@ fn handle_end_tag(rtf: &mut String, tag_end: TagEnd, list_stack: &mut Vec<ListSt
         TagEnd::Emphasis => rtf.push_str("\\i0 "),
         TagEnd::List(_) => {
             let _ = list_stack.pop();
+            rtf.push_str("\\par ");
         }
         TagEnd::Item => {
             if let Some(list_state) = list_stack.last_mut() {
@@ -283,7 +284,7 @@ mod tests {
         let rtf = convert_markdown_to_rtf(markdown);
         assert_eq!(
             rtf,
-            "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}{\\f1 Consolas;}}{\\colortbl;\\red224\\green229\\blue236;\\red26\\green29\\blue34;\\red88\\green166\\blue255;}\\viewkind4\\uc1\\pard\\cf1\\cb2\\f0\\fs22 \\pard\\sa120\\sb60\\b\\fs36 Header\\b0\\fs22\\par\\pard\\sa60\\sb0 \\par\\pard\\li360\\fi-180 \\bullet\\tab \\b Item\\b0 \\pard \\pard\\sa60\\sb0 Paragraph\\par }"
+            "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}{\\f1 Consolas;}}{\\colortbl;\\red224\\green229\\blue236;\\red26\\green29\\blue34;\\red88\\green166\\blue255;}\\viewkind4\\uc1\\pard\\cf1\\cb2\\f0\\fs22 \\pard\\sa120\\sb60\\b\\fs36 Header\\b0\\fs22\\par\\pard\\sa60\\sb0 \\par\\pard\\li360\\fi-180 \\bullet\\tab \\b Item\\b0 \\pard \\par \\pard\\sa60\\sb0 Paragraph\\par }"
         );
     }
 
@@ -301,6 +302,12 @@ mod tests {
         assert!(rtf.contains(
             "1.\\tab \\sa60\\sb0 \\b Headline\\b0 \\par \\par\\pard\\li360\\sa60\\sb0 Body text"
         ));
+    }
+
+    #[test]
+    fn heading_after_list_starts_on_new_paragraph() {
+        let rtf = convert_markdown_to_rtf("- one\n- two\n\n## Brave");
+        assert!(rtf.contains("\\pard \\par \\pard\\sa120\\sb60\\b\\fs32 Brave"));
     }
 
     #[test]

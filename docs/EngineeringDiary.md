@@ -870,3 +870,19 @@ Context: Pipeline was passive (RSS/file/curated). Added Brave News API as an act
 Change: New `SourceType::BraveNews(BraveNewsSourceConfig)` slots into the existing poll loop. Pure parse in `harvester_engine::brave_poll`; HTTP fetch and API-key resolution in `harvester_io::effect_helpers`. Two dedup layers: `BraveSeenSet` (cross-cycle, URL-keyed, bounded FIFO eviction) in `harvester_engine` for Brave-specific dedup; `AppState.ingest_urls` (in-session) for reducer-level dedup. `BravePollContext` struct groups the 4+ mutable args to `handle_brave_source_poll` to stay within clippy's argument-count limit. Brave metadata (title, description, age) persisted in a sidecar store (`.brave_metadata.ron`) for future triage/preview. Per-source poll stats (`parsed → dedup-filtered → emitted`) added to dry-run and `--single-shot` stdout, grouped by source type. `SourcePollStat` recorded by reducer after `ingest_urls` so `emitted` reflects actual enqueued count. `normalize_url_for_dedupe` moved to `harvester_engine::brave_seen_set` (canonical home); `harvester_core` re-exports it to avoid circular dependency. `reqwest::blocking` does not support `.query()` without additional feature flags — use `Url::query_pairs_mut()` to build query strings manually. Lock behavior improved: stale-lock error now printed to stderr (was log-only); Ctrl-C removes the lock file and exits immediately via signal handler.
 Refs: crates/harvester_engine/src/brave_poll.rs, crates/harvester_engine/src/brave_seen_set.rs, crates/harvester_io/src/effect_helpers.rs, crates/harvester_io/src/seen_set_store.rs, crates/harvester_core/src/source_state.rs, crates/harvester_batch/src/lock.rs, crates/harvester_core/tests/brave_integration.rs, docs/plans/Plan.BraveSearchIntegration.md
 
+## 2026-03-31 - Poll stats viewer now emits markdown-shaped sections
+Type: Bug Fix
+Context: The Poll Stats tab rendered one dense paragraph because the RichEdit markdown path treats single newlines as soft wraps, so the formatter's plain newline-separated output lost its intended line breaks.
+Change: Updated the shared poll-stats formatter to emit markdown headings, blank lines, bold summary lines, and bullet rows per source; added formatter regression tests for the sectioned output.
+Lessons Learned: When a view is rendered through markdown, formatter output must encode structure with markdown paragraphs/lists instead of relying on raw newline placement.
+Prevention: Add formatter-level regression tests for every app-owned markdown shape and treat single-line newline joins as suspicious in markdown-backed panes.
+Refs: crates/harvester_core/src/poll_stats_fmt.rs, poll_stats_fmt::tests::formats_groups_as_markdown_sections_and_bullets
+
+## 2026-03-31 - Headings after lists now force a new paragraph in RichEdit markdown
+Type: Bug Fix
+Context: In the Poll Stats tab, the next section heading could attach to the final bullet line because the markdown-to-RTF converter ended lists without emitting a paragraph break.
+Change: Updated list-end handling in the RichEdit markdown renderer to emit `\\par` after a list and added a regression test for a heading immediately following bullet items; refreshed the renderer snapshot accordingly.
+Lessons Learned: Block-level markdown boundaries need explicit paragraph termination in the RTF layer or unrelated sections can visually merge despite correct markdown input.
+Prevention: Keep renderer regression tests for adjacent block shapes such as list-to-heading and list-to-paragraph transitions, not only isolated element snapshots.
+Refs: crates/harvester_app/src/platform/ui/markdown_to_rtf.rs, platform::ui::markdown_to_rtf::tests::heading_after_list_starts_on_new_paragraph
+
