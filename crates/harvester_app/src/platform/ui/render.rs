@@ -161,6 +161,7 @@ pub struct TreeRenderState {
     prev_left_tab: LeftTab,
     prev_triage_text: Option<String>,
     prev_briefing_text: Option<String>,
+    prev_poll_stats_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -238,6 +239,7 @@ impl Default for TreeRenderState {
             prev_left_tab: LeftTab::default(),
             prev_triage_text: None,
             prev_briefing_text: None,
+            prev_poll_stats_text: None,
         }
     }
 }
@@ -1328,6 +1330,21 @@ fn render_preview_section(
             rtf_text: convert_markdown_to_rtf(&truncated),
         });
         tree_state.prev_briefing_text = Some(briefing_markdown.to_string());
+    }
+
+    // Poll Stats tab viewer.
+    let poll_stats_text = view
+        .right_pane
+        .poll_stats_markdown
+        .as_deref()
+        .unwrap_or("No poll data yet.");
+    if tree_state.prev_poll_stats_text.as_deref() != Some(poll_stats_text) {
+        cmds.push(PlatformCommand::SetRichEditContent {
+            window_id,
+            control_id: VIEWER_POLL_STATS,
+            rtf_text: convert_markdown_to_rtf(poll_stats_text),
+        });
+        tree_state.prev_poll_stats_text = Some(poll_stats_text.to_string());
     }
 
     // Trends tab: category selector.
