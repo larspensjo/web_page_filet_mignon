@@ -930,3 +930,11 @@ Lessons Learned: The root cause was treating the easiest observable string as th
 Prevention: Use correctness by construction in tests by preferring typed round-trip loads, request/ack messages, and semantic render helpers over raw file substrings or full snapshots; if a format string is truly a contract, isolate it in one compatibility-focused test and document why it is stable.
 Refs: crates/harvester_io/src/effect_runner.rs, crates/harvester_app/src/platform/ui/markdown_to_rtf.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_batch/src/runner.rs, docs/plans/Findings.UnitTestReviewChunk7.md
 
+## 2026-03-31 - Rework CommanDuctUI tests around generic infrastructure contracts
+Type: Bug Fix
+Context: Chunk 8 unit-test review found `CommanDuctUI` tests encoding Harvester-flavored menu fixtures, exact diagnostic wording, and default palette literals even though the framework contracts are generic action routing, layout invariant rejection, control identification, and dark-theme-safe defaults.
+Change: Replaced app-shaped menu ids/labels with neutral semantic fixtures, relaxed layout and HWND-description assertions to invariant-level metadata, and rewrote the default tab-bar palette test to verify dark-background, readable-text, and blue-accent semantics instead of pinned channel constants.
+Lessons Learned: The root cause was test data and assertions being chosen for convenience from the hosting app and current debug strings, rather than being derived from the framework invariants first. Infrastructure tests drift toward accidental product coupling unless fixtures and checks are intentionally generic.
+Prevention: Use correctness by construction for infrastructure tests by giving generic modules generic fixture builders, asserting typed invariants or invariant-bearing fields before display text, and isolating any true formatting-compatibility requirement in a narrowly named test with an explicit rationale.
+Refs: src/CommanDuctUI/src/controls/menu_handler.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/app.rs, src/CommanDuctUI/src/controls/tab_bar_handler.rs, docs/plans/Findings.UnitTestReviewChunk8.md
+
