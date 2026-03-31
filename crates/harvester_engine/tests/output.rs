@@ -144,7 +144,8 @@ fn concatenated_export_includes_linked_pages_and_dedupes_urls() {
     assert_eq!(urls.len(), 2);
     assert!(urls.contains(&"https://root"));
     assert!(
-        urls.iter().any(|url| url.trim_end_matches('/') == "https://link"),
+        urls.iter()
+            .any(|url| url.trim_end_matches('/') == "https://link"),
         "linked url missing: {urls:?}"
     );
 }

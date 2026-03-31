@@ -292,7 +292,10 @@ mod tests {
         let hash2 = context_hash(&[]);
         assert_eq!(hash1, hash2);
         assert!(!hash1.is_empty());
-        assert_ne!(hash1, context_hash(&[("key".to_string(), "value".to_string())]));
+        assert_ne!(
+            hash1,
+            context_hash(&[("key".to_string(), "value".to_string())])
+        );
     }
 
     #[test]

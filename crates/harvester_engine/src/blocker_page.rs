@@ -119,7 +119,10 @@ mod tests {
             Some("Just a moment..."),
             "Please verify you are human before continuing.",
         );
-        assert_eq!(result, Some(BlockedPageKind::BrowserVerificationInterstitial));
+        assert_eq!(
+            result,
+            Some(BlockedPageKind::BrowserVerificationInterstitial)
+        );
     }
 
     #[test]

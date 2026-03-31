@@ -47,8 +47,7 @@ impl ExtractionPipeline {
         let title = extract_title_from_doc(&doc);
 
         let selected_candidate = select_candidate(&doc, &self.policy.candidate);
-        let (candidate_element, selection, selection_diagnostics) =
-            selected_candidate.into_parts();
+        let (candidate_element, selection, selection_diagnostics) = selected_candidate.into_parts();
 
         let prune_policy = self.policy.prune.clone();
         let prune_closure = |el: &scraper::ElementRef<'_>| should_prune_element(el, &prune_policy);

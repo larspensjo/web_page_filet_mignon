@@ -235,12 +235,18 @@ mod tests {
         let input2 = PreparedInput::from_clean_text(clean2, 10);
         let collection = PreparedCollection::from_inputs(vec![input1, input2]);
         assert_eq!(collection.article_count(), 2);
-        let first_pos = collection.text().find("first").expect("first article present");
+        let first_pos = collection
+            .text()
+            .find("first")
+            .expect("first article present");
         let second_pos = collection
             .text()
             .find("second")
             .expect("second article present");
-        assert!(first_pos < second_pos, "articles should preserve input ordering");
+        assert!(
+            first_pos < second_pos,
+            "articles should preserve input ordering"
+        );
     }
 
     #[test]

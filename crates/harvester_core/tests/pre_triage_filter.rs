@@ -85,11 +85,9 @@ fn manual_include_overrides_hard_exclude() {
         .expect("youtube entry should exist")
         .key
         .clone();
-    assert!(
-        session
-            .set_manual_decision(&youtube_key, ManualDecision::Include)
-            .is_ok()
-    );
+    assert!(session
+        .set_manual_decision(&youtube_key, ManualDecision::Include)
+        .is_ok());
     assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
     assert!(
         session
@@ -109,11 +107,9 @@ fn manual_exclude_overrides_auto_include() {
         PreTriageSession::load_articles(vec![article("https://example.com", None, &body)], &policy);
     assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
     let key = session.entries()[0].key.clone();
-    assert!(
-        session
-            .set_manual_decision(&key, ManualDecision::Exclude)
-            .is_ok()
-    );
+    assert!(session
+        .set_manual_decision(&key, ManualDecision::Exclude)
+        .is_ok());
     assert!(matches!(session.phase(), PreTriagePhase::Failed { .. }));
 }
 

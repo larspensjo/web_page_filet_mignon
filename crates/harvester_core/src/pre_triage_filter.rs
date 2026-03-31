@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{JobId, briefing::LoadedArticle};
+use crate::{briefing::LoadedArticle, JobId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FilterReason {
