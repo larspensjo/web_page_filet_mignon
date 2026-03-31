@@ -153,7 +153,10 @@ mod tests {
         index.end_poll();
         // Second poll starts — live accumulator clears, snapshot must remain
         index.start_poll();
-        assert!(index.poll_stats().is_empty(), "live accumulator should be cleared");
+        assert!(
+            index.poll_stats().is_empty(),
+            "live accumulator should be cleared"
+        );
         let stats = index.last_completed_poll_stats();
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].emitted, 3);

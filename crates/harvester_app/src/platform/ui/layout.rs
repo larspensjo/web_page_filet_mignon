@@ -2287,7 +2287,12 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
         style_id: StyleId::ComboBox,
     });
-    for control_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING, VIEWER_POLL_STATS] {
+    for control_id in [
+        VIEWER_PREVIEW,
+        VIEWER_TRIAGE,
+        VIEWER_BRIEFING,
+        VIEWER_POLL_STATS,
+    ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,
             control_id,
@@ -2705,7 +2710,12 @@ mod tests {
             .expect("summary tab panel rule");
         assert_eq!(summary_tab.fixed_size, None);
         // Other content tabs should also be collapsed.
-        for &control_id in &[PANEL_TAB_TRIAGE, PANEL_TAB_BRIEFING, PANEL_TAB_TRENDS, PANEL_TAB_POLL_STATS] {
+        for &control_id in &[
+            PANEL_TAB_TRIAGE,
+            PANEL_TAB_BRIEFING,
+            PANEL_TAB_TRENDS,
+            PANEL_TAB_POLL_STATS,
+        ] {
             let tab = rules
                 .iter()
                 .find(|r| r.control_id == control_id)
@@ -3116,7 +3126,12 @@ mod tests {
     #[test]
     fn all_right_pane_viewers_receive_viewer_readable_style() {
         let cmds = initial_commands(WindowId::new(99));
-        for viewer_id in [VIEWER_PREVIEW, VIEWER_TRIAGE, VIEWER_BRIEFING, VIEWER_POLL_STATS] {
+        for viewer_id in [
+            VIEWER_PREVIEW,
+            VIEWER_TRIAGE,
+            VIEWER_BRIEFING,
+            VIEWER_POLL_STATS,
+        ] {
             let has_style = cmds.iter().any(|cmd| {
                 matches!(
                     cmd,

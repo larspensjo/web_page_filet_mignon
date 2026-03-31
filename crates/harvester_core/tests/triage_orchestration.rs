@@ -588,7 +588,6 @@ fn restore_completed_jobs_resets_briefing() {
     assert!(state.view().briefing_can_start);
 }
 
-
 #[test]
 fn rerun_uses_triage_cache_when_metadata_and_corpus_unchanged() {
     init_logging();

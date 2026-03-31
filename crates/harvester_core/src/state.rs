@@ -3885,7 +3885,10 @@ mod tests {
         let llm3 = state.allocate_next_llm_request_id();
         let lab3 = state.allocate_next_prompt_lab_run_id();
         assert!(llm3 > llm2, "llm counter advances after lab allocations");
-        assert!(lab3.0 > lab2.0, "lab counter advances after llm allocations");
+        assert!(
+            lab3.0 > lab2.0,
+            "lab counter advances after llm allocations"
+        );
     }
 
     #[test]

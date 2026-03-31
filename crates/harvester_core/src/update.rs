@@ -3130,7 +3130,10 @@ mod tests {
         assert_eq!(effects.len(), 2);
         let req_c = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
             .expect("aggregate briefing request");
-        assert_ne!(req_c, req_b, "briefing request must have a distinct id from last summary");
+        assert_ne!(
+            req_c, req_b,
+            "briefing request must have a distinct id from last summary"
+        );
         match &effects[1] {
             Effect::RequestLlmCompletion {
                 prompt_id,

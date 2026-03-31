@@ -93,8 +93,11 @@ mod tests {
 
         assert!(formatted.contains("## RSS"));
         assert!(formatted.contains("**2 sources**. 26 emitted, 1 dedup-filtered."));
-        assert!(formatted.contains("- **google-alerts-rss**: 20 parsed -> 0 dedup-filtered -> 20 emitted"));
-        assert!(formatted.contains("- **venturebeat-rss**: 7 parsed -> 1 dedup-filtered -> 6 emitted"));
+        assert!(formatted
+            .contains("- **google-alerts-rss**: 20 parsed -> 0 dedup-filtered -> 20 emitted"));
+        assert!(
+            formatted.contains("- **venturebeat-rss**: 7 parsed -> 1 dedup-filtered -> 6 emitted")
+        );
         assert!(formatted.contains("\n\n## Brave\n"));
         assert!(formatted.contains("- **brave-ai-data-center**: 0 parsed"));
     }
