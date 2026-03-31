@@ -159,22 +159,22 @@
 
 **Focus:** Keep tests generic. Remove or rewrite any tests that accidentally encode Harvester-specific assumptions.
 
-- [ ] `src/CommanDuctUI/src/app.rs`
-- [ ] `src/CommanDuctUI/src/command_executor.rs`
-- [ ] `src/CommanDuctUI/src/types.rs`
-- [ ] `src/CommanDuctUI/src/window_common.rs`
-- [ ] `src/CommanDuctUI/src/controls/button_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/chart_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/checkbox_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/combobox_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/dialog_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/label_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/menu_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/paint_router.rs`
-- [ ] `src/CommanDuctUI/src/controls/panel_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/radiobutton_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/tab_bar_handler.rs`
-- [ ] `src/CommanDuctUI/src/controls/treeview_handler.rs`
+- [x] `src/CommanDuctUI/src/app.rs`
+- [x] `src/CommanDuctUI/src/command_executor.rs`
+- [x] `src/CommanDuctUI/src/types.rs`
+- [x] `src/CommanDuctUI/src/window_common.rs`
+- [x] `src/CommanDuctUI/src/controls/button_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/chart_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/checkbox_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/combobox_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/dialog_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/label_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/menu_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/paint_router.rs`
+- [x] `src/CommanDuctUI/src/controls/panel_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/radiobutton_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/tab_bar_handler.rs`
+- [x] `src/CommanDuctUI/src/controls/treeview_handler.rs`
 
 ## Chunk 9: PowerShell and auxiliary TUI modules
 
