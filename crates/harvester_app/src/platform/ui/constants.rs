@@ -89,9 +89,11 @@ pub const PANEL_TAB_TRIAGE: ControlId = ControlId::new(2210);
 pub const PANEL_TAB_SUMMARY: ControlId = ControlId::new(2211);
 pub const PANEL_TAB_BRIEFING: ControlId = ControlId::new(2212);
 pub const PANEL_TAB_TRENDS: ControlId = ControlId::new(2213);
+pub const PANEL_TAB_POLL_STATS: ControlId = ControlId::new(2214);
 // RichEdit viewers inside each tab (except PromptLab which reuses existing controls)
 pub const VIEWER_TRIAGE: ControlId = ControlId::new(5002);
 pub const VIEWER_BRIEFING: ControlId = ControlId::new(5003);
+pub const VIEWER_POLL_STATS: ControlId = ControlId::new(5004);
 // GDI chart control for the Trends tab
 pub const CHART_TRENDS: ControlId = ControlId::new(2230);
 // Left panel: two tab content areas (2300 range)
