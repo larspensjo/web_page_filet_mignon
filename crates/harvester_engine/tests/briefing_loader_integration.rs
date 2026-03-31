@@ -49,7 +49,7 @@ fn single_article_is_loaded_and_in_collection() {
         "article.md",
         "https://example.com/1",
         Some("Title"),
-        "body text",
+        "body text sentinel",
     );
 
     let (articles, collection) =
@@ -57,7 +57,7 @@ fn single_article_is_loaded_and_in_collection() {
 
     assert_eq!(articles.len(), 1);
     assert_eq!(articles[0].url, "https://example.com/1");
-    assert!(collection.contains("--- Article 1"));
+    assert!(collection.contains("body text sentinel"));
 }
 
 #[test]
@@ -191,17 +191,19 @@ fn collection_limits_articles_when_budget_tight() {
     for i in 0..TOTAL_ARTICLES {
         write_markdown_file(
             tmp.path(),
-            &format!("article_{}.md", i),
-            &format!("https://example.com/{}", i),
-            Some("Budget"),
-            "body",
+            &format!("article_{i:02}.md"),
+            &format!("https://example.com/{i:02}"),
+            Some(&format!("Budget {i:02}")),
+            &format!("body article {i:02}"),
         );
     }
 
     let (articles, collection) =
         load_and_prepare_articles(tmp.path(), max_input, &registry, None).unwrap();
     assert_eq!(articles.len(), TOTAL_ARTICLES);
-    let selected_articles = collection.matches("--- Article").count();
+    let selected_articles = (0..TOTAL_ARTICLES)
+        .filter(|i| collection.contains(&format!("body article {i:02}")))
+        .count();
     assert!(
         selected_articles >= 1,
         "collection should include at least one article"
@@ -210,6 +212,18 @@ fn collection_limits_articles_when_budget_tight() {
         selected_articles < TOTAL_ARTICLES,
         "collection should drop articles when budget is tight"
     );
+    for i in 0..selected_articles {
+        assert!(
+            collection.contains(&format!("body article {i:02}")),
+            "collection should keep the selected prefix"
+        );
+    }
+    for i in selected_articles..TOTAL_ARTICLES {
+        assert!(
+            !collection.contains(&format!("body article {i:02}")),
+            "collection should drop articles after the selected prefix"
+        );
+    }
 }
 
 #[test]
@@ -312,25 +326,38 @@ fn filtered_loader_budget_trimming_drops_tail_only() {
     let tmp = tempdir().unwrap();
     let mut selected = Vec::new();
     for idx in 0..20 {
-        let url = format!("https://example.com/{idx}");
+        let url = format!("https://example.com/{idx:02}");
         write_markdown_file(
             tmp.path(),
-            &format!("article_{idx}.md"),
+            &format!("article_{idx:02}.md"),
             &url,
             Some(&format!("Title {idx}")),
-            "body",
+            &format!("body article {idx:02}"),
         );
         selected.push(url);
     }
-    let (_articles, collection) =
+    let (articles, collection) =
         load_and_prepare_articles_filtered(tmp.path(), max_input, &registry, &selected, None)
             .unwrap();
 
-    let selected_articles = collection.matches("--- Article").count();
+    assert_eq!(articles.len(), selected.len());
+    let selected_articles = (0..selected.len())
+        .filter(|idx| collection.contains(&format!("body article {idx:02}")))
+        .count();
     assert!(selected_articles >= 1);
     assert!(selected_articles < selected.len());
-    assert!(collection.contains("--- Article 1: Title 0 ---"));
-    assert!(!collection.contains("--- Article 20: Title 19 ---"));
+    for idx in 0..selected_articles {
+        assert!(
+            collection.contains(&format!("body article {idx:02}")),
+            "collection should keep the selected prefix"
+        );
+    }
+    for idx in selected_articles..selected.len() {
+        assert!(
+            !collection.contains(&format!("body article {idx:02}")),
+            "collection should drop the tail after budget trimming"
+        );
+    }
 }
 
 #[test]

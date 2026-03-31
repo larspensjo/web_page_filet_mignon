@@ -886,3 +886,11 @@ Lessons Learned: Block-level markdown boundaries need explicit paragraph termina
 Prevention: Keep renderer regression tests for adjacent block shapes such as list-to-heading and list-to-paragraph transitions, not only isolated element snapshots.
 Refs: crates/harvester_app/src/platform/ui/markdown_to_rtf.rs, platform::ui::markdown_to_rtf::tests::heading_after_list_starts_on_new_paragraph
 
+## 2026-03-31 - Rewrite engine tests toward typed contracts instead of serialization details
+Type: Bug Fix
+Context: Chunk 4 unit-test review found several `harvester_engine` tests asserting exact hash literals, prompt collection markers, browser-header strings, and raw manifest JSON substrings. Those tests failed under harmless refactors because they were pinned to representations rather than behavior.
+Change: Reworked the affected tests to assert cleaned-content removal and hash determinism, collection selection via unique article bodies and prefix retention, browser-header semantics instead of exact q-values, and manifest fields via parsed JSON.
+Lessons Learned: Tests that observe behavior through serialized intermediates drift toward implementation locks unless the representation is itself a public compatibility boundary.
+Prevention: Prefer typed assertions and semantic fixtures; when representation format must be locked, isolate that in a narrow formatting test with an explicit compatibility rationale.
+Refs: crates/harvester_engine/tests/content_prep_integration.rs, crates/harvester_engine/tests/briefing_loader_integration.rs, crates/harvester_engine/tests/fetch.rs, crates/harvester_engine/tests/output.rs, docs/plans/Findings.UnitTestReviewChunk4.md
+

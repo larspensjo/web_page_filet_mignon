@@ -4,12 +4,18 @@ use harvester_engine::{
     ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter,
 };
 use pretty_assertions::assert_eq;
+use serde_json::Value;
 
 struct CountingTokens;
 impl TokenCounter for CountingTokens {
     fn count(&self, text: &str) -> u32 {
         text.split_whitespace().count() as u32
     }
+}
+
+fn read_manifest(path: &std::path::Path) -> Value {
+    let manifest = std::fs::read_to_string(path).unwrap();
+    serde_json::from_str(&manifest).unwrap()
 }
 
 #[test]
@@ -83,9 +89,10 @@ fn concatenated_export_builds_delimited_output_and_manifest() {
     assert_eq!(summary.doc_count, 2);
     assert_eq!(summary.total_tokens, 5);
 
-    let manifest = std::fs::read_to_string(summary.manifest_path.unwrap()).unwrap();
-    assert!(manifest.contains("\"doc_count\":2"));
-    assert!(manifest.contains("\"total_tokens\":5"));
+    let manifest = read_manifest(summary.manifest_path.as_ref().unwrap());
+    assert_eq!(manifest["doc_count"].as_u64(), Some(2));
+    assert_eq!(manifest["total_tokens"].as_u64(), Some(5));
+    assert_eq!(manifest["files"].as_array().unwrap().len(), 2);
 }
 
 #[test]
@@ -99,9 +106,10 @@ fn concatenated_export_creates_missing_output_dir() {
     let export = std::fs::read_to_string(summary.output_path).unwrap();
     assert!(export.is_empty());
 
-    let manifest = std::fs::read_to_string(summary.manifest_path.unwrap()).unwrap();
-    assert!(manifest.contains("\"doc_count\":0"));
-    assert!(manifest.contains("\"total_tokens\":0"));
+    let manifest = read_manifest(summary.manifest_path.as_ref().unwrap());
+    assert_eq!(manifest["doc_count"].as_u64(), Some(0));
+    assert_eq!(manifest["total_tokens"].as_u64(), Some(0));
+    assert_eq!(manifest["files"].as_array().unwrap().len(), 0);
 }
 
 #[test]
@@ -126,14 +134,19 @@ fn concatenated_export_includes_linked_pages_and_dedupes_urls() {
     assert!(export.contains("url: https://link"));
     assert!(!export.contains("link Dup"));
 
-    let manifest = std::fs::read_to_string(summary.manifest_path.unwrap()).unwrap();
+    let manifest = read_manifest(summary.manifest_path.as_ref().unwrap());
+    let urls = manifest["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| entry["url"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(urls.len(), 2);
+    assert!(urls.contains(&"https://root"));
     assert!(
-        manifest.contains("\"url\":\"https://link\"")
-            || manifest.contains("\"url\":\"https://link/\""),
-        "linked url missing: {}",
-        manifest
+        urls.iter().any(|url| url.trim_end_matches('/') == "https://link"),
+        "linked url missing: {urls:?}"
     );
-    assert!(manifest.contains("\"url\":\"https://root\""));
 }
 
 #[test]

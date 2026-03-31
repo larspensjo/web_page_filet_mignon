@@ -383,19 +383,25 @@ async fn sends_browser_headers() {
     Mock::given(method("GET"))
         .and(path("/headers"))
         .respond_with(|req: &Request| {
-            assert_eq!(
-                req.headers
-                    .get("accept")
-                    .and_then(|value| value.to_str().ok())
-                    .unwrap(),
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-            );
-            assert_eq!(
-                req.headers
-                    .get("accept-language")
-                    .and_then(|value| value.to_str().ok())
-                    .unwrap(),
-                "en-US,en;q=0.9"
+            let accept = req
+                .headers
+                .get("accept")
+                .and_then(|value| value.to_str().ok())
+                .unwrap();
+            assert!(accept.contains("text/html"));
+            assert!(accept.contains("application/xhtml+xml"));
+            assert!(accept.contains("application/xml"));
+
+            let accept_language = req
+                .headers
+                .get("accept-language")
+                .and_then(|value| value.to_str().ok())
+                .unwrap();
+            assert!(
+                accept_language
+                    .split(',')
+                    .any(|value| value.trim_start().starts_with("en")),
+                "expected English language preference, got {accept_language}"
             );
             ResponseTemplate::new(200)
         })
