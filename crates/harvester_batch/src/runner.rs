@@ -874,54 +874,12 @@ fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
 
 /// Prints a grouped poll-stats summary (RSS / Brave / other source types).
 fn print_poll_stats(stats: &[harvester_core::SourcePollStat]) {
-    use harvester_engine::SourceKind;
-
     if stats.is_empty() {
         return;
     }
-
-    let groups: &[(SourceKind, &str)] = &[
-        (SourceKind::Rss, "RSS"),
-        (SourceKind::Brave, "Brave"),
-        (SourceKind::File, "File"),
-        (SourceKind::Curated, "Curated"),
-        (SourceKind::Script, "Script"),
-    ];
-
-    let mut printed_any = false;
-    for (kind, label) in groups {
-        let group: Vec<_> = stats.iter().filter(|s| s.kind == *kind).collect();
-        if group.is_empty() {
-            continue;
-        }
-        if !printed_any {
-            println!("\n--- Poll summary ---");
-            printed_any = true;
-        }
-        let total_emitted: usize = group.iter().map(|s| s.emitted).sum();
-        let total_filtered: usize = group.iter().map(|s| s.dedup_filtered).sum();
-        println!(
-            "{} ({} source{}): {} emitted, {} dedup-filtered",
-            label,
-            group.len(),
-            if group.len() == 1 { "" } else { "s" },
-            total_emitted,
-            total_filtered,
-        );
-        for s in &group {
-            if s.parsed == 0 {
-                println!("  {}: 0 parsed", s.source_id);
-            } else {
-                println!(
-                    "  {}: {} parsed → {} dedup-filtered → {} emitted",
-                    s.source_id, s.parsed, s.dedup_filtered, s.emitted
-                );
-            }
-        }
-    }
-    if printed_any {
-        println!("--------------------");
-    }
+    println!("\n--- Poll summary ---");
+    println!("{}", harvester_core::format_poll_stats(stats));
+    println!("--------------------");
 }
 
 fn print_cycle_table_header() {

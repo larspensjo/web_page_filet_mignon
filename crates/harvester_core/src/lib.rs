@@ -6,6 +6,7 @@ mod effect;
 pub mod entity_index;
 pub mod import_session;
 mod msg;
+mod poll_stats_fmt;
 mod pre_triage_coordinator;
 mod pre_triage_filter;
 mod preview;
@@ -44,6 +45,7 @@ pub use prompt_lab::{
     ModelCatalogSource, PromptLabInputSource, PromptLabRunId, PromptLabRunRecord,
     PromptLabRunStatus, PromptLabStage, PromptLabTemplateSnapshot,
 };
+pub use poll_stats_fmt::format_poll_stats;
 pub use source_state::{SourceInstanceState, SourcePollStat, SourceStateIndex};
 pub use state::{
     normalize_url_for_dedupe, AppState, BatchObservation, CompletedJobSnapshot, JobId,
