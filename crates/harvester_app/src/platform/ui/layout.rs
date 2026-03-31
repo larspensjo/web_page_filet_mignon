@@ -2166,6 +2166,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         PANEL_TAB_SUMMARY,
         PANEL_TAB_BRIEFING,
         PANEL_TAB_TRENDS,
+        PANEL_TAB_POLL_STATS,
         PANEL_LEFT,
         PANEL_LEFT_JOBS,
         PANEL_LEFT_PROMPT_LAB,
@@ -3080,6 +3081,34 @@ mod tests {
                  WM_CTLCOLOR will fall back to system default (light) colors. \
                  Add it to the style application loop in initial_commands().",
                 id
+            );
+        }
+    }
+
+    #[test]
+    fn all_tab_panels_receive_panel_background_dark_theme_style() {
+        let cmds = initial_commands(WindowId::new(99));
+        for panel_id in [
+            PANEL_TAB_TRIAGE,
+            PANEL_TAB_SUMMARY,
+            PANEL_TAB_BRIEFING,
+            PANEL_TAB_TRENDS,
+            PANEL_TAB_POLL_STATS,
+        ] {
+            let has_style = cmds.iter().any(|cmd| {
+                matches!(
+                    cmd,
+                    PlatformCommand::ApplyStyleToControl {
+                        control_id,
+                        style_id: StyleId::PanelBackground,
+                        ..
+                    } if *control_id == panel_id
+                )
+            });
+            assert!(
+                has_style,
+                "PANEL {:?} should receive PanelBackground style in initial_commands",
+                panel_id
             );
         }
     }
