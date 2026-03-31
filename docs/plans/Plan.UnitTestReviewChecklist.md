@@ -135,25 +135,25 @@
 
 **Focus:** Effect execution outcomes, persistence contracts, CLI contract, and UI-facing adapter behavior.
 
-- [ ] `crates/harvester_io/src/effect_runner.rs`
-- [ ] `crates/harvester_io/src/effect_helpers.rs`
-- [ ] `crates/harvester_io/src/persistence.rs`
-- [ ] `crates/harvester_io/src/persistence_worker.rs`
-- [ ] `crates/harvester_io/src/entity_index_store.rs`
-- [ ] `crates/harvester_io/src/runtime_paths.rs`
-- [ ] `crates/harvester_io/src/seen_set_store.rs`
-- [ ] `crates/harvester_io/src/source_loader.rs`
-- [ ] `crates/harvester_io/src/summary_cache_store.rs`
-- [ ] `crates/harvester_io/src/triage_cache_store.rs`
-- [ ] `crates/harvester_app/src/platform/app.rs`
-- [ ] `crates/harvester_app/src/platform/source_loader.rs`
-- [ ] `crates/harvester_app/src/platform/seen_set_store.rs`
-- [ ] `crates/harvester_app/src/platform/ui/layout.rs`
-- [ ] `crates/harvester_app/src/platform/ui/markdown_to_rtf.rs`
-- [ ] `crates/harvester_app/src/platform/ui/render.rs`
-- [ ] `crates/harvester_batch/src/cli.rs`
-- [ ] `crates/harvester_batch/src/lock.rs`
-- [ ] `crates/harvester_batch/src/runner.rs`
+- [x] `crates/harvester_io/src/effect_runner.rs`
+- [x] `crates/harvester_io/src/effect_helpers.rs`
+- [x] `crates/harvester_io/src/persistence.rs`
+- [x] `crates/harvester_io/src/persistence_worker.rs`
+- [x] `crates/harvester_io/src/entity_index_store.rs`
+- [x] `crates/harvester_io/src/runtime_paths.rs`
+- [x] `crates/harvester_io/src/seen_set_store.rs`
+- [x] `crates/harvester_io/src/source_loader.rs`
+- [x] `crates/harvester_io/src/summary_cache_store.rs`
+- [x] `crates/harvester_io/src/triage_cache_store.rs`
+- [x] `crates/harvester_app/src/platform/app.rs`
+- [x] `crates/harvester_app/src/platform/source_loader.rs`
+- [x] `crates/harvester_app/src/platform/seen_set_store.rs`
+- [x] `crates/harvester_app/src/platform/ui/layout.rs`
+- [x] `crates/harvester_app/src/platform/ui/markdown_to_rtf.rs`
+- [x] `crates/harvester_app/src/platform/ui/render.rs`
+- [x] `crates/harvester_batch/src/cli.rs`
+- [x] `crates/harvester_batch/src/lock.rs`
+- [x] `crates/harvester_batch/src/runner.rs`
 
 ## Chunk 8: `CommanDuctUI` generic infrastructure
 
