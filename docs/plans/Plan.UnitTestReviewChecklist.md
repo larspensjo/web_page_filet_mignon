@@ -111,25 +111,25 @@
 
 **Focus:** Validate provider mapping, prompt contracts, replay/metadata behavior, and typed outputs. Constant-only tests are suspect unless the constant is protocol-facing.
 
-- [ ] `crates/harvester_engine/tests/llm_handle.rs`
-- [ ] `crates/harvester_engine/tests/llm_mock.rs`
-- [ ] `crates/harvester_engine/tests/llm_openai.rs`
-- [ ] `crates/harvester_engine/tests/llm_pricing.rs`
-- [ ] `crates/harvester_engine/tests/llm_prompt.rs`
-- [ ] `crates/harvester_engine/tests/llm_quota.rs`
-- [ ] `crates/harvester_engine/tests/llm_replay.rs`
-- [ ] `crates/harvester_engine/tests/llm_types.rs`
-- [ ] `crates/harvester_engine/tests/llm_validation.rs`
-- [ ] `crates/harvester_engine/tests/prompt_context.rs`
-- [ ] `crates/harvester_engine/src/llm/handle.rs`
-- [ ] `crates/harvester_engine/src/llm/prompt.rs`
-- [ ] `crates/harvester_engine/src/llm/prompt_context.rs`
-- [ ] `crates/harvester_engine/src/llm/providers/openai.rs`
-- [ ] `crates/harvester_engine/src/llm/run_metadata.rs`
-- [ ] `crates/harvester_engine/src/llm/template_validation.rs`
-- [ ] `crates/harvester_engine/src/llm/validation.rs`
-- [ ] `crates/harvester_engine/src/llm/prompts/mod.rs`
-- [ ] `crates/harvester_engine/src/llm/prompts/briefing.rs`
+- [x] `crates/harvester_engine/tests/llm_handle.rs`
+- [x] `crates/harvester_engine/tests/llm_mock.rs`
+- [x] `crates/harvester_engine/tests/llm_openai.rs`
+- [x] `crates/harvester_engine/tests/llm_pricing.rs`
+- [x] `crates/harvester_engine/tests/llm_prompt.rs`
+- [x] `crates/harvester_engine/tests/llm_quota.rs`
+- [x] `crates/harvester_engine/tests/llm_replay.rs`
+- [x] `crates/harvester_engine/tests/llm_types.rs`
+- [x] `crates/harvester_engine/tests/llm_validation.rs`
+- [x] `crates/harvester_engine/tests/prompt_context.rs`
+- [x] `crates/harvester_engine/src/llm/handle.rs`
+- [x] `crates/harvester_engine/src/llm/prompt.rs`
+- [x] `crates/harvester_engine/src/llm/prompt_context.rs`
+- [x] `crates/harvester_engine/src/llm/providers/openai.rs`
+- [x] `crates/harvester_engine/src/llm/run_metadata.rs`
+- [x] `crates/harvester_engine/src/llm/template_validation.rs`
+- [x] `crates/harvester_engine/src/llm/validation.rs`
+- [x] `crates/harvester_engine/src/llm/prompts/mod.rs`
+- [x] `crates/harvester_engine/src/llm/prompts/briefing.rs`
 
 ## Chunk 7: IO, app boundary, and batch CLI
 
