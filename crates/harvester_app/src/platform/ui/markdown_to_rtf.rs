@@ -250,10 +250,10 @@ mod tests {
     #[test]
     fn headings_render_as_distinct_bold_blocks() {
         let rtf = convert_markdown_to_rtf("# H1\n## H2\n### H3");
-        assert!(rtf.contains("H1"));
-        assert!(rtf.contains("H2"));
-        assert!(rtf.contains("H3"));
-        assert!(rtf.matches("\\b ").count() >= 3);
+        assert!(rtf.contains("\\pard\\sa120\\sb60\\b\\fs36 H1"));
+        assert!(rtf.contains("\\pard\\sa120\\sb60\\b\\fs32 H2"));
+        assert!(rtf.contains("\\pard\\sa120\\sb60\\b\\fs28 H3"));
+        assert!(rtf.matches("\\pard\\sa120\\sb60\\b\\fs").count() >= 3);
         assert!(rtf.matches("\\par").count() >= 3);
     }
 
