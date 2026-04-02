@@ -17,8 +17,8 @@ use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
     AppViewModel, JobFilterStatus, JobRowView, LastPasteStats, LayoutViewModel, LinkRowView,
-    PreviewHeaderView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
-    TOKEN_LIMIT,
+    OperationProgress, PreviewHeaderView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH,
+    DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
@@ -704,6 +704,31 @@ impl AppState {
             })
             .is_some();
         let preview_source = self.ui.preview.content_kind();
+        let operation_progress =
+            if let Some((completed, total)) = self.source_states.poll_progress() {
+                Some(OperationProgress {
+                    label: "Polling".to_string(),
+                    completed: completed as u32,
+                    total: total as u32,
+                })
+            } else if matches!(self.triage.phase(), TriagePhase::Triaging) {
+                let completed = self.triage.completed_count() + self.triage.failed_count();
+                Some(OperationProgress {
+                    label: "Triaging".to_string(),
+                    completed: completed as u32,
+                    total: self.triage.total() as u32,
+                })
+            } else if matches!(self.briefing.phase(), BriefingPhase::Summarizing) {
+                let completed =
+                    self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
+                Some(OperationProgress {
+                    label: "Summarizing".to_string(),
+                    completed: completed as u32,
+                    total: self.briefing.total() as u32,
+                })
+            } else {
+                None
+            };
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -727,6 +752,8 @@ impl AppState {
                 .triage
                 .progress_text()
                 .or_else(|| self.pre_triage_progress_text()),
+            operation_progress_visible: operation_progress.is_some(),
+            operation_progress,
             poll_sources_enabled: matches!(
                 self.session,
                 SessionState::Idle | SessionState::Running
@@ -784,6 +811,9 @@ impl AppState {
         LayoutViewModel {
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
+            operation_progress_visible: self.source_states.poll_progress().is_some()
+                || matches!(self.triage.phase(), TriagePhase::Triaging)
+                || matches!(self.briefing.phase(), BriefingPhase::Summarizing),
             active_tab: self.active_tab(),
             left_tab: self.left_tab(),
             prompt_lab_advanced_mode: self.prompt_lab.advanced_mode(),
@@ -1322,6 +1352,11 @@ impl AppState {
             self.dirty = true;
         }
         started
+    }
+
+    pub(crate) fn set_poll_total(&mut self, total: usize) {
+        self.source_states.set_poll_total(total);
+        self.dirty = true;
     }
 
     #[allow(dead_code)]
@@ -3845,6 +3880,170 @@ mod tests {
         let state = make_state_with_summarized_job();
         let view = state.view();
         assert!(view.selected_url.is_none());
+    }
+
+    #[test]
+    fn operation_progress_from_poll() {
+        let mut state = AppState::new();
+        assert!(state.start_poll());
+        state.set_poll_total(3);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Polling".to_string(),
+                completed: 0,
+                total: 3,
+            })
+        );
+    }
+
+    #[test]
+    fn operation_progress_from_triage() {
+        use crate::briefing::LoadedArticle;
+        use crate::triage::ArticleTriageResult;
+
+        let mut state = AppState::new();
+        let mut triage = crate::triage::TriageSession::new_loading(None);
+        triage.set_articles(vec![
+            LoadedArticle {
+                url: "https://example.com/1".to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash-1".to_string(),
+                fetched_utc: None,
+            },
+            LoadedArticle {
+                url: "https://example.com/2".to_string(),
+                source_title: None,
+                prepared_text: "text".to_string(),
+                content_hash: "hash-2".to_string(),
+                fetched_utc: None,
+            },
+        ]);
+        triage.transition_to_triaging();
+        triage.start_article(0, 1);
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "News".to_string(),
+                priority: 5,
+                tags: Vec::new(),
+                rationale: "ok".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+        state.set_triage(triage);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Triaging".to_string(),
+                completed: 1,
+                total: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn operation_progress_from_briefing() {
+        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+
+        let mut state = AppState::new();
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(
+            vec![
+                LoadedArticle {
+                    url: "https://example.com/1".to_string(),
+                    source_title: None,
+                    prepared_text: "text".to_string(),
+                    content_hash: "hash-1".to_string(),
+                    fetched_utc: None,
+                },
+                LoadedArticle {
+                    url: "https://example.com/2".to_string(),
+                    source_title: None,
+                    prepared_text: "text".to_string(),
+                    content_hash: "hash-2".to_string(),
+                    fetched_utc: None,
+                },
+            ],
+            "collection".to_string(),
+        );
+        briefing.transition_to_summarizing();
+        briefing.start_article(0, 1);
+        briefing.complete_article(
+            0,
+            ArticleSummaryResult {
+                title: "Title".to_string(),
+                summary: "Summary".to_string(),
+                key_points: Vec::new(),
+                input_tokens: 1,
+                output_tokens: 1,
+                entities: Default::default(),
+            },
+        );
+        state.set_briefing(briefing);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Summarizing".to_string(),
+                completed: 1,
+                total: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn operation_progress_poll_takes_precedence() {
+        use crate::briefing::LoadedArticle;
+
+        let mut state = AppState::new();
+        assert!(state.start_poll());
+        state.set_poll_total(4);
+
+        let mut triage = crate::triage::TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: "https://example.com/1".to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash-1".to_string(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        state.set_triage(triage);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Polling".to_string(),
+                completed: 0,
+                total: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn operation_progress_none_when_idle() {
+        let state = AppState::new();
+        let view = state.view();
+        assert!(view.operation_progress.is_none());
+    }
+
+    #[test]
+    fn operation_progress_none_during_triage_loading() {
+        let mut state = AppState::new();
+        let triage = crate::triage::TriageSession::new_loading(None);
+        state.set_triage(triage);
+
+        let view = state.view();
+        assert!(view.operation_progress.is_none());
     }
 
     // ------------------------------------------------------------------

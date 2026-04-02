@@ -34,6 +34,14 @@ pub struct LastPasteStats {
     pub skipped: usize,
 }
 
+/// Progress for the single active operation shown in the footer bar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationProgress {
+    pub label: String,
+    pub completed: u32,
+    pub total: u32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreviewHeaderView {
     pub domain: String,
@@ -166,6 +174,7 @@ pub struct LeftPaneView {
 pub struct LayoutViewModel {
     pub left_panel_width: i32,
     pub input_panel_visible: bool,
+    pub operation_progress_visible: bool,
     pub active_tab: AppTab,
     pub left_tab: LeftTab,
     pub prompt_lab_advanced_mode: bool,
@@ -195,7 +204,9 @@ pub struct AppViewModel {
     pub briefing_preview: Option<String>,
     pub triage_can_start: bool,
     pub triage_progress: Option<String>,
+    pub operation_progress: Option<OperationProgress>,
     pub poll_sources_enabled: bool,
+    pub operation_progress_visible: bool,
     pub checkpoint_status_message: Option<String>,
     /// Width of the left panels region (PANEL_INPUT + PANEL_JOBS).
     pub left_panel_width: i32,
@@ -233,7 +244,9 @@ impl Default for AppViewModel {
             briefing_preview: None,
             triage_can_start: false,
             triage_progress: None,
+            operation_progress: None,
             poll_sources_enabled: false,
+            operation_progress_visible: false,
             checkpoint_status_message: None,
             left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
             input_panel_visible: false,

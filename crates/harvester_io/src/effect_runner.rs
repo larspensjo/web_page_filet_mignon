@@ -1378,13 +1378,18 @@ impl EffectRunner {
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .to_path_buf();
             let allowed_dirs = vec![config_dir.clone(), output_dir.clone()];
+            let enabled_sources: Vec<_> =
+                registry.sources.into_iter().filter(|s| s.enabled).collect();
 
             let mut seen_set = load_seen_set(&seen_set_path);
             let mut brave_seen_set = crate::load_brave_seen_set(&brave_seen_set_path);
 
-            let mut enabled_sources = 0usize;
-            for config in registry.sources.into_iter().filter(|s| s.enabled) {
-                enabled_sources += 1;
+            let _ = msg_tx.send(Msg::PollStarted {
+                total: enabled_sources.len(),
+            });
+
+            for config in &enabled_sources {
+                let config = config.clone();
                 let source_id = config.id.clone();
                 let source_started = Instant::now();
                 match config.source_type {
@@ -1507,7 +1512,7 @@ impl EffectRunner {
             }
             engine_info!(
                 "[poll-all-timing] all-sources completed enabled_sources={} elapsed_ms={}",
-                enabled_sources,
+                enabled_sources.len(),
                 poll_started.elapsed().as_millis()
             );
         });

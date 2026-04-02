@@ -304,6 +304,7 @@ fn truncate_for_log(input: &str, max_len: usize) -> String {
 fn summarize_batch_msg(msg: &Msg) -> String {
     match msg {
         Msg::PollSourcesClicked => "PollSourcesClicked".to_string(),
+        Msg::PollStarted { total } => format!("PollStarted(total={total})"),
         Msg::AllSourcesPollEnded => "AllSourcesPollEnded".to_string(),
         Msg::SourcePollCompleted {
             source_id, urls, ..

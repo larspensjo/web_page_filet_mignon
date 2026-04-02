@@ -378,6 +378,12 @@ Refs: scripts/harvester_launcher/Reducer.psm1, scripts/tests/HarvesterLauncher.T
 Type: Decision
 Context: The right-pane preview area had grown into a single overloaded surface handling four
 distinct responsibilities: selected-article preview, briefing preview, Prompt Lab output override,
+
+## 2026-04-02 - Footer operation progress bar
+Type: Implementation
+Context: Polling previously exposed only a disabled button, and triage/summary progress lived only in status text. The UI needed one shared, compact progress surface for the active operation without breaking the reducer-owned state model or footer height.
+Change: Added reducer-owned `OperationProgress` projection in `AppViewModel`, tracked poll totals/completions in `SourceStateIndex` via new `Msg::PollStarted { total }`, auto-switched to `PollStats` when polling completed, and rendered a collapsible footer label + progress bar using the existing diff-based layout/render pipeline.
+Refs: crates/harvester_core/src/source_state.rs, crates/harvester_core/src/state.rs, crates/harvester_core/src/update.rs, crates/harvester_io/src/effect_runner.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
 and future content types. Separately, there was no way to see how coverage of companies,
 technologies, products, or themes was evolving across the archive over time. The user requested
 a tab system to give each content type its own surface, plus an entity trend chart that the LLM

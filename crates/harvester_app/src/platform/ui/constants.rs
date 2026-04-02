@@ -59,6 +59,7 @@ pub const LABEL_INPUT_HINT: ControlId = ControlId::new(3002);
 pub const LABEL_TOKEN_PROGRESS: ControlId = ControlId::new(3003);
 pub const LABEL_PREVIEW_HEADER: ControlId = ControlId::new(3004);
 pub const LABEL_JOBS_HEADER: ControlId = ControlId::new(3005);
+pub const LABEL_OPERATION_PROGRESS: ControlId = ControlId::new(3006);
 
 pub const LABEL_TRENDS_DESCRIPTION: ControlId = ControlId::new(3014);
 pub const LABEL_PROMPT_LAB_STATUS: ControlId = ControlId::new(3010);
@@ -81,6 +82,7 @@ pub const CHK_PROMPT_LAB_SECTION_TEMPLATE: ControlId = ControlId::new(3111);
 pub const CHK_PROMPT_LAB_SECTION_RUN_DETAILS: ControlId = ControlId::new(3112);
 pub const COMBO_PROMPT_LAB_MODEL_SELECTOR: ControlId = ControlId::new(3113);
 pub const PROGRESS_TOKENS: ControlId = ControlId::new(4001);
+pub const PROGRESS_OPERATION: ControlId = ControlId::new(4002);
 pub const VIEWER_PREVIEW: ControlId = ControlId::new(5001);
 pub const SPLITTER_MAIN: ControlId = ControlId::new(6001);
 

@@ -26,6 +26,8 @@ pub struct SourceInstanceState {
 pub struct SourceStateIndex {
     states: BTreeMap<SourceId, SourceInstanceState>,
     poll_in_progress: bool,
+    poll_total: Option<usize>,
+    poll_completed: usize,
     /// Stats accumulated for the current poll cycle; cleared when a new poll starts.
     poll_stats: Vec<SourcePollStat>,
     /// Snapshot of stats from the last *completed* poll cycle. Persists across poll starts.
@@ -42,6 +44,7 @@ impl SourceStateIndex {
 
     pub fn record_poll_stat(&mut self, stat: SourcePollStat) {
         self.poll_stats.push(stat);
+        self.poll_completed += 1;
     }
 
     pub fn poll_stats(&self) -> &[SourcePollStat] {
@@ -52,6 +55,9 @@ impl SourceStateIndex {
         let entry = self.states.entry(id.clone()).or_default();
         entry.last_polled = Some(Utc::now());
         entry.last_error = Some(error);
+        if self.poll_in_progress {
+            self.poll_completed += 1;
+        }
     }
 
     pub fn source_state(&self, id: &SourceId) -> Option<&SourceInstanceState> {
@@ -63,14 +69,21 @@ impl SourceStateIndex {
             false
         } else {
             self.poll_in_progress = true;
+            self.poll_total = None;
+            self.poll_completed = 0;
             self.poll_stats.clear();
             true
         }
     }
 
+    pub fn set_poll_total(&mut self, total: usize) {
+        self.poll_total = Some(total);
+    }
+
     pub fn end_poll(&mut self) {
         self.last_completed_poll_stats = self.poll_stats.clone();
         self.poll_in_progress = false;
+        self.poll_total = None;
     }
 
     pub fn is_poll_in_progress(&self) -> bool {
@@ -79,6 +92,14 @@ impl SourceStateIndex {
 
     pub fn last_completed_poll_stats(&self) -> &[SourcePollStat] {
         &self.last_completed_poll_stats
+    }
+
+    pub fn poll_progress(&self) -> Option<(usize, usize)> {
+        let total = self.poll_total?;
+        if !self.poll_in_progress || total == 0 {
+            return None;
+        }
+        Some((self.poll_completed.min(total), total))
     }
 }
 
@@ -177,5 +198,64 @@ mod tests {
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].source_id, SourceId::new("s2").expect("valid"));
         assert_eq!(stats[0].emitted, 7);
+    }
+
+    #[test]
+    fn poll_progress_none_when_idle() {
+        let index = SourceStateIndex::default();
+        assert_eq!(index.poll_progress(), None);
+    }
+
+    #[test]
+    fn poll_progress_available_after_set_total() {
+        let mut index = SourceStateIndex::default();
+        index.start_poll();
+        index.set_poll_total(4);
+        assert_eq!(index.poll_progress(), Some((0, 4)));
+    }
+
+    #[test]
+    fn poll_progress_increments_on_stat() {
+        let mut index = SourceStateIndex::default();
+        index.start_poll();
+        index.set_poll_total(3);
+        index.record_poll_stat(make_stat("s1", 1));
+        assert_eq!(index.poll_progress(), Some((1, 3)));
+    }
+
+    #[test]
+    fn poll_progress_increments_on_error() {
+        let mut index = SourceStateIndex::default();
+        let id = SourceId::new("source").expect("valid");
+        index.start_poll();
+        index.set_poll_total(2);
+        index.record_source_error(&id, "boom".to_string());
+        assert_eq!(index.poll_progress(), Some((1, 2)));
+    }
+
+    #[test]
+    fn poll_progress_not_incremented_on_error_outside_poll() {
+        let mut index = SourceStateIndex::default();
+        let id = SourceId::new("source").expect("valid");
+        index.record_source_error(&id, "boom".to_string());
+        assert_eq!(index.poll_progress(), None);
+    }
+
+    #[test]
+    fn poll_progress_none_when_total_is_zero() {
+        let mut index = SourceStateIndex::default();
+        index.start_poll();
+        index.set_poll_total(0);
+        assert_eq!(index.poll_progress(), None);
+    }
+
+    #[test]
+    fn poll_progress_none_after_end_poll() {
+        let mut index = SourceStateIndex::default();
+        index.start_poll();
+        index.set_poll_total(2);
+        index.record_poll_stat(make_stat("s1", 1));
+        index.end_poll();
+        assert_eq!(index.poll_progress(), None);
     }
 }

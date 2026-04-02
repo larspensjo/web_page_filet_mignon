@@ -160,6 +160,10 @@ pub enum Msg {
     PreTriageResetClicked,
     /// User requested polling all configured sources.
     PollSourcesClicked,
+    /// Effect runner reports the total number of enabled sources to poll.
+    PollStarted {
+        total: usize,
+    },
     /// Polling completed for a source.
     SourcePollCompleted {
         source_id: harvester_engine::SourceId,
