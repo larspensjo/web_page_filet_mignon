@@ -1629,29 +1629,32 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
             view.jobs.iter().collect()
         };
 
-    // TriageResults: sort by triage priority (desc), then job_id (asc) for tie-breaking.
+    // TriageResults: sort by triage priority (desc), then job_id (asc) for tie-breaking,
+    // but only after triage settles. Resorting on every in-flight result changes sibling
+    // order, which currently forces a full TreeView repopulation and visible flicker.
     // All other tabs use stable job-id order from the view model.
     let mut sorted_buf: Vec<&JobRowView>;
-    let jobs_iter: &[&JobRowView] = if matches!(tab, LeftTab::TriageResults) {
-        sorted_buf = scope_filtered;
-        sorted_buf.sort_by(|a, b| {
-            let p_a = a
-                .triage_annotation
-                .as_ref()
-                .map(|t| t.priority)
-                .unwrap_or(0);
-            let p_b = b
-                .triage_annotation
-                .as_ref()
-                .map(|t| t.priority)
-                .unwrap_or(0);
-            p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
-        });
-        &sorted_buf
-    } else {
-        sorted_buf = scope_filtered;
-        &sorted_buf
-    };
+    let jobs_iter: &[&JobRowView] =
+        if matches!(tab, LeftTab::TriageResults) && view.triage_progress.is_none() {
+            sorted_buf = scope_filtered;
+            sorted_buf.sort_by(|a, b| {
+                let p_a = a
+                    .triage_annotation
+                    .as_ref()
+                    .map(|t| t.priority)
+                    .unwrap_or(0);
+                let p_b = b
+                    .triage_annotation
+                    .as_ref()
+                    .map(|t| t.priority)
+                    .unwrap_or(0);
+                p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
+            });
+            &sorted_buf
+        } else {
+            sorted_buf = scope_filtered;
+            &sorted_buf
+        };
 
     jobs_iter
         .iter()
@@ -2745,7 +2748,7 @@ mod tests {
     #[test]
     fn triage_results_tab_sorts_by_priority_descending() {
         // Jobs arrive in job_id order (low priority first), but TriageResults should
-        // show highest priority first.
+        // show highest priority first once triage has settled.
         init_logging();
         let window_id = WindowId::new(62);
         let mut tree_state = TreeRenderState::new();
@@ -2806,6 +2809,153 @@ mod tests {
             populated[1].text.contains("P2"),
             "second item should be P2, got: {}",
             populated[1].text
+        );
+    }
+
+    #[test]
+    fn triage_results_tab_keeps_stable_order_while_triage_in_progress() {
+        init_logging();
+        let window_id = WindowId::new(64);
+        let mut tree_state = TreeRenderState::new();
+
+        let low = make_job(
+            1,
+            "https://low.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+
+        let mut high = make_job(
+            2,
+            "https://high.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        high.has_summary = true;
+        high.summary_title = Some("High Priority".to_string());
+        high.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 5,
+            category: "tech".to_string(),
+            tags: vec![],
+        });
+
+        let mut view = make_view(vec![low, high]);
+        view.left_pane.left_tab = LeftTab::TriageResults;
+        view.triage_progress = Some("Triaging 1/2 articles...".to_string());
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let populated = cmds
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
+                _ => None,
+            })
+            .expect("PopulateTreeView emitted");
+
+        assert_eq!(populated.len(), 2);
+        assert!(
+            populated[0].text.contains("[no triage] https://low.com/"),
+            "first should stay job 1 while triage is running, got: {}",
+            populated[0].text
+        );
+        assert!(
+            populated[1].text.contains("P5"),
+            "second should stay job 2 while triage is running, got: {}",
+            populated[1].text
+        );
+    }
+
+    #[test]
+    fn triage_results_in_progress_updates_rows_without_repopulating_tree() {
+        init_logging();
+        let window_id = WindowId::new(65);
+        let mut tree_state = TreeRenderState::new();
+
+        let low_initial = make_job(
+            1,
+            "https://low.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+
+        let mut high_initial = make_job(
+            2,
+            "https://high.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        high_initial.has_summary = true;
+        high_initial.summary_title = Some("High Priority".to_string());
+        high_initial.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 5,
+            category: "tech".to_string(),
+            tags: vec![],
+        });
+
+        let mut initial_view = make_view(vec![low_initial, high_initial]);
+        initial_view.left_pane.left_tab = LeftTab::TriageResults;
+        initial_view.triage_progress = Some("Triaging 1/2 articles...".to_string());
+        let _ = render(window_id, &initial_view, &mut tree_state);
+
+        let mut low_updated = make_job(
+            1,
+            "https://low.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        low_updated.has_summary = true;
+        low_updated.summary_title = Some("Now Highest".to_string());
+        low_updated.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 6,
+            category: "finance".to_string(),
+            tags: vec![],
+        });
+
+        let mut high_updated = make_job(
+            2,
+            "https://high.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        high_updated.has_summary = true;
+        high_updated.summary_title = Some("High Priority".to_string());
+        high_updated.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 5,
+            category: "tech".to_string(),
+            tags: vec![],
+        });
+
+        let mut updated_view = make_view(vec![low_updated, high_updated]);
+        updated_view.left_pane.left_tab = LeftTab::TriageResults;
+        updated_view.triage_progress = Some("Triaging 2/2 articles...".to_string());
+
+        let cmds = render(window_id, &updated_view, &mut tree_state);
+
+        assert!(
+            !cmds
+                .iter()
+                .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })),
+            "in-flight triage updates should not repopulate the whole tree"
+        );
+        assert!(
+            cmds.iter().any(|cmd| matches!(
+                cmd,
+                PlatformCommand::UpdateTreeItemText { item_id, text, .. }
+                    if *item_id == job_tree_item_id(1) && text.contains("P6 [finance]")
+            )),
+            "updated triage row should refresh in place"
         );
     }
 

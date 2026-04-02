@@ -718,6 +718,15 @@ Prevention: Add flow-level tests for both success and failure branches of each L
 Refs: crates/harvester_core/src/briefing.rs, crates/harvester_core/src/update.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_batch/src/runner.rs
 
 ## 2026-03-11 - Resize responsiveness restored without blanking the jobs tree
+## 2026-04-02 - Deferred triage-results resorting to stop tree flicker
+Type: Bug Fix
+Context: While triage was running, the Triage Results left-pane view kept reordering rows by priority as each result arrived. That changed TreeView sibling order on nearly every update, so the current render path fell back to full `PopulateTreeView`, visibly clearing and rebuilding the pane mid-run.
+Change: Updated `harvester_app` tree rendering so Triage Results keeps stable job order while triage is in flight and only applies priority sorting after triage settles. Added render regression tests covering stable in-flight order and in-place text updates without full repopulation.
+Lessons Learned: When a UI control lacks cheap item reordering, continuously changing sort order turns innocuous data updates into full-structure repaints and visible flicker.
+Prevention: Treat in-flight list ordering as a rendering contract; for TreeView-backed surfaces, prefer stable order during streaming updates and add tests that fail if progress-only updates emit `PopulateTreeView`.
+Refs: crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-03-11 - Resize responsiveness restored without blanking the jobs tree
 Type: Bug Fix
 Context: Dragging the main window border or pane splitter became nearly unresponsive after the TreeView selection-styling update, especially with real job data loaded. Early redraw-suspension mitigations improved throughput but caused blank-pane artifacts, which showed the true fix required separating geometry work from paint-time data costs rather than freezing the control.
 Change: Updated `harvester_app` to keep live TreeView redraw enabled during resize while preserving erase suppression in `commanductui`, kept the lighter geometry-only render path for resize batches, and updated `harvester_core`/`harvester_app` so TreeView marker lookup reads pre-triage state directly from `AppState` instead of rebuilding the full view model during paint. Added unit coverage for the live-drag policy and for the direct marker-state lookup path.
