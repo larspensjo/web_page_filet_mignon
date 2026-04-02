@@ -16,8 +16,8 @@ use commanductui::{
 };
 use harvester_core::{
     update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel, Effect,
-    JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel, LeftTab, LinkDownloadState,
-    ManualDecision, Msg, PromptLabStage, TrendCategory,
+    JobListScope, JobResultKind, LayoutViewModel, LeftTab, LinkDownloadState, ManualDecision, Msg,
+    PromptLabStage, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -1226,13 +1226,8 @@ impl UiStateProvider for AppUiStateProvider {
     ) -> TreeItemMarkerKind {
         if let TreeItemKind::Job { job_id } = decode_tree_item_id(item_id) {
             let guard = self.shared.lock().unwrap();
-            return match guard.state.job_filter_status(job_id) {
-                Some(JobFilterStatus::HardExcluded { .. }) => TreeItemMarkerKind::Red,
-                Some(JobFilterStatus::ReviewNeeded { .. }) => TreeItemMarkerKind::Yellow,
-                Some(JobFilterStatus::ManuallyExcluded) => TreeItemMarkerKind::Gray,
-                Some(JobFilterStatus::ManuallyIncluded) => TreeItemMarkerKind::Blue,
-                _ => TreeItemMarkerKind::None,
-            };
+            let _ = guard.state.job_filter_status(job_id);
+            return TreeItemMarkerKind::None;
         }
         if let TreeItemKind::Link { job_id, link_index } = decode_tree_item_id(item_id) {
             let guard = self.shared.lock().unwrap();
@@ -1254,7 +1249,7 @@ impl UiStateProvider for AppUiStateProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::ui::tree_item_ids::link_tree_item_id;
+    use super::ui::tree_item_ids::{job_tree_item_id, link_tree_item_id};
     use super::*;
     use commanductui::types::{TreeItemMarkerKind, WindowId};
     use commanductui::AppEvent;
@@ -1374,6 +1369,18 @@ mod tests {
                 link_index: 0,
             },
         );
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::None
+        );
+    }
+
+    #[test]
+    fn job_tree_items_do_not_show_status_markers() {
+        let shared = shared_state_with_single_link();
+        let provider = AppUiStateProvider::new(shared.clone());
+        let item_id = job_tree_item_id(1);
+
         assert_eq!(
             provider.tree_item_marker(WindowId::new(1), item_id),
             TreeItemMarkerKind::None
