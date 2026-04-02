@@ -94,7 +94,7 @@ pub struct TreeRenderState {
     /// Tracks the previous left_panel_width to detect changes
     prev_left_panel_width: i32,
     prev_input_panel_visible: bool,
-    prev_status_text: Option<String>,
+    prev_status_label: Option<(String, MessageSeverity)>,
     prev_progress_text: Option<String>,
     prev_preview_text: Option<String>,
     prev_header_text: Option<String>,
@@ -177,7 +177,7 @@ impl Default for TreeRenderState {
             check_state_by_id: HashMap::new(),
             prev_left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
             prev_input_panel_visible: false,
-            prev_status_text: None,
+            prev_status_label: None,
             prev_progress_text: None,
             prev_preview_text: None,
             prev_header_text: None,
@@ -570,15 +570,21 @@ fn render_status_section(
     if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
         status_parts.push(usage);
     }
+    let severity = if let Some(message) = view.ai_unavailable_message.as_deref() {
+        status_parts.push(message.to_string());
+        MessageSeverity::Warning
+    } else {
+        MessageSeverity::Information
+    };
     emit_if_changed(
-        &mut tree_state.prev_status_text,
-        status_parts.join(" | "),
+        &mut tree_state.prev_status_label,
+        (status_parts.join(" | "), severity),
         cmds,
-        |text| PlatformCommand::UpdateLabelText {
+        |(text, severity)| PlatformCommand::UpdateLabelText {
             window_id,
             control_id: LABEL_STATUS,
             text,
-            severity: MessageSeverity::Information,
+            severity,
         },
     );
     tree_state.prev_briefing_progress = view.briefing_progress.clone();
@@ -818,7 +824,13 @@ fn jobs_header_text(view: &AppViewModel) -> String {
                 .iter()
                 .filter(|job| job.triage_annotation.is_some())
                 .count();
-            if triage_result_count == 0 {
+            if view.ai_unavailable_message.is_some() && triage_result_count == 0 {
+                format!("Triage Results{scope_suffix} (AI unavailable)")
+            } else if view.ai_unavailable_message.is_some() {
+                format!(
+                    "Triage Results{scope_suffix} ({triage_result_count} with triage | AI unavailable)"
+                )
+            } else if triage_result_count == 0 {
                 format!("Triage Results{scope_suffix} (no triage results yet)")
             } else {
                 format!("Triage Results{scope_suffix} ({triage_result_count} with triage)")
@@ -3229,6 +3241,72 @@ mod tests {
             .expect("populated triage header rendered");
         assert!(populated_header.contains("Triage Results"));
         assert_ne!(empty_header, populated_header);
+    }
+
+    #[test]
+    fn status_bar_uses_warning_severity_for_ai_unavailable_message() {
+        let window_id = WindowId::new(41);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.ai_unavailable_message =
+            Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::UpdateLabelText { control_id, severity: MessageSeverity::Warning, text, .. }
+                if *control_id == LABEL_STATUS && text.contains("OPENAI_API_KEY is not set")
+            )
+        }));
+    }
+
+    #[test]
+    fn triage_results_header_uses_ai_unavailable_copy_when_blocked() {
+        let window_id = WindowId::new(42);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![]);
+        view.left_pane.left_tab = LeftTab::TriageResults;
+        view.ai_unavailable_message =
+            Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let header = control_text(&cmds, LABEL_JOBS_HEADER).expect("triage header rendered");
+        assert_eq!(header, "Triage Results (AI unavailable)");
+    }
+
+    #[test]
+    fn triage_results_header_preserves_count_when_ai_unavailable() {
+        let window_id = WindowId::new(43);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![JobRowView {
+            job_id: 1,
+            url: "https://example.com".to_string(),
+            stage: Stage::Done,
+            outcome: Some(JobResultKind::Success),
+            tokens: None,
+            bytes: None,
+            link_count: 0,
+            downloaded_link_count: 0,
+            links: vec![],
+            triage_annotation: Some(harvester_core::TriageAnnotationView {
+                priority: 1,
+                category: "keep".to_string(),
+                tags: vec![],
+            }),
+            has_summary: false,
+            summary_title: None,
+            filter_status: None,
+            has_analysis: true,
+            is_since_checkpoint: true,
+        }]);
+        view.left_pane.left_tab = LeftTab::TriageResults;
+        view.ai_unavailable_message =
+            Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
+
+        let cmds = render(window_id, &view, &mut tree_state);
+        let header = control_text(&cmds, LABEL_JOBS_HEADER).expect("triage header rendered");
+        assert_eq!(header, "Triage Results (1 with triage | AI unavailable)");
     }
 
     #[test]

@@ -219,6 +219,14 @@ Refs: docs/Plan.Step2.PromptLab.RunMetadataContract.md
 
 ## 2026-02-14 - Plan.Step3.PromptLab.PerRunOverrides.md
 
+## 2026-04-02 - AI unavailable UX for triage and briefing
+Type: Bug Fix
+Context: Starting the app without OPENAI_API_KEY left the UI in a misleading dead-end where triage could not run but Triage Results still looked like a normal empty state.
+Change: Added explicit reducer-owned AI availability state, fed startup missing-key and metadata-derived no-model signals into it, disabled triage/briefing actions from the view model, surfaced a warning in the status bar, and changed triage/briefing empty-state behavior to show configuration-aware messaging.
+Lessons Learned: Configuration blockers need first-class reducer state rather than being inferred from logs or scattered metadata checks in render.
+Prevention: Keep operator-visible availability reasons in core state and require render tests for blocked-action copy and warning severity when adding new feature gates.
+Refs: crates/harvester_core/src/state.rs, crates/harvester_core/src/update.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/render.rs
+
 Type: Implementation
 Period: 2026-02-14 to 2026-02-15
 StartCommit: `7904f581`

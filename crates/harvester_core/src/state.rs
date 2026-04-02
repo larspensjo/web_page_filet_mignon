@@ -88,6 +88,18 @@ struct PendingBriefingCheckpointSave {
     pending_since_utc: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AiAvailability {
+    Available,
+    Unavailable { reason: AiUnavailableReason },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiUnavailableReason {
+    MissingApiKey,
+    NoTriageModel,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingBriefingCheckpointSaveSnapshot {
@@ -349,6 +361,7 @@ pub struct AppState {
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
     effective_models: HashMap<PromptId, String>,
+    ai_availability: AiAvailability,
     prompt_lab_templates: HashMap<PromptId, PromptLabTemplateSnapshot>,
     summary_cache: SummaryCache,
     briefing_metadata_state: MetadataLoadState,
@@ -447,6 +460,7 @@ impl Default for AppState {
             prompt_contexts: HashMap::new(),
             active_prompt_versions: HashMap::new(),
             effective_models: HashMap::new(),
+            ai_availability: AiAvailability::Available,
             summary_cache: SummaryCache::new(),
             briefing_metadata_state: MetadataLoadState::Idle,
             summary_cache_metadata_snapshot: None,
@@ -729,6 +743,9 @@ impl AppState {
             } else {
                 None
             };
+        let ai_unavailable_message = self.ai_unavailable_message();
+        let triage_blocked_reason = self.triage_blocked_reason();
+        let briefing_blocked_reason = self.briefing_blocked_reason();
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -742,16 +759,20 @@ impl AppState {
             preview_header,
             preview_header_text,
             preview_source,
-            briefing_can_start: self.briefing.can_start(),
+            briefing_can_start: self.briefing.can_start() && self.briefing_ai_available(),
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
-            triage_can_start: (!self.briefing_orchestration.is_requested())
+            triage_can_start: self.triage_ai_available()
+                && (!self.briefing_orchestration.is_requested())
                 && self.triage.can_start()
                 && matches!(self.pre_triage.phase(), PreTriagePhase::ReadyToTriage),
             triage_progress: self
                 .triage
                 .progress_text()
                 .or_else(|| self.pre_triage_progress_text()),
+            ai_unavailable_message,
+            triage_blocked_reason,
+            briefing_blocked_reason,
             operation_progress_visible: operation_progress.is_some(),
             operation_progress,
             poll_sources_enabled: matches!(
@@ -865,6 +886,24 @@ impl AppState {
 
         // Briefing markdown — use the existing briefing preview.
         let briefing_markdown = self.briefing.format_preview();
+        let triage_placeholder = if triage_markdown.is_none() {
+            self.triage_blocked_reason().map(|reason| {
+                format!(
+                    "Article triage is unavailable because {reason}.\n\nSet OPENAI_API_KEY and restart the app to enable triage."
+                )
+            })
+        } else {
+            None
+        };
+        let briefing_placeholder = if briefing_markdown.is_none() {
+            self.briefing_blocked_reason().map(|reason| {
+                format!(
+                    "Briefing is unavailable because {reason}.\n\nSet OPENAI_API_KEY and restart the app to enable briefing."
+                )
+            })
+        } else {
+            None
+        };
 
         let prompt_lab = crate::view_model::PromptLabView::from_state(
             &self.prompt_lab,
@@ -902,12 +941,16 @@ impl AppState {
                     }
                 });
                 (
-                    lab_triage.or(triage_markdown),
+                    lab_triage.or(triage_markdown).or(triage_placeholder),
                     lab_summary.or(summary_markdown),
-                    lab_briefing.or(briefing_markdown),
+                    lab_briefing.or(briefing_markdown).or(briefing_placeholder),
                 )
             } else {
-                (triage_markdown, summary_markdown, briefing_markdown)
+                (
+                    triage_markdown.or(triage_placeholder),
+                    summary_markdown,
+                    briefing_markdown.or(briefing_placeholder),
+                )
             };
 
         let _ = prompt_lab; // moved into LeftPaneView via view()
@@ -1467,6 +1510,68 @@ impl AppState {
     /// Get the effective model for a specific prompt.
     pub fn effective_model_for(&self, prompt_id: PromptId) -> Option<&str> {
         self.effective_models.get(&prompt_id).map(|s| s.as_str())
+    }
+
+    pub fn ai_availability(&self) -> &AiAvailability {
+        &self.ai_availability
+    }
+
+    pub fn triage_ai_available(&self) -> bool {
+        matches!(self.ai_availability, AiAvailability::Available)
+    }
+
+    pub fn briefing_ai_available(&self) -> bool {
+        matches!(self.ai_availability, AiAvailability::Available)
+    }
+
+    pub(crate) fn set_ai_availability(&mut self, availability: AiAvailability) {
+        self.ai_availability = availability;
+    }
+
+    pub(crate) fn reconcile_ai_availability_from_metadata(&mut self) {
+        let triage_model_available = self.effective_models.contains_key(&PromptId::ArticleTriage);
+        match (&self.ai_availability, triage_model_available) {
+            (
+                AiAvailability::Unavailable {
+                    reason: AiUnavailableReason::MissingApiKey,
+                },
+                _,
+            ) => {}
+            (_, true) => self.ai_availability = AiAvailability::Available,
+            (_, false) => {
+                self.ai_availability = AiAvailability::Unavailable {
+                    reason: AiUnavailableReason::NoTriageModel,
+                };
+            }
+        }
+    }
+
+    fn ai_unavailable_reason(&self) -> Option<AiUnavailableReason> {
+        match self.ai_availability {
+            AiAvailability::Available => None,
+            AiAvailability::Unavailable { reason } => Some(reason),
+        }
+    }
+
+    fn ai_unavailable_reason_text(&self) -> Option<&'static str> {
+        match self.ai_unavailable_reason() {
+            Some(AiUnavailableReason::MissingApiKey) => Some("OPENAI_API_KEY is not set"),
+            Some(AiUnavailableReason::NoTriageModel) => Some("no triage model is available"),
+            None => None,
+        }
+    }
+
+    fn ai_unavailable_message(&self) -> Option<String> {
+        self.ai_unavailable_reason_text()
+            .map(|reason| format!("AI features unavailable: {reason}"))
+    }
+
+    fn triage_blocked_reason(&self) -> Option<String> {
+        self.ai_unavailable_reason_text().map(str::to_string)
+    }
+
+    fn briefing_blocked_reason(&self) -> Option<String> {
+        self.ai_unavailable_reason_text().map(str::to_string)
     }
 
     pub(crate) fn set_llm_metadata(

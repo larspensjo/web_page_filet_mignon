@@ -14,6 +14,7 @@ use crate::prompt_lab::{
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
+use crate::state::AiAvailability;
 use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,6 +245,10 @@ pub enum Msg {
         active_versions: std::collections::HashMap<PromptId, PromptVersion>,
         effective_models: std::collections::HashMap<PromptId, String>,
         templates: std::collections::HashMap<PromptId, PromptLabTemplateSnapshot>,
+    },
+    /// Startup/effect boundary detected whether AI-backed workflows are available.
+    AiAvailabilityDetected {
+        availability: AiAvailability,
     },
     /// Summary cache hydrated from persisted store at startup.
     SummaryCacheHydrated {

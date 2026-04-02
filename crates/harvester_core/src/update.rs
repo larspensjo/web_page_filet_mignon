@@ -767,6 +767,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             effects
         }
         Msg::GenerateBriefingClicked => {
+            if !state.briefing_ai_available() {
+                return (state, Vec::new());
+            }
             if !state.briefing().can_start() {
                 return (state, Vec::new());
             }
@@ -1078,6 +1081,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 engine_info!("[briefing-triage] interleave blocked: briefing owns triage");
                 return (state, Vec::new());
             }
+            if !state.triage_ai_available() {
+                state.set_left_tab(LeftTab::TriageResults);
+                state.mark_dirty();
+                return (state, Vec::new());
+            }
             if !state.triage().can_start() {
                 return (state, Vec::new());
             }
@@ -1198,12 +1206,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 active_versions.len()
             );
             state.set_llm_metadata(active_versions, effective_models, templates);
+            state.reconcile_ai_availability_from_metadata();
             state.mark_briefing_metadata_ready();
             state.mark_triage_metadata_ready();
             state.mark_dirty();
             let mut effects = Vec::new();
             try_start_briefing_with_metadata(&mut state, &mut effects);
             effects
+        }
+        Msg::AiAvailabilityDetected { availability } => {
+            state.set_ai_availability(availability);
+            state.mark_dirty();
+            Vec::new()
         }
         Msg::SummaryCacheHydrated { cache } => {
             engine_info!(
@@ -2896,8 +2910,10 @@ mod tests {
 
     fn with_summary_metadata(state: AppState) -> AppState {
         let mut active_versions = HashMap::new();
+        active_versions.insert(PromptId::ArticleTriage, 1);
         active_versions.insert(PromptId::ArticleSummary, 1);
         let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
         effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
         let (state, _) = update(
             state,
@@ -5428,6 +5444,124 @@ mod tests {
         let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
         let (state, _) = update(state, Msg::TriageClicked);
         assert_eq!(state.left_tab(), LeftTab::TriageResults);
+    }
+
+    #[test]
+    fn ai_availability_defaults_to_available_before_startup_evidence_arrives() {
+        init_logging();
+        let state = AppState::new();
+        assert_eq!(state.ai_availability(), &crate::AiAvailability::Available);
+        assert!(state.view().ai_unavailable_message.is_none());
+    }
+
+    #[test]
+    fn missing_api_key_blocks_triage_and_briefing_actions() {
+        init_logging();
+        let state = ready_pre_triage_state(&["https://blocked.example/1"]);
+        let (state, _) = update(
+            state,
+            Msg::AiAvailabilityDetected {
+                availability: crate::AiAvailability::Unavailable {
+                    reason: crate::AiUnavailableReason::MissingApiKey,
+                },
+            },
+        );
+
+        let view = state.view();
+        assert!(!view.triage_can_start);
+        assert!(!view.briefing_can_start);
+        assert_eq!(
+            view.ai_unavailable_message.as_deref(),
+            Some("AI features unavailable: OPENAI_API_KEY is not set")
+        );
+
+        let pre_triage_before = state.pre_triage().resolved_included_urls().to_vec();
+        let (state, triage_effects) = update(state, Msg::TriageClicked);
+        assert!(
+            triage_effects.is_empty(),
+            "blocked triage must dispatch nothing"
+        );
+        assert_eq!(state.left_tab(), LeftTab::TriageResults);
+        assert_eq!(
+            state.pre_triage().resolved_included_urls(),
+            pre_triage_before
+        );
+
+        let (state, briefing_effects) = update(state, Msg::GenerateBriefingClicked);
+        assert!(
+            briefing_effects.is_empty(),
+            "blocked briefing must dispatch nothing"
+        );
+        assert_eq!(state.active_tab(), AppTab::Summary);
+    }
+
+    #[test]
+    fn llm_metadata_without_triage_model_sets_ai_unavailable_reason() {
+        init_logging();
+        let mut active_versions = std::collections::HashMap::new();
+        active_versions.insert(PromptId::ArticleSummary, 1);
+        let mut effective_models = std::collections::HashMap::new();
+        effective_models.insert(PromptId::ArticleSummary, "summary-model".to_string());
+
+        let (state, _) = update(
+            AppState::new(),
+            Msg::LlmMetadataLoaded {
+                active_versions,
+                effective_models,
+                templates: std::collections::HashMap::new(),
+            },
+        );
+
+        assert_eq!(
+            state.ai_availability(),
+            &crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::NoTriageModel,
+            }
+        );
+    }
+
+    #[test]
+    fn valid_triage_metadata_clears_no_triage_model_unavailable_state() {
+        init_logging();
+        let (state, _) = update(
+            AppState::new(),
+            Msg::AiAvailabilityDetected {
+                availability: crate::AiAvailability::Unavailable {
+                    reason: crate::AiUnavailableReason::NoTriageModel,
+                },
+            },
+        );
+        let state = prime_llm_metadata(state);
+        assert_eq!(state.ai_availability(), &crate::AiAvailability::Available);
+    }
+
+    #[test]
+    fn missing_api_key_is_not_overwritten_by_weaker_metadata_reason() {
+        init_logging();
+        let (state, _) = update(
+            AppState::new(),
+            Msg::AiAvailabilityDetected {
+                availability: crate::AiAvailability::Unavailable {
+                    reason: crate::AiUnavailableReason::MissingApiKey,
+                },
+            },
+        );
+
+        let (state, _) = update(
+            state,
+            Msg::LlmMetadataLoaded {
+                active_versions: std::collections::HashMap::new(),
+                effective_models: std::collections::HashMap::new(),
+                templates: std::collections::HashMap::new(),
+            },
+        );
+
+        assert_eq!(
+            state.ai_availability(),
+            &crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            }
+        );
     }
 
     #[test]
