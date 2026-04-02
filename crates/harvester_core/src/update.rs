@@ -1249,6 +1249,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Vec::new()
             }
         }
+        Msg::PollStarted { total } => {
+            state.set_poll_total(total);
+            Vec::new()
+        }
         Msg::SourcePollCompleted {
             source_id,
             urls,
@@ -1276,6 +1280,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::AllSourcesPollEnded => {
             state.end_poll();
             state.pre_triage_coordinator.note_poll_sources_ended();
+            state.select_tab(AppTab::PollStats);
             Vec::new()
         }
         Msg::TabSelected { tab } => {
@@ -7510,5 +7515,56 @@ mod import_tests {
             state.source_states().poll_stats().is_empty(),
             "poll_stats must be cleared when a new poll starts"
         );
+    }
+
+    #[test]
+    fn poll_started_sets_total() {
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+        let (state, _) = update(state, Msg::PollStarted { total: 5 });
+        assert_eq!(state.source_states().poll_progress(), Some((0, 5)));
+    }
+
+    #[test]
+    fn poll_complete_increments_progress() {
+        let state = AppState::new();
+        let source_id = harvester_engine::SourceId::new("rss").unwrap();
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+        let (state, _) = update(state, Msg::PollStarted { total: 2 });
+        let (state, _) = update(
+            state,
+            Msg::SourcePollCompleted {
+                source_id,
+                urls: vec!["https://example.com/1".to_string()],
+                kind: harvester_engine::SourceKind::Rss,
+                parsed: 1,
+                dedup_filtered: 0,
+            },
+        );
+        assert_eq!(state.source_states().poll_progress(), Some((1, 2)));
+    }
+
+    #[test]
+    fn poll_failed_increments_progress() {
+        let state = AppState::new();
+        let source_id = harvester_engine::SourceId::new("rss").unwrap();
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+        let (state, _) = update(state, Msg::PollStarted { total: 2 });
+        let (state, _) = update(
+            state,
+            Msg::SourcePollFailed {
+                source_id,
+                error: "boom".to_string(),
+            },
+        );
+        assert_eq!(state.source_states().poll_progress(), Some((1, 2)));
+    }
+
+    #[test]
+    fn poll_ended_auto_switches_to_poll_stats_tab() {
+        let state = AppState::new();
+        let (state, _) = update(state, Msg::PollSourcesClicked);
+        let (state, _) = update(state, Msg::AllSourcesPollEnded);
+        assert_eq!(state.active_tab(), AppTab::PollStats);
     }
 }

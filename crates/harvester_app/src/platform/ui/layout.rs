@@ -37,6 +37,7 @@ pub(crate) struct PromptLabLayoutConfig {
 pub(crate) struct LayoutConfig {
     pub left_panel_width: i32,
     pub input_panel_visible: bool,
+    pub operation_progress_visible: bool,
     pub prompt_lab: PromptLabLayoutConfig,
     pub active_tab: AppTab,
     pub left_tab: LeftTab,
@@ -788,6 +789,18 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         initial_text: "Ready".to_string(),
         class: LabelClass::StatusBar,
     });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_BOTTOM),
+        control_id: LABEL_OPERATION_PROGRESS,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateProgressBar {
+        window_id,
+        parent_control_id: Some(PANEL_BOTTOM),
+        control_id: PROGRESS_OPERATION,
+    });
 
     apply_dark_theme(window_id, &mut commands);
 
@@ -796,6 +809,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         LayoutConfig {
             left_panel_width: initial_left_width,
             input_panel_visible: false,
+            operation_progress_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -1151,6 +1165,7 @@ pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) ->
         rules: build_layout_rules(
             config.left_panel_width,
             config.input_panel_visible,
+            config.operation_progress_visible,
             config.prompt_lab,
             config.active_tab,
             config.left_tab,
@@ -1161,6 +1176,7 @@ pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) ->
 fn build_layout_rules(
     left_panel_width: i32,
     input_panel_visible: bool,
+    operation_progress_visible: bool,
     prompt_lab: PromptLabLayoutConfig,
     active_tab: AppTab,
     left_tab: LeftTab,
@@ -1171,6 +1187,8 @@ fn build_layout_rules(
     } else {
         0
     };
+    let operation_progress_bar_width = if operation_progress_visible { 80 } else { 0 };
+    let operation_progress_label_width = if operation_progress_visible { 120 } else { 0 };
     let jobs_width = (left_panel_width - input_width).max(0);
     let _ = jobs_width; // jobs panel fills remaining space inside PANEL_LEFT_JOBS
 
@@ -1523,6 +1541,22 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
+            margin: (6, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: PROGRESS_OPERATION,
+            parent_control_id: Some(PANEL_BOTTOM),
+            dock_style: DockStyle::Right,
+            order: 10,
+            fixed_size: Some(operation_progress_bar_width),
+            margin: (6, 6, 6, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_OPERATION_PROGRESS,
+            parent_control_id: Some(PANEL_BOTTOM),
+            dock_style: DockStyle::Right,
+            order: 20,
+            fixed_size: Some(operation_progress_label_width),
             margin: (6, 6, 6, 6),
         },
         LayoutRule {
@@ -2263,6 +2297,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
+        control_id: LABEL_OPERATION_PROGRESS,
+        style_id: StyleId::StatusBarBackground,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
         control_id: LABEL_PROMPT_LAB_STATUS,
         style_id: StyleId::HeaderLabel,
     });
@@ -2408,6 +2447,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         control_id: PROGRESS_TOKENS,
         style_id: StyleId::ProgressBar,
     });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PROGRESS_OPERATION,
+        style_id: StyleId::ProgressBar,
+    });
 
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -2426,6 +2470,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                operation_progress_visible: false,
                 active_tab: AppTab::Triage,
                 left_tab: LeftTab::PromptLab,
                 prompt_lab,
@@ -2456,6 +2501,64 @@ mod tests {
             cmd,
             PlatformCommand::CreateInput { control_id, .. } if *control_id == VIEWER_PREVIEW
         )));
+    }
+
+    #[test]
+    fn operation_controls_have_width_when_visible() {
+        let cmd = build_layout_command(
+            WindowId::new(88),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: true,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        assert_eq!(fixed_size_for(&rules, PROGRESS_OPERATION), 80);
+        assert_eq!(fixed_size_for(&rules, LABEL_OPERATION_PROGRESS), 120);
+    }
+
+    #[test]
+    fn operation_controls_collapse_when_hidden() {
+        let cmd = build_layout_command(
+            WindowId::new(89),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        assert_eq!(fixed_size_for(&rules, PROGRESS_OPERATION), 0);
+        assert_eq!(fixed_size_for(&rules, LABEL_OPERATION_PROGRESS), 0);
     }
 
     #[test]
@@ -2527,6 +2630,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                operation_progress_visible: false,
                 active_tab: AppTab::Summary,
                 left_tab: LeftTab::Jobs,
                 prompt_lab: PromptLabLayoutConfig {
@@ -2574,6 +2678,7 @@ mod tests {
                 LayoutConfig {
                     left_panel_width: 600,
                     input_panel_visible: true,
+                    operation_progress_visible: false,
                     active_tab: AppTab::Summary,
                     left_tab,
                     prompt_lab: PromptLabLayoutConfig {
@@ -2686,6 +2791,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                operation_progress_visible: false,
                 active_tab: AppTab::Summary,
                 left_tab: LeftTab::Jobs,
                 prompt_lab: PromptLabLayoutConfig {
@@ -2736,6 +2842,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                operation_progress_visible: false,
                 active_tab: AppTab::Summary,
                 left_tab: LeftTab::Jobs,
                 prompt_lab: PromptLabLayoutConfig {
@@ -2782,6 +2889,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                operation_progress_visible: false,
                 active_tab: AppTab::Triage,
                 left_tab: LeftTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {
@@ -2829,6 +2937,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                operation_progress_visible: false,
                 active_tab: AppTab::Triage,
                 left_tab: LeftTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {
@@ -2866,6 +2975,7 @@ mod tests {
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,
+                operation_progress_visible: false,
                 active_tab: AppTab::Triage,
                 left_tab: LeftTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {

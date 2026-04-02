@@ -106,6 +106,10 @@ pub struct TreeRenderState {
     prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
     prev_progress_pos: Option<u32>,
+    prev_operation_progress_visible: bool,
+    prev_operation_progress_text: Option<String>,
+    prev_operation_progress_range: Option<(u32, u32)>,
+    prev_operation_progress_pos: Option<u32>,
     prev_open_browser_enabled: Option<bool>,
     prev_jobs_header_text: Option<String>,
     prev_jobs_scope_since_checkpoint_checked: Option<bool>,
@@ -185,6 +189,10 @@ impl Default for TreeRenderState {
             prev_triage_progress: None,
             prev_progress_range: None,
             prev_progress_pos: None,
+            prev_operation_progress_visible: false,
+            prev_operation_progress_text: None,
+            prev_operation_progress_range: None,
+            prev_operation_progress_pos: None,
             prev_open_browser_enabled: None,
             prev_jobs_header_text: None,
             prev_jobs_scope_since_checkpoint_checked: None,
@@ -310,6 +318,7 @@ pub fn render(
     render_tab_bar_section(window_id, view, tree_state, &mut cmds);
     render_left_tab_bar_section(window_id, view, tree_state, &mut cmds);
     render_status_section(window_id, view, tree_state, &mut cmds);
+    render_operation_progress_section(window_id, view, tree_state, &mut cmds);
     render_token_progress_section(window_id, view, tree_state, &mut cmds);
     render_main_controls_section(window_id, view, tree_state, &mut cmds);
     render_prompt_lab_section(window_id, view, tree_state, &mut cmds);
@@ -411,6 +420,7 @@ fn layout_view_from_app_view(view: &AppViewModel) -> LayoutViewModel {
     LayoutViewModel {
         left_panel_width: view.left_panel_width,
         input_panel_visible: view.input_panel_visible,
+        operation_progress_visible: view.operation_progress_visible,
         active_tab: view.right_pane.active_tab,
         left_tab: view.left_pane.left_tab,
         prompt_lab_advanced_mode: view.left_pane.prompt_lab.advanced_mode,
@@ -431,6 +441,7 @@ fn render_layout_section(
     let prompt_lab_tab_visible = layout.left_tab == LeftTab::PromptLab;
     let layout_changed = layout.left_panel_width != tree_state.prev_left_panel_width
         || layout.input_panel_visible != tree_state.prev_input_panel_visible
+        || layout.operation_progress_visible != tree_state.prev_operation_progress_visible
         || layout.active_tab != tree_state.prev_active_tab
         || layout.left_tab != tree_state.prev_left_tab
         || prompt_lab_tab_visible != tree_state.prev_prompt_lab_visible
@@ -462,6 +473,7 @@ fn render_layout_section(
         LayoutConfig {
             left_panel_width: layout.left_panel_width,
             input_panel_visible: layout.input_panel_visible,
+            operation_progress_visible: layout.operation_progress_visible,
             active_tab: layout.active_tab,
             left_tab: layout.left_tab,
             prompt_lab: PromptLabLayoutConfig {
@@ -481,6 +493,7 @@ fn render_layout_section(
     }
     tree_state.prev_left_panel_width = layout.left_panel_width;
     tree_state.prev_input_panel_visible = layout.input_panel_visible;
+    tree_state.prev_operation_progress_visible = layout.operation_progress_visible;
     tree_state.prev_active_tab = layout.active_tab;
     tree_state.prev_left_tab = layout.left_tab;
     tree_state.prev_prompt_lab_visible = prompt_lab_tab_visible;
@@ -570,6 +583,54 @@ fn render_status_section(
     );
     tree_state.prev_briefing_progress = view.briefing_progress.clone();
     tree_state.prev_triage_progress = view.triage_progress.clone();
+}
+
+fn render_operation_progress_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    let (text, range, pos) = match &view.operation_progress {
+        Some(op) => (
+            format!("{}: {}/{}", op.label, op.completed, op.total),
+            (0u32, op.total),
+            op.completed,
+        ),
+        None => (String::new(), (0u32, 0u32), 0u32),
+    };
+
+    emit_if_changed(
+        &mut tree_state.prev_operation_progress_text,
+        text,
+        cmds,
+        |text| PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_OPERATION_PROGRESS,
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_operation_progress_range,
+        range,
+        cmds,
+        |(min, max)| PlatformCommand::SetProgressBarRange {
+            window_id,
+            control_id: PROGRESS_OPERATION,
+            min,
+            max,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_operation_progress_pos,
+        pos,
+        cmds,
+        |position| PlatformCommand::SetProgressBarPosition {
+            window_id,
+            control_id: PROGRESS_OPERATION,
+            position,
+        },
+    );
 }
 
 fn render_token_progress_section(
