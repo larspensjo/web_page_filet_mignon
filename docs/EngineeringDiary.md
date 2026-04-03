@@ -1011,3 +1011,9 @@ Type: Implementation
 Context: After the token strip was quieted, the remaining scan problem was triage hierarchy: both the results rows and the right-hand Triage pane still led with category/priority metadata instead of the article topic.
 Change: Reformatted Triage Results rows to `P# Category: Title — host · tags` so the title is the sentence focus, and updated triage previews to use the article source title when available, with URL-slug fallback before showing category/priority metadata. Added regression coverage for row copy, preview headings, and source-title fallback behavior.
 Refs: crates/harvester_app/src/platform/ui/render.rs, crates/harvester_core/src/preview.rs, crates/harvester_core/src/state.rs, crates/harvester_core/src/triage.rs
+
+## 2026-04-03 - Triage priority dots anchored to the text lane
+Type: Implementation
+Context: The Triage Results marker plan needed a stable geometry pass after the earlier tiny-dot regression, and priority markers had to stay out of the Jobs and Triage Review tabs.
+Change: Reworked CommanDuctUI TreeView marker placement to anchor from the label lane rather than a fixed offset, increased the dot size, and warmed the shared palette. Harvester now reads triage priority directly from reducer state for `TriageResults` job rows only, with regression tests covering the marker mapping and tab gating.
+Refs: src/CommanDuctUI/src/controls/treeview_handler.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_core/src/state.rs

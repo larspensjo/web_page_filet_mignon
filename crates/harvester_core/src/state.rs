@@ -1482,6 +1482,13 @@ impl AppState {
         self.jobs.get(&job_id).map(|job| job.links())
     }
 
+    /// Returns the completed triage result for a job, if that job has one.
+    pub fn triage_result_for_job(&self, job_id: JobId) -> Option<&ArticleTriageResult> {
+        self.jobs
+            .get(&job_id)
+            .and_then(|job| self.triage.result_for_url(&job.url))
+    }
+
     /// Get the context variables for a specific prompt, if loaded.
     /// Returns an empty slice if no context has been loaded for this prompt.
     pub fn context_for(&self, prompt_id: PromptId) -> &[(String, String)] {
@@ -1984,7 +1991,8 @@ impl AppState {
 
         // Priority 2: Triage
         if let Some(triage_result) = self.triage.result_for_url(url) {
-            let title = preview::best_effort_article_title(self.triage.source_title_for_url(url), url);
+            let title =
+                preview::best_effort_article_title(self.triage.source_title_for_url(url), url);
             return (
                 PreviewContentKind::Triage,
                 preview::format_triage_for_preview(title.as_deref(), triage_result),

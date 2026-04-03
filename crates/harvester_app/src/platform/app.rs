@@ -330,6 +330,16 @@ fn job_id_for_item(item_id: commanductui::TreeItemId) -> Option<harvester_core::
     }
 }
 
+fn triage_marker_for_priority(priority: u8) -> TreeItemMarkerKind {
+    match priority {
+        6..=u8::MAX => TreeItemMarkerKind::Red,
+        5 => TreeItemMarkerKind::Yellow,
+        4 => TreeItemMarkerKind::Purple,
+        3 => TreeItemMarkerKind::Gray,
+        _ => TreeItemMarkerKind::None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RenderMode {
     Full,
@@ -1224,26 +1234,36 @@ impl UiStateProvider for AppUiStateProvider {
         _window_id: WindowId,
         item_id: commanductui::TreeItemId,
     ) -> TreeItemMarkerKind {
-        if let TreeItemKind::Job { job_id } = decode_tree_item_id(item_id) {
-            let guard = self.shared.lock().unwrap();
-            let _ = guard.state.job_filter_status(job_id);
-            return TreeItemMarkerKind::None;
-        }
-        if let TreeItemKind::Link { job_id, link_index } = decode_tree_item_id(item_id) {
-            let guard = self.shared.lock().unwrap();
-            if let Some((download_state, age_suspect)) = guard.state.link_state(job_id, link_index)
-            {
-                return match download_state {
-                    LinkDownloadState::Downloaded { .. } => TreeItemMarkerKind::Green,
-                    LinkDownloadState::Downloading => TreeItemMarkerKind::Purple,
-                    LinkDownloadState::Failed { .. } => TreeItemMarkerKind::Red,
-                    LinkDownloadState::NotDownloaded if age_suspect => TreeItemMarkerKind::Yellow,
-                    _ => TreeItemMarkerKind::None,
-                };
+        match decode_tree_item_id(item_id) {
+            TreeItemKind::Job { job_id } => {
+                let guard = self.shared.lock().unwrap();
+                if guard.state.left_tab() != LeftTab::TriageResults {
+                    return TreeItemMarkerKind::None;
+                }
+                if let Some(result) = guard.state.triage_result_for_job(job_id) {
+                    return triage_marker_for_priority(result.priority);
+                }
+                TreeItemMarkerKind::None
             }
+            TreeItemKind::Link { job_id, link_index } => {
+                let guard = self.shared.lock().unwrap();
+                if let Some((download_state, age_suspect)) =
+                    guard.state.link_state(job_id, link_index)
+                {
+                    return match download_state {
+                        LinkDownloadState::Downloaded { .. } => TreeItemMarkerKind::Green,
+                        LinkDownloadState::Downloading => TreeItemMarkerKind::Purple,
+                        LinkDownloadState::Failed { .. } => TreeItemMarkerKind::Red,
+                        LinkDownloadState::NotDownloaded if age_suspect => {
+                            TreeItemMarkerKind::Yellow
+                        }
+                        _ => TreeItemMarkerKind::None,
+                    };
+                }
+                TreeItemMarkerKind::None
+            }
+            _ => TreeItemMarkerKind::None,
         }
-
-        TreeItemMarkerKind::None
     }
 }
 
@@ -1253,10 +1273,151 @@ mod tests {
     use super::*;
     use commanductui::types::{TreeItemMarkerKind, WindowId};
     use commanductui::AppEvent;
-    use harvester_core::{AppState, JobResultKind};
+    use harvester_core::{
+        AppState, CompletedJobSnapshot, Effect, JobResultKind, LeftTab, LlmResultKind,
+        LoadedArticle, Msg,
+    };
+    use harvester_engine::llm::prompt::PromptVersion;
     use harvester_engine::{ExtractedLink, LinkKind};
     use std::path::PathBuf;
     use std::sync::{mpsc, Arc, Mutex};
+
+    fn completed_job_snapshot(url: &str) -> CompletedJobSnapshot {
+        CompletedJobSnapshot {
+            url: url.to_string(),
+            tokens: Some(123),
+            bytes: Some(456),
+            links: vec![],
+            fetched_utc: None,
+        }
+    }
+
+    fn loaded_article(url: &str) -> LoadedArticle {
+        LoadedArticle {
+            url: url.to_string(),
+            source_title: Some("Example".to_string()),
+            prepared_text: std::iter::repeat_n("triage-content", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: "triage-hash".to_string(),
+            fetched_utc: None,
+        }
+    }
+
+    fn triage_json(priority: u8) -> String {
+        format!(
+            r#"{{"category":"security","priority":{},"tags":["tag"],"rationale":"reason"}}"#,
+            priority
+        )
+    }
+
+    fn triage_success_result(priority: u8) -> LlmResultKind {
+        let prompt_version: PromptVersion = 1;
+        LlmResultKind::Success {
+            output_json: triage_json(priority),
+            input_tokens: 42,
+            output_tokens: 7,
+            prompt_version,
+            model_id: "test-model".to_string(),
+        }
+    }
+
+    fn extract_load_articles_request_id(effects: &[Effect]) -> u64 {
+        effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+                _ => None,
+            })
+            .expect("expected LoadArticlesForTriage effect")
+    }
+
+    fn extract_llm_request_id(effects: &[Effect]) -> u64 {
+        effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::RequestLlmCompletion { request_id, .. } => Some(*request_id),
+                _ => None,
+            })
+            .expect("expected RequestLlmCompletion effect")
+    }
+
+    fn advance_to_triage_article_load(mut state: AppState) -> (AppState, u64) {
+        for _ in 0..8 {
+            let (next_state, effects) = update(state, Msg::Tick);
+            state = next_state;
+            if effects
+                .iter()
+                .any(|effect| matches!(effect, Effect::LoadArticlesForTriage { .. }))
+            {
+                return (state, extract_load_articles_request_id(&effects));
+            }
+        }
+        panic!("expected LoadArticlesForTriage effect after ticking");
+    }
+
+    fn shared_state_with_triage_priority(priority: u8) -> Arc<Mutex<SharedState>> {
+        let url = "https://example.com/triage";
+        let (mut state, _) = update(
+            AppState::new(),
+            Msg::RestoreCompletedJobs(vec![completed_job_snapshot(url)]),
+        );
+        if let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request() {
+            let ordered_urls = state.ordered_completed_job_urls_snapshot();
+            let (next_state, _) = update(
+                state,
+                Msg::EvaluatePreTriageRefresh {
+                    ordered_urls,
+                    triggered_by_job_done,
+                },
+            );
+            state = next_state;
+        }
+        let (state, load_request_id) = advance_to_triage_article_load(state);
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: load_request_id,
+                articles: vec![loaded_article(url)],
+            },
+        );
+        let (state, _) = update(
+            state,
+            Msg::LlmMetadataLoaded {
+                active_versions: {
+                    let mut versions = std::collections::HashMap::new();
+                    versions.insert(PromptId::ArticleTriage, 1);
+                    versions
+                },
+                effective_models: {
+                    let mut models = std::collections::HashMap::new();
+                    models.insert(PromptId::ArticleTriage, "test-model".to_string());
+                    models
+                },
+                templates: std::collections::HashMap::<
+                    PromptId,
+                    harvester_core::PromptLabTemplateSnapshot,
+                >::new(),
+            },
+        );
+        let (state, _) = update(
+            state,
+            Msg::PromptContextsLoaded {
+                contexts: std::collections::HashMap::new(),
+            },
+        );
+        let (state, effects) = update(state, Msg::TriageClicked);
+        let triage_request_id = extract_llm_request_id(&effects);
+        let (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: triage_request_id,
+                result: triage_success_result(priority),
+                metadata: None,
+            },
+        );
+        Arc::new(Mutex::new(SharedState { state }))
+    }
 
     fn shared_state_with_single_link() -> Arc<Mutex<SharedState>> {
         let state = AppState::new();
@@ -1376,8 +1537,90 @@ mod tests {
     }
 
     #[test]
-    fn job_tree_items_do_not_show_status_markers() {
-        let shared = shared_state_with_single_link();
+    fn job_tree_items_show_priority_markers_only_in_triage_results() {
+        let shared = shared_state_with_triage_priority(5);
+        let provider = AppUiStateProvider::new(shared.clone());
+        let item_id = job_tree_item_id(1);
+
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::Yellow
+        );
+
+        {
+            let mut guard = shared.lock().unwrap();
+            let (state, _) = update(
+                std::mem::take(&mut guard.state),
+                Msg::LeftTabSelected { tab: LeftTab::Jobs },
+            );
+            guard.state = state;
+        }
+
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::None
+        );
+    }
+
+    #[test]
+    fn job_tree_items_do_not_show_priority_markers_in_triage_review() {
+        let shared = shared_state_with_triage_priority(4);
+        let provider = AppUiStateProvider::new(shared.clone());
+        let item_id = job_tree_item_id(1);
+
+        {
+            let mut guard = shared.lock().unwrap();
+            let (state, _) = update(
+                std::mem::take(&mut guard.state),
+                Msg::LeftTabSelected {
+                    tab: LeftTab::TriageReview,
+                },
+            );
+            guard.state = state;
+        }
+
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::None
+        );
+    }
+
+    #[test]
+    fn triage_priority_marker_mapping_is_stable() {
+        assert_eq!(triage_marker_for_priority(7), TreeItemMarkerKind::Red);
+        assert_eq!(triage_marker_for_priority(5), TreeItemMarkerKind::Yellow);
+        assert_eq!(triage_marker_for_priority(4), TreeItemMarkerKind::Purple);
+        assert_eq!(triage_marker_for_priority(3), TreeItemMarkerKind::Gray);
+        assert_eq!(triage_marker_for_priority(2), TreeItemMarkerKind::None);
+    }
+
+    #[test]
+    fn tree_item_marker_reads_triage_result_without_view_model_rebuild() {
+        let shared = shared_state_with_triage_priority(4);
+        let provider = AppUiStateProvider::new(shared.clone());
+        let item_id = job_tree_item_id(1);
+
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::Purple
+        );
+    }
+
+    #[test]
+    fn tree_item_marker_uses_gray_for_priority_three() {
+        let shared = shared_state_with_triage_priority(3);
+        let provider = AppUiStateProvider::new(shared.clone());
+        let item_id = job_tree_item_id(1);
+
+        assert_eq!(
+            provider.tree_item_marker(WindowId::new(1), item_id),
+            TreeItemMarkerKind::Gray
+        );
+    }
+
+    #[test]
+    fn tree_item_marker_suppresses_low_priority_jobs() {
+        let shared = shared_state_with_triage_priority(2);
         let provider = AppUiStateProvider::new(shared.clone());
         let item_id = job_tree_item_id(1);
 
