@@ -6,8 +6,8 @@ use commanductui::{
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppTab, AppViewModel, JobFilterStatus, JobListScope, JobResultKind, JobRowView,
-    LayoutViewModel, LeftTab, LinkDownloadState, LlmModelUsageView, PreviewHeaderView,
-    PromptLabStage, SessionState, Stage, TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
+    LayoutViewModel, LeftTab, LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState,
+    Stage, TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
@@ -1616,7 +1616,7 @@ fn job_row_check_policy(
             | Some(JobFilterStatus::AutoIncluded) => CheckState::Checked,
             None => CheckState::Unchecked,
         },
-        _ => CheckState::Unchecked,
+        _ => CheckState::Hidden,
     }
 }
 
@@ -1681,7 +1681,7 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
                     id: links_folder_tree_item_id(job.job_id),
                     text: format!("Links ({})", job.link_count),
                     is_folder: true,
-                    state: CheckState::Unchecked,
+                    state: CheckState::Hidden,
                     children: build_link_children(job),
                     style_override: None,
                 });
@@ -1712,10 +1712,7 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
             id: link_tree_item_id(job.job_id, link.index),
             text: link.label.clone(),
             is_folder: false,
-            state: match link.download_state {
-                LinkDownloadState::Downloaded { .. } => CheckState::Checked,
-                _ => CheckState::Unchecked,
-            },
+            state: CheckState::Hidden,
             children: Vec::new(),
             style_override: None,
         })
@@ -1727,7 +1724,7 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
             id: links_show_more_tree_item_id(job.job_id),
             text: format!("(show more… {} remaining)", remaining),
             is_folder: false,
-            state: CheckState::Unchecked,
+            state: CheckState::Hidden,
             children: Vec::new(),
             style_override: None,
         });
@@ -2173,7 +2170,9 @@ fn truncate_markdown_for_preview(text: &str) -> (String, bool) {
 mod tests {
     use super::*;
     use harvester_core::Stage;
-    use harvester_core::{LinkRowView, PromptLabRunId, PromptLabRunSummaryView, PromptLabView};
+    use harvester_core::{
+        LinkDownloadState, LinkRowView, PromptLabRunId, PromptLabRunSummaryView, PromptLabView,
+    };
     use std::path::PathBuf;
     use std::sync::Once;
 
@@ -2431,12 +2430,14 @@ mod tests {
         assert_eq!(job_item.children.len(), 1);
         let folder = &job_item.children[0];
         assert_eq!(folder.text, "Links (4)");
+        assert_eq!(folder.state, CheckState::Hidden);
         assert_eq!(folder.children.len(), 2);
         assert_eq!(folder.children[0].id, link_tree_item_id(42, 0));
-        assert_eq!(folder.children[0].state, CheckState::Checked);
+        assert_eq!(folder.children[0].state, CheckState::Hidden);
         let show_more = &folder.children[1];
         assert_eq!(show_more.id, links_show_more_tree_item_id(42));
         assert_eq!(show_more.text, "(show more… 3 remaining)");
+        assert_eq!(show_more.state, CheckState::Hidden);
     }
 
     #[test]
@@ -3246,18 +3247,44 @@ mod tests {
         // TriageReview + not interactive → Unchecked
         assert_eq!(
             job_row_check_policy(LeftTab::TriageReview, false, &job),
-            CheckState::Unchecked
+            CheckState::Hidden
         );
-        // Jobs tab → always Unchecked
+        // Jobs tab → always Hidden
         assert_eq!(
             job_row_check_policy(LeftTab::Jobs, true, &job),
-            CheckState::Unchecked
+            CheckState::Hidden
         );
-        // TriageResults → always Unchecked
+        // TriageResults → always Hidden
         assert_eq!(
             job_row_check_policy(LeftTab::TriageResults, true, &job),
-            CheckState::Unchecked
+            CheckState::Hidden
         );
+    }
+
+    #[test]
+    fn triage_results_use_hidden_state_lane_for_markers() {
+        let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
+        job.has_summary = true;
+        job.summary_title = Some("Example headline".to_string());
+        job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 5,
+            category: "Business".to_string(),
+            tags: vec!["capex".to_string()],
+        });
+        job.links = vec![make_link_row(
+            0,
+            "Related link",
+            LinkDownloadState::Downloaded {
+                path: "cache/article.html".into(),
+            },
+        )];
+        job.link_count = job.links.len();
+        let mut view = make_view(vec![job]);
+        view.left_pane.left_tab = LeftTab::TriageResults;
+
+        let items = build_job_tree(&view);
+        assert_eq!(items[0].state, CheckState::Hidden);
+        assert_eq!(items[0].children[0].state, CheckState::Hidden);
     }
 
     #[test]

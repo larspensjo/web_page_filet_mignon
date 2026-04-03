@@ -1017,3 +1017,15 @@ Type: Implementation
 Context: The Triage Results marker plan needed a stable geometry pass after the earlier tiny-dot regression, and priority markers had to stay out of the Jobs and Triage Review tabs.
 Change: Reworked CommanDuctUI TreeView marker placement to anchor from the label lane rather than a fixed offset, increased the dot size, and warmed the shared palette. Harvester now reads triage priority directly from reducer state for `TriageResults` job rows only, with regression tests covering the marker mapping and tab gating.
 Refs: src/CommanDuctUI/src/controls/treeview_handler.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_core/src/state.rs
+
+## 2026-04-03 - TreeView marker lane no longer needs a checkbox underneath
+Type: Bug Fix
+Context: The new triage priority dots and link-status markers were visually colliding with the TreeView checkbox lane everywhere except interactive pre-triage review.
+Change: Added `CheckState::Hidden` to CommanDuctUI so tree rows can reserve the state-image lane without rendering a checkbox, taught the handler to ignore clicks on hidden rows, and switched Harvester job/link rows outside `TriageReview` to that blank-lane mode. Also resized markers from the text height so the dot reads as intentional UI.
+Refs: src/CommanDuctUI/src/types.rs, src/CommanDuctUI/src/controls/treeview_handler.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-03 - Hidden TreeView rows now keep a real marker lane
+Type: Bug Fix
+Context: Hiding the checkbox glyph by removing the state image entirely caused triage dots to slide left onto the expand button instead of occupying a clean lane.
+Change: `CheckState::Hidden` rows now keep the TreeView state-image slot for layout, and CommanDuctUI erases the checkbox glyph in postpaint so the reserved gap remains available for markers.
+Refs: src/CommanDuctUI/src/controls/treeview_handler.rs
