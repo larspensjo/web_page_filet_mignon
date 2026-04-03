@@ -5,7 +5,15 @@ pub const FONT_CODE: usize = 1;
 pub const MAX_RTF_NESTING_DEPTH: usize = 20;
 pub const RTF_TRUNCATE_MARKER: &str = "[display truncated]";
 const BODY_FONT_SIZE_HALF_POINTS: usize = 24;
-const COLOR_BODY_TEXT_RTF: &str = "\\red250\\green249\\blue245;";
+const BODY_INDENT_TWIPS: usize = 360;
+const BODY_LINE_SPACING_TWIPS: usize = 360;
+const HEADING_SPACING_AFTER_TWIPS: usize = 220;
+const HEADING_SPACING_BEFORE_TWIPS: usize = 120;
+const BODY_SPACING_AFTER_TWIPS: usize = 120;
+const LIST_INDENT_TWIPS: usize = 720;
+const LIST_HANGING_INDENT_TWIPS: usize = 180;
+const COLOR_BODY_TEXT_RTF: &str = "\\red176\\green174\\blue165;";
+const COLOR_HEADING_TEXT_RTF: &str = "\\red250\\green249\\blue245;";
 const COLOR_BACKGROUND_RTF: &str = "\\red48\\green48\\blue46;";
 const COLOR_LINK_RTF: &str = "\\red217\\green119\\blue87;}";
 
@@ -17,10 +25,11 @@ pub fn convert_markdown_to_rtf(markdown: &str) -> String {
     ));
     rtf.push_str("{\\colortbl;");
     rtf.push_str(COLOR_BODY_TEXT_RTF);
+    rtf.push_str(COLOR_HEADING_TEXT_RTF);
     rtf.push_str(COLOR_BACKGROUND_RTF);
     rtf.push_str(COLOR_LINK_RTF);
     rtf.push_str(&format!(
-        "\\viewkind4\\uc1\\pard\\cf1\\cb2\\f0\\fs{BODY_FONT_SIZE_HALF_POINTS} "
+        "\\viewkind4\\uc1\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1\\sa{BODY_SPACING_AFTER_TWIPS}\\sb0\\cf1\\cb3\\f0\\fs{BODY_FONT_SIZE_HALF_POINTS} "
     ));
 
     let parser = Parser::new_ext(markdown, Options::all());
@@ -138,15 +147,23 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
                 HeadingLevel::H2 => 32,
                 _ => 26,
             };
-            rtf.push_str(&format!("\\pard\\sa160\\sb80\\b\\fs{size} "));
+            rtf.push_str(&format!(
+                "\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa{HEADING_SPACING_AFTER_TWIPS}\\sb{HEADING_SPACING_BEFORE_TWIPS}\\cf2\\b\\fs{size} "
+            ));
         }
         Tag::Paragraph => match list_stack
             .last_mut()
             .and_then(ListState::next_item_paragraph_index)
         {
-            Some(0) => rtf.push_str("\\sa60\\sb0 "),
-            Some(_) => rtf.push_str("\\par\\pard\\li360\\sa60\\sb0 "),
-            None => rtf.push_str("\\pard\\sa60\\sb0 "),
+            Some(0) => rtf.push_str(&format!(
+                "\\sa80\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
+            )),
+            Some(_) => rtf.push_str(&format!(
+                "\\par\\pard\\li{LIST_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa80\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
+            )),
+            None => rtf.push_str(&format!(
+                "\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa{BODY_SPACING_AFTER_TWIPS}\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
+            )),
         },
         Tag::Strong => rtf.push_str("\\b "),
         Tag::Emphasis => rtf.push_str("\\i "),
@@ -155,7 +172,9 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
             None => list_stack.push(ListState::unordered()),
         },
         Tag::Item => {
-            rtf.push_str("\\par\\pard\\li360\\fi-180 ");
+            rtf.push_str(&format!(
+                "\\par\\pard\\li{LIST_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\fi-{LIST_HANGING_INDENT_TWIPS} "
+            ));
             match list_stack.last_mut() {
                 Some(list_state @ ListState::Unordered { .. }) => {
                     list_state.start_item();
@@ -182,7 +201,7 @@ fn handle_end_tag(rtf: &mut String, tag_end: TagEnd, list_stack: &mut Vec<ListSt
     match tag_end {
         TagEnd::Heading(_) => {
             rtf.push_str(&format!(
-                "\\b0\\fs{BODY_FONT_SIZE_HALF_POINTS}\\par\\pard\\sa60\\sb0 "
+                "\\cf1\\b0\\fs{BODY_FONT_SIZE_HALF_POINTS}\\par\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa{BODY_SPACING_AFTER_TWIPS}\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
             ));
         }
         TagEnd::Paragraph => rtf.push_str("\\par "),
@@ -250,10 +269,14 @@ mod tests {
     #[test]
     fn headings_render_as_distinct_bold_blocks() {
         let rtf = convert_markdown_to_rtf("# H1\n## H2\n### H3");
-        assert!(rtf.contains("\\pard\\sa160\\sb80\\b\\fs40 H1"));
-        assert!(rtf.contains("\\pard\\sa160\\sb80\\b\\fs32 H2"));
-        assert!(rtf.contains("\\pard\\sa160\\sb80\\b\\fs26 H3"));
-        assert!(rtf.matches("\\pard\\sa160\\sb80\\b\\fs").count() >= 3);
+        assert!(rtf.contains("\\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs40 H1"));
+        assert!(rtf.contains("\\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs32 H2"));
+        assert!(rtf.contains("\\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs26 H3"));
+        assert!(
+            rtf.matches("\\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs")
+                .count()
+                >= 3
+        );
         assert!(rtf.matches("\\par").count() >= 3);
     }
 
@@ -298,22 +321,30 @@ mod tests {
     fn default_palette_and_body_size_match_readable_viewer_theme() {
         let rtf = convert_markdown_to_rtf("Body");
         assert!(rtf.contains(COLOR_BODY_TEXT_RTF));
+        assert!(rtf.contains(COLOR_HEADING_TEXT_RTF));
         assert!(rtf.contains(COLOR_BACKGROUND_RTF));
         assert!(rtf.contains("\\fs24 "));
+        assert!(rtf.contains("\\li360\\ri360\\sl360\\slmult1"));
     }
 
     #[test]
     fn loose_ordered_list_item_body_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("1. **Headline**\n\n   Body text");
         assert!(rtf.contains(
-            "1.\\tab \\sa60\\sb0 \\b Headline\\b0 \\par \\par\\pard\\li360\\sa60\\sb0 Body text"
+            "1.\\tab \\sa80\\sb0\\sl360\\slmult1 \\b Headline\\b0 \\par \\par\\pard\\li720\\ri360\\sa80\\sb0\\sl360\\slmult1 Body text"
         ));
     }
 
     #[test]
     fn heading_after_list_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("- one\n- two\n\n## Brave");
-        assert!(rtf.contains("\\pard \\par \\pard\\sa160\\sb80\\b\\fs32 Brave"));
+        assert!(rtf.contains("\\pard \\par \\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs32 Brave"));
+    }
+
+    #[test]
+    fn body_paragraphs_use_editorial_measure_and_spacing() {
+        let rtf = convert_markdown_to_rtf("Paragraph");
+        assert!(rtf.contains("\\pard\\li360\\ri360\\sa120\\sb0\\sl360\\slmult1 Paragraph"));
     }
 
     #[test]

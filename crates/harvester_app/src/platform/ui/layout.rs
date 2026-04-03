@@ -932,14 +932,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::DefaultButton,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x1E,
-                g: 0x1E,
-                b: 0x1C,
+                r: 0x18,
+                g: 0x18,
+                b: 0x17,
             }),
             text_color: Some(Color {
-                r: 0xFA,
-                g: 0xF9,
-                b: 0xF5,
+                r: 0xB0,
+                g: 0xAE,
+                b: 0xA5,
             }),
             ..Default::default()
         },
@@ -1055,9 +1055,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 b: 0x2E,
             }),
             text_color: Some(Color {
-                r: 0xFA,
-                g: 0xF9,
-                b: 0xF5,
+                r: 0xB0,
+                g: 0xAE,
+                b: 0xA5,
             }),
             font: Some(FontDescription {
                 name: Some("Segoe UI".to_string()),
@@ -1184,13 +1184,13 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0xFA,
-                g: 0xF9,
-                b: 0xF5,
+                r: 0xB0,
+                g: 0xAE,
+                b: 0xA5,
             }),
             font: Some(FontDescription {
                 name: Some("Segoe UI".to_string()),
-                size: Some(13),
+                size: Some(12),
                 weight: Some(FontWeight::Bold),
             }),
         },
@@ -1301,7 +1301,7 @@ fn build_layout_rules(
             parent_control_id: None,
             dock_style: DockStyle::Top,
             order: 0,
-            fixed_size: Some(48),
+            fixed_size: Some(52),
             margin: (0, 0, 0, 0),
         },
         // TS_JOBS_SCOPE: left side of toolbar.
@@ -1310,8 +1310,8 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_TOOLBAR),
             dock_style: DockStyle::Left,
             order: 10,
-            fixed_size: Some(200),
-            margin: (8, 8, 8, 8),
+            fixed_size: Some(188),
+            margin: (16, 12, 8, 12),
         },
         // PANEL_PROGRESS: container for the token controls on the same toolbar row.
         LayoutRule {
@@ -1327,8 +1327,8 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_PROGRESS),
             dock_style: DockStyle::Left,
             order: 0,
-            fixed_size: Some(300),
-            margin: (8, 12, 8, 6),
+            fixed_size: Some(240),
+            margin: (4, 14, 12, 10),
         },
         LayoutRule {
             control_id: PROGRESS_TOKENS,
@@ -1336,7 +1336,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 1,
             fixed_size: None,
-            margin: (0, 14, 8, 14),
+            margin: (0, 18, 16, 18),
         },
         LayoutRule {
             control_id: PANEL_BOTTOM,
@@ -1344,14 +1344,14 @@ fn build_layout_rules(
             dock_style: DockStyle::Bottom,
             order: 100,
             fixed_size: Some(32),
-            margin: (0, 0, 0, 0),
+            margin: (0, 6, 0, 0),
         },
         LayoutRule {
             control_id: PANEL_BUTTONS,
             parent_control_id: None,
             dock_style: DockStyle::Bottom,
             order: 110,
-            fixed_size: Some(44),
+            fixed_size: Some(52),
             margin: (0, 0, 0, 0),
         },
         // PANEL_LEFT replaces the old root-level PANEL_INPUT + PANEL_JOBS.
@@ -1361,7 +1361,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 200,
             fixed_size: Some(left_panel_width),
-            margin: (8, 8, 8, 8),
+            margin: (12, 12, 6, 14),
         },
         // Left-pane tab bar.
         LayoutRule {
@@ -1370,7 +1370,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Top,
             order: 0,
             fixed_size: Some(28),
-            margin: (0, 0, 2, 0),
+            margin: (0, 0, 6, 0),
         },
         // Left content: Jobs (shown when left_tab is a job-oriented tab).
         LayoutRule {
@@ -1407,7 +1407,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 0,
             fixed_size: Some(input_width),
-            margin: (0, 0, 0, 0),
+            margin: (0, 0, 10, 0),
         },
         LayoutRule {
             control_id: PANEL_JOBS,
@@ -1422,8 +1422,8 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_JOBS),
             dock_style: DockStyle::Top,
             order: 0,
-            fixed_size: Some(28),
-            margin: (0, 0, 4, 0),
+            fixed_size: Some(24),
+            margin: (2, 4, 8, 0),
         },
         LayoutRule {
             control_id: TREE_JOBS,
@@ -1449,15 +1449,15 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (0, 4, 0, 4),
+            margin: (0, 6, 0, 6),
         },
         LayoutRule {
             control_id: SPLITTER_MAIN,
             parent_control_id: None,
             dock_style: DockStyle::Left,
             order: 205,
-            fixed_size: Some(4),
-            margin: (6, 0, 6, 0),
+            fixed_size: Some(2),
+            margin: (4, 18, 4, 18),
         },
         LayoutRule {
             control_id: PANEL_PREVIEW,
@@ -1465,15 +1465,15 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 310,
             fixed_size: None,
-            margin: (8, 12, 8, 12),
+            margin: (6, 16, 12, 16),
         },
         LayoutRule {
             control_id: LABEL_PREVIEW_HEADER,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
             order: 0,
-            fixed_size: Some(28),
-            margin: (6, 6, 4, 0),
+            fixed_size: Some(24),
+            margin: (12, 8, 10, 0),
         },
         // Right-pane tab bar (custom TabBar widget).
         LayoutRule {
@@ -1482,7 +1482,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Top,
             order: 1,
             fixed_size: Some(28),
-            margin: (0, 0, 2, 0),
+            margin: (0, 0, 8, 0),
         },
         // Tab content panels — active tab fills remaining space; inactive ones collapse.
         LayoutRule {
@@ -1499,7 +1499,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (4, 8, 4, 8),
+            margin: (12, 12, 12, 18),
         },
         LayoutRule {
             control_id: PANEL_TAB_SUMMARY,
@@ -1515,7 +1515,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (4, 8, 4, 8),
+            margin: (12, 12, 12, 18),
         },
         LayoutRule {
             control_id: PANEL_TAB_BRIEFING,
@@ -1531,7 +1531,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (4, 8, 4, 8),
+            margin: (12, 12, 12, 18),
         },
         LayoutRule {
             control_id: PANEL_TAB_TRENDS,
@@ -1557,7 +1557,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Top,
             order: 1,
             fixed_size: Some(20),
-            margin: (4, 4, 2, 4),
+            margin: (12, 8, 8, 12),
         },
         LayoutRule {
             control_id: CHART_TRENDS,
@@ -1581,7 +1581,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (4, 8, 4, 8),
+            margin: (12, 12, 12, 18),
         },
         LayoutRule {
             control_id: LABEL_PROMPT_LAB_STATUS,
@@ -1621,7 +1621,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Right,
             order: 10,
             fixed_size: Some(operation_progress_bar_width),
-            margin: (6, 6, 6, 0),
+            margin: (10, 8, 12, 2),
         },
         LayoutRule {
             control_id: LABEL_OPERATION_PROGRESS,
@@ -1629,47 +1629,47 @@ fn build_layout_rules(
             dock_style: DockStyle::Right,
             order: 20,
             fixed_size: Some(operation_progress_label_width),
-            margin: (6, 6, 6, 6),
+            margin: (8, 8, 12, 8),
         },
         LayoutRule {
             control_id: BUTTON_STOP,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 0,
-            fixed_size: Some(140),
-            margin: (6, 16, 6, 8),
+            fixed_size: Some(132),
+            margin: (12, 18, 18, 10),
         },
         LayoutRule {
             control_id: BUTTON_BRIEFING,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 1,
-            fixed_size: Some(160),
-            margin: (6, 4, 6, 4),
+            fixed_size: Some(170),
+            margin: (0, 10, 20, 10),
         },
         LayoutRule {
             control_id: BUTTON_TRIAGE,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 2,
-            fixed_size: Some(160),
-            margin: (6, 4, 6, 4),
+            fixed_size: Some(148),
+            margin: (0, 10, 8, 10),
         },
         LayoutRule {
             control_id: BUTTON_POLL_SOURCES,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 3,
-            fixed_size: Some(160),
-            margin: (6, 4, 6, 4),
+            fixed_size: Some(148),
+            margin: (0, 10, 8, 10),
         },
         LayoutRule {
             control_id: BUTTON_OPEN_BROWSER,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 4,
-            fixed_size: Some(160),
-            margin: (6, 4, 6, 4),
+            fixed_size: Some(148),
+            margin: (0, 10, 8, 10),
         },
     ];
 

@@ -981,3 +981,15 @@ Type: Implementation
 Context: The UI redesign shifted Harvester from a cool blue-gray palette to warm neutrals with a terracotta accent while preserving the existing Win32/CommanDuctUI architecture.
 Change: Reworked `harvester_app` theme definitions, inline tab/toggle colors, reading-pane RTF typography, chart palette, and pane spacing. Added `StatusMeter`, `SectionTitle`, `PrimaryButton`, and `DestructiveButton` to CommanDuctUI so token usage, section headers, and button hierarchy can be styled semantically instead of overloading existing roles. Updated CommanDuctUI chart/dialog hardcoded colors to match the host theme; those surfaces remain hardcoded because the current infrastructure style model does not yet theme owner-drawn chart paint or modal dialog template rendering. Kept the redesign within Win32 constraints by using tonal contrast, typography, and margins instead of unsupported radius, shadow, hover, or alpha effects.
 Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/markdown_to_rtf.rs, crates/harvester_app/src/platform/ui/render.rs, src/CommanDuctUI/src/styling_primitives.rs, src/CommanDuctUI/src/controls/chart_handler.rs, src/CommanDuctUI/src/controls/dialog_handler.rs
+
+## 2026-04-03 - Screenshot follow-up pass for scan hierarchy and editorial reading
+Type: Implementation
+Context: The first warm-palette pass still left the jobs list too URL-dominant, the footer actions too visually even, and the reading pane too much like a utility block.
+Change: Reworked jobs rows to lead with a short title or compact host/path label and push status/source/size metadata into a quieter trailing segment. Tuned the layout/theme layer to demote secondary buttons, soften section labels, widen viewer spacing, and quiet the splitter/footer chrome. Updated the markdown-to-RTF renderer to use softer body text, fixed editorial indents, stronger heading contrast, and roomier paragraph/list spacing. Added render and RTF regression tests for the new row-compaction and reading-surface contracts.
+Refs: crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/markdown_to_rtf.rs
+
+## 2026-04-03 - Triage results rows now scan by priority, title, and source
+Type: Implementation
+Context: Screenshot review showed the Triage Results tab still reading like a dense tag dump, with long tag lists pushing the title and source out of the scan path.
+Change: Reformatted Triage Results rows to `P# · Category · title/slug · host · compact tags`, deriving a readable title from the URL slug when no summary title exists and collapsing long tag sets to two visible tags plus a remainder count. Updated render regression tests to lock the new in-place update and row-shape behavior.
+Refs: crates/harvester_app/src/platform/ui/render.rs

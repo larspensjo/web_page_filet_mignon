@@ -1723,56 +1723,23 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
 /// Jobs tab: stable row text — never changes based on triage results.
 /// Triage annotation is intentionally omitted; use TriageResults tab for that.
 fn format_job_row_legacy(job: &JobRowView) -> String {
-    let filter_prefix = match &job.filter_status {
-        Some(JobFilterStatus::HardExcluded { .. }) => "[AUTO EXCLUDED] ",
-        Some(JobFilterStatus::ReviewNeeded { .. }) => "[REVIEW] ",
-        Some(JobFilterStatus::ManuallyExcluded) => "[EXCLUDED] ",
-        Some(JobFilterStatus::ManuallyIncluded) => "",
-        _ => "",
-    };
+    let mut metadata = Vec::new();
+    if let Some(filter_status) = filter_status_label(job.filter_status.as_ref()) {
+        metadata.push(filter_status.to_string());
+    }
+    metadata.push(job_status_label(job).to_string());
     if job.has_summary {
-        let title = job
-            .summary_title
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .unwrap_or("(summary available)");
-        let domain = domain_from_url(&job.url);
-        let source = if domain.is_empty() { &job.url } else { &domain };
-        return format!("{filter_prefix}{title} — {source}");
+        metadata.push(job_source_label(job));
+    }
+    if let Some(tokens) = job.tokens {
+        metadata.push(format!("{} tok", format_compact_tokens(tokens as u64)));
+    }
+    if let Some(bytes) = job.bytes {
+        metadata.push(format_compact_bytes(bytes));
     }
 
-    let status = match &job.outcome {
-        Some(JobResultKind::Success) => "OK".to_string(),
-        Some(JobResultKind::Failed { reason }) => format!("ERR ({})", reason),
-        None => stage_label(job.stage).to_string(),
-    };
-    let tokens = job.tokens.map(|t| format!("{t} tok"));
-    let bytes = job.bytes.map(|b| format!("{b} B"));
-    let metrics = match (tokens, bytes) {
-        (Some(t), Some(b)) => format!("{t}, {b}"),
-        (Some(t), None) => t,
-        (None, Some(b)) => b,
-        _ => String::new(),
-    };
-    let annotated_url = job.url.clone();
-    let base = if metrics.is_empty() {
-        format!(
-            "[#{id}] {status} — {annotated_url}",
-            id = job.job_id,
-            status = status,
-            annotated_url = annotated_url
-        )
-    } else {
-        format!(
-            "[#{id}] {status} — {annotated_url} ({metrics})",
-            id = job.job_id,
-            status = status,
-            annotated_url = annotated_url,
-            metrics = metrics
-        )
-    };
-    format!("{filter_prefix}{base}")
+    let primary = job_primary_label(job);
+    format!("{primary} — {}", metadata.join(" · "))
 }
 
 /// Triage Review tab: shows the URL/title and review status cue.
@@ -1792,16 +1759,16 @@ fn format_job_row_triage_review(job: &JobRowView) -> String {
 /// Triage Results tab: shows triage annotation (priority/category/tags) prominently.
 fn format_job_row_triage_results(job: &JobRowView) -> String {
     if let Some(annotation) = &job.triage_annotation {
-        let tag_suffix = if annotation.tags.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", annotation.tags.join(", "))
-        };
-        let label = job_display_label(job);
-        format!(
-            "P{} [{}]{} — {}",
-            annotation.priority, annotation.category, tag_suffix, label
-        )
+        let mut parts = vec![
+            format!("P{}", annotation.priority),
+            title_case_label(&annotation.category),
+            triage_result_primary_label(job),
+            job_source_label(job),
+        ];
+        if let Some(tags) = compact_triage_tags(&annotation.tags) {
+            parts.push(tags);
+        }
+        parts.join(" · ")
     } else {
         let label = job_display_label(job);
         format!("[no triage] {label}")
@@ -1811,21 +1778,66 @@ fn format_job_row_triage_results(job: &JobRowView) -> String {
 /// Returns the best short display label for a job (summary title or URL).
 fn job_display_label(job: &JobRowView) -> String {
     if job.has_summary {
+        format!("{} — {}", job_primary_label(job), job_source_label(job))
+    } else {
+        job_primary_label(job)
+    }
+}
+
+fn job_primary_label(job: &JobRowView) -> String {
+    if job.has_summary {
         let title = job
             .summary_title
             .as_deref()
             .map(str::trim)
-            .filter(|t| !t.is_empty())
+            .filter(|title| !title.is_empty())
             .unwrap_or("(summary available)");
-        let domain = domain_from_url(&job.url);
-        let source = if domain.is_empty() {
-            job.url.as_str()
-        } else {
-            domain.as_str()
-        };
-        format!("{title} — {source}")
+        truncate_with_ellipsis(title, 72)
     } else {
-        job.url.clone()
+        compact_url_label(&job.url, 56)
+    }
+}
+
+fn job_source_label(job: &JobRowView) -> String {
+    let domain = domain_from_url(&job.url);
+    if domain.is_empty() {
+        compact_url_label(&job.url, 32)
+    } else {
+        truncate_with_ellipsis(&domain, 32)
+    }
+}
+
+fn triage_result_primary_label(job: &JobRowView) -> String {
+    if job.has_summary {
+        return job_primary_label(job);
+    }
+    url_slug_label(&job.url).unwrap_or_else(|| compact_url_label(&job.url, 56))
+}
+
+fn filter_status_label(filter_status: Option<&JobFilterStatus>) -> Option<&'static str> {
+    match filter_status {
+        Some(JobFilterStatus::HardExcluded { .. }) => Some("Auto-excluded"),
+        Some(JobFilterStatus::ReviewNeeded { .. }) => Some("Review"),
+        Some(JobFilterStatus::ManuallyExcluded) => Some("Excluded"),
+        Some(JobFilterStatus::ManuallyIncluded) => Some("Included"),
+        Some(JobFilterStatus::AutoIncluded) => Some("Auto"),
+        None => None,
+    }
+}
+
+fn job_status_label(job: &JobRowView) -> &'static str {
+    match &job.outcome {
+        Some(JobResultKind::Success) => "OK",
+        Some(JobResultKind::Failed { .. }) => "ERR",
+        None => match job.stage {
+            Stage::Queued => "Queued",
+            Stage::Downloading => "Fetch",
+            Stage::Sanitizing => "Clean",
+            Stage::Converting => "Convert",
+            Stage::Tokenizing => "Tokens",
+            Stage::Writing => "Write",
+            Stage::Done => "Done",
+        },
     }
 }
 
@@ -1838,6 +1850,117 @@ fn stage_label(stage: Stage) -> &'static str {
         Stage::Tokenizing => "Tokenizing",
         Stage::Writing => "Writing",
         Stage::Done => "Done",
+    }
+}
+
+fn compact_url_label(url: &str, max_chars: usize) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return "(untitled source)".to_string();
+    }
+
+    let without_scheme = trimmed
+        .find("://")
+        .map(|pos| &trimmed[pos + 3..])
+        .unwrap_or(trimmed);
+    let without_query = without_scheme
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(without_scheme)
+        .trim_end_matches('/');
+    let mut segments = without_query
+        .split('/')
+        .filter(|segment| !segment.is_empty());
+    let Some(host) = segments.next() else {
+        return truncate_with_ellipsis(trimmed, max_chars);
+    };
+    let path_segments: Vec<&str> = segments.collect();
+    let compact = match path_segments.as_slice() {
+        [] => host.to_string(),
+        [only] => format!("{host}/{only}"),
+        [first, second] => format!("{host}/{first}/{second}"),
+        [first, .., last] => format!("{host}/{first}/.../{last}"),
+    };
+    truncate_with_ellipsis(&compact, max_chars)
+}
+
+fn url_slug_label(url: &str) -> Option<String> {
+    let trimmed = url.trim();
+    let without_scheme = trimmed
+        .find("://")
+        .map(|pos| &trimmed[pos + 3..])
+        .unwrap_or(trimmed);
+    let without_query = without_scheme
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(without_scheme)
+        .trim_end_matches('/');
+    let slug = without_query
+        .rsplit('/')
+        .next()
+        .unwrap_or(without_query)
+        .trim();
+    if slug.is_empty() || !slug.contains('-') {
+        return None;
+    }
+
+    let label = humanize_slug_with_limit(slug, 60);
+    if label.is_empty() || label.eq_ignore_ascii_case(slug) && !label.contains(' ') {
+        None
+    } else {
+        Some(label)
+    }
+}
+
+fn compact_triage_tags(tags: &[String]) -> Option<String> {
+    if tags.is_empty() {
+        return None;
+    }
+
+    let visible: Vec<String> = tags.iter().take(2).map(|tag| humanize_slug(tag)).collect();
+    let hidden = tags.len().saturating_sub(visible.len());
+    let joined = visible.join(", ");
+    if hidden > 0 {
+        Some(format!("{joined} +{hidden}"))
+    } else {
+        Some(joined)
+    }
+}
+
+fn title_case_label(value: &str) -> String {
+    let mut out = Vec::new();
+    for word in value.split(['-', '_', ' ']).filter(|word| !word.is_empty()) {
+        let mut chars = word.chars();
+        let Some(first) = chars.next() else {
+            continue;
+        };
+        let rest: String = chars.collect();
+        out.push(format!(
+            "{}{}",
+            first.to_uppercase(),
+            rest.to_ascii_lowercase()
+        ));
+    }
+    if out.is_empty() {
+        value.trim().to_string()
+    } else {
+        out.join(" ")
+    }
+}
+
+fn humanize_slug(value: &str) -> String {
+    humanize_slug_with_limit(value, 28)
+}
+
+fn humanize_slug_with_limit(value: &str, max_chars: usize) -> String {
+    let words: Vec<&str> = value
+        .split(['-', '_'])
+        .filter(|word| !word.is_empty())
+        .collect();
+    if words.is_empty() {
+        value.to_string()
+    } else {
+        truncate_with_ellipsis(&words.join(" "), max_chars)
     }
 }
 
@@ -1856,6 +1979,33 @@ fn domain_from_url(url: &str) -> String {
         trimmed.to_string()
     } else {
         host.to_string()
+    }
+}
+
+fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
+    let trimmed = value.trim();
+    let char_count = trimmed.chars().count();
+    if char_count <= max_chars {
+        return trimmed.to_string();
+    }
+    if max_chars <= 3 {
+        return ".".repeat(max_chars);
+    }
+
+    let prefix: String = trimmed.chars().take(max_chars - 3).collect();
+    format!("{prefix}...")
+}
+
+fn format_compact_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+
+    if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -2559,10 +2709,12 @@ mod tests {
 
         let row = format_job_row_legacy(&job);
         // Triage annotation must NOT appear in the Jobs tab — row is stable pre/post triage.
-        assert_eq!(row, "Headline from summary — example.com");
+        assert_eq!(
+            row,
+            "Headline from summary — OK · example.com · 123 tok · 456 B"
+        );
         assert!(!row.contains("P4"));
         assert!(!row.contains("[#7]"));
-        assert!(!row.contains("OK"));
         assert!(!row.contains("https://example.com/path?q=1"));
     }
 
@@ -2580,8 +2732,27 @@ mod tests {
         job.summary_title = Some("Should not be used yet".to_string());
 
         let row = format_job_row_legacy(&job);
-        assert!(row.contains("[#9] OK"));
-        assert!(row.contains("https://example.com/path"));
+        assert_eq!(row, "example.com/path — OK · 100 tok · 200 B");
+        assert!(!row.contains("https://"));
+    }
+
+    #[test]
+    fn format_job_row_legacy_compacts_long_url_when_no_summary_exists() {
+        let job = make_job(
+            10,
+            "https://example.com/very-long-section/2026/04/03/story-name?utm_source=test",
+            Stage::Downloading,
+            None,
+            None,
+            Some(2_048),
+        );
+
+        let row = format_job_row_legacy(&job);
+        assert_eq!(
+            row,
+            "example.com/very-long-section/.../story-name — Fetch · 2.0 KB"
+        );
+        assert!(!row.contains('?'));
     }
 
     // ── Per-tab formatter tests ───────────────────────────────────────────────
@@ -2636,8 +2807,7 @@ mod tests {
             tags: vec!["ai".to_string(), "ml".to_string()],
         });
         let row = format_job_row_triage_results(&job);
-        assert!(row.starts_with("P2 [tech] (ai, ml) — "), "got: {row}");
-        assert!(row.contains("Summary Headline"));
+        assert_eq!(row, "P2 · Tech · Summary Headline · example.com · ai, ml");
     }
 
     #[test]
@@ -2646,6 +2816,34 @@ mod tests {
         job.triage_annotation = None;
         let row = format_job_row_triage_results(&job);
         assert!(row.starts_with("[no triage] "), "got: {row}");
+    }
+
+    #[test]
+    fn format_job_row_triage_results_uses_slug_and_compact_tag_count_without_summary() {
+        let mut job = make_job(
+            5,
+            "https://epochai.substack.com/p/hyperscaler-capex-has-quadrupled",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 5,
+            category: "business".to_string(),
+            tags: vec![
+                "capex".to_string(),
+                "resource-grab".to_string(),
+                "hyperscalers".to_string(),
+                "sovereign-ai".to_string(),
+            ],
+        });
+
+        let row = format_job_row_triage_results(&job);
+        assert_eq!(
+            row,
+            "P5 · Business · hyperscaler capex has quadrupled · epochai.substack.com · capex, resource grab +2"
+        );
     }
 
     // ── Scope filter tests ────────────────────────────────────────────────────
@@ -2858,7 +3056,7 @@ mod tests {
 
         assert_eq!(populated.len(), 2);
         assert!(
-            populated[0].text.contains("[no triage] https://low.com/"),
+            populated[0].text.contains("[no triage] low.com"),
             "first should stay job 1 while triage is running, got: {}",
             populated[0].text
         );
@@ -2953,7 +3151,7 @@ mod tests {
             cmds.iter().any(|cmd| matches!(
                 cmd,
                 PlatformCommand::UpdateTreeItemText { item_id, text, .. }
-                    if *item_id == job_tree_item_id(1) && text.contains("P6 [finance]")
+                    if *item_id == job_tree_item_id(1) && text.contains("P6 · Finance")
             )),
             "updated triage row should refresh in place"
         );
