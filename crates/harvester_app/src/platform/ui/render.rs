@@ -112,7 +112,6 @@ pub struct TreeRenderState {
     prev_operation_progress_range: Option<(u32, u32)>,
     prev_operation_progress_pos: Option<u32>,
     prev_open_browser_enabled: Option<bool>,
-    prev_jobs_header_title_text: Option<String>,
     prev_jobs_header_meta_text: Option<String>,
     prev_jobs_scope_since_checkpoint_checked: Option<bool>,
     prev_prompt_lab_visible: bool,
@@ -200,7 +199,6 @@ impl Default for TreeRenderState {
             prev_operation_progress_range: None,
             prev_operation_progress_pos: None,
             prev_open_browser_enabled: None,
-            prev_jobs_header_title_text: None,
             prev_jobs_header_meta_text: None,
             prev_jobs_scope_since_checkpoint_checked: None,
             prev_prompt_lab_visible: false,
@@ -749,16 +747,6 @@ fn render_main_controls_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
-    emit_if_changed(
-        &mut tree_state.prev_jobs_header_title_text,
-        view.left_pane_header.title.clone(),
-        cmds,
-        |text| PlatformCommand::SetControlText {
-            window_id,
-            control_id: LABEL_JOBS_HEADER_TITLE,
-            text,
-        },
-    );
     emit_if_changed(
         &mut tree_state.prev_jobs_header_meta_text,
         format_left_pane_header_meta(&view.left_pane_header),
@@ -1504,7 +1492,7 @@ fn render_preview_section(
         );
         emit_if_changed(
             &mut tree_state.prev_preview_status_text,
-            context.status_label.clone(),
+            String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
                 window_id,
@@ -1514,7 +1502,7 @@ fn render_preview_section(
         );
         emit_if_changed(
             &mut tree_state.prev_preview_attention_text,
-            context.attention_label.clone().unwrap_or_default(),
+            String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
                 window_id,
@@ -3800,7 +3788,7 @@ mod tests {
     }
 
     #[test]
-    fn left_header_title_stays_stable_while_meta_changes() {
+    fn left_header_only_renders_meta_row() {
         let window_id = WindowId::new(40);
         let mut tree_state = TreeRenderState::new();
         let empty_view = make_view(vec![JobRowView {
@@ -3823,12 +3811,10 @@ mod tests {
         let mut empty_view = empty_view;
         empty_view.left_pane.left_tab = LeftTab::TriageResults;
         let empty_cmds = render(window_id, &empty_view, &mut tree_state);
-        let empty_title = control_text(&empty_cmds, LABEL_JOBS_HEADER_TITLE)
-            .expect("empty triage title rendered");
         let empty_meta =
             control_text(&empty_cmds, LABEL_JOBS_HEADER_META).expect("empty triage meta rendered");
-        assert_eq!(empty_title, "Triage Results");
         assert_eq!(empty_meta, "no triage results yet");
+        assert!(control_text(&empty_cmds, LABEL_JOBS_HEADER_TITLE).is_none());
 
         let mut populated_view = empty_view.clone();
         populated_view.jobs[0].triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -3837,12 +3823,10 @@ mod tests {
             tags: vec![],
         });
         let populated_cmds = render(window_id, &populated_view, &mut tree_state);
-        let populated_title = control_text(&populated_cmds, LABEL_JOBS_HEADER_TITLE)
-            .expect("populated triage title rendered");
         let populated_meta = control_text(&populated_cmds, LABEL_JOBS_HEADER_META)
             .expect("populated triage meta rendered");
-        assert_eq!(populated_title, "Triage Results");
         assert_eq!(populated_meta, "1 with triage");
+        assert!(control_text(&populated_cmds, LABEL_JOBS_HEADER_TITLE).is_none());
     }
 
     #[test]
@@ -3873,10 +3857,9 @@ mod tests {
             Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
 
         let cmds = render(window_id, &view, &mut tree_state);
-        let title = control_text(&cmds, LABEL_JOBS_HEADER_TITLE).expect("triage title rendered");
         let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
-        assert_eq!(title, "Triage Results");
         assert_eq!(meta, "no triage results yet · AI unavailable");
+        assert!(control_text(&cmds, LABEL_JOBS_HEADER_TITLE).is_none());
     }
 
     #[test]
@@ -3909,10 +3892,9 @@ mod tests {
             Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
 
         let cmds = render(window_id, &view, &mut tree_state);
-        let title = control_text(&cmds, LABEL_JOBS_HEADER_TITLE).expect("triage title rendered");
         let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
-        assert_eq!(title, "Triage Results");
         assert_eq!(meta, "1 with triage · AI unavailable");
+        assert!(control_text(&cmds, LABEL_JOBS_HEADER_TITLE).is_none());
     }
 
     #[test]

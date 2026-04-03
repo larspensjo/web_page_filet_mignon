@@ -1304,7 +1304,7 @@ fn build_layout_rules(
     left_header_meta_visible: bool,
     preview_header_override_visible: bool,
     preview_context_visible: bool,
-    preview_attention_visible: bool,
+    _preview_attention_visible: bool,
     prompt_lab: PromptLabLayoutConfig,
     active_tab: AppTab,
     left_tab: LeftTab,
@@ -1478,8 +1478,8 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_JOBS),
             dock_style: DockStyle::Top,
             order: 0,
-            fixed_size: Some(24),
-            margin: (2, 4, 8, 0),
+            fixed_size: Some(0),
+            margin: (0, 0, 0, 0),
         },
         LayoutRule {
             control_id: LABEL_JOBS_HEADER_META,
@@ -1568,11 +1568,7 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
             dock_style: DockStyle::Right,
             order: 10,
-            fixed_size: if preview_attention_visible {
-                Some(132)
-            } else {
-                Some(0)
-            },
+            fixed_size: Some(0),
             margin: (0, 0, 0, 0),
         },
         LayoutRule {
@@ -1580,7 +1576,7 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
             dock_style: DockStyle::Right,
             order: 20,
-            fixed_size: Some(128),
+            fixed_size: Some(0),
             margin: (0, 0, 8, 0),
         },
         // Right-pane tab bar (custom TabBar widget).
@@ -2452,6 +2448,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
+        control_id: PANEL_PREVIEW_CONTEXT,
+        style_id: StyleId::PanelBackground,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
         control_id: LABEL_JOBS_HEADER_TITLE,
         style_id: StyleId::SectionTitle,
     });
@@ -2464,16 +2465,6 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         window_id,
         control_id: LABEL_PREVIEW_SOURCE,
         style_id: StyleId::DefaultText,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: LABEL_PREVIEW_STATUS,
-        style_id: StyleId::HeaderLabel,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: LABEL_PREVIEW_ATTENTION,
-        style_id: StyleId::StatusMeter,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,

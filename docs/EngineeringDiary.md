@@ -1035,3 +1035,9 @@ Type: Implementation
 Context: The left pane collection title and the right selected-item strip were still competing with viewer content and with each other.
 Change: Split the left job header into stable title/meta controls, demoted the right strip into source/status metadata, and kept page-level overrides only for briefing and poll-stats views.
 Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_core/src/state.rs, crates/harvester_core/src/view_model.rs
+
+## 2026-04-03 - Left pane header no longer repeats the tab name
+Type: Bug Fix
+Context: The new split header still duplicated the active left tab name below the tab bar, which made the hierarchy flatter rather than clearer.
+Change: Collapsed the left title row and left only the contextual meta line under the tab bar so the tab itself carries the collection name.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
