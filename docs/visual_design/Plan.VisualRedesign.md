@@ -4,7 +4,7 @@
 
 **Goal:** Implement the visual redesign defined in `docs/visual_design/VisualDesignSpec.md` — shifting the app from cool blue-gray accents to a warm neutral palette with terracotta accent, improved typography hierarchy, and better spacing.
 
-**Architecture:** All color/font/spacing changes are isolated to two files: `layout.rs` (theme definitions + layout rules) and `markdown_to_rtf.rs` (RTF reading pane colors). The CommanDuctUI styling API supports per-widget colors, fonts, and margins. It does NOT support border-radius, shadows, alpha, or per-control hover states — those items are deferred to a future CommanDuctUI enhancement pass.
+**Architecture:** Color/font/spacing changes span the Harvester layout layer (`layout.rs`, `markdown_to_rtf.rs`, `render.rs`) and two CommanDuctUI controls that hardcode dark-theme colors (`chart_handler.rs`, `dialog_handler.rs`). The CommanDuctUI styling API supports per-widget colors, fonts, and margins. It does NOT support border-radius, shadows, alpha, or per-control hover states — those items are deferred to a future CommanDuctUI enhancement pass.
 
 **Tech Stack:** Rust, Win32 via CommanDuctUI, RTF for reading pane rendering.
 
@@ -18,7 +18,10 @@
 |------|---------|
 | `crates/harvester_app/src/platform/ui/layout.rs` | Rewrite `define_dark_theme_styles()` with new palette; update `SetTabBarStyle` and `SetToggleSwitchStyle` calls; adjust layout margins; split token meter into its own style; add new `StyleId` variants for token meter and section titles |
 | `crates/harvester_app/src/platform/ui/markdown_to_rtf.rs` | Update hardcoded RTF colors and heading sizes to match spec |
-| `src/CommanDuctUI/src/styling_primitives.rs` | Add new `StyleId` variants: `TokenMeter`, `SectionTitle` |
+| `crates/harvester_app/src/platform/ui/render.rs` | Replace VS Code chart line palette with warm-toned colors |
+| `src/CommanDuctUI/src/styling_primitives.rs` | Add new `StyleId` variants: `StatusMeter`, `SectionTitle`, `PrimaryButton`, `DestructiveButton` |
+| `src/CommanDuctUI/src/controls/chart_handler.rs` | Replace hardcoded `#1E2228` bg and `#3A3F47` grid with warm palette |
+| `src/CommanDuctUI/src/controls/dialog_handler.rs` | Replace hardcoded `#1E2228` bg and cool text/warning colors with warm palette |
 
 ## Color Mapping: Current to New
 
@@ -47,20 +50,23 @@ This table drives all color changes. Reference it throughout implementation.
 **Files:**
 - Modify: `src/CommanDuctUI/src/styling_primitives.rs:57-93`
 
-These new variants allow the token meter and section titles to have their own styles, separate from the catch-all `HeaderLabel`.
+These new variants allow the token meter, section titles, and button hierarchy to have their own styles.
 
-- [ ] **Step 1: Add TokenMeter and SectionTitle to the StyleId enum**
+- [ ] **Step 1: Add new variants to the StyleId enum**
 
-In `src/CommanDuctUI/src/styling_primitives.rs`, add two new variants to `StyleId`:
+In `src/CommanDuctUI/src/styling_primitives.rs`, add four new variants to `StyleId`:
 
 ```rust
     // TabBar custom control
     TabBar,
     TabBarAccent,
     // Token and status meter
-    TokenMeter,
+    StatusMeter,
     // Section title (subdued heading, not accent-colored)
     SectionTitle,
+    // Button hierarchy
+    PrimaryButton,
+    DestructiveButton,
 ```
 
 - [ ] **Step 2: Build and verify**
@@ -75,13 +81,13 @@ Expected: PASS (new enum variants may warn as unused; suppress if needed, they'l
 
 - [ ] **Step 4: Update CommanDuctUI version and changelog**
 
-Per repo rules: "If CommanDuctUI changes, update its version and changelog." Bump the patch version in the CommanDuctUI `Cargo.toml` and add a changelog entry noting the two new `StyleId` variants.
+Per repo rules: "If CommanDuctUI changes, update its version and changelog." Bump the patch version in the CommanDuctUI `Cargo.toml` and add a changelog entry noting the new `StyleId` variants.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/CommanDuctUI/src/styling_primitives.rs src/CommanDuctUI/Cargo.toml src/CommanDuctUI/CHANGELOG.md
-git commit -m "feat(ui): add TokenMeter and SectionTitle StyleId variants"
+git commit -m "feat(ui): add StatusMeter and SectionTitle StyleId variants"
 ```
 
 ---
@@ -476,13 +482,13 @@ ProgressBar: bg to Surface Raised, bar color (text_color) to Accent Primary inst
     });
 ```
 
-- [ ] **Step 12: Add TokenMeter style definition**
+- [ ] **Step 12: Add StatusMeter style definition**
 
-This new style makes the token label use Text Secondary instead of the accent color, so it stops competing with content:
+This new style makes the token label use Text Tertiary for a muted default, per the spec's guidance that status indicators should only escalate near important thresholds:
 
 ```rust
     commands.push(PlatformCommand::DefineStyle {
-        style_id: StyleId::TokenMeter,
+        style_id: StyleId::StatusMeter,
         style: ControlStyle {
             background_color: Some(Color {
                 r: 0x14,
@@ -490,9 +496,9 @@ This new style makes the token label use Text Secondary instead of the accent co
                 b: 0x13,
             }),
             text_color: Some(Color {
-                r: 0xb0,
-                g: 0xae,
-                b: 0xa5,
+                r: 0x87,
+                g: 0x86,
+                b: 0x7f,
             }),
             ..Default::default()
         },
@@ -501,7 +507,7 @@ This new style makes the token label use Text Secondary instead of the accent co
 
 - [ ] **Step 13: Add SectionTitle style definition**
 
-Section titles (like "Triage Results | Since checkpoint") get Text Primary on Surface bg, without the accent color used for header labels:
+Section titles (like "Triage Results | Since checkpoint") get Text Primary on Surface bg, without the accent color used for header labels. Size 13 keeps them above body/viewer text (12) per the spec's type hierarchy:
 
 ```rust
     commands.push(PlatformCommand::DefineStyle {
@@ -519,19 +525,65 @@ Section titles (like "Triage Results | Since checkpoint") get Text Primary on Su
             }),
             font: Some(FontDescription {
                 name: Some("Segoe UI".to_string()),
-                size: Some(11),
+                size: Some(13),
                 weight: Some(FontWeight::Bold),
             }),
         },
     });
 ```
 
-- [ ] **Step 14: Build and verify**
+- [ ] **Step 14: Add PrimaryButton style definition**
+
+Primary constructive actions get an Accent Primary background with Text Primary text:
+
+```rust
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::PrimaryButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0xc9,
+                g: 0x64,
+                b: 0x42,
+            }),
+            text_color: Some(Color {
+                r: 0xfa,
+                g: 0xf9,
+                b: 0xf5,
+            }),
+            ..Default::default()
+        },
+    });
+```
+
+- [ ] **Step 15: Add DestructiveButton style definition**
+
+Stop/destructive actions get an Accent Warning background:
+
+```rust
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::DestructiveButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0xb5,
+                g: 0x33,
+                b: 0x33,
+            }),
+            text_color: Some(Color {
+                r: 0xfa,
+                g: 0xf9,
+                b: 0xf5,
+            }),
+            ..Default::default()
+        },
+    });
+```
+
+- [ ] **Step 16: Build and verify**
 
 Run: `cargo build`
 Expected: compiles cleanly.
 
-- [ ] **Step 15: Commit**
+- [ ] **Step 17: Commit**
 
 ```bash
 git add crates/harvester_app/src/platform/ui/layout.rs
@@ -633,21 +685,21 @@ git commit -m "feat(ui): update tab bar and toggle switch inline colors to warm 
 
 Currently `LABEL_TOKEN_PROGRESS` uses `HeaderLabel` (orange/terracotta). The spec says to quiet the token meter. Also, some labels that are section titles should use `SectionTitle` instead of `HeaderLabel`.
 
-- [ ] **Step 1: Change LABEL_TOKEN_PROGRESS to use TokenMeter style**
+- [ ] **Step 1: Change LABEL_TOKEN_PROGRESS to use StatusMeter style**
 
-Find the `ApplyStyleToControl` for `LABEL_TOKEN_PROGRESS` and change from `HeaderLabel` to `TokenMeter`:
+Find the `ApplyStyleToControl` for `LABEL_TOKEN_PROGRESS` and change from `HeaderLabel` to `StatusMeter`:
 
 ```rust
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_TOKEN_PROGRESS,
-        style_id: StyleId::TokenMeter,
+        style_id: StyleId::StatusMeter,
     });
 ```
 
 - [ ] **Step 2: Change section headers to use SectionTitle style**
 
-Change `LABEL_JOBS_HEADER`, `LABEL_PREVIEW_HEADER`, and `LABEL_TRENDS_DESCRIPTION` from `HeaderLabel` to `SectionTitle`:
+Change `LABEL_JOBS_HEADER` and `LABEL_PREVIEW_HEADER` from `HeaderLabel` to `SectionTitle`. Change `LABEL_TRENDS_DESCRIPTION` to `DefaultText` — it is descriptive body copy ("Top 5 products by recent activity..."), not a section heading:
 
 ```rust
     commands.push(PlatformCommand::ApplyStyleToControl {
@@ -663,22 +715,41 @@ Change `LABEL_JOBS_HEADER`, `LABEL_PREVIEW_HEADER`, and `LABEL_TRENDS_DESCRIPTIO
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_TRENDS_DESCRIPTION,
-        style_id: StyleId::SectionTitle,
+        style_id: StyleId::DefaultText,
     });
 ```
 
 Keep `LABEL_INPUT_HINT` and `LABEL_PROMPT_LAB_STATUS` on `HeaderLabel` — these benefit from the accent color to draw attention to interactive areas.
 
-- [ ] **Step 3: Build and verify**
+- [ ] **Step 3: Apply button hierarchy styles**
+
+Change `BUTTON_STOP` to use `DestructiveButton` and `BUTTON_BRIEFING` to use `PrimaryButton` (as the dominant constructive action). Other bottom-bar buttons stay on `DefaultButton`:
+
+```rust
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_STOP,
+        style_id: StyleId::DestructiveButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_BRIEFING,
+        style_id: StyleId::PrimaryButton,
+    });
+```
+
+Leave `BUTTON_TRIAGE`, `BUTTON_POLL_SOURCES`, and `BUTTON_OPEN_BROWSER` on `DefaultButton` as secondary actions.
+
+- [ ] **Step 4: Build and verify**
 
 Run: `cargo build`
 Expected: compiles cleanly.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add crates/harvester_app/src/platform/ui/layout.rs
-git commit -m "feat(ui): quiet token meter and separate section titles from accent headers"
+git commit -m "feat(ui): quiet token meter, separate section titles, add button hierarchy"
 ```
 
 ---
@@ -886,7 +957,93 @@ git commit -m "feat(ui): increase layout margins for better spacing and breathin
 
 ---
 
-## Task 7: Final verification and clippy
+## Task 7: Update chart and dialog hardcoded colors
+
+**Files:**
+- Modify: `src/CommanDuctUI/src/controls/chart_handler.rs:40-41`
+- Modify: `src/CommanDuctUI/src/controls/chart_handler.rs:229-234` (`mute_color` function)
+- Modify: `src/CommanDuctUI/src/controls/dialog_handler.rs:58-60`
+- Modify: `crates/harvester_app/src/platform/ui/render.rs:345-359`
+
+These files hardcode cool blue-gray colors that will clash with the warm palette.
+
+- [ ] **Step 1: Update chart background and grid colors**
+
+In `src/CommanDuctUI/src/controls/chart_handler.rs`, replace the cool-toned constants with warm equivalents:
+
+```rust
+const COLOR_BG: COLORREF = COLORREF(0x001C_1E1E); // #1E1E1C (Surface)
+const COLOR_GRID: COLORREF = COLORREF(0x0028_2A2A); // #2A2A28 (Border Subtle)
+```
+
+Note: COLORREF uses 0x00BBGGRR byte order.
+
+- [ ] **Step 2: Update the mute_color function's blend target**
+
+The `mute_color` function blends toward the old `#1E2228` background. Update it to blend toward the new Surface color `#1E1E1C`:
+
+```rust
+/// Dims a COLORREF toward the dark background `#1E1E1C`.
+fn mute_color(color: u32) -> u32 {
+    let r = ((color & 0xFF) / 2 + 0x1E / 2) & 0xFF;
+    let g = (((color >> 8) & 0xFF) / 2 + 0x1E / 2) & 0xFF;
+    let b = (((color >> 16) & 0xFF) / 2 + 0x1C / 2) & 0xFF;
+    r | (g << 8) | (b << 16)
+}
+```
+
+- [ ] **Step 3: Update dialog colors**
+
+In `src/CommanDuctUI/src/controls/dialog_handler.rs`, replace the cool-toned constants:
+
+```rust
+const COLOR_DIALOG_BG: COLORREF = COLORREF(0x001C_1E1E);   // #1E1E1C (Surface)
+const COLOR_DIALOG_TEXT: COLORREF = COLORREF(0x00F5_F9FA);  // #FAF9F5 (Text Primary)
+const COLOR_DIALOG_WARNING: COLORREF = COLORREF(0x004264C9); // #C96442 (Accent Primary)
+```
+
+- [ ] **Step 4: Replace chart line palette in render.rs**
+
+In `crates/harvester_app/src/platform/ui/render.rs`, replace the VS Code palette with warm-toned chart colors. These should be distinguishable on the new dark warm background while avoiding cool blue dominance:
+
+```rust
+    // COLORREF palette (0x00BBGGRR), warm-compatible chart colors.
+    const COLORS: [u32; 10] = [
+        0x004264C9, // #C96442 terracotta (accent primary)
+        0x005777D9, // #D97757 coral (accent hover)
+        0x00A5AEB0, // #B0AEA5 warm silver
+        0x007F8687, // #87867F stone
+        0x0059935E, // #5E9359 muted green
+        0x005AACB8, // #B8AC5A warm gold
+        0x008C6DAF, // #AF6D8C muted mauve
+        0x0068A5C4, // #C4A568 sand
+        0x00A0827A, // #7A82A0 cool-warm lavender
+        0x006BB088, // #88B06B sage
+    ];
+```
+
+Also update the doc comment above the function from "VS Code dark-theme palette" to "warm-toned palette":
+
+```rust
+/// Converts a `TrendsTabView` into a `ChartDataPacket` for the chart control.
+/// Uses a fixed 10-color warm-toned palette, assigned by entity index.
+```
+
+- [ ] **Step 5: Build and verify**
+
+Run: `cargo build`
+Expected: compiles cleanly.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/CommanDuctUI/src/controls/chart_handler.rs src/CommanDuctUI/src/controls/dialog_handler.rs crates/harvester_app/src/platform/ui/render.rs
+git commit -m "feat(ui): update chart and dialog hardcoded colors to warm palette"
+```
+
+---
+
+## Task 8: Final verification and clippy
 
 **Files:**
 - All modified files
@@ -906,7 +1063,15 @@ Expected: all tests PASS. If any tests assert on specific color values (e.g., in
 Run: `cargo clippy --all-targets -- -D warnings`
 Expected: PASS with no warnings.
 
-- [ ] **Step 4: Commit any remaining fixes**
+- [ ] **Step 4: Update Engineering Diary**
+
+Per `Agents.md`, noteworthy implementations and decisions must be recorded in `docs/EngineeringDiary.md`. Add an entry for this visual redesign, covering:
+- The palette shift from cool blue-gray to warm neutrals with terracotta accent
+- The new `StyleId` variants added to CommanDuctUI (`StatusMeter`, `SectionTitle`, `PrimaryButton`, `DestructiveButton`) and the rationale for their names
+- The three-file CommanDuctUI surface coverage (chart, dialog, styling_primitives) and why chart/dialog colors were hardcoded rather than theme-driven
+- Any visual decisions that differed from the spec due to Win32 API constraints
+
+- [ ] **Step 5: Commit any remaining fixes**
 
 If tests or clippy required adjustments, commit them:
 
@@ -928,6 +1093,5 @@ These spec items cannot be implemented without extending CommanDuctUI's `Control
 | Per-control hover states | Add hover color fields or a state-based style model |
 | Internal padding | Add `padding` field to `ControlStyle` (distinct from layout margins) |
 | Alpha/opacity | Extend `Color` to RGBA; implement via `AlphaBlend` or layered windows |
-| Button variants (primary/secondary/ghost/destructive) | Add more `StyleId` variants and apply per-button, or add button-specific style commands |
 
 These should be tackled as a separate CommanDuctUI feature pass after the palette/typography/spacing changes are visually validated.
