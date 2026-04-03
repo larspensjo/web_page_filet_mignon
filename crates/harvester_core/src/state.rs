@@ -16,9 +16,9 @@ use crate::triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, Triage
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
-    AppViewModel, JobFilterStatus, JobRowView, LastPasteStats, LayoutViewModel, LinkRowView,
-    OperationProgress, PreviewHeaderView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH,
-    DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
+    AppViewModel, JobFilterStatus, JobRowView, LastPasteStats, LayoutViewModel, LeftPaneHeaderView,
+    LinkRowView, OperationProgress, PreviewContextView, PreviewHeaderView, TriageAnnotationView,
+    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
@@ -694,6 +694,13 @@ impl AppState {
                     nav_heavy: quality.nav_heavy(),
                 }
             });
+        let left_pane_header = build_left_pane_header_view(
+            self.left_tab,
+            self.job_list_scope,
+            &jobs,
+            self.ai_unavailable_message().as_deref(),
+        );
+        let preview_context = preview_header.as_ref().map(build_preview_context_view);
         let preview_header_text = if self.active_tab() == AppTab::Briefing {
             Some(self.format_briefing_preview_header())
         } else if self.active_tab() == AppTab::PollStats {
@@ -756,7 +763,9 @@ impl AppState {
             total_tokens: self.metrics.total_tokens,
             token_limit: TOKEN_LIMIT,
             preview_text,
+            left_pane_header,
             preview_header,
+            preview_context,
             preview_header_text,
             preview_source,
             briefing_can_start: self.briefing.can_start() && self.briefing_ai_available(),
@@ -829,6 +838,12 @@ impl AppState {
     }
 
     pub fn layout_view(&self) -> LayoutViewModel {
+        let selected_job = self
+            .ui
+            .selected_job_id()
+            .and_then(|job_id| self.jobs.get(&job_id));
+        let preview_header_override_visible =
+            matches!(self.active_tab(), AppTab::Briefing | AppTab::PollStats);
         LayoutViewModel {
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
@@ -837,6 +852,17 @@ impl AppState {
                 || matches!(self.briefing.phase(), BriefingPhase::Summarizing),
             active_tab: self.active_tab(),
             left_tab: self.left_tab(),
+            left_header_meta_visible: matches!(
+                self.left_tab(),
+                LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults
+            ),
+            preview_header_override_visible,
+            preview_context_visible: selected_job.is_some() && !preview_header_override_visible,
+            preview_attention_visible: selected_job
+                .and_then(|job| job.preview_quality.as_ref())
+                .map(|quality| quality.nav_heavy())
+                .unwrap_or(false)
+                && !preview_header_override_visible,
             prompt_lab_advanced_mode: self.prompt_lab.advanced_mode(),
             prompt_lab_compare_section_open: self.prompt_lab.compare_section_open(),
             prompt_lab_context_section_open: self.prompt_lab.context_section_open(),
@@ -2567,6 +2593,116 @@ impl AppState {
     pub(crate) fn clear_prompt_lab_history(&mut self) {
         self.prompt_lab.clear_history();
         self.dirty = true;
+    }
+}
+
+fn build_left_pane_header_view(
+    left_tab: LeftTab,
+    job_list_scope: JobListScope,
+    jobs: &[JobRowView],
+    ai_unavailable_message: Option<&str>,
+) -> LeftPaneHeaderView {
+    let scoped_jobs: Vec<&JobRowView> = if job_list_scope == JobListScope::SinceCheckpoint {
+        jobs.iter().filter(|job| job.is_since_checkpoint).collect()
+    } else {
+        jobs.iter().collect()
+    };
+    let scope_label = if job_list_scope == JobListScope::SinceCheckpoint {
+        Some("Since checkpoint".to_string())
+    } else {
+        None
+    };
+
+    match left_tab {
+        LeftTab::Jobs => {
+            let count = scoped_jobs.len();
+            LeftPaneHeaderView {
+                title: "Jobs".to_string(),
+                scope_label,
+                count_label: Some(format!("{count} jobs")),
+                state_label: if count == 0 {
+                    Some("no jobs in scope".to_string())
+                } else {
+                    None
+                },
+            }
+        }
+        LeftTab::TriageReview => {
+            let review_needed_count = scoped_jobs
+                .iter()
+                .filter(|job| {
+                    matches!(
+                        job.filter_status,
+                        Some(JobFilterStatus::ReviewNeeded { .. })
+                    )
+                })
+                .count();
+            LeftPaneHeaderView {
+                title: "Triage Review".to_string(),
+                scope_label,
+                count_label: Some(if review_needed_count == 0 {
+                    "no review-needed items".to_string()
+                } else {
+                    format!("{review_needed_count} review-needed")
+                }),
+                state_label: None,
+            }
+        }
+        LeftTab::TriageResults => {
+            let triage_result_count = scoped_jobs
+                .iter()
+                .filter(|job| job.triage_annotation.is_some())
+                .count();
+            LeftPaneHeaderView {
+                title: "Triage Results".to_string(),
+                scope_label,
+                count_label: Some(if triage_result_count == 0 {
+                    "no triage results yet".to_string()
+                } else {
+                    format!("{triage_result_count} with triage")
+                }),
+                state_label: ai_unavailable_message.map(|_| "AI unavailable".to_string()),
+            }
+        }
+        LeftTab::PromptLab => LeftPaneHeaderView {
+            title: "Job List".to_string(),
+            scope_label: None,
+            count_label: None,
+            state_label: None,
+        },
+    }
+}
+
+fn build_preview_context_view(header: &PreviewHeaderView) -> PreviewContextView {
+    let source_label = if header.domain.is_empty() {
+        "(unknown source)".to_string()
+    } else {
+        header.domain.clone()
+    };
+    let status_label = match &header.outcome {
+        Some(JobResultKind::Failed { reason }) => format!("Failed ({reason})"),
+        Some(JobResultKind::Success) => "Done".to_string(),
+        None => match header.stage {
+            Stage::Queued => "Queued",
+            Stage::Downloading => "Downloading",
+            Stage::Sanitizing => "Sanitizing",
+            Stage::Converting => "Converting",
+            Stage::Tokenizing => "Tokenizing",
+            Stage::Writing => "Writing",
+            Stage::Done => "Done",
+        }
+        .to_string(),
+    };
+    let attention_label = if header.nav_heavy {
+        Some("navigation-heavy".to_string())
+    } else {
+        None
+    };
+
+    PreviewContextView {
+        source_label,
+        status_label,
+        attention_label,
     }
 }
 
@@ -4454,7 +4590,95 @@ mod tests {
     }
 
     #[test]
-    fn briefing_tab_view_uses_briefing_header_text_instead_of_selected_article_header() {
+    fn left_header_for_triage_results_since_checkpoint_has_stable_title_and_meta() {
+        use crate::briefing::LoadedArticle;
+        use crate::triage::ArticleTriageResult;
+
+        let mut state = AppState::new();
+        state.job_list_scope = JobListScope::SinceCheckpoint;
+        state.left_tab = LeftTab::TriageResults;
+        state.jobs.insert(
+            1,
+            JobState {
+                url: "https://example.com/article".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+        let mut triage = crate::triage::TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: "https://example.com/article".to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash".to_string(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        triage.start_article(0, 1);
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "Keep".to_string(),
+                priority: 1,
+                tags: vec![],
+                rationale: "ok".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+        state.set_triage(triage);
+
+        let view = state.view();
+
+        assert_eq!(view.left_pane_header.title, "Triage Results");
+        assert_eq!(view.left_pane_header.scope_label.as_deref(), Some("Since checkpoint"));
+        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 with triage"));
+        assert_eq!(view.left_pane_header.state_label.as_deref(), None);
+    }
+
+    #[test]
+    fn left_header_shows_empty_state_in_meta_not_title() {
+        let mut state = AppState::new();
+        state.left_tab = LeftTab::TriageResults;
+
+        let view = state.view();
+
+        assert_eq!(view.left_pane_header.title, "Triage Results");
+        assert_eq!(
+            view.left_pane_header.count_label.as_deref(),
+            Some("no triage results yet")
+        );
+        assert_eq!(view.left_pane_header.state_label.as_deref(), None);
+    }
+
+    #[test]
+    fn preview_metadata_for_selected_done_job_exposes_source_and_status() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            1,
+            JobState {
+                url: "https://epochai.substack.com/p/what".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+        state.select_job(1);
+
+        let view = state.view();
+
+        let preview_context = view
+            .preview_context
+            .as_ref()
+            .expect("expected preview metadata for selected job");
+        assert_eq!(preview_context.source_label, "epochai.substack.com");
+        assert_eq!(preview_context.status_label, "Done");
+        assert_eq!(preview_context.attention_label, None);
+    }
+
+    #[test]
+    fn briefing_tab_still_uses_page_level_header_override() {
         use crate::briefing::{BriefingResult, BriefingSession};
 
         let mut state = AppState::new();
@@ -4544,7 +4768,7 @@ mod poll_stats_view_tests {
     use super::*;
 
     #[test]
-    fn poll_stats_header_override_when_tab_active() {
+    fn poll_stats_tab_still_uses_page_level_header_override() {
         let mut state = AppState::new();
         state.select_tab(AppTab::PollStats);
         let view = state.view();

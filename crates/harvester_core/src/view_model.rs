@@ -54,6 +54,21 @@ pub struct PreviewHeaderView {
     pub nav_heavy: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LeftPaneHeaderView {
+    pub title: String,
+    pub scope_label: Option<String>,
+    pub count_label: Option<String>,
+    pub state_label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewContextView {
+    pub source_label: String,
+    pub status_label: String,
+    pub attention_label: Option<String>,
+}
+
 /// View data for one entity in the trends tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityLineView {
@@ -177,6 +192,10 @@ pub struct LayoutViewModel {
     pub operation_progress_visible: bool,
     pub active_tab: AppTab,
     pub left_tab: LeftTab,
+    pub left_header_meta_visible: bool,
+    pub preview_header_override_visible: bool,
+    pub preview_context_visible: bool,
+    pub preview_attention_visible: bool,
     pub prompt_lab_advanced_mode: bool,
     pub prompt_lab_compare_section_open: bool,
     pub prompt_lab_context_section_open: bool,
@@ -196,7 +215,9 @@ pub struct AppViewModel {
     pub total_tokens: u64,
     pub token_limit: u64,
     pub preview_text: Option<String>,
+    pub left_pane_header: LeftPaneHeaderView,
     pub preview_header: Option<PreviewHeaderView>,
+    pub preview_context: Option<PreviewContextView>,
     pub preview_header_text: Option<String>,
     pub preview_source: Option<PreviewContentKind>,
     pub briefing_can_start: bool,
@@ -239,7 +260,14 @@ impl Default for AppViewModel {
             total_tokens: 0,
             token_limit: TOKEN_LIMIT,
             preview_text: None,
+            left_pane_header: LeftPaneHeaderView {
+                title: "Jobs".to_string(),
+                scope_label: None,
+                count_label: None,
+                state_label: None,
+            },
             preview_header: None,
+            preview_context: None,
             preview_header_text: None,
             preview_source: None,
             briefing_can_start: false,

@@ -70,7 +70,8 @@ pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
     AppViewModel, CategoryTrendView, EntityLineView, JobFilterStatus, JobRowView, LayoutViewModel,
-    LeftPaneView, LinkRowView, LlmModelUsageView, OperationProgress, PreviewHeaderView,
+    LeftPaneHeaderView, LeftPaneView, LinkRowView, LlmModelUsageView, OperationProgress,
+    PreviewContextView, PreviewHeaderView,
     PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
     PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, RightPaneView, TrendsTabView,
     TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,

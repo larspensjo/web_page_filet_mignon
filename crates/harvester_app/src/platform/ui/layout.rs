@@ -40,6 +40,10 @@ pub(crate) struct LayoutConfig {
     pub left_panel_width: i32,
     pub input_panel_visible: bool,
     pub operation_progress_visible: bool,
+    pub left_header_meta_visible: bool,
+    pub preview_header_override_visible: bool,
+    pub preview_context_visible: bool,
+    pub preview_attention_visible: bool,
     pub prompt_lab: PromptLabLayoutConfig,
     pub active_tab: AppTab,
     pub left_tab: LeftTab,
@@ -217,6 +221,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: None,
         control_id: PANEL_PREVIEW,
     });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_PREVIEW_CONTEXT,
+    });
 
     // Create the vertical splitter between left panels and preview
     commands.push(PlatformCommand::CreateSplitter {
@@ -230,6 +239,27 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_PREVIEW),
         control_id: LABEL_PREVIEW_HEADER,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
+        control_id: LABEL_PREVIEW_SOURCE,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
+        control_id: LABEL_PREVIEW_STATUS,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
+        control_id: LABEL_PREVIEW_ATTENTION,
         initial_text: String::new(),
         class: LabelClass::Default,
     });
@@ -367,8 +397,15 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreateLabel {
         window_id,
         parent_control_id: Some(PANEL_JOBS),
-        control_id: LABEL_JOBS_HEADER,
-        initial_text: "Job List".to_string(),
+        control_id: LABEL_JOBS_HEADER_TITLE,
+        initial_text: "Jobs".to_string(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_JOBS),
+        control_id: LABEL_JOBS_HEADER_META,
+        initial_text: String::new(),
         class: LabelClass::Default,
     });
     commands.push(PlatformCommand::CreateTreeView {
@@ -812,6 +849,10 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
             left_panel_width: initial_left_width,
             input_panel_visible: false,
             operation_progress_visible: false,
+            left_header_meta_visible: false,
+            preview_header_override_visible: false,
+            preview_context_visible: false,
+            preview_attention_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -1237,13 +1278,17 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     });
 }
 
-pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) -> PlatformCommand {
+    pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) -> PlatformCommand {
     PlatformCommand::DefineLayout {
         window_id,
         rules: build_layout_rules(
             config.left_panel_width,
             config.input_panel_visible,
             config.operation_progress_visible,
+            config.left_header_meta_visible,
+            config.preview_header_override_visible,
+            config.preview_context_visible,
+            config.preview_attention_visible,
             config.prompt_lab,
             config.active_tab,
             config.left_tab,
@@ -1251,10 +1296,15 @@ pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) ->
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_layout_rules(
     left_panel_width: i32,
     input_panel_visible: bool,
     operation_progress_visible: bool,
+    left_header_meta_visible: bool,
+    preview_header_override_visible: bool,
+    preview_context_visible: bool,
+    preview_attention_visible: bool,
     prompt_lab: PromptLabLayoutConfig,
     active_tab: AppTab,
     left_tab: LeftTab,
@@ -1424,12 +1474,20 @@ fn build_layout_rules(
             margin: (0, 0, 0, 0),
         },
         LayoutRule {
-            control_id: LABEL_JOBS_HEADER,
+            control_id: LABEL_JOBS_HEADER_TITLE,
             parent_control_id: Some(PANEL_JOBS),
             dock_style: DockStyle::Top,
             order: 0,
             fixed_size: Some(24),
             margin: (2, 4, 8, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_JOBS_HEADER_META,
+            parent_control_id: Some(PANEL_JOBS),
+            dock_style: DockStyle::Top,
+            order: 1,
+            fixed_size: if left_header_meta_visible { Some(18) } else { Some(0) },
+            margin: (2, 2, 8, 0),
         },
         LayoutRule {
             control_id: TREE_JOBS,
@@ -1478,15 +1536,59 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
             order: 0,
-            fixed_size: Some(24),
+            fixed_size: if preview_header_override_visible {
+                Some(24)
+            } else {
+                Some(0)
+            },
             margin: (12, 8, 10, 0),
+        },
+        LayoutRule {
+            control_id: PANEL_PREVIEW_CONTEXT,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: DockStyle::Top,
+            order: 1,
+            fixed_size: if preview_context_visible {
+                Some(24)
+            } else {
+                Some(0)
+            },
+            margin: (12, 6, 10, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_PREVIEW_SOURCE,
+            parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
+            dock_style: DockStyle::Fill,
+            order: 0,
+            fixed_size: None,
+            margin: (0, 0, 8, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_PREVIEW_ATTENTION,
+            parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
+            dock_style: DockStyle::Right,
+            order: 10,
+            fixed_size: if preview_attention_visible {
+                Some(132)
+            } else {
+                Some(0)
+            },
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_PREVIEW_STATUS,
+            parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
+            dock_style: DockStyle::Right,
+            order: 20,
+            fixed_size: Some(128),
+            margin: (0, 0, 8, 0),
         },
         // Right-pane tab bar (custom TabBar widget).
         LayoutRule {
             control_id: TAB_BAR_RIGHT,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
-            order: 1,
+            order: 2,
             fixed_size: Some(28),
             margin: (0, 0, 8, 0),
         },
@@ -2350,8 +2452,28 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
-        control_id: LABEL_JOBS_HEADER,
+        control_id: LABEL_JOBS_HEADER_TITLE,
         style_id: StyleId::SectionTitle,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_JOBS_HEADER_META,
+        style_id: StyleId::DefaultText,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_PREVIEW_SOURCE,
+        style_id: StyleId::DefaultText,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_PREVIEW_STATUS,
+        style_id: StyleId::HeaderLabel,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_PREVIEW_ATTENTION,
+        style_id: StyleId::StatusMeter,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -2545,14 +2667,18 @@ mod tests {
     fn layout_rules_for_prompt_lab(prompt_lab: PromptLabLayoutConfig) -> Vec<LayoutRule> {
         let cmd = build_layout_command(
             WindowId::new(99),
-            LayoutConfig {
-                left_panel_width: 600,
-                input_panel_visible: true,
-                operation_progress_visible: false,
-                active_tab: AppTab::Triage,
-                left_tab: LeftTab::PromptLab,
-                prompt_lab,
-            },
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: false,
+            left_header_meta_visible: true,
+            preview_header_override_visible: false,
+            preview_context_visible: false,
+            preview_attention_visible: false,
+            active_tab: AppTab::Triage,
+            left_tab: LeftTab::PromptLab,
+            prompt_lab,
+        },
         );
         match cmd {
             PlatformCommand::DefineLayout { rules, .. } => rules,
@@ -2585,14 +2711,18 @@ mod tests {
     fn operation_controls_have_width_when_visible() {
         let cmd = build_layout_command(
             WindowId::new(88),
-            LayoutConfig {
-                left_panel_width: 600,
-                input_panel_visible: true,
-                operation_progress_visible: true,
-                active_tab: AppTab::Summary,
-                left_tab: LeftTab::Jobs,
-                prompt_lab: PromptLabLayoutConfig {
-                    visible: false,
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: true,
+            left_header_meta_visible: true,
+            preview_header_override_visible: false,
+            preview_context_visible: false,
+            preview_attention_visible: false,
+            active_tab: AppTab::Summary,
+            left_tab: LeftTab::Jobs,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: false,
                     advanced_mode: false,
                     compare_section_open: false,
                     context_section_open: false,
@@ -2614,14 +2744,18 @@ mod tests {
     fn operation_controls_collapse_when_hidden() {
         let cmd = build_layout_command(
             WindowId::new(89),
-            LayoutConfig {
-                left_panel_width: 600,
-                input_panel_visible: true,
-                operation_progress_visible: false,
-                active_tab: AppTab::Summary,
-                left_tab: LeftTab::Jobs,
-                prompt_lab: PromptLabLayoutConfig {
-                    visible: false,
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: false,
+            left_header_meta_visible: true,
+            preview_header_override_visible: false,
+            preview_context_visible: false,
+            preview_attention_visible: false,
+            active_tab: AppTab::Summary,
+            left_tab: LeftTab::Jobs,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: false,
                     advanced_mode: false,
                     compare_section_open: false,
                     context_section_open: false,
@@ -2709,6 +2843,10 @@ mod tests {
                 left_panel_width: 600,
                 input_panel_visible: true,
                 operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
                 active_tab: AppTab::Summary,
                 left_tab: LeftTab::Jobs,
                 prompt_lab: PromptLabLayoutConfig {
@@ -2759,6 +2897,10 @@ mod tests {
                     left_panel_width: 600,
                     input_panel_visible: true,
                     operation_progress_visible: false,
+                    left_header_meta_visible: true,
+                    preview_header_override_visible: false,
+                    preview_context_visible: false,
+                    preview_attention_visible: false,
                     active_tab: AppTab::Summary,
                     left_tab,
                     prompt_lab: PromptLabLayoutConfig {
@@ -2872,6 +3014,10 @@ mod tests {
                 left_panel_width: 600,
                 input_panel_visible: true,
                 operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
                 active_tab: AppTab::Summary,
                 left_tab: LeftTab::Jobs,
                 prompt_lab: PromptLabLayoutConfig {
@@ -2923,6 +3069,10 @@ mod tests {
                 left_panel_width: 600,
                 input_panel_visible: true,
                 operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
                 active_tab: AppTab::Summary,
                 left_tab: LeftTab::Jobs,
                 prompt_lab: PromptLabLayoutConfig {
@@ -2970,6 +3120,10 @@ mod tests {
                 left_panel_width: 600,
                 input_panel_visible: true,
                 operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
                 active_tab: AppTab::Triage,
                 left_tab: LeftTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {
@@ -3018,6 +3172,10 @@ mod tests {
                 left_panel_width: 600,
                 input_panel_visible: true,
                 operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
                 active_tab: AppTab::Triage,
                 left_tab: LeftTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {
@@ -3056,6 +3214,10 @@ mod tests {
                 left_panel_width: 600,
                 input_panel_visible: true,
                 operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
                 active_tab: AppTab::Triage,
                 left_tab: LeftTab::PromptLab,
                 prompt_lab: PromptLabLayoutConfig {

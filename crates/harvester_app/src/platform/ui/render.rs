@@ -9,6 +9,7 @@ use harvester_core::{
     LayoutViewModel, LeftTab, LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState,
     Stage, TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
+use harvester_core::{LeftPaneHeaderView, PreviewContextView};
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
 
@@ -97,7 +98,6 @@ pub struct TreeRenderState {
     prev_status_label: Option<(String, MessageSeverity)>,
     prev_progress_text: Option<String>,
     prev_preview_text: Option<String>,
-    prev_header_text: Option<String>,
     prev_stop_enabled: Option<bool>,
     prev_briefing_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
@@ -112,7 +112,8 @@ pub struct TreeRenderState {
     prev_operation_progress_range: Option<(u32, u32)>,
     prev_operation_progress_pos: Option<u32>,
     prev_open_browser_enabled: Option<bool>,
-    prev_jobs_header_text: Option<String>,
+    prev_jobs_header_title_text: Option<String>,
+    prev_jobs_header_meta_text: Option<String>,
     prev_jobs_scope_since_checkpoint_checked: Option<bool>,
     prev_prompt_lab_visible: bool,
     prev_prompt_lab_advanced_mode: bool,
@@ -167,6 +168,10 @@ pub struct TreeRenderState {
     prev_triage_text: Option<String>,
     prev_briefing_text: Option<String>,
     prev_poll_stats_text: Option<String>,
+    prev_preview_header_override_text: Option<String>,
+    prev_preview_source_text: Option<String>,
+    prev_preview_status_text: Option<String>,
+    prev_preview_attention_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -181,7 +186,6 @@ impl Default for TreeRenderState {
             prev_status_label: None,
             prev_progress_text: None,
             prev_preview_text: None,
-            prev_header_text: None,
             prev_stop_enabled: None,
             prev_briefing_enabled: None,
             prev_triage_enabled: None,
@@ -196,7 +200,8 @@ impl Default for TreeRenderState {
             prev_operation_progress_range: None,
             prev_operation_progress_pos: None,
             prev_open_browser_enabled: None,
-            prev_jobs_header_text: None,
+            prev_jobs_header_title_text: None,
+            prev_jobs_header_meta_text: None,
             prev_jobs_scope_since_checkpoint_checked: None,
             prev_prompt_lab_visible: false,
             prev_prompt_lab_advanced_mode: false,
@@ -250,6 +255,10 @@ impl Default for TreeRenderState {
             prev_triage_text: None,
             prev_briefing_text: None,
             prev_poll_stats_text: None,
+            prev_preview_header_override_text: None,
+            prev_preview_source_text: None,
+            prev_preview_status_text: None,
+            prev_preview_attention_text: None,
         }
     }
 }
@@ -425,6 +434,17 @@ fn layout_view_from_app_view(view: &AppViewModel) -> LayoutViewModel {
         operation_progress_visible: view.operation_progress_visible,
         active_tab: view.right_pane.active_tab,
         left_tab: view.left_pane.left_tab,
+        left_header_meta_visible: view.left_pane_header.scope_label.is_some()
+            || view.left_pane_header.count_label.is_some()
+            || view.left_pane_header.state_label.is_some(),
+        preview_header_override_visible: view.preview_header_text.is_some(),
+        preview_context_visible: view.preview_context.is_some() && view.preview_header_text.is_none(),
+        preview_attention_visible: view
+            .preview_context
+            .as_ref()
+            .and_then(|context| context.attention_label.as_ref())
+            .is_some()
+            && view.preview_header_text.is_none(),
         prompt_lab_advanced_mode: view.left_pane.prompt_lab.advanced_mode,
         prompt_lab_compare_section_open: view.left_pane.prompt_lab.compare_section_open,
         prompt_lab_context_section_open: view.left_pane.prompt_lab.context_section_open,
@@ -476,6 +496,10 @@ fn render_layout_section(
             left_panel_width: layout.left_panel_width,
             input_panel_visible: layout.input_panel_visible,
             operation_progress_visible: layout.operation_progress_visible,
+            left_header_meta_visible: layout.left_header_meta_visible,
+            preview_header_override_visible: layout.preview_header_override_visible,
+            preview_context_visible: layout.preview_context_visible,
+            preview_attention_visible: layout.preview_attention_visible,
             active_tab: layout.active_tab,
             left_tab: layout.left_tab,
             prompt_lab: PromptLabLayoutConfig {
@@ -726,12 +750,22 @@ fn render_main_controls_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     emit_if_changed(
-        &mut tree_state.prev_jobs_header_text,
-        jobs_header_text(view),
+        &mut tree_state.prev_jobs_header_title_text,
+        view.left_pane_header.title.clone(),
         cmds,
         |text| PlatformCommand::SetControlText {
             window_id,
-            control_id: LABEL_JOBS_HEADER,
+            control_id: LABEL_JOBS_HEADER_TITLE,
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_jobs_header_meta_text,
+        format_left_pane_header_meta(&view.left_pane_header),
+        cmds,
+        |text| PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_JOBS_HEADER_META,
             text,
         },
     );
@@ -797,63 +831,18 @@ fn render_main_controls_section(
     );
 }
 
-fn jobs_header_text(view: &AppViewModel) -> String {
-    let scoped_jobs: Vec<&JobRowView> =
-        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
-            view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
-        } else {
-            view.jobs.iter().collect()
-        };
-    let scope_suffix = if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
-        " | Since checkpoint"
-    } else {
-        ""
-    };
-    match view.left_pane.left_tab {
-        LeftTab::Jobs => {
-            if scoped_jobs.is_empty()
-                && view.left_pane.job_list_scope == JobListScope::SinceCheckpoint
-            {
-                format!("Jobs{scope_suffix} (none)")
-            } else {
-                format!("Jobs{scope_suffix}")
-            }
-        }
-        LeftTab::TriageReview => {
-            let review_needed_count = scoped_jobs
-                .iter()
-                .filter(|job| {
-                    matches!(
-                        job.filter_status,
-                        Some(JobFilterStatus::ReviewNeeded { .. })
-                    )
-                })
-                .count();
-            if review_needed_count == 0 {
-                format!("Triage Review{scope_suffix} (no review-needed items)")
-            } else {
-                format!("Triage Review{scope_suffix} ({review_needed_count} review-needed)")
-            }
-        }
-        LeftTab::TriageResults => {
-            let triage_result_count = scoped_jobs
-                .iter()
-                .filter(|job| job.triage_annotation.is_some())
-                .count();
-            if view.ai_unavailable_message.is_some() && triage_result_count == 0 {
-                format!("Triage Results{scope_suffix} (AI unavailable)")
-            } else if view.ai_unavailable_message.is_some() {
-                format!(
-                    "Triage Results{scope_suffix} ({triage_result_count} with triage | AI unavailable)"
-                )
-            } else if triage_result_count == 0 {
-                format!("Triage Results{scope_suffix} (no triage results yet)")
-            } else {
-                format!("Triage Results{scope_suffix} ({triage_result_count} with triage)")
-            }
-        }
-        LeftTab::PromptLab => "Job List".to_string(),
+fn format_left_pane_header_meta(header: &LeftPaneHeaderView) -> String {
+    let mut parts = Vec::<String>::new();
+    if let Some(scope_label) = header.scope_label.as_deref() {
+        parts.push(String::from(scope_label));
     }
+    if let Some(count_label) = header.count_label.as_deref() {
+        parts.push(String::from(count_label));
+    }
+    if let Some(state_label) = header.state_label.as_deref() {
+        parts.push(String::from(state_label));
+    }
+    parts.join(" · ")
 }
 
 fn render_prompt_lab_section(
@@ -1451,21 +1440,130 @@ fn render_preview_section(
         data: build_chart_data(&view.right_pane.trends),
     });
 
-    let header_text = view
-        .preview_header_text
-        .clone()
-        .or_else(|| view.preview_header.as_ref().map(format_preview_header))
-        .unwrap_or_else(|| "(no selection)".to_string());
-    emit_if_changed(
-        &mut tree_state.prev_header_text,
-        header_text,
-        cmds,
-        |text| PlatformCommand::SetControlText {
-            window_id,
-            control_id: LABEL_PREVIEW_HEADER,
-            text,
-        },
-    );
+    if let Some(header_text) = view.preview_header_text.clone() {
+        emit_if_changed(
+            &mut tree_state.prev_preview_header_override_text,
+            header_text,
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_HEADER,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_source_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_SOURCE,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_status_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_STATUS,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_attention_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_ATTENTION,
+                text,
+            },
+        );
+    } else if let Some(context) = view.preview_context.as_ref() {
+        emit_if_changed(
+            &mut tree_state.prev_preview_header_override_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_HEADER,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_source_text,
+            context.source_label.clone(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_SOURCE,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_status_text,
+            context.status_label.clone(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_STATUS,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_attention_text,
+            context.attention_label.clone().unwrap_or_default(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_ATTENTION,
+                text,
+            },
+        );
+    } else {
+        emit_if_changed(
+            &mut tree_state.prev_preview_header_override_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_HEADER,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_source_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_SOURCE,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_status_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_STATUS,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.prev_preview_attention_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_PREVIEW_ATTENTION,
+                text,
+            },
+        );
+    }
 }
 
 fn prompt_lab_status_text(prompt_lab: &harvester_core::PromptLabView) -> String {
@@ -1857,6 +1955,7 @@ fn job_status_label(job: &JobRowView) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn stage_label(stage: Stage) -> &'static str {
     match stage {
         Stage::Queued => "Queued",
@@ -2017,21 +2116,29 @@ fn format_compact_bytes(bytes: u64) -> String {
     }
 }
 
-fn format_preview_header(header: &PreviewHeaderView) -> String {
-    let mut parts = Vec::new();
-    if !header.domain.is_empty() {
-        parts.push(header.domain.clone());
-    }
-    let stage_desc = match &header.outcome {
-        Some(JobResultKind::Failed { reason }) => format!("Failed ({})", reason),
+#[allow(dead_code)]
+fn format_preview_context(header: &PreviewHeaderView) -> PreviewContextView {
+    let source_label = if header.domain.is_empty() {
+        "(unknown source)".to_string()
+    } else {
+        header.domain.clone()
+    };
+    let status_label = match &header.outcome {
+        Some(JobResultKind::Failed { reason }) => format!("Failed ({reason})"),
         Some(JobResultKind::Success) => "Done".to_string(),
         None => stage_label(header.stage).to_string(),
     };
-    parts.push(stage_desc);
-    if header.nav_heavy {
-        parts.push("navigation-heavy".to_string());
+    let attention_label = if header.nav_heavy {
+        Some("navigation-heavy".to_string())
+    } else {
+        None
+    };
+
+    PreviewContextView {
+        source_label,
+        status_label,
+        attention_label,
     }
-    parts.join(" | ")
 }
 
 #[allow(dead_code)]
@@ -2251,7 +2358,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_header_includes_headings_and_tokens() {
+    fn preview_context_exposes_source_status_and_ignores_analytics_fields() {
         init_logging();
         let header = PreviewHeaderView {
             domain: "example.com".to_string(),
@@ -2263,11 +2370,14 @@ mod tests {
             link_density: 0.0,
             nav_heavy: false,
         };
-        assert_eq!(format_preview_header(&header), "example.com | Done");
+        let context = format_preview_context(&header);
+        assert_eq!(context.source_label, "example.com");
+        assert_eq!(context.status_label, "Done");
+        assert_eq!(context.attention_label, None);
     }
 
     #[test]
-    fn preview_header_appends_nav_heavy_indicator() {
+    fn preview_context_appends_nav_heavy_indicator() {
         init_logging();
         let header = PreviewHeaderView {
             domain: "dense.example".to_string(),
@@ -2279,10 +2389,10 @@ mod tests {
             link_density: 1.0,
             nav_heavy: true,
         };
-        assert_eq!(
-            format_preview_header(&header),
-            "dense.example | Converting | navigation-heavy"
-        );
+        let context = format_preview_context(&header);
+        assert_eq!(context.source_label, "dense.example");
+        assert_eq!(context.status_label, "Converting");
+        assert_eq!(context.attention_label.as_deref(), Some("navigation-heavy"));
     }
 
     #[test]
@@ -2301,6 +2411,11 @@ mod tests {
                 link_density: 0.0,
                 nav_heavy: false,
             }),
+            preview_context: Some(PreviewContextView {
+                source_label: "example.com".to_string(),
+                status_label: "Done".to_string(),
+                attention_label: None,
+            }),
             preview_header_text: Some("Executive Briefing | 3 articles | Done".to_string()),
             ..AppViewModel::default()
         };
@@ -2314,6 +2429,62 @@ mod tests {
             _ => None,
         });
         assert_eq!(header, Some("Executive Briefing | 3 articles | Done"));
+        assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE), Some(""));
+        assert_eq!(control_text(&commands, LABEL_PREVIEW_STATUS), Some(""));
+        assert_eq!(control_text(&commands, LABEL_PREVIEW_ATTENTION), Some(""));
+    }
+
+    #[test]
+    fn preview_metadata_clears_when_no_article_is_selected() {
+        init_logging();
+        let window_id = WindowId::new(2);
+        let mut tree_state = TreeRenderState::new();
+        let view = make_view(vec![]);
+
+        let commands = render(window_id, &view, &mut tree_state);
+
+        assert_eq!(control_text(&commands, LABEL_PREVIEW_HEADER), Some(""));
+        assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE), Some(""));
+        assert_eq!(control_text(&commands, LABEL_PREVIEW_STATUS), Some(""));
+        assert_eq!(control_text(&commands, LABEL_PREVIEW_ATTENTION), Some(""));
+    }
+
+    #[test]
+    fn header_texts_do_not_reemit_when_unchanged() {
+        init_logging();
+        let window_id = WindowId::new(3);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(vec![make_job(
+            1,
+            "https://epochai.substack.com/p/what",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        )]);
+        view.left_pane.left_tab = LeftTab::TriageResults;
+        view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+        view.jobs[0].triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 1,
+            category: "keep".to_string(),
+            tags: vec![],
+        });
+
+        let _ = render(window_id, &view, &mut tree_state);
+        let commands = render(window_id, &view, &mut tree_state);
+
+        assert!(!commands.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, .. }
+                    if *control_id == LABEL_JOBS_HEADER_TITLE
+                        || *control_id == LABEL_JOBS_HEADER_META
+                        || *control_id == LABEL_PREVIEW_HEADER
+                        || *control_id == LABEL_PREVIEW_SOURCE
+                        || *control_id == LABEL_PREVIEW_STATUS
+                        || *control_id == LABEL_PREVIEW_ATTENTION
+            )
+        }));
     }
 
     #[test]
@@ -3629,7 +3800,7 @@ mod tests {
     }
 
     #[test]
-    fn triage_results_header_changes_when_triage_data_appears() {
+    fn left_header_title_stays_stable_while_meta_changes() {
         let window_id = WindowId::new(40);
         let mut tree_state = TreeRenderState::new();
         let empty_view = make_view(vec![JobRowView {
@@ -3652,9 +3823,12 @@ mod tests {
         let mut empty_view = empty_view;
         empty_view.left_pane.left_tab = LeftTab::TriageResults;
         let empty_cmds = render(window_id, &empty_view, &mut tree_state);
-        let empty_header =
-            control_text(&empty_cmds, LABEL_JOBS_HEADER).expect("empty triage header rendered");
-        assert!(empty_header.contains("Triage Results"));
+        let empty_title = control_text(&empty_cmds, LABEL_JOBS_HEADER_TITLE)
+            .expect("empty triage title rendered");
+        let empty_meta =
+            control_text(&empty_cmds, LABEL_JOBS_HEADER_META).expect("empty triage meta rendered");
+        assert_eq!(empty_title, "Triage Results");
+        assert_eq!(empty_meta, "no triage results yet");
 
         let mut populated_view = empty_view.clone();
         populated_view.jobs[0].triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -3663,10 +3837,12 @@ mod tests {
             tags: vec![],
         });
         let populated_cmds = render(window_id, &populated_view, &mut tree_state);
-        let populated_header = control_text(&populated_cmds, LABEL_JOBS_HEADER)
-            .expect("populated triage header rendered");
-        assert!(populated_header.contains("Triage Results"));
-        assert_ne!(empty_header, populated_header);
+        let populated_title = control_text(&populated_cmds, LABEL_JOBS_HEADER_TITLE)
+            .expect("populated triage title rendered");
+        let populated_meta = control_text(&populated_cmds, LABEL_JOBS_HEADER_META)
+            .expect("populated triage meta rendered");
+        assert_eq!(populated_title, "Triage Results");
+        assert_eq!(populated_meta, "1 with triage");
     }
 
     #[test]
@@ -3688,7 +3864,7 @@ mod tests {
     }
 
     #[test]
-    fn triage_results_header_uses_ai_unavailable_copy_when_blocked() {
+    fn triage_results_meta_uses_ai_unavailable_copy_when_blocked() {
         let window_id = WindowId::new(42);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![]);
@@ -3697,12 +3873,14 @@ mod tests {
             Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
 
         let cmds = render(window_id, &view, &mut tree_state);
-        let header = control_text(&cmds, LABEL_JOBS_HEADER).expect("triage header rendered");
-        assert_eq!(header, "Triage Results (AI unavailable)");
+        let title = control_text(&cmds, LABEL_JOBS_HEADER_TITLE).expect("triage title rendered");
+        let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
+        assert_eq!(title, "Triage Results");
+        assert_eq!(meta, "no triage results yet · AI unavailable");
     }
 
     #[test]
-    fn triage_results_header_preserves_count_when_ai_unavailable() {
+    fn triage_results_meta_preserves_count_when_ai_unavailable() {
         let window_id = WindowId::new(43);
         let mut tree_state = TreeRenderState::new();
         let mut view = make_view(vec![JobRowView {
@@ -3731,8 +3909,10 @@ mod tests {
             Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
 
         let cmds = render(window_id, &view, &mut tree_state);
-        let header = control_text(&cmds, LABEL_JOBS_HEADER).expect("triage header rendered");
-        assert_eq!(header, "Triage Results (1 with triage | AI unavailable)");
+        let title = control_text(&cmds, LABEL_JOBS_HEADER_TITLE).expect("triage title rendered");
+        let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
+        assert_eq!(title, "Triage Results");
+        assert_eq!(meta, "1 with triage · AI unavailable");
     }
 
     #[test]

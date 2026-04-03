@@ -1029,3 +1029,9 @@ Type: Bug Fix
 Context: Hiding the checkbox glyph by removing the state image entirely caused triage dots to slide left onto the expand button instead of occupying a clean lane.
 Change: `CheckState::Hidden` rows now keep the TreeView state-image slot for layout, and CommanDuctUI erases the checkbox glyph in postpaint so the reserved gap remains available for markers.
 Refs: src/CommanDuctUI/src/controls/treeview_handler.rs
+
+## 2026-04-03 - Header hierarchy split into title and metadata rows
+Type: Implementation
+Context: The left pane collection title and the right selected-item strip were still competing with viewer content and with each other.
+Change: Split the left job header into stable title/meta controls, demoted the right strip into source/status metadata, and kept page-level overrides only for briefing and poll-stats views.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_core/src/state.rs, crates/harvester_core/src/view_model.rs
