@@ -860,17 +860,9 @@ impl AppState {
 
         // Build triage markdown for the selected job.
         let triage_markdown = selected_url.and_then(|url| {
-            self.triage.result_for_url(url).map(|r| {
-                let tags_line = if r.tags.is_empty() {
-                    "none".to_string()
-                } else {
-                    r.tags.join(", ")
-                };
-                format!(
-                    "**Category:** {}\n**Priority:** P{}\n**Tags:** {}\n\n---\n\n{}\n",
-                    r.category, r.priority, tags_line, r.rationale
-                )
-            })
+            self.triage
+                .result_for_url(url)
+                .map(crate::preview::format_triage_for_preview)
         });
 
         // Build summary markdown for the selected job.
@@ -2596,18 +2588,16 @@ fn format_lab_triage_markdown(output_json: &str) -> String {
     use harvester_engine::llm::validation::validate_triage;
     match validate_triage(output_json) {
         Ok(result) => {
-            let tags_line = if result.tags.is_empty() {
-                "none".to_string()
-            } else {
-                result.tags.join(", ")
+            let triage = crate::triage::ArticleTriageResult {
+                category: result.category,
+                priority: result.priority.value(),
+                tags: result.tags,
+                rationale: result.rationale,
+                input_tokens: 0,
+                output_tokens: 0,
             };
-            format!(
-                "**\\[Lab\\]** **Category:** {}\n**Priority:** P{}\n**Tags:** {}\n\n---\n\n{}\n",
-                result.category,
-                result.priority.value(),
-                tags_line,
-                result.rationale
-            )
+            let formatted = crate::preview::format_triage_for_preview(&triage);
+            format!("*Prompt Lab preview*\n\n{formatted}")
         }
         Err(_) => format!("**\\[Lab Triage\\]**\n\n```json\n{output_json}\n```\n"),
     }
@@ -4339,8 +4329,8 @@ mod tests {
 
         let (kind, content) = state.resolve_best_preview(url);
         assert_eq!(kind, PreviewContentKind::Triage);
-        assert!(content.contains("Triage Assessment"));
-        assert!(content.contains("7/10"));
+        assert!(content.contains("Security · Priority P7"));
+        assert!(content.contains("## Why It Matters"));
         assert!(content.contains("Test rationale"));
     }
 

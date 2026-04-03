@@ -43,18 +43,15 @@ pub fn format_summary_for_preview(summary: &ArticleSummaryResult) -> String {
 pub fn format_triage_for_preview(result: &ArticleTriageResult) -> String {
     use std::fmt::Write;
     let mut out = String::new();
-    let _ = writeln!(out, "# Triage Assessment");
+    let _ = writeln!(out, "# {} · Priority P{}", result.category, result.priority);
     out.push('\n');
-    let _ = writeln!(out, "**Priority:** {}/10", result.priority);
-    let _ = writeln!(out, "**Category:** {}", result.category);
     if !result.tags.is_empty() {
-        let _ = write!(out, "**Tags:** {}", result.tags.join(", "));
+        let _ = writeln!(out, "Tags: {}", result.tags.join(", "));
         out.push('\n');
     }
+    let _ = writeln!(out, "## Why It Matters");
     out.push('\n');
-    let _ = writeln!(out, "## Rationale");
-    out.push('\n');
-    let _ = writeln!(out, "{}", result.rationale);
+    let _ = writeln!(out, "{}", result.rationale.trim());
     out
 }
 
@@ -126,11 +123,10 @@ mod tests {
             output_tokens: 50,
         };
         let formatted = format_triage_for_preview(&result);
-        assert!(formatted.contains("# Triage Assessment"));
-        assert!(formatted.contains("**Priority:** 7/10"));
-        assert!(formatted.contains("**Category:** Security"));
-        assert!(formatted.contains("**Tags:** vulnerability, zero-day"));
-        assert!(formatted.contains("## Rationale"));
+        assert!(formatted.contains("# Security · Priority P7"));
+        assert!(formatted.contains("Tags: vulnerability, zero-day"));
+        assert!(formatted.contains("## Why It Matters"));
+        assert!(!formatted.contains("## Signals"));
         assert!(formatted.contains("newly discovered vulnerability"));
     }
 

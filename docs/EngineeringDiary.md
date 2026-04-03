@@ -993,3 +993,9 @@ Type: Implementation
 Context: Screenshot review showed the Triage Results tab still reading like a dense tag dump, with long tag lists pushing the title and source out of the scan path.
 Change: Reformatted Triage Results rows to `P# · Category · title/slug · host · compact tags`, deriving a readable title from the URL slug when no summary title exists and collapsing long tag sets to two visible tags plus a remainder count. Updated render regression tests to lock the new in-place update and row-shape behavior.
 Refs: crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-03 - Triage preview now reads like an editorial note
+Type: Implementation
+Context: After the results list was cleaned up, the right-hand Triage pane still surfaced raw diagnostics first, with inline category/priority/tags text and a header crowded by low-value document metrics.
+Change: Reformatted triage preview content into a short markdown document with a title, a single compact tag line, and `Why It Matters`, reused that formatter for Prompt Lab triage previews, and simplified the preview header to emphasize source plus state instead of tokens/bytes/headings. Updated preview, state, and render tests to lock the new reading-surface contract.
+Refs: crates/harvester_core/src/preview.rs, crates/harvester_core/src/state.rs, crates/harvester_app/src/platform/ui/render.rs

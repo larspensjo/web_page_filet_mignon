@@ -2017,13 +2017,6 @@ fn format_preview_header(header: &PreviewHeaderView) -> String {
     if !header.domain.is_empty() {
         parts.push(header.domain.clone());
     }
-    if let Some(tokens) = header.tokens {
-        parts.push(format!("{} tokens", format_with_commas(tokens as u64)));
-    }
-    if let Some(bytes) = header.bytes {
-        parts.push(format!("{bytes} B"));
-    }
-    parts.push(format!("{count} headings", count = header.heading_count));
     let stage_desc = match &header.outcome {
         Some(JobResultKind::Failed { reason }) => format!("Failed ({})", reason),
         Some(JobResultKind::Success) => "Done".to_string(),
@@ -2031,7 +2024,7 @@ fn format_preview_header(header: &PreviewHeaderView) -> String {
     };
     parts.push(stage_desc);
     if header.nav_heavy {
-        parts.push("[nav-heavy]".to_string());
+        parts.push("navigation-heavy".to_string());
     }
     parts.join(" | ")
 }
@@ -2263,10 +2256,7 @@ mod tests {
             link_density: 0.0,
             nav_heavy: false,
         };
-        assert_eq!(
-            format_preview_header(&header),
-            "example.com | 1,234 tokens | 2048 B | 8 headings | Done"
-        );
+        assert_eq!(format_preview_header(&header), "example.com | Done");
     }
 
     #[test]
@@ -2284,7 +2274,7 @@ mod tests {
         };
         assert_eq!(
             format_preview_header(&header),
-            "dense.example | 0 headings | Converting | [nav-heavy]"
+            "dense.example | Converting | navigation-heavy"
         );
     }
 
