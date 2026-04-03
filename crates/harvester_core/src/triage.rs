@@ -239,6 +239,15 @@ impl TriageSession {
             })
     }
 
+    pub fn source_title_for_url(&self, url: &str) -> Option<&str> {
+        self.articles
+            .iter()
+            .find(|article| article.url == url)
+            .and_then(|article| article.source_title.as_deref())
+            .map(str::trim)
+            .filter(|title| !title.is_empty())
+    }
+
     pub fn article_content_hash(&self, url: &str) -> Option<&str> {
         self.articles
             .iter()

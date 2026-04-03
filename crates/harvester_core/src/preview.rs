@@ -40,10 +40,21 @@ pub fn format_summary_for_preview(summary: &ArticleSummaryResult) -> String {
 }
 
 /// Format a triage assessment as human-readable markdown.
-pub fn format_triage_for_preview(result: &ArticleTriageResult) -> String {
+pub fn format_triage_for_preview(title: Option<&str>, result: &ArticleTriageResult) -> String {
     use std::fmt::Write;
     let mut out = String::new();
-    let _ = writeln!(out, "# {} · Priority P{}", result.category, result.priority);
+    let heading = title
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .unwrap_or("Triage assessment");
+    let _ = writeln!(out, "# {heading}");
+    out.push('\n');
+    let _ = writeln!(
+        out,
+        "{} · Priority P{}",
+        title_case_label(&result.category),
+        result.priority
+    );
     out.push('\n');
     if !result.tags.is_empty() {
         let _ = writeln!(out, "Tags: {}", result.tags.join(", "));
@@ -53,6 +64,37 @@ pub fn format_triage_for_preview(result: &ArticleTriageResult) -> String {
     out.push('\n');
     let _ = writeln!(out, "{}", result.rationale.trim());
     out
+}
+
+pub fn best_effort_article_title(source_title: Option<&str>, url: &str) -> Option<String> {
+    let explicit = source_title
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+        .map(ToOwned::to_owned);
+    if explicit.is_some() {
+        return explicit;
+    }
+
+    let trimmed = url.trim();
+    let without_scheme = trimmed
+        .find("://")
+        .map(|pos| &trimmed[pos + 3..])
+        .unwrap_or(trimmed);
+    let without_query = without_scheme
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(without_scheme)
+        .trim_end_matches('/');
+    let slug = without_query
+        .rsplit('/')
+        .next()
+        .unwrap_or(without_query)
+        .trim();
+    if slug.is_empty() || !slug.contains('-') {
+        return None;
+    }
+
+    Some(title_case_label(&slug.replace(['-', '_'], " ")))
 }
 
 /// Format pre-triage exclusion reasons for display.
@@ -108,6 +150,27 @@ pub fn filter_reason_display(reason: &FilterReason) -> &'static str {
     }
 }
 
+fn title_case_label(value: &str) -> String {
+    let mut out = Vec::new();
+    for word in value.split(['-', '_', ' ']).filter(|word| !word.is_empty()) {
+        let mut chars = word.chars();
+        let Some(first) = chars.next() else {
+            continue;
+        };
+        let rest: String = chars.collect();
+        out.push(format!(
+            "{}{}",
+            first.to_uppercase(),
+            rest.to_ascii_lowercase()
+        ));
+    }
+    if out.is_empty() {
+        value.trim().to_string()
+    } else {
+        out.join(" ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -122,8 +185,9 @@ mod tests {
             input_tokens: 100,
             output_tokens: 50,
         };
-        let formatted = format_triage_for_preview(&result);
-        assert!(formatted.contains("# Security · Priority P7"));
+        let formatted = format_triage_for_preview(Some("New vulnerability disclosed"), &result);
+        assert!(formatted.contains("# New vulnerability disclosed"));
+        assert!(formatted.contains("Security · Priority P7"));
         assert!(formatted.contains("Tags: vulnerability, zero-day"));
         assert!(formatted.contains("## Why It Matters"));
         assert!(!formatted.contains("## Signals"));
@@ -140,10 +204,20 @@ mod tests {
             input_tokens: 100,
             output_tokens: 50,
         };
-        let formatted = format_triage_for_preview(&result);
+        let formatted = format_triage_for_preview(None, &result);
         // Should not contain JSON-like braces from struct formatting
         assert!(!formatted.contains('{'));
         assert!(!formatted.contains('}'));
+        assert!(formatted.contains("# Triage assessment"));
+    }
+
+    #[test]
+    fn best_effort_article_title_falls_back_to_humanized_slug() {
+        let title = best_effort_article_title(
+            None,
+            "https://epochai.substack.com/p/hyperscaler-capex-has-quadrupled?x=1",
+        );
+        assert_eq!(title.as_deref(), Some("Hyperscaler Capex Has Quadrupled"));
     }
 
     #[test]

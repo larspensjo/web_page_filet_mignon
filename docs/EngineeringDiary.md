@@ -1005,3 +1005,9 @@ Type: Implementation
 Context: After the list and reading-surface cleanup, the top token budget strip had become the loudest element in the UI, competing with active tabs, selection, and primary actions.
 Change: Reduced the toolbar height, capped the token meter width to a short fixed measure, compacted the count label, and kept the bar on muted styling until the budget is actually exhausted. Updated layout and render regression tests to lock the fixed-width meter, compact label copy, and muted-below-limit styling.
 Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-03 - Triage hierarchy now leads with the article subject
+Type: Implementation
+Context: After the token strip was quieted, the remaining scan problem was triage hierarchy: both the results rows and the right-hand Triage pane still led with category/priority metadata instead of the article topic.
+Change: Reformatted Triage Results rows to `P# Category: Title — host · tags` so the title is the sentence focus, and updated triage previews to use the article source title when available, with URL-slug fallback before showing category/priority metadata. Added regression coverage for row copy, preview headings, and source-title fallback behavior.
+Refs: crates/harvester_app/src/platform/ui/render.rs, crates/harvester_core/src/preview.rs, crates/harvester_core/src/state.rs, crates/harvester_core/src/triage.rs

@@ -860,9 +860,13 @@ impl AppState {
 
         // Build triage markdown for the selected job.
         let triage_markdown = selected_url.and_then(|url| {
+            let title = crate::preview::best_effort_article_title(
+                self.triage.source_title_for_url(url),
+                url,
+            );
             self.triage
                 .result_for_url(url)
-                .map(crate::preview::format_triage_for_preview)
+                .map(|result| crate::preview::format_triage_for_preview(title.as_deref(), result))
         });
 
         // Build summary markdown for the selected job.
@@ -1980,9 +1984,10 @@ impl AppState {
 
         // Priority 2: Triage
         if let Some(triage_result) = self.triage.result_for_url(url) {
+            let title = preview::best_effort_article_title(self.triage.source_title_for_url(url), url);
             return (
                 PreviewContentKind::Triage,
-                preview::format_triage_for_preview(triage_result),
+                preview::format_triage_for_preview(title.as_deref(), triage_result),
             );
         }
 
@@ -2596,7 +2601,7 @@ fn format_lab_triage_markdown(output_json: &str) -> String {
                 input_tokens: 0,
                 output_tokens: 0,
             };
-            let formatted = crate::preview::format_triage_for_preview(&triage);
+            let formatted = crate::preview::format_triage_for_preview(None, &triage);
             format!("*Prompt Lab preview*\n\n{formatted}")
         }
         Err(_) => format!("**\\[Lab Triage\\]**\n\n```json\n{output_json}\n```\n"),
@@ -4270,7 +4275,7 @@ mod tests {
         let mut triage = crate::triage::TriageSession::new_loading(None);
         triage.set_articles(vec![LoadedArticle {
             url: url.to_string(),
-            source_title: None,
+            source_title: Some("Source headline".to_string()),
             prepared_text: "text".to_string(),
             content_hash: "hash".to_string(),
             fetched_utc: None,
@@ -4307,7 +4312,7 @@ mod tests {
         let mut triage = crate::triage::TriageSession::new_loading(None);
         triage.set_articles(vec![LoadedArticle {
             url: url.to_string(),
-            source_title: None,
+            source_title: Some("Source headline".to_string()),
             prepared_text: "text".to_string(),
             content_hash: "hash".to_string(),
             fetched_utc: None,
@@ -4329,6 +4334,7 @@ mod tests {
 
         let (kind, content) = state.resolve_best_preview(url);
         assert_eq!(kind, PreviewContentKind::Triage);
+        assert!(content.contains("# Source headline"));
         assert!(content.contains("Security · Priority P7"));
         assert!(content.contains("## Why It Matters"));
         assert!(content.contains("Test rationale"));

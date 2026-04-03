@@ -1775,16 +1775,17 @@ fn format_job_row_triage_review(job: &JobRowView) -> String {
 /// Triage Results tab: shows triage annotation (priority/category/tags) prominently.
 fn format_job_row_triage_results(job: &JobRowView) -> String {
     if let Some(annotation) = &job.triage_annotation {
-        let mut parts = vec![
-            format!("P{}", annotation.priority),
+        let primary = format!(
+            "P{} {}: {}",
+            annotation.priority,
             title_case_label(&annotation.category),
-            triage_result_primary_label(job),
-            job_source_label(job),
-        ];
+            triage_result_primary_label(job)
+        );
+        let mut metadata = vec![job_source_label(job)];
         if let Some(tags) = compact_triage_tag_count(&annotation.tags) {
-            parts.push(tags);
+            metadata.push(tags);
         }
-        parts.join(" · ")
+        format!("{primary} — {}", metadata.join(" · "))
     } else {
         let label = job_display_label(job);
         format!("[no triage] {label}")
@@ -1827,7 +1828,9 @@ fn triage_result_primary_label(job: &JobRowView) -> String {
     if job.has_summary {
         return job_primary_label(job);
     }
-    url_slug_label(&job.url).unwrap_or_else(|| compact_url_label(&job.url, 56))
+    url_slug_label(&job.url)
+        .map(|label| title_case_label(&label))
+        .unwrap_or_else(|| compact_url_label(&job.url, 56))
 }
 
 fn filter_status_label(filter_status: Option<&JobFilterStatus>) -> Option<&'static str> {
@@ -2794,7 +2797,7 @@ mod tests {
             tags: vec!["ai".to_string(), "ml".to_string()],
         });
         let row = format_job_row_triage_results(&job);
-        assert_eq!(row, "P2 · Tech · Summary Headline · example.com · 2 tags");
+        assert_eq!(row, "P2 Tech: Summary Headline — example.com · 2 tags");
     }
 
     #[test]
@@ -2829,7 +2832,7 @@ mod tests {
         let row = format_job_row_triage_results(&job);
         assert_eq!(
             row,
-            "P5 · Business · hyperscaler capex has quadrupled · epochai.substack.com · 4 tags"
+            "P5 Business: Hyperscaler Capex Has Quadrupled — epochai.substack.com · 4 tags"
         );
     }
 
@@ -3138,7 +3141,7 @@ mod tests {
             cmds.iter().any(|cmd| matches!(
                 cmd,
                 PlatformCommand::UpdateTreeItemText { item_id, text, .. }
-                    if *item_id == job_tree_item_id(1) && text.contains("P6 · Finance")
+                    if *item_id == job_tree_item_id(1) && text.contains("P6 Finance: Now Highest")
             )),
             "updated triage row should refresh in place"
         );
