@@ -4,10 +4,10 @@ pub const FONT_BODY: usize = 0;
 pub const FONT_CODE: usize = 1;
 pub const MAX_RTF_NESTING_DEPTH: usize = 20;
 pub const RTF_TRUNCATE_MARKER: &str = "[display truncated]";
-const BODY_FONT_SIZE_HALF_POINTS: usize = 22;
-const COLOR_BODY_TEXT_RTF: &str = "\\red224\\green229\\blue236;";
-const COLOR_BACKGROUND_RTF: &str = "\\red26\\green29\\blue34;";
-const COLOR_LINK_RTF: &str = "\\red88\\green166\\blue255;}";
+const BODY_FONT_SIZE_HALF_POINTS: usize = 24;
+const COLOR_BODY_TEXT_RTF: &str = "\\red250\\green249\\blue245;";
+const COLOR_BACKGROUND_RTF: &str = "\\red48\\green48\\blue46;";
+const COLOR_LINK_RTF: &str = "\\red217\\green119\\blue87;}";
 
 pub fn convert_markdown_to_rtf(markdown: &str) -> String {
     let mut rtf = String::new();
@@ -134,11 +134,11 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
     match tag {
         Tag::Heading { level, .. } => {
             let size = match level {
-                HeadingLevel::H1 => 36,
+                HeadingLevel::H1 => 40,
                 HeadingLevel::H2 => 32,
-                _ => 28,
+                _ => 26,
             };
-            rtf.push_str(&format!("\\pard\\sa120\\sb60\\b\\fs{size} "));
+            rtf.push_str(&format!("\\pard\\sa160\\sb80\\b\\fs{size} "));
         }
         Tag::Paragraph => match list_stack
             .last_mut()
@@ -250,10 +250,10 @@ mod tests {
     #[test]
     fn headings_render_as_distinct_bold_blocks() {
         let rtf = convert_markdown_to_rtf("# H1\n## H2\n### H3");
-        assert!(rtf.contains("\\pard\\sa120\\sb60\\b\\fs36 H1"));
-        assert!(rtf.contains("\\pard\\sa120\\sb60\\b\\fs32 H2"));
-        assert!(rtf.contains("\\pard\\sa120\\sb60\\b\\fs28 H3"));
-        assert!(rtf.matches("\\pard\\sa120\\sb60\\b\\fs").count() >= 3);
+        assert!(rtf.contains("\\pard\\sa160\\sb80\\b\\fs40 H1"));
+        assert!(rtf.contains("\\pard\\sa160\\sb80\\b\\fs32 H2"));
+        assert!(rtf.contains("\\pard\\sa160\\sb80\\b\\fs26 H3"));
+        assert!(rtf.matches("\\pard\\sa160\\sb80\\b\\fs").count() >= 3);
         assert!(rtf.matches("\\par").count() >= 3);
     }
 
@@ -299,7 +299,7 @@ mod tests {
         let rtf = convert_markdown_to_rtf("Body");
         assert!(rtf.contains(COLOR_BODY_TEXT_RTF));
         assert!(rtf.contains(COLOR_BACKGROUND_RTF));
-        assert!(rtf.contains("\\fs22 "));
+        assert!(rtf.contains("\\fs24 "));
     }
 
     #[test]
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn heading_after_list_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("- one\n- two\n\n## Brave");
-        assert!(rtf.contains("\\pard \\par \\pard\\sa120\\sb60\\b\\fs32 Brave"));
+        assert!(rtf.contains("\\pard \\par \\pard\\sa160\\sb80\\b\\fs32 Brave"));
     }
 
     #[test]

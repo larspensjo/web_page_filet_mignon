@@ -171,19 +171,19 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: TAB_BAR_LEFT,
         background_color: Color {
-            r: 0x2E,
-            g: 0x32,
-            b: 0x39,
+            r: 0x14,
+            g: 0x14,
+            b: 0x13,
         },
         text_color: Color {
-            r: 0xE0,
-            g: 0xE5,
-            b: 0xEC,
+            r: 0xFA,
+            g: 0xF9,
+            b: 0xF5,
         },
         accent_color: Color {
-            r: 0x00,
-            g: 0x80,
-            b: 0xFF,
+            r: 0xC9,
+            g: 0x64,
+            b: 0x42,
         },
         font: None,
     });
@@ -249,19 +249,19 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: TAB_BAR_RIGHT,
         background_color: Color {
-            r: 0x2E,
-            g: 0x32,
-            b: 0x39,
+            r: 0x14,
+            g: 0x14,
+            b: 0x13,
         },
         text_color: Color {
-            r: 0xE0,
-            g: 0xE5,
-            b: 0xEC,
+            r: 0xFA,
+            g: 0xF9,
+            b: 0xF5,
         },
         accent_color: Color {
-            r: 0x00,
-            g: 0x80,
-            b: 0xFF,
+            r: 0xC9,
+            g: 0x64,
+            b: 0x42,
         },
         font: None,
     });
@@ -321,19 +321,19 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         control_id: TAB_BAR_TRENDS,
         background_color: Color {
-            r: 0x2E,
-            g: 0x32,
-            b: 0x39,
+            r: 0x14,
+            g: 0x14,
+            b: 0x13,
         },
         text_color: Color {
-            r: 0xE0,
-            g: 0xE5,
-            b: 0xEC,
+            r: 0xFA,
+            g: 0xF9,
+            b: 0xF5,
         },
         accent_color: Color {
-            r: 0x00,
-            g: 0x80,
-            b: 0xFF,
+            r: 0xC9,
+            g: 0x64,
+            b: 0x42,
         },
         font: None,
     });
@@ -835,9 +835,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::MainWindowBackground,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
+                r: 0x14,
+                g: 0x14,
+                b: 0x13,
             }),
             ..Default::default()
         },
@@ -847,14 +847,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::PanelBackground,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x26,
-                g: 0x2A,
-                b: 0x2E,
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -864,14 +864,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::StatusBarBackground,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
+                r: 0x14,
+                g: 0x14,
+                b: 0x13,
             }),
             text_color: Some(Color {
-                r: 0x80,
-                g: 0x90,
-                b: 0xA0,
+                r: 0xB0,
+                g: 0xAE,
+                b: 0xA5,
             }),
             ..Default::default()
         },
@@ -881,14 +881,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::DefaultText,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
+                r: 0x14,
+                g: 0x14,
+                b: 0x13,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -898,14 +898,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::HeaderLabel,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x26,
-                g: 0x2A,
-                b: 0x2E,
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0xFF,
-                g: 0xB3,
-                b: 0x47,
+                r: 0xC9,
+                g: 0x64,
+                b: 0x42,
             }),
             ..Default::default()
         },
@@ -915,14 +915,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::DefaultInput,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x1A,
-                g: 0x1D,
-                b: 0x22,
+                r: 0x30,
+                g: 0x30,
+                b: 0x2E,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -932,14 +932,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::DefaultButton,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -949,14 +949,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::RadioButton,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -965,14 +965,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::CheckBox,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -983,14 +983,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::TabBar,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x2E,
-                g: 0x32,
-                b: 0x39,
+                r: 0x14,
+                g: 0x14,
+                b: 0x13,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -1000,9 +1000,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::TabBarAccent,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x00,
-                g: 0x80,
-                b: 0xFF,
+                r: 0xC9,
+                g: 0x64,
+                b: 0x42,
             }),
             ..Default::default()
         },
@@ -1012,14 +1012,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::TreeView,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x26,
-                g: 0x2A,
-                b: 0x2E,
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -1029,14 +1029,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ViewerMonospace,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x1A,
-                g: 0x1D,
-                b: 0x22,
+                r: 0x30,
+                g: 0x30,
+                b: 0x2E,
             }),
             text_color: Some(Color {
-                r: 0x00,
-                g: 0xC9,
-                b: 0xFF,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             font: Some(FontDescription {
                 name: Some("Cascadia Code".to_string()),
@@ -1050,18 +1050,18 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ViewerReadable,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x1A,
-                g: 0x1D,
-                b: 0x22,
+                r: 0x30,
+                g: 0x30,
+                b: 0x2E,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             font: Some(FontDescription {
                 name: Some("Segoe UI".to_string()),
-                size: Some(11),
+                size: Some(12),
                 weight: Some(FontWeight::Normal),
             }),
         },
@@ -1071,14 +1071,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ProgressBar,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x1A,
-                g: 0x1D,
-                b: 0x22,
+                r: 0x30,
+                g: 0x30,
+                b: 0x2E,
             }),
             text_color: Some(Color {
-                r: 0x00,
-                g: 0xC9,
-                b: 0xFF,
+                r: 0xC9,
+                g: 0x64,
+                b: 0x42,
             }),
             ..Default::default()
         },
@@ -1089,9 +1089,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::Splitter,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x40,
-                g: 0x44,
-                b: 0x4B,
+                r: 0x30,
+                g: 0x30,
+                b: 0x2E,
             }),
             ..Default::default()
         },
@@ -1101,14 +1101,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ComboBox,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x1A,
-                g: 0x1D,
-                b: 0x22,
+                r: 0x30,
+                g: 0x30,
+                b: 0x2E,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -1119,9 +1119,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::TreeItemDisabled,
         style: ControlStyle {
             text_color: Some(Color {
-                r: 0x60,
-                g: 0x65,
-                b: 0x6B,
+                r: 0x87,
+                g: 0x86,
+                b: 0x7F,
             }),
             ..Default::default()
         },
@@ -1132,14 +1132,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::TreeViewSelectedRow,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x37,
-                g: 0x3E,
-                b: 0x47,
+                r: 0x3D,
+                g: 0x3D,
+                b: 0x3A,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -1150,9 +1150,81 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::TreeViewSelectionAccent,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x00,
-                g: 0x80,
-                b: 0xFF,
+                r: 0xC9,
+                g: 0x64,
+                b: 0x42,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::StatusMeter,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x14,
+                g: 0x14,
+                b: 0x13,
+            }),
+            text_color: Some(Color {
+                r: 0x87,
+                g: 0x86,
+                b: 0x7F,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::SectionTitle,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
+            }),
+            text_color: Some(Color {
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
+            }),
+            font: Some(FontDescription {
+                name: Some("Segoe UI".to_string()),
+                size: Some(13),
+                weight: Some(FontWeight::Bold),
+            }),
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::PrimaryButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0xC9,
+                g: 0x64,
+                b: 0x42,
+            }),
+            text_color: Some(Color {
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::DestructiveButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0xB5,
+                g: 0x33,
+                b: 0x33,
+            }),
+            text_color: Some(Color {
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -1289,7 +1361,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 200,
             fixed_size: Some(left_panel_width),
-            margin: (6, 6, 6, 6),
+            margin: (8, 8, 8, 8),
         },
         // Left-pane tab bar.
         LayoutRule {
@@ -1393,7 +1465,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 310,
             fixed_size: None,
-            margin: (6, 6, 6, 6),
+            margin: (8, 12, 8, 12),
         },
         LayoutRule {
             control_id: LABEL_PREVIEW_HEADER,
@@ -1427,7 +1499,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (0, 0, 0, 0),
+            margin: (4, 8, 4, 8),
         },
         LayoutRule {
             control_id: PANEL_TAB_SUMMARY,
@@ -1443,7 +1515,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (0, 0, 0, 0),
+            margin: (4, 8, 4, 8),
         },
         LayoutRule {
             control_id: PANEL_TAB_BRIEFING,
@@ -1459,7 +1531,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (0, 0, 0, 0),
+            margin: (4, 8, 4, 8),
         },
         LayoutRule {
             control_id: PANEL_TAB_TRENDS,
@@ -1509,7 +1581,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (0, 0, 0, 0),
+            margin: (4, 8, 4, 8),
         },
         LayoutRule {
             control_id: LABEL_PROMPT_LAB_STATUS,
@@ -1541,7 +1613,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (6, 6, 6, 6),
+            margin: (8, 12, 8, 12),
         },
         LayoutRule {
             control_id: PROGRESS_OPERATION,
@@ -1564,8 +1636,8 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 0,
-            fixed_size: Some(160),
-            margin: (6, 6, 6, 0),
+            fixed_size: Some(140),
+            margin: (6, 16, 6, 8),
         },
         LayoutRule {
             control_id: BUTTON_BRIEFING,
@@ -1573,7 +1645,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 1,
             fixed_size: Some(160),
-            margin: (6, 6, 6, 0),
+            margin: (6, 4, 6, 4),
         },
         LayoutRule {
             control_id: BUTTON_TRIAGE,
@@ -1581,7 +1653,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 2,
             fixed_size: Some(160),
-            margin: (6, 6, 6, 0),
+            margin: (6, 4, 6, 4),
         },
         LayoutRule {
             control_id: BUTTON_POLL_SOURCES,
@@ -1589,7 +1661,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 3,
             fixed_size: Some(160),
-            margin: (6, 6, 6, 0),
+            margin: (6, 4, 6, 4),
         },
         LayoutRule {
             control_id: BUTTON_OPEN_BROWSER,
@@ -1597,7 +1669,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 4,
             fixed_size: Some(160),
-            margin: (6, 6, 6, 0),
+            margin: (6, 4, 6, 4),
         },
     ];
 
@@ -2239,51 +2311,51 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         window_id,
         control_id: TS_JOBS_SCOPE,
         background: Color {
-            r: 0x2B,
-            g: 0x2B,
-            b: 0x2B,
+            r: 0x14,
+            g: 0x14,
+            b: 0x13,
         },
         pill_off: Color {
-            r: 0x4B,
-            g: 0x4F,
-            b: 0x57,
+            r: 0x3D,
+            g: 0x3D,
+            b: 0x3A,
         },
         pill_on: Color {
-            r: 0x00,
-            g: 0x80,
-            b: 0xFF,
-        }, // blue accent — same as tab bar
+            r: 0xC9,
+            g: 0x64,
+            b: 0x42,
+        },
         knob: Color {
-            r: 0xF0,
-            g: 0xF0,
-            b: 0xF0,
+            r: 0xFA,
+            g: 0xF9,
+            b: 0xF5,
         },
         text: Color {
-            r: 0xCC,
-            g: 0xCC,
-            b: 0xCC,
+            r: 0xB0,
+            g: 0xAE,
+            b: 0xA5,
         },
     });
 
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_PREVIEW_HEADER,
-        style_id: StyleId::HeaderLabel,
+        style_id: StyleId::SectionTitle,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_JOBS_HEADER,
-        style_id: StyleId::HeaderLabel,
+        style_id: StyleId::SectionTitle,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_TRENDS_DESCRIPTION,
-        style_id: StyleId::HeaderLabel,
+        style_id: StyleId::DefaultText,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_TOKEN_PROGRESS,
-        style_id: StyleId::HeaderLabel,
+        style_id: StyleId::StatusMeter,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -2342,12 +2414,12 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_STOP,
-        style_id: StyleId::DefaultButton,
+        style_id: StyleId::DestructiveButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_BRIEFING,
-        style_id: StyleId::DefaultButton,
+        style_id: StyleId::PrimaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,

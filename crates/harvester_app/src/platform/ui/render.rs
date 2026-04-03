@@ -342,20 +342,20 @@ pub(crate) fn render_layout_only(
 }
 
 /// Converts a `TrendsTabView` into a `ChartDataPacket` for the chart control.
-/// Uses a fixed 10-color VS Code dark-theme palette, assigned by entity index.
+/// Uses a fixed 10-color warm-toned palette, assigned by entity index.
 fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
-    // COLORREF palette (0x00BBGGRR), up to 10 entity lines.
+    // COLORREF palette (0x00BBGGRR), warm-compatible chart colors.
     const COLORS: [u32; 10] = [
-        0x00B0C94E, // #4EC9B0 teal
-        0x007891CE, // #CE9178 salmon
-        0x00FEDC9C, // #9CDCFE light blue
-        0x00AADCDC, // #DCDCAA yellow
-        0x00C086C5, // #C586C0 purple
-        0x004747F4, // #F44747 red
-        0x007DBAD7, // #D7BA7D gold
-        0x0055996A, // #6A9955 green
-        0x00D69C56, // #569CD6 blue
-        0x00A8CEB5, // #B5CEA8 light green
+        0x004264C9, // #C96442 terracotta
+        0x005777D9, // #D97757 coral
+        0x00A5AEB0, // #B0AEA5 warm silver
+        0x007F8687, // #87867F stone
+        0x0059935E, // #5E9359 muted green
+        0x005AACB8, // #B8AC5A warm gold
+        0x008C6DAF, // #AF6D8C muted mauve
+        0x0068A5C4, // #C4A568 sand
+        0x00A0827A, // #7A82A0 cool-warm lavender
+        0x006BB088, // #88B06B sage
     ];
 
     if trends.is_loading {

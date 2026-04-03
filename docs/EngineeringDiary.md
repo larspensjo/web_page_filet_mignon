@@ -975,3 +975,9 @@ Change: Stopped assigning tree-item markers to job rows and kept markers only fo
 Lessons Learned: Tiny unlabeled status markers can read as rendering defects rather than useful feedback when the row already includes explicit text.
 Prevention: Prefer text for job-level state in tree rows and add focused UI regression tests before introducing compact markers.
 Refs: crates/harvester_app/src/platform/app.rs, docs/EngineeringDiary.md
+
+## 2026-04-03 - Warm dark visual redesign foundation
+Type: Implementation
+Context: The UI redesign shifted Harvester from a cool blue-gray palette to warm neutrals with a terracotta accent while preserving the existing Win32/CommanDuctUI architecture.
+Change: Reworked `harvester_app` theme definitions, inline tab/toggle colors, reading-pane RTF typography, chart palette, and pane spacing. Added `StatusMeter`, `SectionTitle`, `PrimaryButton`, and `DestructiveButton` to CommanDuctUI so token usage, section headers, and button hierarchy can be styled semantically instead of overloading existing roles. Updated CommanDuctUI chart/dialog hardcoded colors to match the host theme; those surfaces remain hardcoded because the current infrastructure style model does not yet theme owner-drawn chart paint or modal dialog template rendering. Kept the redesign within Win32 constraints by using tonal contrast, typography, and margins instead of unsupported radius, shadow, hover, or alpha effects.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/markdown_to_rtf.rs, crates/harvester_app/src/platform/ui/render.rs, src/CommanDuctUI/src/styling_primitives.rs, src/CommanDuctUI/src/controls/chart_handler.rs, src/CommanDuctUI/src/controls/dialog_handler.rs
