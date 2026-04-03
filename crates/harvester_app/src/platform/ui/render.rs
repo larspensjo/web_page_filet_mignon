@@ -1765,7 +1765,7 @@ fn format_job_row_triage_results(job: &JobRowView) -> String {
             triage_result_primary_label(job),
             job_source_label(job),
         ];
-        if let Some(tags) = compact_triage_tags(&annotation.tags) {
+        if let Some(tags) = compact_triage_tag_count(&annotation.tags) {
             parts.push(tags);
         }
         parts.join(" · ")
@@ -1912,18 +1912,14 @@ fn url_slug_label(url: &str) -> Option<String> {
     }
 }
 
-fn compact_triage_tags(tags: &[String]) -> Option<String> {
+fn compact_triage_tag_count(tags: &[String]) -> Option<String> {
     if tags.is_empty() {
         return None;
     }
-
-    let visible: Vec<String> = tags.iter().take(2).map(|tag| humanize_slug(tag)).collect();
-    let hidden = tags.len().saturating_sub(visible.len());
-    let joined = visible.join(", ");
-    if hidden > 0 {
-        Some(format!("{joined} +{hidden}"))
+    if tags.len() == 1 {
+        Some("1 tag".to_string())
     } else {
-        Some(joined)
+        Some(format!("{} tags", tags.len()))
     }
 }
 
@@ -1946,10 +1942,6 @@ fn title_case_label(value: &str) -> String {
     } else {
         out.join(" ")
     }
-}
-
-fn humanize_slug(value: &str) -> String {
-    humanize_slug_with_limit(value, 28)
 }
 
 fn humanize_slug_with_limit(value: &str, max_chars: usize) -> String {
@@ -2807,7 +2799,7 @@ mod tests {
             tags: vec!["ai".to_string(), "ml".to_string()],
         });
         let row = format_job_row_triage_results(&job);
-        assert_eq!(row, "P2 · Tech · Summary Headline · example.com · ai, ml");
+        assert_eq!(row, "P2 · Tech · Summary Headline · example.com · 2 tags");
     }
 
     #[test]
@@ -2842,7 +2834,7 @@ mod tests {
         let row = format_job_row_triage_results(&job);
         assert_eq!(
             row,
-            "P5 · Business · hyperscaler capex has quadrupled · epochai.substack.com · capex, resource grab +2"
+            "P5 · Business · hyperscaler capex has quadrupled · epochai.substack.com · 4 tags"
         );
     }
 
