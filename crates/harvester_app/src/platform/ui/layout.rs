@@ -21,6 +21,8 @@ const PROMPT_LAB_ROW_HEIGHT_STATUS: i32 = 24;
 const PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT: i32 = 120;
 const PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY: i32 = 42;
 const PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH: i32 = 120;
+const TOKEN_METER_BAR_WIDTH: i32 = 190;
+const TOKEN_METER_LABEL_WIDTH: i32 = 120;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PromptLabLayoutConfig {
@@ -379,7 +381,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_PROGRESS),
         control_id: LABEL_TOKEN_PROGRESS,
-        initial_text: format!("Tokens: 0 / {} (0%)", TOKEN_LIMIT),
+        initial_text: format!("0 / {}K", TOKEN_LIMIT / 1_000),
         class: LabelClass::Default,
     });
 
@@ -1171,7 +1173,11 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 g: 0x86,
                 b: 0x7F,
             }),
-            ..Default::default()
+            font: Some(FontDescription {
+                name: Some("Segoe UI".to_string()),
+                size: Some(10),
+                weight: Some(FontWeight::Normal),
+            }),
         },
     });
 
@@ -1301,7 +1307,7 @@ fn build_layout_rules(
             parent_control_id: None,
             dock_style: DockStyle::Top,
             order: 0,
-            fixed_size: Some(52),
+            fixed_size: Some(42),
             margin: (0, 0, 0, 0),
         },
         // TS_JOBS_SCOPE: left side of toolbar.
@@ -1311,7 +1317,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 10,
             fixed_size: Some(188),
-            margin: (16, 12, 8, 12),
+            margin: (16, 8, 12, 8),
         },
         // PANEL_PROGRESS: container for the token controls on the same toolbar row.
         LayoutRule {
@@ -1325,18 +1331,18 @@ fn build_layout_rules(
         LayoutRule {
             control_id: LABEL_TOKEN_PROGRESS,
             parent_control_id: Some(PANEL_PROGRESS),
-            dock_style: DockStyle::Left,
+            dock_style: DockStyle::Right,
             order: 0,
-            fixed_size: Some(240),
-            margin: (4, 14, 12, 10),
+            fixed_size: Some(TOKEN_METER_LABEL_WIDTH),
+            margin: (10, 11, 16, 9),
         },
         LayoutRule {
             control_id: PROGRESS_TOKENS,
             parent_control_id: Some(PANEL_PROGRESS),
-            dock_style: DockStyle::Fill,
+            dock_style: DockStyle::Right,
             order: 1,
-            fixed_size: None,
-            margin: (0, 18, 16, 18),
+            fixed_size: Some(TOKEN_METER_BAR_WIDTH),
+            margin: (0, 14, 18, 14),
         },
         LayoutRule {
             control_id: PANEL_BOTTOM,
@@ -2517,7 +2523,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: PROGRESS_TOKENS,
-        style_id: StyleId::ProgressBar,
+        style_id: StyleId::StatusMeter,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -2732,14 +2738,16 @@ mod tests {
             .find(|r| r.control_id == LABEL_TOKEN_PROGRESS)
             .expect("token label rule");
         assert_eq!(token_label.parent_control_id, Some(PANEL_PROGRESS));
-        assert_eq!(token_label.dock_style, DockStyle::Left);
+        assert_eq!(token_label.dock_style, DockStyle::Right);
+        assert_eq!(token_label.fixed_size, Some(TOKEN_METER_LABEL_WIDTH));
 
         let token_bar = rules
             .iter()
             .find(|r| r.control_id == PROGRESS_TOKENS)
             .expect("token bar rule");
         assert_eq!(token_bar.parent_control_id, Some(PANEL_PROGRESS));
-        assert_eq!(token_bar.dock_style, DockStyle::Fill);
+        assert_eq!(token_bar.dock_style, DockStyle::Right);
+        assert_eq!(token_bar.fixed_size, Some(TOKEN_METER_BAR_WIDTH));
     }
 
     #[test]

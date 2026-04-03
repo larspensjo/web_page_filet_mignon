@@ -999,3 +999,9 @@ Type: Implementation
 Context: After the results list was cleaned up, the right-hand Triage pane still surfaced raw diagnostics first, with inline category/priority/tags text and a header crowded by low-value document metrics.
 Change: Reformatted triage preview content into a short markdown document with a title, a single compact tag line, and `Why It Matters`, reused that formatter for Prompt Lab triage previews, and simplified the preview header to emphasize source plus state instead of tokens/bytes/headings. Updated preview, state, and render tests to lock the new reading-surface contract.
 Refs: crates/harvester_core/src/preview.rs, crates/harvester_core/src/state.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-03 - Token budget meter no longer dominates the header
+Type: Implementation
+Context: After the list and reading-surface cleanup, the top token budget strip had become the loudest element in the UI, competing with active tabs, selection, and primary actions.
+Change: Reduced the toolbar height, capped the token meter width to a short fixed measure, compacted the count label, and kept the bar on muted styling until the budget is actually exhausted. Updated layout and render regression tests to lock the fixed-width meter, compact label copy, and muted-below-limit styling.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs

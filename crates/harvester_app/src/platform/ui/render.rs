@@ -106,6 +106,7 @@ pub struct TreeRenderState {
     prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
     prev_progress_pos: Option<u32>,
+    prev_token_progress_style: Option<StyleId>,
     prev_operation_progress_visible: bool,
     prev_operation_progress_text: Option<String>,
     prev_operation_progress_range: Option<(u32, u32)>,
@@ -189,6 +190,7 @@ impl Default for TreeRenderState {
             prev_triage_progress: None,
             prev_progress_range: None,
             prev_progress_pos: None,
+            prev_token_progress_style: None,
             prev_operation_progress_visible: false,
             prev_operation_progress_text: None,
             prev_operation_progress_range: None,
@@ -664,11 +666,15 @@ fn render_token_progress_section(
         0.0
     };
     let progress_text = format!(
-        "Tokens: {} / {} ({:.1}%)",
-        format_with_commas(scoped_total_tokens),
-        format_with_commas(view.token_limit),
-        percent
+        "{} / {}",
+        format_compact_tokens(scoped_total_tokens),
+        format_compact_tokens(view.token_limit)
     );
+    let progress_style = if percent >= 100.0 {
+        StyleId::ProgressBar
+    } else {
+        StyleId::StatusMeter
+    };
 
     emit_if_changed(
         &mut tree_state.prev_progress_range,
@@ -689,6 +695,16 @@ fn render_token_progress_section(
             window_id,
             control_id: PROGRESS_TOKENS,
             position,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_token_progress_style,
+        progress_style,
+        cmds,
+        |style_id| PlatformCommand::ApplyStyleToControl {
+            window_id,
+            control_id: PROGRESS_TOKENS,
+            style_id,
         },
     );
     emit_if_changed(
@@ -1999,17 +2015,6 @@ fn format_compact_bytes(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
-}
-
-fn format_with_commas(value: u64) -> String {
-    let mut out = String::new();
-    for (i, ch) in value.to_string().chars().rev().enumerate() {
-        if i != 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(ch);
-    }
-    out.chars().rev().collect()
 }
 
 fn format_preview_header(header: &PreviewHeaderView) -> String {
@@ -3520,7 +3525,7 @@ mod tests {
                 cmd,
                 PlatformCommand::SetControlText { control_id, text, .. }
                 if *control_id == LABEL_TOKEN_PROGRESS
-                    && text == "Tokens: 50 / 200,000 (0.0%)"
+                    && text == "50 / 200K"
             )
         }));
         assert!(cmds.iter().any(|cmd| {
@@ -3528,6 +3533,67 @@ mod tests {
                 cmd,
                 PlatformCommand::SetProgressBarPosition { control_id, position, .. }
                 if *control_id == PROGRESS_TOKENS && *position == 50
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
+                if *control_id == PROGRESS_TOKENS && *style_id == StyleId::StatusMeter
+            )
+        }));
+    }
+
+    #[test]
+    fn token_progress_stays_muted_below_limit_even_when_high() {
+        let window_id = WindowId::new(42);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(Vec::new());
+        view.total_tokens = 97_002;
+        view.token_limit = 100_000;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
+                if *control_id == PROGRESS_TOKENS && *style_id == StyleId::StatusMeter
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == LABEL_TOKEN_PROGRESS
+                    && text == "97K / 100K"
+            )
+        }));
+    }
+
+    #[test]
+    fn token_progress_escalates_to_accent_at_limit() {
+        let window_id = WindowId::new(43);
+        let mut tree_state = TreeRenderState::new();
+        let mut view = make_view(Vec::new());
+        view.total_tokens = 100_000;
+        view.token_limit = 100_000;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
+                if *control_id == PROGRESS_TOKENS && *style_id == StyleId::ProgressBar
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlText { control_id, text, .. }
+                if *control_id == LABEL_TOKEN_PROGRESS
+                    && text == "100K / 100K"
             )
         }));
     }
