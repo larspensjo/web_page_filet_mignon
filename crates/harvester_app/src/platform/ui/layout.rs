@@ -1278,7 +1278,7 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     });
 }
 
-    pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) -> PlatformCommand {
+pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) -> PlatformCommand {
     PlatformCommand::DefineLayout {
         window_id,
         rules: build_layout_rules(
@@ -1486,7 +1486,11 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_JOBS),
             dock_style: DockStyle::Top,
             order: 1,
-            fixed_size: if left_header_meta_visible { Some(18) } else { Some(0) },
+            fixed_size: if left_header_meta_visible {
+                Some(18)
+            } else {
+                Some(0)
+            },
             margin: (2, 2, 8, 0),
         },
         LayoutRule {
@@ -2658,18 +2662,18 @@ mod tests {
     fn layout_rules_for_prompt_lab(prompt_lab: PromptLabLayoutConfig) -> Vec<LayoutRule> {
         let cmd = build_layout_command(
             WindowId::new(99),
-        LayoutConfig {
-            left_panel_width: 600,
-            input_panel_visible: true,
-            operation_progress_visible: false,
-            left_header_meta_visible: true,
-            preview_header_override_visible: false,
-            preview_context_visible: false,
-            preview_attention_visible: false,
-            active_tab: AppTab::Triage,
-            left_tab: LeftTab::PromptLab,
-            prompt_lab,
-        },
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
+                active_tab: AppTab::Triage,
+                left_tab: LeftTab::PromptLab,
+                prompt_lab,
+            },
         );
         match cmd {
             PlatformCommand::DefineLayout { rules, .. } => rules,
@@ -2702,18 +2706,18 @@ mod tests {
     fn operation_controls_have_width_when_visible() {
         let cmd = build_layout_command(
             WindowId::new(88),
-        LayoutConfig {
-            left_panel_width: 600,
-            input_panel_visible: true,
-            operation_progress_visible: true,
-            left_header_meta_visible: true,
-            preview_header_override_visible: false,
-            preview_context_visible: false,
-            preview_attention_visible: false,
-            active_tab: AppTab::Summary,
-            left_tab: LeftTab::Jobs,
-            prompt_lab: PromptLabLayoutConfig {
-                visible: false,
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: true,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
                     advanced_mode: false,
                     compare_section_open: false,
                     context_section_open: false,
@@ -2735,18 +2739,18 @@ mod tests {
     fn operation_controls_collapse_when_hidden() {
         let cmd = build_layout_command(
             WindowId::new(89),
-        LayoutConfig {
-            left_panel_width: 600,
-            input_panel_visible: true,
-            operation_progress_visible: false,
-            left_header_meta_visible: true,
-            preview_header_override_visible: false,
-            preview_context_visible: false,
-            preview_attention_visible: false,
-            active_tab: AppTab::Summary,
-            left_tab: LeftTab::Jobs,
-            prompt_lab: PromptLabLayoutConfig {
-                visible: false,
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
                     advanced_mode: false,
                     compare_section_open: false,
                     context_section_open: false,

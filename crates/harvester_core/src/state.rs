@@ -4632,8 +4632,14 @@ mod tests {
         let view = state.view();
 
         assert_eq!(view.left_pane_header.title, "Triage Results");
-        assert_eq!(view.left_pane_header.scope_label.as_deref(), Some("Since checkpoint"));
-        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 with triage"));
+        assert_eq!(
+            view.left_pane_header.scope_label.as_deref(),
+            Some("Since checkpoint")
+        );
+        assert_eq!(
+            view.left_pane_header.count_label.as_deref(),
+            Some("1 with triage")
+        );
         assert_eq!(view.left_pane_header.state_label.as_deref(), None);
     }
 

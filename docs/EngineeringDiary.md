@@ -1041,3 +1041,9 @@ Type: Bug Fix
 Context: The new split header still duplicated the active left tab name below the tab bar, which made the hierarchy flatter rather than clearer.
 Change: Collapsed the left title row and left only the contextual meta line under the tab bar so the tab itself carries the collection name.
 Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-03 - Triage rows now lead with the article title
+Type: Implementation
+Context: Screenshot review showed the Triage Results list still scanning as metadata-first because `P# category` led each row while the title and host were pushed later in the line.
+Change: Reworked the row formatter so Triage Results now leads with the article title or slug, followed by compact triage metadata (`P# category`, host, tags). Kept the change in `render.rs` and updated render tests to lock the new title-first ordering and no-triage placeholder copy.
+Refs: crates/harvester_app/src/platform/ui/render.rs

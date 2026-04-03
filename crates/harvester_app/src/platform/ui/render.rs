@@ -436,7 +436,8 @@ fn layout_view_from_app_view(view: &AppViewModel) -> LayoutViewModel {
             || view.left_pane_header.count_label.is_some()
             || view.left_pane_header.state_label.is_some(),
         preview_header_override_visible: view.preview_header_text.is_some(),
-        preview_context_visible: view.preview_context.is_some() && view.preview_header_text.is_none(),
+        preview_context_visible: view.preview_context.is_some()
+            && view.preview_header_text.is_none(),
         preview_attention_visible: view
             .preview_context
             .as_ref()
@@ -1855,23 +1856,31 @@ fn format_job_row_triage_review(job: &JobRowView) -> String {
     format!("{review_status}{label}")
 }
 
-/// Triage Results tab: shows triage annotation (priority/category/tags) prominently.
+/// Triage Results tab: title first, with triage metadata kept compact.
 fn format_job_row_triage_results(job: &JobRowView) -> String {
     if let Some(annotation) = &job.triage_annotation {
-        let primary = format!(
-            "P{} {}: {}",
+        let primary = triage_result_primary_label(job);
+        let mut metadata = vec![format!(
+            "P{} {}",
             annotation.priority,
-            title_case_label(&annotation.category),
-            triage_result_primary_label(job)
-        );
-        let mut metadata = vec![job_source_label(job)];
+            title_case_label(&annotation.category)
+        )];
+        metadata.push(job_source_label(job));
         if let Some(tags) = compact_triage_tag_count(&annotation.tags) {
             metadata.push(tags);
         }
         format!("{primary} — {}", metadata.join(" · "))
     } else {
-        let label = job_display_label(job);
-        format!("[no triage] {label}")
+        let primary = if job.has_summary {
+            job_primary_label(job)
+        } else {
+            compact_url_label(&job.url, 48)
+        };
+        let mut metadata = vec!["No triage".to_string()];
+        if job.has_summary {
+            metadata.push(job_source_label(job));
+        }
+        format!("{primary} — {}", metadata.join(" · "))
     }
 }
 
@@ -1885,6 +1894,10 @@ fn job_display_label(job: &JobRowView) -> String {
 }
 
 fn job_primary_label(job: &JobRowView) -> String {
+    job_primary_label_with_limit(job, 64)
+}
+
+fn job_primary_label_with_limit(job: &JobRowView, max_chars: usize) -> String {
     if job.has_summary {
         let title = job
             .summary_title
@@ -1892,9 +1905,9 @@ fn job_primary_label(job: &JobRowView) -> String {
             .map(str::trim)
             .filter(|title| !title.is_empty())
             .unwrap_or("(summary available)");
-        truncate_with_ellipsis(title, 72)
+        truncate_with_ellipsis(title, max_chars)
     } else {
-        compact_url_label(&job.url, 56)
+        compact_url_label(&job.url, max_chars.min(56))
     }
 }
 
@@ -1909,11 +1922,12 @@ fn job_source_label(job: &JobRowView) -> String {
 
 fn triage_result_primary_label(job: &JobRowView) -> String {
     if job.has_summary {
-        return job_primary_label(job);
+        return job_primary_label_with_limit(job, 58);
     }
     url_slug_label(&job.url)
         .map(|label| title_case_label(&label))
-        .unwrap_or_else(|| compact_url_label(&job.url, 56))
+        .map(|label| truncate_with_ellipsis(&label, 58))
+        .unwrap_or_else(|| compact_url_label(&job.url, 48))
 }
 
 fn filter_status_label(filter_status: Option<&JobFilterStatus>) -> Option<&'static str> {
@@ -2957,7 +2971,7 @@ mod tests {
             tags: vec!["ai".to_string(), "ml".to_string()],
         });
         let row = format_job_row_triage_results(&job);
-        assert_eq!(row, "P2 Tech: Summary Headline — example.com · 2 tags");
+        assert_eq!(row, "Summary Headline — P2 Tech · example.com · 2 tags");
     }
 
     #[test]
@@ -2965,7 +2979,7 @@ mod tests {
         let mut job = make_job(4, "https://example.com/d", Stage::Done, None, None, None);
         job.triage_annotation = None;
         let row = format_job_row_triage_results(&job);
-        assert!(row.starts_with("[no triage] "), "got: {row}");
+        assert_eq!(row, "example.com/d — No triage");
     }
 
     #[test]
@@ -2992,7 +3006,7 @@ mod tests {
         let row = format_job_row_triage_results(&job);
         assert_eq!(
             row,
-            "P5 Business: Hyperscaler Capex Has Quadrupled — epochai.substack.com · 4 tags"
+            "Hyperscaler Capex Has Quadrupled — P5 Business · epochai.substack.com · 4 tags"
         );
     }
 
@@ -3206,8 +3220,13 @@ mod tests {
 
         assert_eq!(populated.len(), 2);
         assert!(
-            populated[0].text.contains("[no triage] low.com"),
+            populated[0].text.starts_with("low.com"),
             "first should stay job 1 while triage is running, got: {}",
+            populated[0].text
+        );
+        assert!(
+            populated[0].text.contains("No triage"),
+            "first should still show no-triage state, got: {}",
             populated[0].text
         );
         assert!(
@@ -3301,7 +3320,9 @@ mod tests {
             cmds.iter().any(|cmd| matches!(
                 cmd,
                 PlatformCommand::UpdateTreeItemText { item_id, text, .. }
-                    if *item_id == job_tree_item_id(1) && text.contains("P6 Finance: Now Highest")
+                    if *item_id == job_tree_item_id(1)
+                        && text.contains("Now Highest")
+                        && text.contains("P6 Finance")
             )),
             "updated triage row should refresh in place"
         );

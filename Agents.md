@@ -25,3 +25,4 @@
 ## Diary
 - Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations, important decisions, and bug fixes with reusable lessons.
 - Keep diary entries short and reference concrete artifacts.
+- Add new entries to the end.
