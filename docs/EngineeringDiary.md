@@ -1047,3 +1047,9 @@ Type: Implementation
 Context: Screenshot review showed the Triage Results list still scanning as metadata-first because `P# category` led each row while the title and host were pushed later in the line.
 Change: Reworked the row formatter so Triage Results now leads with the article title or slug, followed by compact triage metadata (`P# category`, host, tags). Kept the change in `render.rs` and updated render tests to lock the new title-first ordering and no-triage placeholder copy.
 Refs: crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-03 - Secondary footer actions and readers now recede more cleanly
+Type: Implementation
+Context: After the row-hierarchy pass, the remaining screenshot gap was footer competition and a reading pane that still felt too wide and utility-like.
+Change: Added a semantic `SecondaryButton` style in CommanDuctUI so Harvester could demote `Triage Articles`, `Poll Sources`, and `Open in Browser` without muting every generic button. Follow-up screenshot review also changed disabled button painting to mute the fill itself, made `Stop / Finish` neutral by default and destructive only while a session is actually running, and increased the footer row height so the primary action no longer reads like a short chip. Tightened footer grouping, softened footer text and splitter chrome, widened preview-side margins, and increased RichEdit indents and spacing so long-form panes read more like editorial documents.
+Refs: src/CommanDuctUI/src/styling_primitives.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/markdown_to_rtf.rs

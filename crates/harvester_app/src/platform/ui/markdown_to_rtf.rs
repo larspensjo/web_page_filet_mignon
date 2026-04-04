@@ -5,13 +5,13 @@ pub const FONT_CODE: usize = 1;
 pub const MAX_RTF_NESTING_DEPTH: usize = 20;
 pub const RTF_TRUNCATE_MARKER: &str = "[display truncated]";
 const BODY_FONT_SIZE_HALF_POINTS: usize = 24;
-const BODY_INDENT_TWIPS: usize = 360;
-const BODY_LINE_SPACING_TWIPS: usize = 360;
-const HEADING_SPACING_AFTER_TWIPS: usize = 220;
-const HEADING_SPACING_BEFORE_TWIPS: usize = 120;
-const BODY_SPACING_AFTER_TWIPS: usize = 120;
-const LIST_INDENT_TWIPS: usize = 720;
-const LIST_HANGING_INDENT_TWIPS: usize = 180;
+const BODY_INDENT_TWIPS: usize = 520;
+const BODY_LINE_SPACING_TWIPS: usize = 400;
+const HEADING_SPACING_AFTER_TWIPS: usize = 260;
+const HEADING_SPACING_BEFORE_TWIPS: usize = 140;
+const BODY_SPACING_AFTER_TWIPS: usize = 140;
+const LIST_INDENT_TWIPS: usize = 920;
+const LIST_HANGING_INDENT_TWIPS: usize = 220;
 const COLOR_BODY_TEXT_RTF: &str = "\\red176\\green174\\blue165;";
 const COLOR_HEADING_TEXT_RTF: &str = "\\red250\\green249\\blue245;";
 const COLOR_BACKGROUND_RTF: &str = "\\red48\\green48\\blue46;";
@@ -143,9 +143,9 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
     match tag {
         Tag::Heading { level, .. } => {
             let size = match level {
-                HeadingLevel::H1 => 40,
-                HeadingLevel::H2 => 32,
-                _ => 26,
+                HeadingLevel::H1 => 42,
+                HeadingLevel::H2 => 34,
+                _ => 28,
             };
             rtf.push_str(&format!(
                 "\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa{HEADING_SPACING_AFTER_TWIPS}\\sb{HEADING_SPACING_BEFORE_TWIPS}\\cf2\\b\\fs{size} "
@@ -269,11 +269,11 @@ mod tests {
     #[test]
     fn headings_render_as_distinct_bold_blocks() {
         let rtf = convert_markdown_to_rtf("# H1\n## H2\n### H3");
-        assert!(rtf.contains("\\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs40 H1"));
-        assert!(rtf.contains("\\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs32 H2"));
-        assert!(rtf.contains("\\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs26 H3"));
+        assert!(rtf.contains("\\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs42 H1"));
+        assert!(rtf.contains("\\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs34 H2"));
+        assert!(rtf.contains("\\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs28 H3"));
         assert!(
-            rtf.matches("\\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs")
+            rtf.matches("\\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs")
                 .count()
                 >= 3
         );
@@ -324,27 +324,27 @@ mod tests {
         assert!(rtf.contains(COLOR_HEADING_TEXT_RTF));
         assert!(rtf.contains(COLOR_BACKGROUND_RTF));
         assert!(rtf.contains("\\fs24 "));
-        assert!(rtf.contains("\\li360\\ri360\\sl360\\slmult1"));
+        assert!(rtf.contains("\\li520\\ri520\\sl400\\slmult1"));
     }
 
     #[test]
     fn loose_ordered_list_item_body_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("1. **Headline**\n\n   Body text");
         assert!(rtf.contains(
-            "1.\\tab \\sa80\\sb0\\sl360\\slmult1 \\b Headline\\b0 \\par \\par\\pard\\li720\\ri360\\sa80\\sb0\\sl360\\slmult1 Body text"
+            "1.\\tab \\sa80\\sb0\\sl400\\slmult1 \\b Headline\\b0 \\par \\par\\pard\\li920\\ri520\\sa80\\sb0\\sl400\\slmult1 Body text"
         ));
     }
 
     #[test]
     fn heading_after_list_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("- one\n- two\n\n## Brave");
-        assert!(rtf.contains("\\pard \\par \\pard\\li360\\ri360\\sa220\\sb120\\cf2\\b\\fs32 Brave"));
+        assert!(rtf.contains("\\pard \\par \\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs34 Brave"));
     }
 
     #[test]
     fn body_paragraphs_use_editorial_measure_and_spacing() {
         let rtf = convert_markdown_to_rtf("Paragraph");
-        assert!(rtf.contains("\\pard\\li360\\ri360\\sa120\\sb0\\sl360\\slmult1 Paragraph"));
+        assert!(rtf.contains("\\pard\\li520\\ri520\\sa140\\sb0\\sl400\\slmult1 Paragraph"));
     }
 
     #[test]

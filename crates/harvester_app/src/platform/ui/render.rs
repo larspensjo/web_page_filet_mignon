@@ -107,6 +107,7 @@ pub struct TreeRenderState {
     prev_progress_range: Option<(u32, u32)>,
     prev_progress_pos: Option<u32>,
     prev_token_progress_style: Option<StyleId>,
+    prev_stop_style: Option<StyleId>,
     prev_operation_progress_visible: bool,
     prev_operation_progress_text: Option<String>,
     prev_operation_progress_range: Option<(u32, u32)>,
@@ -194,6 +195,7 @@ impl Default for TreeRenderState {
             prev_progress_range: None,
             prev_progress_pos: None,
             prev_token_progress_style: None,
+            prev_stop_style: None,
             prev_operation_progress_visible: false,
             prev_operation_progress_text: None,
             prev_operation_progress_range: None,
@@ -756,6 +758,20 @@ fn render_main_controls_section(
             window_id,
             control_id: LABEL_JOBS_HEADER_META,
             text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_stop_style,
+        if matches!(view.session, SessionState::Running) {
+            StyleId::DestructiveButton
+        } else {
+            StyleId::SecondaryButton
+        },
+        cmds,
+        |style_id| PlatformCommand::ApplyStyleToControl {
+            window_id,
+            control_id: BUTTON_STOP,
+            style_id,
         },
     );
     emit_if_changed(
@@ -3500,6 +3516,53 @@ mod tests {
             )
         });
         assert!(disabled, "BUTTON_OPEN_BROWSER should be disabled");
+    }
+
+    #[test]
+    fn stop_button_uses_secondary_style_when_not_running() {
+        init_logging();
+        let view = make_view(vec![]);
+        let mut tree_state = TreeRenderState::new();
+        let window_id = WindowId::new(1);
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
+                if *control_id == BUTTON_STOP && *style_id == StyleId::SecondaryButton
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+                if *control_id == BUTTON_STOP
+            )
+        }));
+    }
+
+    #[test]
+    fn stop_button_uses_destructive_style_when_running() {
+        init_logging();
+        let mut view = make_view(vec![]);
+        view.session = SessionState::Running;
+        let mut tree_state = TreeRenderState::new();
+        let window_id = WindowId::new(1);
+        let cmds = render(window_id, &view, &mut tree_state);
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
+                if *control_id == BUTTON_STOP && *style_id == StyleId::DestructiveButton
+            )
+        }));
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+                if *control_id == BUTTON_STOP
+            )
+        }));
     }
 
     #[test]

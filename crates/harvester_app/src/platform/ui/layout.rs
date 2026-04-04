@@ -912,9 +912,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 b: 0x13,
             }),
             text_color: Some(Color {
-                r: 0xB0,
-                g: 0xAE,
-                b: 0xA5,
+                r: 0x87,
+                g: 0x86,
+                b: 0x7F,
             }),
             ..Default::default()
         },
@@ -978,6 +978,23 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 r: 0x18,
                 g: 0x18,
                 b: 0x17,
+            }),
+            text_color: Some(Color {
+                r: 0xB0,
+                g: 0xAE,
+                b: 0xA5,
+            }),
+            ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::SecondaryButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x24,
+                g: 0x24,
+                b: 0x22,
             }),
             text_color: Some(Color {
                 r: 0xB0,
@@ -1132,9 +1149,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::Splitter,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x30,
-                g: 0x30,
-                b: 0x2E,
+                r: 0x2A,
+                g: 0x2A,
+                b: 0x28,
             }),
             ..Default::default()
         },
@@ -1400,14 +1417,14 @@ fn build_layout_rules(
             dock_style: DockStyle::Bottom,
             order: 100,
             fixed_size: Some(32),
-            margin: (0, 6, 0, 0),
+            margin: (0, 8, 0, 0),
         },
         LayoutRule {
             control_id: PANEL_BUTTONS,
             parent_control_id: None,
             dock_style: DockStyle::Bottom,
             order: 110,
-            fixed_size: Some(52),
+            fixed_size: Some(56),
             margin: (0, 0, 0, 0),
         },
         // PANEL_LEFT replaces the old root-level PANEL_INPUT + PANEL_JOBS.
@@ -1525,7 +1542,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Left,
             order: 205,
             fixed_size: Some(2),
-            margin: (4, 18, 4, 18),
+            margin: (4, 20, 4, 20),
         },
         LayoutRule {
             control_id: PANEL_PREVIEW,
@@ -1533,7 +1550,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 310,
             fixed_size: None,
-            margin: (6, 16, 12, 16),
+            margin: (8, 20, 16, 20),
         },
         LayoutRule {
             control_id: LABEL_PREVIEW_HEADER,
@@ -1545,7 +1562,7 @@ fn build_layout_rules(
             } else {
                 Some(0)
             },
-            margin: (12, 8, 10, 0),
+            margin: (18, 10, 12, 0),
         },
         LayoutRule {
             control_id: PANEL_PREVIEW_CONTEXT,
@@ -1557,7 +1574,7 @@ fn build_layout_rules(
             } else {
                 Some(0)
             },
-            margin: (12, 6, 10, 0),
+            margin: (18, 8, 12, 0),
         },
         LayoutRule {
             control_id: LABEL_PREVIEW_SOURCE,
@@ -1590,7 +1607,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Top,
             order: 2,
             fixed_size: Some(28),
-            margin: (0, 0, 8, 0),
+            margin: (0, 2, 10, 0),
         },
         // Tab content panels — active tab fills remaining space; inactive ones collapse.
         LayoutRule {
@@ -1607,7 +1624,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (12, 12, 12, 18),
+            margin: (18, 16, 18, 24),
         },
         LayoutRule {
             control_id: PANEL_TAB_SUMMARY,
@@ -1623,7 +1640,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (12, 12, 12, 18),
+            margin: (18, 16, 18, 24),
         },
         LayoutRule {
             control_id: PANEL_TAB_BRIEFING,
@@ -1639,7 +1656,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (12, 12, 12, 18),
+            margin: (18, 16, 18, 24),
         },
         LayoutRule {
             control_id: PANEL_TAB_TRENDS,
@@ -1665,7 +1682,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Top,
             order: 1,
             fixed_size: Some(20),
-            margin: (12, 8, 8, 12),
+            margin: (18, 10, 8, 16),
         },
         LayoutRule {
             control_id: CHART_TRENDS,
@@ -1689,7 +1706,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (12, 12, 12, 18),
+            margin: (18, 16, 18, 24),
         },
         LayoutRule {
             control_id: LABEL_PROMPT_LAB_STATUS,
@@ -1721,7 +1738,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Fill,
             order: 0,
             fixed_size: None,
-            margin: (8, 12, 8, 12),
+            margin: (10, 14, 8, 14),
         },
         LayoutRule {
             control_id: PROGRESS_OPERATION,
@@ -1729,7 +1746,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Right,
             order: 10,
             fixed_size: Some(operation_progress_bar_width),
-            margin: (10, 8, 12, 2),
+            margin: (12, 10, 14, 4),
         },
         LayoutRule {
             control_id: LABEL_OPERATION_PROGRESS,
@@ -1737,47 +1754,47 @@ fn build_layout_rules(
             dock_style: DockStyle::Right,
             order: 20,
             fixed_size: Some(operation_progress_label_width),
-            margin: (8, 8, 12, 8),
+            margin: (8, 10, 14, 10),
         },
         LayoutRule {
             control_id: BUTTON_STOP,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 0,
-            fixed_size: Some(132),
-            margin: (12, 18, 18, 10),
+            fixed_size: Some(128),
+            margin: (14, 6, 22, 6),
         },
         LayoutRule {
             control_id: BUTTON_BRIEFING,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 1,
-            fixed_size: Some(170),
-            margin: (0, 10, 20, 10),
+            fixed_size: Some(168),
+            margin: (0, 6, 6, 6),
         },
         LayoutRule {
             control_id: BUTTON_TRIAGE,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 2,
-            fixed_size: Some(148),
-            margin: (0, 10, 8, 10),
+            fixed_size: Some(144),
+            margin: (0, 6, 6, 6),
         },
         LayoutRule {
             control_id: BUTTON_POLL_SOURCES,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 3,
-            fixed_size: Some(148),
-            margin: (0, 10, 8, 10),
+            fixed_size: Some(144),
+            margin: (0, 6, 6, 6),
         },
         LayoutRule {
             control_id: BUTTON_OPEN_BROWSER,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 4,
-            fixed_size: Some(148),
-            margin: (0, 10, 8, 10),
+            fixed_size: Some(144),
+            margin: (0, 6, 6, 6),
         },
     ];
 
@@ -2537,7 +2554,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_STOP,
-        style_id: StyleId::DestructiveButton,
+        style_id: StyleId::SecondaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -2547,17 +2564,17 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_TRIAGE,
-        style_id: StyleId::DefaultButton,
+        style_id: StyleId::SecondaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_POLL_SOURCES,
-        style_id: StyleId::DefaultButton,
+        style_id: StyleId::SecondaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_OPEN_BROWSER,
-        style_id: StyleId::DefaultButton,
+        style_id: StyleId::SecondaryButton,
     });
     for control_id in [
         BTN_PROMPT_LAB_RESOLVE,
@@ -3495,5 +3512,163 @@ mod tests {
                 viewer_id
             );
         }
+    }
+
+    #[test]
+    fn secondary_footer_buttons_use_secondary_button_style() {
+        let cmds = initial_commands(WindowId::new(99));
+        for button_id in [BUTTON_TRIAGE, BUTTON_POLL_SOURCES, BUTTON_OPEN_BROWSER] {
+            let has_style = cmds.iter().any(|cmd| {
+                matches!(
+                    cmd,
+                    PlatformCommand::ApplyStyleToControl {
+                        control_id,
+                        style_id: StyleId::SecondaryButton,
+                        ..
+                    } if *control_id == button_id
+                )
+            });
+            assert!(
+                has_style,
+                "BUTTON {:?} should receive SecondaryButton style",
+                button_id
+            );
+        }
+    }
+
+    #[test]
+    fn preview_viewers_use_editorial_inner_margins() {
+        let cmd = build_layout_command(
+            WindowId::new(109),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+
+        for viewer_id in [
+            VIEWER_PREVIEW,
+            VIEWER_TRIAGE,
+            VIEWER_BRIEFING,
+            VIEWER_POLL_STATS,
+        ] {
+            let rule = rules
+                .iter()
+                .find(|r| r.control_id == viewer_id)
+                .expect("viewer rule");
+            assert_eq!(
+                rule.margin,
+                (18, 16, 18, 24),
+                "VIEWER {:?} should use the roomier reading margins",
+                viewer_id
+            );
+        }
+    }
+
+    #[test]
+    fn footer_buttons_share_a_common_vertical_alignment() {
+        let cmd = build_layout_command(
+            WindowId::new(110),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+
+        let expected_vertical = (6, 6);
+        for button_id in [
+            BUTTON_STOP,
+            BUTTON_BRIEFING,
+            BUTTON_TRIAGE,
+            BUTTON_POLL_SOURCES,
+            BUTTON_OPEN_BROWSER,
+        ] {
+            let rule = rules
+                .iter()
+                .find(|r| r.control_id == button_id)
+                .expect("button rule");
+            assert_eq!(
+                (rule.margin.1, rule.margin.3),
+                expected_vertical,
+                "BUTTON {:?} should share the footer row baseline",
+                button_id
+            );
+        }
+    }
+
+    #[test]
+    fn footer_button_row_is_tall_enough_for_primary_action_presence() {
+        let cmd = build_layout_command(
+            WindowId::new(111),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        let panel_buttons = rules
+            .iter()
+            .find(|r| r.control_id == PANEL_BUTTONS)
+            .expect("buttons panel rule");
+        assert_eq!(panel_buttons.fixed_size, Some(56));
     }
 }
