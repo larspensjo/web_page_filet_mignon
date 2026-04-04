@@ -701,12 +701,11 @@ impl AppState {
             self.ai_unavailable_message().as_deref(),
         );
         let preview_context = preview_header.as_ref().map(build_preview_context_view);
-        let preview_header_text = if self.active_tab() == AppTab::Briefing {
-            Some(self.format_briefing_preview_header())
-        } else if self.active_tab() == AppTab::PollStats {
-            Some("Poll Stats | last poll".to_string())
-        } else {
-            None
+        let preview_header_text = match self.active_tab() {
+            AppTab::Briefing => Some(self.format_briefing_preview_header()),
+            AppTab::Trends => Some(self.format_trends_preview_header()),
+            AppTab::PollStats => Some("Poll Stats | last poll".to_string()),
+            AppTab::Triage | AppTab::Summary => None,
         };
         let selected_triage_article_available = self
             .ui
@@ -837,13 +836,20 @@ impl AppState {
         }
     }
 
+    fn format_trends_preview_header(&self) -> String {
+        "Trends | recent activity".to_string()
+    }
+
     pub fn layout_view(&self) -> LayoutViewModel {
         let selected_job = self
             .ui
             .selected_job_id()
             .and_then(|job_id| self.jobs.get(&job_id));
         let preview_header_override_visible =
-            matches!(self.active_tab(), AppTab::Briefing | AppTab::PollStats);
+            matches!(
+                self.active_tab(),
+                AppTab::Briefing | AppTab::Trends | AppTab::PollStats
+            );
         LayoutViewModel {
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
@@ -4799,5 +4805,51 @@ mod poll_stats_view_tests {
         state.select_tab(AppTab::Triage);
         let view = state.view();
         assert_eq!(view.preview_header_text, None);
+    }
+}
+
+#[cfg(test)]
+mod trends_view_tests {
+    use super::*;
+
+    #[test]
+    fn trends_tab_uses_page_level_header_override_instead_of_selected_article_context() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            1,
+            JobState {
+                url: "https://epochai.substack.com/p/what".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+        state.select_job(1);
+        state.select_tab(AppTab::Trends);
+
+        let view = state.view();
+        let layout = state.layout_view();
+
+        assert!(
+            view.preview_header_text
+                .as_deref()
+                .unwrap_or("")
+                .contains("Trends"),
+            "trends tab must provide a page-level header override"
+        );
+        assert!(
+            view.preview_context
+                .as_ref()
+                .is_some_and(|context| context.source_label == "epochai.substack.com"),
+            "selected article metadata may still exist in state"
+        );
+        assert!(
+            layout.preview_header_override_visible,
+            "trends tab should render the page-level header row"
+        );
+        assert!(
+            !layout.preview_context_visible,
+            "trends tab should hide the selected article metadata row"
+        );
     }
 }

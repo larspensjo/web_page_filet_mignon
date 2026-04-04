@@ -1053,3 +1053,9 @@ Type: Implementation
 Context: After the row-hierarchy pass, the remaining screenshot gap was footer competition and a reading pane that still felt too wide and utility-like.
 Change: Added a semantic `SecondaryButton` style in CommanDuctUI so Harvester could demote `Triage Articles`, `Poll Sources`, and `Open in Browser` without muting every generic button. Follow-up screenshot review also changed disabled button painting to mute the fill itself, made `Stop / Finish` neutral by default and destructive only while a session is actually running, and increased the footer row height so the primary action no longer reads like a short chip. Tightened footer grouping, softened footer text and splitter chrome, widened preview-side margins, and increased RichEdit indents and spacing so long-form panes read more like editorial documents.
 Refs: src/CommanDuctUI/src/styling_primitives.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/markdown_to_rtf.rs
+
+## 2026-04-04 - Trends header no longer leaks selected-article source text
+Type: Bug Fix
+Context: The right-pane header split left `Trends` on the selected-article fallback path, so a host like `epochai.substack.com` could appear above the trends tabs even though the chart is collection-level data.
+Change: Routed `AppTab::Trends` through a page-level preview header override, hid the selected-article metadata row for that tab, and added state regression coverage locking the trends header behavior.
+Refs: crates/harvester_core/src/state.rs

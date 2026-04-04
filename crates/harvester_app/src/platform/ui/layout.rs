@@ -1556,25 +1556,25 @@ fn build_layout_rules(
             control_id: LABEL_PREVIEW_HEADER,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
-            order: 0,
+            order: 1,
             fixed_size: if preview_header_override_visible {
-                Some(24)
+                Some(18)
             } else {
                 Some(0)
             },
-            margin: (18, 10, 12, 0),
+            margin: (2, 2, 8, 0),
         },
         LayoutRule {
             control_id: PANEL_PREVIEW_CONTEXT,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
-            order: 1,
+            order: 2,
             fixed_size: if preview_context_visible {
-                Some(24)
+                Some(22)
             } else {
                 Some(0)
             },
-            margin: (18, 8, 12, 0),
+            margin: (2, 2, 4, 0),
         },
         LayoutRule {
             control_id: LABEL_PREVIEW_SOURCE,
@@ -1605,9 +1605,9 @@ fn build_layout_rules(
             control_id: TAB_BAR_RIGHT,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
-            order: 2,
+            order: 0,
             fixed_size: Some(28),
-            margin: (0, 2, 10, 0),
+            margin: (0, 0, 6, 0),
         },
         // Tab content panels — active tab fills remaining space; inactive ones collapse.
         LayoutRule {
