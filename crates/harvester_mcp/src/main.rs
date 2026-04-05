@@ -68,6 +68,8 @@ impl HarvesterMcpServer {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let overall_start = Instant::now();
+
     let args = Args::parse();
 
     let log_dir = args
@@ -95,11 +97,18 @@ async fn main() -> anyhow::Result<()> {
         t1.elapsed().as_millis()
     );
 
+    engine_logging::engine_info!("article index: not yet implemented");
+
     engine_logging::engine_info!(
         "output_dir={:?} agent_model={} context_budget={}",
         args.output_dir,
         args.agent_model,
         args.context_budget
+    );
+
+    engine_logging::engine_info!(
+        "startup complete in {}ms",
+        overall_start.elapsed().as_millis()
     );
 
     let server = HarvesterMcpServer::new(args.output_dir, entity_index, summary_cache);
