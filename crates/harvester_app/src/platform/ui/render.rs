@@ -5,9 +5,9 @@ use commanductui::{
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppTab, AppViewModel, IndirectLinkPhase, JobFilterStatus, JobListScope, JobResultKind,
-    JobRowView, LayoutViewModel, LeftPaneHeaderView, LeftTab, LlmModelUsageView,
-    PreviewContextView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendsTabView,
+    AppTab, AppViewModel, JobFilterStatus, JobListScope, JobResultKind, JobRowView,
+    LayoutViewModel, LeftPaneHeaderView, LeftTab, LlmModelUsageView, PreviewContextView,
+    PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendsTabView,
     DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
@@ -105,7 +105,6 @@ pub struct TreeRenderState {
     prev_briefing_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
     prev_poll_enabled: Option<bool>,
-    prev_poll_indirect_enabled: Option<bool>,
     prev_briefing_progress: Option<String>,
     prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
@@ -194,7 +193,6 @@ impl Default for TreeRenderState {
             prev_briefing_enabled: None,
             prev_triage_enabled: None,
             prev_poll_enabled: None,
-            prev_poll_indirect_enabled: None,
             prev_briefing_progress: None,
             prev_triage_progress: None,
             prev_progress_range: None,
@@ -604,21 +602,10 @@ fn render_status_section(
     if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
         status_parts.push(usage);
     }
-    if let Some(summary) = &view.indirect_link_summary {
-        let summary_text = match summary.phase {
-            IndirectLinkPhase::Collecting => {
-                format!("{} indirect links collected", summary.count)
-            }
-            IndirectLinkPhase::Ready => {
-                if summary.count == 0 {
-                    "No indirect links".to_string()
-                } else {
-                    format!("{} indirect links ready", summary.count)
-                }
-            }
-        };
-        status_parts.push(summary_text);
-    }
+    // Indirect-link polling is intentionally hidden for now because the current
+    // collection pass still produces large noisy batches on cold starts.
+    // Do not surface collection counts in the footer until the feature is
+    // redesigned and safe to re-enable.
     let severity = if let Some(message) = view.ai_unavailable_message.as_deref() {
         status_parts.push(message.to_string());
         MessageSeverity::Warning
@@ -833,16 +820,6 @@ fn render_main_controls_section(
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_POLL_SOURCES,
-            enabled,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_poll_indirect_enabled,
-        view.poll_indirect_links_enabled,
-        cmds,
-        |enabled| PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_POLL_INDIRECT_LINKS,
             enabled,
         },
     );

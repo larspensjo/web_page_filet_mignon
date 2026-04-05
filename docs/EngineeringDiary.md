@@ -1071,3 +1071,15 @@ Type: Implementation
 Context: Stage gating requires a visible footer action for the new indirect-link collection feature, and the button must reuse the secondary footer styling when the indirect pool is empty/enabled so the warm theme stays consistent.
 Change: Added the layout rule, style application, and footer enablement hook for `Poll Indirect Links`, wired the button into the event handler/render pipeline, and extended the view model status line so the readiness text (collecting/ready/empty) appears alongside session metadata.
 Refs: docs/visual_design/VisualDesignSpec.md, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_core/src/update.rs, crates/harvester_core/src/state.rs, crates/harvester_core/src/view_model.rs
+
+## 2026-04-05 - Indirect-link polling now drops navigation/share noise before enqueue
+Type: Bug Fix
+Context: Field testing showed `Poll Indirect Links` ballooning into large low-signal batches dominated by site chrome, social share URLs, legal pages, and redirect wrappers.
+Change: Filtered indirect links upstream in reducer state collection, switched pool-local dedupe to normalized URLs, and added regression tests covering noise rejection and normalized duplicate suppression.
+Refs: crates/harvester_core/src/state.rs, engine.log
+
+## 2026-04-05 - Indirect-link polling UI hidden pending redesign
+Type: Bug Fix
+Context: Fresh-start polling still surfaced large low-signal indirect link pools, so the footer action and status copy encouraged expensive noisy follow-up runs.
+Change: Removed the `Poll Indirect Links` footer button from layout/rendering and stopped showing indirect-link counts in the footer, while leaving the underlying code path commented and intact for a future redesign.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs

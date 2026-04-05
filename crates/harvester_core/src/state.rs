@@ -38,6 +38,48 @@ const LINK_ROW_LIMIT: usize = 200;
 const LINK_LABEL_MAX: usize = 80;
 const LINK_LABEL_TRUNCATE_MARKER: &str = "…";
 const CHECKPOINT_SAVING_STATUS_MESSAGE: &str = "Checkpoint saving...";
+const INDIRECT_LINK_BLOCKED_HOSTS: &[&str] = &[
+    "youtube.com",
+    "youtu.be",
+    "facebook.com",
+    "twitter.com",
+    "x.com",
+    "linkedin.com",
+    "instagram.com",
+    "whatsapp.com",
+    "pinterest.com",
+    "flipboard.com",
+    "tiktok.com",
+    "zdcs.link",
+];
+const INDIRECT_LINK_BLOCKED_PATH_PREFIXES: &[&str] = &[
+    "/about",
+    "/author",
+    "/authors",
+    "/category",
+    "/categories",
+    "/contact",
+    "/creators",
+    "/login",
+    "/new",
+    "/privacy",
+    "/search",
+    "/subscription",
+    "/tag",
+    "/tags",
+    "/terms",
+];
+const INDIRECT_LINK_BLOCKED_PATH_CONTAINS: &[&str] = &[
+    "/share",
+    "/sharer",
+    "/intent/",
+    "/intent?",
+    "/bookmark",
+    "/contact_us",
+    "/about/press",
+    "/about/copyright",
+    "/about/policies",
+];
 
 fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSnapshot> {
     let registry = PromptRegistry::with_defaults();
@@ -301,13 +343,84 @@ impl IndirectLinkPool {
     }
 
     fn add_link(&mut self, link: IndirectLink) -> bool {
-        if self.seen_urls.contains(&link.url) {
+        let normalized = normalize_url_for_dedupe(&link.url);
+        if normalized.is_empty() || self.seen_urls.contains(&normalized) {
             return false;
         }
-        self.seen_urls.insert(link.url.clone());
+        self.seen_urls.insert(normalized);
         self.links.push(link);
         true
     }
+}
+
+fn host_matches_indirect_blocklist(host: &str) -> bool {
+    INDIRECT_LINK_BLOCKED_HOSTS
+        .iter()
+        .any(|blocked| host == *blocked || host.ends_with(&format!(".{blocked}")))
+}
+
+fn should_collect_indirect_link(source_url: &str, link_url: &str) -> bool {
+    let link = match Url::parse(link_url) {
+        Ok(url) => url,
+        Err(_) => return false,
+    };
+
+    match link.scheme() {
+        "http" | "https" => {}
+        _ => return false,
+    }
+
+    let host = match link.host_str() {
+        Some(host) => host.to_ascii_lowercase(),
+        None => return false,
+    };
+    if host_matches_indirect_blocklist(&host) {
+        return false;
+    }
+
+    let path = link.path().to_ascii_lowercase();
+    if path == "/" {
+        return false;
+    }
+    if INDIRECT_LINK_BLOCKED_PATH_PREFIXES
+        .iter()
+        .any(|prefix| path == *prefix || path.starts_with(&format!("{prefix}/")))
+    {
+        return false;
+    }
+    if INDIRECT_LINK_BLOCKED_PATH_CONTAINS
+        .iter()
+        .any(|pattern| path.contains(pattern))
+    {
+        return false;
+    }
+
+    if let Some(query) = link.query() {
+        let lower = query.to_ascii_lowercase();
+        if lower.contains("utm_")
+            || lower.contains("fbclid=")
+            || lower.contains("gclid=")
+            || lower.contains("redirect=")
+            || lower.contains("share=")
+            || lower.contains("intent=")
+        {
+            return false;
+        }
+    }
+
+    if let Ok(source) = Url::parse(source_url) {
+        if source.host_str().map(|h| h.eq_ignore_ascii_case(&host)) == Some(true) {
+            let articleish_markers = [
+                "/20", "/article/", "/articles/", "/story/", "/news/", "/insights/", "/p/",
+            ];
+            let looks_articleish = articleish_markers.iter().any(|m| path.contains(m));
+            if !looks_articleish {
+                return false;
+            }
+        }
+    }
+
+    true
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2434,6 +2547,9 @@ impl AppState {
             if link.kind != LinkKind::Hyperlink {
                 continue;
             }
+            if !should_collect_indirect_link(&job.url, &link.url) {
+                continue;
+            }
             let normalized = normalize_url_for_dedupe(&link.url);
             if normalized.is_empty() || self.has_seen_url(&normalized) {
                 continue;
@@ -3800,6 +3916,68 @@ mod tests {
             "https://other.example/path".to_string()
         );
         assert_eq!(stored_links[1].index, 2);
+    }
+
+    #[test]
+    fn collect_indirect_links_filters_navigation_and_share_noise() {
+        let mut state = AppState::new();
+        state.jobs.insert(
+            9,
+            JobState {
+                url: "https://mashable.com/article/april-5-microsoft-windows-11-pro".to_string(),
+                stage: Stage::Done,
+                origin: JobOrigin::Direct,
+                links: vec![
+                    LinkRecord {
+                        index: 0,
+                        url: "https://mashable.com/tech".to_string(),
+                        anchor_text: None,
+                        kind: LinkKind::Hyperlink,
+                        download_state: LinkDownloadState::NotDownloaded,
+                        age_estimate: None,
+                    },
+                    LinkRecord {
+                        index: 1,
+                        url: "https://twitter.com/intent/tweet?url=https://mashable.com/article/april-5-microsoft-windows-11-pro".to_string(),
+                        anchor_text: None,
+                        kind: LinkKind::Hyperlink,
+                        download_state: LinkDownloadState::NotDownloaded,
+                        age_estimate: None,
+                    },
+                    LinkRecord {
+                        index: 2,
+                        url: "https://example.com/news/follow-up-story".to_string(),
+                        anchor_text: None,
+                        kind: LinkKind::Hyperlink,
+                        download_state: LinkDownloadState::NotDownloaded,
+                        age_estimate: None,
+                    },
+                ],
+                ..Default::default()
+            },
+        );
+
+        state.begin_indirect_link_generation();
+        state.collect_indirect_links_from_job(9);
+
+        let drained = state.drain_indirect_links();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].url, "https://example.com/news/follow-up-story");
+    }
+
+    #[test]
+    fn indirect_link_pool_dedupes_normalized_urls() {
+        let mut pool = IndirectLinkPool::new();
+
+        assert!(pool.add_link(IndirectLink {
+            url: "https://Example.com/path/".to_string(),
+            source_job_id: 1,
+        }));
+        assert!(!pool.add_link(IndirectLink {
+            url: "https://example.com/path".to_string(),
+            source_job_id: 2,
+        }));
+        assert_eq!(pool.len(), 1);
     }
 
     #[test]
