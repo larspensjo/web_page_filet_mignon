@@ -16,9 +16,10 @@ use crate::triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, Triage
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::{guess_age_from_url, AgeEstimate};
 use crate::view_model::{
-    AppViewModel, JobFilterStatus, JobRowView, LastPasteStats, LayoutViewModel, LeftPaneHeaderView,
-    LinkRowView, OperationProgress, PreviewContextView, PreviewHeaderView, TriageAnnotationView,
-    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
+    AppViewModel, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus, JobRowView,
+    LastPasteStats, LayoutViewModel, LeftPaneHeaderView, LinkRowView, OperationProgress,
+    PreviewContextView, PreviewHeaderView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH,
+    DEFAULT_WINDOW_WIDTH, TOKEN_LIMIT,
 };
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
@@ -244,6 +245,71 @@ pub struct LinkRecord {
     pub age_estimate: Option<AgeEstimate>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum JobOrigin {
+    #[default]
+    Direct,
+    Indirect {
+        source_job_id: JobId,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndirectLink {
+    pub url: String,
+    pub source_job_id: JobId,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct IndirectLinkPool {
+    generation: u32,
+    links: Vec<IndirectLink>,
+    seen_urls: HashSet<String>,
+}
+
+impl IndirectLinkPool {
+    fn new() -> Self {
+        Self {
+            generation: 0,
+            links: Vec::new(),
+            seen_urls: HashSet::new(),
+        }
+    }
+
+    fn begin_new_generation(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.links.clear();
+        self.seen_urls.clear();
+    }
+
+    fn len(&self) -> usize {
+        self.links.len()
+    }
+
+    fn generation(&self) -> u32 {
+        self.generation
+    }
+
+    fn is_empty(&self) -> bool {
+        self.links.is_empty()
+    }
+
+    fn draining_links(&mut self) -> Vec<IndirectLink> {
+        let drained = self.links.drain(..).collect();
+        self.seen_urls.clear();
+        drained
+    }
+
+    fn add_link(&mut self, link: IndirectLink) -> bool {
+        if self.seen_urls.contains(&link.url) {
+            return false;
+        }
+        self.seen_urls.insert(link.url.clone());
+        self.links.push(link);
+        true
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkSnapshotRecord {
     pub url: String,
@@ -357,6 +423,8 @@ pub struct AppState {
     triage: TriageSession,
     pre_triage: PreTriageSession,
     pre_triage_manual_overrides: HashMap<ArticleFilterKey, ManualDecision>,
+    indirect_link_pool: IndirectLinkPool,
+    indirect_poll_in_progress: bool,
     source_states: SourceStateIndex,
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
@@ -456,6 +524,8 @@ impl Default for AppState {
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
             pre_triage_manual_overrides: HashMap::new(),
+            indirect_link_pool: IndirectLinkPool::new(),
+            indirect_poll_in_progress: false,
             source_states: SourceStateIndex::default(),
             prompt_contexts: HashMap::new(),
             active_prompt_versions: HashMap::new(),
@@ -787,6 +857,8 @@ impl AppState {
                 self.session,
                 SessionState::Idle | SessionState::Running
             ) && !self.source_states.is_poll_in_progress(),
+            poll_indirect_links_enabled: !self.indirect_link_pool.is_empty()
+                && !self.indirect_poll_in_progress(),
             checkpoint_status_message: self.briefing_checkpoint_status_message.clone(),
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
@@ -803,6 +875,7 @@ impl AppState {
                 ),
             },
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
+            indirect_link_summary: self.build_indirect_link_summary(),
             llm_usage_by_model: self.llm_usage_rows(),
             right_pane: self.build_right_pane_view(selected_triage_article_available),
         }
@@ -845,11 +918,10 @@ impl AppState {
             .ui
             .selected_job_id()
             .and_then(|job_id| self.jobs.get(&job_id));
-        let preview_header_override_visible =
-            matches!(
-                self.active_tab(),
-                AppTab::Briefing | AppTab::Trends | AppTab::PollStats
-            );
+        let preview_header_override_visible = matches!(
+            self.active_tab(),
+            AppTab::Briefing | AppTab::Trends | AppTab::PollStats
+        );
         LayoutViewModel {
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
@@ -1290,6 +1362,19 @@ impl AppState {
 
     pub fn pre_triage_key_for_job(&self, job_id: JobId) -> Option<crate::ArticleFilterKey> {
         self.pre_triage.key_for_job(job_id)
+    }
+
+    fn build_indirect_link_summary(&self) -> Option<IndirectLinkSummary> {
+        let count = self.indirect_link_pool.len();
+        if count == 0 && self.indirect_link_pool.generation() == 0 && !self.is_poll_in_progress() {
+            return None;
+        }
+        let phase = if self.is_poll_in_progress() {
+            IndirectLinkPhase::Collecting
+        } else {
+            IndirectLinkPhase::Ready
+        };
+        Some(IndirectLinkSummary { count, phase })
     }
 
     pub fn pre_triage_manual_overrides(&self) -> &HashMap<ArticleFilterKey, ManualDecision> {
@@ -1936,6 +2021,7 @@ impl AppState {
                     content_preview: None,
                     preview_quality: None,
                     links: Vec::new(),
+                    origin: JobOrigin::Direct,
                     fetched_utc: restored_fetched_utc,
                 },
             );
@@ -1993,6 +2079,7 @@ impl AppState {
                     content_preview: None,
                     preview_quality: None,
                     links: Vec::new(),
+                    origin: JobOrigin::Direct,
                     fetched_utc: restored_fetched_utc,
                 },
             );
@@ -2264,17 +2351,7 @@ impl AppState {
             self.next_job_id += 1;
             self.jobs.insert(
                 job_id,
-                JobState {
-                    url: url.clone(),
-                    stage: Stage::Queued,
-                    outcome: None,
-                    tokens: None,
-                    bytes: None,
-                    content_preview: None,
-                    preview_quality: None,
-                    links: Vec::new(),
-                    fetched_utc: None,
-                },
+                Self::build_job_state(url.clone(), JobOrigin::Direct),
             );
             enqueued.push((job_id, url.clone()));
         }
@@ -2324,6 +2401,127 @@ impl AppState {
             enqueued: enqueued_count,
             skipped,
         }
+    }
+
+    fn build_job_state(url: String, origin: JobOrigin) -> JobState {
+        JobState {
+            url,
+            stage: Stage::Queued,
+            outcome: None,
+            tokens: None,
+            bytes: None,
+            content_preview: None,
+            preview_quality: None,
+            links: Vec::new(),
+            origin,
+            fetched_utc: None,
+        }
+    }
+
+    fn has_seen_url(&self, normalized_url: &str) -> bool {
+        self.seen_urls.contains(normalized_url)
+    }
+
+    fn collect_indirect_links_from_job(&mut self, job_id: JobId) {
+        let job = match self.jobs.get(&job_id) {
+            Some(job) => job,
+            None => return,
+        };
+        if job.origin != JobOrigin::Direct {
+            return;
+        }
+        for link in &job.links {
+            if link.kind != LinkKind::Hyperlink {
+                continue;
+            }
+            let normalized = normalize_url_for_dedupe(&link.url);
+            if normalized.is_empty() || self.has_seen_url(&normalized) {
+                continue;
+            }
+            self.indirect_link_pool.add_link(IndirectLink {
+                url: link.url.clone(),
+                source_job_id: job_id,
+            });
+        }
+    }
+
+    pub(crate) fn ingest_indirect_links(&mut self, links: Vec<IndirectLink>) -> IngestResult {
+        let mut unique = Vec::new();
+        let mut skipped = 0;
+        for link in links {
+            let normalized = normalize_url_for_dedupe(&link.url);
+            if normalized.is_empty() {
+                continue;
+            }
+            if self.is_url_seen(&normalized) {
+                skipped += 1;
+                continue;
+            }
+            unique.push(link);
+        }
+
+        if unique.is_empty() {
+            return IngestResult {
+                effects: Vec::new(),
+                enqueued: 0,
+                skipped,
+            };
+        }
+
+        let should_start = self.session() == SessionState::Idle;
+        if should_start {
+            self.start_session();
+        }
+
+        let mut effects = Vec::with_capacity(unique.len() + usize::from(should_start));
+        if should_start {
+            effects.push(Effect::StartSession);
+        }
+        let mut enqueued = 0;
+        for link in unique {
+            let job_id = self.next_job_id;
+            self.next_job_id += 1;
+            self.jobs.insert(
+                job_id,
+                Self::build_job_state(
+                    link.url.clone(),
+                    JobOrigin::Indirect {
+                        source_job_id: link.source_job_id,
+                    },
+                ),
+            );
+            effects.push(Effect::EnqueueUrl {
+                job_id,
+                url: link.url,
+            });
+            enqueued += 1;
+        }
+
+        IngestResult {
+            effects,
+            enqueued,
+            skipped,
+        }
+    }
+
+    pub(crate) fn begin_indirect_link_generation(&mut self) {
+        self.indirect_link_pool.begin_new_generation();
+    }
+
+    pub(crate) fn drain_indirect_links(&mut self) -> Vec<IndirectLink> {
+        self.indirect_link_pool.draining_links()
+    }
+
+    pub(crate) fn set_indirect_poll_in_progress(&mut self, value: bool) {
+        self.indirect_poll_in_progress = value;
+    }
+
+    pub(crate) fn indirect_poll_in_progress(&self) -> bool {
+        self.indirect_poll_in_progress
+    }
+
+    pub(crate) fn has_indirect_links(&self) -> bool {
+        !self.indirect_link_pool.is_empty()
     }
 
     pub(crate) fn apply_progress(
@@ -2383,6 +2581,7 @@ impl AppState {
                     job.set_preview_content(content);
                 }
                 job.attach_extracted_links(extracted_links);
+                self.collect_indirect_links_from_job(job_id);
             } else {
                 job.clear_preview_content();
                 job.clear_links();
@@ -2838,6 +3037,7 @@ struct JobState {
     content_preview: Option<String>,
     preview_quality: Option<PreviewQuality>,
     links: Vec<LinkRecord>,
+    origin: JobOrigin,
     fetched_utc: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -2859,6 +3059,7 @@ impl JobState {
             link_count: self.links.len(),
             downloaded_link_count,
             links,
+            origin: self.origin.clone(),
             triage_annotation: None,
             has_summary: false,
             summary_title: None,

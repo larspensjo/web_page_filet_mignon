@@ -161,6 +161,8 @@ pub enum Msg {
     PreTriageResetClicked,
     /// User requested polling all configured sources.
     PollSourcesClicked,
+    /// User requested polling the indirect-link pool.
+    PollIndirectLinks,
     /// Effect runner reports the total number of enabled sources to poll.
     PollStarted {
         total: usize,

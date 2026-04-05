@@ -1065,3 +1065,9 @@ Type: Implementation
 Context: The first migration slice from `Plan.OwnerDrawnListboxDesign.md` replaced the old left-pane tree path for the job-oriented tabs with the new structured owner-drawn listbox flow, while Prompt Lab remained on its separate panel path.
 Change: Wired the Harvester left pane to populate and select through the new listbox commands, including per-row badge/title/metadata descriptors and badge-column sizing for Jobs, Triage Review, and Triage Results.
 Refs: docs/plans/Plan.OwnerDrawnListboxDesign.md, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/layout.rs
+
+## 2026-04-05 - Indirect-link polling stage button and UI visibility
+Type: Implementation
+Context: Stage gating requires a visible footer action for the new indirect-link collection feature, and the button must reuse the secondary footer styling when the indirect pool is empty/enabled so the warm theme stays consistent.
+Change: Added the layout rule, style application, and footer enablement hook for `Poll Indirect Links`, wired the button into the event handler/render pipeline, and extended the view model status line so the readiness text (collecting/ready/empty) appears alongside session metadata.
+Refs: docs/visual_design/VisualDesignSpec.md, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_core/src/update.rs, crates/harvester_core/src/state.rs, crates/harvester_core/src/view_model.rs

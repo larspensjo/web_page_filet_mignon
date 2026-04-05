@@ -5,7 +5,7 @@ use crate::prompt_lab::{
     PromptLabCompareBatchStatus, PromptLabInputSource, PromptLabRunId, PromptLabRunStatus,
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
-use crate::state::LinkDownloadState;
+use crate::state::{JobOrigin, LinkDownloadState};
 use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
@@ -60,6 +60,18 @@ pub struct LeftPaneHeaderView {
     pub scope_label: Option<String>,
     pub count_label: Option<String>,
     pub state_label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndirectLinkPhase {
+    Collecting,
+    Ready,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndirectLinkSummary {
+    pub count: usize,
+    pub phase: IndirectLinkPhase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +243,7 @@ pub struct AppViewModel {
     pub briefing_blocked_reason: Option<String>,
     pub operation_progress: Option<OperationProgress>,
     pub poll_sources_enabled: bool,
+    pub poll_indirect_links_enabled: bool,
     pub operation_progress_visible: bool,
     pub checkpoint_status_message: Option<String>,
     /// Width of the left panels region (PANEL_INPUT + PANEL_JOBS).
@@ -243,6 +256,7 @@ pub struct AppViewModel {
     pub selected_url: Option<String>,
     pub left_pane: LeftPaneView,
     pub is_pre_triage_reviewing: bool,
+    pub indirect_link_summary: Option<IndirectLinkSummary>,
     /// Per-model LLM token usage, sorted alphabetically by model name. Only Miss runs counted.
     pub llm_usage_by_model: Vec<LlmModelUsageView>,
     /// Right-pane tab content area view.
@@ -282,6 +296,7 @@ impl Default for AppViewModel {
             briefing_blocked_reason: None,
             operation_progress: None,
             poll_sources_enabled: false,
+            poll_indirect_links_enabled: false,
             operation_progress_visible: false,
             checkpoint_status_message: None,
             left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
@@ -290,6 +305,7 @@ impl Default for AppViewModel {
             selected_url: None,
             left_pane: LeftPaneView::default(),
             is_pre_triage_reviewing: false,
+            indirect_link_summary: None,
             llm_usage_by_model: Vec::new(),
             right_pane: RightPaneView::default(),
         }
@@ -1010,6 +1026,7 @@ pub struct JobRowView {
     pub link_count: usize,
     pub downloaded_link_count: usize,
     pub links: Vec<LinkRowView>,
+    pub origin: JobOrigin,
     pub triage_annotation: Option<TriageAnnotationView>,
     pub has_summary: bool,
     pub summary_title: Option<String>,

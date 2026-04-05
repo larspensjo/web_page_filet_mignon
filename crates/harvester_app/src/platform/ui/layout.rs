@@ -817,6 +817,13 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_BUTTONS),
+        control_id: BUTTON_POLL_INDIRECT_LINKS,
+        text: "Poll Indirect Links".to_string(),
+    });
+
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_OPEN_BROWSER,
         text: "Open in Browser".to_string(),
     });
@@ -1250,53 +1257,133 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     for (style_id, background, text) in [
         (
             StyleId::BadgePriorityCritical,
-            Color { r: 0x8F, g: 0x2D, b: 0x2E },
-            Color { r: 0xFF, g: 0xF7, b: 0xF4 },
+            Color {
+                r: 0x8F,
+                g: 0x2D,
+                b: 0x2E,
+            },
+            Color {
+                r: 0xFF,
+                g: 0xF7,
+                b: 0xF4,
+            },
         ),
         (
             StyleId::BadgePriorityHigh,
-            Color { r: 0xA7, g: 0x72, b: 0x2A },
-            Color { r: 0xFF, g: 0xF8, b: 0xEA },
+            Color {
+                r: 0xA7,
+                g: 0x72,
+                b: 0x2A,
+            },
+            Color {
+                r: 0xFF,
+                g: 0xF8,
+                b: 0xEA,
+            },
         ),
         (
             StyleId::BadgePriorityMedium,
-            Color { r: 0x66, g: 0x4B, b: 0x8D },
-            Color { r: 0xF1, g: 0xE9, b: 0xFF },
+            Color {
+                r: 0x66,
+                g: 0x4B,
+                b: 0x8D,
+            },
+            Color {
+                r: 0xF1,
+                g: 0xE9,
+                b: 0xFF,
+            },
         ),
         (
             StyleId::BadgePriorityLow,
-            Color { r: 0x56, g: 0x5C, b: 0x66 },
-            Color { r: 0xF0, g: 0xF3, b: 0xF5 },
+            Color {
+                r: 0x56,
+                g: 0x5C,
+                b: 0x66,
+            },
+            Color {
+                r: 0xF0,
+                g: 0xF3,
+                b: 0xF5,
+            },
         ),
         (
             StyleId::BadgeCategory,
-            Color { r: 0x3D, g: 0x45, b: 0x43 },
-            Color { r: 0xD6, g: 0xDC, b: 0xD7 },
+            Color {
+                r: 0x3D,
+                g: 0x45,
+                b: 0x43,
+            },
+            Color {
+                r: 0xD6,
+                g: 0xDC,
+                b: 0xD7,
+            },
         ),
         (
             StyleId::BadgeStatusDone,
-            Color { r: 0x2C, g: 0x6C, b: 0x4A },
-            Color { r: 0xEC, g: 0xF8, b: 0xEF },
+            Color {
+                r: 0x2C,
+                g: 0x6C,
+                b: 0x4A,
+            },
+            Color {
+                r: 0xEC,
+                g: 0xF8,
+                b: 0xEF,
+            },
         ),
         (
             StyleId::BadgeStatusError,
-            Color { r: 0x8C, g: 0x36, b: 0x36 },
-            Color { r: 0xFF, g: 0xF0, b: 0xF0 },
+            Color {
+                r: 0x8C,
+                g: 0x36,
+                b: 0x36,
+            },
+            Color {
+                r: 0xFF,
+                g: 0xF0,
+                b: 0xF0,
+            },
         ),
         (
             StyleId::BadgeStatusActive,
-            Color { r: 0x5A, g: 0x4A, b: 0x8F },
-            Color { r: 0xF4, g: 0xEF, b: 0xFF },
+            Color {
+                r: 0x5A,
+                g: 0x4A,
+                b: 0x8F,
+            },
+            Color {
+                r: 0xF4,
+                g: 0xEF,
+                b: 0xFF,
+            },
         ),
         (
             StyleId::BadgeStatusMuted,
-            Color { r: 0x54, g: 0x58, b: 0x5E },
-            Color { r: 0xE0, g: 0xE5, b: 0xEC },
+            Color {
+                r: 0x54,
+                g: 0x58,
+                b: 0x5E,
+            },
+            Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            },
         ),
         (
             StyleId::BadgeIndirect,
-            Color { r: 0x54, g: 0x58, b: 0x5E },
-            Color { r: 0xE0, g: 0xE5, b: 0xEC },
+            Color {
+                r: 0x54,
+                g: 0x58,
+                b: 0x5E,
+            },
+            Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            },
         ),
     ] {
         commands.push(PlatformCommand::DefineStyle {
@@ -1911,10 +1998,18 @@ fn build_layout_rules(
             margin: (0, 6, 6, 6),
         },
         LayoutRule {
-            control_id: BUTTON_OPEN_BROWSER,
+            control_id: BUTTON_POLL_INDIRECT_LINKS,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 4,
+            fixed_size: Some(144),
+            margin: (0, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: BUTTON_OPEN_BROWSER,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 5,
             fixed_size: Some(144),
             margin: (0, 6, 6, 6),
         },
@@ -2691,6 +2786,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_POLL_SOURCES,
+        style_id: StyleId::SecondaryButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_POLL_INDIRECT_LINKS,
         style_id: StyleId::SecondaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
@@ -3639,7 +3739,12 @@ mod tests {
     #[test]
     fn secondary_footer_buttons_use_secondary_button_style() {
         let cmds = initial_commands(WindowId::new(99));
-        for button_id in [BUTTON_TRIAGE, BUTTON_POLL_SOURCES, BUTTON_OPEN_BROWSER] {
+        for button_id in [
+            BUTTON_TRIAGE,
+            BUTTON_POLL_SOURCES,
+            BUTTON_POLL_INDIRECT_LINKS,
+            BUTTON_OPEN_BROWSER,
+        ] {
             let has_style = cmds.iter().any(|cmd| {
                 matches!(
                     cmd,
@@ -3743,6 +3848,7 @@ mod tests {
             BUTTON_BRIEFING,
             BUTTON_TRIAGE,
             BUTTON_POLL_SOURCES,
+            BUTTON_POLL_INDIRECT_LINKS,
             BUTTON_OPEN_BROWSER,
         ] {
             let rule = rules

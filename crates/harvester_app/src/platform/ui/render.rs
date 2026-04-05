@@ -5,11 +5,11 @@ use commanductui::{
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppTab, AppViewModel, JobFilterStatus, JobListScope, JobResultKind, JobRowView,
-    LayoutViewModel, LeftTab, LlmModelUsageView, PreviewHeaderView, PromptLabStage, SessionState,
-    Stage, TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
+    AppTab, AppViewModel, IndirectLinkPhase, JobFilterStatus, JobListScope, JobResultKind,
+    JobRowView, LayoutViewModel, LeftPaneHeaderView, LeftTab, LlmModelUsageView,
+    PreviewContextView, PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendsTabView,
+    DEFAULT_JOBS_PANEL_WIDTH,
 };
-use harvester_core::{LeftPaneHeaderView, PreviewContextView};
 use harvester_engine::llm::ModelId;
 use harvester_engine::LinkKind;
 
@@ -105,6 +105,7 @@ pub struct TreeRenderState {
     prev_briefing_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
     prev_poll_enabled: Option<bool>,
+    prev_poll_indirect_enabled: Option<bool>,
     prev_briefing_progress: Option<String>,
     prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
@@ -193,6 +194,7 @@ impl Default for TreeRenderState {
             prev_briefing_enabled: None,
             prev_triage_enabled: None,
             prev_poll_enabled: None,
+            prev_poll_indirect_enabled: None,
             prev_briefing_progress: None,
             prev_triage_progress: None,
             prev_progress_range: None,
@@ -602,6 +604,21 @@ fn render_status_section(
     if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
         status_parts.push(usage);
     }
+    if let Some(summary) = &view.indirect_link_summary {
+        let summary_text = match summary.phase {
+            IndirectLinkPhase::Collecting => {
+                format!("{} indirect links collected", summary.count)
+            }
+            IndirectLinkPhase::Ready => {
+                if summary.count == 0 {
+                    "No indirect links".to_string()
+                } else {
+                    format!("{} indirect links ready", summary.count)
+                }
+            }
+        };
+        status_parts.push(summary_text);
+    }
     let severity = if let Some(message) = view.ai_unavailable_message.as_deref() {
         status_parts.push(message.to_string());
         MessageSeverity::Warning
@@ -816,6 +833,16 @@ fn render_main_controls_section(
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_POLL_SOURCES,
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_poll_indirect_enabled,
+        view.poll_indirect_links_enabled,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_POLL_INDIRECT_LINKS,
             enabled,
         },
     );
@@ -1679,7 +1706,8 @@ fn compute_list_box_badge_column_width(items: &[ListBoxItemDescriptor]) -> i32 {
                 .enumerate()
                 .map(|(index, badge)| {
                     let text_width = (badge.text.chars().count() as i32 * 8).max(24);
-                    text_width + LIST_BOX_BADGE_PAD_X * 2
+                    text_width
+                        + LIST_BOX_BADGE_PAD_X * 2
                         + if index > 0 { LIST_BOX_BADGE_GAP } else { 0 }
                 })
                 .sum::<i32>()
@@ -1694,11 +1722,12 @@ fn compute_list_box_badge_column_width(items: &[ListBoxItemDescriptor]) -> i32 {
 
 fn build_list_box_items(view: &AppViewModel) -> Vec<ListBoxItemDescriptor> {
     let tab = view.left_pane.left_tab;
-    let scope_filtered: Vec<&JobRowView> = if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
-        view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
-    } else {
-        view.jobs.iter().collect()
-    };
+    let scope_filtered: Vec<&JobRowView> =
+        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+            view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
+        } else {
+            view.jobs.iter().collect()
+        };
 
     let mut sorted_buf: Vec<&JobRowView>;
     let jobs_iter: &[&JobRowView] =
@@ -1761,7 +1790,9 @@ fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItemDescriptor 
             job.tokens
                 .map(|tokens| format_compact_tokens(tokens as u64))
                 .unwrap_or_else(|| "—".to_string()),
-            job.bytes.map(format_compact_bytes).unwrap_or_else(|| "—".to_string())
+            job.bytes
+                .map(format_compact_bytes)
+                .unwrap_or_else(|| "—".to_string())
         ),
         LeftTab::TriageReview => {
             let category = job
@@ -2530,7 +2561,8 @@ mod tests {
     use super::*;
     use harvester_core::Stage;
     use harvester_core::{
-        LinkDownloadState, LinkRowView, PromptLabRunId, PromptLabRunSummaryView, PromptLabView,
+        JobOrigin, LinkDownloadState, LinkRowView, PromptLabRunId, PromptLabRunSummaryView,
+        PromptLabView,
     };
     use std::path::PathBuf;
     use std::sync::Once;
@@ -2563,6 +2595,7 @@ mod tests {
             summary_title: None,
             filter_status: None,
             has_analysis: false,
+            origin: JobOrigin::Direct,
             is_since_checkpoint: false,
         }
     }
@@ -2838,6 +2871,7 @@ mod tests {
             summary_title: None,
             filter_status: None,
             has_analysis: false,
+            origin: JobOrigin::Direct,
             is_since_checkpoint: false,
         };
         let view = make_view(vec![job]);
@@ -4124,6 +4158,7 @@ mod tests {
             summary_title: None,
             filter_status: None,
             has_analysis: false,
+            origin: JobOrigin::Direct,
             is_since_checkpoint: true,
         }]);
         let mut empty_view = empty_view;
@@ -4203,6 +4238,7 @@ mod tests {
             summary_title: None,
             filter_status: None,
             has_analysis: true,
+            origin: JobOrigin::Direct,
             is_since_checkpoint: true,
         }]);
         view.left_pane.left_tab = LeftTab::TriageResults;

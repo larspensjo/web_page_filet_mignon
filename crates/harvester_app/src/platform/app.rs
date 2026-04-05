@@ -835,6 +835,11 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::PollSourcesClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_POLL_INDIRECT_LINKS =>
+            {
+                let _ = self.msg_tx.send(Msg::PollIndirectLinks);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_OPEN_BROWSER =>
             {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
@@ -1135,9 +1140,7 @@ impl PlatformEventHandler for AppEventHandler {
                 }
             }
             AppEvent::ListBoxItemSelectionChanged {
-                window_id,
-                item_id,
-                ..
+                window_id, item_id, ..
             } if window_id == self.window_id => {
                 let _ = self.msg_tx.send(Msg::JobSelected { job_id: item_id.0 });
             }

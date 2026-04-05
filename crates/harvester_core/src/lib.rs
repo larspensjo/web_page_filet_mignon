@@ -49,7 +49,7 @@ pub use prompt_lab::{
 pub use source_state::{SourceInstanceState, SourcePollStat, SourceStateIndex};
 pub use state::{
     normalize_url_for_dedupe, AiAvailability, AiUnavailableReason, AppState, BatchObservation,
-    CompletedJobSnapshot, JobId, JobResultKind, LinkDownloadState, LinkSnapshotRecord,
+    CompletedJobSnapshot, JobId, JobOrigin, JobResultKind, LinkDownloadState, LinkSnapshotRecord,
     LlmRequestState, LlmResultIndex, SessionState, Stage,
 };
 // ImportPhase is re-exported from import_session above; BatchObservation uses it.
@@ -69,12 +69,12 @@ pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCach
 pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
-    AppViewModel, CategoryTrendView, EntityLineView, JobFilterStatus, JobRowView, LayoutViewModel,
-    LeftPaneHeaderView, LeftPaneView, LinkRowView, LlmModelUsageView, OperationProgress,
-    PreviewContextView, PreviewHeaderView, PromptLabCompareBatchView,
-    PromptLabCompareCandidateView, PromptLabComparePolicyView, PromptLabCompareRowView,
-    PromptLabRunSummaryView, PromptLabView, RightPaneView, TrendsTabView, TriageAnnotationView,
-    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
+    AppViewModel, CategoryTrendView, EntityLineView, IndirectLinkPhase, IndirectLinkSummary,
+    JobFilterStatus, JobRowView, LayoutViewModel, LeftPaneHeaderView, LeftPaneView, LinkRowView,
+    LlmModelUsageView, OperationProgress, PreviewContextView, PreviewHeaderView,
+    PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
+    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, RightPaneView, TrendsTabView,
+    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
     INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
