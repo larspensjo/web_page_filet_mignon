@@ -1407,10 +1407,11 @@ fn render_preview_section(
         .unwrap_or_default();
     if tree_state.prev_briefing_text.as_deref() != Some(briefing_markdown) {
         let (truncated, _) = truncate_markdown_for_preview(briefing_markdown);
+        let display = strip_leading_h1(&truncated);
         cmds.push(PlatformCommand::SetRichEditContent {
             window_id,
             control_id: VIEWER_BRIEFING,
-            rtf_text: convert_markdown_to_rtf(&truncated),
+            rtf_text: convert_markdown_to_rtf(display),
         });
         tree_state.prev_briefing_text = Some(briefing_markdown.to_string());
     }
@@ -2275,6 +2276,16 @@ fn truncate_for_viewer(text: &str) -> String {
     let mut truncated = text[..cutoff].to_string();
     truncated.push_str(&marker);
     truncated
+}
+
+fn strip_leading_h1(text: &str) -> &str {
+    let trimmed = text.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("# ") {
+        let end = rest.find('\n').map_or(rest.len(), |i| i + 1);
+        rest[end..].trim_start_matches('\n')
+    } else {
+        trimmed
+    }
 }
 
 fn truncate_markdown_for_preview(text: &str) -> (String, bool) {

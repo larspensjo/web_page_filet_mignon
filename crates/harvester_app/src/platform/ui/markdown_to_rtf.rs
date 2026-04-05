@@ -6,8 +6,8 @@ pub const MAX_RTF_NESTING_DEPTH: usize = 20;
 pub const RTF_TRUNCATE_MARKER: &str = "[display truncated]";
 const BODY_FONT_SIZE_HALF_POINTS: usize = 24;
 const BODY_INDENT_TWIPS: usize = 520;
-const BODY_LINE_SPACING_TWIPS: usize = 400;
-const HEADING_SPACING_AFTER_TWIPS: usize = 260;
+const BODY_LINE_SPACING_TWIPS: usize = 360;
+const HEADING_SPACING_AFTER_TWIPS: usize = 160;
 const HEADING_SPACING_BEFORE_TWIPS: usize = 140;
 const BODY_SPACING_AFTER_TWIPS: usize = 140;
 const LIST_INDENT_TWIPS: usize = 920;
@@ -159,7 +159,7 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
                 "\\sa80\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
             )),
             Some(_) => rtf.push_str(&format!(
-                "\\par\\pard\\li{LIST_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa80\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
+                "\\pard\\li{LIST_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa80\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
             )),
             None => rtf.push_str(&format!(
                 "\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa{BODY_SPACING_AFTER_TWIPS}\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
@@ -201,7 +201,7 @@ fn handle_end_tag(rtf: &mut String, tag_end: TagEnd, list_stack: &mut Vec<ListSt
     match tag_end {
         TagEnd::Heading(_) => {
             rtf.push_str(&format!(
-                "\\cf1\\b0\\fs{BODY_FONT_SIZE_HALF_POINTS}\\par\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa{BODY_SPACING_AFTER_TWIPS}\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
+                "\\cf1\\b0\\fs{BODY_FONT_SIZE_HALF_POINTS}\\par\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sa0\\sb0\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1 "
             ));
         }
         TagEnd::Paragraph => rtf.push_str("\\par "),
@@ -269,11 +269,11 @@ mod tests {
     #[test]
     fn headings_render_as_distinct_bold_blocks() {
         let rtf = convert_markdown_to_rtf("# H1\n## H2\n### H3");
-        assert!(rtf.contains("\\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs42 H1"));
-        assert!(rtf.contains("\\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs34 H2"));
-        assert!(rtf.contains("\\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs28 H3"));
+        assert!(rtf.contains("\\pard\\li520\\ri520\\sa160\\sb140\\cf2\\b\\fs42 H1"));
+        assert!(rtf.contains("\\pard\\li520\\ri520\\sa160\\sb140\\cf2\\b\\fs34 H2"));
+        assert!(rtf.contains("\\pard\\li520\\ri520\\sa160\\sb140\\cf2\\b\\fs28 H3"));
         assert!(
-            rtf.matches("\\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs")
+            rtf.matches("\\pard\\li520\\ri520\\sa160\\sb140\\cf2\\b\\fs")
                 .count()
                 >= 3
         );
@@ -324,27 +324,27 @@ mod tests {
         assert!(rtf.contains(COLOR_HEADING_TEXT_RTF));
         assert!(rtf.contains(COLOR_BACKGROUND_RTF));
         assert!(rtf.contains("\\fs24 "));
-        assert!(rtf.contains("\\li520\\ri520\\sl400\\slmult1"));
+        assert!(rtf.contains("\\li520\\ri520\\sl360\\slmult1"));
     }
 
     #[test]
     fn loose_ordered_list_item_body_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("1. **Headline**\n\n   Body text");
         assert!(rtf.contains(
-            "1.\\tab \\sa80\\sb0\\sl400\\slmult1 \\b Headline\\b0 \\par \\par\\pard\\li920\\ri520\\sa80\\sb0\\sl400\\slmult1 Body text"
+            "1.\\tab \\sa80\\sb0\\sl360\\slmult1 \\b Headline\\b0 \\par \\pard\\li920\\ri520\\sa80\\sb0\\sl360\\slmult1 Body text"
         ));
     }
 
     #[test]
     fn heading_after_list_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("- one\n- two\n\n## Brave");
-        assert!(rtf.contains("\\pard \\par \\pard\\li520\\ri520\\sa260\\sb140\\cf2\\b\\fs34 Brave"));
+        assert!(rtf.contains("\\pard \\par \\pard\\li520\\ri520\\sa160\\sb140\\cf2\\b\\fs34 Brave"));
     }
 
     #[test]
     fn body_paragraphs_use_editorial_measure_and_spacing() {
         let rtf = convert_markdown_to_rtf("Paragraph");
-        assert!(rtf.contains("\\pard\\li520\\ri520\\sa140\\sb0\\sl400\\slmult1 Paragraph"));
+        assert!(rtf.contains("\\pard\\li520\\ri520\\sa140\\sb0\\sl360\\slmult1 Paragraph"));
     }
 
     #[test]
