@@ -665,9 +665,8 @@ impl AppState {
         // the render layer (build_job_tree) so the Jobs tab is never affected.
 
         // Derive selected_url — expose for any selected job
-        let selected_url = self
-            .ui
-            .selected_job_id()
+        let selected_job_id = self.ui.selected_job_id();
+        let selected_url = selected_job_id
             .and_then(|job_id| self.jobs.get(&job_id))
             .map(|job| job.url.clone());
         let briefing_preview = self.briefing.format_preview();
@@ -762,6 +761,7 @@ impl AppState {
             total_tokens: self.metrics.total_tokens,
             token_limit: TOKEN_LIMIT,
             preview_text,
+            selected_job_id,
             left_pane_header,
             preview_header,
             preview_context,

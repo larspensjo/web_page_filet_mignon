@@ -215,6 +215,7 @@ pub struct AppViewModel {
     pub total_tokens: u64,
     pub token_limit: u64,
     pub preview_text: Option<String>,
+    pub selected_job_id: Option<crate::JobId>,
     pub left_pane_header: LeftPaneHeaderView,
     pub preview_header: Option<PreviewHeaderView>,
     pub preview_context: Option<PreviewContextView>,
@@ -260,6 +261,7 @@ impl Default for AppViewModel {
             total_tokens: 0,
             token_limit: TOKEN_LIMIT,
             preview_text: None,
+            selected_job_id: None,
             left_pane_header: LeftPaneHeaderView {
                 title: "Jobs".to_string(),
                 scope_label: None,

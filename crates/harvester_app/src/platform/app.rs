@@ -1134,6 +1134,14 @@ impl PlatformEventHandler for AppEventHandler {
                     let _ = self.msg_tx.send(Msg::JobSelected { job_id });
                 }
             }
+            AppEvent::ListBoxItemSelectionChanged {
+                window_id,
+                item_id,
+                ..
+            } if window_id == self.window_id => {
+                let _ = self.msg_tx.send(Msg::JobSelected { job_id: item_id.0 });
+            }
+            AppEvent::ListBoxScrolled { .. } => {}
             AppEvent::TreeViewItemToggledByUser {
                 window_id,
                 item_id,

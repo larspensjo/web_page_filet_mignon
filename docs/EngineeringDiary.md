@@ -1059,3 +1059,9 @@ Type: Bug Fix
 Context: The right-pane header split left `Trends` on the selected-article fallback path, so a host like `epochai.substack.com` could appear above the trends tabs even though the chart is collection-level data.
 Change: Routed `AppTab::Trends` through a page-level preview header override, hid the selected-article metadata row for that tab, and added state regression coverage locking the trends header behavior.
 Refs: crates/harvester_core/src/state.rs
+
+## 2026-04-05 - Left pane now routes through the owner-drawn listbox slice
+Type: Implementation
+Context: The first migration slice from `Plan.OwnerDrawnListboxDesign.md` replaced the old left-pane tree path for the job-oriented tabs with the new structured owner-drawn listbox flow, while Prompt Lab remained on its separate panel path.
+Change: Wired the Harvester left pane to populate and select through the new listbox commands, including per-row badge/title/metadata descriptors and badge-column sizing for Jobs, Triage Review, and Triage Results.
+Refs: docs/plans/Plan.OwnerDrawnListboxDesign.md, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/layout.rs

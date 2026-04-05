@@ -1,7 +1,7 @@
 use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{
-    ChartDataPacket, ChartLineData, ChartLineEmphasis, CheckState, MessageSeverity,
-    PlatformCommand, StyleId, WindowId,
+    BadgeDescriptor, ChartDataPacket, ChartLineData, ChartLineEmphasis, CheckState,
+    ListBoxItemDescriptor, ListBoxItemId, MessageSeverity, PlatformCommand, StyleId, WindowId,
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
@@ -28,6 +28,9 @@ const SUMMARY_EMPTY_STATE_MARKDOWN: &str =
     "No article selected\n\nSelect a job/article from the list to view its summary.";
 /// Maximum number of models shown individually in the status bar before collapsing.
 const MAX_STATUS_BAR_MODELS: usize = 2;
+const LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH: i32 = 130;
+const LIST_BOX_BADGE_PAD_X: i32 = 6;
+const LIST_BOX_BADGE_GAP: i32 = 4;
 
 fn format_compact_tokens(n: u64) -> String {
     if n >= 1_000_000 {
@@ -270,6 +273,7 @@ impl TreeRenderState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 struct TreeStructureItem {
     id: TreeItemId,
     parent_id: Option<TreeItemId>,
@@ -279,6 +283,7 @@ struct TreeStructureItem {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct TreeSnapshot {
     structure: Vec<TreeStructureItem>,
     text_by_id: HashMap<TreeItemId, String>,
@@ -334,8 +339,8 @@ pub fn render(
     render_main_controls_section(window_id, view, tree_state, &mut cmds);
     render_prompt_lab_section(window_id, view, tree_state, &mut cmds);
 
-    let job_items = build_job_tree(view);
-    append_tree_commands(window_id, job_items, tree_state, &mut cmds);
+    let list_items = build_list_box_items(view);
+    append_list_box_commands(window_id, view, list_items, &mut cmds);
 
     render_preview_section(window_id, view, tree_state, &mut cmds);
 
@@ -1642,6 +1647,212 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
     )
 }
 
+fn append_list_box_commands(
+    window_id: WindowId,
+    view: &AppViewModel,
+    items: Vec<ListBoxItemDescriptor>,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    let badge_column_width = compute_list_box_badge_column_width(&items);
+    let badge_column_width = badge_column_width.clamp(0, u16::MAX as i32) as u16;
+    cmds.push(PlatformCommand::PopulateListBox {
+        window_id,
+        control_id: TREE_JOBS,
+        items,
+        badge_column_width,
+    });
+    if let Some(selected_job_id) = view.selected_job_id {
+        cmds.push(PlatformCommand::SetListBoxSelection {
+            window_id,
+            control_id: TREE_JOBS,
+            item_id: ListBoxItemId(selected_job_id),
+        });
+    }
+}
+
+fn compute_list_box_badge_column_width(items: &[ListBoxItemDescriptor]) -> i32 {
+    let widest_row = items
+        .iter()
+        .map(|item| {
+            item.badges
+                .iter()
+                .enumerate()
+                .map(|(index, badge)| {
+                    let text_width = (badge.text.chars().count() as i32 * 8).max(24);
+                    text_width + LIST_BOX_BADGE_PAD_X * 2
+                        + if index > 0 { LIST_BOX_BADGE_GAP } else { 0 }
+                })
+                .sum::<i32>()
+        })
+        .max()
+        .unwrap_or(LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH);
+
+    widest_row
+        .saturating_add(LIST_BOX_BADGE_GAP * 2)
+        .clamp(LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH, 280)
+}
+
+fn build_list_box_items(view: &AppViewModel) -> Vec<ListBoxItemDescriptor> {
+    let tab = view.left_pane.left_tab;
+    let scope_filtered: Vec<&JobRowView> = if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+        view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
+    } else {
+        view.jobs.iter().collect()
+    };
+
+    let mut sorted_buf: Vec<&JobRowView>;
+    let jobs_iter: &[&JobRowView] =
+        if matches!(tab, LeftTab::TriageResults) && view.triage_progress.is_none() {
+            sorted_buf = scope_filtered;
+            sorted_buf.sort_by(|a, b| {
+                let p_a = a
+                    .triage_annotation
+                    .as_ref()
+                    .map(|t| t.priority)
+                    .unwrap_or(0);
+                let p_b = b
+                    .triage_annotation
+                    .as_ref()
+                    .map(|t| t.priority)
+                    .unwrap_or(0);
+                p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
+            });
+            &sorted_buf
+        } else {
+            sorted_buf = scope_filtered;
+            &sorted_buf
+        };
+
+    jobs_iter
+        .iter()
+        .map(|job| build_list_box_item(tab, job))
+        .collect()
+}
+
+fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItemDescriptor {
+    let badges = match tab {
+        LeftTab::Jobs => vec![BadgeDescriptor {
+            text: job_status_label(job).to_string(),
+            style: job_status_style(job),
+        }],
+        LeftTab::TriageReview => vec![BadgeDescriptor {
+            text: triage_review_status_label(job).to_string(),
+            style: triage_review_status_style(job),
+        }],
+        LeftTab::TriageResults => vec![BadgeDescriptor {
+            text: triage_result_primary_label(job),
+            style: triage_priority_style(job),
+        }],
+        LeftTab::PromptLab => vec![BadgeDescriptor {
+            text: job_status_label(job).to_string(),
+            style: job_status_style(job),
+        }],
+    };
+
+    let title = job
+        .summary_title
+        .as_deref()
+        .map(str::to_string)
+        .unwrap_or_else(|| compact_url_label(&job.url, 80));
+    let metadata = match tab {
+        LeftTab::Jobs => format!(
+            "{} · {} · {}",
+            job_source_label(job),
+            job.tokens
+                .map(|tokens| format_compact_tokens(tokens as u64))
+                .unwrap_or_else(|| "—".to_string()),
+            job.bytes.map(format_compact_bytes).unwrap_or_else(|| "—".to_string())
+        ),
+        LeftTab::TriageReview => {
+            let category = job
+                .triage_annotation
+                .as_ref()
+                .map(|triage| title_case_label(&triage.category))
+                .unwrap_or_else(|| "Untriaged".to_string());
+            format!("{category} · {}", job_source_label(job))
+        }
+        LeftTab::TriageResults => {
+            let category = job
+                .triage_annotation
+                .as_ref()
+                .map(|triage| title_case_label(&triage.category))
+                .unwrap_or_else(|| "Untriaged".to_string());
+            let tag_count = job
+                .triage_annotation
+                .as_ref()
+                .and_then(|triage| compact_triage_tag_count(&triage.tags))
+                .unwrap_or_else(|| "0 tags".to_string());
+            format!("{category} · {} · {tag_count}", job_source_label(job))
+        }
+        LeftTab::PromptLab => format!("{} · {}", job_source_label(job), job_status_label(job)),
+    };
+    let enabled = !matches!(
+        tab,
+        LeftTab::TriageReview
+            if matches!(
+                job.filter_status,
+                Some(JobFilterStatus::HardExcluded { .. })
+                    | Some(JobFilterStatus::ManuallyExcluded)
+            )
+    );
+
+    ListBoxItemDescriptor {
+        id: ListBoxItemId(job.job_id),
+        badges,
+        title,
+        metadata,
+        enabled,
+    }
+}
+
+fn job_status_style(job: &JobRowView) -> StyleId {
+    match job_status_label(job) {
+        "OK" | "Done" => StyleId::BadgeStatusDone,
+        "ERR" => StyleId::BadgeStatusError,
+        "Fetch" | "Queued" => StyleId::BadgeStatusActive,
+        _ => StyleId::BadgeStatusMuted,
+    }
+}
+
+fn triage_review_status_label(job: &JobRowView) -> &'static str {
+    match job.filter_status.as_ref() {
+        Some(JobFilterStatus::HardExcluded { .. }) => "Auto Excluded",
+        Some(JobFilterStatus::ReviewNeeded { .. }) => "Review",
+        Some(JobFilterStatus::ManuallyExcluded) => "Excluded",
+        Some(JobFilterStatus::ManuallyIncluded) => "Included",
+        Some(JobFilterStatus::AutoIncluded) => "Included",
+        None => "Review",
+    }
+}
+
+fn triage_review_status_style(job: &JobRowView) -> StyleId {
+    match job.filter_status.as_ref() {
+        Some(JobFilterStatus::HardExcluded { .. }) | Some(JobFilterStatus::ManuallyExcluded) => {
+            StyleId::BadgeStatusMuted
+        }
+        Some(JobFilterStatus::ReviewNeeded { .. }) => StyleId::BadgeStatusActive,
+        Some(JobFilterStatus::ManuallyIncluded) | Some(JobFilterStatus::AutoIncluded) => {
+            StyleId::BadgeStatusDone
+        }
+        None => StyleId::BadgeStatusMuted,
+    }
+}
+
+fn triage_priority_style(job: &JobRowView) -> StyleId {
+    match job
+        .triage_annotation
+        .as_ref()
+        .map(|triage| triage.priority)
+        .unwrap_or_default()
+    {
+        0..=3 => StyleId::BadgePriorityLow,
+        4 => StyleId::BadgePriorityMedium,
+        5 => StyleId::BadgePriorityHigh,
+        _ => StyleId::BadgePriorityCritical,
+    }
+}
+
+#[allow(dead_code)]
 fn append_tree_commands(
     window_id: WindowId,
     items: Vec<TreeItemDescriptor>,
@@ -1691,12 +1902,14 @@ fn append_tree_commands(
     tree_state.check_state_by_id = snapshot.check_state_by_id;
 }
 
+#[allow(dead_code)]
 enum JobRowPresentation {
     Jobs,
     TriageReview,
     TriageResults,
 }
 
+#[allow(dead_code)]
 fn job_row_presentation(tab: LeftTab) -> JobRowPresentation {
     match tab {
         LeftTab::Jobs => JobRowPresentation::Jobs,
@@ -1706,6 +1919,7 @@ fn job_row_presentation(tab: LeftTab) -> JobRowPresentation {
     }
 }
 
+#[allow(dead_code)]
 fn job_row_check_policy(
     tab: LeftTab,
     is_pre_triage_reviewing: bool,
@@ -1724,6 +1938,7 @@ fn job_row_check_policy(
     }
 }
 
+#[allow(dead_code)]
 fn job_row_style_policy(tab: LeftTab, has_summary: bool) -> Option<StyleId> {
     match tab {
         LeftTab::Jobs => {
@@ -1737,6 +1952,7 @@ fn job_row_style_policy(tab: LeftTab, has_summary: bool) -> Option<StyleId> {
     }
 }
 
+#[allow(dead_code)]
 fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
     let tab = view.left_pane.left_tab;
     let presentation = job_row_presentation(tab);
@@ -1807,6 +2023,7 @@ fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
     let mut children: Vec<_> = job
         .links
@@ -1839,6 +2056,7 @@ fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
 
 /// Jobs tab: stable row text — never changes based on triage results.
 /// Triage annotation is intentionally omitted; use TriageResults tab for that.
+#[allow(dead_code)]
 fn format_job_row_legacy(job: &JobRowView) -> String {
     let mut metadata = Vec::new();
     if let Some(filter_status) = filter_status_label(job.filter_status.as_ref()) {
@@ -1860,6 +2078,7 @@ fn format_job_row_legacy(job: &JobRowView) -> String {
 }
 
 /// Triage Review tab: shows the URL/title and review status cue.
+#[allow(dead_code)]
 fn format_job_row_triage_review(job: &JobRowView) -> String {
     let review_status = match &job.filter_status {
         Some(JobFilterStatus::HardExcluded { .. }) => "[AUTO EXCLUDED] ",
@@ -1874,6 +2093,7 @@ fn format_job_row_triage_review(job: &JobRowView) -> String {
 }
 
 /// Triage Results tab: title first, with triage metadata kept compact.
+#[allow(dead_code)]
 fn format_job_row_triage_results(job: &JobRowView) -> String {
     if let Some(annotation) = &job.triage_annotation {
         let primary = triage_result_primary_label(job);
@@ -1938,13 +2158,16 @@ fn job_source_label(job: &JobRowView) -> String {
 }
 
 fn triage_result_primary_label(job: &JobRowView) -> String {
-    if job.has_summary {
-        return job_primary_label_with_limit(job, 58);
-    }
     url_slug_label(&job.url)
         .map(|label| title_case_label(&label))
         .map(|label| truncate_with_ellipsis(&label, 58))
-        .unwrap_or_else(|| compact_url_label(&job.url, 48))
+        .unwrap_or_else(|| {
+            if job.has_summary {
+                job_primary_label_with_limit(job, 58)
+            } else {
+                compact_url_label(&job.url, 48)
+            }
+        })
 }
 
 fn filter_status_label(filter_status: Option<&JobFilterStatus>) -> Option<&'static str> {

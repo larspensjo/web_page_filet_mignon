@@ -408,7 +408,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         initial_text: String::new(),
         class: LabelClass::Default,
     });
-    commands.push(PlatformCommand::CreateTreeView {
+    commands.push(PlatformCommand::CreateListBox {
         window_id,
         parent_control_id: Some(PANEL_JOBS),
         control_id: TREE_JOBS,
@@ -1186,6 +1186,128 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
             ..Default::default()
         },
     });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ListBoxRow,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x26,
+                g: 0x2A,
+                b: 0x2E,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ListBoxSelectedRow,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x37,
+                g: 0x3E,
+                b: 0x47,
+            }),
+            text_color: Some(Color {
+                r: 0xE0,
+                g: 0xE5,
+                b: 0xEC,
+            }),
+            ..Default::default()
+        },
+    });
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ListBoxHoverRow,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x2D,
+                g: 0x33,
+                b: 0x3A,
+            }),
+            ..Default::default()
+        },
+    });
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ListBoxDisabledRow,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x24,
+                g: 0x27,
+                b: 0x2B,
+            }),
+            text_color: Some(Color {
+                r: 0x87,
+                g: 0x8C,
+                b: 0x93,
+            }),
+            ..Default::default()
+        },
+    });
+
+    for (style_id, background, text) in [
+        (
+            StyleId::BadgePriorityCritical,
+            Color { r: 0x8F, g: 0x2D, b: 0x2E },
+            Color { r: 0xFF, g: 0xF7, b: 0xF4 },
+        ),
+        (
+            StyleId::BadgePriorityHigh,
+            Color { r: 0xA7, g: 0x72, b: 0x2A },
+            Color { r: 0xFF, g: 0xF8, b: 0xEA },
+        ),
+        (
+            StyleId::BadgePriorityMedium,
+            Color { r: 0x66, g: 0x4B, b: 0x8D },
+            Color { r: 0xF1, g: 0xE9, b: 0xFF },
+        ),
+        (
+            StyleId::BadgePriorityLow,
+            Color { r: 0x56, g: 0x5C, b: 0x66 },
+            Color { r: 0xF0, g: 0xF3, b: 0xF5 },
+        ),
+        (
+            StyleId::BadgeCategory,
+            Color { r: 0x3D, g: 0x45, b: 0x43 },
+            Color { r: 0xD6, g: 0xDC, b: 0xD7 },
+        ),
+        (
+            StyleId::BadgeStatusDone,
+            Color { r: 0x2C, g: 0x6C, b: 0x4A },
+            Color { r: 0xEC, g: 0xF8, b: 0xEF },
+        ),
+        (
+            StyleId::BadgeStatusError,
+            Color { r: 0x8C, g: 0x36, b: 0x36 },
+            Color { r: 0xFF, g: 0xF0, b: 0xF0 },
+        ),
+        (
+            StyleId::BadgeStatusActive,
+            Color { r: 0x5A, g: 0x4A, b: 0x8F },
+            Color { r: 0xF4, g: 0xEF, b: 0xFF },
+        ),
+        (
+            StyleId::BadgeStatusMuted,
+            Color { r: 0x54, g: 0x58, b: 0x5E },
+            Color { r: 0xE0, g: 0xE5, b: 0xEC },
+        ),
+        (
+            StyleId::BadgeIndirect,
+            Color { r: 0x54, g: 0x58, b: 0x5E },
+            Color { r: 0xE0, g: 0xE5, b: 0xEC },
+        ),
+    ] {
+        commands.push(PlatformCommand::DefineStyle {
+            style_id,
+            style: ControlStyle {
+                background_color: Some(background),
+                text_color: Some(text),
+                ..Default::default()
+            },
+        });
+    }
 
     // Selected row: subtle lighter background
     commands.push(PlatformCommand::DefineStyle {
