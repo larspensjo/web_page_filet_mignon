@@ -12,3 +12,23 @@ You need an Open-AI API key, but the costs are very low.
 - [docs/Architecture.md](docs/Architecture.md)
 - [docs/PromptContextFiles.md](docs/PromptContextFiles.md)
 - [docs/ThreatModel.md](docs/ThreatModel.md)
+
+## harvester_mcp
+
+An MCP server that exposes the Harvester article corpus to Claude Code and Codex as a queryable knowledge base.
+
+### Usage
+
+```
+harvester_mcp [--output-dir <path>] [--log-dir <path>] [--agent-model <model-id>] [--context-budget <tokens>]
+```
+
+### Tools
+
+- `search_articles` — regex search across the article corpus
+- `read_article` — read a single article by filename
+- `list_articles` — list articles with optional date/title filters
+- `search_entities` — search the entity index by company, technology, product, or theme
+- `get_article_summary` — retrieve a cached article summary by URL
+
+Logs are written to `<output-dir>/logs/mcp.log`.

@@ -197,12 +197,21 @@ impl HarvesterMcpServer {
     /// Return the server version.
     #[rmcp::tool(description = "Return the harvester-mcp server version.")]
     async fn server_version(&self) -> String {
-        env!("CARGO_PKG_VERSION").to_string()
+        let t = std::time::Instant::now();
+        engine_logging::engine_info!("[tool] server_version called");
+        let result = env!("CARGO_PKG_VERSION").to_string();
+        engine_logging::engine_info!("[tool] server_version returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        result
     }
 
     /// Search article content with a regex pattern, optional date range, and result cap.
     #[rmcp::tool(description = "Search article content using a regex pattern. Optionally filter by date range (date_from/date_to as ISO date strings) and cap results with max_results (default 20). Returns JSON array of matches with filename, title, url, fetched_utc, and a content snippet.")]
     async fn search_articles(&self, Parameters(p): Parameters<SearchArticlesParams>) -> String {
+        let t = std::time::Instant::now();
+        engine_logging::engine_info!(
+            "[tool] search_articles called with pattern={:?} date_from={:?} date_to={:?} max_results={:?}",
+            p.pattern, p.date_from, p.date_to, p.max_results
+        );
         let re = match Regex::new(&p.pattern) {
             Ok(r) => r,
             Err(e) => return serde_json::json!({"error": format!("invalid regex: {}", e)}).to_string(),
@@ -233,13 +242,17 @@ impl HarvesterMcpServer {
             }
         }
 
-        serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
+        let result = serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
+        engine_logging::engine_info!("[tool] search_articles returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        result
     }
 
     /// Return the full markdown content of an article by filename.
     #[rmcp::tool(description = "Read the full markdown content of an article. Pass the filename (e.g. \"my-article.md\") as returned by list_articles or search_articles.")]
     async fn read_article(&self, Parameters(p): Parameters<ReadArticleParams>) -> String {
-        match self
+        let t = std::time::Instant::now();
+        engine_logging::engine_info!("[tool] read_article called with filename={:?}", p.filename);
+        let result = match self
             .article_index
             .articles
             .iter()
@@ -247,12 +260,22 @@ impl HarvesterMcpServer {
         {
             Some(entry) => entry.content.clone(),
             None => serde_json::json!({"error": format!("article not found: {}", p.filename)}).to_string(),
-        }
+        };
+        engine_logging::engine_info!("[tool] read_article returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        result
     }
 
     /// Search articles by entity tags (company, technology, product, theme).
     #[rmcp::tool(description = "Search articles by entity tags. Provide at least one of: company, technology, product, theme (all case-insensitive substring matches). All provided filters must match (AND logic). Returns JSON array with url, fetched_utc, companies, technologies, products, themes.")]
     async fn search_entities(&self, Parameters(p): Parameters<SearchEntitiesParams>) -> String {
+        let t = std::time::Instant::now();
+        engine_logging::engine_info!(
+            "[tool] search_entities called with company={} technology={} product={} theme={}",
+            p.company.as_deref().unwrap_or("None"),
+            p.technology.as_deref().unwrap_or("None"),
+            p.product.as_deref().unwrap_or("None"),
+            p.theme.as_deref().unwrap_or("None"),
+        );
         if p.company.is_none() && p.technology.is_none() && p.product.is_none() && p.theme.is_none() {
             return serde_json::json!({"error": "at least one search parameter required"}).to_string();
         }
@@ -293,13 +316,17 @@ impl HarvesterMcpServer {
             })
             .collect();
 
-        serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
+        let result = serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
+        engine_logging::engine_info!("[tool] search_entities returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        result
     }
 
     /// Return the summary for an article by URL.
     #[rmcp::tool(description = "Get the LLM-generated summary for an article by its URL. Returns title, summary, key_points, and created_at_utc, or a status object if no summary is available.")]
     async fn get_article_summary(&self, Parameters(p): Parameters<GetArticleSummaryParams>) -> String {
-        match self.summary_index.get(&p.url) {
+        let t = std::time::Instant::now();
+        engine_logging::engine_info!("[tool] get_article_summary called with url={:?}", p.url);
+        let result = match self.summary_index.get(&p.url) {
             None => serde_json::json!({"status": "no summary available"}).to_string(),
             Some(entry) => {
                 let resp = ArticleSummaryResponse {
@@ -310,12 +337,19 @@ impl HarvesterMcpServer {
                 };
                 serde_json::to_string(&resp).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
             }
-        }
+        };
+        engine_logging::engine_info!("[tool] get_article_summary returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        result
     }
 
     /// List articles, optionally filtered by date range and/or title regex.
     #[rmcp::tool(description = "List articles in the corpus. Optionally filter by date_from/date_to (ISO date strings, inclusive) and/or title_pattern (regex on title). Returns JSON array with filename, title, url, fetched_utc, token_count.")]
     async fn list_articles(&self, Parameters(p): Parameters<ListArticlesParams>) -> String {
+        let t = std::time::Instant::now();
+        engine_logging::engine_info!(
+            "[tool] list_articles called with date_from={:?} date_to={:?} title_pattern={:?}",
+            p.date_from, p.date_to, p.title_pattern
+        );
         let title_re = if let Some(pat) = &p.title_pattern {
             match Regex::new(pat) {
                 Ok(r) => Some(r),
@@ -355,7 +389,9 @@ impl HarvesterMcpServer {
             })
             .collect();
 
-        serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
+        let result = serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
+        engine_logging::engine_info!("[tool] list_articles returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        result
     }
 }
 
