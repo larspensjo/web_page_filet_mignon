@@ -1,11 +1,12 @@
 mod article_index;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
 use article_index::{ArticleIndex};
 use clap::Parser;
-use harvester_core::{EntityIndex, SummaryCache};
+use harvester_core::{EntityIndex, SummaryCache, SummaryCacheEntry};
 use harvester_io::{load_entity_index, load_summary_cache};
 use regex::Regex;
 use rmcp::handler::server::router::tool::ToolRouter;
@@ -40,11 +41,11 @@ struct Args {
 struct HarvesterMcpServer {
     #[allow(dead_code)]
     output_dir: PathBuf,
-    #[allow(dead_code)]
-    entity_index: EntityIndex,
+    entity_index: std::sync::Arc<EntityIndex>,
     #[allow(dead_code)]
     summary_cache: SummaryCache,
     article_index: std::sync::Arc<ArticleIndex>,
+    summary_index: std::sync::Arc<HashMap<String, SummaryCacheEntry>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -78,7 +79,43 @@ struct ListArticlesParams {
     title_pattern: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SearchEntitiesParams {
+    /// Substring to match against company names (case-insensitive)
+    company: Option<String>,
+    /// Substring to match against technology names (case-insensitive)
+    technology: Option<String>,
+    /// Substring to match against product names (case-insensitive)
+    product: Option<String>,
+    /// Substring to match against themes (case-insensitive)
+    theme: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct GetArticleSummaryParams {
+    /// Article URL
+    url: String,
+}
+
 // ── Result structs ───────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct EntitySearchResult {
+    url: String,
+    fetched_utc: Option<String>,
+    companies: Vec<String>,
+    technologies: Vec<String>,
+    products: Vec<String>,
+    themes: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct ArticleSummaryResponse {
+    title: String,
+    summary: String,
+    key_points: Vec<String>,
+    created_at_utc: String,
+}
 
 #[derive(Serialize)]
 struct SearchMatch {
@@ -213,6 +250,69 @@ impl HarvesterMcpServer {
         }
     }
 
+    /// Search articles by entity tags (company, technology, product, theme).
+    #[rmcp::tool(description = "Search articles by entity tags. Provide at least one of: company, technology, product, theme (all case-insensitive substring matches). All provided filters must match (AND logic). Returns JSON array with url, fetched_utc, companies, technologies, products, themes.")]
+    async fn search_entities(&self, Parameters(p): Parameters<SearchEntitiesParams>) -> String {
+        if p.company.is_none() && p.technology.is_none() && p.product.is_none() && p.theme.is_none() {
+            return serde_json::json!({"error": "at least one search parameter required"}).to_string();
+        }
+
+        let results: Vec<EntitySearchResult> = self
+            .entity_index
+            .entries
+            .iter()
+            .filter_map(|(url, entry)| {
+                let matches_company = p.company.as_ref().is_none_or(|q| {
+                    let q = q.to_lowercase();
+                    entry.companies.iter().any(|c| c.to_lowercase().contains(&q))
+                });
+                let matches_technology = p.technology.as_ref().is_none_or(|q| {
+                    let q = q.to_lowercase();
+                    entry.technologies.iter().any(|c| c.to_lowercase().contains(&q))
+                });
+                let matches_product = p.product.as_ref().is_none_or(|q| {
+                    let q = q.to_lowercase();
+                    entry.products.iter().any(|c| c.to_lowercase().contains(&q))
+                });
+                let matches_theme = p.theme.as_ref().is_none_or(|q| {
+                    let q = q.to_lowercase();
+                    entry.themes.iter().any(|c| c.to_lowercase().contains(&q))
+                });
+                if matches_company && matches_technology && matches_product && matches_theme {
+                    Some(EntitySearchResult {
+                        url: url.clone(),
+                        fetched_utc: entry.fetched_utc.clone(),
+                        companies: entry.companies.clone(),
+                        technologies: entry.technologies.clone(),
+                        products: entry.products.clone(),
+                        themes: entry.themes.clone(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
+    }
+
+    /// Return the summary for an article by URL.
+    #[rmcp::tool(description = "Get the LLM-generated summary for an article by its URL. Returns title, summary, key_points, and created_at_utc, or a status object if no summary is available.")]
+    async fn get_article_summary(&self, Parameters(p): Parameters<GetArticleSummaryParams>) -> String {
+        match self.summary_index.get(&p.url) {
+            None => serde_json::json!({"status": "no summary available"}).to_string(),
+            Some(entry) => {
+                let resp = ArticleSummaryResponse {
+                    title: entry.result.title.clone(),
+                    summary: entry.result.summary.clone(),
+                    key_points: entry.result.key_points.clone(),
+                    created_at_utc: entry.created_at_utc.clone(),
+                };
+                serde_json::to_string(&resp).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
+            }
+        }
+    }
+
     /// List articles, optionally filtered by date range and/or title regex.
     #[rmcp::tool(description = "List articles in the corpus. Optionally filter by date_from/date_to (ISO date strings, inclusive) and/or title_pattern (regex on title). Returns JSON array with filename, title, url, fetched_utc, token_count.")]
     async fn list_articles(&self, Parameters(p): Parameters<ListArticlesParams>) -> String {
@@ -274,12 +374,14 @@ impl HarvesterMcpServer {
         entity_index: EntityIndex,
         summary_cache: SummaryCache,
         article_index: ArticleIndex,
+        summary_index: HashMap<String, SummaryCacheEntry>,
     ) -> Self {
         Self {
             output_dir,
-            entity_index,
+            entity_index: std::sync::Arc::new(entity_index),
             summary_cache,
             article_index: std::sync::Arc::new(article_index),
+            summary_index: std::sync::Arc::new(summary_index),
             tool_router: Self::tool_router(),
         }
     }
@@ -331,12 +433,31 @@ async fn main() -> anyhow::Result<()> {
         args.context_budget
     );
 
+    // Build URL → summary index
+    let t3 = Instant::now();
+    let mut summary_index: HashMap<String, SummaryCacheEntry> = HashMap::new();
+    for (url, entity_entry) in &entity_index.entries {
+        let Some(ref content_hash) = entity_entry.content_hash else { continue };
+        let newest = summary_cache
+            .iter()
+            .filter(|(k, _)| k.content_hash == *content_hash)
+            .max_by_key(|(_, v)| &v.created_at_utc);
+        if let Some((_, entry)) = newest {
+            summary_index.insert(url.clone(), entry.clone());
+        }
+    }
+    engine_logging::engine_info!(
+        "summary index: built {} entries in {}ms",
+        summary_index.len(),
+        t3.elapsed().as_millis()
+    );
+
     engine_logging::engine_info!(
         "startup complete in {}ms",
         overall_start.elapsed().as_millis()
     );
 
-    let server = HarvesterMcpServer::new(args.output_dir, entity_index, summary_cache, article_index);
+    let server = HarvesterMcpServer::new(args.output_dir, entity_index, summary_cache, article_index, summary_index);
     let transport = stdio();
     server.serve(transport).await?.waiting().await?;
 
