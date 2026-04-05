@@ -131,16 +131,18 @@ fn date_in_range(
 fn build_snippet(content: &str, re: &Regex) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut included: Vec<usize> = Vec::new();
+    let mut match_count = 0usize;
     for (i, line) in lines.iter().enumerate() {
         if re.is_match(line) {
             let start = i.saturating_sub(1);
-            let end = (i + 1).min(lines.len() - 1);
+            let end = (i + 1).min(lines.len().saturating_sub(1));
             for j in start..=end {
                 if !included.contains(&j) {
                     included.push(j);
                 }
             }
-            if included.iter().filter(|&&j| re.is_match(lines[j])).count() >= 3 {
+            match_count += 1;
+            if match_count >= 3 {
                 break;
             }
         }
@@ -166,7 +168,7 @@ impl HarvesterMcpServer {
     async fn search_articles(&self, Parameters(p): Parameters<SearchArticlesParams>) -> String {
         let re = match Regex::new(&p.pattern) {
             Ok(r) => r,
-            Err(e) => return format!("{{\"error\": \"invalid regex: {}\"}}", e),
+            Err(e) => return serde_json::json!({"error": format!("invalid regex: {}", e)}).to_string(),
         };
         let max = p.max_results.unwrap_or(20);
         let mut results: Vec<SearchMatch> = Vec::new();
@@ -194,7 +196,7 @@ impl HarvesterMcpServer {
             }
         }
 
-        serde_json::to_string(&results).unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
+        serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
     }
 
     /// Return the full markdown content of an article by filename.
@@ -207,7 +209,7 @@ impl HarvesterMcpServer {
             .find(|a| a.filename == p.filename)
         {
             Some(entry) => entry.content.clone(),
-            None => format!("{{\"error\": \"article not found: {}\"}}", p.filename),
+            None => serde_json::json!({"error": format!("article not found: {}", p.filename)}).to_string(),
         }
     }
 
@@ -218,7 +220,7 @@ impl HarvesterMcpServer {
             match Regex::new(pat) {
                 Ok(r) => Some(r),
                 Err(e) => {
-                    return format!("{{\"error\": \"invalid title_pattern regex: {}\"}}", e)
+                    return serde_json::json!({"error": format!("invalid title_pattern regex: {}", e)}).to_string()
                 }
             }
         } else {
@@ -253,7 +255,7 @@ impl HarvesterMcpServer {
             })
             .collect();
 
-        serde_json::to_string(&results).unwrap_or_else(|e| format!("{{\"error\": \"{}\"}}", e))
+        serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
     }
 }
 
