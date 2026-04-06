@@ -2766,7 +2766,7 @@ mod tests {
         let commands_initial = render(window_id, &view_initial, &mut tree_state);
         assert!(commands_initial
             .iter()
-            .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })));
+            .any(|cmd| matches!(cmd, PlatformCommand::PopulateListBox { .. })));
 
         let view_updated = make_view(vec![make_job(
             1,
@@ -2777,22 +2777,18 @@ mod tests {
             Some(2048),
         )]);
         let commands_updated = render(window_id, &view_updated, &mut tree_state);
-
-        assert!(!commands_updated
+        let populated = commands_updated
             .iter()
-            .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })));
-
-        let mut text_updates = commands_updated
-            .iter()
-            .filter_map(|cmd| match cmd {
-                PlatformCommand::UpdateTreeItemText { item_id, text, .. } => Some((item_id, text)),
+            .find_map(|cmd| match cmd {
+                PlatformCommand::PopulateListBox { items, .. } => Some(items),
                 _ => None,
             })
-            .collect::<Vec<_>>();
-        assert_eq!(text_updates.len(), 1);
-        let (item_id, text) = text_updates.pop().expect("update exists");
-        assert_eq!(*item_id, TreeItemId(1));
-        assert_eq!(text, &format_job_row_legacy(&view_updated.jobs[0]));
+            .expect("updated list emitted");
+        assert_eq!(populated.len(), 1);
+        assert_eq!(populated[0].id, ListBoxItemId(1));
+        assert_eq!(populated[0].title, "example.com");
+        assert_eq!(populated[0].badges[0].text, "Fetch");
+        assert_eq!(populated[0].metadata, "example.com · 100 · 2.0 KB");
     }
 
     #[test]
@@ -2818,14 +2814,12 @@ mod tests {
         let commands_added = render(window_id, &view_added, &mut tree_state);
         assert!(commands_added
             .iter()
-            .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })));
+            .any(|cmd| matches!(cmd, PlatformCommand::PopulateListBox { .. })));
     }
 
     #[test]
     fn links_folder_and_show_more_children_rendered() {
         init_logging();
-        let window_id = WindowId::new(4);
-        let mut tree_state = TreeRenderState::new();
         let link = make_link_row(
             0,
             "Example",
@@ -2852,14 +2846,7 @@ mod tests {
             is_since_checkpoint: false,
         };
         let view = make_view(vec![job]);
-        let commands = render(window_id, &view, &mut tree_state);
-        let items = commands
-            .iter()
-            .find_map(|cmd| match cmd {
-                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-                _ => None,
-            })
-            .expect("populate emitted");
+        let items = build_job_tree(&view);
         let job_item = &items[0];
         assert_eq!(job_item.children.len(), 1);
         let folder = &job_item.children[0];
@@ -3276,8 +3263,6 @@ mod tests {
     #[test]
     fn scope_since_checkpoint_filters_jobs_in_tree() {
         init_logging();
-        let window_id = WindowId::new(60);
-        let mut tree_state = TreeRenderState::new();
 
         let mut job_in = make_job(
             1,
@@ -3306,28 +3291,19 @@ mod tests {
         let mut view = make_view(vec![job_in, job_out]);
         view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
 
-        let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds
-            .iter()
-            .find_map(|cmd| match cmd {
-                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-                _ => None,
-            })
-            .expect("PopulateTreeView emitted");
+        let populated = build_list_box_items(&view);
 
         assert_eq!(populated.len(), 1, "only the in-scope job should appear");
         assert!(
-            populated[0].text.contains("In Scope"),
+            populated[0].title.contains("In Scope"),
             "wrong item: {}",
-            populated[0].text
+            populated[0].title
         );
     }
 
     #[test]
     fn scope_all_shows_all_jobs() {
         init_logging();
-        let window_id = WindowId::new(61);
-        let mut tree_state = TreeRenderState::new();
 
         let mut job1 = make_job(
             1,
@@ -3356,14 +3332,7 @@ mod tests {
         let mut view = make_view(vec![job1, job2]);
         view.left_pane.job_list_scope = JobListScope::All;
 
-        let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds
-            .iter()
-            .find_map(|cmd| match cmd {
-                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-                _ => None,
-            })
-            .expect("PopulateTreeView emitted");
+        let populated = build_list_box_items(&view);
 
         assert_eq!(populated.len(), 2, "all jobs should appear with All scope");
     }
@@ -3373,8 +3342,6 @@ mod tests {
         // Jobs arrive in job_id order (low priority first), but TriageResults should
         // show highest priority first once triage has settled.
         init_logging();
-        let window_id = WindowId::new(62);
-        let mut tree_state = TreeRenderState::new();
 
         let mut low = make_job(
             1,
@@ -3412,34 +3379,25 @@ mod tests {
         let mut view = make_view(vec![low, high]);
         view.left_pane.left_tab = LeftTab::TriageResults;
 
-        let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds
-            .iter()
-            .find_map(|cmd| match cmd {
-                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-                _ => None,
-            })
-            .expect("PopulateTreeView emitted");
+        let populated = build_list_box_items(&view);
 
         assert_eq!(populated.len(), 2);
         // TriageResults render must reorder: highest priority (P5) first.
         assert!(
-            populated[0].text.contains("P5"),
-            "first item should be P5, got: {}",
-            populated[0].text
+            populated[0].title.contains("High Priority"),
+            "first item should be High Priority, got: {}",
+            populated[0].title
         );
         assert!(
-            populated[1].text.contains("P2"),
-            "second item should be P2, got: {}",
-            populated[1].text
+            populated[1].title.contains("Low Priority"),
+            "second item should be Low Priority, got: {}",
+            populated[1].title
         );
     }
 
     #[test]
     fn triage_results_tab_keeps_stable_order_while_triage_in_progress() {
         init_logging();
-        let window_id = WindowId::new(64);
-        let mut tree_state = TreeRenderState::new();
 
         let low = make_job(
             1,
@@ -3470,30 +3428,23 @@ mod tests {
         view.left_pane.left_tab = LeftTab::TriageResults;
         view.triage_progress = Some("Triaging 1/2 articles...".to_string());
 
-        let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds
-            .iter()
-            .find_map(|cmd| match cmd {
-                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-                _ => None,
-            })
-            .expect("PopulateTreeView emitted");
+        let populated = build_list_box_items(&view);
 
         assert_eq!(populated.len(), 2);
         assert!(
-            populated[0].text.starts_with("low.com"),
+            populated[0].title.starts_with("low.com"),
             "first should stay job 1 while triage is running, got: {}",
-            populated[0].text
+            populated[0].title
         );
         assert!(
-            populated[0].text.contains("No triage"),
-            "first should still show no-triage state, got: {}",
-            populated[0].text
+            populated[0].metadata.contains("Untriaged"),
+            "first should still show untriaged metadata, got: {}",
+            populated[0].metadata
         );
         assert!(
-            populated[1].text.contains("P5"),
+            populated[1].title.contains("High Priority"),
             "second should stay job 2 while triage is running, got: {}",
-            populated[1].text
+            populated[1].title
         );
     }
 
@@ -3571,30 +3522,23 @@ mod tests {
 
         let cmds = render(window_id, &updated_view, &mut tree_state);
 
-        assert!(
-            !cmds
-                .iter()
-                .any(|cmd| matches!(cmd, PlatformCommand::PopulateTreeView { .. })),
-            "in-flight triage updates should not repopulate the whole tree"
-        );
-        assert!(
-            cmds.iter().any(|cmd| matches!(
-                cmd,
-                PlatformCommand::UpdateTreeItemText { item_id, text, .. }
-                    if *item_id == job_tree_item_id(1)
-                        && text.contains("Now Highest")
-                        && text.contains("P6 Finance")
-            )),
-            "updated triage row should refresh in place"
-        );
+        let populated = cmds
+            .iter()
+            .find_map(|cmd| match cmd {
+                PlatformCommand::PopulateListBox { items, .. } => Some(items),
+                _ => None,
+            })
+            .expect("updated list emitted");
+        assert_eq!(populated.len(), 2);
+        assert_eq!(populated[0].id, ListBoxItemId(1));
+        assert!(populated[0].title.contains("Now Highest"));
+        assert!(populated[0].metadata.contains("Finance"));
     }
 
     #[test]
     fn jobs_tab_stable_order_unaffected_by_triage_priority() {
         // Jobs tab must show items in job_id order, not reordered by triage priority.
         init_logging();
-        let window_id = WindowId::new(63);
-        let mut tree_state = TreeRenderState::new();
 
         let mut low = make_job(
             1,
@@ -3631,26 +3575,19 @@ mod tests {
         let mut view = make_view(vec![low, high]);
         view.left_pane.left_tab = LeftTab::Jobs; // stable order
 
-        let cmds = render(window_id, &view, &mut tree_state);
-        let populated = cmds
-            .iter()
-            .find_map(|cmd| match cmd {
-                PlatformCommand::PopulateTreeView { items, .. } => Some(items),
-                _ => None,
-            })
-            .expect("PopulateTreeView emitted");
+        let populated = build_list_box_items(&view);
 
         assert_eq!(populated.len(), 2);
         // Jobs tab must preserve insertion order (job_id 1 first, then job_id 2).
         assert!(
-            populated[0].text.contains("Low Priority"),
+            populated[0].title.contains("Low Priority"),
             "first should be Low Priority (job 1), got: {}",
-            populated[0].text
+            populated[0].title
         );
         assert!(
-            populated[1].text.contains("High Priority"),
+            populated[1].title.contains("High Priority"),
             "second should be High Priority (job 2), got: {}",
-            populated[1].text
+            populated[1].title
         );
     }
 
@@ -4140,6 +4077,12 @@ mod tests {
         }]);
         let mut empty_view = empty_view;
         empty_view.left_pane.left_tab = LeftTab::TriageResults;
+        empty_view.left_pane_header = LeftPaneHeaderView {
+            title: "Triage Results".to_string(),
+            scope_label: None,
+            count_label: Some("no triage results yet".to_string()),
+            state_label: None,
+        };
         let empty_cmds = render(window_id, &empty_view, &mut tree_state);
         let empty_meta =
             control_text(&empty_cmds, LABEL_JOBS_HEADER_META).expect("empty triage meta rendered");
@@ -4152,6 +4095,12 @@ mod tests {
             category: "keep".to_string(),
             tags: vec![],
         });
+        populated_view.left_pane_header = LeftPaneHeaderView {
+            title: "Triage Results".to_string(),
+            scope_label: None,
+            count_label: Some("1 with triage".to_string()),
+            state_label: None,
+        };
         let populated_cmds = render(window_id, &populated_view, &mut tree_state);
         let populated_meta = control_text(&populated_cmds, LABEL_JOBS_HEADER_META)
             .expect("populated triage meta rendered");
@@ -4185,6 +4134,12 @@ mod tests {
         view.left_pane.left_tab = LeftTab::TriageResults;
         view.ai_unavailable_message =
             Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
+        view.left_pane_header = LeftPaneHeaderView {
+            title: "Triage Results".to_string(),
+            scope_label: None,
+            count_label: Some("no triage results yet".to_string()),
+            state_label: Some("AI unavailable".to_string()),
+        };
 
         let cmds = render(window_id, &view, &mut tree_state);
         let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
@@ -4221,6 +4176,12 @@ mod tests {
         view.left_pane.left_tab = LeftTab::TriageResults;
         view.ai_unavailable_message =
             Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
+        view.left_pane_header = LeftPaneHeaderView {
+            title: "Triage Results".to_string(),
+            scope_label: None,
+            count_label: Some("1 with triage".to_string()),
+            state_label: Some("AI unavailable".to_string()),
+        };
 
         let cmds = render(window_id, &view, &mut tree_state);
         let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");

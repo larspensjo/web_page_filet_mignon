@@ -1089,3 +1089,15 @@ Type: Bug Fix
 Context: The new left-pane owner-drawn listbox selected rows on mouse click but did not reliably react to arrow/page navigation because the custom child window was not taking focus on click and did not advertise that it wanted dialog-managed navigation keys.
 Change: On `WM_LBUTTONDOWN`, the listbox now calls `SetFocus(hwnd)` before hit-testing, and `WM_GETDLGCODE` returns `DLGC_WANTARROWS | DLGC_WANTCHARS` so Up/Down/Page/Home/End and future character shortcuts route to the control.
 Refs: src/CommanDuctUI/src/controls/listbox_handler.rs, docs/plans/Plan.OwnerDrawnListboxDesign.md
+
+## 2026-04-06 - Treeview marker geometry test now matches centered 14px marker
+Type: Bug Fix
+Context: `cargo nextest run` started failing after the treeview marker sizing logic clamped markers to the current 14px maximum, but one unit test still asserted the older 12px geometry.
+Change: Updated the `tree_item_marker_rect_anchors_before_text_lane` expectation to the centered 14px rect produced by the live layout math.
+Refs: src/CommanDuctUI/src/controls/treeview_handler.rs
+
+## 2026-04-06 - Render tests now assert list-box output and explicit left-pane header input
+Type: Bug Fix
+Context: Several `harvester_app` render tests were still expecting `PopulateTreeView` commands and implicit header-copy derivation after the left-pane renderer switched to `PopulateListBox` while keeping tree helpers only for marker/link hierarchy logic.
+Change: Rebased the stale assertions onto `PopulateListBox` and `build_job_tree` where appropriate, and seeded `left_pane_header` explicitly in tests that validate header meta copy.
+Refs: crates/harvester_app/src/platform/ui/render.rs
