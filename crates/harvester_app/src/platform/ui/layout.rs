@@ -1948,7 +1948,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Right,
             order: 10,
             fixed_size: Some(operation_progress_bar_width),
-            margin: (12, 10, 14, 4),
+            margin: (12, 10, 8, 4),
         },
         LayoutRule {
             control_id: LABEL_OPERATION_PROGRESS,
@@ -1956,7 +1956,7 @@ fn build_layout_rules(
             dock_style: DockStyle::Right,
             order: 20,
             fixed_size: Some(operation_progress_label_width),
-            margin: (8, 10, 14, 10),
+            margin: (8, 10, 6, 10),
         },
         LayoutRule {
             control_id: BUTTON_STOP,
