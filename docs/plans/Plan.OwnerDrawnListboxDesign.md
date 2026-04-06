@@ -35,41 +35,7 @@ CommanDuctUI version bumps from 0.10.7 to 1.0.0 with this change.
 
 ## 1. New CommanDuctUI Control: ListBox
 
-### Win32 Strategy
-
-A custom window class registered via `RegisterClassExW`. The control owns its `WM_PAINT` handler entirely — no Win32 ListBox, ListView, or TreeView involved. Vertical scrolling via `WM_VSCROLL` with a standard scrollbar.
-
-### Rendering
-
-Double-buffered: paint to an off-screen `HBITMAP`, then `BitBlt` to the window DC. Full repaint on every data change. This eliminates flicker regardless of update strategy.
-
-### Data Model
-
-```rust
-pub type ListBoxItemId = u64;
-
-pub struct ListBoxItemDescriptor {
-    pub id: ListBoxItemId,
-    pub badges: Vec<BadgeDescriptor>,
-    pub title: String,
-    pub metadata: String,  // pre-formatted, e.g. "aibusiness.com · 11 tags"
-    pub enabled: bool,     // false → row renders as disabled (dimmed text, muted badge)
-}
-
-pub struct BadgeDescriptor {
-    pub text: String,
-    pub style: StyleId,
-}
-```
-
-Items are structured — no pre-formatted flat strings. The app builds `ListBoxItemDescriptor` values with typed badge, title, and metadata fields. The `enabled` flag controls whether the row renders normally or in a disabled/dimmed style.
-
-### Interaction
-
-- **Selection:** Single-click selects a row. One selected row at a time. Disabled rows are selectable (needed for toggling back to included).
-- **Keyboard:** Arrow Up/Down move selection. Page Up/Down scroll by visible page. Home/End jump to first/last item.
-- **Events:** Selection change emits `AppEvent::ListBoxItemSelectionChanged`. Scroll change emits `AppEvent::ListBoxScrolled`.
-- **No type-ahead, no checkboxes.**
+Implemented in `CommanDuctUI` 1.0.x. The owner-drawn control, shared types, scrolling, selection events, and programmatic selection commands now exist in the toolkit.
 
 ---
 
@@ -262,51 +228,13 @@ Checkboxes are removed from all left-pane tabs. In the Triage Review tab, the us
 
 ## 7. CommanDuctUI API Surface
 
-### New Commands (PlatformCommand)
-
-- `CreateListBox { window_id, control_id, parent }` — creates the control window.
-- `PopulateListBox { window_id, control_id, items: Vec<ListBoxItemDescriptor>, badge_column_width: u16 }` — replaces all items and triggers repaint.
-- `SetListBoxSelection { window_id, control_id, item_id }` — programmatic selection.
-
-### New Events (AppEvent)
-
-- `ListBoxItemSelectionChanged { window_id, control_id, item_id }`
-- `ListBoxScrolled { window_id, control_id, position }`
-
-### New Styles (StyleId)
-
-- `ListBoxRow` — default row background and text colors.
-- `ListBoxSelectedRow` — selected row background, accent bar.
-- `ListBoxHoverRow` — hover background.
-- `ListBoxDisabledRow` — disabled/excluded row dimmed text and background.
-- `BadgePriorityCritical` — P6+ badges (red).
-- `BadgePriorityHigh` — P5 badges (yellow-brown).
-- `BadgePriorityMedium` — P4 badges (purple).
-- `BadgePriorityLow` — P3 badges (gray).
-- `BadgeCategory` — category pills (muted surface).
-- `BadgeStatusDone` — completed job status (green).
-- `BadgeStatusError` — error status (red).
-- `BadgeStatusActive` — in-progress status (purple).
-- `BadgeStatusMuted` — muted/auto-excluded/excluded status (gray).
-- `BadgeIndirect` — indirect-origin article badge (distinct but subtle).
-
-### Platform Implementation (CommanDuctUI internals)
-
-This is a cross-cutting platform feature, not just a new control type. The implementation touches:
-
-- **Shared types** (`types.rs`): New `ListBoxItemDescriptor`, `BadgeDescriptor`, `PopulateListBox`, `CreateListBox`, `SetListBoxSelection` command variants, and `ListBoxItemSelectionChanged` / `ListBoxScrolled` event variants alongside the existing tree types.
-- **Platform dispatcher** (`app.rs`): New dispatch arms for `CreateListBox`, `PopulateListBox`, `SetListBoxSelection` in the command handler (currently wired for tree commands at lines ~424–555).
-- **Native window state** (`window_common.rs`): New `ControlKind::ListBox` variant, `listbox_state` storage, WM_PAINT / WM_VSCROLL / WM_LBUTTONDOWN / WM_KEYDOWN message routing for the listbox window class.
-- **Styling** (`style.rs` or equivalent): All new `StyleId` variants must have both light and dark theme values.
-- **Changelog**: `src/CommanDuctUI/CHANGELOG.md` updated for 1.0.0.
-
-### Version
-
-CommanDuctUI version: `0.10.7` → `1.0.0`.
+Implemented. Commands, events, styles, dispatcher wiring, toolkit version bump, and changelog entries landed in `CommanDuctUI`.
 
 ---
 
 ## 8. Harvester Integration
+
+Status: partial. The left pane now populates and selects through the listbox path for Jobs, Triage Review, and Triage Results, but the migration is not complete.
 
 ### Data Flow (unchanged pattern)
 
@@ -326,6 +254,12 @@ The Triage Review builder sets `enabled: false` for excluded articles and adds `
 
 Existing helper functions (`triage_result_primary_label()`, `job_source_label()`, `compact_triage_tag_count()`, `title_case_label()`, `domain_from_url()`, `truncate_with_ellipsis()`, `compact_url_label()`) remain unchanged.
 
+Current state:
+- Structured listbox item building is in use.
+- Excluded rows already render as disabled in Triage Review.
+- Full badge parity is not done yet. Triage Results still renders only one badge, and Triage Review does not yet add the `[Indirect]` badge.
+- Legacy tree formatters and tree-building code still exist in the codebase and should be removed at final cutover.
+
 ### New: Indirect Link Pool
 
 - `IndirectLinkPool` added to `AppState`, populated during `Msg::JobFetchCompleted` when extracted links are available.
@@ -333,10 +267,19 @@ Existing helper functions (`triage_result_primary_label()`, `job_source_label()`
 - New view model field: `indirect_link_summary: Option<IndirectLinkSummary>` for status bar display.
 - New `JobOrigin` field on jobs to distinguish direct vs indirect.
 
+Current state:
+- Reducer/state support for the indirect-link pool, generation handling, and `PollIndirectLinks` exists.
+- The UI cutover is incomplete. The bottom-bar button and status display described below are not fully surfaced yet.
+
 ### New: Keyboard Exclude Handler
 
 - `app.rs` event loop: when `ListBoxItemSelectionChanged` is active on Triage Review and the exclude key is pressed, dispatch `Msg::PreTriageDecisionSet` toggling the selected job's include/exclude state.
 - This replaces the `TreeViewItemToggledByUser` → `PreTriageDecisionSet` path.
+
+Current state:
+- Not complete yet. Listbox selection events are wired to `Msg::JobSelected`.
+- Keyboard exclude/include on `X` is still pending.
+- TreeView toggle handling for pre-triage decisions still exists and must be removed when the listbox keyboard path replaces it.
 
 ### Removed from Harvester
 
@@ -364,11 +307,13 @@ Existing helper functions (`triage_result_primary_label()`, `job_source_label()`
 
 ## 9. What Stays in CommanDuctUI
 
-The TreeView control remains in CommanDuctUI as-is. It is a generic library — no reason to remove working code. Harvester simply stops using it for the left pane.
+Implemented decision: the TreeView remains in `CommanDuctUI`. Harvester is migrating away from it for the left pane without removing the generic TreeView control from the toolkit.
 
 ---
 
 ## 10. Test Plan
+
+Status: partial coverage exists now. The toolkit control and parts of the reducer flow are covered, but the full Harvester cutover described below is not yet covered end-to-end.
 
 ### Unit Tests (Harvester)
 

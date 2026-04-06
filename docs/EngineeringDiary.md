@@ -1083,3 +1083,9 @@ Type: Bug Fix
 Context: Fresh-start polling still surfaced large low-signal indirect link pools, so the footer action and status copy encouraged expensive noisy follow-up runs.
 Change: Removed the `Poll Indirect Links` footer button from layout/rendering and stopped showing indirect-link counts in the footer, while leaving the underlying code path commented and intact for a future redesign.
 Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-06 - Owner-drawn listbox now claims focus and dialog-navigation keys
+Type: Bug Fix
+Context: The new left-pane owner-drawn listbox selected rows on mouse click but did not reliably react to arrow/page navigation because the custom child window was not taking focus on click and did not advertise that it wanted dialog-managed navigation keys.
+Change: On `WM_LBUTTONDOWN`, the listbox now calls `SetFocus(hwnd)` before hit-testing, and `WM_GETDLGCODE` returns `DLGC_WANTARROWS | DLGC_WANTCHARS` so Up/Down/Page/Home/End and future character shortcuts route to the control.
+Refs: src/CommanDuctUI/src/controls/listbox_handler.rs, docs/plans/Plan.OwnerDrawnListboxDesign.md
