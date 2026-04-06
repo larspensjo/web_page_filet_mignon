@@ -28,7 +28,7 @@ const SUMMARY_EMPTY_STATE_MARKDOWN: &str =
     "No article selected\n\nSelect a job/article from the list to view its summary.";
 /// Maximum number of models shown individually in the status bar before collapsing.
 const MAX_STATUS_BAR_MODELS: usize = 2;
-const LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH: i32 = 130;
+const LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH: i32 = 44;
 const LIST_BOX_BADGE_PAD_X: i32 = 6;
 const LIST_BOX_BADGE_GAP: i32 = 4;
 
