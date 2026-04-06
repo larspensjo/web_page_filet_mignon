@@ -11,13 +11,13 @@ use commanductui::types::{
     FormTextValidation, MenuActionId, MessageSeverity, TreeItemMarkerKind,
 };
 use commanductui::{
-    AppEvent, CheckState, PlatformCommand, PlatformEventHandler, PlatformInterface,
-    UiStateProvider, WindowConfig, WindowId,
+    AppEvent, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
+    WindowConfig, WindowId,
 };
 use harvester_core::{
     update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel, Effect,
-    JobListScope, JobResultKind, LayoutViewModel, LeftTab, LinkDownloadState, ManualDecision, Msg,
-    PromptLabStage, TrendCategory,
+    JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel, LeftTab, LinkDownloadState,
+    ManualDecision, Msg, PromptLabStage, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -321,15 +321,6 @@ struct AppEventHandler {
     tree_render_state: ui::render::TreeRenderState,
 }
 
-fn job_id_for_item(item_id: commanductui::TreeItemId) -> Option<harvester_core::JobId> {
-    match decode_tree_item_id(item_id) {
-        TreeItemKind::Job { job_id } => Some(job_id),
-        TreeItemKind::LinksFolder { job_id }
-        | TreeItemKind::LinksShowMore { job_id }
-        | TreeItemKind::Link { job_id, .. } => Some(job_id),
-    }
-}
-
 fn triage_marker_for_priority(priority: u8) -> TreeItemMarkerKind {
     match priority {
         6..=u8::MAX => TreeItemMarkerKind::Red,
@@ -338,6 +329,18 @@ fn triage_marker_for_priority(priority: u8) -> TreeItemMarkerKind {
         3 => TreeItemMarkerKind::Gray,
         _ => TreeItemMarkerKind::None,
     }
+}
+
+fn pre_triage_toggle_message(state: &AppState) -> Option<Msg> {
+    let job_id = state.selected_job_id()?;
+    let key = state.pre_triage_key_for_job(job_id)?;
+    let decision = match state.job_filter_status(job_id) {
+        Some(JobFilterStatus::HardExcluded { .. }) | Some(JobFilterStatus::ManuallyExcluded) => {
+            ManualDecision::Include
+        }
+        _ => ManualDecision::Exclude,
+    };
+    Some(Msg::PreTriageDecisionSet { key, decision })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -621,13 +624,8 @@ impl AppEventHandler {
                 any_dirty |= state.consume_dirty();
             }
 
-            let completed_snapshot = if persist_completed_needed {
-                Some(state.completed_jobs_snapshot())
-            } else {
-                None
-            };
-            let overrides_snapshot = if persist_completed_needed || persist_overrides_needed {
-                Some(state.pre_triage_manual_overrides().clone())
+            let persistence_snapshot = if persist_completed_needed || persist_overrides_needed {
+                Some(PersistenceSnapshot::capture(&state))
             } else {
                 None
             };
@@ -659,12 +657,9 @@ impl AppEventHandler {
             let render_snapshot_ms = snapshot_start.elapsed().as_millis();
             guard.state = state;
 
-            if completed_snapshot.is_some() || overrides_snapshot.is_some() {
+            if let Some(snapshot) = persistence_snapshot {
                 persistence_enqueued = true;
-                self.persistence_worker.enqueue(PersistenceSnapshot {
-                    completed: completed_snapshot.unwrap_or_default(),
-                    pre_triage_overrides: overrides_snapshot.unwrap_or_default(),
-                });
+                self.persistence_worker.enqueue(snapshot);
             }
             (
                 maybe_render.0,
@@ -1132,47 +1127,33 @@ impl PlatformEventHandler for AppEventHandler {
                     .msg_tx
                     .send(Msg::PromptLabTemplateUserDraftChanged { text });
             }
-            AppEvent::TreeViewItemSelectionChanged { window_id, item_id }
-                if window_id == self.window_id =>
-            {
-                if let Some(job_id) = job_id_for_item(item_id) {
-                    let _ = self.msg_tx.send(Msg::JobSelected { job_id });
-                }
-            }
             AppEvent::ListBoxItemSelectionChanged {
                 window_id, item_id, ..
             } if window_id == self.window_id => {
                 let _ = self.msg_tx.send(Msg::JobSelected { job_id: item_id.0 });
             }
-            AppEvent::ListBoxScrolled { .. } => {}
-            AppEvent::TreeViewItemToggledByUser {
+            AppEvent::ListBoxItemKeyDown {
                 window_id,
-                item_id,
-                new_state,
-            } if window_id == self.window_id => {
-                if let TreeItemKind::Link { job_id, link_index } = decode_tree_item_id(item_id) {
-                    let checked = matches!(new_state, CheckState::Checked);
-                    let _ = self.msg_tx.send(Msg::LinkToggleRequested {
-                        job_id,
-                        link_index,
-                        checked,
-                    });
-                } else if let TreeItemKind::Job { job_id } = decode_tree_item_id(item_id) {
-                    let guard = self.shared.lock().unwrap();
-                    if guard.state.is_pre_triage_reviewing() {
-                        if let Some(key) = guard.state.pre_triage_key_for_job(job_id) {
-                            let decision = if matches!(new_state, CheckState::Checked) {
-                                ManualDecision::Include
-                            } else {
-                                ManualDecision::Exclude
-                            };
-                            let _ = self
-                                .msg_tx
-                                .send(Msg::PreTriageDecisionSet { key, decision });
+                control_id,
+                key_code,
+            } if window_id == self.window_id && control_id == ui::constants::TREE_JOBS => {
+                if key_code == b'X' as u16 {
+                    let maybe_msg = {
+                        let guard = self.shared.lock().unwrap();
+                        if guard.state.left_tab() == LeftTab::TriageReview
+                            && guard.state.is_pre_triage_reviewing()
+                        {
+                            pre_triage_toggle_message(&guard.state)
+                        } else {
+                            None
                         }
+                    };
+                    if let Some(msg) = maybe_msg {
+                        let _ = self.msg_tx.send(msg);
                     }
                 }
             }
+            AppEvent::ListBoxScrolled { .. } => {}
             AppEvent::WindowCloseRequestedByUser { .. } => {
                 self.commands.push_back(PlatformCommand::QuitApplication);
             }
@@ -1427,7 +1408,63 @@ mod tests {
                 metadata: None,
             },
         );
+        let mut state = state;
+        if let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request() {
+            let ordered_urls = vec![url.to_string()];
+            let (next_state, _) = update(
+                state,
+                Msg::EvaluatePreTriageRefresh {
+                    ordered_urls,
+                    triggered_by_job_done,
+                },
+            );
+            state = next_state;
+        }
         Arc::new(Mutex::new(SharedState { state }))
+    }
+
+    fn shared_state_with_ready_pre_triage_review() -> Arc<Mutex<SharedState>> {
+        let url = "https://example.com/pre-triage";
+        let (mut state, _) = update(
+            AppState::new(),
+            Msg::RestoreCompletedJobs(vec![completed_job_snapshot(url)]),
+        );
+        if let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request() {
+            let (mut state, _) = update(
+                state,
+                Msg::EvaluatePreTriageRefresh {
+                    ordered_urls: vec![url.to_string()],
+                    triggered_by_job_done,
+                },
+            );
+            for _ in 0..8 {
+                let (next_state, effects) = update(state, Msg::Tick);
+                if let Some(request_id) = effects.iter().find_map(|effect| match effect {
+                    Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+                    _ => None,
+                }) {
+                    let articles = vec![harvester_core::LoadedArticle {
+                        url: url.to_string(),
+                        source_title: None,
+                        prepared_text: std::iter::repeat_n("pre-triage-content", 220)
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                        content_hash: "hash-pre-triage".to_string(),
+                        fetched_utc: None,
+                    }];
+                    let (next_state, _) = update(
+                        next_state,
+                        Msg::TriageArticlesLoaded {
+                            request_id,
+                            articles,
+                        },
+                    );
+                    return Arc::new(Mutex::new(SharedState { state: next_state }));
+                }
+                state = next_state;
+            }
+        }
+        panic!("expected pre-triage refresh dispatch for test fixture");
     }
 
     fn shared_state_with_single_link() -> Arc<Mutex<SharedState>> {
@@ -1458,8 +1495,9 @@ mod tests {
         guard.state = state;
     }
 
-    fn test_handler_with_outbound() -> (AppEventHandler, mpsc::Receiver<Msg>) {
-        let shared = Arc::new(Mutex::new(SharedState::default()));
+    fn test_handler_with_shared(
+        shared: Arc<Mutex<SharedState>>,
+    ) -> (AppEventHandler, mpsc::Receiver<Msg>) {
         let (in_tx, in_rx) = mpsc::channel();
         let _ = in_tx;
         let (out_tx, out_rx) = mpsc::channel();
@@ -1482,6 +1520,42 @@ mod tests {
             ui::render::TreeRenderState::new(),
         );
         (handler, out_rx)
+    }
+
+    fn test_handler_with_shared_and_temp_state(
+        shared: Arc<Mutex<SharedState>>,
+    ) -> (
+        AppEventHandler,
+        mpsc::Sender<Msg>,
+        tempfile::TempDir,
+        PathBuf,
+    ) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let (in_tx, in_rx) = mpsc::channel();
+        let (out_tx, _out_rx) = mpsc::channel();
+        let output_dir = temp.path().to_path_buf();
+        let paths = RuntimePaths::new(
+            output_dir.clone(),
+            output_dir.join("sources.ron"),
+            output_dir.join("contexts"),
+            output_dir.join("prompts"),
+        );
+        let platform_handler = Box::new(Win32PlatformHandler);
+        let effect_runner = EffectRunner::new(paths.clone(), out_tx.clone(), platform_handler);
+        let handler = AppEventHandler::new(
+            WindowId::new(1),
+            shared,
+            in_rx,
+            out_tx,
+            effect_runner,
+            PersistenceWorker::new(paths.state_path.clone()),
+            ui::render::TreeRenderState::new(),
+        );
+        (handler, in_tx, temp, paths.state_path)
+    }
+
+    fn test_handler_with_outbound() -> (AppEventHandler, mpsc::Receiver<Msg>) {
+        test_handler_with_shared(Arc::new(Mutex::new(SharedState::default())))
     }
 
     #[test]
@@ -1545,6 +1619,35 @@ mod tests {
             provider.tree_item_marker(WindowId::new(1), item_id),
             TreeItemMarkerKind::None
         );
+    }
+
+    #[test]
+    fn pre_triage_override_persistence_preserves_completed_jobs() {
+        let shared = shared_state_with_ready_pre_triage_review();
+        let key = {
+            let guard = shared.lock().unwrap();
+            guard
+                .state
+                .pre_triage_key_for_job(1)
+                .expect("pre-triage key for restored job")
+        };
+        let (mut handler, in_tx, _temp, state_path) =
+            test_handler_with_shared_and_temp_state(shared);
+
+        in_tx
+            .send(Msg::PreTriageDecisionSet {
+                key,
+                decision: ManualDecision::Exclude,
+            })
+            .expect("send pre-triage decision");
+        handler.process_pending_messages();
+        handler.persistence_worker.shutdown();
+
+        let completed = harvester_io::load_completed_jobs(&state_path);
+        let overrides = harvester_io::load_pre_triage_overrides(&state_path);
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].url, "https://example.com/pre-triage");
+        assert_eq!(overrides.len(), 1);
     }
 
     #[test]
@@ -1913,6 +2016,66 @@ mod tests {
                 tab: LeftTab::TriageResults
             }
         );
+    }
+
+    #[test]
+    fn listbox_x_key_toggles_pre_triage_decision_on_triage_review() {
+        let shared = shared_state_with_ready_pre_triage_review();
+        apply_msg(
+            &shared,
+            Msg::LeftTabSelected {
+                tab: LeftTab::TriageReview,
+            },
+        );
+        apply_msg(&shared, Msg::JobSelected { job_id: 1 });
+
+        let expected_key = {
+            let guard = shared.lock().unwrap();
+            guard
+                .state
+                .pre_triage_key_for_job(1)
+                .expect("pre triage key")
+        };
+        let expected_decision = {
+            let guard = shared.lock().unwrap();
+            match guard.state.job_filter_status(1) {
+                Some(JobFilterStatus::HardExcluded { .. })
+                | Some(JobFilterStatus::ManuallyExcluded) => ManualDecision::Include,
+                _ => ManualDecision::Exclude,
+            }
+        };
+
+        let (mut handler, rx) = test_handler_with_shared(shared);
+        handler.handle_event(AppEvent::ListBoxItemKeyDown {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::TREE_JOBS,
+            key_code: b'X' as u16,
+        });
+
+        assert_eq!(
+            rx.recv_timeout(Duration::from_millis(250))
+                .expect("pre triage decision"),
+            Msg::PreTriageDecisionSet {
+                key: expected_key,
+                decision: expected_decision,
+            }
+        );
+    }
+
+    #[test]
+    fn listbox_x_key_does_nothing_outside_pre_triage_review() {
+        let shared = shared_state_with_triage_priority(5);
+        apply_msg(&shared, Msg::LeftTabSelected { tab: LeftTab::Jobs });
+        apply_msg(&shared, Msg::JobSelected { job_id: 1 });
+
+        let (mut handler, rx) = test_handler_with_shared(shared);
+        handler.handle_event(AppEvent::ListBoxItemKeyDown {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::TREE_JOBS,
+            key_code: b'X' as u16,
+        });
+
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
     }
 
     #[test]

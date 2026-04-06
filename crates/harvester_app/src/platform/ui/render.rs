@@ -5,7 +5,7 @@ use commanductui::{
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppTab, AppViewModel, JobFilterStatus, JobListScope, JobResultKind, JobRowView,
+    AppTab, AppViewModel, JobFilterStatus, JobListScope, JobOrigin, JobResultKind, JobRowView,
     LayoutViewModel, LeftPaneHeaderView, LeftTab, LlmModelUsageView, PreviewContextView,
     PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendsTabView,
     DEFAULT_JOBS_PANEL_WIDTH,
@@ -105,6 +105,7 @@ pub struct TreeRenderState {
     prev_briefing_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
     prev_poll_enabled: Option<bool>,
+    prev_poll_indirect_enabled: Option<bool>,
     prev_briefing_progress: Option<String>,
     prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
@@ -193,6 +194,7 @@ impl Default for TreeRenderState {
             prev_briefing_enabled: None,
             prev_triage_enabled: None,
             prev_poll_enabled: None,
+            prev_poll_indirect_enabled: None,
             prev_briefing_progress: None,
             prev_triage_progress: None,
             prev_progress_range: None,
@@ -602,10 +604,21 @@ fn render_status_section(
     if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
         status_parts.push(usage);
     }
-    // Indirect-link polling is intentionally hidden for now because the current
-    // collection pass still produces large noisy batches on cold starts.
-    // Do not surface collection counts in the footer until the feature is
-    // redesigned and safe to re-enable.
+    if let Some(indirect_summary) = view.indirect_link_summary.as_ref() {
+        let indirect_text = match indirect_summary.phase {
+            harvester_core::IndirectLinkPhase::Collecting => {
+                format!("{} indirect links collected", indirect_summary.count)
+            }
+            harvester_core::IndirectLinkPhase::Ready => {
+                if indirect_summary.count == 0 {
+                    "No indirect links".to_string()
+                } else {
+                    format!("{} indirect links ready", indirect_summary.count)
+                }
+            }
+        };
+        status_parts.push(indirect_text);
+    }
     let severity = if let Some(message) = view.ai_unavailable_message.as_deref() {
         status_parts.push(message.to_string());
         MessageSeverity::Warning
@@ -820,6 +833,16 @@ fn render_main_controls_section(
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_POLL_SOURCES,
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.prev_poll_indirect_enabled,
+        view.poll_indirect_links_enabled,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_POLL_INDIRECT_LINKS,
             enabled,
         },
     );
@@ -1736,7 +1759,7 @@ fn build_list_box_items(view: &AppViewModel) -> Vec<ListBoxItemDescriptor> {
 }
 
 fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItemDescriptor {
-    let badges = match tab {
+    let mut badges = match tab {
         LeftTab::Jobs => vec![BadgeDescriptor {
             text: job_status_label(job).to_string(),
             style: job_status_style(job),
@@ -1745,15 +1768,30 @@ fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItemDescriptor 
             text: triage_review_status_label(job).to_string(),
             style: triage_review_status_style(job),
         }],
-        LeftTab::TriageResults => vec![BadgeDescriptor {
-            text: triage_result_primary_label(job),
-            style: triage_priority_style(job),
-        }],
+        LeftTab::TriageResults => {
+            let mut badges = vec![BadgeDescriptor {
+                text: triage_priority_label(job),
+                style: triage_priority_style(job),
+            }];
+            if let Some(annotation) = job.triage_annotation.as_ref() {
+                badges.push(BadgeDescriptor {
+                    text: title_case_label(&annotation.category),
+                    style: StyleId::BadgeCategory,
+                });
+            }
+            badges
+        }
         LeftTab::PromptLab => vec![BadgeDescriptor {
             text: job_status_label(job).to_string(),
             style: job_status_style(job),
         }],
     };
+    if matches!(tab, LeftTab::TriageReview) && matches!(job.origin, JobOrigin::Indirect { .. }) {
+        badges.push(BadgeDescriptor {
+            text: "Indirect".to_string(),
+            style: StyleId::BadgeIndirect,
+        });
+    }
 
     let title = job
         .summary_title
@@ -1780,17 +1818,12 @@ fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItemDescriptor 
             format!("{category} · {}", job_source_label(job))
         }
         LeftTab::TriageResults => {
-            let category = job
-                .triage_annotation
-                .as_ref()
-                .map(|triage| title_case_label(&triage.category))
-                .unwrap_or_else(|| "Untriaged".to_string());
             let tag_count = job
                 .triage_annotation
                 .as_ref()
                 .and_then(|triage| compact_triage_tag_count(&triage.tags))
                 .unwrap_or_else(|| "0 tags".to_string());
-            format!("{category} · {} · {tag_count}", job_source_label(job))
+            format!("{} · {tag_count}", job_source_label(job))
         }
         LeftTab::PromptLab => format!("{} · {}", job_source_label(job), job_status_label(job)),
     };
@@ -1858,6 +1891,15 @@ fn triage_priority_style(job: &JobRowView) -> StyleId {
         5 => StyleId::BadgePriorityHigh,
         _ => StyleId::BadgePriorityCritical,
     }
+}
+
+fn triage_priority_label(job: &JobRowView) -> String {
+    let priority = job
+        .triage_annotation
+        .as_ref()
+        .map(|triage| triage.priority)
+        .unwrap_or_default();
+    format!("P{priority}")
 }
 
 #[allow(dead_code)]
@@ -2086,7 +2128,6 @@ fn format_job_row_legacy(job: &JobRowView) -> String {
 }
 
 /// Triage Review tab: shows the URL/title and review status cue.
-#[allow(dead_code)]
 fn format_job_row_triage_review(job: &JobRowView) -> String {
     let review_status = match &job.filter_status {
         Some(JobFilterStatus::HardExcluded { .. }) => "[AUTO EXCLUDED] ",
@@ -2101,7 +2142,6 @@ fn format_job_row_triage_review(job: &JobRowView) -> String {
 }
 
 /// Triage Results tab: title first, with triage metadata kept compact.
-#[allow(dead_code)]
 fn format_job_row_triage_results(job: &JobRowView) -> String {
     if let Some(annotation) = &job.triage_annotation {
         let primary = triage_result_primary_label(job);
@@ -2792,6 +2832,48 @@ mod tests {
     }
 
     #[test]
+    fn triage_review_items_show_indirect_badge_and_disabled_state() {
+        let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
+        job.summary_title = Some("Example headline".to_string());
+        job.filter_status = Some(JobFilterStatus::ManuallyExcluded);
+        job.origin = JobOrigin::Indirect { source_job_id: 9 };
+        job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 4,
+            category: "security".to_string(),
+            tags: vec![],
+        });
+
+        let item = build_list_box_item(LeftTab::TriageReview, &job);
+
+        assert!(!item.enabled);
+        assert_eq!(item.badges.len(), 2);
+        assert_eq!(item.badges[0].text, "Excluded");
+        assert_eq!(item.badges[1].text, "Indirect");
+        assert_eq!(item.badges[1].style, StyleId::BadgeIndirect);
+        assert_eq!(item.metadata, "Security · example.com");
+    }
+
+    #[test]
+    fn triage_results_items_show_priority_and_category_badges() {
+        let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
+        job.summary_title = Some("Example headline".to_string());
+        job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: 5,
+            category: "business".to_string(),
+            tags: vec!["tag-a".to_string()],
+        });
+
+        let item = build_list_box_item(LeftTab::TriageResults, &job);
+
+        assert_eq!(item.badges.len(), 2);
+        assert_eq!(item.badges[0].text, "P5");
+        assert_eq!(item.badges[0].style, StyleId::BadgePriorityHigh);
+        assert_eq!(item.badges[1].text, "Business");
+        assert_eq!(item.badges[1].style, StyleId::BadgeCategory);
+        assert_eq!(item.metadata, "example.com · 1 tag");
+    }
+
+    #[test]
     fn tree_repopulates_when_structure_changes() {
         init_logging();
         let window_id = WindowId::new(2);
@@ -3437,8 +3519,13 @@ mod tests {
             populated[0].title
         );
         assert!(
-            populated[0].metadata.contains("Untriaged"),
-            "first should still show untriaged metadata, got: {}",
+            populated[0].metadata.contains("low.com"),
+            "first should still show the source label, got: {}",
+            populated[0].metadata
+        );
+        assert!(
+            populated[0].metadata.contains("0 tags"),
+            "first should still show zero tags, got: {}",
             populated[0].metadata
         );
         assert!(
@@ -3532,7 +3619,8 @@ mod tests {
         assert_eq!(populated.len(), 2);
         assert_eq!(populated[0].id, ListBoxItemId(1));
         assert!(populated[0].title.contains("Now Highest"));
-        assert!(populated[0].metadata.contains("Finance"));
+        assert!(populated[0].metadata.contains("low.com"));
+        assert!(populated[0].metadata.contains("0 tags"));
     }
 
     #[test]
@@ -3698,6 +3786,41 @@ mod tests {
             )
         });
         assert!(disabled, "BUTTON_OPEN_BROWSER should be disabled");
+    }
+
+    #[test]
+    fn render_enables_poll_indirect_links_when_links_are_available() {
+        init_logging();
+        let mut view = make_view(vec![]);
+        view.poll_indirect_links_enabled = true;
+        let mut tree_state = TreeRenderState::new();
+        let window_id = WindowId::new(1);
+        let cmds = render(window_id, &view, &mut tree_state);
+        let enabled = cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+                if *control_id == BUTTON_POLL_INDIRECT_LINKS
+            )
+        });
+        assert!(enabled, "BUTTON_POLL_INDIRECT_LINKS should be enabled");
+    }
+
+    #[test]
+    fn render_disables_poll_indirect_links_when_links_are_unavailable() {
+        init_logging();
+        let view = make_view(vec![]);
+        let mut tree_state = TreeRenderState::new();
+        let window_id = WindowId::new(1);
+        let cmds = render(window_id, &view, &mut tree_state);
+        let disabled = cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+                if *control_id == BUTTON_POLL_INDIRECT_LINKS
+            )
+        });
+        assert!(disabled, "BUTTON_POLL_INDIRECT_LINKS should be disabled");
     }
 
     #[test]

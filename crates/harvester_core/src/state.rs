@@ -2312,6 +2312,10 @@ impl AppState {
         Some(job.url.clone())
     }
 
+    pub fn selected_job_id(&self) -> Option<JobId> {
+        self.ui.selected_job_id()
+    }
+
     pub(crate) fn selected_job_has_summary(&self) -> bool {
         self.ui
             .selected_job_id()
@@ -3489,7 +3493,7 @@ impl UiState {
         self.preview_mode = mode;
     }
 
-    fn selected_job_id(&self) -> Option<JobId> {
+    pub(crate) fn selected_job_id(&self) -> Option<JobId> {
         self.preview.job_id()
     }
 

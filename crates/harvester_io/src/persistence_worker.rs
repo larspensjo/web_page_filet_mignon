@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use engine_logging::engine_info;
-use harvester_core::{ArticleFilterKey, CompletedJobSnapshot, ManualDecision};
+use harvester_core::{AppState, ArticleFilterKey, CompletedJobSnapshot, ManualDecision};
 
 use crate::persist_runtime_state;
 
@@ -16,6 +16,15 @@ const MAX_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 pub struct PersistenceSnapshot {
     pub completed: Vec<CompletedJobSnapshot>,
     pub pre_triage_overrides: HashMap<ArticleFilterKey, ManualDecision>,
+}
+
+impl PersistenceSnapshot {
+    pub fn capture(state: &AppState) -> Self {
+        Self {
+            completed: state.completed_jobs_snapshot(),
+            pre_triage_overrides: state.pre_triage_manual_overrides().clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -175,7 +184,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use harvester_core::{ArticleFilterKey, ManualDecision};
+    use harvester_core::{update, ArticleFilterKey, ManualDecision, Msg};
 
     use super::*;
     use crate::{load_completed_jobs, load_pre_triage_overrides};
@@ -190,22 +199,20 @@ mod tests {
         let path = state_path(temp.path());
         let mut worker = PersistenceWorker::new(path.clone());
 
-        let first = PersistenceSnapshot {
-            completed: vec![],
-            pre_triage_overrides: HashMap::new(),
-        };
-        let mut second_overrides = HashMap::new();
-        second_overrides.insert(
-            ArticleFilterKey {
-                url: "https://example.com/a".to_string(),
-                content_hash: 1,
+        let first = PersistenceSnapshot::capture(&harvester_core::AppState::new());
+        let (state_with_overrides, _) = update(
+            harvester_core::AppState::new(),
+            Msg::PreTriageOverridesHydrated {
+                overrides: HashMap::from([(
+                    ArticleFilterKey {
+                        url: "https://example.com/a".to_string(),
+                        content_hash: 1,
+                    },
+                    ManualDecision::Include,
+                )]),
             },
-            ManualDecision::Include,
         );
-        let second = PersistenceSnapshot {
-            completed: vec![],
-            pre_triage_overrides: second_overrides,
-        };
+        let second = PersistenceSnapshot::capture(&state_with_overrides);
 
         worker.enqueue(first);
         worker.enqueue(second);
@@ -221,20 +228,51 @@ mod tests {
         let path = state_path(temp.path());
         let worker = PersistenceWorker::new(path.clone());
 
-        let snapshot = PersistenceSnapshot {
-            completed: vec![harvester_core::CompletedJobSnapshot {
+        let (state_with_completed, _) = update(
+            harvester_core::AppState::new(),
+            Msg::RestoreCompletedJobs(vec![harvester_core::CompletedJobSnapshot {
                 url: "https://example.com/x".to_string(),
                 tokens: Some(1),
                 bytes: Some(1),
                 links: vec![],
                 fetched_utc: None,
-            }],
-            pre_triage_overrides: HashMap::new(),
-        };
+            }]),
+        );
+        let snapshot = PersistenceSnapshot::capture(&state_with_completed);
         worker.enqueue(snapshot);
         thread::sleep(Duration::from_millis(500));
 
         let completed = load_completed_jobs(&path);
         assert_eq!(completed.len(), 1);
+    }
+
+    #[test]
+    fn capture_builds_full_snapshot_from_app_state() {
+        let (state, _) = update(
+            harvester_core::AppState::new(),
+            Msg::RestoreCompletedJobs(vec![harvester_core::CompletedJobSnapshot {
+                url: "https://example.com/x".to_string(),
+                tokens: Some(1),
+                bytes: Some(1),
+                links: vec![],
+                fetched_utc: None,
+            }]),
+        );
+        let (state, _) = update(
+            state,
+            Msg::PreTriageOverridesHydrated {
+                overrides: HashMap::from([(
+                    ArticleFilterKey {
+                        url: "https://example.com/x".to_string(),
+                        content_hash: 1,
+                    },
+                    ManualDecision::Exclude,
+                )]),
+            },
+        );
+
+        let snapshot = PersistenceSnapshot::capture(&state);
+        assert_eq!(snapshot.completed.len(), 1);
+        assert_eq!(snapshot.pre_triage_overrides.len(), 1);
     }
 }

@@ -1101,3 +1101,9 @@ Type: Bug Fix
 Context: Several `harvester_app` render tests were still expecting `PopulateTreeView` commands and implicit header-copy derivation after the left-pane renderer switched to `PopulateListBox` while keeping tree helpers only for marker/link hierarchy logic.
 Change: Rebased the stale assertions onto `PopulateListBox` and `build_job_tree` where appropriate, and seeded `left_pane_header` explicitly in tests that validate header meta copy.
 Refs: crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-06 - Listbox footer and keyboard exclude path moved fully onto the new control
+Type: Bug Fix
+Context: The owner-drawn left-pane listbox still lacked the indirect-link footer action, the footer status copy, and the `X` shortcut plumbing needed to replace the old tree checkbox flow.
+Change: Restored the `Poll Indirect Links` footer button and footer status summary, added structured badges for triage rows, and routed listbox key presses through a generic `ListBoxItemKeyDown` event so Harvester can toggle pre-triage include/exclude from the selected row.
+Refs: crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, src/CommanDuctUI/src/controls/listbox_handler.rs

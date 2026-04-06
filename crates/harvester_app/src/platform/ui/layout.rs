@@ -813,6 +813,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         control_id: BUTTON_POLL_SOURCES,
         text: "Poll Sources".to_string(),
     });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_BUTTONS),
+        control_id: BUTTON_POLL_INDIRECT_LINKS,
+        text: "Poll Indirect Links".to_string(),
+    });
 
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -1991,10 +1997,18 @@ fn build_layout_rules(
             margin: (0, 6, 6, 6),
         },
         LayoutRule {
-            control_id: BUTTON_OPEN_BROWSER,
+            control_id: BUTTON_POLL_INDIRECT_LINKS,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 4,
+            fixed_size: Some(168),
+            margin: (0, 6, 6, 6),
+        },
+        LayoutRule {
+            control_id: BUTTON_OPEN_BROWSER,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 5,
             fixed_size: Some(144),
             margin: (0, 6, 6, 6),
         },
@@ -2773,10 +2787,11 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
         control_id: BUTTON_POLL_SOURCES,
         style_id: StyleId::SecondaryButton,
     });
-    // Intentionally hide the indirect-link polling affordance for now.
-    // Cold-start polls still explode into large noisy link graphs dominated by
-    // site navigation, related-story clusters, assets, and taxonomy pages, so
-    // exposing the footer action invites expensive low-signal runs.
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_POLL_INDIRECT_LINKS,
+        style_id: StyleId::SecondaryButton,
+    });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_OPEN_BROWSER,
@@ -3723,7 +3738,12 @@ mod tests {
     #[test]
     fn secondary_footer_buttons_use_secondary_button_style() {
         let cmds = initial_commands(WindowId::new(99));
-        for button_id in [BUTTON_TRIAGE, BUTTON_POLL_SOURCES, BUTTON_OPEN_BROWSER] {
+        for button_id in [
+            BUTTON_TRIAGE,
+            BUTTON_POLL_SOURCES,
+            BUTTON_POLL_INDIRECT_LINKS,
+            BUTTON_OPEN_BROWSER,
+        ] {
             let has_style = cmds.iter().any(|cmd| {
                 matches!(
                     cmd,
@@ -3827,6 +3847,7 @@ mod tests {
             BUTTON_BRIEFING,
             BUTTON_TRIAGE,
             BUTTON_POLL_SOURCES,
+            BUTTON_POLL_INDIRECT_LINKS,
             BUTTON_OPEN_BROWSER,
         ] {
             let rule = rules

@@ -69,7 +69,7 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
         }
     };
 
-    let completed = state
+    let completed: Vec<CompletedJobSnapshot> = state
         .completed
         .into_iter()
         .map(|job| CompletedJobSnapshot {
@@ -88,7 +88,12 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
         })
         .collect();
 
-    engine_info!("Loaded persisted completed jobs from {:?}", state_path);
+    if !completed.is_empty() {
+        engine_info!("Loaded persisted completed jobs from {:?}", state_path);
+        return completed;
+    }
+
+    engine_info!("No completed jobs found in persisted state {:?}", state_path);
     completed
 }
 
@@ -214,14 +219,6 @@ fn is_safe_downloaded_path(value: &str) -> bool {
 
 pub fn persist_completed_jobs(state_path: &Path, completed: &[CompletedJobSnapshot]) {
     persist_runtime_state(state_path, completed, &std::collections::HashMap::new());
-}
-
-pub fn persist_pre_triage_overrides(
-    state_path: &Path,
-    pre_triage_overrides: &std::collections::HashMap<ArticleFilterKey, ManualDecision>,
-) {
-    let completed = load_completed_jobs(state_path);
-    persist_runtime_state(state_path, &completed, pre_triage_overrides);
 }
 
 pub fn persist_runtime_state(
