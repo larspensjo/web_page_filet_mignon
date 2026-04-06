@@ -411,7 +411,13 @@ fn should_collect_indirect_link(source_url: &str, link_url: &str) -> bool {
     if let Ok(source) = Url::parse(source_url) {
         if source.host_str().map(|h| h.eq_ignore_ascii_case(&host)) == Some(true) {
             let articleish_markers = [
-                "/20", "/article/", "/articles/", "/story/", "/news/", "/insights/", "/p/",
+                "/20",
+                "/article/",
+                "/articles/",
+                "/story/",
+                "/news/",
+                "/insights/",
+                "/p/",
             ];
             let looks_articleish = articleish_markers.iter().any(|m| path.contains(m));
             if !looks_articleish {
