@@ -322,6 +322,11 @@ impl PreTriageSession {
             .collect()
     }
 
+    /// Returns the committed included URL set.
+    ///
+    /// This is intentionally available only in `ReadyToTriage`: during `Reviewing`, unresolved
+    /// review rows are still tentative, so callers that need provisional include/exclude state
+    /// should use `tentative_included_urls()` or `resolved_included_articles()` instead.
     pub fn resolved_included_urls(&self) -> Vec<String> {
         if !matches!(self.phase(), PreTriagePhase::ReadyToTriage) {
             return Vec::new();
@@ -339,6 +344,10 @@ impl PreTriageSession {
         self.resolved_included_urls_internal()
     }
 
+    /// Returns the currently included articles for interactive workflows.
+    ///
+    /// Unlike `resolved_included_urls()`, this includes tentative decisions while `Reviewing`.
+    /// The triage handoff uses this so the user can run triage from an in-progress review.
     pub fn resolved_included_articles(&self) -> Vec<LoadedArticle> {
         self.resolved_included_urls_internal()
             .into_iter()
@@ -371,14 +380,13 @@ impl PreTriageSession {
         *self = Self::default();
     }
 
-    /// Construct a session that is directly in `ReadyToTriage` phase with no entries.
+    /// Construct a session whose internal lifecycle is `Loaded` with no entries.
     ///
-    /// This state is unreachable via normal transitions (the phase derivation logic
-    /// transitions to `Failed` when the resolved included URL set is empty). This
-    /// constructor exists solely to exercise the defensive guard in `working_corpus`
-    /// that prevents mis-classification if state is ever constructed directly in tests.
+    /// This state is unreachable via normal transitions: normal lifecycle refreshes transition to
+    /// `Failed` when the resolved included URL set is empty. This constructor exists solely to
+    /// exercise defensive guards if state is ever constructed directly in tests.
     #[cfg(test)]
-    pub fn ready_to_triage_empty_for_test() -> Self {
+    pub fn loaded_empty_for_test() -> Self {
         Self {
             lifecycle: PreTriageLifecycle::Loaded,
             entries: Vec::new(),

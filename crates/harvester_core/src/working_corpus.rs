@@ -458,16 +458,15 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------------------------
-    // Test: ready pre-triage but empty resolved URLs → Unavailable (defensive guard)
+    // Test: loaded pre-triage but empty resolved URLs → Unavailable (defensive guard)
     // -----------------------------------------------------------------------------------------
     #[test]
-    fn ready_pre_triage_empty_urls_yields_unavailable() {
+    fn loaded_empty_pre_triage_yields_unavailable() {
         init_logging();
-        // NOTE: `ReadyToTriage` with zero included URLs is unreachable via normal transitions —
-        // The normal lifecycle derivation transitions to `Failed` when the resolved set is empty.
+        // NOTE: a loaded lifecycle with zero included URLs is unreachable via normal transitions.
         // The test-only constructor bypasses that invariant to exercise the defensive guard at
         // working_corpus.rs lines 64–70.
-        let pre_triage = PreTriageSession::ready_to_triage_empty_for_test();
+        let pre_triage = PreTriageSession::loaded_empty_for_test();
         assert_eq!(pre_triage.phase(), PreTriagePhase::ReadyToTriage);
 
         let triage = complete_triage(&["https://t.com"], 5);
