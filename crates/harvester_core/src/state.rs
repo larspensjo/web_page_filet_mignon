@@ -962,7 +962,11 @@ impl AppState {
             triage_can_start: self.triage_ai_available()
                 && (!self.briefing_orchestration.is_requested())
                 && self.triage.can_start()
-                && matches!(self.pre_triage.phase(), PreTriagePhase::ReadyToTriage),
+                && matches!(
+                    self.pre_triage.phase(),
+                    PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+                )
+                && !self.pre_triage.resolved_included_articles().is_empty(),
             triage_progress: self
                 .triage
                 .progress_text()
@@ -1430,14 +1434,17 @@ impl AppState {
     }
 
     /// Consumes the pre-triage included articles for use in a triage session,
-    /// resetting pre-triage to Idle. Returns `None` if pre-triage is not in
-    /// `ReadyToTriage` phase or has no resolved articles. This is a one-way
+    /// resetting pre-triage to Idle. Returns `None` if pre-triage is not in an
+    /// interactive phase or has no resolved articles. This is a one-way
     /// transition that ensures pre-triage cannot remain action-ready after its
     /// articles have been handed off.
-    pub(crate) fn consume_ready_pre_triage_articles_for_triage(
+    pub(crate) fn consume_interactive_pre_triage_articles_for_triage(
         &mut self,
     ) -> Option<Vec<crate::briefing::LoadedArticle>> {
-        if !matches!(self.pre_triage.phase(), PreTriagePhase::ReadyToTriage) {
+        if !matches!(
+            self.pre_triage.phase(),
+            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+        ) {
             return None;
         }
         let articles = self.pre_triage.resolved_included_articles();

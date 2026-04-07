@@ -77,7 +77,7 @@ fn manual_include_overrides_hard_exclude() {
         ],
         &policy,
     );
-    assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
+    assert_eq!(session.phase(), PreTriagePhase::ReadyToTriage);
     let youtube_key = session
         .entries()
         .iter()
@@ -88,7 +88,7 @@ fn manual_include_overrides_hard_exclude() {
     assert!(session
         .set_manual_decision(&youtube_key, ManualDecision::Include)
         .is_ok());
-    assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
+    assert_eq!(session.phase(), PreTriagePhase::ReadyToTriage);
     assert!(
         session
             .resolved_included_urls()
@@ -105,7 +105,7 @@ fn manual_exclude_overrides_auto_include() {
         .join(" ");
     let mut session =
         PreTriageSession::load_articles(vec![article("https://example.com", None, &body)], &policy);
-    assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
+    assert_eq!(session.phase(), PreTriagePhase::ReadyToTriage);
     let key = session.entries()[0].key.clone();
     assert!(session
         .set_manual_decision(&key, ManualDecision::Exclude)
@@ -140,7 +140,7 @@ fn policy_with_no_review_entries_fast_paths_to_ready() {
         .join(" ");
     let session =
         PreTriageSession::load_articles(vec![article("https://example.com", None, &body)], &policy);
-    assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
+    assert_eq!(session.phase(), PreTriagePhase::ReadyToTriage);
 }
 
 #[test]
@@ -161,7 +161,7 @@ fn corpus_fingerprint_changes_when_decisions_change() {
         .join(" ");
     let mut session =
         PreTriageSession::load_articles(vec![article("https://example.com", None, &body)], &policy);
-    assert_eq!(session.phase(), &PreTriagePhase::ReadyToTriage);
+    assert_eq!(session.phase(), PreTriagePhase::Reviewing);
     let before = session.corpus_fingerprint();
     let key = session.entries()[0].key.clone();
     session

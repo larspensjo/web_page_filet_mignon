@@ -1089,7 +1089,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             if !state.triage().can_start() {
                 return (state, Vec::new());
             }
-            if !matches!(state.pre_triage().phase(), PreTriagePhase::ReadyToTriage) {
+            if !matches!(
+                state.pre_triage().phase(),
+                PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+            ) {
                 return (state, Vec::new());
             }
             state.set_left_tab(LeftTab::TriageResults);
@@ -2270,7 +2273,7 @@ fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
     // Consumes the pre-triage articles via a phase-guarded helper that atomically
     // resets pre-triage to Idle, ensuring it cannot remain action-ready after
     // its articles have been handed off to triage.
-    let included = match state.consume_ready_pre_triage_articles_for_triage() {
+    let included = match state.consume_interactive_pre_triage_articles_for_triage() {
         Some(articles) => articles,
         None => {
             state
@@ -5779,14 +5782,14 @@ mod tests {
         state
     }
 
-    // ── consume_ready_pre_triage_articles_for_triage unit tests ──────────────
+    // ── consume_interactive_pre_triage_articles_for_triage unit tests ────────
 
     #[test]
-    fn consume_ready_pre_triage_articles_for_triage_rejects_non_ready_phase() {
+    fn consume_interactive_pre_triage_articles_for_triage_rejects_non_interactive_phase() {
         init_logging();
         // Pre-triage is Idle (default) — consume must return None.
         let mut state = AppState::new();
-        let result = state.consume_ready_pre_triage_articles_for_triage();
+        let result = state.consume_interactive_pre_triage_articles_for_triage();
         assert!(result.is_none(), "Idle phase must return None");
         assert!(
             matches!(
@@ -5798,7 +5801,7 @@ mod tests {
     }
 
     #[test]
-    fn consume_ready_pre_triage_articles_for_triage_returns_articles_and_resets_to_idle() {
+    fn consume_interactive_pre_triage_articles_for_triage_returns_articles_and_resets_to_idle() {
         init_logging();
         // Setup: ReadyToTriage state with articles
         let urls = &["https://example.com/a", "https://example.com/b"];
@@ -5809,7 +5812,7 @@ mod tests {
         ));
 
         // Action: consume articles
-        let articles = state.consume_ready_pre_triage_articles_for_triage();
+        let articles = state.consume_interactive_pre_triage_articles_for_triage();
 
         // Assert: returns Some with the articles
         let articles = articles.expect("should return Some in ReadyToTriage with articles");
@@ -5833,6 +5836,79 @@ mod tests {
             state.pre_triage().resolved_included_urls().is_empty(),
             "no URLs should remain in pre-triage after consuming"
         );
+    }
+
+    #[test]
+    fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
+        init_logging();
+        let review_content: String = std::iter::repeat_n("longword", 100)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let url1 = "https://review-handoff.com/1";
+        let url2 = "https://review-handoff.com/2";
+        let state = add_completed_job_for_test(AppState::new(), url1);
+        let state = add_completed_job_for_test(state, url2);
+        let (state, request_id) = tick_until_dispatch(state);
+        let articles = vec![
+            LoadedArticle {
+                url: url1.to_string(),
+                source_title: None,
+                prepared_text: review_content.clone(),
+                content_hash: format!("hash-{url1}"),
+                fetched_utc: None,
+            },
+            LoadedArticle {
+                url: url2.to_string(),
+                source_title: None,
+                prepared_text: review_content,
+                content_hash: format!("hash-{url2}"),
+                fetched_utc: None,
+            },
+        ];
+        let (state, _) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles,
+            },
+        );
+        let key = state.pre_triage().entries()[0].key.clone();
+        let (state, _) = update(
+            state,
+            Msg::PreTriageDecisionSet {
+                key,
+                decision: crate::pre_triage_filter::ManualDecision::Exclude,
+            },
+        );
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Reviewing
+            ),
+            "one unresolved review item should keep pre-triage in Reviewing"
+        );
+        assert!(
+            state.view().triage_can_start,
+            "Reviewing phase with tentative included articles must allow triage start"
+        );
+
+        let state = prime_llm_metadata(state);
+        let (state, effects) = update(state, Msg::TriageClicked);
+
+        assert!(!effects.is_empty(), "triage should dispatch from Reviewing");
+        assert!(
+            matches!(
+                state.pre_triage().phase(),
+                crate::pre_triage_filter::PreTriagePhase::Idle
+            ),
+            "pre-triage must reset to Idle after TriageClicked"
+        );
+        assert_eq!(
+            state.triage().articles().len(),
+            1,
+            "only the tentatively included article should be handed to triage"
+        );
+        assert_eq!(state.triage().articles()[0].url, url2);
     }
 
     // ── consume handoff integration tests ─────────────────────────────────────
@@ -6022,8 +6098,9 @@ mod tests {
     #[test]
     fn archive_clicked_with_pre_triage_reviewing_has_zero_pending_count() {
         init_logging();
-        // Reviewing phase: resolved_included_urls() returns empty (articles not yet settled).
-        // pending_pre_triage_count must be 0 — no warning shown while user is mid-review.
+        // Reviewing phase: resolved_included_urls() returns empty because only ReadyToTriage
+        // exposes a committed pre-triage URL set. pending_pre_triage_count must be 0 — no warning
+        // shown while user is mid-review.
         //
         // Build reviewing state: load two "review-verdict" articles (word count ~100 words,
         // in SmallMediumContent band), then set a manual decision on one. The other stays
@@ -6063,11 +6140,11 @@ mod tests {
         assert!(
             matches!(
                 state.pre_triage().phase(),
-                crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
+                crate::pre_triage_filter::PreTriagePhase::Reviewing
             ),
-            "must be ReadyToTriage after loading review articles"
+            "unresolved review articles should derive Reviewing immediately after load"
         );
-        // Set a manual decision on the first article → Reviewing phase.
+        // Set a manual decision on the first article; the second remains unresolved.
         let key = state.pre_triage().entries()[0].key.clone();
         let (state, _) = update(
             state,
@@ -6995,7 +7072,7 @@ mod tests {
         );
         assert_eq!(
             state.pre_triage().phase(),
-            &pre_triage_phase_before,
+            pre_triage_phase_before,
             "stale result must not mutate pre-triage state"
         );
         assert!(

@@ -1107,3 +1107,15 @@ Type: Bug Fix
 Context: The owner-drawn left-pane listbox still lacked the indirect-link footer action, the footer status copy, and the `X` shortcut plumbing needed to replace the old tree checkbox flow.
 Change: Restored the `Poll Indirect Links` footer button and footer status summary, added structured badges for triage rows, and routed listbox key presses through a generic `ListBoxItemKeyDown` event so Harvester can toggle pre-triage include/exclude from the selected row.
 Refs: crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, src/CommanDuctUI/src/controls/listbox_handler.rs
+
+## 2026-04-07 - Triage can start from interactive review
+Type: Bug Fix
+Context: Pressing `X` in Triage Review could move pre-triage from `ReadyToTriage` to `Reviewing`, which disabled the `Triage Articles` button even though unresolved review rows are tentatively included.
+Change: Allowed triage start and pre-triage handoff from both `Reviewing` and `ReadyToTriage` when at least one article is currently included. Added a regression test for the `X`-then-`Triage Articles` path.
+Refs: crates/harvester_core/src/state.rs, crates/harvester_core/src/update.rs
+
+## 2026-04-07 - Pre-triage phase now derives from lifecycle plus entries
+Type: Hardening
+Context: `Reviewing` and `ReadyToTriage` were stored as mutable pre-triage phases, allowing load and manual-decision paths to drift into different readiness interpretations.
+Change: Replaced the stored phase with a smaller internal lifecycle (`Idle`, `LoadingArticles`, `Loaded`, `Failed`) and made `phase()` derive `Reviewing` vs `ReadyToTriage` from the current entries. Updated tests to assert that review-verdict articles derive `Reviewing` immediately.
+Refs: crates/harvester_core/src/pre_triage_filter.rs, crates/harvester_core/src/update.rs, crates/harvester_core/src/working_corpus.rs, crates/harvester_core/tests/pre_triage_filter.rs

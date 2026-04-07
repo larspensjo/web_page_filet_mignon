@@ -64,6 +64,14 @@ pub enum PreTriagePhase {
     Failed { reason: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PreTriageLifecycle {
+    Idle,
+    LoadingArticles,
+    Loaded,
+    Failed { reason: String },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PreTriagePolicy {
     blocked_hosts: Vec<String>,
@@ -175,7 +183,7 @@ impl PreTriagePolicy {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreTriageSession {
-    phase: PreTriagePhase,
+    lifecycle: PreTriageLifecycle,
     entries: Vec<ArticleFilterEntry>,
     job_key_by_id: HashMap<JobId, ArticleFilterKey>,
     loaded_by_url: HashMap<String, LoadedArticle>,
@@ -184,7 +192,7 @@ pub struct PreTriageSession {
 impl Default for PreTriageSession {
     fn default() -> Self {
         Self {
-            phase: PreTriagePhase::Idle,
+            lifecycle: PreTriageLifecycle::Idle,
             entries: Vec::new(),
             job_key_by_id: HashMap::new(),
             loaded_by_url: HashMap::new(),
@@ -195,13 +203,26 @@ impl Default for PreTriageSession {
 impl PreTriageSession {
     pub fn new_loading() -> Self {
         Self {
-            phase: PreTriagePhase::LoadingArticles,
+            lifecycle: PreTriageLifecycle::LoadingArticles,
             ..Self::default()
         }
     }
 
-    pub fn phase(&self) -> &PreTriagePhase {
-        &self.phase
+    pub fn phase(&self) -> PreTriagePhase {
+        match &self.lifecycle {
+            PreTriageLifecycle::Idle => PreTriagePhase::Idle,
+            PreTriageLifecycle::LoadingArticles => PreTriagePhase::LoadingArticles,
+            PreTriageLifecycle::Loaded => {
+                if self.has_unresolved_review() {
+                    PreTriagePhase::Reviewing
+                } else {
+                    PreTriagePhase::ReadyToTriage
+                }
+            }
+            PreTriageLifecycle::Failed { reason } => PreTriagePhase::Failed {
+                reason: reason.clone(),
+            },
+        }
     }
 
     pub fn entries(&self) -> &[ArticleFilterEntry] {
@@ -209,14 +230,11 @@ impl PreTriageSession {
     }
 
     pub fn is_reviewing(&self) -> bool {
-        matches!(self.phase, PreTriagePhase::Reviewing)
+        matches!(self.phase(), PreTriagePhase::Reviewing)
     }
 
     pub fn is_interactive(&self) -> bool {
-        matches!(
-            self.phase,
-            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
-        )
+        matches!(self.lifecycle, PreTriageLifecycle::Loaded)
     }
 
     pub fn has_unresolved_review(&self) -> bool {
@@ -244,7 +262,7 @@ impl PreTriageSession {
             })
             .collect();
         let mut session = Self {
-            phase: PreTriagePhase::Idle,
+            lifecycle: PreTriageLifecycle::Idle,
             entries,
             job_key_by_id: HashMap::new(),
             loaded_by_url: articles
@@ -252,7 +270,7 @@ impl PreTriageSession {
                 .map(|article| (article.url.clone(), article))
                 .collect(),
         };
-        session.phase = session.derive_phase_after_load();
+        session.refresh_loaded_lifecycle("no articles passed pre-triage filters");
         session
     }
 
@@ -268,15 +286,7 @@ impl PreTriageSession {
             return Err("filter key not found");
         };
         entry.manual_decision = Some(decision);
-        self.phase = if self.has_unresolved_review() {
-            PreTriagePhase::Reviewing
-        } else if self.resolved_included_urls_internal().is_empty() {
-            PreTriagePhase::Failed {
-                reason: "no included articles after manual decisions".to_string(),
-            }
-        } else {
-            PreTriagePhase::ReadyToTriage
-        };
+        self.refresh_loaded_lifecycle("no included articles after manual decisions");
         Ok(())
     }
 
@@ -284,7 +294,7 @@ impl PreTriageSession {
         for entry in &mut self.entries {
             entry.manual_decision = None;
         }
-        self.phase = self.derive_phase_after_load();
+        self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
     }
 
     pub fn apply_manual_overrides(
@@ -292,13 +302,13 @@ impl PreTriageSession {
         overrides: &HashMap<ArticleFilterKey, ManualDecision>,
     ) {
         if overrides.is_empty() {
-            self.phase = self.derive_phase_after_load();
+            self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
             return;
         }
         for entry in &mut self.entries {
             entry.manual_decision = overrides.get(&entry.key).copied();
         }
-        self.phase = self.derive_phase_after_load();
+        self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
     }
 
     pub fn manual_overrides(&self) -> HashMap<ArticleFilterKey, ManualDecision> {
@@ -313,7 +323,7 @@ impl PreTriageSession {
     }
 
     pub fn resolved_included_urls(&self) -> Vec<String> {
-        if !matches!(self.phase, PreTriagePhase::ReadyToTriage) {
+        if !matches!(self.phase(), PreTriagePhase::ReadyToTriage) {
             return Vec::new();
         }
         self.resolved_included_urls_internal()
@@ -370,26 +380,28 @@ impl PreTriageSession {
     #[cfg(test)]
     pub fn ready_to_triage_empty_for_test() -> Self {
         Self {
-            phase: PreTriagePhase::ReadyToTriage,
+            lifecycle: PreTriageLifecycle::Loaded,
             entries: Vec::new(),
             job_key_by_id: HashMap::new(),
             loaded_by_url: HashMap::new(),
         }
     }
 
-    fn derive_phase_after_load(&self) -> PreTriagePhase {
+    fn refresh_loaded_lifecycle(&mut self, empty_included_reason: &'static str) {
         if self.entries.is_empty() {
-            return PreTriagePhase::Failed {
+            self.lifecycle = PreTriageLifecycle::Failed {
                 reason: "no articles available".to_string(),
             };
+            return;
         }
         let included = self.resolved_included_urls_internal();
         if included.is_empty() {
-            return PreTriagePhase::Failed {
-                reason: "no articles passed pre-triage filters".to_string(),
+            self.lifecycle = PreTriageLifecycle::Failed {
+                reason: empty_included_reason.to_string(),
             };
+            return;
         }
-        PreTriagePhase::ReadyToTriage
+        self.lifecycle = PreTriageLifecycle::Loaded;
     }
 
     fn resolved_included_urls_internal(&self) -> Vec<String> {

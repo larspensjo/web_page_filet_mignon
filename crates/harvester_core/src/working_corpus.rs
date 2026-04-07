@@ -284,7 +284,7 @@ mod tests {
     fn pre_triage_ready_wins_over_stale_triage() {
         init_logging();
         let pre_triage = ready_pre_triage(&["https://a.com", "https://b.com"]);
-        assert_eq!(pre_triage.phase(), &PreTriagePhase::ReadyToTriage);
+        assert_eq!(pre_triage.phase(), PreTriagePhase::ReadyToTriage);
 
         let triage = idle_triage(); // "stale": no completed run
 
@@ -335,15 +335,15 @@ mod tests {
             ],
             &policy,
         );
-        // After load the session is ReadyToTriage (Review articles are tentatively included).
-        // Resolve the first article; the second remains unresolved → Reviewing.
+        // Review-verdict articles derive Reviewing immediately. Resolve the first article; the
+        // second remains unresolved → Reviewing.
         let key1 = pre_triage.entries()[0].key.clone();
         pre_triage
             .set_manual_decision(&key1, ManualDecision::Include)
             .expect("set_manual_decision must succeed while ReadyToTriage");
         assert_eq!(
             pre_triage.phase(),
-            &PreTriagePhase::Reviewing,
+            PreTriagePhase::Reviewing,
             "session must be in Reviewing while the second article is still unresolved"
         );
 
@@ -373,7 +373,7 @@ mod tests {
         init_logging();
         // LoadingArticles must never be treated as ready; selector falls through to triage.
         let pre_triage = PreTriageSession::new_loading();
-        assert_eq!(pre_triage.phase(), &PreTriagePhase::LoadingArticles);
+        assert_eq!(pre_triage.phase(), PreTriagePhase::LoadingArticles);
 
         let triage = complete_triage(&["https://t.com"], 5);
 
@@ -464,11 +464,11 @@ mod tests {
     fn ready_pre_triage_empty_urls_yields_unavailable() {
         init_logging();
         // NOTE: `ReadyToTriage` with zero included URLs is unreachable via normal transitions —
-        // `derive_phase_after_load` and `set_manual_decision` both transition to `Failed` when
-        // the resolved set is empty.  The test-only constructor bypasses that invariant to
-        // exercise the defensive guard at working_corpus.rs lines 64–70.
+        // The normal lifecycle derivation transitions to `Failed` when the resolved set is empty.
+        // The test-only constructor bypasses that invariant to exercise the defensive guard at
+        // working_corpus.rs lines 64–70.
         let pre_triage = PreTriageSession::ready_to_triage_empty_for_test();
-        assert_eq!(pre_triage.phase(), &PreTriagePhase::ReadyToTriage);
+        assert_eq!(pre_triage.phase(), PreTriagePhase::ReadyToTriage);
 
         let triage = complete_triage(&["https://t.com"], 5);
 
@@ -525,7 +525,7 @@ mod tests {
             .expect("set_manual_decision must succeed while ReadyToTriage");
         assert_eq!(
             pre_triage.phase(),
-            &PreTriagePhase::Reviewing,
+            PreTriagePhase::Reviewing,
             "session must be Reviewing while the second article is unresolved"
         );
 
