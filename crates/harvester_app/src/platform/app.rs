@@ -50,6 +50,100 @@ const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
 const LLM_MAX_CONCURRENT_REQUESTS_ENV: &str = "LLM_MAX_CONCURRENT_REQUESTS";
 const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
 
+fn apply_startup_msg(
+    state: AppState,
+    msg: Msg,
+    startup_effects: &mut Vec<Effect>,
+) -> AppState {
+    let (next_state, effects) = update(state, msg);
+    startup_effects.extend(effects);
+    next_state
+}
+
+fn prepare_startup_state(
+    mut state: AppState,
+    paths: &RuntimePaths,
+    initial_width: i32,
+    llm_max_concurrent_requests: usize,
+    startup_ai_availability: Option<AiAvailability>,
+) -> (AppState, Vec<Effect>) {
+    let mut startup_effects = Vec::new();
+
+    // Synchronous startup preparation: seed all cheap, local facts before the
+    // first view snapshot so the first visible frame is already correct.
+    let (mut next_state, _) = update(state, Msg::WindowResized { window_width: initial_width });
+    next_state.set_triage_max_in_flight(llm_max_concurrent_requests);
+    next_state.set_summary_max_in_flight(llm_max_concurrent_requests);
+    state = next_state;
+
+    if let Some(availability) = startup_ai_availability {
+        state = apply_startup_msg(
+            state,
+            Msg::AiAvailabilityDetected { availability },
+            &mut startup_effects,
+        );
+    }
+
+    // Asynchronous startup hydration begins here. Reducer-owned startup
+    // scheduling stays adjacent to the state transition that emits those effects.
+    state = apply_startup_msg(state, Msg::StartupHydrationRequested, &mut startup_effects);
+
+    let completed = load_completed_jobs(&paths.state_path);
+    if !completed.is_empty() {
+        state = apply_startup_msg(state, Msg::RestoreCompletedJobs(completed), &mut startup_effects);
+    }
+
+    let summary_cache = load_summary_cache(&paths.summary_cache_path);
+    if !summary_cache.is_empty() {
+        state = apply_startup_msg(
+            state,
+            Msg::SummaryCacheHydrated {
+                cache: summary_cache,
+            },
+            &mut startup_effects,
+        );
+    }
+
+    let triage_cache = load_triage_cache(&paths.triage_cache_path);
+    if !triage_cache.is_empty() {
+        state = apply_startup_msg(
+            state,
+            Msg::TriageCacheHydrated { cache: triage_cache },
+            &mut startup_effects,
+        );
+    }
+
+    let overrides = load_pre_triage_overrides(&paths.state_path);
+    if !overrides.is_empty() {
+        state = apply_startup_msg(
+            state,
+            Msg::PreTriageOverridesHydrated { overrides },
+            &mut startup_effects,
+        );
+    }
+
+    (state, startup_effects)
+}
+
+fn assemble_startup_commands(
+    window_id: WindowId,
+    initial_view: &AppViewModel,
+    tree_render_state: &mut ui::render::TreeRenderState,
+) -> Vec<PlatformCommand> {
+    let mut initial_commands = ui::layout::initial_commands(window_id);
+    initial_commands.extend(ui::render::render(
+        window_id,
+        initial_view,
+        tree_render_state,
+    ));
+
+    // Reveal ownership stays at the app layer so first render and first reveal
+    // remain one explicit, testable contract.
+    initial_commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
+    initial_commands.push(PlatformCommand::ShowWindow { window_id });
+    initial_commands
+}
+
 pub fn run_app() -> commanductui::PlatformResult<()> {
     logging::initialize(LogDestination::Both);
     engine_info!("Logger initialized. Starting harvester_app...");
@@ -80,19 +174,6 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
 
     let shared_state = Arc::new(Mutex::new(SharedState::default()));
     let llm_max_concurrent_requests = llm_max_concurrency_requests_from_env();
-    {
-        let mut guard = shared_state.lock().expect("lock shared state");
-        let state = std::mem::take(&mut guard.state);
-        let (mut state, _) = update(
-            state,
-            Msg::WindowResized {
-                window_width: initial_width,
-            },
-        );
-        state.set_triage_max_in_flight(llm_max_concurrent_requests);
-        state.set_summary_max_in_flight(llm_max_concurrent_requests);
-        guard.state = state;
-    }
     engine_info!(
         "[llm-concurrency] configured max_concurrent_requests={}",
         llm_max_concurrent_requests
@@ -152,83 +233,31 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     };
     effect_runner.enqueue(vec![Effect::LoadPromptTemplateFiles]);
     {
-        let mut guard = shared_state.lock().unwrap();
+        let mut guard = shared_state.lock().expect("lock shared state");
         let state = std::mem::take(&mut guard.state);
-        let (state, effects) = if let Some(availability) = startup_ai_availability {
-            let (state, mut effects) = update(state, Msg::AiAvailabilityDetected { availability });
-            let (state, startup_effects) = update(state, Msg::StartupHydrationRequested);
-            effects.extend(startup_effects);
-            (state, effects)
-        } else {
-            update(state, Msg::StartupHydrationRequested)
-        };
-        if !effects.is_empty() {
-            effect_runner.enqueue(effects);
+        let (prepared_state, startup_effects) = prepare_startup_state(
+            state,
+            &paths,
+            initial_width,
+            llm_max_concurrent_requests,
+            startup_ai_availability,
+        );
+        if !startup_effects.is_empty() {
+            effect_runner.enqueue(startup_effects);
         }
-        guard.state = state;
-    }
-    {
-        let completed = load_completed_jobs(&paths.state_path);
-        if !completed.is_empty() {
-            let mut guard = shared_state.lock().unwrap();
-            let state = std::mem::take(&mut guard.state);
-            let (state, effects) = update(state, Msg::RestoreCompletedJobs(completed));
-            if !effects.is_empty() {
-                effect_runner.enqueue(effects);
-            }
-            guard.state = state;
-        }
+        guard.state = prepared_state;
     }
 
-    // Hydrate summary cache from persistent store
-    {
-        let cache = load_summary_cache(&paths.summary_cache_path);
-        if !cache.is_empty() {
-            let mut guard = shared_state.lock().unwrap();
-            let state = std::mem::take(&mut guard.state);
-            let (state, effects) = update(state, Msg::SummaryCacheHydrated { cache });
-            if !effects.is_empty() {
-                effect_runner.enqueue(effects);
-            }
-            guard.state = state;
-        }
-    }
-
-    {
-        let cache = load_triage_cache(&paths.triage_cache_path);
-        if !cache.is_empty() {
-            let mut guard = shared_state.lock().unwrap();
-            let state = std::mem::take(&mut guard.state);
-            let (state, effects) = update(state, Msg::TriageCacheHydrated { cache });
-            if !effects.is_empty() {
-                effect_runner.enqueue(effects);
-            }
-            guard.state = state;
-        }
-    }
-    {
-        let overrides = load_pre_triage_overrides(&paths.state_path);
-        if !overrides.is_empty() {
-            let mut guard = shared_state.lock().unwrap();
-            let state = std::mem::take(&mut guard.state);
-            let (state, effects) = update(state, Msg::PreTriageOverridesHydrated { overrides });
-            if !effects.is_empty() {
-                effect_runner.enqueue(effects);
-            }
-            guard.state = state;
-        }
-    }
-
-    let initial_view = shared_state.lock().unwrap().state.view();
+    let initial_view = {
+        let guard = shared_state.lock().expect("lock shared state");
+        guard.state.view()
+    };
     let mut tree_render_state = ui::render::TreeRenderState::new();
-    let mut initial_commands = ui::layout::initial_commands(window_id);
-    initial_commands.extend(ui::render::render(
+    let initial_commands = assemble_startup_commands(
         window_id,
         &initial_view,
         &mut tree_render_state,
-    ));
-    initial_commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
-    initial_commands.push(PlatformCommand::ShowWindow { window_id });
+    );
 
     let event_handler: Arc<Mutex<dyn PlatformEventHandler>> =
         Arc::new(Mutex::new(AppEventHandler::new(
@@ -1561,6 +1590,18 @@ mod tests {
         test_handler_with_shared(Arc::new(Mutex::new(SharedState::default())))
     }
 
+    fn startup_test_paths() -> (tempfile::TempDir, RuntimePaths) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let output_dir = temp.path().to_path_buf();
+        let paths = RuntimePaths::new(
+            output_dir.clone(),
+            output_dir.join("sources.ron"),
+            output_dir.join("contexts"),
+            output_dir.join("prompts"),
+        );
+        (temp, paths)
+    }
+
     #[test]
     fn tree_item_marker_updates_with_link_state() {
         let shared = shared_state_with_single_link();
@@ -1772,6 +1813,73 @@ mod tests {
             MAX_LLM_CONCURRENT_REQUESTS
         );
         assert_eq!(parse_llm_max_concurrency_requests(Some(" 2 ")), 2);
+    }
+
+    #[test]
+    fn prepare_startup_state_schedules_metadata_load_once() {
+        let (_temp, paths) = startup_test_paths();
+        let (_state, effects) = prepare_startup_state(
+            AppState::new(),
+            &paths,
+            1200,
+            4,
+            Some(AiAvailability::Unavailable {
+                reason: AiUnavailableReason::MissingApiKey,
+            }),
+        );
+
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|effect| matches!(effect, Effect::LoadLlmMetadata))
+                .count(),
+            1
+        );
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|effect| matches!(effect, Effect::LoadPromptContexts))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn assembled_startup_commands_render_before_reveal() {
+        let (_temp, paths) = startup_test_paths();
+        let (state, _effects) =
+            prepare_startup_state(AppState::new(), &paths, 1200, 4, None);
+        let view = state.view();
+        let window_id = WindowId::new(1);
+        let mut tree_render_state = ui::render::TreeRenderState::new();
+
+        let layout_commands = ui::layout::initial_commands(window_id);
+        let render_commands = ui::render::render(window_id, &view, &mut tree_render_state);
+        let commands = assemble_startup_commands(
+            window_id,
+            &view,
+            &mut ui::render::TreeRenderState::new(),
+        );
+
+        let render_end = layout_commands.len() + render_commands.len();
+        let show_window_indexes = commands
+            .iter()
+            .enumerate()
+            .filter_map(|(index, command)| match command {
+                PlatformCommand::ShowWindow { .. } => Some(index),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(show_window_indexes, vec![render_end + 1]);
+        assert!(matches!(
+            commands.get(render_end),
+            Some(PlatformCommand::SignalMainWindowUISetupComplete { .. })
+        ));
+        assert!(matches!(
+            commands.get(render_end + 1),
+            Some(PlatformCommand::ShowWindow { .. })
+        ));
     }
 
     #[test]
