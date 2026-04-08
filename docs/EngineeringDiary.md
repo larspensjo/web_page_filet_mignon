@@ -1131,3 +1131,9 @@ Type: Bug Fix
 Context: Moving the mouse across article rows repainted the entire owner-drawn listbox on each hover transition, producing a visible flicker/flash along the left edge.
 Change: Narrowed hover invalidation to only the previous and current row rectangles in `CommanDuctUI`'s listbox handler and added a row-geometry regression test.
 Refs: src/CommanDuctUI/src/controls/listbox_handler.rs
+
+## 2026-04-08 - Startup now emits a deterministic first layout
+Type: Bug Fix
+Context: `harvester_app` could show a malformed first frame because the initial render reused default render-cache values, started from the default window width, and enqueued startup metadata twice.
+Change: Forced the first render to emit `DefineLayout`, seeded app state with the restored startup width before the first view snapshot, and removed the duplicate `LoadLlmMetadata` bootstrap enqueue. Added a render regression test for the default first frame.
+Refs: crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/render.rs

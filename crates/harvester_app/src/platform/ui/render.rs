@@ -92,6 +92,7 @@ pub(crate) fn combo_index_to_model(index: usize, catalog: &[ModelId]) -> Option<
 #[derive(Debug)]
 pub struct TreeRenderState {
     initialized: bool,
+    layout_initialized: bool,
     structure: Vec<TreeStructureItem>,
     text_by_id: HashMap<TreeItemId, String>,
     check_state_by_id: HashMap<TreeItemId, CheckState>,
@@ -182,6 +183,7 @@ impl Default for TreeRenderState {
     fn default() -> Self {
         Self {
             initialized: false,
+            layout_initialized: false,
             structure: Vec::new(),
             text_by_id: HashMap::new(),
             check_state_by_id: HashMap::new(),
@@ -469,7 +471,8 @@ fn render_layout_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     let prompt_lab_tab_visible = layout.left_tab == LeftTab::PromptLab;
-    let layout_changed = layout.left_panel_width != tree_state.prev_left_panel_width
+    let layout_changed = !tree_state.layout_initialized
+        || layout.left_panel_width != tree_state.prev_left_panel_width
         || layout.input_panel_visible != tree_state.prev_input_panel_visible
         || layout.operation_progress_visible != tree_state.prev_operation_progress_visible
         || layout.active_tab != tree_state.prev_active_tab
@@ -538,6 +541,7 @@ fn render_layout_section(
     tree_state.prev_prompt_lab_run_details_section_open =
         layout.prompt_lab_run_details_section_open;
     tree_state.prev_prompt_lab_template_editor_open = layout.prompt_lab_template_editor_open;
+    tree_state.layout_initialized = true;
 }
 
 fn render_tab_bar_section(
@@ -3130,6 +3134,19 @@ mod tests {
         assert_eq!(input_width, harvester_core::INPUT_PANEL_FIXED_WIDTH);
         assert_eq!(left_width, 760);
         assert_eq!(jobs_fill, None, "PANEL_JOBS should Fill its parent");
+    }
+
+    #[test]
+    fn initial_render_emits_layout_for_default_view() {
+        init_logging();
+        let window_id = WindowId::new(51);
+        let mut tree_state = TreeRenderState::new();
+
+        let commands = render(window_id, &AppViewModel::default(), &mut tree_state);
+
+        assert!(commands
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::DefineLayout { .. })));
     }
 
     #[test]

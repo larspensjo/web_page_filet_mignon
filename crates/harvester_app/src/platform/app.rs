@@ -82,12 +82,16 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     let llm_max_concurrent_requests = llm_max_concurrency_requests_from_env();
     {
         let mut guard = shared_state.lock().expect("lock shared state");
-        guard
-            .state
-            .set_triage_max_in_flight(llm_max_concurrent_requests);
-        guard
-            .state
-            .set_summary_max_in_flight(llm_max_concurrent_requests);
+        let state = std::mem::take(&mut guard.state);
+        let (mut state, _) = update(
+            state,
+            Msg::WindowResized {
+                window_width: initial_width,
+            },
+        );
+        state.set_triage_max_in_flight(llm_max_concurrent_requests);
+        state.set_summary_max_in_flight(llm_max_concurrent_requests);
+        guard.state = state;
     }
     engine_info!(
         "[llm-concurrency] configured max_concurrent_requests={}",
@@ -146,10 +150,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
         EffectRunner::new(paths.clone(), msg_tx.clone(), platform_handler)
     };
-    effect_runner.enqueue(vec![
-        Effect::LoadPromptTemplateFiles,
-        Effect::LoadLlmMetadata,
-    ]);
+    effect_runner.enqueue(vec![Effect::LoadPromptTemplateFiles]);
     {
         let mut guard = shared_state.lock().unwrap();
         let state = std::mem::take(&mut guard.state);
@@ -226,6 +227,8 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         &initial_view,
         &mut tree_render_state,
     ));
+    initial_commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
+    initial_commands.push(PlatformCommand::ShowWindow { window_id });
 
     let event_handler: Arc<Mutex<dyn PlatformEventHandler>> =
         Arc::new(Mutex::new(AppEventHandler::new(

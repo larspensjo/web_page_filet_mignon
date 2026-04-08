@@ -873,9 +873,6 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         },
     ));
 
-    commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
-    commands.push(PlatformCommand::ShowWindow { window_id });
-
     commands
 }
 
@@ -3097,6 +3094,18 @@ mod tests {
             )),
             "jobs scope toggle switch should be created"
         );
+    }
+
+    #[test]
+    fn initial_commands_do_not_show_window_directly() {
+        let commands = initial_commands(WindowId::new(3));
+        assert!(!commands
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::ShowWindow { .. })));
+        assert!(!commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::SignalMainWindowUISetupComplete { .. }
+        )));
     }
 
     #[test]
