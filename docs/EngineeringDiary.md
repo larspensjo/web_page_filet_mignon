@@ -1155,3 +1155,9 @@ Type: Refactor
 Context: Task 3 of `Plan.RefactorUpdateIntoModules` moved briefing-specific reducer branches out of `harvester_core::update`, but the summary orchestration and checkpoint handlers were still mixed into `update/mod.rs`.
 Change: Extracted briefing click/load/checkpoint handlers plus the briefing-step orchestration helpers into `update/briefing.rs`, left shared summary-cache helpers in `update/mod.rs`, and rewired existing triage/LLM paths to call the new sub-module boundary.
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/briefing.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-08 - Triage refresh and triage-run orchestration moved into an update sub-module
+Type: Refactor
+Context: Task 4 of `Plan.RefactorUpdateIntoModules` moved the triage-specific reducer work out of `harvester_core::update`, but the pre-triage refresh coordinator, triage dispatch loop, and cache-run logging were still embedded in `update/mod.rs`.
+Change: Extracted the triage/pre-triage message handlers plus `dispatch_pre_triage_if_due()` and `dispatch_next_triage_step()` into `update/triage.rs`, kept `update/mod.rs` as the routing table, and made the briefing module call the triage dispatcher through the explicit sub-module boundary instead of `super::*`.
+Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/update/briefing.rs, docs/plans/Plan.RefactorUpdateIntoModules.md

@@ -330,7 +330,7 @@ git commit -m "refactor: extract briefing handlers from update into sub-module"
 - Create: `crates/harvester_core/src/update/triage.rs`
 - Modify: `crates/harvester_core/src/update/mod.rs`
 
-- [ ] **Step 1: Create `triage.rs` with handler functions**
+- [x] **Step 1: Create `triage.rs` with handler functions**
 
 Move these match arm bodies:
 - `Msg::TriageClicked` → `handle_triage_clicked`
@@ -351,11 +351,11 @@ Move these helper functions:
 
 **Cross-module dependency:** `dispatch_next_triage_step` calls `on_triage_settled_for_briefing` from the briefing module. Import it as `super::briefing::on_triage_settled_for_briefing`.
 
-- [ ] **Step 2: Wire up in `mod.rs`**
+- [x] **Step 2: Wire up in `mod.rs`**
 
 Add `mod triage;` and replace match arm bodies. The `Msg::Tick` handler in `mod.rs` will call `triage::dispatch_pre_triage_if_due`.
 
-- [ ] **Step 3: Build + clippy + test**
+- [x] **Step 3: Build + clippy + test**
 
 ```bash
 cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core

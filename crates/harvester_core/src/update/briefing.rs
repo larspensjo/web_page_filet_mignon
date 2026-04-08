@@ -1,4 +1,6 @@
 use super::*;
+use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
+use crate::triage::TriagePhase;
 
 pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
     if !state.briefing_ai_available() {
@@ -103,7 +105,7 @@ pub(super) fn handle_prereq_articles_loaded(
         state.triage_mut().transition_to_triaging();
         state.start_triage_cache_run();
         state.mark_triage_metadata_ready();
-        dispatch_next_triage_step(state, &mut effects);
+        super::triage::dispatch_next_triage_step(state, &mut effects);
     }
     effects
 }
