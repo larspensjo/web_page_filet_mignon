@@ -805,7 +805,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_TRIAGE,
-        text: "Triage Articles".to_string(),
+        text: "Run Triage".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,

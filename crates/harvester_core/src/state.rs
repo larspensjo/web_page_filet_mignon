@@ -1592,7 +1592,7 @@ impl AppState {
         match self.pre_triage.phase() {
             PreTriagePhase::LoadingArticles => Some("Pre-triage loading...".to_string()),
             PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage => Some(format!(
-                "Pre-triage: {} include, {} review, {} filtered",
+                "Pre-triage: {} include, {} review, {} filtered; Run Triage uses current selection",
                 include, review, filtered
             )),
             PreTriagePhase::Failed { reason } => Some(format!("Pre-triage failed: {reason}")),
