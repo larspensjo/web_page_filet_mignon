@@ -93,7 +93,10 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
         return completed;
     }
 
-    engine_info!("No completed jobs found in persisted state {:?}", state_path);
+    engine_info!(
+        "No completed jobs found in persisted state {:?}",
+        state_path
+    );
     completed
 }
 
