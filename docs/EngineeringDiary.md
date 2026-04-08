@@ -1143,3 +1143,9 @@ Type: Refactor
 Context: `run_app()` still mixed synchronous startup state seeding, startup hydration scheduling, first-view assembly, and reveal sequencing in one brittle block with repeated `take/update/restore` patterns.
 Change: Extracted `prepare_startup_state()` and `assemble_startup_commands()` in `harvester_app` so synchronous startup reads as one explicit sequence before the first `view()` snapshot, and added app-layer tests that lock the render-before-reveal contract plus the single `LoadLlmMetadata` startup scheduling invariant.
 Refs: crates/harvester_app/src/platform/app.rs, docs/plans/Plan.StartupRefactor.md
+
+## 2026-04-08 - Prompt Lab update handlers moved into a sub-module
+Type: Refactor
+Context: Task 2 of `Plan.RefactorUpdateIntoModules` split the largest self-contained branch set out of `harvester_core::update`, but the Prompt Lab reducer arms and run-dispatch helpers were still embedded in `update/mod.rs`.
+Change: Moved the Prompt Lab match-arm bodies plus run/template helpers into `update/prompt_lab.rs`, left `update()` as a forwarding table for `Msg::PromptLab*`, and updated reducer tests to call the moved helper through the new sub-module.
+Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/prompt_lab.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
