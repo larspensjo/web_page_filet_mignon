@@ -1,7 +1,8 @@
-use super::*;
 use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage};
+use crate::state::PromptLabPendingRunRegistration;
 use crate::tabs::LeftTab;
-use engine_logging::engine_error;
+use crate::{AppState, Effect};
+use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::types::ModelId;
 
@@ -202,7 +203,7 @@ pub(super) fn handle_context_apply_and_rerun_requested(state: &mut AppState) -> 
     let snapshot = state
         .prompt_lab()
         .resolved_url_snapshot()
-        .map(ToOwned::to_owned);
+        .map(str::to_owned);
     let input = match snapshot {
         Some(text) => text,
         None => return Vec::new(),
@@ -390,7 +391,7 @@ pub(super) fn handle_template_apply_and_rerun_requested(state: &mut AppState) ->
     let snapshot = state
         .prompt_lab()
         .resolved_url_snapshot()
-        .map(ToOwned::to_owned);
+        .map(str::to_owned);
     let input = match snapshot {
         Some(text) => text,
         None => return Vec::new(),
@@ -497,7 +498,7 @@ pub(super) fn handle_run_requested(state: &mut AppState) -> Vec<Effect> {
     let snapshot = state
         .prompt_lab()
         .resolved_url_snapshot()
-        .map(ToOwned::to_owned);
+        .map(str::to_owned);
     let input = match snapshot {
         Some(text) => text,
         None => return Vec::new(),
@@ -613,7 +614,7 @@ pub(super) fn handle_compare_batch_start_requested(state: &mut AppState) -> Vec<
     let snapshot = state
         .prompt_lab()
         .resolved_url_snapshot()
-        .map(ToOwned::to_owned);
+        .map(str::to_owned);
     let input = match snapshot {
         Some(text) => text,
         None => return Vec::new(),
@@ -757,7 +758,7 @@ pub(super) fn dispatch_prompt_lab_run(
     let pending_prompt_version = prompt_version;
     let pending_model_override = model_override.clone();
     state.record_pending_llm_request(request_id, prompt_id);
-    state.add_prompt_lab_pending_run(crate::state::PromptLabPendingRunRegistration {
+    state.add_prompt_lab_pending_run(PromptLabPendingRunRegistration {
         run_id,
         stage,
         prompt_id,

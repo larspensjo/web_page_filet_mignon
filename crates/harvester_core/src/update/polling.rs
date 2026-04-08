@@ -1,4 +1,6 @@
-use super::*;
+use crate::tabs::AppTab;
+use crate::{AppState, Effect, SessionState};
+use engine_logging::{engine_info, engine_warn};
 
 pub(super) fn handle_poll_sources_clicked(state: &mut AppState) -> Vec<Effect> {
     if matches!(

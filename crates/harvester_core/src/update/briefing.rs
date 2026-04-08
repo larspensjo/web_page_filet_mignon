@@ -2,10 +2,12 @@ use super::summary_cache_support::{
     build_summary_cache_key, context_hash_for_log, log_summary_cache_run_summary,
     log_summary_cache_warmup_if_needed, short_hash, summary_cache_key_error_reason,
 };
-use super::*;
 use crate::briefing::{BriefingPhase, BriefingSession, CorpusFingerprint};
 use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
+use crate::tabs::AppTab;
 use crate::triage::TriagePhase;
+use crate::{AppState, Effect};
+use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
 
 pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {

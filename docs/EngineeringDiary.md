@@ -1197,3 +1197,11 @@ Type: Refactor
 Context: After the reducer branch extraction and test move, `harvester_core::update::mod.rs` still owned pasted-URL parsing plus the shared summary-cache helper/logging functions, so the wrapper file still mixed dispatch with domain helper logic.
 Change: Moved URL parsing into `update/url_input.rs`, moved the shared summary-cache warmup/key/logging helpers into `update/summary_cache_support.rs`, and updated briefing, triage, LLM-completion, and reducer-test code to import those helpers explicitly instead of relying on `mod.rs` imports leaking through `super::*`.
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/url_input.rs, crates/harvester_core/src/update/summary_cache_support.rs, crates/harvester_core/src/update/briefing.rs, crates/harvester_core/src/update/llm_completed.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/update/tests/mod.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-08 - Update submodules now compile with explicit imports
+Type: Bug Fix
+Context: After removing `super::*` from the `harvester_core::update` submodules, the reducer stopped compiling because those files had been relying on names imported only in `update/mod.rs`.
+Change: Added explicit imports for reducer macros, state/effect types, tabs, and prompt-lab/LLM identifiers in the affected `update/*` files, and replaced `ToOwned`-style snapshot cloning with direct `str::to_owned` calls where needed.
+Lessons Learned: `super::*` hid real module dependencies and let submodules compile only because `mod.rs` happened to import the right names.
+Prevention: Keep `update` submodules on explicit imports so future extractions fail locally and visibly instead of depending on parent-module import leakage.
+Refs: crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/update/briefing.rs, crates/harvester_core/src/update/import.rs, crates/harvester_core/src/update/llm_completed.rs, crates/harvester_core/src/update/polling.rs, crates/harvester_core/src/update/prompt_lab.rs, crates/harvester_core/src/update/triage.rs
