@@ -998,9 +998,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::SecondaryButton,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x24,
-                g: 0x24,
-                b: 0x22,
+                r: 0x2A,
+                g: 0x2A,
+                b: 0x28,
             }),
             text_color: Some(Color {
                 r: 0xB0,
@@ -1197,14 +1197,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ListBoxRow,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x26,
-                g: 0x2A,
-                b: 0x2E,
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -1213,14 +1213,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ListBoxSelectedRow,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x37,
-                g: 0x3E,
-                b: 0x47,
+                r: 0x3D,
+                g: 0x3D,
+                b: 0x3A,
             }),
             text_color: Some(Color {
-                r: 0xE0,
-                g: 0xE5,
-                b: 0xEC,
+                r: 0xFA,
+                g: 0xF9,
+                b: 0xF5,
             }),
             ..Default::default()
         },
@@ -1229,9 +1229,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ListBoxHoverRow,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x2D,
-                g: 0x33,
-                b: 0x3A,
+                r: 0x2A,
+                g: 0x2A,
+                b: 0x28,
             }),
             ..Default::default()
         },
@@ -1240,14 +1240,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ListBoxDisabledRow,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x24,
-                g: 0x27,
-                b: 0x2B,
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
             }),
             text_color: Some(Color {
-                r: 0x87,
-                g: 0x8C,
-                b: 0x93,
+                r: 0x5E,
+                g: 0x5D,
+                b: 0x59,
             }),
             ..Default::default()
         },
