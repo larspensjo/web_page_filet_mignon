@@ -1173,3 +1173,15 @@ Type: Refactor
 Context: Task 7 of `Plan.RefactorUpdateIntoModules` still left the cross-domain `Msg::LlmCompleted` branch inline in `harvester_core::update/mod.rs`, even after briefing, triage, and Prompt Lab had their own extracted orchestration modules.
 Change: Extracted the full `Msg::LlmCompleted` flow into `update/llm_completed.rs`, split it into summary, triage, aggregate-briefing, and prompt-lab completion helpers, and kept `update/mod.rs` as a forwarding table that only delegates completion routing.
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/llm_completed.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-08 - Footer workflow order now matches Poll -> Triage -> Briefing
+Type: Bug Fix
+Context: The footer action row presented the main workflow out of sequence, and `Poll Indirect Links` had been re-enabled despite the earlier decision to keep that path disabled pending redesign.
+Change: Reordered the footer buttons to `Poll Sources`, `Run Triage`, then `Generate Briefing`, and forced `Poll Indirect Links` to stay disabled in the renderer while leaving the underlying indirect-link pipeline intact. Added layout/render regression coverage for the workflow order and disabled state.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-08 - Indirect-link footer affordance hidden again pending redesign
+Type: Bug Fix
+Context: Even while disabled, the visible `Poll Indirect Links` footer control and readiness copy still advertised a dormant workflow stage and suggested a supported next step.
+Change: Removed the `Poll Indirect Links` footer button from layout/rendering again, dropped the indirect-link footer status copy, and removed the app-layer button handler while keeping the indirect-link pipeline code intact behind the UI boundary.
+Refs: crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
