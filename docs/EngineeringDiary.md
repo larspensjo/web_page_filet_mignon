@@ -1149,3 +1149,9 @@ Type: Refactor
 Context: Task 2 of `Plan.RefactorUpdateIntoModules` split the largest self-contained branch set out of `harvester_core::update`, but the Prompt Lab reducer arms and run-dispatch helpers were still embedded in `update/mod.rs`.
 Change: Moved the Prompt Lab match-arm bodies plus run/template helpers into `update/prompt_lab.rs`, left `update()` as a forwarding table for `Msg::PromptLab*`, and updated reducer tests to call the moved helper through the new sub-module.
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/prompt_lab.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-08 - Briefing orchestration moved behind an update sub-module
+Type: Refactor
+Context: Task 3 of `Plan.RefactorUpdateIntoModules` moved briefing-specific reducer branches out of `harvester_core::update`, but the summary orchestration and checkpoint handlers were still mixed into `update/mod.rs`.
+Change: Extracted briefing click/load/checkpoint handlers plus the briefing-step orchestration helpers into `update/briefing.rs`, left shared summary-cache helpers in `update/mod.rs`, and rewired existing triage/LLM paths to call the new sub-module boundary.
+Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/briefing.rs, docs/plans/Plan.RefactorUpdateIntoModules.md

@@ -270,7 +270,7 @@ git commit -m "refactor: extract prompt_lab handlers from update into sub-module
 - Create: `crates/harvester_core/src/update/briefing.rs`
 - Modify: `crates/harvester_core/src/update/mod.rs`
 
-- [ ] **Step 1: Create `briefing.rs` with handler functions**
+- [x] **Step 1: Create `briefing.rs` with handler functions**
 
 Move these match arm bodies into handler functions:
 - `Msg::GenerateBriefingClicked` → `handle_generate_clicked`
@@ -303,13 +303,13 @@ Move these briefing-specific helper functions:
 
 All handlers: `pub(super) fn handle_xxx(state: &mut AppState, ...) -> Vec<Effect>`.
 
-- [ ] **Step 2: Wire up in `mod.rs`**
+- [x] **Step 2: Wire up in `mod.rs`**
 
 Add `mod briefing;` (the domain module, shadowing the `crate::briefing` — use `self::briefing` or rename to `mod update_briefing` if collision occurs; actually, `mod briefing` within `update/` creates `update::briefing`, not `crate::briefing`, so no collision).
 
 Replace each briefing-related match arm body with a handler call.
 
-- [ ] **Step 3: Build + clippy + test**
+- [x] **Step 3: Build + clippy + test**
 
 ```bash
 cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core
