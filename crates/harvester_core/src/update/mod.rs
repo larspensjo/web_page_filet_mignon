@@ -29,11 +29,6 @@ const MIN_PREVIEW_WIDTH: i32 = 200;
 const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
 
 /// Pure update function: applies a message to state and returns any effects.
-#[allow(
-    clippy::too_many_lines,
-    clippy::cognitive_complexity,
-    clippy::excessive_nesting
-)]
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let effects = match msg {
         Msg::InputChanged(text) => {
