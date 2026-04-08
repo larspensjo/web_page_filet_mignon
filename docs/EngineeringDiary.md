@@ -1137,3 +1137,9 @@ Type: Bug Fix
 Context: `harvester_app` could show a malformed first frame because the initial render reused default render-cache values, started from the default window width, and enqueued startup metadata twice.
 Change: Forced the first render to emit `DefineLayout`, seeded app state with the restored startup width before the first view snapshot, and removed the duplicate `LoadLlmMetadata` bootstrap enqueue. Added a render regression test for the default first frame.
 Refs: crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-08 - Startup preparation and reveal ordering now have app-layer helpers
+Type: Refactor
+Context: `run_app()` still mixed synchronous startup state seeding, startup hydration scheduling, first-view assembly, and reveal sequencing in one brittle block with repeated `take/update/restore` patterns.
+Change: Extracted `prepare_startup_state()` and `assemble_startup_commands()` in `harvester_app` so synchronous startup reads as one explicit sequence before the first `view()` snapshot, and added app-layer tests that lock the render-before-reveal contract plus the single `LoadLlmMetadata` startup scheduling invariant.
+Refs: crates/harvester_app/src/platform/app.rs, docs/plans/Plan.StartupRefactor.md
