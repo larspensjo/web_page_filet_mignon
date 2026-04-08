@@ -1167,3 +1167,9 @@ Type: Refactor
 Context: Tasks 5, 6, and 8 of `Plan.RefactorUpdateIntoModules` still left archive-dialog flow, source polling, and saved-webpage import handling embedded in `harvester_core::update/mod.rs`, making the dispatcher harder to scan.
 Change: Extracted the archive handlers into `update/archive.rs`, source-poll handlers into `update/polling.rs`, and saved-webpage import handlers into `update/import.rs`; kept `update/mod.rs` as a forwarding table and moved `is_safe_archive_basename()` with the archive flow so the helper stays local to the domain.
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/update/polling.rs, crates/harvester_core/src/update/import.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-08 - LLM completion routing moved behind an update sub-module
+Type: Refactor
+Context: Task 7 of `Plan.RefactorUpdateIntoModules` still left the cross-domain `Msg::LlmCompleted` branch inline in `harvester_core::update/mod.rs`, even after briefing, triage, and Prompt Lab had their own extracted orchestration modules.
+Change: Extracted the full `Msg::LlmCompleted` flow into `update/llm_completed.rs`, split it into summary, triage, aggregate-briefing, and prompt-lab completion helpers, and kept `update/mod.rs` as a forwarding table that only delegates completion routing.
+Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/llm_completed.rs, docs/plans/Plan.RefactorUpdateIntoModules.md

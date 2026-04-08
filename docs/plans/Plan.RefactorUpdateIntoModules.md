@@ -445,7 +445,7 @@ git commit -m "refactor: extract polling handlers from update into sub-module"
 
 This is the most complex extraction because `Msg::LlmCompleted` (lines 330–768, ~440 lines) branches into four domains.
 
-- [ ] **Step 1: Create `llm_completed.rs`**
+- [x] **Step 1: Create `llm_completed.rs`**
 
 ```rust
 use super::*;
@@ -484,7 +484,7 @@ And uses shared helpers from `mod.rs` (accessible via `super::*`):
 - `log_summary_cache_*`
 - `short_hash`
 
-- [ ] **Step 2: Wire up in `mod.rs`**
+- [x] **Step 2: Wire up in `mod.rs`**
 
 Replace the `Msg::LlmCompleted { request_id, result, metadata }` arm:
 
@@ -494,7 +494,7 @@ Msg::LlmCompleted { request_id, result, metadata } => {
 }
 ```
 
-- [ ] **Step 3: Build + clippy + test**
+- [x] **Step 3: Build + clippy + test**
 
 ```bash
 cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core
