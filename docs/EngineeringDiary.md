@@ -1119,3 +1119,9 @@ Type: Hardening
 Context: `Reviewing` and `ReadyToTriage` were stored as mutable pre-triage phases, allowing load and manual-decision paths to drift into different readiness interpretations.
 Change: Replaced the stored phase with a smaller internal lifecycle (`Idle`, `LoadingArticles`, `Loaded`, `Failed`) and made `phase()` derive `Reviewing` vs `ReadyToTriage` from the current entries. Updated tests to assert that review-verdict articles derive `Reviewing` immediately.
 Refs: crates/harvester_core/src/pre_triage_filter.rs, crates/harvester_core/src/update.rs, crates/harvester_core/src/working_corpus.rs, crates/harvester_core/tests/pre_triage_filter.rs
+
+## 2026-04-08 - Jobs list selection now uses warm listbox palette tokens
+Type: Bug Fix
+Context: The left-pane Jobs UI had moved from the old TreeView to the owner-drawn ListBox, but the control still painted from a legacy cool blue-gray fallback palette instead of the visual-spec warm accent system.
+Change: Added `ListBoxSelectionAccent`, wired the Jobs list to the listbox-specific style IDs, and taught `CommanDuctUI` list boxes to consume the host palette so the selected row fill and left accent bar match the shared warm accent token.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, src/CommanDuctUI/src/controls/listbox_handler.rs, src/CommanDuctUI/src/styling_primitives.rs

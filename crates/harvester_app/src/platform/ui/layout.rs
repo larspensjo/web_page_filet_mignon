@@ -1226,6 +1226,17 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         },
     });
     commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::ListBoxSelectionAccent,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0xC9,
+                g: 0x64,
+                b: 0x42,
+            }),
+            ..Default::default()
+        },
+    });
+    commands.push(PlatformCommand::DefineStyle {
         style_id: StyleId::ListBoxHoverRow,
         style: ControlStyle {
             background_color: Some(Color {
@@ -2872,7 +2883,27 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: TREE_JOBS,
-        style_id: StyleId::TreeView,
+        style_id: StyleId::ListBoxRow,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: TREE_JOBS,
+        style_id: StyleId::ListBoxSelectedRow,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: TREE_JOBS,
+        style_id: StyleId::ListBoxSelectionAccent,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: TREE_JOBS,
+        style_id: StyleId::ListBoxHoverRow,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: TREE_JOBS,
+        style_id: StyleId::ListBoxDisabledRow,
     });
 
     commands.push(PlatformCommand::ApplyStyleToControl {
