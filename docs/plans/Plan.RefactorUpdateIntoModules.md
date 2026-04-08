@@ -376,7 +376,7 @@ git commit -m "refactor: extract triage handlers from update into sub-module"
 - Create: `crates/harvester_core/src/update/archive.rs`
 - Modify: `crates/harvester_core/src/update/mod.rs`
 
-- [ ] **Step 1: Create `archive.rs` with handler functions**
+- [x] **Step 1: Create `archive.rs` with handler functions**
 
 Move these match arm bodies:
 - `Msg::ArchiveClicked` → `handle_archive_clicked`
@@ -387,9 +387,9 @@ Move these match arm bodies:
 
 Move `is_safe_archive_basename` as a private helper.
 
-- [ ] **Step 2: Wire up in `mod.rs`**
+- [x] **Step 2: Wire up in `mod.rs`**
 
-- [ ] **Step 3: Build + clippy + test**
+- [x] **Step 3: Build + clippy + test**
 
 ```bash
 cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core
@@ -410,7 +410,7 @@ git commit -m "refactor: extract archive handlers from update into sub-module"
 - Create: `crates/harvester_core/src/update/polling.rs`
 - Modify: `crates/harvester_core/src/update/mod.rs`
 
-- [ ] **Step 1: Create `polling.rs` with handler functions**
+- [x] **Step 1: Create `polling.rs` with handler functions**
 
 Move these match arm bodies:
 - `Msg::PollSourcesClicked` → `handle_poll_sources_clicked`
@@ -420,9 +420,9 @@ Move these match arm bodies:
 - `Msg::SourcePollFailed` → `handle_source_poll_failed`
 - `Msg::AllSourcesPollEnded` → `handle_all_sources_poll_ended`
 
-- [ ] **Step 2: Wire up in `mod.rs`**
+- [x] **Step 2: Wire up in `mod.rs`**
 
-- [ ] **Step 3: Build + clippy + test**
+- [x] **Step 3: Build + clippy + test**
 
 ```bash
 cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core
@@ -515,7 +515,7 @@ git commit -m "refactor: extract LlmCompleted handler from update into sub-modul
 - Create: `crates/harvester_core/src/update/import.rs`
 - Modify: `crates/harvester_core/src/update/mod.rs`
 
-- [ ] **Step 1: Create `import.rs` with handler functions**
+- [x] **Step 1: Create `import.rs` with handler functions**
 
 Move these match arm bodies:
 - `Msg::ImportSavedWebpagesRequested` → `handle_import_requested`
@@ -523,9 +523,9 @@ Move these match arm bodies:
 - `Msg::ImportSavedWebpagesFailed` → `handle_import_failed`
 - `Msg::ImportedCorpusCleared` → `handle_corpus_cleared`
 
-- [ ] **Step 2: Wire up in `mod.rs`**
+- [x] **Step 2: Wire up in `mod.rs`**
 
-- [ ] **Step 3: Build + clippy + test**
+- [x] **Step 3: Build + clippy + test**
 
 ```bash
 cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core

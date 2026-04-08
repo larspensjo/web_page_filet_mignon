@@ -17,7 +17,10 @@ use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::types::ModelId;
 use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage};
 
+mod archive;
 mod briefing;
+mod import;
+mod polling;
 mod prompt_lab;
 mod triage;
 
@@ -28,16 +31,6 @@ const MIN_LEFT_WIDTH: i32 = INPUT_PANEL_FIXED_WIDTH + MIN_JOBS_PANEL_WIDTH;
 const MIN_PREVIEW_WIDTH: i32 = 200;
 // Total width occupied by splitter (width + margins)
 const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
-
-fn is_safe_archive_basename(name: &str) -> bool {
-    if name.is_empty() || name == "." || name == ".." {
-        return false;
-    }
-    if name.contains(['/', '\\', '\0']) {
-        return false;
-    }
-    !std::path::Path::new(name).is_absolute()
-}
 
 /// Pure update function: applies a message to state and returns any effects.
 #[allow(
@@ -91,32 +84,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Vec::new()
             }
         }
-        Msg::ArchiveClicked => {
-            let request_id = state.allocate_next_archive_request_id();
-            let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
-            let article_count = corpus.count();
-            let fingerprint = corpus.fingerprint();
-            let source = corpus.source();
-            engine_info!(
-                "[working-corpus] source={:?} count={} fingerprint={:#010x} caller=archive-open request_id={}",
-                source,
-                article_count,
-                fingerprint,
-                request_id,
-            );
-            // Count pre-triage articles ready for review. resolved_included_urls() is phase-gated:
-            // returns empty when phase is Idle (after consume) or during Reviewing (phase-gated).
-            let pending_pre_triage_count = state.pre_triage().resolved_included_urls().len();
-            state.pin_archive_corpus(corpus);
-            let since_utc = state.briefing_since_utc();
-            vec![Effect::OpenArchiveDialog {
-                request_id,
-                article_count,
-                since_utc,
-                default_basename: "archive.md".to_string(),
-                pending_pre_triage_count,
-            }]
-        }
+        Msg::ArchiveClicked => archive::handle_archive_clicked(&mut state),
         Msg::ToggleInputPanel => {
             let opening = !state.input_panel_visible();
             let desired_left_width_px = if opening {
@@ -785,108 +753,38 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             default_file_exists,
             export_dir,
             pending_pre_triage_count,
-        } => {
-            if request_id != state.archive_request_id() {
-                return (state, Vec::new());
-            }
-            vec![Effect::ShowArchiveDialog {
-                request_id,
-                article_count,
-                since_utc,
-                default_basename,
-                default_file_exists,
-                export_dir,
-                pending_pre_triage_count,
-            }]
-        }
+        } => archive::handle_dialog_ready(
+            &mut state,
+            request_id,
+            article_count,
+            since_utc,
+            default_basename,
+            default_file_exists,
+            export_dir,
+            pending_pre_triage_count,
+        ),
         Msg::ArchiveDialogSubmitted {
             request_id,
             basename,
             set_checkpoint,
             submitted_at,
-        } => {
-            if request_id != state.archive_request_id() {
-                return (state, Vec::new());
-            }
-            if !is_safe_archive_basename(&basename) {
-                engine_warn!(
-                    "[archive-dialog] rejecting invalid basename request_id={} basename={}",
-                    request_id,
-                    basename
-                );
-                return (state, Vec::new());
-            }
-            let pinned = state.pinned_archive_corpus();
-            let (ordered_urls, fingerprint) = match pinned {
-                Some(corpus) => (corpus.ordered_urls().to_vec(), corpus.fingerprint()),
-                None => {
-                    // Unreachable in normal operation: ArchiveClicked always precedes
-                    // ArchiveDialogSubmitted.  Guard defensively rather than emit an empty
-                    // archive file to disk.
-                    engine_warn!(
-                        "[archive-dialog] no pinned corpus at submit time request_id={}; \
-                         dropping submit",
-                        request_id
-                    );
-                    return (state, Vec::new());
-                }
-            };
-            state.clear_pinned_archive_corpus();
-            engine_info!(
-                "[working-corpus] source=pinned count={} fingerprint={:#010x} caller=archive-submit request_id={}",
-                ordered_urls.len(),
-                fingerprint,
-                request_id,
-            );
-            let since_utc = state.briefing_since_utc();
-            let requested_checkpoint = set_checkpoint.then_some(submitted_at);
-            vec![Effect::ArchiveRequested {
-                request_id,
-                basename,
-                ordered_urls,
-                since_utc,
-                requested_checkpoint,
-            }]
-        }
+        } => archive::handle_dialog_submitted(
+            &mut state,
+            request_id,
+            basename,
+            set_checkpoint,
+            submitted_at,
+        ),
         Msg::ArchiveExportCompleted {
             request_id,
             requested_checkpoint,
             ..
-        } => {
-            if request_id != state.archive_request_id() {
-                return (state, Vec::new());
-            }
-            // Clear any residual pin (idempotent — normally already cleared at submit time).
-            state.clear_pinned_archive_corpus();
-            if let Some(checkpoint) = requested_checkpoint {
-                let save_id = state.begin_briefing_checkpoint_save(Some(checkpoint));
-                state.mark_dirty();
-                vec![Effect::SaveBriefingCheckpoint {
-                    save_id,
-                    since_utc: Some(checkpoint),
-                }]
-            } else {
-                Vec::new()
-            }
-        }
+        } => archive::handle_export_completed(&mut state, request_id, requested_checkpoint),
         Msg::ArchiveExportFailed {
             request_id,
             basename,
             reason,
-        } => {
-            if request_id != state.archive_request_id() {
-                return (state, Vec::new());
-            }
-            engine_warn!(
-                "[archive-dialog] export failed request_id={} basename={} reason={}",
-                request_id,
-                basename,
-                reason
-            );
-            // Clear any residual pin (idempotent — normally already cleared at submit time).
-            state.clear_pinned_archive_corpus();
-            Vec::new()
-        }
+        } => archive::handle_export_failed(&mut state, request_id, basename, reason),
         Msg::ArticlesLoaded {
             articles,
             collection_text,
@@ -974,67 +872,27 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             None => Vec::new(),
         },
-        Msg::PollSourcesClicked => {
-            if matches!(
-                state.session(),
-                SessionState::Finishing | SessionState::Finished
-            ) || state.is_poll_in_progress()
-            {
-                Vec::new()
-            } else if state.start_poll() {
-                engine_info!("[source-poll] polling requested");
-                state.pre_triage_coordinator.note_poll_started();
-                state.begin_indirect_link_generation();
-                vec![Effect::PollAllSources]
-            } else {
-                Vec::new()
-            }
-        }
-        Msg::PollIndirectLinks => {
-            if !state.has_indirect_links() || state.indirect_poll_in_progress() {
-                Vec::new()
-            } else {
-                state.set_indirect_poll_in_progress(true);
-                let links = state.drain_indirect_links();
-                let result = state.ingest_indirect_links(links);
-                state.set_indirect_poll_in_progress(false);
-                result.effects
-            }
-        }
-        Msg::PollStarted { total } => {
-            state.set_poll_total(total);
-            Vec::new()
-        }
+        Msg::PollSourcesClicked => polling::handle_poll_sources_clicked(&mut state),
+        Msg::PollIndirectLinks => polling::handle_poll_indirect_links(&mut state),
+        Msg::PollStarted { total } => polling::handle_poll_started(&mut state, total),
         Msg::SourcePollCompleted {
             source_id,
             urls,
             kind,
             parsed,
             dedup_filtered,
-        } => {
-            engine_info!("[source-poll] {} returned {} urls", source_id, urls.len());
-            state.record_source_poll(&source_id, urls.len());
-            let ingest = state.ingest_urls(urls);
-            state.record_poll_stat(crate::SourcePollStat {
-                source_id: source_id.clone(),
-                kind,
-                parsed,
-                dedup_filtered,
-                emitted: ingest.enqueued,
-            });
-            ingest.effects
-        }
+        } => polling::handle_source_poll_completed(
+            &mut state,
+            source_id,
+            urls,
+            kind,
+            parsed,
+            dedup_filtered,
+        ),
         Msg::SourcePollFailed { source_id, error } => {
-            engine_warn!("[source-poll] {} failed: {}", source_id, error);
-            state.record_source_error(&source_id, error);
-            Vec::new()
+            polling::handle_source_poll_failed(&mut state, source_id, error)
         }
-        Msg::AllSourcesPollEnded => {
-            state.end_poll();
-            state.pre_triage_coordinator.note_poll_sources_ended();
-            state.select_tab(AppTab::PollStats);
-            Vec::new()
-        }
+        Msg::AllSourcesPollEnded => polling::handle_all_sources_poll_ended(&mut state),
         Msg::TabSelected { tab } => {
             state.select_tab(tab);
             if tab == AppTab::Trends {
@@ -1229,60 +1087,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
 
         // --- Import saved webpages ---
         Msg::ImportSavedWebpagesRequested { dir } => {
-            let request_id = state.allocate_next_llm_request_id();
-            engine_info!(
-                "[import-saved-web] request id={request_id} dir={}",
-                dir.display()
-            );
-            state.import_session.start_import(request_id, dir.clone());
-            vec![Effect::ImportSavedWebpages { dir, request_id }]
+            import::handle_import_requested(&mut state, dir)
         }
-
         Msg::ImportSavedWebpagesCompleted { request_id, report } => {
-            if !state.import_session.is_authoritative(request_id) {
-                engine_warn!(
-                    "[import-saved-web] stale completion request_id={request_id}, current={} — ignored",
-                    state.import_session.request_id
-                );
-                return (state, Vec::new());
-            }
-
-            let imports_completed = report.imported_entries.len();
-            let imports_failed = report.failures.len();
-            engine_info!(
-                "[import-saved-web] completed id={request_id} imported={imports_completed} failed={imports_failed}"
-            );
-
-            let imported_entries = report.imported_entries.clone();
-
-            state.import_session.phase = crate::import_session::ImportPhase::Complete;
-            state.import_session.imported_entries = imported_entries.clone();
-            state.import_session.imports_completed = imports_completed;
-            state.import_session.imports_failed = imports_failed;
-            state.import_session.duplicate_url_count = report.duplicate_url_count;
-            state.import_session.duplicate_content_count = report.duplicate_content_count;
-            state.import_session.warnings = report.warnings;
-            state.apply_imported_archive_entries(&imported_entries);
-            state.request_pre_triage_refresh_evaluation(false);
-            Vec::new()
+            import::handle_import_completed(&mut state, request_id, report)
         }
-
         Msg::ImportSavedWebpagesFailed { request_id, reason } => {
-            if !state.import_session.is_authoritative(request_id) {
-                engine_warn!("[import-saved-web] stale failure request_id={request_id} — ignored");
-                return (state, Vec::new());
-            }
-            engine_warn!("[import-saved-web] failed id={request_id} reason={reason}");
-            state.import_session.phase = crate::import_session::ImportPhase::Failed;
-            state.import_session.failure_reason = Some(reason);
-            Vec::new()
+            import::handle_import_failed(&mut state, request_id, reason)
         }
-
-        Msg::ImportedCorpusCleared => {
-            engine_info!("[import-saved-web] corpus cleared");
-            state.import_session.clear();
-            Vec::new()
-        }
+        Msg::ImportedCorpusCleared => import::handle_corpus_cleared(&mut state),
 
         Msg::Tick => {
             state.advance_tick();

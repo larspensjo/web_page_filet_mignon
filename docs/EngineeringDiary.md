@@ -1161,3 +1161,9 @@ Type: Refactor
 Context: Task 4 of `Plan.RefactorUpdateIntoModules` moved the triage-specific reducer work out of `harvester_core::update`, but the pre-triage refresh coordinator, triage dispatch loop, and cache-run logging were still embedded in `update/mod.rs`.
 Change: Extracted the triage/pre-triage message handlers plus `dispatch_pre_triage_if_due()` and `dispatch_next_triage_step()` into `update/triage.rs`, kept `update/mod.rs` as the routing table, and made the briefing module call the triage dispatcher through the explicit sub-module boundary instead of `super::*`.
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/update/briefing.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-08 - Archive, polling, and import reducer branches moved behind update sub-modules
+Type: Refactor
+Context: Tasks 5, 6, and 8 of `Plan.RefactorUpdateIntoModules` still left archive-dialog flow, source polling, and saved-webpage import handling embedded in `harvester_core::update/mod.rs`, making the dispatcher harder to scan.
+Change: Extracted the archive handlers into `update/archive.rs`, source-poll handlers into `update/polling.rs`, and saved-webpage import handlers into `update/import.rs`; kept `update/mod.rs` as a forwarding table and moved `is_safe_archive_basename()` with the archive flow so the helper stays local to the domain.
+Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/update/polling.rs, crates/harvester_core/src/update/import.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
