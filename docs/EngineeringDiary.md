@@ -1185,3 +1185,9 @@ Type: Bug Fix
 Context: Even while disabled, the visible `Poll Indirect Links` footer control and readiness copy still advertised a dormant workflow stage and suggested a supported next step.
 Change: Removed the `Poll Indirect Links` footer button from layout/rendering again, dropped the indirect-link footer status copy, and removed the app-layer button handler while keeping the indirect-link pipeline code intact behind the UI boundary.
 Refs: crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-08 - Update reducer tests moved out of mod.rs
+Type: Refactor
+Context: `harvester_core::update::mod.rs` still embedded two large unit-test modules, which made the wrapper file much longer and harder to scan even after the reducer branches had been extracted into sub-modules.
+Change: Replaced the in-file test blocks with `#[cfg(test)] mod tests;`, moved the main reducer unit tests into `update/tests/mod.rs`, and moved the import/polling-specific reducer tests into `update/tests/import_tests.rs` while keeping them under `src/update/` so they still exercise private reducer helpers.
+Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/import_tests.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
