@@ -1,9 +1,11 @@
+use super::summary_cache_support::short_hash;
 use super::*;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriagePolicy, PreTriageSession,
 };
 use crate::state::TriageCacheLookupResult;
 use crate::triage::TriageSession;
+use harvester_engine::llm::prompt::PromptId;
 
 pub(super) fn handle_evaluate_pre_triage_refresh(
     state: &mut AppState,

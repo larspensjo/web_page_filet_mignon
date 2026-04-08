@@ -1,6 +1,12 @@
+use super::summary_cache_support::{
+    build_summary_cache_key, context_hash_for_log, log_summary_cache_run_summary,
+    log_summary_cache_warmup_if_needed, short_hash, summary_cache_key_error_reason,
+};
 use super::*;
+use crate::briefing::{BriefingPhase, BriefingSession, CorpusFingerprint};
 use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
 use crate::triage::TriagePhase;
+use harvester_engine::llm::prompt::PromptId;
 
 pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
     if !state.briefing_ai_available() {
@@ -284,7 +290,7 @@ pub(super) fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Ve
         let content_hash = article.content_hash.clone();
         let content_hash_short = short_hash(&content_hash);
         let context = state.context_for(PromptId::ArticleSummary).to_vec();
-        let context_hash_value = context_hash(&context);
+        let context_hash_value = context_hash_for_log(&context);
         let metadata = state.summary_cache_metadata();
         let version_display = metadata
             .map(|(version, _)| version.to_string())

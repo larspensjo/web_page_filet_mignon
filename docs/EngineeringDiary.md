@@ -1191,3 +1191,9 @@ Type: Refactor
 Context: `harvester_core::update::mod.rs` still embedded two large unit-test modules, which made the wrapper file much longer and harder to scan even after the reducer branches had been extracted into sub-modules.
 Change: Replaced the in-file test blocks with `#[cfg(test)] mod tests;`, moved the main reducer unit tests into `update/tests/mod.rs`, and moved the import/polling-specific reducer tests into `update/tests/import_tests.rs` while keeping them under `src/update/` so they still exercise private reducer helpers.
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/import_tests.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-08 - Update helper clusters moved out of mod.rs
+Type: Refactor
+Context: After the reducer branch extraction and test move, `harvester_core::update::mod.rs` still owned pasted-URL parsing plus the shared summary-cache helper/logging functions, so the wrapper file still mixed dispatch with domain helper logic.
+Change: Moved URL parsing into `update/url_input.rs`, moved the shared summary-cache warmup/key/logging helpers into `update/summary_cache_support.rs`, and updated briefing, triage, LLM-completion, and reducer-test code to import those helpers explicitly instead of relying on `mod.rs` imports leaking through `super::*`.
+Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/url_input.rs, crates/harvester_core/src/update/summary_cache_support.rs, crates/harvester_core/src/update/briefing.rs, crates/harvester_core/src/update/llm_completed.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/update/tests/mod.rs, docs/plans/Plan.RefactorUpdateIntoModules.md

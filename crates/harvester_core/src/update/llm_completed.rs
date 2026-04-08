@@ -1,3 +1,8 @@
+use super::summary_cache_support::{
+    build_summary_cache_key, log_summary_cache_completion_metadata,
+    log_summary_cache_lookup_mismatch, log_summary_cache_run_summary, short_hash,
+    summary_cache_key_error_reason,
+};
 use super::*;
 use crate::briefing::{ArticleSummaryResult, BriefingResult, BriefingStoryResult};
 use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage};
@@ -107,7 +112,7 @@ fn handle_summary_completion(
 
                 let cache_key_result = match lookup_key.clone() {
                     Some(key) => Ok(key),
-                    None => super::build_summary_cache_key(
+                    None => build_summary_cache_key(
                         &content_hash,
                         PromptId::ArticleSummary,
                         run_metadata.as_ref().map(|(version, _)| *version),
@@ -119,14 +124,10 @@ fn handle_summary_completion(
                 match cache_key_result {
                     Ok(store_key) => {
                         if let Some(lookup) = lookup_key.as_ref() {
-                            super::log_summary_cache_lookup_mismatch(
-                                article_idx,
-                                lookup,
-                                &store_key,
-                            );
+                            log_summary_cache_lookup_mismatch(article_idx, lookup, &store_key);
                         }
 
-                        let completion_key = super::build_summary_cache_key(
+                        let completion_key = build_summary_cache_key(
                             &content_hash,
                             PromptId::ArticleSummary,
                             Some(*prompt_version),
@@ -134,7 +135,7 @@ fn handle_summary_completion(
                             &context,
                         );
                         if let Ok(completion_key) = completion_key {
-                            super::log_summary_cache_completion_metadata(
+                            log_summary_cache_completion_metadata(
                                 article_idx,
                                 &store_key,
                                 &completion_key,
@@ -162,7 +163,7 @@ fn handle_summary_completion(
                             store_key.prompt_version,
                             store_key.model_id,
                             store_key.context_hash,
-                            super::short_hash(&content_hash),
+                            short_hash(&content_hash),
                         );
                         effects.push(Effect::UpsertEntityIndexEntry {
                             url: article_url,
@@ -176,7 +177,7 @@ fn handle_summary_completion(
                         engine_warn!(
                             "[summary-cache] article={} skip storing result: {}",
                             article_idx,
-                            super::summary_cache_key_error_reason(&err)
+                            summary_cache_key_error_reason(&err)
                         );
                     }
                 }
@@ -332,7 +333,7 @@ fn handle_briefing_completion(
         }
     }
 
-    super::log_summary_cache_run_summary(state);
+    log_summary_cache_run_summary(state);
     state.mark_dirty();
 }
 

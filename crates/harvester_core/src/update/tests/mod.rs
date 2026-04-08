@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Once;
 
+use super::summary_cache_support::summary_cache_model_ids_compatible;
 use super::*;
 use crate::briefing::{ArticleSummaryState, BriefingPhase, LoadedArticle};
 use crate::LlmResultKind;
+use crate::PromptLabStage;
+use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{
     run_metadata::{CacheStatus, LlmRunMetadata, LlmRunMetadataInit},
     DEFAULT_BRIEFING_MODEL, OPENAI_MODEL_GPT_4O, OPENAI_MODEL_GPT_4O_MINI,
@@ -764,10 +767,7 @@ fn triage_success(request_id: u64) -> Msg {
     }
 }
 
-fn start_triage_for_test(
-    state: AppState,
-    articles: Vec<LoadedArticle>,
-) -> (AppState, Vec<Effect>) {
+fn start_triage_for_test(state: AppState, articles: Vec<LoadedArticle>) -> (AppState, Vec<Effect>) {
     let mut active_versions = std::collections::HashMap::new();
     active_versions.insert(PromptId::ArticleTriage, 1);
     let mut effective_models = std::collections::HashMap::new();
@@ -2416,11 +2416,8 @@ fn make_entity_index_with_company(
 fn entity_index_loaded_populates_trend_data() {
     init_logging();
     let state = AppState::default();
-    let index = make_entity_index_with_company(
-        "https://example.com/a",
-        "Nvidia",
-        "2026-02-01T00:00:00Z",
-    );
+    let index =
+        make_entity_index_with_company("https://example.com/a", "Nvidia", "2026-02-01T00:00:00Z");
     let (state, effects) = update(state, Msg::EntityIndexLoaded { index });
     assert!(effects.is_empty());
     let trend_data = state
@@ -3166,8 +3163,7 @@ fn archive_clicked_after_triage_start_has_zero_pending_pre_triage_count() {
 }
 
 #[test]
-fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating_active_triage()
-{
+fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating_active_triage() {
     init_logging();
     let urls = &["https://repopulate.com/1"];
     let state = ready_pre_triage_state(urls);

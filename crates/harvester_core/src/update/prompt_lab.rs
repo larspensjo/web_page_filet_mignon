@@ -1,4 +1,9 @@
 use super::*;
+use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage};
+use crate::tabs::LeftTab;
+use engine_logging::engine_error;
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use harvester_engine::llm::types::ModelId;
 
 pub(super) fn handle_open_requested(state: &mut AppState) -> Vec<Effect> {
     // Bridge: selecting the PromptLab tab is now the canonical open action.
