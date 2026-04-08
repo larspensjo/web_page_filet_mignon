@@ -797,10 +797,9 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_BRIEFING,
-        text: "Generate Briefing".to_string(),
+        control_id: BUTTON_POLL_SOURCES,
+        text: "Poll Sources".to_string(),
     });
-
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_BUTTONS),
@@ -810,14 +809,8 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_POLL_SOURCES,
-        text: "Poll Sources".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_POLL_INDIRECT_LINKS,
-        text: "Poll Indirect Links".to_string(),
+        control_id: BUTTON_BRIEFING,
+        text: "Generate Briefing".to_string(),
     });
 
     commands.push(PlatformCommand::CreateButton {
@@ -1981,11 +1974,11 @@ fn build_layout_rules(
             margin: (14, 6, 22, 6),
         },
         LayoutRule {
-            control_id: BUTTON_BRIEFING,
+            control_id: BUTTON_POLL_SOURCES,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 1,
-            fixed_size: Some(168),
+            fixed_size: Some(144),
             margin: (0, 6, 6, 6),
         },
         LayoutRule {
@@ -1997,18 +1990,10 @@ fn build_layout_rules(
             margin: (0, 6, 6, 6),
         },
         LayoutRule {
-            control_id: BUTTON_POLL_SOURCES,
+            control_id: BUTTON_BRIEFING,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 3,
-            fixed_size: Some(144),
-            margin: (0, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_POLL_INDIRECT_LINKS,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 4,
             fixed_size: Some(168),
             margin: (0, 6, 6, 6),
         },
@@ -2016,7 +2001,7 @@ fn build_layout_rules(
             control_id: BUTTON_OPEN_BROWSER,
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
-            order: 5,
+            order: 4,
             fixed_size: Some(144),
             margin: (0, 6, 6, 6),
         },
@@ -2782,8 +2767,8 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
-        control_id: BUTTON_BRIEFING,
-        style_id: StyleId::PrimaryButton,
+        control_id: BUTTON_POLL_SOURCES,
+        style_id: StyleId::SecondaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -2792,13 +2777,8 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
-        control_id: BUTTON_POLL_SOURCES,
-        style_id: StyleId::SecondaryButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_POLL_INDIRECT_LINKS,
-        style_id: StyleId::SecondaryButton,
+        control_id: BUTTON_BRIEFING,
+        style_id: StyleId::PrimaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -3781,7 +3761,6 @@ mod tests {
         for button_id in [
             BUTTON_TRIAGE,
             BUTTON_POLL_SOURCES,
-            BUTTON_POLL_INDIRECT_LINKS,
             BUTTON_OPEN_BROWSER,
         ] {
             let has_style = cmds.iter().any(|cmd| {
@@ -3887,7 +3866,6 @@ mod tests {
             BUTTON_BRIEFING,
             BUTTON_TRIAGE,
             BUTTON_POLL_SOURCES,
-            BUTTON_POLL_INDIRECT_LINKS,
             BUTTON_OPEN_BROWSER,
         ] {
             let rule = rules
@@ -3904,9 +3882,57 @@ mod tests {
     }
 
     #[test]
-    fn footer_button_row_is_tall_enough_for_primary_action_presence() {
+    fn footer_buttons_follow_workflow_order() {
         let cmd = build_layout_command(
             WindowId::new(111),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+
+        let ordered_buttons: Vec<_> = rules
+            .iter()
+            .filter(|rule| rule.parent_control_id == Some(PANEL_BUTTONS))
+            .map(|rule| (rule.order, rule.control_id))
+            .collect();
+
+        assert_eq!(
+            ordered_buttons,
+            vec![
+                (0, BUTTON_STOP),
+                (1, BUTTON_POLL_SOURCES),
+                (2, BUTTON_TRIAGE),
+                (3, BUTTON_BRIEFING),
+                (4, BUTTON_OPEN_BROWSER),
+            ]
+        );
+    }
+
+    #[test]
+    fn footer_button_row_is_tall_enough_for_primary_action_presence() {
+        let cmd = build_layout_command(
+            WindowId::new(112),
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,

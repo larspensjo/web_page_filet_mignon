@@ -106,7 +106,6 @@ pub struct TreeRenderState {
     prev_briefing_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
     prev_poll_enabled: Option<bool>,
-    prev_poll_indirect_enabled: Option<bool>,
     prev_briefing_progress: Option<String>,
     prev_triage_progress: Option<String>,
     prev_progress_range: Option<(u32, u32)>,
@@ -196,7 +195,6 @@ impl Default for TreeRenderState {
             prev_briefing_enabled: None,
             prev_triage_enabled: None,
             prev_poll_enabled: None,
-            prev_poll_indirect_enabled: None,
             prev_briefing_progress: None,
             prev_triage_progress: None,
             prev_progress_range: None,
@@ -608,21 +606,6 @@ fn render_status_section(
     if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
         status_parts.push(usage);
     }
-    if let Some(indirect_summary) = view.indirect_link_summary.as_ref() {
-        let indirect_text = match indirect_summary.phase {
-            harvester_core::IndirectLinkPhase::Collecting => {
-                format!("{} indirect links collected", indirect_summary.count)
-            }
-            harvester_core::IndirectLinkPhase::Ready => {
-                if indirect_summary.count == 0 {
-                    "No indirect links".to_string()
-                } else {
-                    format!("{} indirect links ready", indirect_summary.count)
-                }
-            }
-        };
-        status_parts.push(indirect_text);
-    }
     let severity = if let Some(message) = view.ai_unavailable_message.as_deref() {
         status_parts.push(message.to_string());
         MessageSeverity::Warning
@@ -837,16 +820,6 @@ fn render_main_controls_section(
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_POLL_SOURCES,
-            enabled,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_poll_indirect_enabled,
-        view.poll_indirect_links_enabled,
-        cmds,
-        |enabled| PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_POLL_INDIRECT_LINKS,
             enabled,
         },
     );
@@ -3803,41 +3776,6 @@ mod tests {
             )
         });
         assert!(disabled, "BUTTON_OPEN_BROWSER should be disabled");
-    }
-
-    #[test]
-    fn render_enables_poll_indirect_links_when_links_are_available() {
-        init_logging();
-        let mut view = make_view(vec![]);
-        view.poll_indirect_links_enabled = true;
-        let mut tree_state = TreeRenderState::new();
-        let window_id = WindowId::new(1);
-        let cmds = render(window_id, &view, &mut tree_state);
-        let enabled = cmds.iter().any(|cmd| {
-            matches!(
-                cmd,
-                PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
-                if *control_id == BUTTON_POLL_INDIRECT_LINKS
-            )
-        });
-        assert!(enabled, "BUTTON_POLL_INDIRECT_LINKS should be enabled");
-    }
-
-    #[test]
-    fn render_disables_poll_indirect_links_when_links_are_unavailable() {
-        init_logging();
-        let view = make_view(vec![]);
-        let mut tree_state = TreeRenderState::new();
-        let window_id = WindowId::new(1);
-        let cmds = render(window_id, &view, &mut tree_state);
-        let disabled = cmds.iter().any(|cmd| {
-            matches!(
-                cmd,
-                PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
-                if *control_id == BUTTON_POLL_INDIRECT_LINKS
-            )
-        });
-        assert!(disabled, "BUTTON_POLL_INDIRECT_LINKS should be disabled");
     }
 
     #[test]

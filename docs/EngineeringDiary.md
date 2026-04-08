@@ -1149,3 +1149,15 @@ Type: Refactor
 Context: Task 2 of `Plan.RefactorUpdateIntoModules` split the largest self-contained branch set out of `harvester_core::update`, but the Prompt Lab reducer arms and run-dispatch helpers were still embedded in `update/mod.rs`.
 Change: Moved the Prompt Lab match-arm bodies plus run/template helpers into `update/prompt_lab.rs`, left `update()` as a forwarding table for `Msg::PromptLab*`, and updated reducer tests to call the moved helper through the new sub-module.
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/prompt_lab.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-08 - Footer workflow order now matches Poll -> Triage -> Briefing
+Type: Bug Fix
+Context: The footer action row presented the main workflow out of sequence, and `Poll Indirect Links` had been re-enabled despite the earlier decision to keep that path disabled pending redesign.
+Change: Reordered the footer buttons to `Poll Sources`, `Run Triage`, then `Generate Briefing`, and forced `Poll Indirect Links` to stay disabled in the renderer while leaving the underlying indirect-link pipeline intact. Added layout/render regression coverage for the workflow order and disabled state.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-08 - Indirect-link footer affordance hidden again pending redesign
+Type: Bug Fix
+Context: Even while disabled, the visible `Poll Indirect Links` footer control and readiness copy still advertised a dormant workflow stage and suggested a supported next step.
+Change: Removed the `Poll Indirect Links` footer button from layout/rendering again, dropped the indirect-link footer status copy, and removed the app-layer button handler while keeping the indirect-link pipeline code intact behind the UI boundary.
+Refs: crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs

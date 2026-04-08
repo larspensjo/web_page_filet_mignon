@@ -862,11 +862,6 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::PollSourcesClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_POLL_INDIRECT_LINKS =>
-            {
-                let _ = self.msg_tx.send(Msg::PollIndirectLinks);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_OPEN_BROWSER =>
             {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
