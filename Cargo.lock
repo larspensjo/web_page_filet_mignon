@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "commanductui"
-version = "1.0.6"
+version = "1.0.7"
 dependencies = [
  "log",
  "windows",

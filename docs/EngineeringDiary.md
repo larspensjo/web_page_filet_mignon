@@ -1125,3 +1125,9 @@ Type: Bug Fix
 Context: The left-pane Jobs UI had moved from the old TreeView to the owner-drawn ListBox, but the control still painted from a legacy cool blue-gray fallback palette instead of the visual-spec warm accent system.
 Change: Added `ListBoxSelectionAccent`, wired the Jobs list to the listbox-specific style IDs, and taught `CommanDuctUI` list boxes to consume the host palette so the selected row fill and left accent bar match the shared warm accent token.
 Refs: crates/harvester_app/src/platform/ui/layout.rs, src/CommanDuctUI/src/controls/listbox_handler.rs, src/CommanDuctUI/src/styling_primitives.rs
+
+## 2026-04-08 - Listbox hover repaint no longer invalidates the full client
+Type: Bug Fix
+Context: Moving the mouse across article rows repainted the entire owner-drawn listbox on each hover transition, producing a visible flicker/flash along the left edge.
+Change: Narrowed hover invalidation to only the previous and current row rectangles in `CommanDuctUI`'s listbox handler and added a row-geometry regression test.
+Refs: src/CommanDuctUI/src/controls/listbox_handler.rs
