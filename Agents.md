@@ -8,6 +8,7 @@
 ## Architecture
 - Preserve the unidirectional data flow: input -> action -> reducer -> state -> render, with side effects isolated and fed back as actions.
 - Reducers must stay pure and unit-testable.
+- Keep `mod.rs` and `lib.rs` files as thin wrappers only.
 
 ## CommanDuctUI Boundary
 - Treat `CommanDuctUI` as generic infrastructure, not Harvester domain code.
