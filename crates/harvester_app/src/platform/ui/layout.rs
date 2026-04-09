@@ -3082,10 +3082,9 @@ mod tests {
         assert!(!commands
             .iter()
             .any(|cmd| matches!(cmd, PlatformCommand::ShowWindow { .. })));
-        assert!(!commands.iter().any(|cmd| matches!(
-            cmd,
-            PlatformCommand::SignalMainWindowUISetupComplete { .. }
-        )));
+        assert!(!commands
+            .iter()
+            .any(|cmd| matches!(cmd, PlatformCommand::SignalMainWindowUISetupComplete { .. })));
     }
 
     #[test]
@@ -3758,11 +3757,7 @@ mod tests {
     #[test]
     fn secondary_footer_buttons_use_secondary_button_style() {
         let cmds = initial_commands(WindowId::new(99));
-        for button_id in [
-            BUTTON_TRIAGE,
-            BUTTON_POLL_SOURCES,
-            BUTTON_OPEN_BROWSER,
-        ] {
+        for button_id in [BUTTON_TRIAGE, BUTTON_POLL_SOURCES, BUTTON_OPEN_BROWSER] {
             let has_style = cmds.iter().any(|cmd| {
                 matches!(
                     cmd,

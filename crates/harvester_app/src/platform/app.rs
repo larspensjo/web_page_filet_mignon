@@ -50,11 +50,7 @@ const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
 const LLM_MAX_CONCURRENT_REQUESTS_ENV: &str = "LLM_MAX_CONCURRENT_REQUESTS";
 const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
 
-fn apply_startup_msg(
-    state: AppState,
-    msg: Msg,
-    startup_effects: &mut Vec<Effect>,
-) -> AppState {
+fn apply_startup_msg(state: AppState, msg: Msg, startup_effects: &mut Vec<Effect>) -> AppState {
     let (next_state, effects) = update(state, msg);
     startup_effects.extend(effects);
     next_state
@@ -71,7 +67,12 @@ fn prepare_startup_state(
 
     // Synchronous startup preparation: seed all cheap, local facts before the
     // first view snapshot so the first visible frame is already correct.
-    let (mut next_state, _) = update(state, Msg::WindowResized { window_width: initial_width });
+    let (mut next_state, _) = update(
+        state,
+        Msg::WindowResized {
+            window_width: initial_width,
+        },
+    );
     next_state.set_triage_max_in_flight(llm_max_concurrent_requests);
     next_state.set_summary_max_in_flight(llm_max_concurrent_requests);
     state = next_state;
@@ -90,7 +91,11 @@ fn prepare_startup_state(
 
     let completed = load_completed_jobs(&paths.state_path);
     if !completed.is_empty() {
-        state = apply_startup_msg(state, Msg::RestoreCompletedJobs(completed), &mut startup_effects);
+        state = apply_startup_msg(
+            state,
+            Msg::RestoreCompletedJobs(completed),
+            &mut startup_effects,
+        );
     }
 
     let summary_cache = load_summary_cache(&paths.summary_cache_path);
@@ -108,7 +113,9 @@ fn prepare_startup_state(
     if !triage_cache.is_empty() {
         state = apply_startup_msg(
             state,
-            Msg::TriageCacheHydrated { cache: triage_cache },
+            Msg::TriageCacheHydrated {
+                cache: triage_cache,
+            },
             &mut startup_effects,
         );
     }
@@ -253,11 +260,8 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         guard.state.view()
     };
     let mut tree_render_state = ui::render::TreeRenderState::new();
-    let initial_commands = assemble_startup_commands(
-        window_id,
-        &initial_view,
-        &mut tree_render_state,
-    );
+    let initial_commands =
+        assemble_startup_commands(window_id, &initial_view, &mut tree_render_state);
 
     let event_handler: Arc<Mutex<dyn PlatformEventHandler>> =
         Arc::new(Mutex::new(AppEventHandler::new(
@@ -1842,19 +1846,15 @@ mod tests {
     #[test]
     fn assembled_startup_commands_render_before_reveal() {
         let (_temp, paths) = startup_test_paths();
-        let (state, _effects) =
-            prepare_startup_state(AppState::new(), &paths, 1200, 4, None);
+        let (state, _effects) = prepare_startup_state(AppState::new(), &paths, 1200, 4, None);
         let view = state.view();
         let window_id = WindowId::new(1);
         let mut tree_render_state = ui::render::TreeRenderState::new();
 
         let layout_commands = ui::layout::initial_commands(window_id);
         let render_commands = ui::render::render(window_id, &view, &mut tree_render_state);
-        let commands = assemble_startup_commands(
-            window_id,
-            &view,
-            &mut ui::render::TreeRenderState::new(),
-        );
+        let commands =
+            assemble_startup_commands(window_id, &view, &mut ui::render::TreeRenderState::new());
 
         let render_end = layout_commands.len() + render_commands.len();
         let show_window_indexes = commands
