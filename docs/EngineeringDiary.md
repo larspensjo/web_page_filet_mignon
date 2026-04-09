@@ -551,6 +551,12 @@ Change: Refined the updater contract in the plan-review loop prompt to explicitl
 Evidence: `scripts/Invoke-PlanReviewLoop.ps1` syntax parse check passed (`Parser::ParseFile` returned OK).
 Refs: scripts/Invoke-PlanReviewLoop.ps1
 
+## 2026-04-09 - harvester_core state module split
+Type: Implementation
+Context: `crates/harvester_core/src/state.rs` had grown past 5,000 lines and mixed reducer-owned state, link helpers, view-building logic, and tests into one file, which made navigation and safe refactoring harder.
+Change: Converted `state.rs` into a directory module and extracted focused submodules for job state, UI state, indirect-link handling, pure link helpers, view building, and state tests while preserving the existing `AppState` API and crate-internal import surface.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/job_state.rs, crates/harvester_core/src/state/ui_state.rs, crates/harvester_core/src/state/indirect_links.rs, crates/harvester_core/src/state/link_helpers.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs
+
 ## 2026-03-01 - Claude plan loop isolation and UTF-8 CLI encoding
 Type: Decision
 Context: Plan-review loop runs should be deterministic and not inherit prior Claude session state, and generated markdown had mojibake (`ΓÇö`) from an encoding mismatch in the CLI capture path.
