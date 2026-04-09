@@ -1,5 +1,4 @@
 use crate::briefing::BriefingSession;
-use crate::context_hash;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
@@ -12,7 +11,7 @@ use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
 use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::triage::{ArticleTriageResult, TriagePhase, TriageSession};
-use crate::triage_cache::{TriageCache, TriageCacheKey};
+use crate::triage_cache::TriageCache;
 use crate::url_age::AgeEstimate;
 #[cfg(test)]
 use crate::view_model::OperationProgress;
@@ -24,12 +23,19 @@ use harvester_engine::{ExtractedLink, ImportedArchiveRef, LinkKind, SourceId};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
+mod briefing_orchestration;
+mod cache_state;
 mod indirect_links;
 mod job_state;
 mod link_helpers;
 mod ui_state;
 mod view_builder;
 
+use briefing_orchestration::BriefingOrchestration;
+use cache_state::{
+    MetadataLoadState, SummaryCacheMetadataSnapshot, SummaryCacheMetrics,
+    TriageCacheMetadataSnapshot, TriageCacheRunMetrics,
+};
 use indirect_links::{should_collect_indirect_link, IndirectLink, IndirectLinkPool};
 use job_state::JobState;
 #[cfg(test)]
@@ -68,26 +74,6 @@ fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSna
         .collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MetadataLoadState {
-    Idle,
-    Pending,
-    Ready,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct SummaryCacheMetadataSnapshot {
-    prompt_version: PromptVersion,
-    model_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TriageCacheMetadataSnapshot {
-    prompt_version: PromptVersion,
-    model_id: String,
-    context_hash: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingBriefingCheckpointSave {
     save_id: u64,
@@ -119,115 +105,6 @@ pub(crate) enum TriageCacheLookupResult<'a> {
     Hit(&'a ArticleTriageResult),
     Miss,
     KeyUnavailable,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct BriefingOrchestration {
-    requested: bool,
-    skip_aggregate_briefing: bool,
-    priority_cutoff_exclusive: u8,
-    prereq_articles: Option<Vec<crate::briefing::LoadedArticle>>,
-}
-
-impl Default for BriefingOrchestration {
-    fn default() -> Self {
-        Self {
-            requested: false,
-            skip_aggregate_briefing: false,
-            priority_cutoff_exclusive: 1,
-            prereq_articles: None,
-        }
-    }
-}
-
-impl BriefingOrchestration {
-    fn request(&mut self, skip_aggregate_briefing: bool) {
-        self.requested = true;
-        self.skip_aggregate_briefing = skip_aggregate_briefing;
-    }
-
-    fn store_prereq(&mut self, articles: Vec<crate::briefing::LoadedArticle>) {
-        self.prereq_articles = Some(articles);
-    }
-
-    fn take_prereq(&mut self) -> Option<Vec<crate::briefing::LoadedArticle>> {
-        self.prereq_articles.take()
-    }
-
-    fn clear(&mut self) {
-        self.requested = false;
-        self.skip_aggregate_briefing = false;
-        self.prereq_articles = None;
-    }
-
-    fn is_requested(&self) -> bool {
-        self.requested
-    }
-
-    fn policy(&self) -> crate::briefing::TriageSelectionPolicy {
-        crate::briefing::TriageSelectionPolicy {
-            cutoff_exclusive: self.priority_cutoff_exclusive,
-            exclude_untriaged: true,
-        }
-    }
-
-    fn clear_request(&mut self) {
-        self.requested = false;
-    }
-
-    fn skip_aggregate_briefing(&self) -> bool {
-        self.skip_aggregate_briefing
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct SummaryCacheMetrics {
-    hits: usize,
-    misses: usize,
-    key_unavailable: usize,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct TriageCacheRunMetrics {
-    hits: u32,
-    misses: u32,
-    key_unavailable: u32,
-}
-
-impl TriageCacheRunMetrics {
-    pub(crate) fn hits(&self) -> u32 {
-        self.hits
-    }
-
-    pub(crate) fn misses(&self) -> u32 {
-        self.misses
-    }
-
-    pub(crate) fn key_unavailable(&self) -> u32 {
-        self.key_unavailable
-    }
-
-    pub(crate) fn total(&self) -> u32 {
-        self.hits + self.misses + self.key_unavailable
-    }
-}
-
-impl SummaryCacheMetrics {
-    pub(crate) fn hits(&self) -> usize {
-        self.hits
-    }
-
-    pub(crate) fn misses(&self) -> usize {
-        self.misses
-    }
-
-    pub(crate) fn key_unavailable(&self) -> usize {
-        self.key_unavailable
-    }
-
-    pub(crate) fn total(&self) -> usize {
-        self.hits + self.misses + self.key_unavailable
-    }
 }
 
 /// Represents the download status for a specific link.
@@ -1242,276 +1119,6 @@ impl AppState {
         prompt_id: PromptId,
     ) -> Option<&PromptLabTemplateSnapshot> {
         self.prompt_lab_templates.get(&prompt_id)
-    }
-
-    /// Try to reuse a cached summary result for the given cache key.
-    /// Returns None if there is no cached entry for this key.
-    pub(crate) fn try_reuse_summary(
-        &self,
-        key: &crate::summary_cache::SummaryCacheKey,
-    ) -> Option<&crate::briefing::ArticleSummaryResult> {
-        self.summary_cache.lookup(key).map(|entry| &entry.result)
-    }
-
-    /// Store a summary result in the cache with the given key.
-    pub(crate) fn store_summary_result(
-        &mut self,
-        key: crate::summary_cache::SummaryCacheKey,
-        result: crate::briefing::ArticleSummaryResult,
-        created_at_utc: String,
-    ) {
-        let entry = crate::summary_cache::SummaryCacheEntry {
-            result,
-            created_at_utc,
-        };
-        self.summary_cache.insert(key, entry);
-    }
-
-    /// Replace the entire summary cache (used for hydration).
-    pub(crate) fn set_summary_cache(&mut self, cache: SummaryCache) {
-        self.summary_cache = cache;
-    }
-
-    pub(crate) fn start_summary_cache_run(&mut self) {
-        self.summary_cache_metrics = SummaryCacheMetrics::default();
-        self.summary_cache_metadata_snapshot = None;
-        self.summary_cache_warmup_logged = false;
-        self.briefing_metadata_state = MetadataLoadState::Pending;
-    }
-
-    pub(crate) fn mark_briefing_metadata_ready(&mut self) {
-        if self.briefing_metadata_state != MetadataLoadState::Pending {
-            return;
-        }
-        let snapshot = match (
-            self.active_prompt_versions
-                .get(&PromptId::ArticleSummary)
-                .copied(),
-            self.effective_models
-                .get(&PromptId::ArticleSummary)
-                .cloned(),
-        ) {
-            (Some(version), Some(model_id)) => Some(SummaryCacheMetadataSnapshot {
-                prompt_version: version,
-                model_id,
-            }),
-            _ => None,
-        };
-        self.summary_cache_metadata_snapshot = snapshot;
-        self.briefing_metadata_state = MetadataLoadState::Ready;
-    }
-
-    pub(crate) fn is_briefing_metadata_ready(&self) -> bool {
-        matches!(self.briefing_metadata_state, MetadataLoadState::Ready)
-    }
-
-    pub(crate) fn summary_cache_metadata(&self) -> Option<(PromptVersion, &str)> {
-        self.summary_cache_metadata_snapshot
-            .as_ref()
-            .map(|snapshot| (snapshot.prompt_version, snapshot.model_id.as_str()))
-    }
-
-    pub(crate) fn summary_cache_warmup_logged(&self) -> bool {
-        self.summary_cache_warmup_logged
-    }
-
-    pub(crate) fn mark_summary_cache_warmup_logged(&mut self) {
-        self.summary_cache_warmup_logged = true;
-    }
-
-    pub(crate) fn record_summary_cache_hit(&mut self) {
-        self.summary_cache_metrics.hits += 1;
-    }
-
-    pub(crate) fn record_summary_cache_miss(&mut self) {
-        self.summary_cache_metrics.misses += 1;
-    }
-
-    pub(crate) fn record_summary_cache_key_unavailable(&mut self) {
-        self.summary_cache_metrics.key_unavailable += 1;
-    }
-
-    pub(crate) fn summary_cache_metrics(&self) -> SummaryCacheMetrics {
-        self.summary_cache_metrics
-    }
-
-    pub(crate) fn finalize_summary_cache_run(&mut self) {
-        self.briefing_metadata_state = MetadataLoadState::Idle;
-        self.summary_cache_metadata_snapshot = None;
-        self.summary_cache_warmup_logged = false;
-    }
-
-    pub(crate) fn briefing_orchestration_requested(&self) -> bool {
-        self.briefing_orchestration.is_requested()
-    }
-
-    pub(crate) fn request_briefing_orchestration(&mut self) {
-        self.briefing_orchestration.request(false);
-    }
-
-    pub(crate) fn request_summary_preparation(&mut self) {
-        self.briefing_orchestration.request(true);
-    }
-
-    pub(crate) fn store_briefing_prereq_articles(
-        &mut self,
-        articles: Vec<crate::briefing::LoadedArticle>,
-    ) {
-        self.briefing_orchestration.store_prereq(articles);
-    }
-
-    pub(crate) fn take_briefing_prereq_articles(
-        &mut self,
-    ) -> Option<Vec<crate::briefing::LoadedArticle>> {
-        self.briefing_orchestration.take_prereq()
-    }
-
-    pub(crate) fn clear_briefing_orchestration(&mut self) {
-        self.briefing_orchestration.clear();
-    }
-
-    pub(crate) fn clear_briefing_orchestration_request(&mut self) {
-        self.briefing_orchestration.clear_request();
-    }
-
-    pub(crate) fn briefing_triage_policy(&self) -> crate::briefing::TriageSelectionPolicy {
-        self.briefing_orchestration.policy()
-    }
-
-    pub(crate) fn briefing_orchestration_skip_aggregate(&self) -> bool {
-        self.briefing_orchestration.skip_aggregate_briefing()
-    }
-
-    /// Get an immutable reference to the summary cache.
-    pub(crate) fn summary_cache(&self) -> &SummaryCache {
-        &self.summary_cache
-    }
-    pub(crate) fn set_triage_cache(&mut self, cache: TriageCache) {
-        self.triage_cache = cache;
-    }
-
-    pub fn triage_cache(&self) -> &TriageCache {
-        &self.triage_cache
-    }
-
-    pub(crate) fn start_triage_cache_run(&mut self) {
-        self.triage_cache_run_metrics = TriageCacheRunMetrics::default();
-        self.triage_cache_run_start_logged = false;
-    }
-
-    pub(crate) fn mark_triage_metadata_pending(&mut self) {
-        self.triage_metadata_state = MetadataLoadState::Pending;
-    }
-
-    pub(crate) fn mark_triage_metadata_ready(&mut self) {
-        let snapshot = match (
-            self.active_prompt_versions
-                .get(&PromptId::ArticleTriage)
-                .copied(),
-            self.effective_models.get(&PromptId::ArticleTriage).cloned(),
-        ) {
-            (Some(prompt_version), Some(model_id)) => Some(TriageCacheMetadataSnapshot {
-                prompt_version,
-                model_id,
-                context_hash: context_hash(self.context_for(PromptId::ArticleTriage)),
-            }),
-            _ => {
-                self.triage_metadata_state = MetadataLoadState::Pending;
-                None
-            }
-        };
-        if snapshot.is_some() {
-            self.triage_metadata_state = MetadataLoadState::Ready;
-        }
-        self.triage_cache_metadata_snapshot = snapshot;
-    }
-
-    pub(crate) fn triage_metadata_ready(&self) -> bool {
-        matches!(self.triage_metadata_state, MetadataLoadState::Ready)
-    }
-
-    pub(crate) fn triage_cache_metadata(&self) -> Option<(PromptVersion, &str, &str)> {
-        self.triage_cache_metadata_snapshot
-            .as_ref()
-            .map(|snapshot| {
-                (
-                    snapshot.prompt_version,
-                    snapshot.model_id.as_str(),
-                    snapshot.context_hash.as_str(),
-                )
-            })
-    }
-
-    pub(crate) fn try_reuse_triage(&self, content_hash: &str) -> TriageCacheLookupResult<'_> {
-        let snapshot = match &self.triage_cache_metadata_snapshot {
-            Some(snapshot) => snapshot,
-            None => return TriageCacheLookupResult::KeyUnavailable,
-        };
-        let key = match TriageCacheKey::try_new_with_context_hash(
-            content_hash,
-            PromptId::ArticleTriage,
-            Some(snapshot.prompt_version),
-            Some(snapshot.model_id.as_str()),
-            &snapshot.context_hash,
-        ) {
-            Ok(key) => key,
-            Err(_) => return TriageCacheLookupResult::KeyUnavailable,
-        };
-        match self.triage_cache.lookup(&key) {
-            Some(result) => TriageCacheLookupResult::Hit(result),
-            None => TriageCacheLookupResult::Miss,
-        }
-    }
-
-    pub(crate) fn store_triage_result(&mut self, content_hash: &str, result: ArticleTriageResult) {
-        let snapshot = match &self.triage_cache_metadata_snapshot {
-            Some(snapshot) => snapshot,
-            None => return,
-        };
-        let key = match TriageCacheKey::try_new_with_context_hash(
-            content_hash,
-            PromptId::ArticleTriage,
-            Some(snapshot.prompt_version),
-            Some(snapshot.model_id.as_str()),
-            &snapshot.context_hash,
-        ) {
-            Ok(key) => key,
-            Err(_) => return,
-        };
-
-        self.triage_cache.insert(key, result);
-    }
-
-    pub(crate) fn record_triage_cache_hit(&mut self) {
-        self.triage_cache_run_metrics.hits = self.triage_cache_run_metrics.hits.saturating_add(1);
-    }
-
-    pub(crate) fn record_triage_cache_miss(&mut self) {
-        self.triage_cache_run_metrics.misses =
-            self.triage_cache_run_metrics.misses.saturating_add(1);
-    }
-
-    pub(crate) fn record_triage_cache_key_unavailable(&mut self) {
-        self.triage_cache_run_metrics.key_unavailable = self
-            .triage_cache_run_metrics
-            .key_unavailable
-            .saturating_add(1);
-    }
-
-    pub(crate) fn triage_cache_metrics(&self) -> &TriageCacheRunMetrics {
-        &self.triage_cache_run_metrics
-    }
-
-    pub(crate) fn triage_cache_run_start_logged(&self) -> bool {
-        self.triage_cache_run_start_logged
-    }
-
-    pub(crate) fn mark_triage_cache_run_started(&mut self) {
-        self.triage_cache_run_start_logged = true;
-    }
-
-    pub(crate) fn finalize_triage_cache_run(&mut self) {
-        self.triage_cache_run_start_logged = false;
     }
 
     pub(crate) fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {

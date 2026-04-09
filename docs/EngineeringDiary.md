@@ -1211,3 +1211,9 @@ Change: Added explicit imports for reducer macros, state/effect types, tabs, and
 Lessons Learned: `super::*` hid real module dependencies and let submodules compile only because `mod.rs` happened to import the right names.
 Prevention: Keep `update` submodules on explicit imports so future extractions fail locally and visibly instead of depending on parent-module import leakage.
 Refs: crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/update/briefing.rs, crates/harvester_core/src/update/import.rs, crates/harvester_core/src/update/llm_completed.rs, crates/harvester_core/src/update/polling.rs, crates/harvester_core/src/update/prompt_lab.rs, crates/harvester_core/src/update/triage.rs
+
+## 2026-04-09 - state mod.rs follow-up extraction
+Type: Refactor
+Context: The first `harvester_core::state` split left `state/mod.rs` above the rough target size, with cache metadata and briefing orchestration still mixed into the wrapper.
+Change: Moved summary/triage cache metadata and metrics into `state/cache_state.rs`, moved briefing orchestration into `state/briefing_orchestration.rs`, and kept `state/mod.rs` focused on `AppState`, core job/session state, and the remaining transitions. The follow-up brought `state/mod.rs` down to 1792 lines.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/cache_state.rs, crates/harvester_core/src/state/briefing_orchestration.rs
