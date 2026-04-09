@@ -14,7 +14,7 @@ use crate::summary_cache::SummaryCache;
 use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::triage::{ArticleTriageResult, ArticleTriageState, TriagePhase, TriageSession};
 use crate::triage_cache::{TriageCache, TriageCacheKey};
-use crate::url_age::{guess_age_from_url, AgeEstimate};
+use crate::url_age::AgeEstimate;
 use crate::view_model::{
     AppViewModel, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus, JobRowView,
     LastPasteStats, LayoutViewModel, LeftPaneHeaderView, LinkRowView, OperationProgress,
@@ -30,6 +30,12 @@ use harvester_engine::{
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use url::Url;
+
+mod job_state;
+
+use job_state::JobState;
+#[cfg(test)]
+use job_state::PreviewQuality;
 
 pub type JobId = u64;
 
@@ -3160,149 +3166,6 @@ pub enum LlmRequestState {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
-struct JobState {
-    url: String,
-    stage: Stage,
-    outcome: Option<JobResultKind>,
-    tokens: Option<u32>,
-    bytes: Option<u64>,
-    content_preview: Option<String>,
-    preview_quality: Option<PreviewQuality>,
-    links: Vec<LinkRecord>,
-    origin: JobOrigin,
-    fetched_utc: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-impl JobState {
-    fn to_view(&self, id: JobId, is_since_checkpoint: bool) -> JobRowView {
-        let links = build_link_rows(&self.links);
-        let downloaded_link_count = self
-            .links
-            .iter()
-            .filter(|link| matches!(link.download_state, LinkDownloadState::Downloaded { .. }))
-            .count();
-        JobRowView {
-            job_id: id,
-            url: self.url.clone(),
-            stage: self.stage,
-            outcome: self.outcome.clone(),
-            tokens: self.tokens,
-            bytes: self.bytes,
-            link_count: self.links.len(),
-            downloaded_link_count,
-            links,
-            origin: self.origin.clone(),
-            triage_annotation: None,
-            has_summary: false,
-            summary_title: None,
-            filter_status: None,
-            has_analysis: false,
-            is_since_checkpoint,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn content_preview(&self) -> Option<&str> {
-        self.content_preview.as_deref()
-    }
-
-    fn set_preview_content(&mut self, content: String) {
-        self.preview_quality = Some(PreviewQuality::from_markdown(&content));
-        self.content_preview = Some(content);
-    }
-
-    fn clear_preview_content(&mut self) {
-        self.preview_quality = None;
-        self.content_preview = None;
-    }
-    #[allow(dead_code)]
-    fn links(&self) -> &[LinkRecord] {
-        &self.links
-    }
-
-    #[allow(dead_code)]
-    fn clear_links(&mut self) {
-        self.links.clear();
-    }
-
-    fn attach_extracted_links(&mut self, links: Vec<ExtractedLink>) {
-        self.links.clear();
-        let mut seen = HashSet::new();
-        for (idx, link) in links.into_iter().enumerate() {
-            if self.links.len() >= MAX_EXTRACTED_LINKS {
-                break;
-            }
-            let canonical = normalize_extracted_link(&link.url);
-            if canonical.is_empty() {
-                continue;
-            }
-            if !seen.insert(canonical.clone()) {
-                continue;
-            }
-            self.links.push(LinkRecord {
-                index: idx as u32,
-                url: canonical.clone(),
-                anchor_text: link.text,
-                kind: link.kind,
-                download_state: LinkDownloadState::NotDownloaded,
-                age_estimate: guess_age_from_url(&canonical),
-            });
-        }
-    }
-
-    fn apply_link_snapshots(&mut self, snapshots: &[LinkSnapshotRecord]) {
-        for snapshot in snapshots {
-            if let Some(path) = snapshot.downloaded_path.as_ref() {
-                let canonical = normalize_extracted_link(&snapshot.url);
-                if canonical.is_empty() {
-                    continue;
-                }
-                if let Some(record) = self.links.iter_mut().find(|record| record.url == canonical) {
-                    record.download_state = LinkDownloadState::Downloaded {
-                        path: PathBuf::from(path),
-                    };
-                }
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    fn find_link_mut(&mut self, link_index: u32) -> Option<&mut LinkRecord> {
-        self.links
-            .iter_mut()
-            .find(|record| record.index == link_index)
-    }
-
-    #[allow(dead_code)]
-    fn mark_link_download_requested(&mut self, link_index: u32) {
-        if let Some(record) = self.find_link_mut(link_index) {
-            record.download_state = LinkDownloadState::Downloading;
-        }
-    }
-
-    #[allow(dead_code)]
-    fn mark_link_download_completed(&mut self, link_index: u32, path: PathBuf) {
-        if let Some(record) = self.find_link_mut(link_index) {
-            record.download_state = LinkDownloadState::Downloaded { path };
-        }
-    }
-
-    #[allow(dead_code)]
-    fn mark_link_download_failed(&mut self, link_index: u32, error: String) {
-        if let Some(record) = self.find_link_mut(link_index) {
-            record.download_state = LinkDownloadState::Failed { error };
-        }
-    }
-
-    #[allow(dead_code)]
-    fn mark_link_deleted(&mut self, link_index: u32) {
-        if let Some(record) = self.find_link_mut(link_index) {
-            record.download_state = LinkDownloadState::NotDownloaded;
-        }
-    }
-}
-
 fn map_job_filter_status(entry: &crate::ArticleFilterEntry) -> JobFilterStatus {
     match entry.manual_decision {
         Some(crate::ManualDecision::Exclude) => JobFilterStatus::ManuallyExcluded,
@@ -3356,51 +3219,6 @@ fn truncate_link_url(url: &str) -> String {
             .max(1);
         let truncated = truncate_to_char_boundary(url, max_chars);
         format!("{truncated}{LINK_LABEL_TRUNCATE_MARKER}")
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct PreviewQuality {
-    heading_count: usize,
-    link_density: f64,
-}
-
-impl Default for PreviewQuality {
-    fn default() -> Self {
-        Self {
-            heading_count: 0,
-            link_density: 0.0,
-        }
-    }
-}
-
-impl PreviewQuality {
-    const NAV_HEAVY_THRESHOLD: f64 = 0.3;
-
-    fn from_markdown(content: &str) -> Self {
-        let heading_count = content
-            .lines()
-            .filter(|line| line.trim_start().starts_with('#'))
-            .count();
-        let link_count = content
-            .split('[')
-            .skip(1)
-            .filter(|segment| segment.contains("]("))
-            .count();
-        let word_count = content.split_whitespace().count();
-        let link_density = if word_count > 0 {
-            link_count as f64 / word_count as f64
-        } else {
-            0.0
-        };
-        Self {
-            heading_count,
-            link_density,
-        }
-    }
-
-    fn nav_heavy(&self) -> bool {
-        self.link_density > Self::NAV_HEAVY_THRESHOLD
     }
 }
 
