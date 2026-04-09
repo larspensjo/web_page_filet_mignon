@@ -168,7 +168,9 @@ pub(super) fn should_collect_indirect_link(source_url: &str, link_url: &str) -> 
                 "/insights/",
                 "/p/",
             ];
-            let looks_articleish = articleish_markers.iter().any(|marker| path.contains(marker));
+            let looks_articleish = articleish_markers
+                .iter()
+                .any(|marker| path.contains(marker));
             if !looks_articleish {
                 return false;
             }

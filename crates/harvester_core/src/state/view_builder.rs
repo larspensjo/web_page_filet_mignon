@@ -9,8 +9,8 @@ use crate::tabs::{AppTab, JobListScope, LeftTab};
 use crate::triage::{ArticleTriageState, TriagePhase};
 use crate::view_model::{
     AppViewModel, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus, JobRowView,
-    LayoutViewModel, LeftPaneHeaderView, OperationProgress, PreviewContextView,
-    PreviewHeaderView, RightPaneView, TriageAnnotationView, TOKEN_LIMIT,
+    LayoutViewModel, LeftPaneHeaderView, OperationProgress, PreviewContextView, PreviewHeaderView,
+    RightPaneView, TriageAnnotationView, TOKEN_LIMIT,
 };
 use harvester_engine::normalize_url_for_dedupe;
 
@@ -128,30 +128,31 @@ impl AppState {
             })
             .is_some();
         let preview_source = self.ui.preview.content_kind();
-        let operation_progress = if let Some((completed, total)) = self.source_states.poll_progress()
-        {
-            Some(OperationProgress {
-                label: "Polling".to_string(),
-                completed: completed as u32,
-                total: total as u32,
-            })
-        } else if matches!(self.triage.phase(), TriagePhase::Triaging) {
-            let completed = self.triage.completed_count() + self.triage.failed_count();
-            Some(OperationProgress {
-                label: "Triaging".to_string(),
-                completed: completed as u32,
-                total: self.triage.total() as u32,
-            })
-        } else if matches!(self.briefing.phase(), BriefingPhase::Summarizing) {
-            let completed = self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
-            Some(OperationProgress {
-                label: "Summarizing".to_string(),
-                completed: completed as u32,
-                total: self.briefing.total() as u32,
-            })
-        } else {
-            None
-        };
+        let operation_progress =
+            if let Some((completed, total)) = self.source_states.poll_progress() {
+                Some(OperationProgress {
+                    label: "Polling".to_string(),
+                    completed: completed as u32,
+                    total: total as u32,
+                })
+            } else if matches!(self.triage.phase(), TriagePhase::Triaging) {
+                let completed = self.triage.completed_count() + self.triage.failed_count();
+                Some(OperationProgress {
+                    label: "Triaging".to_string(),
+                    completed: completed as u32,
+                    total: self.triage.total() as u32,
+                })
+            } else if matches!(self.briefing.phase(), BriefingPhase::Summarizing) {
+                let completed =
+                    self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
+                Some(OperationProgress {
+                    label: "Summarizing".to_string(),
+                    completed: completed as u32,
+                    total: self.briefing.total() as u32,
+                })
+            } else {
+                None
+            };
         let ai_unavailable_message = self.ai_unavailable_message();
         let triage_blocked_reason = self.triage_blocked_reason();
         let briefing_blocked_reason = self.briefing_blocked_reason();
@@ -231,7 +232,8 @@ impl AppState {
             BriefingPhase::WaitingForTriage => "Waiting for triage".to_string(),
             BriefingPhase::LoadingArticles => "Loading articles".to_string(),
             BriefingPhase::Summarizing => {
-                let settled = self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
+                let settled =
+                    self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
                 format!("Summaries {settled}/{total}")
             }
             BriefingPhase::GeneratingBriefing => "Generating briefing".to_string(),
@@ -455,7 +457,12 @@ fn build_left_pane_header_view(
         LeftTab::TriageReview => {
             let review_needed_count = scoped_jobs
                 .iter()
-                .filter(|job| matches!(job.filter_status, Some(JobFilterStatus::ReviewNeeded { .. })))
+                .filter(|job| {
+                    matches!(
+                        job.filter_status,
+                        Some(JobFilterStatus::ReviewNeeded { .. })
+                    )
+                })
                 .count();
             LeftPaneHeaderView {
                 title: "Triage Review".to_string(),

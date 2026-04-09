@@ -14,9 +14,9 @@ use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::triage::{ArticleTriageResult, TriagePhase, TriageSession};
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use crate::url_age::AgeEstimate;
-use crate::view_model::{JobFilterStatus, LastPasteStats};
 #[cfg(test)]
 use crate::view_model::OperationProgress;
+use crate::view_model::{JobFilterStatus, LastPasteStats};
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
@@ -24,8 +24,8 @@ use harvester_engine::{ExtractedLink, ImportedArchiveRef, LinkKind, SourceId};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
-mod job_state;
 mod indirect_links;
+mod job_state;
 mod link_helpers;
 mod ui_state;
 mod view_builder;
@@ -35,9 +35,8 @@ use job_state::JobState;
 #[cfg(test)]
 use job_state::PreviewQuality;
 use link_helpers::{
-    build_link_rows, domain_from_url, format_lab_briefing_markdown,
-    format_lab_summary_markdown, format_lab_triage_markdown, map_job_filter_status,
-    normalize_extracted_link,
+    build_link_rows, domain_from_url, format_lab_briefing_markdown, format_lab_summary_markdown,
+    format_lab_triage_markdown, map_job_filter_status, normalize_extracted_link,
 };
 use ui_state::{MetricsState, PreviewMode, PreviewState, UiState};
 
@@ -2373,7 +2372,6 @@ pub enum LlmRequestState {
         reason: String,
     },
 }
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Stage {

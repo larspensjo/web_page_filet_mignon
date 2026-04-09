@@ -1,6 +1,6 @@
 use super::{
-    build_link_rows, normalize_extracted_link, JobId, JobOrigin, JobResultKind,
-    LinkDownloadState, LinkRecord, LinkSnapshotRecord, Stage, MAX_EXTRACTED_LINKS,
+    build_link_rows, normalize_extracted_link, JobId, JobOrigin, JobResultKind, LinkDownloadState,
+    LinkRecord, LinkSnapshotRecord, Stage, MAX_EXTRACTED_LINKS,
 };
 use crate::url_age::guess_age_from_url;
 use crate::view_model::JobRowView;
