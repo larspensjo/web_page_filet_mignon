@@ -2,7 +2,7 @@
 
 ## Workflow
 - Build with `cargo build`.
-- When a task is complete, run `cargo clippy --all-targets -- -D warnings`.
+- When a task is complete, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
 - When adding a CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change.
 
 ## Architecture
