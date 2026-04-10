@@ -4,5 +4,7 @@ pub mod markdown_to_rtf;
 pub mod render;
 mod render_controls;
 mod render_list_box;
+mod render_preview;
+mod render_prompt_lab;
 mod render_text;
 pub mod tree_item_ids;
