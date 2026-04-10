@@ -8,7 +8,7 @@ use chrono::Utc;
 
 use commanductui::types::{
     FormButtons, FormDialogDescriptor, FormField, FormFieldValue, FormFileExistsWarning, FormRow,
-    FormTextValidation, MenuActionId, MessageSeverity, TreeItemMarkerKind,
+    FormTextValidation, MessageSeverity, TreeItemMarkerKind,
 };
 use commanductui::{
     AppEvent, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
@@ -40,7 +40,6 @@ use super::ui;
 use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::Win32PlatformHandler;
 
-const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
 const ARCHIVE_DIALOG_CONTEXT_PREFIX: &str = "archive:";
 const ARCHIVE_DIALOG_FILENAME_FIELD_ID: &str = "archive.basename";
 const ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID: &str = "archive.set_checkpoint";
@@ -1058,7 +1057,9 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::PromptLabTemplateSaveRequested);
             }
-            AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ADD_URL => {
+            AppEvent::MenuActionClicked { action_id }
+                if action_id == ui::constants::MENU_ACTION_ADD_URL =>
+            {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
             }
             AppEvent::FormDialogCompleted {

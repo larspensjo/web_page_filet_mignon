@@ -1,5 +1,5 @@
 use commanductui::types::{
-    ControlId, DockStyle, LabelClass, LayoutRule, MenuActionId, MenuItemConfig, SplitterOrientation,
+    ControlId, DockStyle, LabelClass, LayoutRule, MenuItemConfig, SplitterOrientation,
 };
 use commanductui::{
     Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
@@ -9,8 +9,6 @@ use harvester_core::{
 };
 
 use super::constants::*;
-
-const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
 
 const PROMPT_LAB_ROW_HEIGHT_STANDARD: i32 = 26;
 const PROMPT_LAB_ROW_HEIGHT_ACTION: i32 = 28;
