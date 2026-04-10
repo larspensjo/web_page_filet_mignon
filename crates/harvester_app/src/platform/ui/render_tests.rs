@@ -125,9 +125,31 @@ fn preview_metadata_clears_when_no_article_is_selected() {
 }
 
 #[test]
-fn header_texts_do_not_reemit_when_unchanged() {
+fn preview_source_is_labeled_as_metadata() {
     init_logging();
     let window_id = WindowId::new(3);
+    let mut tree_state = TreeRenderState::new();
+    let view = AppViewModel {
+        preview_context: Some(PreviewContextView {
+            source_label: "epochai.substack.com".to_string(),
+            status_label: "Done".to_string(),
+            attention_label: None,
+        }),
+        ..AppViewModel::default()
+    };
+
+    let commands = render(window_id, &view, &mut tree_state);
+
+    assert_eq!(
+        control_text(&commands, LABEL_PREVIEW_SOURCE),
+        Some("Source: epochai.substack.com")
+    );
+}
+
+#[test]
+fn header_texts_do_not_reemit_when_unchanged() {
+    init_logging();
+    let window_id = WindowId::new(4);
     let mut tree_state = TreeRenderState::new();
     let mut view = make_view(vec![make_job(
         1,

@@ -19,6 +19,7 @@ const PROMPT_LAB_ROW_HEIGHT_STATUS: i32 = 24;
 const PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT: i32 = 120;
 const PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY: i32 = 42;
 const PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH: i32 = 120;
+const PREVIEW_CONTEXT_ROW_HEIGHT: i32 = 32;
 const TOKEN_METER_BAR_WIDTH: i32 = 190;
 const TOKEN_METER_LABEL_WIDTH: i32 = 120;
 
@@ -943,6 +944,23 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     });
 
     commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::MetadataText,
+        style: ControlStyle {
+            background_color: None,
+            text_color: Some(Color {
+                r: 0x87,
+                g: 0x86,
+                b: 0x7F,
+            }),
+            font: Some(FontDescription {
+                name: Some("Segoe UI".to_string()),
+                size: Some(12),
+                weight: Some(FontWeight::Normal),
+            }),
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
         style_id: StyleId::DefaultInput,
         style: ControlStyle {
             background_color: Some(Color {
@@ -1771,11 +1789,11 @@ fn build_layout_rules(
             dock_style: DockStyle::Top,
             order: 2,
             fixed_size: if preview_context_visible {
-                Some(22)
+                Some(PREVIEW_CONTEXT_ROW_HEIGHT)
             } else {
                 Some(0)
             },
-            margin: (2, 2, 4, 0),
+            margin: (2, 4, 4, 2),
         },
         LayoutRule {
             control_id: LABEL_PREVIEW_SOURCE,
@@ -2655,19 +2673,19 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
             b: 0x3A,
         },
         pill_on: Color {
+            r: 0x3D,
+            g: 0x3D,
+            b: 0x3A,
+        },
+        knob: Color {
             r: 0xC9,
             g: 0x64,
             b: 0x42,
         },
-        knob: Color {
-            r: 0xFA,
-            g: 0xF9,
-            b: 0xF5,
-        },
         text: Color {
-            r: 0xB0,
-            g: 0xAE,
-            b: 0xA5,
+            r: 0x87,
+            g: 0x86,
+            b: 0x7F,
         },
     });
 
@@ -2689,17 +2707,17 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_JOBS_HEADER_META,
-        style_id: StyleId::DefaultText,
+        style_id: StyleId::MetadataText,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_PREVIEW_SOURCE,
-        style_id: StyleId::DefaultText,
+        style_id: StyleId::MetadataText,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: LABEL_TRENDS_DESCRIPTION,
-        style_id: StyleId::DefaultText,
+        style_id: StyleId::MetadataText,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -3217,6 +3235,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn metadata_style_is_transparent_and_applied_to_metadata_labels() {
+        let commands = initial_commands(WindowId::new(2));
+        let metadata_style = commands.iter().find_map(|cmd| match cmd {
+            PlatformCommand::DefineStyle { style_id, style }
+                if *style_id == StyleId::MetadataText =>
+            {
+                Some(style)
+            }
+            _ => None,
+        });
+        let metadata_style = metadata_style.expect("MetadataText style should be defined");
+        assert_eq!(metadata_style.background_color, None);
+        assert_eq!(
+            metadata_style.text_color,
+            Some(Color {
+                r: 0x87,
+                g: 0x86,
+                b: 0x7F,
+            })
+        );
+
+        for label_id in [
+            LABEL_JOBS_HEADER_META,
+            LABEL_PREVIEW_SOURCE,
+            LABEL_TRENDS_DESCRIPTION,
+        ] {
+            assert!(
+                commands.iter().any(|cmd| matches!(
+                    cmd,
+                    PlatformCommand::ApplyStyleToControl {
+                        control_id,
+                        style_id,
+                        ..
+                    } if *control_id == label_id && *style_id == StyleId::MetadataText
+                )),
+                "metadata label {:?} should use MetadataText",
+                label_id
+            );
+        }
+    }
+
     /// General regression guard: every StyleId that appears in an ApplyStyleToControl command
     /// must have a corresponding DefineStyle command earlier in the same sequence.
     /// A missing DefineStyle is a silent runtime failure — WM_CTLCOLOR gets no brush and
@@ -3366,6 +3426,49 @@ mod tests {
         assert_eq!(
             fill_count, 1,
             "PANEL_PREVIEW tab panels must have exactly one Fill child; additional tabs should be collapsed with zero-size non-Fill rules"
+        );
+    }
+
+    #[test]
+    fn preview_context_row_is_tall_enough_for_metadata_label() {
+        let cmd = build_layout_command(
+            WindowId::new(32),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: true,
+                preview_attention_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        let context_row = rules
+            .iter()
+            .find(|r| r.control_id == PANEL_PREVIEW_CONTEXT)
+            .expect("preview context row rule");
+        assert_eq!(context_row.fixed_size, Some(PREVIEW_CONTEXT_ROW_HEIGHT));
+        assert!(
+            context_row.fixed_size.unwrap_or_default()
+                - context_row.margin.1
+                - context_row.margin.3
+                >= 26,
+            "preview metadata row should leave enough vertical room for styled label text"
         );
     }
 

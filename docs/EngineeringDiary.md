@@ -1237,3 +1237,9 @@ Type: UI Change
 Context: The app footer still treated briefing as the primary action and kept Archive plus Prompt Lab entry points in the File menu.
 Change: Made `Poll sources` the footer primary action, demoted `Generate Briefing`, added an `Archive` footer button at the end of the row, and removed the File menu entries for Archive and Prompt Lab while keeping Add URL in the menu.
 Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/constants.rs
+
+## 2026-04-10 - Preview and scope metadata subdued
+Type: UI Change
+Context: The left scope/count line and right preview source domain painted as high-contrast text on dark strips, making useful metadata compete with tabs and reading content.
+Change: Added generic `StyleId::MetadataText` in CommanDuctUI, applied it to scope/source metadata labels, labeled preview source text as `Source: ...`, and toned down the checkpoint toggle active palette.
+Refs: src/CommanDuctUI/src/styling_primitives.rs, crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/ui/render.rs, docs/visual_design/VisualDesignSpec.md

@@ -795,6 +795,15 @@ fn format_left_pane_header_meta(header: &LeftPaneHeaderView) -> String {
     parts.join(" · ")
 }
 
+fn format_preview_source_label(source_label: &str) -> String {
+    let source_label = source_label.trim();
+    if source_label.is_empty() {
+        String::new()
+    } else {
+        format!("Source: {source_label}")
+    }
+}
+
 fn render_prompt_lab_section(
     window_id: WindowId,
     view: &AppViewModel,
@@ -1445,7 +1454,7 @@ fn render_preview_section(
         );
         emit_if_changed(
             &mut tree_state.prev_preview_source_text,
-            context.source_label.clone(),
+            format_preview_source_label(&context.source_label),
             cmds,
             |text| PlatformCommand::SetControlText {
                 window_id,
