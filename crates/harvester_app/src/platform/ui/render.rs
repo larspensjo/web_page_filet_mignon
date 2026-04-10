@@ -45,14 +45,46 @@ pub(crate) fn combo_index_to_model(index: usize, catalog: &[ModelId]) -> Option<
 }
 
 #[derive(Debug)]
-pub struct TreeRenderState {
+pub(super) struct LayoutRenderState {
     pub(super) layout_initialized: bool,
-    /// Tracks the previous left_panel_width to detect changes
     pub(super) prev_left_panel_width: i32,
     pub(super) prev_input_panel_visible: bool,
+    pub(super) prev_operation_progress_visible: bool,
+    pub(super) prev_active_tab: AppTab,
+    pub(super) prev_left_tab: LeftTab,
+    pub(super) prev_prompt_lab_visible: bool,
+    pub(super) prev_prompt_lab_advanced_mode: bool,
+    pub(super) prev_prompt_lab_compare_section_open: bool,
+    pub(super) prev_prompt_lab_context_section_open: bool,
+    pub(super) prev_prompt_lab_template_section_open: bool,
+    pub(super) prev_prompt_lab_run_details_section_open: bool,
+    pub(super) prev_prompt_lab_template_editor_open: bool,
+}
+
+impl Default for LayoutRenderState {
+    fn default() -> Self {
+        Self {
+            layout_initialized: false,
+            prev_left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
+            prev_input_panel_visible: false,
+            prev_operation_progress_visible: false,
+            prev_active_tab: AppTab::Summary,
+            prev_left_tab: LeftTab::default(),
+            prev_prompt_lab_visible: false,
+            prev_prompt_lab_advanced_mode: false,
+            prev_prompt_lab_compare_section_open: false,
+            prev_prompt_lab_context_section_open: false,
+            prev_prompt_lab_template_section_open: false,
+            prev_prompt_lab_run_details_section_open: false,
+            prev_prompt_lab_template_editor_open: false,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct ControlsRenderState {
     pub(super) prev_status_label: Option<(String, MessageSeverity)>,
     pub(super) prev_progress_text: Option<String>,
-    pub(super) prev_preview_text: Option<String>,
     pub(super) prev_stop_enabled: Option<bool>,
     pub(super) prev_briefing_enabled: Option<bool>,
     pub(super) prev_triage_enabled: Option<bool>,
@@ -63,25 +95,25 @@ pub struct TreeRenderState {
     pub(super) prev_progress_pos: Option<u32>,
     pub(super) prev_token_progress_style: Option<StyleId>,
     pub(super) prev_stop_style: Option<StyleId>,
-    pub(super) prev_operation_progress_visible: bool,
     pub(super) prev_operation_progress_text: Option<String>,
     pub(super) prev_operation_progress_range: Option<(u32, u32)>,
     pub(super) prev_operation_progress_pos: Option<u32>,
     pub(super) prev_open_browser_enabled: Option<bool>,
     pub(super) prev_jobs_header_meta_text: Option<String>,
     pub(super) prev_jobs_scope_since_checkpoint_checked: Option<bool>,
-    pub(super) prev_prompt_lab_visible: bool,
-    pub(super) prev_prompt_lab_advanced_mode: bool,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct PromptLabRenderState {
     pub(super) prev_prompt_lab_mode_basic_checked: Option<bool>,
     pub(super) prev_prompt_lab_mode_advanced_checked: Option<bool>,
     pub(super) prev_prompt_lab_stage_triage_checked: Option<bool>,
     pub(super) prev_prompt_lab_stage_summary_checked: Option<bool>,
     pub(super) prev_prompt_lab_stage_briefing_checked: Option<bool>,
-    pub(super) prev_prompt_lab_compare_section_open: bool,
-    pub(super) prev_prompt_lab_context_section_open: bool,
-    pub(super) prev_prompt_lab_template_section_open: bool,
-    pub(super) prev_prompt_lab_run_details_section_open: bool,
-    pub(super) prev_prompt_lab_template_editor_open: bool,
+    pub(super) prev_prompt_lab_section_compare_checked: Option<bool>,
+    pub(super) prev_prompt_lab_section_context_checked: Option<bool>,
+    pub(super) prev_prompt_lab_section_template_checked: Option<bool>,
+    pub(super) prev_prompt_lab_section_run_details_checked: Option<bool>,
     pub(super) prev_prompt_lab_status_text: Option<String>,
     pub(super) prev_prompt_lab_metadata_text: Option<String>,
     pub(super) prev_prompt_lab_url_input: Option<String>,
@@ -111,15 +143,13 @@ pub struct TreeRenderState {
     pub(super) prev_prompt_lab_compare_cancel_enabled: Option<bool>,
     pub(super) prev_prompt_lab_compare_auto_select_enabled: Option<bool>,
     pub(super) prev_prompt_lab_compare_winner_clear_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_section_compare_checked: Option<bool>,
-    pub(super) prev_prompt_lab_section_context_checked: Option<bool>,
-    pub(super) prev_prompt_lab_section_template_checked: Option<bool>,
-    pub(super) prev_prompt_lab_section_run_details_checked: Option<bool>,
     pub(super) prev_prompt_lab_model_catalog: Option<Vec<ModelId>>,
     pub(super) prev_prompt_lab_selected_model: Option<String>,
-    // Tab bar state
-    pub(super) prev_active_tab: AppTab,
-    pub(super) prev_left_tab: LeftTab,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct PreviewRenderState {
+    pub(super) prev_preview_text: Option<String>,
     pub(super) prev_triage_text: Option<String>,
     pub(super) prev_briefing_text: Option<String>,
     pub(super) prev_poll_stats_text: Option<String>,
@@ -129,90 +159,12 @@ pub struct TreeRenderState {
     pub(super) prev_preview_attention_text: Option<String>,
 }
 
-impl Default for TreeRenderState {
-    fn default() -> Self {
-        Self {
-            layout_initialized: false,
-            prev_left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
-            prev_input_panel_visible: false,
-            prev_status_label: None,
-            prev_progress_text: None,
-            prev_preview_text: None,
-            prev_stop_enabled: None,
-            prev_briefing_enabled: None,
-            prev_triage_enabled: None,
-            prev_poll_enabled: None,
-            prev_briefing_progress: None,
-            prev_triage_progress: None,
-            prev_progress_range: None,
-            prev_progress_pos: None,
-            prev_token_progress_style: None,
-            prev_stop_style: None,
-            prev_operation_progress_visible: false,
-            prev_operation_progress_text: None,
-            prev_operation_progress_range: None,
-            prev_operation_progress_pos: None,
-            prev_open_browser_enabled: None,
-            prev_jobs_header_meta_text: None,
-            prev_jobs_scope_since_checkpoint_checked: None,
-            prev_prompt_lab_visible: false,
-            prev_prompt_lab_advanced_mode: false,
-            prev_prompt_lab_mode_basic_checked: None,
-            prev_prompt_lab_mode_advanced_checked: None,
-            prev_prompt_lab_stage_triage_checked: None,
-            prev_prompt_lab_stage_summary_checked: None,
-            prev_prompt_lab_stage_briefing_checked: None,
-            prev_prompt_lab_compare_section_open: false,
-            prev_prompt_lab_context_section_open: false,
-            prev_prompt_lab_template_section_open: false,
-            prev_prompt_lab_run_details_section_open: false,
-            prev_prompt_lab_template_editor_open: false,
-            prev_prompt_lab_status_text: None,
-            prev_prompt_lab_metadata_text: None,
-            prev_prompt_lab_url_input: None,
-            prev_prompt_lab_run_enabled: None,
-            prev_prompt_lab_resolve_enabled: None,
-            prev_prompt_lab_url_enabled: None,
-            prev_prompt_lab_context_text: None,
-            prev_prompt_lab_context_status_text: None,
-            prev_prompt_lab_context_apply_enabled: None,
-            prev_prompt_lab_context_apply_rerun_enabled: None,
-            prev_prompt_lab_context_revert_enabled: None,
-            prev_prompt_lab_context_save_enabled: None,
-            prev_prompt_lab_template_open_checked: None,
-            prev_prompt_lab_template_system_text: None,
-            prev_prompt_lab_template_user_text: None,
-            prev_prompt_lab_template_status_text: None,
-            prev_prompt_lab_template_apply_enabled: None,
-            prev_prompt_lab_template_apply_rerun_enabled: None,
-            prev_prompt_lab_template_revert_enabled: None,
-            prev_prompt_lab_template_save_enabled: None,
-            prev_prompt_lab_template_system_enabled: None,
-            prev_prompt_lab_template_user_enabled: None,
-            prev_prompt_lab_compare_add_current_enabled: None,
-            prev_prompt_lab_compare_add_baseline_enabled: None,
-            prev_prompt_lab_compare_reset_draft_enabled: None,
-            prev_prompt_lab_compare_start_enabled: None,
-            prev_prompt_lab_compare_cancel_enabled: None,
-            prev_prompt_lab_compare_auto_select_enabled: None,
-            prev_prompt_lab_compare_winner_clear_enabled: None,
-            prev_prompt_lab_section_compare_checked: None,
-            prev_prompt_lab_section_context_checked: None,
-            prev_prompt_lab_section_template_checked: None,
-            prev_prompt_lab_section_run_details_checked: None,
-            prev_prompt_lab_model_catalog: None,
-            prev_prompt_lab_selected_model: None,
-            prev_active_tab: AppTab::Summary,
-            prev_left_tab: LeftTab::default(),
-            prev_triage_text: None,
-            prev_briefing_text: None,
-            prev_poll_stats_text: None,
-            prev_preview_header_override_text: None,
-            prev_preview_source_text: None,
-            prev_preview_status_text: None,
-            prev_preview_attention_text: None,
-        }
-    }
+#[derive(Debug, Default)]
+pub struct TreeRenderState {
+    pub(super) layout: LayoutRenderState,
+    pub(super) controls: ControlsRenderState,
+    pub(super) prompt_lab: PromptLabRenderState,
+    pub(super) preview: PreviewRenderState,
 }
 
 impl TreeRenderState {
@@ -373,34 +325,34 @@ fn render_layout_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     let prompt_lab_tab_visible = layout.left_tab == LeftTab::PromptLab;
-    let layout_changed = !tree_state.layout_initialized
-        || layout.left_panel_width != tree_state.prev_left_panel_width
-        || layout.input_panel_visible != tree_state.prev_input_panel_visible
-        || layout.operation_progress_visible != tree_state.prev_operation_progress_visible
-        || layout.active_tab != tree_state.prev_active_tab
-        || layout.left_tab != tree_state.prev_left_tab
-        || prompt_lab_tab_visible != tree_state.prev_prompt_lab_visible
-        || layout.prompt_lab_advanced_mode != tree_state.prev_prompt_lab_advanced_mode
+    let layout_changed = !tree_state.layout.layout_initialized
+        || layout.left_panel_width != tree_state.layout.prev_left_panel_width
+        || layout.input_panel_visible != tree_state.layout.prev_input_panel_visible
+        || layout.operation_progress_visible != tree_state.layout.prev_operation_progress_visible
+        || layout.active_tab != tree_state.layout.prev_active_tab
+        || layout.left_tab != tree_state.layout.prev_left_tab
+        || prompt_lab_tab_visible != tree_state.layout.prev_prompt_lab_visible
+        || layout.prompt_lab_advanced_mode != tree_state.layout.prev_prompt_lab_advanced_mode
         || layout.prompt_lab_compare_section_open
-            != tree_state.prev_prompt_lab_compare_section_open
+            != tree_state.layout.prev_prompt_lab_compare_section_open
         || layout.prompt_lab_context_section_open
-            != tree_state.prev_prompt_lab_context_section_open
+            != tree_state.layout.prev_prompt_lab_context_section_open
         || layout.prompt_lab_template_section_open
-            != tree_state.prev_prompt_lab_template_section_open
+            != tree_state.layout.prev_prompt_lab_template_section_open
         || layout.prompt_lab_run_details_section_open
-            != tree_state.prev_prompt_lab_run_details_section_open
+            != tree_state.layout.prev_prompt_lab_run_details_section_open
         || layout.prompt_lab_template_editor_open
-            != tree_state.prev_prompt_lab_template_editor_open;
+            != tree_state.layout.prev_prompt_lab_template_editor_open;
     if !layout_changed {
         return;
     }
     engine_debug!(
         "[Render] Layout update: left_panel_width {} -> {}, input_panel_visible: {} -> {}, active_tab: {:?} -> {:?}",
-        tree_state.prev_left_panel_width,
+        tree_state.layout.prev_left_panel_width,
         layout.left_panel_width,
-        tree_state.prev_input_panel_visible,
+        tree_state.layout.prev_input_panel_visible,
         layout.input_panel_visible,
-        tree_state.prev_active_tab,
+        tree_state.layout.prev_active_tab,
         layout.active_tab,
     );
     cmds.push(build_layout_command(
@@ -426,24 +378,25 @@ fn render_layout_section(
             },
         },
     ));
-    if prompt_lab_tab_visible && !tree_state.prev_prompt_lab_visible {
-        tree_state.prev_prompt_lab_model_catalog = None;
-        tree_state.prev_prompt_lab_selected_model = None;
+    if prompt_lab_tab_visible && !tree_state.layout.prev_prompt_lab_visible {
+        tree_state.prompt_lab.prev_prompt_lab_model_catalog = None;
+        tree_state.prompt_lab.prev_prompt_lab_selected_model = None;
     }
-    tree_state.prev_left_panel_width = layout.left_panel_width;
-    tree_state.prev_input_panel_visible = layout.input_panel_visible;
-    tree_state.prev_operation_progress_visible = layout.operation_progress_visible;
-    tree_state.prev_active_tab = layout.active_tab;
-    tree_state.prev_left_tab = layout.left_tab;
-    tree_state.prev_prompt_lab_visible = prompt_lab_tab_visible;
-    tree_state.prev_prompt_lab_advanced_mode = layout.prompt_lab_advanced_mode;
-    tree_state.prev_prompt_lab_compare_section_open = layout.prompt_lab_compare_section_open;
-    tree_state.prev_prompt_lab_context_section_open = layout.prompt_lab_context_section_open;
-    tree_state.prev_prompt_lab_template_section_open = layout.prompt_lab_template_section_open;
-    tree_state.prev_prompt_lab_run_details_section_open =
+    tree_state.layout.prev_left_panel_width = layout.left_panel_width;
+    tree_state.layout.prev_input_panel_visible = layout.input_panel_visible;
+    tree_state.layout.prev_operation_progress_visible = layout.operation_progress_visible;
+    tree_state.layout.prev_active_tab = layout.active_tab;
+    tree_state.layout.prev_left_tab = layout.left_tab;
+    tree_state.layout.prev_prompt_lab_visible = prompt_lab_tab_visible;
+    tree_state.layout.prev_prompt_lab_advanced_mode = layout.prompt_lab_advanced_mode;
+    tree_state.layout.prev_prompt_lab_compare_section_open = layout.prompt_lab_compare_section_open;
+    tree_state.layout.prev_prompt_lab_context_section_open = layout.prompt_lab_context_section_open;
+    tree_state.layout.prev_prompt_lab_template_section_open =
+        layout.prompt_lab_template_section_open;
+    tree_state.layout.prev_prompt_lab_run_details_section_open =
         layout.prompt_lab_run_details_section_open;
-    tree_state.prev_prompt_lab_template_editor_open = layout.prompt_lab_template_editor_open;
-    tree_state.layout_initialized = true;
+    tree_state.layout.prev_prompt_lab_template_editor_open = layout.prompt_lab_template_editor_open;
+    tree_state.layout.layout_initialized = true;
 }
 
 fn render_prompt_lab_section(
@@ -453,7 +406,7 @@ fn render_prompt_lab_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_mode_basic_checked,
+        &mut tree_state.prompt_lab.prev_prompt_lab_mode_basic_checked,
         !view.left_pane.prompt_lab.advanced_mode,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
@@ -463,7 +416,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_mode_advanced_checked,
+        &mut tree_state.prompt_lab.prev_prompt_lab_mode_advanced_checked,
         view.left_pane.prompt_lab.advanced_mode,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
@@ -473,7 +426,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_stage_triage_checked,
+        &mut tree_state.prompt_lab.prev_prompt_lab_stage_triage_checked,
         view.left_pane.prompt_lab.selected_stage == PromptLabStage::Triage,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
@@ -483,7 +436,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_stage_summary_checked,
+        &mut tree_state.prompt_lab.prev_prompt_lab_stage_summary_checked,
         view.left_pane.prompt_lab.selected_stage == PromptLabStage::Summary,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
@@ -493,7 +446,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_stage_briefing_checked,
+        &mut tree_state.prompt_lab.prev_prompt_lab_stage_briefing_checked,
         view.left_pane.prompt_lab.selected_stage == PromptLabStage::Briefing,
         cmds,
         |checked| PlatformCommand::SetRadioButtonChecked {
@@ -503,7 +456,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_section_compare_checked,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_section_compare_checked,
         view.left_pane.prompt_lab.compare_section_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
@@ -513,7 +468,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_section_context_checked,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_section_context_checked,
         view.left_pane.prompt_lab.context_section_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
@@ -523,7 +480,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_section_template_checked,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_section_template_checked,
         view.left_pane.prompt_lab.template_section_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
@@ -533,7 +492,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_section_run_details_checked,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_section_run_details_checked,
         view.left_pane.prompt_lab.run_details_section_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
@@ -545,7 +506,12 @@ fn render_prompt_lab_section(
 
     let model_catalog = &view.left_pane.prompt_lab.model_catalog;
     let selected_model = view.left_pane.prompt_lab.selected_model_override.as_ref();
-    if tree_state.prev_prompt_lab_model_catalog.as_deref() != Some(model_catalog.as_slice()) {
+    if tree_state
+        .prompt_lab
+        .prev_prompt_lab_model_catalog
+        .as_deref()
+        != Some(model_catalog.as_slice())
+    {
         engine_info!(
             "[prompt-lab-model] render updating combo items source={:?} count={}",
             view.left_pane.prompt_lab.model_catalog_source,
@@ -558,12 +524,17 @@ fn render_prompt_lab_section(
             control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
             items,
         });
-        tree_state.prev_prompt_lab_model_catalog = Some(model_catalog.clone());
+        tree_state.prompt_lab.prev_prompt_lab_model_catalog = Some(model_catalog.clone());
     }
     let selected_model_key = selected_model
         .map(|m| m.model_name().to_string())
         .unwrap_or_else(|| "__DEFAULT__".to_string());
-    if tree_state.prev_prompt_lab_selected_model.as_deref() != Some(selected_model_key.as_str()) {
+    if tree_state
+        .prompt_lab
+        .prev_prompt_lab_selected_model
+        .as_deref()
+        != Some(selected_model_key.as_str())
+    {
         let index = model_to_combo_index(selected_model, model_catalog);
         engine_info!(
             "[prompt-lab-model] render updating combo selection key={} index={:?} catalog_count={}",
@@ -576,11 +547,11 @@ fn render_prompt_lab_section(
             control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
             selected_index: index,
         });
-        tree_state.prev_prompt_lab_selected_model = Some(selected_model_key);
+        tree_state.prompt_lab.prev_prompt_lab_selected_model = Some(selected_model_key);
     }
 
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_run_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_run_enabled,
         view.left_pane.prompt_lab.can_run,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -590,7 +561,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_resolve_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_resolve_enabled,
         !view.left_pane.prompt_lab.resolve_pending,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -600,7 +571,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_url_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_url_enabled,
         true,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -612,7 +583,9 @@ fn render_prompt_lab_section(
 
     let compare_add_enabled = view.left_pane.prompt_lab.can_add_candidate;
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_compare_add_current_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_compare_add_current_enabled,
         compare_add_enabled,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -622,7 +595,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_compare_add_baseline_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_compare_add_baseline_enabled,
         compare_add_enabled,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -632,7 +607,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_compare_reset_draft_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_compare_reset_draft_enabled,
         view.left_pane.prompt_lab.can_reset_draft,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -642,7 +619,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_compare_start_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_compare_start_enabled,
         view.left_pane.prompt_lab.active_batch.is_none()
             && view.left_pane.prompt_lab.draft_candidates.len() >= 2,
         cmds,
@@ -653,7 +630,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_compare_cancel_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_compare_cancel_enabled,
         view.left_pane
             .prompt_lab
             .active_batch
@@ -668,7 +645,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_compare_auto_select_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_compare_auto_select_enabled,
         view.left_pane
             .prompt_lab
             .active_batch
@@ -683,7 +662,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_compare_winner_clear_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_compare_winner_clear_enabled,
         view.left_pane
             .prompt_lab
             .active_batch
@@ -703,7 +684,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_context_apply_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_context_apply_enabled,
         view.left_pane.prompt_lab.can_apply_context,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -713,7 +694,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_context_apply_rerun_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_context_apply_rerun_enabled,
         view.left_pane.prompt_lab.can_apply_and_rerun,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -723,7 +706,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_context_revert_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_context_revert_enabled,
         view.left_pane.prompt_lab.can_revert_context,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -733,7 +716,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_context_save_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_context_save_enabled,
         view.left_pane.prompt_lab.can_save_context,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -743,7 +726,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_open_checked,
+        &mut tree_state.prompt_lab.prev_prompt_lab_template_open_checked,
         view.left_pane.prompt_lab.template_editor_open,
         cmds,
         |checked| PlatformCommand::SetCheckBoxChecked {
@@ -763,7 +746,7 @@ fn render_prompt_lab_section(
     let can_revert_template =
         view.left_pane.prompt_lab.template_dirty || view.left_pane.prompt_lab.template_applied;
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_apply_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_template_apply_enabled,
         can_apply_template,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -773,7 +756,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_apply_rerun_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_template_apply_rerun_enabled,
         can_apply_template_and_rerun,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -783,7 +768,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_revert_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_template_revert_enabled,
         can_revert_template,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -793,7 +780,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_save_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_template_save_enabled,
         view.left_pane.prompt_lab.template_applied,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -803,7 +790,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_system_text,
+        &mut tree_state.prompt_lab.prev_prompt_lab_template_system_text,
         view.left_pane.prompt_lab.template_system_draft.clone(),
         cmds,
         |text| PlatformCommand::SetInputText {
@@ -813,7 +800,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_user_text,
+        &mut tree_state.prompt_lab.prev_prompt_lab_template_user_text,
         view.left_pane.prompt_lab.template_user_draft.clone(),
         cmds,
         |text| PlatformCommand::SetInputText {
@@ -823,7 +810,9 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_system_enabled,
+        &mut tree_state
+            .prompt_lab
+            .prev_prompt_lab_template_system_enabled,
         view.left_pane.prompt_lab.template_editor_open,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -833,7 +822,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_user_enabled,
+        &mut tree_state.prompt_lab.prev_prompt_lab_template_user_enabled,
         view.left_pane.prompt_lab.template_editor_open,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -843,7 +832,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_url_input,
+        &mut tree_state.prompt_lab.prev_prompt_lab_url_input,
         view.left_pane.prompt_lab.url_input.clone(),
         cmds,
         |text| PlatformCommand::SetInputText {
@@ -853,7 +842,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_status_text,
+        &mut tree_state.prompt_lab.prev_prompt_lab_status_text,
         prompt_lab_status_text(&view.left_pane.prompt_lab),
         cmds,
         |text| PlatformCommand::SetControlText {
@@ -863,7 +852,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_metadata_text,
+        &mut tree_state.prompt_lab.prev_prompt_lab_metadata_text,
         prompt_lab_metadata_text(&view.left_pane.prompt_lab),
         cmds,
         |text| PlatformCommand::SetControlText {
@@ -873,7 +862,7 @@ fn render_prompt_lab_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_context_text,
+        &mut tree_state.prompt_lab.prev_prompt_lab_context_text,
         view.left_pane.prompt_lab.context_draft_text.clone(),
         cmds,
         |text| PlatformCommand::SetInputText {
@@ -900,7 +889,7 @@ fn render_prompt_lab_section(
             .unwrap_or_default()
     };
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_context_status_text,
+        &mut tree_state.prompt_lab.prev_prompt_lab_context_status_text,
         context_status_text,
         cmds,
         |text| PlatformCommand::SetControlText {
@@ -932,7 +921,7 @@ fn render_prompt_lab_section(
         String::new()
     };
     emit_if_changed(
-        &mut tree_state.prev_prompt_lab_template_status_text,
+        &mut tree_state.prompt_lab.prev_prompt_lab_template_status_text,
         template_status_text,
         cmds,
         |text| PlatformCommand::SetControlText {
@@ -955,7 +944,7 @@ fn render_preview_section(
         .summary_markdown
         .as_deref()
         .unwrap_or(SUMMARY_EMPTY_STATE_MARKDOWN);
-    if tree_state.prev_preview_text.as_deref() != Some(summary_markdown) {
+    if tree_state.preview.prev_preview_text.as_deref() != Some(summary_markdown) {
         let (truncated_markdown, was_truncated) = truncate_markdown_for_preview(summary_markdown);
         let mut rtf_text = convert_markdown_to_rtf(&truncated_markdown);
         if was_truncated {
@@ -976,7 +965,7 @@ fn render_preview_section(
             control_id: VIEWER_PREVIEW,
             rtf_text,
         });
-        tree_state.prev_preview_text = Some(summary_markdown.to_string());
+        tree_state.preview.prev_preview_text = Some(summary_markdown.to_string());
     }
 
     // Triage tab viewer.
@@ -985,14 +974,14 @@ fn render_preview_section(
         .triage_markdown
         .as_deref()
         .unwrap_or_default();
-    if tree_state.prev_triage_text.as_deref() != Some(triage_markdown) {
+    if tree_state.preview.prev_triage_text.as_deref() != Some(triage_markdown) {
         let (truncated, _) = truncate_markdown_for_preview(triage_markdown);
         cmds.push(PlatformCommand::SetRichEditContent {
             window_id,
             control_id: VIEWER_TRIAGE,
             rtf_text: convert_markdown_to_rtf(&truncated),
         });
-        tree_state.prev_triage_text = Some(triage_markdown.to_string());
+        tree_state.preview.prev_triage_text = Some(triage_markdown.to_string());
     }
 
     // Briefing tab viewer.
@@ -1001,7 +990,7 @@ fn render_preview_section(
         .briefing_markdown
         .as_deref()
         .unwrap_or_default();
-    if tree_state.prev_briefing_text.as_deref() != Some(briefing_markdown) {
+    if tree_state.preview.prev_briefing_text.as_deref() != Some(briefing_markdown) {
         let (truncated, _) = truncate_markdown_for_preview(briefing_markdown);
         let display = strip_leading_h1(&truncated);
         cmds.push(PlatformCommand::SetRichEditContent {
@@ -1009,7 +998,7 @@ fn render_preview_section(
             control_id: VIEWER_BRIEFING,
             rtf_text: convert_markdown_to_rtf(display),
         });
-        tree_state.prev_briefing_text = Some(briefing_markdown.to_string());
+        tree_state.preview.prev_briefing_text = Some(briefing_markdown.to_string());
     }
 
     // Poll Stats tab viewer.
@@ -1018,13 +1007,13 @@ fn render_preview_section(
         .poll_stats_markdown
         .as_deref()
         .unwrap_or("No poll data yet.");
-    if tree_state.prev_poll_stats_text.as_deref() != Some(poll_stats_text) {
+    if tree_state.preview.prev_poll_stats_text.as_deref() != Some(poll_stats_text) {
         cmds.push(PlatformCommand::SetRichEditContent {
             window_id,
             control_id: VIEWER_POLL_STATS,
             rtf_text: convert_markdown_to_rtf(poll_stats_text),
         });
-        tree_state.prev_poll_stats_text = Some(poll_stats_text.to_string());
+        tree_state.preview.prev_poll_stats_text = Some(poll_stats_text.to_string());
     }
 
     // Trends tab: category selector.
@@ -1044,7 +1033,7 @@ fn render_preview_section(
 
     if let Some(header_text) = view.preview_header_text.clone() {
         emit_if_changed(
-            &mut tree_state.prev_preview_header_override_text,
+            &mut tree_state.preview.prev_preview_header_override_text,
             header_text,
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1054,7 +1043,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_source_text,
+            &mut tree_state.preview.prev_preview_source_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1064,7 +1053,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_status_text,
+            &mut tree_state.preview.prev_preview_status_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1074,7 +1063,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_attention_text,
+            &mut tree_state.preview.prev_preview_attention_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1085,7 +1074,7 @@ fn render_preview_section(
         );
     } else if let Some(context) = view.preview_context.as_ref() {
         emit_if_changed(
-            &mut tree_state.prev_preview_header_override_text,
+            &mut tree_state.preview.prev_preview_header_override_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1095,7 +1084,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_source_text,
+            &mut tree_state.preview.prev_preview_source_text,
             context.source_label.clone(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1105,7 +1094,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_status_text,
+            &mut tree_state.preview.prev_preview_status_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1115,7 +1104,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_attention_text,
+            &mut tree_state.preview.prev_preview_attention_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1126,7 +1115,7 @@ fn render_preview_section(
         );
     } else {
         emit_if_changed(
-            &mut tree_state.prev_preview_header_override_text,
+            &mut tree_state.preview.prev_preview_header_override_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1136,7 +1125,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_source_text,
+            &mut tree_state.preview.prev_preview_source_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1146,7 +1135,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_status_text,
+            &mut tree_state.preview.prev_preview_status_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
@@ -1156,7 +1145,7 @@ fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.prev_preview_attention_text,
+            &mut tree_state.preview.prev_preview_attention_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {

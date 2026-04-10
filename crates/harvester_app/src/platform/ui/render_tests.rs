@@ -1608,7 +1608,7 @@ fn summary_tab_without_selected_article_shows_empty_state_not_briefing_preview()
     let cmds = render(window_id, &view, &mut tree_state);
 
     assert_eq!(
-        tree_state.prev_preview_text.as_deref(),
+        tree_state.preview.prev_preview_text.as_deref(),
         Some(SUMMARY_EMPTY_STATE_MARKDOWN)
     );
     assert!(!cmds.iter().any(|cmd| {

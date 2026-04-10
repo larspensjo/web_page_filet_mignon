@@ -106,7 +106,7 @@ pub(super) fn render_status_section(
         MessageSeverity::Information
     };
     emit_if_changed(
-        &mut tree_state.prev_status_label,
+        &mut tree_state.controls.prev_status_label,
         (status_parts.join(" | "), severity),
         cmds,
         |(text, severity)| PlatformCommand::UpdateLabelText {
@@ -116,8 +116,8 @@ pub(super) fn render_status_section(
             severity,
         },
     );
-    tree_state.prev_briefing_progress = view.briefing_progress.clone();
-    tree_state.prev_triage_progress = view.triage_progress.clone();
+    tree_state.controls.prev_briefing_progress = view.briefing_progress.clone();
+    tree_state.controls.prev_triage_progress = view.triage_progress.clone();
 }
 
 pub(super) fn render_operation_progress_section(
@@ -136,7 +136,7 @@ pub(super) fn render_operation_progress_section(
     };
 
     emit_if_changed(
-        &mut tree_state.prev_operation_progress_text,
+        &mut tree_state.controls.prev_operation_progress_text,
         text,
         cmds,
         |text| PlatformCommand::SetControlText {
@@ -146,7 +146,7 @@ pub(super) fn render_operation_progress_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_operation_progress_range,
+        &mut tree_state.controls.prev_operation_progress_range,
         range,
         cmds,
         |(min, max)| PlatformCommand::SetProgressBarRange {
@@ -157,7 +157,7 @@ pub(super) fn render_operation_progress_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_operation_progress_pos,
+        &mut tree_state.controls.prev_operation_progress_pos,
         pos,
         cmds,
         |position| PlatformCommand::SetProgressBarPosition {
@@ -204,7 +204,7 @@ pub(super) fn render_token_progress_section(
     };
 
     emit_if_changed(
-        &mut tree_state.prev_progress_range,
+        &mut tree_state.controls.prev_progress_range,
         (0, bar_max as u32),
         cmds,
         |(min, max)| PlatformCommand::SetProgressBarRange {
@@ -215,7 +215,7 @@ pub(super) fn render_token_progress_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_progress_pos,
+        &mut tree_state.controls.prev_progress_pos,
         clamped_tokens as u32,
         cmds,
         |position| PlatformCommand::SetProgressBarPosition {
@@ -225,7 +225,7 @@ pub(super) fn render_token_progress_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_token_progress_style,
+        &mut tree_state.controls.prev_token_progress_style,
         progress_style,
         cmds,
         |style_id| PlatformCommand::ApplyStyleToControl {
@@ -235,7 +235,7 @@ pub(super) fn render_token_progress_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_progress_text,
+        &mut tree_state.controls.prev_progress_text,
         progress_text,
         cmds,
         |text| PlatformCommand::SetControlText {
@@ -253,7 +253,7 @@ pub(super) fn render_main_controls_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     emit_if_changed(
-        &mut tree_state.prev_jobs_header_meta_text,
+        &mut tree_state.controls.prev_jobs_header_meta_text,
         format_left_pane_header_meta(&view.left_pane_header),
         cmds,
         |text| PlatformCommand::SetControlText {
@@ -263,7 +263,7 @@ pub(super) fn render_main_controls_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_stop_style,
+        &mut tree_state.controls.prev_stop_style,
         if matches!(view.session, SessionState::Running) {
             StyleId::DestructiveButton
         } else {
@@ -277,7 +277,7 @@ pub(super) fn render_main_controls_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_stop_enabled,
+        &mut tree_state.controls.prev_stop_enabled,
         matches!(view.session, SessionState::Running),
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -287,7 +287,7 @@ pub(super) fn render_main_controls_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_briefing_enabled,
+        &mut tree_state.controls.prev_briefing_enabled,
         view.briefing_can_start,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -297,7 +297,7 @@ pub(super) fn render_main_controls_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_triage_enabled,
+        &mut tree_state.controls.prev_triage_enabled,
         view.triage_can_start,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -307,7 +307,7 @@ pub(super) fn render_main_controls_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_poll_enabled,
+        &mut tree_state.controls.prev_poll_enabled,
         view.poll_sources_enabled,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -317,7 +317,7 @@ pub(super) fn render_main_controls_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_open_browser_enabled,
+        &mut tree_state.controls.prev_open_browser_enabled,
         view.selected_url.is_some(),
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
@@ -327,7 +327,7 @@ pub(super) fn render_main_controls_section(
         },
     );
     emit_if_changed(
-        &mut tree_state.prev_jobs_scope_since_checkpoint_checked,
+        &mut tree_state.controls.prev_jobs_scope_since_checkpoint_checked,
         view.left_pane.job_list_scope == JobListScope::SinceCheckpoint,
         cmds,
         |checked| PlatformCommand::SetToggleSwitchState {
