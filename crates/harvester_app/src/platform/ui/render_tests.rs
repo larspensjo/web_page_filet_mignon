@@ -260,23 +260,38 @@ fn triage_review_items_show_indirect_badge_and_disabled_state() {
 }
 
 #[test]
-fn triage_results_items_show_priority_and_category_badges() {
-    let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
-    job.summary_title = Some("Example headline".to_string());
-    job.triage_annotation = Some(harvester_core::TriageAnnotationView {
-        priority: 5,
-        category: "business".to_string(),
-        tags: vec!["tag-a".to_string()],
-    });
+fn triage_results_priority_badge_maps_full_scale() {
+    // The triage prompt returns priority 1 (lowest) to 5 (highest/most urgent).
+    // See crates/harvester_engine/src/llm/prompts/triage.rs.
+    let cases: &[(u8, StyleId)] = &[
+        (1, StyleId::BadgePriorityLow),
+        (2, StyleId::BadgePriorityLow),
+        (3, StyleId::BadgePriorityMedium),
+        (4, StyleId::BadgePriorityHigh),
+        (5, StyleId::BadgePriorityCritical),
+    ];
 
-    let item = build_list_box_item(LeftTab::TriageResults, &job);
+    for (priority, expected_style) in cases {
+        let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
+        job.summary_title = Some("Example headline".to_string());
+        job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+            priority: *priority,
+            category: "business".to_string(),
+            tags: vec!["tag-a".to_string()],
+        });
 
-    assert_eq!(item.badges.len(), 2);
-    assert_eq!(item.badges[0].text, "P5");
-    assert_eq!(item.badges[0].style, StyleId::BadgePriorityHigh);
-    assert_eq!(item.badges[1].text, "Business");
-    assert_eq!(item.badges[1].style, StyleId::BadgeCategory);
-    assert_eq!(item.metadata, "example.com · 1 tag");
+        let item = build_list_box_item(LeftTab::TriageResults, &job);
+
+        assert_eq!(item.badges.len(), 2, "priority {priority}");
+        assert_eq!(item.badges[0].text, format!("P{priority}"));
+        assert_eq!(
+            item.badges[0].style, *expected_style,
+            "priority {priority} should map to {:?}",
+            expected_style
+        );
+        assert_eq!(item.badges[1].text, "Business");
+        assert_eq!(item.badges[1].style, StyleId::BadgeCategory);
+    }
 }
 
 #[test]

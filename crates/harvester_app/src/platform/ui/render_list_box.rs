@@ -246,15 +246,19 @@ pub(super) fn triage_review_status_style(job: &JobRowView) -> StyleId {
 }
 
 pub(super) fn triage_priority_style(job: &JobRowView) -> StyleId {
+    // Triage prompt (crates/harvester_engine/src/llm/prompts/triage.rs) asks the
+    // model for priority 1 (lowest) through 5 (highest/most urgent). We have four
+    // badge styles, so P1 and P2 share the muted "Low" pill and P3..P5 each get
+    // their own color to accelerate scan speed on the high-urgency tail.
     match job
         .triage_annotation
         .as_ref()
         .map(|triage| triage.priority)
         .unwrap_or_default()
     {
-        0..=3 => StyleId::BadgePriorityLow,
-        4 => StyleId::BadgePriorityMedium,
-        5 => StyleId::BadgePriorityHigh,
+        0..=2 => StyleId::BadgePriorityLow,
+        3 => StyleId::BadgePriorityMedium,
+        4 => StyleId::BadgePriorityHigh,
         _ => StyleId::BadgePriorityCritical,
     }
 }
