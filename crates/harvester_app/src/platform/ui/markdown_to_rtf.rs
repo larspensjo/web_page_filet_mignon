@@ -15,7 +15,8 @@ const LIST_HANGING_INDENT_TWIPS: usize = 220;
 const COLOR_BODY_TEXT_RTF: &str = "\\red176\\green174\\blue165;";
 const COLOR_HEADING_TEXT_RTF: &str = "\\red250\\green249\\blue245;";
 const COLOR_BACKGROUND_RTF: &str = "\\red48\\green48\\blue46;";
-const COLOR_LINK_RTF: &str = "\\red217\\green119\\blue87;}";
+const COLOR_LINK_RTF: &str = "\\red217\\green119\\blue87;";
+const COLOR_CHIP_BG_RTF: &str = "\\red61\\green61\\blue58;}";
 
 pub fn convert_markdown_to_rtf(markdown: &str) -> String {
     let mut rtf = String::new();
@@ -28,6 +29,7 @@ pub fn convert_markdown_to_rtf(markdown: &str) -> String {
     rtf.push_str(COLOR_HEADING_TEXT_RTF);
     rtf.push_str(COLOR_BACKGROUND_RTF);
     rtf.push_str(COLOR_LINK_RTF);
+    rtf.push_str(COLOR_CHIP_BG_RTF);
     rtf.push_str(&format!(
         "\\viewkind4\\uc1\\pard\\li{BODY_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\sl{BODY_LINE_SPACING_TWIPS}\\slmult1\\sa{BODY_SPACING_AFTER_TWIPS}\\sb0\\cf1\\cb3\\f0\\fs{BODY_FONT_SIZE_HALF_POINTS} "
     ));
@@ -50,7 +52,15 @@ pub fn convert_markdown_to_rtf(markdown: &str) -> String {
                     handle_end_tag(&mut rtf, tag_end, &mut list_stack);
                 }
             }
-            Event::Text(text) | Event::Code(text) => escape_rtf_text(&mut rtf, text.as_ref()),
+            Event::Text(text) => escape_rtf_text(&mut rtf, text.as_ref()),
+            Event::Code(text) => {
+                // Render inline code as a shaded chip (tag pill style).
+                // \chshdng10000 = full character shading pattern; \chcbpat5 = use
+                // chip background color (index 5 in the color table).
+                rtf.push_str("\\chshdng10000\\chcbpat5 ");
+                escape_rtf_text(&mut rtf, text.as_ref());
+                rtf.push_str("\\chshdng0\\chcbpat0 ");
+            }
             Event::SoftBreak => rtf.push(' '),
             Event::HardBreak => rtf.push_str("\\line "),
             Event::Rule => rtf.push_str("\\par "),
@@ -389,5 +399,28 @@ mod tests {
         let rtf = convert_markdown_to_rtf(&markdown);
         assert!(rtf.starts_with("{\\rtf"));
         assert!(rtf.ends_with('}'));
+    }
+
+    #[test]
+    fn inline_code_gets_character_background_shading() {
+        let rtf = convert_markdown_to_rtf("a `chip` b");
+        // The new chip background color must be declared in the color table.
+        // `\red61\green61\blue58;` corresponds to #3D3D3A (spec's Surface Overlay).
+        assert!(
+            rtf.contains("\\red61\\green61\\blue58;"),
+            "color table should include the chip background color; got: {rtf}"
+        );
+        // The inline code run must be wrapped in character shading control words.
+        // We expect \chshdng10000\chcbpat<N> to enable, and \chshdng0\chcbpat0 to reset.
+        assert!(
+            rtf.contains("\\chshdng10000"),
+            "inline code should enable character shading; got: {rtf}"
+        );
+        assert!(
+            rtf.contains("\\chshdng0\\chcbpat0"),
+            "inline code should reset character shading after the run; got: {rtf}"
+        );
+        // The chip text itself must still appear verbatim.
+        assert!(rtf.contains("chip"));
     }
 }
