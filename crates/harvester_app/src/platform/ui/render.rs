@@ -1,29 +1,20 @@
-use commanductui::types::{TreeItemDescriptor, TreeItemId};
 use commanductui::{
-    BadgeDescriptor, ChartDataPacket, ChartLineData, ChartLineEmphasis, CheckState,
-    ListBoxItemDescriptor, ListBoxItemId, MessageSeverity, PlatformCommand, StyleId, WindowId,
+    BadgeDescriptor, ChartDataPacket, ChartLineData, ChartLineEmphasis, ListBoxItemDescriptor,
+    ListBoxItemId, MessageSeverity, PlatformCommand, StyleId, WindowId,
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
     AppTab, AppViewModel, JobFilterStatus, JobListScope, JobOrigin, JobResultKind, JobRowView,
-    LayoutViewModel, LeftPaneHeaderView, LeftTab, LlmModelUsageView, PreviewContextView,
-    PreviewHeaderView, PromptLabStage, SessionState, Stage, TrendsTabView,
-    DEFAULT_JOBS_PANEL_WIDTH,
+    LayoutViewModel, LeftPaneHeaderView, LeftTab, LlmModelUsageView, PromptLabStage, SessionState,
+    Stage, TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
-use harvester_engine::LinkKind;
 
 use super::constants::*;
 use super::layout::{build_layout_command, LayoutConfig, PromptLabLayoutConfig};
 use super::markdown_to_rtf::{convert_markdown_to_rtf, RTF_TRUNCATE_MARKER};
-use super::tree_item_ids::{
-    job_tree_item_id, link_tree_item_id, links_folder_tree_item_id, links_show_more_tree_item_id,
-};
-use std::collections::HashMap;
 
 const MAX_VIEWER_CHARS: usize = 64 * 1024;
-#[allow(dead_code)]
-const VIEWER_TRUNCATE_MARKER: &str = "[display truncated]";
 const SUMMARY_EMPTY_STATE_MARKDOWN: &str =
     "No article selected\n\nSelect a job/article from the list to view its summary.";
 /// Maximum number of models shown individually in the status bar before collapsing.
@@ -91,11 +82,7 @@ pub(crate) fn combo_index_to_model(index: usize, catalog: &[ModelId]) -> Option<
 
 #[derive(Debug)]
 pub struct TreeRenderState {
-    initialized: bool,
     layout_initialized: bool,
-    structure: Vec<TreeStructureItem>,
-    text_by_id: HashMap<TreeItemId, String>,
-    check_state_by_id: HashMap<TreeItemId, CheckState>,
     /// Tracks the previous left_panel_width to detect changes
     prev_left_panel_width: i32,
     prev_input_panel_visible: bool,
@@ -181,11 +168,7 @@ pub struct TreeRenderState {
 impl Default for TreeRenderState {
     fn default() -> Self {
         Self {
-            initialized: false,
             layout_initialized: false,
-            structure: Vec::new(),
-            text_by_id: HashMap::new(),
-            check_state_by_id: HashMap::new(),
             prev_left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
             prev_input_panel_visible: false,
             prev_status_label: None,
@@ -271,53 +254,6 @@ impl Default for TreeRenderState {
 impl TreeRenderState {
     pub fn new() -> Self {
         Self::default()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)]
-struct TreeStructureItem {
-    id: TreeItemId,
-    parent_id: Option<TreeItemId>,
-    is_folder: bool,
-    child_count: usize,
-    style_override: Option<StyleId>,
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-struct TreeSnapshot {
-    structure: Vec<TreeStructureItem>,
-    text_by_id: HashMap<TreeItemId, String>,
-    check_state_by_id: HashMap<TreeItemId, CheckState>,
-}
-
-impl TreeSnapshot {
-    fn from_items(items: &[TreeItemDescriptor]) -> Self {
-        let mut snapshot = Self {
-            structure: Vec::new(),
-            text_by_id: HashMap::new(),
-            check_state_by_id: HashMap::new(),
-        };
-        snapshot.push_items(items, None);
-        snapshot
-    }
-
-    fn push_items(&mut self, items: &[TreeItemDescriptor], parent_id: Option<TreeItemId>) {
-        for item in items {
-            self.structure.push(TreeStructureItem {
-                id: item.id,
-                parent_id,
-                is_folder: item.is_folder,
-                child_count: item.children.len(),
-                style_override: item.style_override,
-            });
-            self.text_by_id.insert(item.id, item.text.clone());
-            self.check_state_by_id.insert(item.id, item.state);
-            if !item.children.is_empty() {
-                self.push_items(&item.children, Some(item.id));
-            }
-        }
     }
 }
 
@@ -1879,330 +1815,12 @@ fn triage_priority_label(job: &JobRowView) -> String {
     format!("P{priority}")
 }
 
-#[allow(dead_code)]
-fn append_tree_commands(
-    window_id: WindowId,
-    items: Vec<TreeItemDescriptor>,
-    tree_state: &mut TreeRenderState,
-    cmds: &mut Vec<PlatformCommand>,
-) {
-    let snapshot = TreeSnapshot::from_items(&items);
-    if !tree_state.initialized || tree_state.structure != snapshot.structure {
-        cmds.push(PlatformCommand::PopulateTreeView {
-            window_id,
-            control_id: TREE_JOBS,
-            items,
-        });
-        tree_state.initialized = true;
-        tree_state.structure = snapshot.structure;
-        tree_state.text_by_id = snapshot.text_by_id;
-        tree_state.check_state_by_id = snapshot.check_state_by_id;
-        return;
-    }
-
-    for item in &snapshot.structure {
-        if let Some(new_text) = snapshot.text_by_id.get(&item.id) {
-            if tree_state.text_by_id.get(&item.id) != Some(new_text) {
-                cmds.push(PlatformCommand::UpdateTreeItemText {
-                    window_id,
-                    control_id: TREE_JOBS,
-                    item_id: item.id,
-                    text: new_text.clone(),
-                });
-            }
-        }
-
-        if let Some(new_state) = snapshot.check_state_by_id.get(&item.id) {
-            if tree_state.check_state_by_id.get(&item.id) != Some(new_state) {
-                cmds.push(PlatformCommand::UpdateTreeItemVisualState {
-                    window_id,
-                    control_id: TREE_JOBS,
-                    item_id: item.id,
-                    new_state: *new_state,
-                });
-            }
-        }
-    }
-
-    tree_state.structure = snapshot.structure;
-    tree_state.text_by_id = snapshot.text_by_id;
-    tree_state.check_state_by_id = snapshot.check_state_by_id;
-}
-
-#[allow(dead_code)]
-enum JobRowPresentation {
-    Jobs,
-    TriageReview,
-    TriageResults,
-}
-
-#[allow(dead_code)]
-fn job_row_presentation(tab: LeftTab) -> JobRowPresentation {
-    match tab {
-        LeftTab::Jobs => JobRowPresentation::Jobs,
-        LeftTab::TriageReview => JobRowPresentation::TriageReview,
-        LeftTab::TriageResults => JobRowPresentation::TriageResults,
-        LeftTab::PromptLab => JobRowPresentation::Jobs,
-    }
-}
-
-#[allow(dead_code)]
-fn job_row_check_policy(
-    tab: LeftTab,
-    is_pre_triage_reviewing: bool,
-    job: &JobRowView,
-) -> CheckState {
-    match tab {
-        LeftTab::TriageReview if is_pre_triage_reviewing => match job.filter_status {
-            Some(JobFilterStatus::HardExcluded { .. })
-            | Some(JobFilterStatus::ManuallyExcluded) => CheckState::Unchecked,
-            Some(JobFilterStatus::ReviewNeeded { .. })
-            | Some(JobFilterStatus::ManuallyIncluded)
-            | Some(JobFilterStatus::AutoIncluded) => CheckState::Checked,
-            None => CheckState::Unchecked,
-        },
-        _ => CheckState::Hidden,
-    }
-}
-
-#[allow(dead_code)]
-fn job_row_style_policy(tab: LeftTab, has_summary: bool) -> Option<StyleId> {
-    match tab {
-        LeftTab::Jobs => {
-            if has_summary {
-                None
-            } else {
-                Some(StyleId::TreeItemDisabled)
-            }
-        }
-        LeftTab::TriageReview | LeftTab::TriageResults | LeftTab::PromptLab => None,
-    }
-}
-
-#[allow(dead_code)]
-fn build_job_tree(view: &AppViewModel) -> Vec<TreeItemDescriptor> {
-    let tab = view.left_pane.left_tab;
-    let presentation = job_row_presentation(tab);
-
-    // Scope filter: SinceCheckpoint drops jobs not in the checkpoint window.
-    let scope_filtered: Vec<&JobRowView> =
-        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
-            view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
-        } else {
-            view.jobs.iter().collect()
-        };
-
-    // TriageResults: sort by triage priority (desc), then job_id (asc) for tie-breaking,
-    // but only after triage settles. Resorting on every in-flight result changes sibling
-    // order, which currently forces a full TreeView repopulation and visible flicker.
-    // All other tabs use stable job-id order from the view model.
-    let mut sorted_buf: Vec<&JobRowView>;
-    let jobs_iter: &[&JobRowView] =
-        if matches!(tab, LeftTab::TriageResults) && view.triage_progress.is_none() {
-            sorted_buf = scope_filtered;
-            sorted_buf.sort_by(|a, b| {
-                let p_a = a
-                    .triage_annotation
-                    .as_ref()
-                    .map(|t| t.priority)
-                    .unwrap_or(0);
-                let p_b = b
-                    .triage_annotation
-                    .as_ref()
-                    .map(|t| t.priority)
-                    .unwrap_or(0);
-                p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
-            });
-            &sorted_buf
-        } else {
-            sorted_buf = scope_filtered;
-            &sorted_buf
-        };
-
-    jobs_iter
-        .iter()
-        .map(|job| {
-            let mut children = Vec::new();
-            if job.link_count > 0 {
-                children.push(TreeItemDescriptor {
-                    id: links_folder_tree_item_id(job.job_id),
-                    text: format!("Links ({})", job.link_count),
-                    is_folder: true,
-                    state: CheckState::Hidden,
-                    children: build_link_children(job),
-                    style_override: None,
-                });
-            }
-            let text = match presentation {
-                JobRowPresentation::Jobs => format_job_row_legacy(job),
-                JobRowPresentation::TriageReview => format_job_row_triage_review(job),
-                JobRowPresentation::TriageResults => format_job_row_triage_results(job),
-            };
-            TreeItemDescriptor {
-                id: job_tree_item_id(job.job_id),
-                text,
-                is_folder: true,
-                state: job_row_check_policy(tab, view.is_pre_triage_reviewing, job),
-                children,
-                style_override: job_row_style_policy(tab, job.has_summary),
-            }
-        })
-        .collect()
-}
-
-#[allow(dead_code)]
-fn build_link_children(job: &JobRowView) -> Vec<TreeItemDescriptor> {
-    let mut children: Vec<_> = job
-        .links
-        .iter()
-        .filter(|link| link.kind == LinkKind::Hyperlink)
-        .map(|link| TreeItemDescriptor {
-            id: link_tree_item_id(job.job_id, link.index),
-            text: link.label.clone(),
-            is_folder: false,
-            state: CheckState::Hidden,
-            children: Vec::new(),
-            style_override: None,
-        })
-        .collect();
-
-    let remaining = job.link_count.saturating_sub(job.links.len());
-    if remaining > 0 {
-        children.push(TreeItemDescriptor {
-            id: links_show_more_tree_item_id(job.job_id),
-            text: format!("(show more… {} remaining)", remaining),
-            is_folder: false,
-            state: CheckState::Hidden,
-            children: Vec::new(),
-            style_override: None,
-        });
-    }
-
-    children
-}
-
-/// Jobs tab: stable row text — never changes based on triage results.
-/// Triage annotation is intentionally omitted; use TriageResults tab for that.
-#[allow(dead_code)]
-fn format_job_row_legacy(job: &JobRowView) -> String {
-    let mut metadata = Vec::new();
-    if let Some(filter_status) = filter_status_label(job.filter_status.as_ref()) {
-        metadata.push(filter_status.to_string());
-    }
-    metadata.push(job_status_label(job).to_string());
-    if job.has_summary {
-        metadata.push(job_source_label(job));
-    }
-    if let Some(tokens) = job.tokens {
-        metadata.push(format!("{} tok", format_compact_tokens(tokens as u64)));
-    }
-    if let Some(bytes) = job.bytes {
-        metadata.push(format_compact_bytes(bytes));
-    }
-
-    let primary = job_primary_label(job);
-    format!("{primary} — {}", metadata.join(" · "))
-}
-
-/// Triage Review tab: shows the URL/title and review status cue.
-fn format_job_row_triage_review(job: &JobRowView) -> String {
-    let review_status = match &job.filter_status {
-        Some(JobFilterStatus::HardExcluded { .. }) => "[AUTO EXCLUDED] ",
-        Some(JobFilterStatus::ReviewNeeded { .. }) => "[REVIEW NEEDED] ",
-        Some(JobFilterStatus::ManuallyExcluded) => "[EXCLUDED] ",
-        Some(JobFilterStatus::ManuallyIncluded) => "[INCLUDED] ",
-        Some(JobFilterStatus::AutoIncluded) => "[AUTO INCLUDED] ",
-        None => "",
-    };
-    let label = job_display_label(job);
-    format!("{review_status}{label}")
-}
-
-/// Triage Results tab: title first, with triage metadata kept compact.
-fn format_job_row_triage_results(job: &JobRowView) -> String {
-    if let Some(annotation) = &job.triage_annotation {
-        let primary = triage_result_primary_label(job);
-        let mut metadata = vec![format!(
-            "P{} {}",
-            annotation.priority,
-            title_case_label(&annotation.category)
-        )];
-        metadata.push(job_source_label(job));
-        if let Some(tags) = compact_triage_tag_count(&annotation.tags) {
-            metadata.push(tags);
-        }
-        format!("{primary} — {}", metadata.join(" · "))
-    } else {
-        let primary = if job.has_summary {
-            job_primary_label(job)
-        } else {
-            compact_url_label(&job.url, 48)
-        };
-        let mut metadata = vec!["No triage".to_string()];
-        if job.has_summary {
-            metadata.push(job_source_label(job));
-        }
-        format!("{primary} — {}", metadata.join(" · "))
-    }
-}
-
-/// Returns the best short display label for a job (summary title or URL).
-fn job_display_label(job: &JobRowView) -> String {
-    if job.has_summary {
-        format!("{} — {}", job_primary_label(job), job_source_label(job))
-    } else {
-        job_primary_label(job)
-    }
-}
-
-fn job_primary_label(job: &JobRowView) -> String {
-    job_primary_label_with_limit(job, 64)
-}
-
-fn job_primary_label_with_limit(job: &JobRowView, max_chars: usize) -> String {
-    if job.has_summary {
-        let title = job
-            .summary_title
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .unwrap_or("(summary available)");
-        truncate_with_ellipsis(title, max_chars)
-    } else {
-        compact_url_label(&job.url, max_chars.min(56))
-    }
-}
-
 fn job_source_label(job: &JobRowView) -> String {
     let domain = domain_from_url(&job.url);
     if domain.is_empty() {
         compact_url_label(&job.url, 32)
     } else {
         truncate_with_ellipsis(&domain, 32)
-    }
-}
-
-fn triage_result_primary_label(job: &JobRowView) -> String {
-    url_slug_label(&job.url)
-        .map(|label| title_case_label(&label))
-        .map(|label| truncate_with_ellipsis(&label, 58))
-        .unwrap_or_else(|| {
-            if job.has_summary {
-                job_primary_label_with_limit(job, 58)
-            } else {
-                compact_url_label(&job.url, 48)
-            }
-        })
-}
-
-fn filter_status_label(filter_status: Option<&JobFilterStatus>) -> Option<&'static str> {
-    match filter_status {
-        Some(JobFilterStatus::HardExcluded { .. }) => Some("Auto-excluded"),
-        Some(JobFilterStatus::ReviewNeeded { .. }) => Some("Review"),
-        Some(JobFilterStatus::ManuallyExcluded) => Some("Excluded"),
-        Some(JobFilterStatus::ManuallyIncluded) => Some("Included"),
-        Some(JobFilterStatus::AutoIncluded) => Some("Auto"),
-        None => None,
     }
 }
 
@@ -2219,19 +1837,6 @@ fn job_status_label(job: &JobRowView) -> &'static str {
             Stage::Writing => "Write",
             Stage::Done => "Done",
         },
-    }
-}
-
-#[allow(dead_code)]
-fn stage_label(stage: Stage) -> &'static str {
-    match stage {
-        Stage::Queued => "Queued",
-        Stage::Downloading => "Downloading",
-        Stage::Sanitizing => "Sanitizing",
-        Stage::Converting => "Converting",
-        Stage::Tokenizing => "Tokenizing",
-        Stage::Writing => "Writing",
-        Stage::Done => "Done",
     }
 }
 
@@ -2266,34 +1871,6 @@ fn compact_url_label(url: &str, max_chars: usize) -> String {
     truncate_with_ellipsis(&compact, max_chars)
 }
 
-fn url_slug_label(url: &str) -> Option<String> {
-    let trimmed = url.trim();
-    let without_scheme = trimmed
-        .find("://")
-        .map(|pos| &trimmed[pos + 3..])
-        .unwrap_or(trimmed);
-    let without_query = without_scheme
-        .split(['?', '#'])
-        .next()
-        .unwrap_or(without_scheme)
-        .trim_end_matches('/');
-    let slug = without_query
-        .rsplit('/')
-        .next()
-        .unwrap_or(without_query)
-        .trim();
-    if slug.is_empty() || !slug.contains('-') {
-        return None;
-    }
-
-    let label = humanize_slug_with_limit(slug, 60);
-    if label.is_empty() || label.eq_ignore_ascii_case(slug) && !label.contains(' ') {
-        None
-    } else {
-        Some(label)
-    }
-}
-
 fn compact_triage_tag_count(tags: &[String]) -> Option<String> {
     if tags.is_empty() {
         return None;
@@ -2323,18 +1900,6 @@ fn title_case_label(value: &str) -> String {
         value.trim().to_string()
     } else {
         out.join(" ")
-    }
-}
-
-fn humanize_slug_with_limit(value: &str, max_chars: usize) -> String {
-    let words: Vec<&str> = value
-        .split(['-', '_'])
-        .filter(|word| !word.is_empty())
-        .collect();
-    if words.is_empty() {
-        value.to_string()
-    } else {
-        truncate_with_ellipsis(&words.join(" "), max_chars)
     }
 }
 
@@ -2381,149 +1946,6 @@ fn format_compact_bytes(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
-}
-
-#[allow(dead_code)]
-fn format_preview_context(header: &PreviewHeaderView) -> PreviewContextView {
-    let source_label = if header.domain.is_empty() {
-        "(unknown source)".to_string()
-    } else {
-        header.domain.clone()
-    };
-    let status_label = match &header.outcome {
-        Some(JobResultKind::Failed { reason }) => format!("Failed ({reason})"),
-        Some(JobResultKind::Success) => "Done".to_string(),
-        None => stage_label(header.stage).to_string(),
-    };
-    let attention_label = if header.nav_heavy {
-        Some("navigation-heavy".to_string())
-    } else {
-        None
-    };
-
-    PreviewContextView {
-        source_label,
-        status_label,
-        attention_label,
-    }
-}
-
-#[allow(dead_code)]
-fn normalize_windows_newlines(text: &str) -> String {
-    let mut normalized = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match ch {
-            '\r' => {
-                if matches!(chars.peek(), Some('\n')) {
-                    chars.next();
-                }
-                normalized.push_str("\r\n");
-            }
-            '\n' => normalized.push_str("\r\n"),
-            other => normalized.push(other),
-        }
-    }
-    normalized
-}
-
-#[allow(dead_code)]
-fn shape_for_viewer(text: &str) -> String {
-    let text = add_spacing_before_headings(text);
-    let text = normalize_bullets(&text);
-    let text = strip_bold_markers(&text);
-    let text = cap_blank_line_runs(&text);
-    truncate_for_viewer(&text)
-}
-
-#[allow(dead_code)]
-fn add_spacing_before_headings(text: &str) -> String {
-    let mut output: Vec<&str> = Vec::new();
-    for line in text.lines() {
-        let is_heading = line.starts_with('#');
-        if is_heading && !output.is_empty() && !output.last().unwrap_or(&"").trim().is_empty() {
-            output.push("");
-        }
-        output.push(line);
-    }
-    output.join("\n")
-}
-
-#[allow(dead_code)]
-fn normalize_bullets(text: &str) -> String {
-    let mut out = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        let indent_len = line.len().saturating_sub(trimmed.len());
-        if let Some(rest) = trimmed
-            .strip_prefix("- ")
-            .or_else(|| trimmed.strip_prefix("* "))
-        {
-            let mut rebuilt = String::new();
-            rebuilt.push_str(&line[..indent_len]);
-            rebuilt.push_str("• ");
-            rebuilt.push_str(rest);
-            out.push(rebuilt);
-        } else {
-            out.push(line.to_string());
-        }
-    }
-    out.join("\n")
-}
-
-#[allow(dead_code)]
-fn strip_bold_markers(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '*' && matches!(chars.peek(), Some('*')) {
-            chars.next();
-            continue;
-        }
-        out.push(ch);
-    }
-    out
-}
-
-#[allow(dead_code)]
-fn cap_blank_line_runs(text: &str) -> String {
-    let mut out = Vec::new();
-    let mut blank_run = 0usize;
-    for line in text.lines() {
-        if line.trim().is_empty() {
-            blank_run += 1;
-            if blank_run <= 2 {
-                out.push("");
-            }
-        } else {
-            blank_run = 0;
-            out.push(line);
-        }
-    }
-    out.join("\n")
-}
-
-#[allow(dead_code)]
-fn truncate_for_viewer(text: &str) -> String {
-    let total_chars = text.chars().count();
-    if total_chars <= MAX_VIEWER_CHARS {
-        return text.to_string();
-    }
-
-    let marker = format!("\r\n{VIEWER_TRUNCATE_MARKER}");
-    let marker_chars = marker.chars().count();
-    if marker_chars >= MAX_VIEWER_CHARS {
-        return marker;
-    }
-    let keep_chars = MAX_VIEWER_CHARS - marker_chars;
-    let cutoff = text
-        .char_indices()
-        .nth(keep_chars)
-        .map(|(idx, _)| idx)
-        .unwrap_or(text.len());
-    let mut truncated = text[..cutoff].to_string();
-    truncated.push_str(&marker);
-    truncated
 }
 
 fn strip_leading_h1(text: &str) -> &str {
