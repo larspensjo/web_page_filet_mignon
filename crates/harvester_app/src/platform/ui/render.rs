@@ -1,62 +1,26 @@
 use commanductui::{
-    BadgeDescriptor, ChartDataPacket, ChartLineData, ChartLineEmphasis, ListBoxItemDescriptor,
-    ListBoxItemId, MessageSeverity, PlatformCommand, StyleId, WindowId,
+    ChartDataPacket, ChartLineData, ChartLineEmphasis, MessageSeverity, PlatformCommand, StyleId,
+    WindowId,
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
-    AppTab, AppViewModel, JobFilterStatus, JobListScope, JobOrigin, JobResultKind, JobRowView,
-    LayoutViewModel, LeftPaneHeaderView, LeftTab, LlmModelUsageView, PromptLabStage, SessionState,
-    Stage, TrendsTabView, DEFAULT_JOBS_PANEL_WIDTH,
+    AppTab, AppViewModel, LayoutViewModel, LeftTab, PromptLabStage, TrendsTabView,
+    DEFAULT_JOBS_PANEL_WIDTH,
 };
 use harvester_engine::llm::ModelId;
 
 use super::constants::*;
 use super::layout::{build_layout_command, LayoutConfig, PromptLabLayoutConfig};
 use super::markdown_to_rtf::{convert_markdown_to_rtf, RTF_TRUNCATE_MARKER};
+use super::render_controls::{
+    render_left_tab_bar_section, render_main_controls_section, render_operation_progress_section,
+    render_status_section, render_tab_bar_section, render_token_progress_section,
+};
+use super::render_list_box::{append_list_box_commands, ListBoxRenderModel};
+use super::render_text::{strip_leading_h1, truncate_markdown_for_preview};
 
-const MAX_VIEWER_CHARS: usize = 64 * 1024;
 const SUMMARY_EMPTY_STATE_MARKDOWN: &str =
     "No article selected\n\nSelect a job/article from the list to view its summary.";
-/// Maximum number of models shown individually in the status bar before collapsing.
-const MAX_STATUS_BAR_MODELS: usize = 2;
-const LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH: i32 = 44;
-const LIST_BOX_BADGE_PAD_X: i32 = 6;
-const LIST_BOX_BADGE_GAP: i32 = 4;
-
-fn format_compact_tokens(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{}K", n / 1_000)
-    } else {
-        n.to_string()
-    }
-}
-
-/// Builds the LLM usage segment for the status bar, or None if no usage recorded.
-/// Shows up to MAX_STATUS_BAR_MODELS models individually; collapses the rest.
-fn format_llm_usage_status(rows: &[LlmModelUsageView]) -> Option<String> {
-    if rows.is_empty() {
-        return None;
-    }
-    let visible = rows.len().min(MAX_STATUS_BAR_MODELS);
-    let mut parts: Vec<String> = rows[..visible]
-        .iter()
-        .map(|r| {
-            format!(
-                "{}: in={} out={}",
-                r.model,
-                format_compact_tokens(r.input_tokens),
-                format_compact_tokens(r.output_tokens)
-            )
-        })
-        .collect();
-    let hidden = rows.len() - visible;
-    if hidden > 0 {
-        parts.push(format!("+{} models", hidden));
-    }
-    Some(parts.join(", "))
-}
 
 /// Helper: Convert optional ModelId to combo box selection index.
 /// Returns 0 for None (default), or index+1 for a specific model in the catalog.
@@ -82,87 +46,87 @@ pub(crate) fn combo_index_to_model(index: usize, catalog: &[ModelId]) -> Option<
 
 #[derive(Debug)]
 pub struct TreeRenderState {
-    layout_initialized: bool,
+    pub(super) layout_initialized: bool,
     /// Tracks the previous left_panel_width to detect changes
-    prev_left_panel_width: i32,
-    prev_input_panel_visible: bool,
-    prev_status_label: Option<(String, MessageSeverity)>,
-    prev_progress_text: Option<String>,
-    prev_preview_text: Option<String>,
-    prev_stop_enabled: Option<bool>,
-    prev_briefing_enabled: Option<bool>,
-    prev_triage_enabled: Option<bool>,
-    prev_poll_enabled: Option<bool>,
-    prev_briefing_progress: Option<String>,
-    prev_triage_progress: Option<String>,
-    prev_progress_range: Option<(u32, u32)>,
-    prev_progress_pos: Option<u32>,
-    prev_token_progress_style: Option<StyleId>,
-    prev_stop_style: Option<StyleId>,
-    prev_operation_progress_visible: bool,
-    prev_operation_progress_text: Option<String>,
-    prev_operation_progress_range: Option<(u32, u32)>,
-    prev_operation_progress_pos: Option<u32>,
-    prev_open_browser_enabled: Option<bool>,
-    prev_jobs_header_meta_text: Option<String>,
-    prev_jobs_scope_since_checkpoint_checked: Option<bool>,
-    prev_prompt_lab_visible: bool,
-    prev_prompt_lab_advanced_mode: bool,
-    prev_prompt_lab_mode_basic_checked: Option<bool>,
-    prev_prompt_lab_mode_advanced_checked: Option<bool>,
-    prev_prompt_lab_stage_triage_checked: Option<bool>,
-    prev_prompt_lab_stage_summary_checked: Option<bool>,
-    prev_prompt_lab_stage_briefing_checked: Option<bool>,
-    prev_prompt_lab_compare_section_open: bool,
-    prev_prompt_lab_context_section_open: bool,
-    prev_prompt_lab_template_section_open: bool,
-    prev_prompt_lab_run_details_section_open: bool,
-    prev_prompt_lab_template_editor_open: bool,
-    prev_prompt_lab_status_text: Option<String>,
-    prev_prompt_lab_metadata_text: Option<String>,
-    prev_prompt_lab_url_input: Option<String>,
-    prev_prompt_lab_run_enabled: Option<bool>,
-    prev_prompt_lab_resolve_enabled: Option<bool>,
-    prev_prompt_lab_url_enabled: Option<bool>,
-    prev_prompt_lab_context_text: Option<String>,
-    prev_prompt_lab_context_status_text: Option<String>,
-    prev_prompt_lab_context_apply_enabled: Option<bool>,
-    prev_prompt_lab_context_apply_rerun_enabled: Option<bool>,
-    prev_prompt_lab_context_revert_enabled: Option<bool>,
-    prev_prompt_lab_context_save_enabled: Option<bool>,
-    prev_prompt_lab_template_open_checked: Option<bool>,
-    prev_prompt_lab_template_system_text: Option<String>,
-    prev_prompt_lab_template_user_text: Option<String>,
-    prev_prompt_lab_template_status_text: Option<String>,
-    prev_prompt_lab_template_apply_enabled: Option<bool>,
-    prev_prompt_lab_template_apply_rerun_enabled: Option<bool>,
-    prev_prompt_lab_template_revert_enabled: Option<bool>,
-    prev_prompt_lab_template_save_enabled: Option<bool>,
-    prev_prompt_lab_template_system_enabled: Option<bool>,
-    prev_prompt_lab_template_user_enabled: Option<bool>,
-    prev_prompt_lab_compare_add_current_enabled: Option<bool>,
-    prev_prompt_lab_compare_add_baseline_enabled: Option<bool>,
-    prev_prompt_lab_compare_reset_draft_enabled: Option<bool>,
-    prev_prompt_lab_compare_start_enabled: Option<bool>,
-    prev_prompt_lab_compare_cancel_enabled: Option<bool>,
-    prev_prompt_lab_compare_auto_select_enabled: Option<bool>,
-    prev_prompt_lab_compare_winner_clear_enabled: Option<bool>,
-    prev_prompt_lab_section_compare_checked: Option<bool>,
-    prev_prompt_lab_section_context_checked: Option<bool>,
-    prev_prompt_lab_section_template_checked: Option<bool>,
-    prev_prompt_lab_section_run_details_checked: Option<bool>,
-    prev_prompt_lab_model_catalog: Option<Vec<ModelId>>,
-    prev_prompt_lab_selected_model: Option<String>,
+    pub(super) prev_left_panel_width: i32,
+    pub(super) prev_input_panel_visible: bool,
+    pub(super) prev_status_label: Option<(String, MessageSeverity)>,
+    pub(super) prev_progress_text: Option<String>,
+    pub(super) prev_preview_text: Option<String>,
+    pub(super) prev_stop_enabled: Option<bool>,
+    pub(super) prev_briefing_enabled: Option<bool>,
+    pub(super) prev_triage_enabled: Option<bool>,
+    pub(super) prev_poll_enabled: Option<bool>,
+    pub(super) prev_briefing_progress: Option<String>,
+    pub(super) prev_triage_progress: Option<String>,
+    pub(super) prev_progress_range: Option<(u32, u32)>,
+    pub(super) prev_progress_pos: Option<u32>,
+    pub(super) prev_token_progress_style: Option<StyleId>,
+    pub(super) prev_stop_style: Option<StyleId>,
+    pub(super) prev_operation_progress_visible: bool,
+    pub(super) prev_operation_progress_text: Option<String>,
+    pub(super) prev_operation_progress_range: Option<(u32, u32)>,
+    pub(super) prev_operation_progress_pos: Option<u32>,
+    pub(super) prev_open_browser_enabled: Option<bool>,
+    pub(super) prev_jobs_header_meta_text: Option<String>,
+    pub(super) prev_jobs_scope_since_checkpoint_checked: Option<bool>,
+    pub(super) prev_prompt_lab_visible: bool,
+    pub(super) prev_prompt_lab_advanced_mode: bool,
+    pub(super) prev_prompt_lab_mode_basic_checked: Option<bool>,
+    pub(super) prev_prompt_lab_mode_advanced_checked: Option<bool>,
+    pub(super) prev_prompt_lab_stage_triage_checked: Option<bool>,
+    pub(super) prev_prompt_lab_stage_summary_checked: Option<bool>,
+    pub(super) prev_prompt_lab_stage_briefing_checked: Option<bool>,
+    pub(super) prev_prompt_lab_compare_section_open: bool,
+    pub(super) prev_prompt_lab_context_section_open: bool,
+    pub(super) prev_prompt_lab_template_section_open: bool,
+    pub(super) prev_prompt_lab_run_details_section_open: bool,
+    pub(super) prev_prompt_lab_template_editor_open: bool,
+    pub(super) prev_prompt_lab_status_text: Option<String>,
+    pub(super) prev_prompt_lab_metadata_text: Option<String>,
+    pub(super) prev_prompt_lab_url_input: Option<String>,
+    pub(super) prev_prompt_lab_run_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_resolve_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_url_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_context_text: Option<String>,
+    pub(super) prev_prompt_lab_context_status_text: Option<String>,
+    pub(super) prev_prompt_lab_context_apply_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_context_apply_rerun_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_context_revert_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_context_save_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_template_open_checked: Option<bool>,
+    pub(super) prev_prompt_lab_template_system_text: Option<String>,
+    pub(super) prev_prompt_lab_template_user_text: Option<String>,
+    pub(super) prev_prompt_lab_template_status_text: Option<String>,
+    pub(super) prev_prompt_lab_template_apply_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_template_apply_rerun_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_template_revert_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_template_save_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_template_system_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_template_user_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_compare_add_current_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_compare_add_baseline_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_compare_reset_draft_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_compare_start_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_compare_cancel_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_compare_auto_select_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_compare_winner_clear_enabled: Option<bool>,
+    pub(super) prev_prompt_lab_section_compare_checked: Option<bool>,
+    pub(super) prev_prompt_lab_section_context_checked: Option<bool>,
+    pub(super) prev_prompt_lab_section_template_checked: Option<bool>,
+    pub(super) prev_prompt_lab_section_run_details_checked: Option<bool>,
+    pub(super) prev_prompt_lab_model_catalog: Option<Vec<ModelId>>,
+    pub(super) prev_prompt_lab_selected_model: Option<String>,
     // Tab bar state
-    prev_active_tab: AppTab,
-    prev_left_tab: LeftTab,
-    prev_triage_text: Option<String>,
-    prev_briefing_text: Option<String>,
-    prev_poll_stats_text: Option<String>,
-    prev_preview_header_override_text: Option<String>,
-    prev_preview_source_text: Option<String>,
-    prev_preview_status_text: Option<String>,
-    prev_preview_attention_text: Option<String>,
+    pub(super) prev_active_tab: AppTab,
+    pub(super) prev_left_tab: LeftTab,
+    pub(super) prev_triage_text: Option<String>,
+    pub(super) prev_briefing_text: Option<String>,
+    pub(super) prev_poll_stats_text: Option<String>,
+    pub(super) prev_preview_header_override_text: Option<String>,
+    pub(super) prev_preview_source_text: Option<String>,
+    pub(super) prev_preview_status_text: Option<String>,
+    pub(super) prev_preview_attention_text: Option<String>,
 }
 
 impl Default for TreeRenderState {
@@ -359,8 +323,12 @@ fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
     }
 }
 
-fn emit_if_changed<T, F>(prev: &mut Option<T>, next: T, cmds: &mut Vec<PlatformCommand>, emit: F)
-where
+pub(super) fn emit_if_changed<T, F>(
+    prev: &mut Option<T>,
+    next: T,
+    cmds: &mut Vec<PlatformCommand>,
+    emit: F,
+) where
     T: PartialEq + Clone,
     F: FnOnce(T) -> PlatformCommand,
 {
@@ -476,323 +444,6 @@ fn render_layout_section(
         layout.prompt_lab_run_details_section_open;
     tree_state.prev_prompt_lab_template_editor_open = layout.prompt_lab_template_editor_open;
     tree_state.layout_initialized = true;
-}
-
-fn render_tab_bar_section(
-    window_id: WindowId,
-    view: &AppViewModel,
-    _tree_state: &mut TreeRenderState,
-    cmds: &mut Vec<PlatformCommand>,
-) {
-    let active = view.right_pane.active_tab;
-    cmds.push(PlatformCommand::SetTabBarSelection {
-        window_id,
-        control_id: TAB_BAR_RIGHT,
-        selected_index: active.to_index(),
-    });
-}
-
-fn render_left_tab_bar_section(
-    window_id: WindowId,
-    view: &AppViewModel,
-    _tree_state: &mut TreeRenderState,
-    cmds: &mut Vec<PlatformCommand>,
-) {
-    let active = view.left_pane.left_tab;
-    cmds.push(PlatformCommand::SetTabBarSelection {
-        window_id,
-        control_id: TAB_BAR_LEFT,
-        selected_index: active.to_index(),
-    });
-}
-
-fn render_status_section(
-    window_id: WindowId,
-    view: &AppViewModel,
-    tree_state: &mut TreeRenderState,
-    cmds: &mut Vec<PlatformCommand>,
-) {
-    let session_label = match view.session {
-        SessionState::Idle => "Idle",
-        SessionState::Running => "Running",
-        SessionState::Finishing => "Finishing",
-        SessionState::Finished => "Finished",
-    };
-    let status_base_text = match &view.last_paste_stats {
-        Some(stats) => format!(
-            "Session: {} | Jobs: {} | Last paste: enqueued {}, skipped {}",
-            session_label, view.job_count, stats.enqueued, stats.skipped
-        ),
-        None => format!("Session: {} | Jobs: {}", session_label, view.job_count),
-    };
-
-    let mut status_parts = vec![status_base_text];
-    if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
-        status_parts.push("Since checkpoint".to_string());
-    }
-    if let Some(progress) = view.briefing_progress.as_deref() {
-        status_parts.push(progress.to_string());
-    }
-    if let Some(progress) = view.triage_progress.as_deref() {
-        status_parts.push(progress.to_string());
-    }
-    if let Some(status) = view.checkpoint_status_message.as_deref() {
-        status_parts.push(status.to_string());
-    }
-    if let Some(usage) = format_llm_usage_status(&view.llm_usage_by_model) {
-        status_parts.push(usage);
-    }
-    let severity = if let Some(message) = view.ai_unavailable_message.as_deref() {
-        status_parts.push(message.to_string());
-        MessageSeverity::Warning
-    } else {
-        MessageSeverity::Information
-    };
-    emit_if_changed(
-        &mut tree_state.prev_status_label,
-        (status_parts.join(" | "), severity),
-        cmds,
-        |(text, severity)| PlatformCommand::UpdateLabelText {
-            window_id,
-            control_id: LABEL_STATUS,
-            text,
-            severity,
-        },
-    );
-    tree_state.prev_briefing_progress = view.briefing_progress.clone();
-    tree_state.prev_triage_progress = view.triage_progress.clone();
-}
-
-fn render_operation_progress_section(
-    window_id: WindowId,
-    view: &AppViewModel,
-    tree_state: &mut TreeRenderState,
-    cmds: &mut Vec<PlatformCommand>,
-) {
-    let (text, range, pos) = match &view.operation_progress {
-        Some(op) => (
-            format!("{}: {}/{}", op.label, op.completed, op.total),
-            (0u32, op.total),
-            op.completed,
-        ),
-        None => (String::new(), (0u32, 0u32), 0u32),
-    };
-
-    emit_if_changed(
-        &mut tree_state.prev_operation_progress_text,
-        text,
-        cmds,
-        |text| PlatformCommand::SetControlText {
-            window_id,
-            control_id: LABEL_OPERATION_PROGRESS,
-            text,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_operation_progress_range,
-        range,
-        cmds,
-        |(min, max)| PlatformCommand::SetProgressBarRange {
-            window_id,
-            control_id: PROGRESS_OPERATION,
-            min,
-            max,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_operation_progress_pos,
-        pos,
-        cmds,
-        |position| PlatformCommand::SetProgressBarPosition {
-            window_id,
-            control_id: PROGRESS_OPERATION,
-            position,
-        },
-    );
-}
-
-fn render_token_progress_section(
-    window_id: WindowId,
-    view: &AppViewModel,
-    tree_state: &mut TreeRenderState,
-    cmds: &mut Vec<PlatformCommand>,
-) {
-    let scoped_total_tokens = match view.left_pane.job_list_scope {
-        JobListScope::All => view.total_tokens,
-        JobListScope::SinceCheckpoint => view
-            .jobs
-            .iter()
-            .filter(|job| job.is_since_checkpoint)
-            .filter_map(|job| job.tokens.map(u64::from))
-            .sum(),
-    };
-    let raw_limit = view.token_limit;
-    let effective_limit = raw_limit.max(1);
-    let bar_max = effective_limit.min(u32::MAX as u64);
-    let clamped_tokens = scoped_total_tokens.min(bar_max);
-    let percent = if raw_limit > 0 {
-        (scoped_total_tokens.min(raw_limit) as f64 / raw_limit as f64) * 100.0
-    } else {
-        0.0
-    };
-    let progress_text = format!(
-        "{} / {}",
-        format_compact_tokens(scoped_total_tokens),
-        format_compact_tokens(view.token_limit)
-    );
-    let progress_style = if percent >= 100.0 {
-        StyleId::ProgressBar
-    } else {
-        StyleId::StatusMeter
-    };
-
-    emit_if_changed(
-        &mut tree_state.prev_progress_range,
-        (0, bar_max as u32),
-        cmds,
-        |(min, max)| PlatformCommand::SetProgressBarRange {
-            window_id,
-            control_id: PROGRESS_TOKENS,
-            min,
-            max,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_progress_pos,
-        clamped_tokens as u32,
-        cmds,
-        |position| PlatformCommand::SetProgressBarPosition {
-            window_id,
-            control_id: PROGRESS_TOKENS,
-            position,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_token_progress_style,
-        progress_style,
-        cmds,
-        |style_id| PlatformCommand::ApplyStyleToControl {
-            window_id,
-            control_id: PROGRESS_TOKENS,
-            style_id,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_progress_text,
-        progress_text,
-        cmds,
-        |text| PlatformCommand::SetControlText {
-            window_id,
-            control_id: LABEL_TOKEN_PROGRESS,
-            text,
-        },
-    );
-}
-
-fn render_main_controls_section(
-    window_id: WindowId,
-    view: &AppViewModel,
-    tree_state: &mut TreeRenderState,
-    cmds: &mut Vec<PlatformCommand>,
-) {
-    emit_if_changed(
-        &mut tree_state.prev_jobs_header_meta_text,
-        format_left_pane_header_meta(&view.left_pane_header),
-        cmds,
-        |text| PlatformCommand::SetControlText {
-            window_id,
-            control_id: LABEL_JOBS_HEADER_META,
-            text,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_stop_style,
-        if matches!(view.session, SessionState::Running) {
-            StyleId::DestructiveButton
-        } else {
-            StyleId::SecondaryButton
-        },
-        cmds,
-        |style_id| PlatformCommand::ApplyStyleToControl {
-            window_id,
-            control_id: BUTTON_STOP,
-            style_id,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_stop_enabled,
-        matches!(view.session, SessionState::Running),
-        cmds,
-        |enabled| PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_STOP,
-            enabled,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_briefing_enabled,
-        view.briefing_can_start,
-        cmds,
-        |enabled| PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_BRIEFING,
-            enabled,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_triage_enabled,
-        view.triage_can_start,
-        cmds,
-        |enabled| PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_TRIAGE,
-            enabled,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_poll_enabled,
-        view.poll_sources_enabled,
-        cmds,
-        |enabled| PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_POLL_SOURCES,
-            enabled,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_open_browser_enabled,
-        view.selected_url.is_some(),
-        cmds,
-        |enabled| PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_OPEN_BROWSER,
-            enabled,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state.prev_jobs_scope_since_checkpoint_checked,
-        view.left_pane.job_list_scope == JobListScope::SinceCheckpoint,
-        cmds,
-        |checked| PlatformCommand::SetToggleSwitchState {
-            window_id,
-            control_id: TS_JOBS_SCOPE,
-            checked,
-        },
-    );
-}
-
-fn format_left_pane_header_meta(header: &LeftPaneHeaderView) -> String {
-    let mut parts = Vec::<String>::new();
-    if let Some(scope_label) = header.scope_label.as_deref() {
-        parts.push(String::from(scope_label));
-    }
-    if let Some(count_label) = header.count_label.as_deref() {
-        parts.push(String::from(count_label));
-    }
-    if let Some(state_label) = header.state_label.as_deref() {
-        parts.push(String::from(state_label));
-    }
-    parts.join(" · ")
 }
 
 fn render_prompt_lab_section(
@@ -1587,412 +1238,6 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
     )
 }
 
-fn append_list_box_commands(
-    window_id: WindowId,
-    list_box: ListBoxRenderModel,
-    cmds: &mut Vec<PlatformCommand>,
-) {
-    let ListBoxRenderModel {
-        items,
-        selected_item_id,
-    } = list_box;
-    let badge_column_width = compute_list_box_badge_column_width(&items);
-    let badge_column_width = badge_column_width.clamp(0, u16::MAX as i32) as u16;
-    cmds.push(PlatformCommand::PopulateListBox {
-        window_id,
-        control_id: TREE_JOBS,
-        items,
-        badge_column_width,
-    });
-    if let Some(item_id) = selected_item_id {
-        cmds.push(PlatformCommand::SetListBoxSelection {
-            window_id,
-            control_id: TREE_JOBS,
-            item_id,
-        });
-    }
-}
-
-struct ListBoxRenderModel {
-    items: Vec<ListBoxItemDescriptor>,
-    selected_item_id: Option<ListBoxItemId>,
-}
-
-impl ListBoxRenderModel {
-    fn from_view(view: &AppViewModel) -> Self {
-        let items = build_list_box_items(view);
-        let selected_item_id = view
-            .selected_job_id
-            .map(ListBoxItemId)
-            .filter(|selected_item_id| items.iter().any(|item| item.id == *selected_item_id));
-        Self {
-            items,
-            selected_item_id,
-        }
-    }
-}
-
-fn compute_list_box_badge_column_width(items: &[ListBoxItemDescriptor]) -> i32 {
-    let widest_row = items
-        .iter()
-        .map(|item| {
-            item.badges
-                .iter()
-                .enumerate()
-                .map(|(index, badge)| {
-                    let text_width = (badge.text.chars().count() as i32 * 8).max(24);
-                    text_width
-                        + LIST_BOX_BADGE_PAD_X * 2
-                        + if index > 0 { LIST_BOX_BADGE_GAP } else { 0 }
-                })
-                .sum::<i32>()
-        })
-        .max()
-        .unwrap_or(LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH);
-
-    widest_row
-        .saturating_add(LIST_BOX_BADGE_GAP * 2)
-        .clamp(LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH, 280)
-}
-
-fn build_list_box_items(view: &AppViewModel) -> Vec<ListBoxItemDescriptor> {
-    let tab = view.left_pane.left_tab;
-    let scope_filtered: Vec<&JobRowView> =
-        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
-            view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
-        } else {
-            view.jobs.iter().collect()
-        };
-
-    let mut sorted_buf: Vec<&JobRowView>;
-    let jobs_iter: &[&JobRowView] =
-        if matches!(tab, LeftTab::TriageResults) && view.triage_progress.is_none() {
-            sorted_buf = scope_filtered;
-            sorted_buf.sort_by(|a, b| {
-                let p_a = a
-                    .triage_annotation
-                    .as_ref()
-                    .map(|t| t.priority)
-                    .unwrap_or(0);
-                let p_b = b
-                    .triage_annotation
-                    .as_ref()
-                    .map(|t| t.priority)
-                    .unwrap_or(0);
-                p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
-            });
-            &sorted_buf
-        } else {
-            sorted_buf = scope_filtered;
-            &sorted_buf
-        };
-
-    jobs_iter
-        .iter()
-        .map(|job| build_list_box_item(tab, job))
-        .collect()
-}
-
-fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItemDescriptor {
-    let mut badges = match tab {
-        LeftTab::Jobs => vec![BadgeDescriptor {
-            text: job_status_label(job).to_string(),
-            style: job_status_style(job),
-        }],
-        LeftTab::TriageReview => vec![BadgeDescriptor {
-            text: triage_review_status_label(job).to_string(),
-            style: triage_review_status_style(job),
-        }],
-        LeftTab::TriageResults => {
-            let mut badges = vec![BadgeDescriptor {
-                text: triage_priority_label(job),
-                style: triage_priority_style(job),
-            }];
-            if let Some(annotation) = job.triage_annotation.as_ref() {
-                badges.push(BadgeDescriptor {
-                    text: title_case_label(&annotation.category),
-                    style: StyleId::BadgeCategory,
-                });
-            }
-            badges
-        }
-        LeftTab::PromptLab => vec![BadgeDescriptor {
-            text: job_status_label(job).to_string(),
-            style: job_status_style(job),
-        }],
-    };
-    if matches!(tab, LeftTab::TriageReview) && matches!(job.origin, JobOrigin::Indirect { .. }) {
-        badges.push(BadgeDescriptor {
-            text: "Indirect".to_string(),
-            style: StyleId::BadgeIndirect,
-        });
-    }
-
-    let title = job
-        .summary_title
-        .as_deref()
-        .map(str::to_string)
-        .unwrap_or_else(|| compact_url_label(&job.url, 80));
-    let metadata = match tab {
-        LeftTab::Jobs => format!(
-            "{} · {} · {}",
-            job_source_label(job),
-            job.tokens
-                .map(|tokens| format_compact_tokens(tokens as u64))
-                .unwrap_or_else(|| "—".to_string()),
-            job.bytes
-                .map(format_compact_bytes)
-                .unwrap_or_else(|| "—".to_string())
-        ),
-        LeftTab::TriageReview => {
-            let category = job
-                .triage_annotation
-                .as_ref()
-                .map(|triage| title_case_label(&triage.category))
-                .unwrap_or_else(|| "Untriaged".to_string());
-            format!("{category} · {}", job_source_label(job))
-        }
-        LeftTab::TriageResults => {
-            let tag_count = job
-                .triage_annotation
-                .as_ref()
-                .and_then(|triage| compact_triage_tag_count(&triage.tags))
-                .unwrap_or_else(|| "0 tags".to_string());
-            format!("{} · {tag_count}", job_source_label(job))
-        }
-        LeftTab::PromptLab => format!("{} · {}", job_source_label(job), job_status_label(job)),
-    };
-    let enabled = !matches!(
-        tab,
-        LeftTab::TriageReview
-            if matches!(
-                job.filter_status,
-                Some(JobFilterStatus::HardExcluded { .. })
-                    | Some(JobFilterStatus::ManuallyExcluded)
-            )
-    );
-
-    ListBoxItemDescriptor {
-        id: ListBoxItemId(job.job_id),
-        badges,
-        title,
-        metadata,
-        enabled,
-    }
-}
-
-fn job_status_style(job: &JobRowView) -> StyleId {
-    match job_status_label(job) {
-        "OK" | "Done" => StyleId::BadgeStatusDone,
-        "ERR" => StyleId::BadgeStatusError,
-        "Fetch" | "Queued" => StyleId::BadgeStatusActive,
-        _ => StyleId::BadgeStatusMuted,
-    }
-}
-
-fn triage_review_status_label(job: &JobRowView) -> &'static str {
-    match job.filter_status.as_ref() {
-        Some(JobFilterStatus::HardExcluded { .. }) => "Auto Excluded",
-        Some(JobFilterStatus::ReviewNeeded { .. }) => "Review",
-        Some(JobFilterStatus::ManuallyExcluded) => "Excluded",
-        Some(JobFilterStatus::ManuallyIncluded) => "Included",
-        Some(JobFilterStatus::AutoIncluded) => "Included",
-        None => "Review",
-    }
-}
-
-fn triage_review_status_style(job: &JobRowView) -> StyleId {
-    match job.filter_status.as_ref() {
-        Some(JobFilterStatus::HardExcluded { .. }) | Some(JobFilterStatus::ManuallyExcluded) => {
-            StyleId::BadgeStatusMuted
-        }
-        Some(JobFilterStatus::ReviewNeeded { .. }) => StyleId::BadgeStatusActive,
-        Some(JobFilterStatus::ManuallyIncluded) | Some(JobFilterStatus::AutoIncluded) => {
-            StyleId::BadgeStatusDone
-        }
-        None => StyleId::BadgeStatusMuted,
-    }
-}
-
-fn triage_priority_style(job: &JobRowView) -> StyleId {
-    match job
-        .triage_annotation
-        .as_ref()
-        .map(|triage| triage.priority)
-        .unwrap_or_default()
-    {
-        0..=3 => StyleId::BadgePriorityLow,
-        4 => StyleId::BadgePriorityMedium,
-        5 => StyleId::BadgePriorityHigh,
-        _ => StyleId::BadgePriorityCritical,
-    }
-}
-
-fn triage_priority_label(job: &JobRowView) -> String {
-    let priority = job
-        .triage_annotation
-        .as_ref()
-        .map(|triage| triage.priority)
-        .unwrap_or_default();
-    format!("P{priority}")
-}
-
-fn job_source_label(job: &JobRowView) -> String {
-    let domain = domain_from_url(&job.url);
-    if domain.is_empty() {
-        compact_url_label(&job.url, 32)
-    } else {
-        truncate_with_ellipsis(&domain, 32)
-    }
-}
-
-fn job_status_label(job: &JobRowView) -> &'static str {
-    match &job.outcome {
-        Some(JobResultKind::Success) => "OK",
-        Some(JobResultKind::Failed { .. }) => "ERR",
-        None => match job.stage {
-            Stage::Queued => "Queued",
-            Stage::Downloading => "Fetch",
-            Stage::Sanitizing => "Clean",
-            Stage::Converting => "Convert",
-            Stage::Tokenizing => "Tokens",
-            Stage::Writing => "Write",
-            Stage::Done => "Done",
-        },
-    }
-}
-
-fn compact_url_label(url: &str, max_chars: usize) -> String {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return "(untitled source)".to_string();
-    }
-
-    let without_scheme = trimmed
-        .find("://")
-        .map(|pos| &trimmed[pos + 3..])
-        .unwrap_or(trimmed);
-    let without_query = without_scheme
-        .split(['?', '#'])
-        .next()
-        .unwrap_or(without_scheme)
-        .trim_end_matches('/');
-    let mut segments = without_query
-        .split('/')
-        .filter(|segment| !segment.is_empty());
-    let Some(host) = segments.next() else {
-        return truncate_with_ellipsis(trimmed, max_chars);
-    };
-    let path_segments: Vec<&str> = segments.collect();
-    let compact = match path_segments.as_slice() {
-        [] => host.to_string(),
-        [only] => format!("{host}/{only}"),
-        [first, second] => format!("{host}/{first}/{second}"),
-        [first, .., last] => format!("{host}/{first}/.../{last}"),
-    };
-    truncate_with_ellipsis(&compact, max_chars)
-}
-
-fn compact_triage_tag_count(tags: &[String]) -> Option<String> {
-    if tags.is_empty() {
-        return None;
-    }
-    if tags.len() == 1 {
-        Some("1 tag".to_string())
-    } else {
-        Some(format!("{} tags", tags.len()))
-    }
-}
-
-fn title_case_label(value: &str) -> String {
-    let mut out = Vec::new();
-    for word in value.split(['-', '_', ' ']).filter(|word| !word.is_empty()) {
-        let mut chars = word.chars();
-        let Some(first) = chars.next() else {
-            continue;
-        };
-        let rest: String = chars.collect();
-        out.push(format!(
-            "{}{}",
-            first.to_uppercase(),
-            rest.to_ascii_lowercase()
-        ));
-    }
-    if out.is_empty() {
-        value.trim().to_string()
-    } else {
-        out.join(" ")
-    }
-}
-
-fn domain_from_url(url: &str) -> String {
-    let trimmed = url.trim();
-    let without_scheme = trimmed
-        .find("://")
-        .map(|pos| &trimmed[pos + 3..])
-        .unwrap_or(trimmed);
-    let host = without_scheme
-        .split(['/', '?', '#'])
-        .next()
-        .unwrap_or(without_scheme)
-        .trim_end_matches('/');
-    if host.is_empty() {
-        trimmed.to_string()
-    } else {
-        host.to_string()
-    }
-}
-
-fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
-    let trimmed = value.trim();
-    let char_count = trimmed.chars().count();
-    if char_count <= max_chars {
-        return trimmed.to_string();
-    }
-    if max_chars <= 3 {
-        return ".".repeat(max_chars);
-    }
-
-    let prefix: String = trimmed.chars().take(max_chars - 3).collect();
-    format!("{prefix}...")
-}
-
-fn format_compact_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-
-    if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
-fn strip_leading_h1(text: &str) -> &str {
-    let trimmed = text.trim_start();
-    if let Some(rest) = trimmed.strip_prefix("# ") {
-        let end = rest.find('\n').map_or(rest.len(), |i| i + 1);
-        rest[end..].trim_start_matches('\n')
-    } else {
-        trimmed
-    }
-}
-
-fn truncate_markdown_for_preview(text: &str) -> (String, bool) {
-    let total_chars = text.chars().count();
-    if total_chars <= MAX_VIEWER_CHARS {
-        return (text.to_string(), false);
-    }
-
-    let cutoff = text
-        .char_indices()
-        .nth(MAX_VIEWER_CHARS)
-        .map(|(idx, _)| idx)
-        .unwrap_or(text.len());
-    (text[..cutoff].to_string(), true)
-}
 
 #[cfg(test)]
 #[rustfmt::skip]
