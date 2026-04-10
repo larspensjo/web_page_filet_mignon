@@ -41,8 +41,6 @@ use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::Win32PlatformHandler;
 
 const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
-const MENU_ACTION_ARCHIVE: MenuActionId = MenuActionId(2);
-const MENU_ACTION_PROMPT_LAB: MenuActionId = MenuActionId(3);
 const ARCHIVE_DIALOG_CONTEXT_PREFIX: &str = "archive:";
 const ARCHIVE_DIALOG_FILENAME_FIELD_ID: &str = "archive.basename";
 const ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID: &str = "archive.set_checkpoint";
@@ -808,29 +806,6 @@ impl AppEventHandler {
             &mut self.tree_render_state,
         ));
     }
-
-    fn toggle_prompt_lab_from_menu(&self) {
-        let (input_panel_visible, prompt_lab_visible) = self
-            .shared
-            .lock()
-            .map(|guard| {
-                let view = guard.state.view();
-                (view.input_panel_visible, view.left_pane.prompt_lab.visible)
-            })
-            .unwrap_or((false, false));
-        if !prompt_lab_visible && !input_panel_visible {
-            let _ = self.msg_tx.send(Msg::ToggleInputPanel);
-        }
-        let msg = if prompt_lab_visible {
-            Msg::PromptLabCloseRequested
-        } else {
-            Msg::PromptLabOpenRequested
-        };
-        let _ = self.msg_tx.send(msg.clone());
-        if matches!(msg, Msg::PromptLabOpenRequested) {
-            let _ = self.msg_tx.send(Msg::PromptLabContextEditorOpened);
-        }
-    }
 }
 
 impl Drop for AppEventHandler {
@@ -869,6 +844,11 @@ impl PlatformEventHandler for AppEventHandler {
                 if control_id == ui::constants::BUTTON_OPEN_BROWSER =>
             {
                 let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_ARCHIVE =>
+            {
+                let _ = self.msg_tx.send(Msg::ArchiveClicked);
             }
             AppEvent::TabBarSelectionChanged {
                 control_id,
@@ -1080,12 +1060,6 @@ impl PlatformEventHandler for AppEventHandler {
             }
             AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ADD_URL => {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
-            }
-            AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_ARCHIVE => {
-                let _ = self.msg_tx.send(Msg::ArchiveClicked);
-            }
-            AppEvent::MenuActionClicked { action_id } if action_id == MENU_ACTION_PROMPT_LAB => {
-                self.toggle_prompt_lab_from_menu();
             }
             AppEvent::FormDialogCompleted {
                 window_id,
@@ -1927,6 +1901,17 @@ mod tests {
     }
 
     #[test]
+    fn archive_footer_button_emits_archive_clicked() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BUTTON_ARCHIVE,
+        });
+        let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
+        assert_eq!(msg, Msg::ArchiveClicked);
+    }
+
+    #[test]
     fn prompt_lab_action_buttons_emit_expected_msgs() {
         let (mut handler, rx) = test_handler_with_outbound();
         handler.handle_event(AppEvent::ButtonClicked {
@@ -2211,45 +2196,6 @@ mod tests {
             Msg::JobListScopeSet {
                 scope: JobListScope::All
             }
-        );
-    }
-
-    #[test]
-    fn prompt_lab_menu_action_emits_open_then_close() {
-        let (mut handler, rx) = test_handler_with_outbound();
-        handler.handle_event(AppEvent::MenuActionClicked {
-            action_id: MENU_ACTION_PROMPT_LAB,
-        });
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250))
-                .expect("input panel open"),
-            Msg::ToggleInputPanel
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250))
-                .expect("lab open"),
-            Msg::PromptLabOpenRequested
-        );
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250))
-                .expect("context open"),
-            Msg::PromptLabContextEditorOpened
-        );
-
-        {
-            let mut guard = handler.shared.lock().expect("shared lock");
-            let (state, _) = update(
-                std::mem::take(&mut guard.state),
-                Msg::PromptLabOpenRequested,
-            );
-            guard.state = state;
-        }
-        handler.handle_event(AppEvent::MenuActionClicked {
-            action_id: MENU_ACTION_PROMPT_LAB,
-        });
-        assert_eq!(
-            rx.recv_timeout(Duration::from_millis(250)).expect("close"),
-            Msg::PromptLabCloseRequested
         );
     }
 }

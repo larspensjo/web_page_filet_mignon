@@ -11,8 +11,6 @@ use harvester_core::{
 use super::constants::*;
 
 const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
-const MENU_ACTION_ARCHIVE: MenuActionId = MenuActionId(2);
-const MENU_ACTION_PROMPT_LAB: MenuActionId = MenuActionId(3);
 
 const PROMPT_LAB_ROW_HEIGHT_STANDARD: i32 = 26;
 const PROMPT_LAB_ROW_HEIGHT_ACTION: i32 = 28;
@@ -104,23 +102,11 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         menu_items: vec![MenuItemConfig {
             action: None,
             text: "File".to_string(),
-            children: vec![
-                MenuItemConfig {
-                    action: Some(MENU_ACTION_ADD_URL),
-                    text: "Add URL...\tCtrl+L".to_string(),
-                    children: Vec::new(),
-                },
-                MenuItemConfig {
-                    action: Some(MENU_ACTION_ARCHIVE),
-                    text: "Archive...".to_string(),
-                    children: Vec::new(),
-                },
-                MenuItemConfig {
-                    action: Some(MENU_ACTION_PROMPT_LAB),
-                    text: "Prompt Lab...".to_string(),
-                    children: Vec::new(),
-                },
-            ],
+            children: vec![MenuItemConfig {
+                action: Some(MENU_ACTION_ADD_URL),
+                text: "Add URL...\tCtrl+L".to_string(),
+                children: Vec::new(),
+            }],
         }],
     });
 
@@ -798,7 +784,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         window_id,
         parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_POLL_SOURCES,
-        text: "Poll Sources".to_string(),
+        text: "Poll sources".to_string(),
     });
     commands.push(PlatformCommand::CreateButton {
         window_id,
@@ -818,6 +804,12 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
         parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_OPEN_BROWSER,
         text: "Open in Browser".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_BUTTONS),
+        control_id: BUTTON_ARCHIVE,
+        text: "Archive".to_string(),
     });
 
     commands.push(PlatformCommand::CreateLabel {
@@ -2005,6 +1997,14 @@ fn build_layout_rules(
             fixed_size: Some(144),
             margin: (0, 6, 6, 6),
         },
+        LayoutRule {
+            control_id: BUTTON_ARCHIVE,
+            parent_control_id: Some(PANEL_BUTTONS),
+            dock_style: DockStyle::Left,
+            order: 5,
+            fixed_size: Some(112),
+            margin: (0, 6, 6, 6),
+        },
     ];
 
     // Always emit Prompt Lab sub-panel rules; tab collapse handles outer visibility.
@@ -2768,7 +2768,7 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_POLL_SOURCES,
-        style_id: StyleId::SecondaryButton,
+        style_id: StyleId::PrimaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
@@ -2778,11 +2778,16 @@ fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_BRIEFING,
-        style_id: StyleId::PrimaryButton,
+        style_id: StyleId::SecondaryButton,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
         control_id: BUTTON_OPEN_BROWSER,
+        style_id: StyleId::SecondaryButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_ARCHIVE,
         style_id: StyleId::SecondaryButton,
     });
     for control_id in [
@@ -3757,7 +3762,12 @@ mod tests {
     #[test]
     fn secondary_footer_buttons_use_secondary_button_style() {
         let cmds = initial_commands(WindowId::new(99));
-        for button_id in [BUTTON_TRIAGE, BUTTON_POLL_SOURCES, BUTTON_OPEN_BROWSER] {
+        for button_id in [
+            BUTTON_TRIAGE,
+            BUTTON_BRIEFING,
+            BUTTON_OPEN_BROWSER,
+            BUTTON_ARCHIVE,
+        ] {
             let has_style = cmds.iter().any(|cmd| {
                 matches!(
                     cmd,
@@ -3774,6 +3784,25 @@ mod tests {
                 button_id
             );
         }
+    }
+
+    #[test]
+    fn poll_sources_uses_primary_button_style() {
+        let cmds = initial_commands(WindowId::new(100));
+        let has_style = cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::ApplyStyleToControl {
+                    control_id,
+                    style_id: StyleId::PrimaryButton,
+                    ..
+                } if *control_id == BUTTON_POLL_SOURCES
+            )
+        });
+        assert!(
+            has_style,
+            "BUTTON_POLL_SOURCES should receive PrimaryButton style"
+        );
     }
 
     #[test]
@@ -3862,6 +3891,7 @@ mod tests {
             BUTTON_TRIAGE,
             BUTTON_POLL_SOURCES,
             BUTTON_OPEN_BROWSER,
+            BUTTON_ARCHIVE,
         ] {
             let rule = rules
                 .iter()
@@ -3920,6 +3950,7 @@ mod tests {
                 (2, BUTTON_TRIAGE),
                 (3, BUTTON_BRIEFING),
                 (4, BUTTON_OPEN_BROWSER),
+                (5, BUTTON_ARCHIVE),
             ]
         );
     }

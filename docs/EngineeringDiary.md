@@ -1231,3 +1231,9 @@ Change: Step 1 — moved the entire inline `#[cfg(test)]` block (~2,230 lines) i
 Lessons Learned: PowerShell `[System.IO.File]::WriteAllLines` silently truncated files to 0 bytes in this terminal session on every attempt. Python (`python script.py`) was the only reliable large-file mutation path in this workspace.
 Prevention: For large Rust file deletions (> ~100 lines), prefer a Python helper script over PowerShell file-write patterns; keep the script in `scripts/` temporarily and delete after validation.
 Refs: crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_tests.rs, docs/plans/Plan.RenderRsRefactor.md, commit 0bbdcd8 (Step 1)
+
+## 2026-04-10 - Footer archive action and polling emphasis
+Type: UI Change
+Context: The app footer still treated briefing as the primary action and kept Archive plus Prompt Lab entry points in the File menu.
+Change: Made `Poll sources` the footer primary action, demoted `Generate Briefing`, added an `Archive` footer button at the end of the row, and removed the File menu entries for Archive and Prompt Lab while keeping Add URL in the menu.
+Refs: crates/harvester_app/src/platform/ui/layout.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/constants.rs
