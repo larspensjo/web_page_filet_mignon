@@ -1305,14 +1305,14 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         (
             StyleId::BadgePriorityLow,
             Color {
-                r: 0x56,
-                g: 0x5C,
-                b: 0x66,
+                r: 0x3D,
+                g: 0x3D,
+                b: 0x3A,
             },
             Color {
-                r: 0xF0,
-                g: 0xF3,
-                b: 0xF5,
+                r: 0xB0,
+                g: 0xAE,
+                b: 0xA5,
             },
         ),
         (
