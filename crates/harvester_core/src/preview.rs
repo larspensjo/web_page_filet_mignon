@@ -56,8 +56,17 @@ pub fn format_triage_for_preview(title: Option<&str>, result: &ArticleTriageResu
         result.priority
     );
     out.push('\n');
-    if !result.tags.is_empty() {
-        let _ = writeln!(out, "Tags: {}", result.tags.join(", "));
+    let chips: Vec<String> = result
+        .tags
+        .iter()
+        .filter_map(|tag| sanitize_tag_for_chip(tag))
+        .map(|tag| format!("`{tag}`"))
+        .collect();
+    if !chips.is_empty() {
+        // Each chip is an inline code span so the RTF renderer shows them
+        // as shaded chips in the preview pane. See sanitize_tag_for_chip
+        // for why tag text must be normalized before wrapping in backticks.
+        let _ = writeln!(out, "Tags: {}", chips.join(" "));
         out.push('\n');
     }
     let _ = writeln!(out, "## Why It Matters");
@@ -171,6 +180,27 @@ fn title_case_label(value: &str) -> String {
     }
 }
 
+/// Prepare an LLM-produced tag string for rendering as a markdown inline
+/// code chip. Strips backticks (which would close the span) and CR/LF
+/// (which would break the paragraph), and trims surrounding whitespace.
+/// Returns `None` if nothing remains.
+fn sanitize_tag_for_chip(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .chars()
+        .map(|ch| match ch {
+            '`' => '\u{2032}', // U+2032 PRIME — visually similar, inert in markdown
+            '\n' | '\r' => ' ',
+            other => other,
+        })
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,7 +218,9 @@ mod tests {
         let formatted = format_triage_for_preview(Some("New vulnerability disclosed"), &result);
         assert!(formatted.contains("# New vulnerability disclosed"));
         assert!(formatted.contains("Security · Priority P7"));
-        assert!(formatted.contains("Tags: vulnerability, zero-day"));
+        // Each tag is wrapped in a backtick span so the RTF preview renders
+        // them as shaded chips (see markdown_to_rtf::convert_markdown_to_rtf).
+        assert!(formatted.contains("Tags: `vulnerability` `zero-day`"));
         assert!(formatted.contains("## Why It Matters"));
         assert!(!formatted.contains("## Signals"));
         assert!(formatted.contains("newly discovered vulnerability"));
@@ -258,5 +290,70 @@ mod tests {
         assert!(formatted.contains("No Analysis Available Yet"));
         assert!(formatted.contains("Triage"));
         assert!(formatted.contains("Briefing"));
+    }
+
+    #[test]
+    fn triage_formatter_sanitizes_backticks_in_tag_text() {
+        // A tag containing a literal backtick must not be allowed to close the
+        // inline code span. Verify the output contains no adjacent backticks
+        // (which would indicate a broken span) and that the sanitized form is
+        // present.
+        let result = ArticleTriageResult {
+            category: "Security".to_string(),
+            priority: 3,
+            tags: vec!["back`tick".to_string(), "clean".to_string()],
+            rationale: "test".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+        let formatted = format_triage_for_preview(Some("t"), &result);
+        // No "``" — that would mean a code span got closed and reopened.
+        assert!(
+            !formatted.contains("``"),
+            "formatter must not emit adjacent backticks; got: {formatted}"
+        );
+        // Sanitized form: backtick replaced with U+2032 PRIME.
+        assert!(formatted.contains("`back\u{2032}tick`"));
+        assert!(formatted.contains("`clean`"));
+    }
+
+    #[test]
+    fn triage_formatter_sanitizes_newlines_in_tag_text() {
+        let result = ArticleTriageResult {
+            category: "Security".to_string(),
+            priority: 3,
+            tags: vec!["line1\nline2".to_string(), "tab\rreturn".to_string()],
+            rationale: "test".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+        let formatted = format_triage_for_preview(Some("t"), &result);
+        // The Tags: line stays on a single line; no stray CR/LF leaks into a chip.
+        let tags_line = formatted
+            .lines()
+            .find(|line| line.starts_with("Tags:"))
+            .expect("Tags: line present");
+        assert!(!tags_line.contains('\r'));
+        assert!(tags_line.contains("`line1 line2`"));
+        assert!(tags_line.contains("`tab return`"));
+    }
+
+    #[test]
+    fn triage_formatter_drops_empty_tags_after_sanitization() {
+        let result = ArticleTriageResult {
+            category: "Security".to_string(),
+            priority: 3,
+            tags: vec!["  ".to_string(), "keep".to_string(), "\n\n".to_string()],
+            rationale: "test".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+        let formatted = format_triage_for_preview(Some("t"), &result);
+        let tags_line = formatted
+            .lines()
+            .find(|line| line.starts_with("Tags:"))
+            .expect("Tags: line present");
+        // Only the non-empty sanitized tag survives.
+        assert_eq!(tags_line.trim(), "Tags: `keep`");
     }
 }
