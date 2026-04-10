@@ -1269,10 +1269,27 @@ Prevention: Before moving a `pub(crate)` function to a submodule, run a workspac
 Refs: crates/harvester_app/src/platform/ui/render_prompt_lab.rs, crates/harvester_app/src/platform/ui/render_preview.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_tests.rs, docs/plans/Plan.RenderRsRefactor.md
 
 ## 2026-04-10 — Visual spec polish (priority badges + tag chips)
-
 Closed three VisualDesignSpec gaps in the reading and list panes:
 - `triage_priority_style` now spans the 1-5 triage scale (render_list_box.rs).
 - `BadgePriorityLow` warmed to the spec's Surface Overlay neutral (layout.rs).
 - Triage preview tags render as shaded chips via new inline-code RTF shading
   (markdown_to_rtf.rs + preview.rs).
 See docs/visual_design/Plan.visual-spec-ui-polish.md for the full rationale.
+
+## 2026-04-10 - Split pre-triage refresh tests out of update/tests/mod.rs
+Type: Refactor
+Context: `crates/harvester_core/src/update/tests/mod.rs` had grown past 4,000 lines, which conflicted with the repo goal of keeping `mod.rs` files as thin wrappers.
+Change: Moved the pre-triage refresh and poll-burst test slice into `crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs`, leaving `mod.rs` as shared fixtures plus child-module declarations. Kept the shared helper setup in `mod.rs` for now because earlier update tests still depend on it.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs
+
+## 2026-04-10 - Split Prompt Lab tests out of update/tests/mod.rs
+Type: Refactor
+Context: After the pre-triage extraction, `crates/harvester_core/src/update/tests/mod.rs` still mixed a large Prompt Lab reducer suite with briefing, archive, and shared fixture code.
+Change: Moved the contiguous Prompt Lab reducer, routing, override, and compare-batch tests into `crates/harvester_core/src/update/tests/prompt_lab_tests.rs`. Left shared helpers like `prepare_type_url_snapshot` and `dispatch_lab_run` in `mod.rs` because later Prompt Lab aggregate-history tests still depend on them.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/prompt_lab_tests.rs
+
+## 2026-04-10 - Split archive and checkpoint tests out of update/tests/mod.rs
+Type: Refactor
+Context: `crates/harvester_core/src/update/tests/mod.rs` still bundled archive dialog, checkpoint persistence, pinned corpus, and pre-triage handoff tests into the main module after the earlier test extractions.
+Change: Moved the archive-focused reducer and integration slice into `crates/harvester_core/src/update/tests/archive_tests.rs`, including archive-only helpers for completing triage requests and building `TriageComplete` state. Kept `prime_llm_metadata` in `mod.rs` because an earlier AI-availability test still uses it.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/archive_tests.rs
