@@ -1267,3 +1267,9 @@ Change: Step 7 — Created `render_prompt_lab.rs` (632 lines): `render_prompt_la
 Lessons Learned: `pub(crate) use` in render.rs lets submodule-extracted functions remain at their original public call site without moving all callers; the re-export pattern is cleaner than keeping a forwarding wrapper. Test files that import via `use super::*` silently depend on every import in the parent module; each time a parent import is removed after extraction, the test file needs explicit imports for the displaced symbols. Checking external `pub(crate)` usage before moving a function prevents unexpected caller breakage.
 Prevention: Before moving a `pub(crate)` function to a submodule, run a workspace-wide grep for callers outside the current module. After running an extraction script, check for `use super::*` in any test file that compiles through the module and add explicit imports for symbols no longer brought in by the parent.
 Refs: crates/harvester_app/src/platform/ui/render_prompt_lab.rs, crates/harvester_app/src/platform/ui/render_preview.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_tests.rs, docs/plans/Plan.RenderRsRefactor.md
+
+## 2026-04-10 - Split pre-triage refresh tests out of update/tests/mod.rs
+Type: Refactor
+Context: `crates/harvester_core/src/update/tests/mod.rs` had grown past 4,000 lines, which conflicted with the repo goal of keeping `mod.rs` files as thin wrappers.
+Change: Moved the pre-triage refresh and poll-burst test slice into `crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs`, leaving `mod.rs` as shared fixtures plus child-module declarations. Kept the shared helper setup in `mod.rs` for now because earlier update tests still depend on it.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs
