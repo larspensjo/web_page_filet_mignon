@@ -1273,3 +1273,9 @@ Type: Refactor
 Context: `crates/harvester_core/src/update/tests/mod.rs` had grown past 4,000 lines, which conflicted with the repo goal of keeping `mod.rs` files as thin wrappers.
 Change: Moved the pre-triage refresh and poll-burst test slice into `crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs`, leaving `mod.rs` as shared fixtures plus child-module declarations. Kept the shared helper setup in `mod.rs` for now because earlier update tests still depend on it.
 Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs
+
+## 2026-04-10 - Split Prompt Lab tests out of update/tests/mod.rs
+Type: Refactor
+Context: After the pre-triage extraction, `crates/harvester_core/src/update/tests/mod.rs` still mixed a large Prompt Lab reducer suite with briefing, archive, and shared fixture code.
+Change: Moved the contiguous Prompt Lab reducer, routing, override, and compare-batch tests into `crates/harvester_core/src/update/tests/prompt_lab_tests.rs`. Left shared helpers like `prepare_type_url_snapshot` and `dispatch_lab_run` in `mod.rs` because later Prompt Lab aggregate-history tests still depend on them.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/prompt_lab_tests.rs
