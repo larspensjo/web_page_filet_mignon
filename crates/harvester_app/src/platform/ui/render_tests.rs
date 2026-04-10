@@ -820,6 +820,58 @@
     }
 
     #[test]
+    fn scope_since_checkpoint_skips_selection_for_filtered_job() {
+        init_logging();
+        let window_id = WindowId::new(61);
+        let mut tree_state = TreeRenderState::new();
+
+        let mut job_in = make_job(
+            1,
+            "https://a.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        job_in.is_since_checkpoint = true;
+        job_in.has_summary = true;
+        job_in.summary_title = Some("In Scope".to_string());
+
+        let mut job_out = make_job(
+            2,
+            "https://b.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        job_out.is_since_checkpoint = false;
+        job_out.has_summary = true;
+        job_out.summary_title = Some("Out of Scope".to_string());
+
+        let mut view = make_view(vec![job_in, job_out]);
+        view.selected_job_id = Some(2);
+        view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+
+        let cmds = render(window_id, &view, &mut tree_state);
+
+        assert!(cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::PopulateListBox { items, .. }
+                    if items.iter().all(|item| item.id != ListBoxItemId(2))
+            )
+        }));
+        assert!(!cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::SetListBoxSelection { control_id, item_id, .. }
+                    if *control_id == TREE_JOBS && *item_id == ListBoxItemId(2)
+            )
+        }));
+    }
+
+    #[test]
     fn scope_all_shows_all_jobs() {
         init_logging();
 

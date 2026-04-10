@@ -341,8 +341,8 @@ pub fn render(
     render_main_controls_section(window_id, view, tree_state, &mut cmds);
     render_prompt_lab_section(window_id, view, tree_state, &mut cmds);
 
-    let list_items = build_list_box_items(view);
-    append_list_box_commands(window_id, view, list_items, &mut cmds);
+    let list_box = ListBoxRenderModel::from_view(view);
+    append_list_box_commands(window_id, list_box, &mut cmds);
 
     render_preview_section(window_id, view, tree_state, &mut cmds);
 
@@ -1653,10 +1653,13 @@ fn prompt_lab_metadata_text(prompt_lab: &harvester_core::PromptLabView) -> Strin
 
 fn append_list_box_commands(
     window_id: WindowId,
-    view: &AppViewModel,
-    items: Vec<ListBoxItemDescriptor>,
+    list_box: ListBoxRenderModel,
     cmds: &mut Vec<PlatformCommand>,
 ) {
+    let ListBoxRenderModel {
+        items,
+        selected_item_id,
+    } = list_box;
     let badge_column_width = compute_list_box_badge_column_width(&items);
     let badge_column_width = badge_column_width.clamp(0, u16::MAX as i32) as u16;
     cmds.push(PlatformCommand::PopulateListBox {
@@ -1665,12 +1668,31 @@ fn append_list_box_commands(
         items,
         badge_column_width,
     });
-    if let Some(selected_job_id) = view.selected_job_id {
+    if let Some(item_id) = selected_item_id {
         cmds.push(PlatformCommand::SetListBoxSelection {
             window_id,
             control_id: TREE_JOBS,
-            item_id: ListBoxItemId(selected_job_id),
+            item_id,
         });
+    }
+}
+
+struct ListBoxRenderModel {
+    items: Vec<ListBoxItemDescriptor>,
+    selected_item_id: Option<ListBoxItemId>,
+}
+
+impl ListBoxRenderModel {
+    fn from_view(view: &AppViewModel) -> Self {
+        let items = build_list_box_items(view);
+        let selected_item_id = view
+            .selected_job_id
+            .map(ListBoxItemId)
+            .filter(|selected_item_id| items.iter().any(|item| item.id == *selected_item_id));
+        Self {
+            items,
+            selected_item_id,
+        }
     }
 }
 
@@ -2551,5 +2573,6 @@ fn truncate_markdown_for_preview(text: &str) -> (String, bool) {
 }
 
 #[cfg(test)]
+#[rustfmt::skip]
 #[path = "render_tests.rs"]
 mod tests;

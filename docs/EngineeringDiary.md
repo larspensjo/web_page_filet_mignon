@@ -1217,3 +1217,9 @@ Type: Refactor
 Context: The first `harvester_core::state` split left `state/mod.rs` above the rough target size, with cache metadata and briefing orchestration still mixed into the wrapper.
 Change: Moved summary/triage cache metadata and metrics into `state/cache_state.rs`, moved briefing orchestration into `state/briefing_orchestration.rs`, and kept `state/mod.rs` focused on `AppState`, core job/session state, and the remaining transitions. The follow-up brought `state/mod.rs` down to 1792 lines.
 Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/cache_state.rs, crates/harvester_core/src/state/briefing_orchestration.rs
+
+## 2026-04-10 - Archive checkpoint export avoids stale list selection
+Type: Bug Fix
+Context: Exporting an archive with "set checkpoint" enabled could move the selected job outside the active Since Checkpoint list scope, then the renderer still asked CommanDuctUI to select the filtered-out list item and logged an invalid handle error.
+Change: Derived list-box items and selected item together in a render model so selection commands are emitted only for items present in the populated list, and added a render regression test for a filtered selected job.
+Refs: crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_tests.rs, engine.log
