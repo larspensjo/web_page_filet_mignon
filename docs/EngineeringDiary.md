@@ -1267,3 +1267,12 @@ Change: Step 7 — Created `render_prompt_lab.rs` (632 lines): `render_prompt_la
 Lessons Learned: `pub(crate) use` in render.rs lets submodule-extracted functions remain at their original public call site without moving all callers; the re-export pattern is cleaner than keeping a forwarding wrapper. Test files that import via `use super::*` silently depend on every import in the parent module; each time a parent import is removed after extraction, the test file needs explicit imports for the displaced symbols. Checking external `pub(crate)` usage before moving a function prevents unexpected caller breakage.
 Prevention: Before moving a `pub(crate)` function to a submodule, run a workspace-wide grep for callers outside the current module. After running an extraction script, check for `use super::*` in any test file that compiles through the module and add explicit imports for symbols no longer brought in by the parent.
 Refs: crates/harvester_app/src/platform/ui/render_prompt_lab.rs, crates/harvester_app/src/platform/ui/render_preview.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_tests.rs, docs/plans/Plan.RenderRsRefactor.md
+
+## 2026-04-10 — Visual spec polish (priority badges + tag chips)
+
+Closed three VisualDesignSpec gaps in the reading and list panes:
+- `triage_priority_style` now spans the 1-5 triage scale (render_list_box.rs).
+- `BadgePriorityLow` warmed to the spec's Surface Overlay neutral (layout.rs).
+- Triage preview tags render as shaded chips via new inline-code RTF shading
+  (markdown_to_rtf.rs + preview.rs).
+See docs/visual_design/Plan.visual-spec-ui-polish.md for the full rationale.
