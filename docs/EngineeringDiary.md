@@ -1279,3 +1279,9 @@ Type: Refactor
 Context: After the pre-triage extraction, `crates/harvester_core/src/update/tests/mod.rs` still mixed a large Prompt Lab reducer suite with briefing, archive, and shared fixture code.
 Change: Moved the contiguous Prompt Lab reducer, routing, override, and compare-batch tests into `crates/harvester_core/src/update/tests/prompt_lab_tests.rs`. Left shared helpers like `prepare_type_url_snapshot` and `dispatch_lab_run` in `mod.rs` because later Prompt Lab aggregate-history tests still depend on them.
 Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/prompt_lab_tests.rs
+
+## 2026-04-10 - Split archive and checkpoint tests out of update/tests/mod.rs
+Type: Refactor
+Context: `crates/harvester_core/src/update/tests/mod.rs` still bundled archive dialog, checkpoint persistence, pinned corpus, and pre-triage handoff tests into the main module after the earlier test extractions.
+Change: Moved the archive-focused reducer and integration slice into `crates/harvester_core/src/update/tests/archive_tests.rs`, including archive-only helpers for completing triage requests and building `TriageComplete` state. Kept `prime_llm_metadata` in `mod.rs` because an earlier AI-availability test still uses it.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/archive_tests.rs
