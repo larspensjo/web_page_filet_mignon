@@ -1293,3 +1293,15 @@ Type: Refactor
 Context: `crates/harvester_core/src/update/tests/mod.rs` still bundled archive dialog, checkpoint persistence, pinned corpus, and pre-triage handoff tests into the main module after the earlier test extractions.
 Change: Moved the archive-focused reducer and integration slice into `crates/harvester_core/src/update/tests/archive_tests.rs`, including archive-only helpers for completing triage requests and building `TriageComplete` state. Kept `prime_llm_metadata` in `mod.rs` because an earlier AI-availability test still uses it.
 Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/archive_tests.rs
+
+## 2026-04-11 - Extract shared update test fixtures into support.rs
+Type: Refactor
+Context: After the feature-slice extractions, `crates/harvester_core/src/update/tests/mod.rs` still carried the shared briefing, triage, Prompt Lab, and pre-triage fixture helpers, so the file was smaller but not yet a thin wrapper.
+Change: Moved the shared helper surface into `crates/harvester_core/src/update/tests/support.rs` and rewired `mod.rs` plus the extracted child modules to use that support module instead of local helper definitions. Result: `mod.rs` dropped to 1,358 lines and now contains mostly direct tests plus submodule declarations.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/support.rs
+
+## 2026-04-11 - Split triage reducer tests out of update/tests/mod.rs
+Type: Refactor
+Context: After the support extraction, `crates/harvester_core/src/update/tests/mod.rs` still kept the largest remaining cohesive reducer slice: triage dispatch, concurrency-limit, quota-failure, and briefing/triage blocking tests.
+Change: Moved that cluster into `crates/harvester_core/src/update/tests/triage_tests.rs` and left `mod.rs` focused on briefing-history, entity-index, and smaller state/UI reducer tests. Result: `mod.rs` dropped again to 1,233 lines.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/triage_tests.rs
