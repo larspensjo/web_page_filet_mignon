@@ -1211,9 +1211,9 @@ fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
         style_id: StyleId::ListBoxSelectedRow,
         style: ControlStyle {
             background_color: Some(Color {
-                r: 0x3D,
-                g: 0x3D,
-                b: 0x3A,
+                r: 0x2C,
+                g: 0x23,
+                b: 0x21,
             }),
             text_color: Some(Color {
                 r: 0xFA,
