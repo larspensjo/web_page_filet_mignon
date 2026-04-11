@@ -1305,3 +1305,9 @@ Type: Refactor
 Context: After the support extraction, `crates/harvester_core/src/update/tests/mod.rs` still kept the largest remaining cohesive reducer slice: triage dispatch, concurrency-limit, quota-failure, and briefing/triage blocking tests.
 Change: Moved that cluster into `crates/harvester_core/src/update/tests/triage_tests.rs` and left `mod.rs` focused on briefing-history, entity-index, and smaller state/UI reducer tests. Result: `mod.rs` dropped again to 1,233 lines.
 Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/triage_tests.rs
+
+## 2026-04-11 - Finish update/tests/mod.rs wrapper conversion
+Type: Refactor
+Context: `crates/harvester_core/src/update/tests/mod.rs` still mixed briefing-history, entity-index, and UI/state reducer tests after the earlier feature-slice extractions, so it was smaller but still not acting like a wrapper.
+Change: Moved the remaining briefing-history and aggregate-request assertions into `crates/harvester_core/src/update/tests/briefing_history_tests.rs`, the trend/entity-index reducer tests into `crates/harvester_core/src/update/tests/entity_index_tests.rs`, and the LeftTab / JobListScope / AI-availability reducer tests into `crates/harvester_core/src/update/tests/ui_state_tests.rs`. Result: `mod.rs` dropped to 503 lines and now mainly holds the early briefing/cache/browser tests plus child-module declarations.
+Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/briefing_history_tests.rs, crates/harvester_core/src/update/tests/ui_state_tests.rs
