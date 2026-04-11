@@ -256,7 +256,7 @@ fn triage_review_items_show_indirect_badge_and_disabled_state() {
     assert_eq!(item.badges[0].text, "Excluded");
     assert_eq!(item.badges[1].text, "Indirect");
     assert_eq!(item.badges[1].style, StyleId::BadgeIndirect);
-    assert_eq!(item.metadata, "Security · example.com");
+    assert_eq!(item.metadata, "Security");
 }
 
 #[test]
@@ -291,6 +291,9 @@ fn triage_results_priority_badge_maps_full_scale() {
         );
         assert_eq!(item.badges[1].text, "Business");
         assert_eq!(item.badges[1].style, StyleId::BadgeCategory);
+        // Metadata should NOT repeat the domain — the URL in the title row
+        // already shows it. Only the tag count remains.
+        assert_eq!(item.metadata, "1 tag");
     }
 }
 
@@ -731,11 +734,6 @@ fn triage_results_tab_keeps_stable_order_while_triage_in_progress() {
         populated[0].title
     );
     assert!(
-        populated[0].metadata.contains("low.com"),
-        "first should still show the source label, got: {}",
-        populated[0].metadata
-    );
-    assert!(
         populated[0].metadata.contains("0 tags"),
         "first should still show zero tags, got: {}",
         populated[0].metadata
@@ -831,7 +829,6 @@ fn triage_results_in_progress_updates_rows_without_repopulating_tree() {
     assert_eq!(populated.len(), 2);
     assert_eq!(populated[0].id, ListBoxItemId(1));
     assert!(populated[0].title.contains("Now Highest"));
-    assert!(populated[0].metadata.contains("low.com"));
     assert!(populated[0].metadata.contains("0 tags"));
 }
 

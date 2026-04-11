@@ -175,22 +175,16 @@ pub(super) fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItem
                 .map(format_compact_bytes)
                 .unwrap_or_else(|| "—".to_string())
         ),
-        LeftTab::TriageReview => {
-            let category = job
-                .triage_annotation
-                .as_ref()
-                .map(|triage| title_case_label(&triage.category))
-                .unwrap_or_else(|| "Untriaged".to_string());
-            format!("{category} · {}", job_source_label(job))
-        }
-        LeftTab::TriageResults => {
-            let tag_count = job
-                .triage_annotation
-                .as_ref()
-                .and_then(|triage| compact_triage_tag_count(&triage.tags))
-                .unwrap_or_else(|| "0 tags".to_string());
-            format!("{} · {tag_count}", job_source_label(job))
-        }
+        LeftTab::TriageReview => job
+            .triage_annotation
+            .as_ref()
+            .map(|triage| title_case_label(&triage.category))
+            .unwrap_or_else(|| "Untriaged".to_string()),
+        LeftTab::TriageResults => job
+            .triage_annotation
+            .as_ref()
+            .and_then(|triage| compact_triage_tag_count(&triage.tags))
+            .unwrap_or_else(|| "0 tags".to_string()),
         LeftTab::PromptLab => format!("{} · {}", job_source_label(job), job_status_label(job)),
     };
     let enabled = !matches!(
