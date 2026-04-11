@@ -271,16 +271,20 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
             b: 0x13,
         },
         text_color: Color {
-            r: 0xFA,
-            g: 0xF9,
-            b: 0xF5,
+            r: 0x87,
+            g: 0x86,
+            b: 0x7F,
         },
         accent_color: Color {
-            r: 0xC9,
-            g: 0x64,
-            b: 0x42,
+            r: 0x3D,
+            g: 0x3D,
+            b: 0x3A,
         },
-        font: None,
+        font: Some(FontDescription {
+            name: Some("Segoe UI".to_string()),
+            size: Some(9),
+            weight: Some(FontWeight::Normal),
+        }),
     });
 
     // Tab content panels — all created at startup; inactive ones are collapsed.
@@ -343,16 +347,20 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
             b: 0x13,
         },
         text_color: Color {
-            r: 0xFA,
-            g: 0xF9,
-            b: 0xF5,
+            r: 0x87,
+            g: 0x86,
+            b: 0x7F,
         },
         accent_color: Color {
-            r: 0xC9,
-            g: 0x64,
-            b: 0x42,
+            r: 0x3D,
+            g: 0x3D,
+            b: 0x3A,
         },
-        font: None,
+        font: Some(FontDescription {
+            name: Some("Segoe UI".to_string()),
+            size: Some(9),
+            weight: Some(FontWeight::Normal),
+        }),
     });
     commands.push(PlatformCommand::CreateChart {
         window_id,
