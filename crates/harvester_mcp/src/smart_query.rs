@@ -501,7 +501,7 @@ impl SmartQueryEngine {
                     ],
                 )
                 .with_temperature(0.0)
-                .with_max_output_tokens(220)
+                .with_max_output_tokens(400)
                 .with_json_response(),
             )
             .await?;

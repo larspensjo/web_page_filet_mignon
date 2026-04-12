@@ -1371,3 +1371,9 @@ Type: Tooling
 Context: The original here-string Phase 2 smoke test could close stdin before `query_knowledge_base` finished, which made longer smart-query runs look like they only returned the `initialize` response.
 Change: Added `scripts/Test-HarvesterMcpSmoke.ps1`, a PowerShell 7 stdio harness that keeps `harvester_mcp` alive, sends the MCP initialize and `query_knowledge_base` requests, and prints the parsed tool payload for a query passed as an argument.
 Refs: scripts/Test-HarvesterMcpSmoke.ps1
+
+## 2026-04-12 - Make OpenAI chat parsing tolerate modern message shapes
+Type: Bug Fix
+Context: Phase 2 digest assembly could reach OpenAI and score articles successfully, then still fall back because the shared chat parser only accepted non-empty string `message.content` and collapsed newer response variants into `choice missing content`.
+Change: Updated the OpenAI chat parser to accept content-part arrays, surface assistant refusals explicitly, and annotate empty/truncated responses with the finish reason. Also raised the smart-query digest completion budget to reduce empty visible responses from GPT-5 reasoning models.
+Refs: crates/harvester_engine/src/llm/providers/openai.rs, crates/harvester_engine/tests/llm_openai.rs, crates/harvester_mcp/src/smart_query.rs
