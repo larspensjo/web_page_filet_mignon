@@ -16,6 +16,7 @@ const MAX_EXPANSION_PATTERNS: usize = 3;
 const MAX_EXPANSION_ENTITIES: usize = 5;
 const MAX_KEY_FACTS: usize = 2;
 const SCORING_CONCURRENCY: usize = 4;
+const MAX_SCORING_CANDIDATES: usize = 25;
 
 #[derive(Clone)]
 pub struct SmartQueryEngine {
@@ -78,6 +79,8 @@ struct CandidateArticle {
     key_points: Vec<String>,
     matched_patterns: Vec<String>,
     matched_entities: Vec<String>,
+    title_pattern_hits: usize,
+    url_pattern_hits: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +88,16 @@ struct ScoredCandidate {
     candidate: CandidateArticle,
     relevance_score: u8,
     key_facts: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CandidateSelection {
+    candidates: Vec<CandidateArticle>,
+    regex_match_count: usize,
+    entity_match_count: usize,
+    total_unique_candidates: usize,
+    scoring_candidates: usize,
+    capped: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -164,8 +177,17 @@ impl SmartQueryEngine {
             })?;
 
         let expansion = self.expand_query(provider.clone(), input).await?;
-        let candidates = self.collect_candidates(input, &expansion);
-        if candidates.is_empty() {
+        let selection = self.collect_candidates(input, &expansion);
+        engine_logging::engine_info!(
+            "[smart-query] candidate selection regex_matches={} entity_matches={} unique_candidates={} scoring_candidates={} capped={}",
+            selection.regex_match_count,
+            selection.entity_match_count,
+            selection.total_unique_candidates,
+            selection.scoring_candidates,
+            selection.capped
+        );
+
+        if selection.candidates.is_empty() {
             return Ok(QueryKnowledgeBaseResponse {
                 mode: "smart".to_string(),
                 question: input.question.clone(),
@@ -179,7 +201,7 @@ impl SmartQueryEngine {
         }
 
         let scored = self
-            .score_candidates(provider.clone(), input, candidates)
+            .score_candidates(provider.clone(), input, selection.candidates)
             .await?;
         let synthesis = self.assemble_digest(provider, input, &scored).await?;
         let ranked_articles = scored
@@ -275,7 +297,7 @@ impl SmartQueryEngine {
         &self,
         input: &QueryKnowledgeBaseInput,
         expansion: &QueryExpansion,
-    ) -> Vec<CandidateArticle> {
+    ) -> CandidateSelection {
         let date_from = expansion
             .date_from
             .as_deref()
@@ -288,14 +310,14 @@ impl SmartQueryEngine {
         let regexes = compile_patterns(&expansion.regex_patterns);
         let mut candidates = HashMap::new();
 
-        self.collect_regex_matches(
+        let regex_match_count = self.collect_regex_matches(
             &mut candidates,
             &regexes,
             &scope_entities,
             date_from,
             date_to,
         );
-        self.collect_entity_matches(
+        let entity_match_count = self.collect_entity_matches(
             &mut candidates,
             &expansion.entity_names,
             &scope_entities,
@@ -305,12 +327,23 @@ impl SmartQueryEngine {
 
         let mut ranked: Vec<_> = candidates.into_values().collect();
         ranked.sort_by(|left, right| {
-            match_score(right)
-                .cmp(&match_score(left))
+            deterministic_match_score(right)
+                .cmp(&deterministic_match_score(left))
                 .then_with(|| right.fetched_utc.cmp(&left.fetched_utc))
                 .then_with(|| left.filename.cmp(&right.filename))
         });
-        ranked
+        let total_unique_candidates = ranked.len();
+        let capped = ranked.len() > MAX_SCORING_CANDIDATES;
+        ranked.truncate(MAX_SCORING_CANDIDATES);
+
+        CandidateSelection {
+            scoring_candidates: ranked.len(),
+            candidates: ranked,
+            regex_match_count,
+            entity_match_count,
+            total_unique_candidates,
+            capped,
+        }
     }
 
     fn collect_regex_matches(
@@ -320,7 +353,8 @@ impl SmartQueryEngine {
         scope_entities: &[String],
         date_from: Option<&str>,
         date_to: Option<&str>,
-    ) {
+    ) -> usize {
+        let mut matched_articles = 0;
         for entry in &self.article_index.articles {
             if !date_in_range(entry.fetched_utc.as_deref(), date_from, date_to) {
                 continue;
@@ -332,11 +366,31 @@ impl SmartQueryEngine {
 
             let mut matched_patterns = Vec::new();
             let mut snippet = String::new();
+            let mut title_pattern_hits = 0usize;
+            let mut url_pattern_hits = 0usize;
             for (pattern, regex) in regexes {
-                if regex.is_match(&entry.content) {
+                let content_match = regex.is_match(&entry.content);
+                let title_match = entry
+                    .title
+                    .as_deref()
+                    .map(|title| regex.is_match(title))
+                    .unwrap_or(false);
+                let url_match = entry
+                    .url
+                    .as_deref()
+                    .map(|url| regex.is_match(url))
+                    .unwrap_or(false);
+
+                if content_match || title_match || url_match {
                     push_unique(&mut matched_patterns, pattern.clone());
                     if snippet.is_empty() {
                         snippet = build_snippet(&entry.content, regex);
+                    }
+                    if title_match {
+                        title_pattern_hits += 1;
+                    }
+                    if url_match {
+                        url_pattern_hits += 1;
                     }
                 }
             }
@@ -344,15 +398,19 @@ impl SmartQueryEngine {
             if matched_patterns.is_empty() {
                 continue;
             }
+            matched_articles += 1;
 
             let candidate = candidates
                 .entry(candidate_key(entry))
                 .or_insert_with(|| self.make_candidate(entry, entity_entry, snippet.clone()));
             merge_strings(&mut candidate.matched_patterns, matched_patterns);
+            candidate.title_pattern_hits += title_pattern_hits;
+            candidate.url_pattern_hits += url_pattern_hits;
             if candidate.snippet.is_empty() {
                 candidate.snippet = snippet;
             }
         }
+        matched_articles
     }
 
     fn collect_entity_matches(
@@ -362,7 +420,8 @@ impl SmartQueryEngine {
         scope_entities: &[String],
         date_from: Option<&str>,
         date_to: Option<&str>,
-    ) {
+    ) -> usize {
+        let mut matched_articles = HashSet::new();
         for entity_name in entity_names {
             for (url, entity_entry) in &self.entity_index.entries {
                 if !entity_entry_matches(entity_entry, entity_name) {
@@ -378,12 +437,14 @@ impl SmartQueryEngine {
                     continue;
                 }
 
+                matched_articles.insert(candidate_key(article));
                 let candidate = candidates.entry(candidate_key(article)).or_insert_with(|| {
                     self.make_candidate(article, Some(entity_entry), String::new())
                 });
                 push_unique(&mut candidate.matched_entities, entity_name.clone());
             }
         }
+        matched_articles.len()
     }
 
     fn make_candidate(
@@ -416,6 +477,8 @@ impl SmartQueryEngine {
             key_points,
             matched_patterns: Vec::new(),
             matched_entities: Vec::new(),
+            title_pattern_hits: 0,
+            url_pattern_hits: 0,
         }
     }
 
@@ -534,6 +597,7 @@ impl SmartQueryEngine {
 
         let ranked_articles = self
             .collect_candidates(input, &expansion)
+            .candidates
             .into_iter()
             .take(input.max_results.max(1))
             .map(|candidate| RankedArticleDigest {
@@ -898,6 +962,22 @@ fn match_score(candidate: &CandidateArticle) -> usize {
     candidate.matched_patterns.len() + candidate.matched_entities.len()
 }
 
+fn deterministic_match_score(candidate: &CandidateArticle) -> usize {
+    let mut score = 0usize;
+    score += candidate.title_pattern_hits * 1_000;
+    score += candidate.matched_entities.len() * 250;
+    score += candidate.matched_patterns.len() * 50;
+    score += candidate.url_pattern_hits * 25;
+    if candidate.summary.is_some() {
+        score += 10;
+    }
+    if !candidate.key_points.is_empty() {
+        score += 5;
+    }
+    score += match_score(candidate);
+    score
+}
+
 fn merge_strings(target: &mut Vec<String>, source: Vec<String>) {
     for value in source {
         push_unique(target, value);
@@ -1004,8 +1084,8 @@ mod tests {
         provider: Option<Arc<dyn LlmProvider>>,
         context_budget: usize,
     ) -> SmartQueryEngine {
-        let article_index = ArticleIndex {
-            articles: vec![
+        test_engine_with_articles(
+            vec![
                 sample_article(
                     "alpha.md",
                     "Anthropic expands security testing",
@@ -1021,40 +1101,54 @@ mod tests {
                     "# Beta\nBudget pressure and enterprise AI ROI.",
                 ),
             ],
-        };
-        let entity_index = EntityIndex {
-            schema_version: 1,
-            entries: vec![
-                (
-                    "https://example.com/alpha".to_string(),
-                    EntityIndexEntry {
-                        fetched_utc: Some("2026-04-11T16:45:55Z".to_string()),
-                        content_hash: Some("hash-alpha".to_string()),
-                        companies: vec!["Anthropic".to_string()],
-                        technologies: vec!["AI security".to_string()],
-                        products: vec![],
-                        themes: vec!["cybersecurity".to_string()],
-                    },
+            EntityIndex {
+                schema_version: 1,
+                entries: vec![
+                    (
+                        "https://example.com/alpha".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-11T16:45:55Z".to_string()),
+                            content_hash: Some("hash-alpha".to_string()),
+                            companies: vec!["Anthropic".to_string()],
+                            technologies: vec!["AI security".to_string()],
+                            products: vec![],
+                            themes: vec!["cybersecurity".to_string()],
+                        },
+                    ),
+                    (
+                        "https://example.com/beta".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-10T10:00:00Z".to_string()),
+                            content_hash: Some("hash-beta".to_string()),
+                            companies: vec!["KPMG".to_string()],
+                            technologies: vec![],
+                            products: vec![],
+                            themes: vec!["roi-metrics".to_string()],
+                        },
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            },
+            HashMap::from([(
+                "https://example.com/alpha".to_string(),
+                summary_entry(
+                    "Anthropic says stronger model evaluations improve security testing.",
                 ),
-                (
-                    "https://example.com/beta".to_string(),
-                    EntityIndexEntry {
-                        fetched_utc: Some("2026-04-10T10:00:00Z".to_string()),
-                        content_hash: Some("hash-beta".to_string()),
-                        companies: vec!["KPMG".to_string()],
-                        technologies: vec![],
-                        products: vec![],
-                        themes: vec!["roi-metrics".to_string()],
-                    },
-                ),
-            ]
-            .into_iter()
-            .collect(),
-        };
-        let summary_index = HashMap::from([(
-            "https://example.com/alpha".to_string(),
-            summary_entry("Anthropic says stronger model evaluations improve security testing."),
-        )]);
+            )]),
+            provider,
+            context_budget,
+        )
+    }
+
+    fn test_engine_with_articles(
+        articles: Vec<ArticleEntry>,
+        entity_index: EntityIndex,
+        summary_index: HashMap<String, SummaryCacheEntry>,
+        provider: Option<Arc<dyn LlmProvider>>,
+        context_budget: usize,
+    ) -> SmartQueryEngine {
+        let article_index = ArticleIndex { articles };
 
         SmartQueryEngine::new(
             Arc::new(article_index),
@@ -1064,6 +1158,60 @@ mod tests {
             "mock-model",
             context_budget,
         )
+    }
+
+    #[test]
+    fn collect_candidates_caps_and_prefers_title_hits() {
+        let mut articles = Vec::new();
+        for idx in 0..30 {
+            let filename = if idx == 0 {
+                "priority.md".to_string()
+            } else {
+                format!("article-{idx:02}.md")
+            };
+            let title = if idx == 0 {
+                "Anthropic security bulletin".to_string()
+            } else {
+                format!("Background article {idx:02}")
+            };
+            let url = format!("https://example.com/{idx:02}");
+            let fetched = format!("2026-04-{:02}T10:00:00Z", (idx % 28) + 1);
+            let body = format!("# Article {idx}\nThis article mentions security in the body.");
+            articles.push(sample_article(&filename, &title, &url, &fetched, &body));
+        }
+
+        let engine = test_engine_with_articles(
+            articles,
+            EntityIndex {
+                schema_version: 1,
+                entries: Default::default(),
+            },
+            HashMap::new(),
+            None,
+            10_000,
+        );
+        let input = QueryKnowledgeBaseInput {
+            question: "What do the loaded articles say about security?".to_string(),
+            max_results: 5,
+            scope_entities: Vec::new(),
+            scope_date_from: None,
+            scope_date_to: None,
+        };
+        let expansion = QueryExpansion {
+            regex_patterns: vec!["(?i)security".to_string()],
+            entity_names: Vec::new(),
+            date_from: None,
+            date_to: None,
+        };
+
+        let selection = engine.collect_candidates(&input, &expansion);
+
+        assert_eq!(selection.regex_match_count, 30);
+        assert_eq!(selection.entity_match_count, 0);
+        assert_eq!(selection.total_unique_candidates, 30);
+        assert_eq!(selection.scoring_candidates, MAX_SCORING_CANDIDATES);
+        assert!(selection.capped);
+        assert_eq!(selection.candidates[0].filename, "priority.md");
     }
 
     #[tokio::test]

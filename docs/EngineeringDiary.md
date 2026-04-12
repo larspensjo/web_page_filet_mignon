@@ -1383,3 +1383,9 @@ Type: Tooling
 Context: `mcp.log` kept historical Phase 2 fallbacks, but the warning lines only contained free-form error text, which made it harder to distinguish network outages from parser defects or provider compatibility issues.
 Change: Added a per-process startup session marker to `harvester_mcp` logs and changed smart-query fallback warnings to emit structured `fallback_reason=...` codes alongside the detailed error text.
 Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Cap and rank smart-query candidates before LLM scoring
+Type: Performance
+Context: The Phase 2 smart-query path already limited regex expansion count, but a broad pattern like `security` could still match a large share of a real corpus and trigger one scoring call per candidate article.
+Change: Added deterministic pre-scoring ranking that prefers title hits, entity hits, and stronger pattern coverage; capped the scored candidate set to 25 articles; and logged regex/entity/unique/capped candidate counts before LLM scoring. Added a regression test for the cap and deterministic ordering.
+Refs: crates/harvester_mcp/src/smart_query.rs
