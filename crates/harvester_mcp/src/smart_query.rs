@@ -132,15 +132,19 @@ impl SmartQueryEngine {
         match self.query_with_agent(&input).await {
             Ok(response) => self.enforce_context_budget(response),
             Err(err) => {
+                let fallback_reason = llm_error_code(&err);
+                let detail = render_llm_error(&err);
                 engine_logging::engine_warn!(
-                    "[smart-query] agent path unavailable, falling back to raw results: {}",
-                    render_llm_error(&err)
+                    "[smart-query] agent path unavailable; fallback_reason={} detail={}",
+                    fallback_reason,
+                    detail
                 );
                 let response = self.build_raw_fallback(
                     &input,
                     vec![format!(
-                        "Smart-query agent unavailable; returned raw results instead ({})",
-                        render_llm_error(&err)
+                        "Smart-query agent unavailable; returned raw results instead (reason={} detail={})",
+                        fallback_reason,
+                        detail
                     )],
                 );
                 self.enforce_context_budget(response)
@@ -919,6 +923,42 @@ fn render_llm_error(err: &LlmError) -> String {
         LlmError::AuthenticationFailed => "authentication failed".to_string(),
         LlmError::Timeout => "request timed out".to_string(),
         LlmError::ContentFiltered => "provider content filter".to_string(),
+    }
+}
+
+fn llm_error_code(err: &LlmError) -> String {
+    match err {
+        LlmError::Configuration { detail } => {
+            if detail.contains("OPENAI_API_KEY") {
+                "configuration_missing_api_key".to_string()
+            } else {
+                "configuration".to_string()
+            }
+        }
+        LlmError::InvalidResponse { detail } => {
+            if detail.contains("assistant refusal") {
+                "invalid_response_refusal".to_string()
+            } else if detail.contains("choice missing content") {
+                "invalid_response_empty_content".to_string()
+            } else if detail.contains("json parse failure") {
+                "invalid_response_json_parse".to_string()
+            } else {
+                "invalid_response".to_string()
+            }
+        }
+        LlmError::Network { .. } => "network_request_failed".to_string(),
+        LlmError::QuotaExhausted { .. } => "quota_exhausted".to_string(),
+        LlmError::Http { status, body } => {
+            if *status == 400 && body.contains("unsupported_parameter") {
+                "http_400_unsupported_parameter".to_string()
+            } else {
+                format!("http_{status}")
+            }
+        }
+        LlmError::RateLimited { .. } => "rate_limited".to_string(),
+        LlmError::AuthenticationFailed => "authentication_failed".to_string(),
+        LlmError::Timeout => "timeout".to_string(),
+        LlmError::ContentFiltered => "content_filtered".to_string(),
     }
 }
 

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use article_index::ArticleIndex;
 use clap::Parser;
@@ -565,6 +566,15 @@ async fn main() -> anyhow::Result<()> {
 
     engine_logging::initialize_to_path(&log_path);
 
+    let session_id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    engine_logging::engine_info!(
+        "===== harvester_mcp session start pid={} session_id={} =====",
+        std::process::id(),
+        session_id
+    );
     engine_logging::engine_info!("harvester_mcp starting");
 
     let t0 = Instant::now();

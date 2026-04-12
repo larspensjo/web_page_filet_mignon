@@ -1377,3 +1377,9 @@ Type: Bug Fix
 Context: Phase 2 digest assembly could reach OpenAI and score articles successfully, then still fall back because the shared chat parser only accepted non-empty string `message.content` and collapsed newer response variants into `choice missing content`.
 Change: Updated the OpenAI chat parser to accept content-part arrays, surface assistant refusals explicitly, and annotate empty/truncated responses with the finish reason. Also raised the smart-query digest completion budget to reduce empty visible responses from GPT-5 reasoning models.
 Refs: crates/harvester_engine/src/llm/providers/openai.rs, crates/harvester_engine/tests/llm_openai.rs, crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Add structured smart-query fallback reasons to MCP logs
+Type: Tooling
+Context: `mcp.log` kept historical Phase 2 fallbacks, but the warning lines only contained free-form error text, which made it harder to distinguish network outages from parser defects or provider compatibility issues.
+Change: Added a per-process startup session marker to `harvester_mcp` logs and changed smart-query fallback warnings to emit structured `fallback_reason=...` codes alongside the detailed error text.
+Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs
