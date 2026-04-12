@@ -9,9 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use article_index::ArticleIndex;
 use clap::Parser;
-use harvester_core::{EntityIndex, SummaryCache, SummaryCacheEntry};
+use harvester_core::{ArticleTriageResult, EntityIndex, SummaryCache, SummaryCacheEntry};
 use harvester_engine::llm::{LlmProvider, OpenAiProvider};
-use harvester_io::{load_entity_index, load_summary_cache};
+use harvester_io::{load_entity_index, load_summary_cache, load_triage_cache};
 use regex::Regex;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -530,6 +530,7 @@ impl HarvesterMcpServer {
         summary_cache: SummaryCache,
         article_index: ArticleIndex,
         summary_index: HashMap<String, SummaryCacheEntry>,
+        triage_index: HashMap<String, ArticleTriageResult>,
         smart_query_config: SmartQueryConfig,
     ) -> Self {
         let entity_index = Arc::new(entity_index);
@@ -539,6 +540,7 @@ impl HarvesterMcpServer {
             article_index.clone(),
             entity_index.clone(),
             summary_index.clone(),
+            Arc::new(triage_index.clone()),
             smart_query_config.agent_provider,
             smart_query_config.agent_model,
             smart_query_config.context_budget,
@@ -587,6 +589,11 @@ async fn main() -> anyhow::Result<()> {
     let summary_cache = load_summary_cache(&summary_cache_path);
     engine_logging::engine_info!("summary cache loaded in {}ms", t1.elapsed().as_millis());
 
+    let t1b = Instant::now();
+    let triage_cache_path = args.output_dir.join(".triage_cache.ron");
+    let triage_cache = load_triage_cache(&triage_cache_path);
+    engine_logging::engine_info!("triage cache loaded in {}ms", t1b.elapsed().as_millis());
+
     let t2 = Instant::now();
     let article_index = ArticleIndex::load(&args.output_dir);
     engine_logging::engine_info!(
@@ -623,6 +630,36 @@ async fn main() -> anyhow::Result<()> {
         t3.elapsed().as_millis()
     );
 
+    let t4 = Instant::now();
+    let mut triage_by_hash: HashMap<String, (String, ArticleTriageResult)> = HashMap::new();
+    for (key, entry) in triage_cache.iter() {
+        let should_replace = triage_by_hash
+            .get(&key.content_hash)
+            .map(|(created_at, _)| entry.created_at_utc > *created_at)
+            .unwrap_or(true);
+        if should_replace {
+            triage_by_hash.insert(
+                key.content_hash.clone(),
+                (entry.created_at_utc.clone(), entry.result.clone()),
+            );
+        }
+    }
+
+    let mut triage_index: HashMap<String, ArticleTriageResult> = HashMap::new();
+    for (url, entity_entry) in &entity_index.entries {
+        let Some(content_hash) = entity_entry.content_hash.as_ref() else {
+            continue;
+        };
+        if let Some((_, result)) = triage_by_hash.get(content_hash) {
+            triage_index.insert(url.clone(), result.clone());
+        }
+    }
+    engine_logging::engine_info!(
+        "triage index: built {} entries in {}ms",
+        triage_index.len(),
+        t4.elapsed().as_millis()
+    );
+
     let agent_provider: Option<Arc<dyn LlmProvider>> = match OpenAiProvider::from_env() {
         Ok(provider) => {
             engine_logging::engine_info!("smart-query provider initialized");
@@ -648,6 +685,7 @@ async fn main() -> anyhow::Result<()> {
         summary_cache,
         article_index,
         summary_index,
+        triage_index,
         SmartQueryConfig {
             agent_model: args.agent_model,
             context_budget: args.context_budget,

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::article_index::{ArticleEntry, ArticleIndex};
-use harvester_core::{EntityIndex, EntityIndexEntry, SummaryCacheEntry};
+use harvester_core::{ArticleTriageResult, EntityIndex, EntityIndexEntry, SummaryCacheEntry};
 use harvester_engine::llm::{
     ChatMessage, ChatRole, LlmError, LlmProvider, LlmRequest, ModelId, ProviderKind,
 };
@@ -23,6 +23,7 @@ pub struct SmartQueryEngine {
     article_index: Arc<ArticleIndex>,
     entity_index: Arc<EntityIndex>,
     summary_index: Arc<HashMap<String, SummaryCacheEntry>>,
+    triage_index: Arc<HashMap<String, ArticleTriageResult>>,
     provider: Option<Arc<dyn LlmProvider>>,
     agent_model: ModelId,
     context_budget: usize,
@@ -81,6 +82,7 @@ struct CandidateArticle {
     matched_entities: Vec<String>,
     title_pattern_hits: usize,
     url_pattern_hits: usize,
+    triage_priority: Option<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +129,7 @@ impl SmartQueryEngine {
         article_index: Arc<ArticleIndex>,
         entity_index: Arc<EntityIndex>,
         summary_index: Arc<HashMap<String, SummaryCacheEntry>>,
+        triage_index: Arc<HashMap<String, ArticleTriageResult>>,
         provider: Option<Arc<dyn LlmProvider>>,
         agent_model: impl Into<String>,
         context_budget: usize,
@@ -135,6 +138,7 @@ impl SmartQueryEngine {
             article_index,
             entity_index,
             summary_index,
+            triage_index,
             provider,
             agent_model: ModelId::new(ProviderKind::OpenAi, agent_model.into()),
             context_budget,
@@ -176,14 +180,36 @@ impl SmartQueryEngine {
                 detail: "OPENAI_API_KEY missing; agent provider unavailable".to_string(),
             })?;
 
-        let expansion = self.expand_query(provider.clone(), input).await?;
+        let mut warnings = Vec::new();
+        let expansion = match self.expand_query(provider.clone(), input).await {
+            Ok(expansion) => expansion,
+            Err(err) => {
+                let fallback_reason = llm_error_code(&err);
+                let detail = render_llm_error(&err);
+                engine_logging::engine_warn!(
+                    "[smart-query] expansion fallback activated; reason={} detail={}",
+                    fallback_reason,
+                    detail
+                );
+                warnings.push(format!(
+                    "Expansion agent unavailable; used heuristic expansion instead (reason={} detail={})",
+                    fallback_reason, detail
+                ));
+                heuristic_query_expansion(input)
+            }
+        };
         let selection = self.collect_candidates(input, &expansion);
         engine_logging::engine_info!(
-            "[smart-query] candidate selection regex_matches={} entity_matches={} unique_candidates={} scoring_candidates={} capped={}",
+            "[smart-query] candidate selection regex_matches={} entity_matches={} unique_candidates={} scoring_candidates={} candidates_with_triage={} capped={}",
             selection.regex_match_count,
             selection.entity_match_count,
             selection.total_unique_candidates,
             selection.scoring_candidates,
+            selection
+                .candidates
+                .iter()
+                .filter(|candidate| candidate.triage_priority.is_some())
+                .count(),
             selection.capped
         );
 
@@ -195,7 +221,7 @@ impl SmartQueryEngine {
                     "No matching articles were found in the current corpus.".to_string(),
                 ),
                 ranked_articles: Vec::new(),
-                warnings: Vec::new(),
+                warnings,
                 total_token_count: 0,
             });
         }
@@ -225,7 +251,7 @@ impl SmartQueryEngine {
             question: input.question.clone(),
             synthesis: Some(synthesis),
             ranked_articles,
-            warnings: Vec::new(),
+            warnings,
             total_token_count: 0,
         })
     }
@@ -249,23 +275,19 @@ impl SmartQueryEngine {
         );
         engine_logging::engine_info!("[smart-query] expansion prompt: {}", user_prompt);
 
-        let response = provider
-            .complete(
-                &LlmRequest::new(
-                    self.agent_model.clone(),
-                    vec![
-                        ChatMessage::new(
-                            ChatRole::System,
-                            "You expand knowledge-base questions into retrieval hints. Return JSON only.",
-                        ),
-                        ChatMessage::new(ChatRole::User, user_prompt.clone()),
-                    ],
-                )
-                .with_temperature(0.0)
-                .with_max_output_tokens(250)
-                .with_json_response(),
-            )
-            .await?;
+        let response = match self
+            .request_expansion(provider.clone(), &user_prompt, 250)
+            .await
+        {
+            Ok(response) => response,
+            Err(err) if should_retry_empty_length_response(&err) => {
+                engine_logging::engine_warn!(
+                    "[smart-query] expansion retry activated after empty length response"
+                );
+                self.request_expansion(provider, &user_prompt, 400).await?
+            }
+            Err(err) => return Err(err),
+        };
 
         engine_logging::engine_info!(
             "[smart-query] expansion response tokens={} body={}",
@@ -291,6 +313,31 @@ impl SmartQueryEngine {
             date_from: parsed.date_from.or_else(|| input.scope_date_from.clone()),
             date_to: parsed.date_to.or_else(|| input.scope_date_to.clone()),
         })
+    }
+
+    async fn request_expansion(
+        &self,
+        provider: Arc<dyn LlmProvider>,
+        user_prompt: &str,
+        max_output_tokens: u32,
+    ) -> Result<harvester_engine::llm::LlmResponse, LlmError> {
+        provider
+            .complete(
+                &LlmRequest::new(
+                    self.agent_model.clone(),
+                    vec![
+                        ChatMessage::new(
+                            ChatRole::System,
+                            "You expand knowledge-base questions into retrieval hints. Return JSON only.",
+                        ),
+                        ChatMessage::new(ChatRole::User, user_prompt.to_string()),
+                    ],
+                )
+                .with_temperature(0.0)
+                .with_max_output_tokens(max_output_tokens)
+                .with_json_response(),
+            )
+            .await
     }
 
     fn collect_candidates(
@@ -466,6 +513,11 @@ impl SmartQueryEngine {
         } else {
             fallback_excerpt(&entry.content)
         };
+        let triage_priority = entry
+            .url
+            .as_ref()
+            .and_then(|url| self.triage_index.get(url))
+            .map(|triage| triage.priority);
 
         CandidateArticle {
             filename: entry.filename.clone(),
@@ -479,6 +531,7 @@ impl SmartQueryEngine {
             matched_entities: Vec::new(),
             title_pattern_hits: 0,
             url_pattern_hits: 0,
+            triage_priority,
         }
     }
 
@@ -753,6 +806,17 @@ fn parse_json_response<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, Ll
     })
 }
 
+fn heuristic_query_expansion(input: &QueryKnowledgeBaseInput) -> QueryExpansion {
+    let mut entity_names = normalize_terms(input.scope_entities.clone());
+    entity_names.truncate(MAX_EXPANSION_ENTITIES);
+    QueryExpansion {
+        regex_patterns: heuristic_patterns(&input.question),
+        entity_names,
+        date_from: input.scope_date_from.clone(),
+        date_to: input.scope_date_to.clone(),
+    }
+}
+
 fn extract_json_payload(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     if trimmed.starts_with('{') && trimmed.ends_with('}') {
@@ -801,6 +865,12 @@ fn normalize_terms(terms: Vec<String>) -> Vec<String> {
 
 fn heuristic_patterns(question: &str) -> Vec<String> {
     let mut patterns = Vec::new();
+    for pattern in demand_growth_patterns(question) {
+        push_unique(&mut patterns, pattern);
+        if patterns.len() >= MAX_EXPANSION_PATTERNS {
+            return patterns;
+        }
+    }
     let terms = significant_terms(question);
     if !terms.is_empty() {
         push_unique(&mut patterns, format!("(?i){}", terms.join("|")));
@@ -820,11 +890,67 @@ fn heuristic_patterns(question: &str) -> Vec<String> {
     patterns
 }
 
+fn demand_growth_patterns(question: &str) -> Vec<String> {
+    let lower = question.to_lowercase();
+    let mentions_ai = lower.contains(" ai")
+        || lower.starts_with("ai ")
+        || lower.contains("artificial intelligence");
+    let mentions_demand = ["demand", "growth", "usage", "capacity", "scale", "prepared"]
+        .iter()
+        .any(|term| lower.contains(term));
+
+    if !(mentions_ai && mentions_demand) {
+        return Vec::new();
+    }
+
+    vec![
+        "(?i)(capacity|compute|data\\s*-?center|infrastructure|power|grid|chips?|gpus?|tpus?|semiconductor|foundry)".to_string(),
+        "(?i)(nvidia|tsmc|broadcom|amd|microsoft|alphabet|google|amazon|meta|oracle)".to_string(),
+        "(?i)(demand|growth|adoption|usage|scaling|scale-up|scale up)".to_string(),
+    ]
+}
+
 fn significant_terms(text: &str) -> Vec<String> {
     const STOPWORDS: &[&str] = &[
-        "about", "after", "against", "among", "and", "are", "corpus", "does", "for", "from",
-        "have", "into", "said", "says", "that", "the", "their", "there", "these", "this", "those",
-        "what", "when", "where", "which", "who", "with", "will", "would", "your",
+        "about",
+        "after",
+        "against",
+        "among",
+        "and",
+        "are",
+        "corpus",
+        "does",
+        "for",
+        "from",
+        "have",
+        "into",
+        "said",
+        "says",
+        "suppose",
+        "that",
+        "the",
+        "their",
+        "there",
+        "these",
+        "this",
+        "those",
+        "usage",
+        "want",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "with",
+        "will",
+        "would",
+        "your",
+        "investigate",
+        "best",
+        "prepared",
+        "meet",
+        "increased",
+        "companies",
     ];
 
     let mut terms = Vec::new();
@@ -980,6 +1106,7 @@ fn match_score(candidate: &CandidateArticle) -> usize {
 fn deterministic_match_score(candidate: &CandidateArticle) -> usize {
     let mut score = 0usize;
     score += candidate.title_pattern_hits * 1_000;
+    score += candidate.triage_priority.unwrap_or(0) as usize * 200;
     score += candidate.matched_entities.len() * 250;
     score += candidate.matched_patterns.len() * 50;
     score += candidate.url_pattern_hits * 25;
@@ -1055,6 +1182,14 @@ fn llm_error_code(err: &LlmError) -> String {
         LlmError::Timeout => "timeout".to_string(),
         LlmError::ContentFiltered => "content_filtered".to_string(),
     }
+}
+
+fn should_retry_empty_length_response(err: &LlmError) -> bool {
+    matches!(
+        err,
+        LlmError::InvalidResponse { detail }
+            if detail.contains("choice missing content") && detail.contains("finish_reason=length")
+    )
 }
 
 #[cfg(test)]
@@ -1151,6 +1286,7 @@ mod tests {
                     "Anthropic says stronger model evaluations improve security testing.",
                 ),
             )]),
+            HashMap::new(),
             provider,
             context_budget,
         )
@@ -1160,6 +1296,7 @@ mod tests {
         articles: Vec<ArticleEntry>,
         entity_index: EntityIndex,
         summary_index: HashMap<String, SummaryCacheEntry>,
+        triage_index: HashMap<String, ArticleTriageResult>,
         provider: Option<Arc<dyn LlmProvider>>,
         context_budget: usize,
     ) -> SmartQueryEngine {
@@ -1169,6 +1306,7 @@ mod tests {
             Arc::new(article_index),
             Arc::new(entity_index),
             Arc::new(summary_index),
+            Arc::new(triage_index),
             provider,
             "mock-model",
             context_budget,
@@ -1202,6 +1340,7 @@ mod tests {
                 entries: Default::default(),
             },
             HashMap::new(),
+            HashMap::new(),
             None,
             10_000,
         );
@@ -1227,6 +1366,94 @@ mod tests {
         assert_eq!(selection.scoring_candidates, MAX_SCORING_CANDIDATES);
         assert!(selection.capped);
         assert_eq!(selection.candidates[0].filename, "priority.md");
+    }
+
+    #[test]
+    fn collect_candidates_prefers_higher_triage_priority() {
+        let articles = vec![
+            sample_article(
+                "high.md",
+                "Background article high",
+                "https://example.com/high",
+                "2026-04-11T10:00:00Z",
+                "# High\nThis article mentions security in the body.",
+            ),
+            sample_article(
+                "low.md",
+                "Background article low",
+                "https://example.com/low",
+                "2026-04-12T10:00:00Z",
+                "# Low\nThis article mentions security in the body.",
+            ),
+        ];
+        let triage_index = HashMap::from([
+            (
+                "https://example.com/high".to_string(),
+                ArticleTriageResult {
+                    category: "security".to_string(),
+                    priority: 5,
+                    tags: vec!["tag".to_string()],
+                    rationale: "high".to_string(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            ),
+            (
+                "https://example.com/low".to_string(),
+                ArticleTriageResult {
+                    category: "security".to_string(),
+                    priority: 1,
+                    tags: vec!["tag".to_string()],
+                    rationale: "low".to_string(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            ),
+        ]);
+        let engine = test_engine_with_articles(
+            articles,
+            EntityIndex {
+                schema_version: 1,
+                entries: Default::default(),
+            },
+            HashMap::new(),
+            triage_index,
+            None,
+            10_000,
+        );
+        let input = QueryKnowledgeBaseInput {
+            question: "What do the loaded articles say about security?".to_string(),
+            max_results: 5,
+            scope_entities: Vec::new(),
+            scope_date_from: None,
+            scope_date_to: None,
+        };
+        let expansion = QueryExpansion {
+            regex_patterns: vec!["(?i)security".to_string()],
+            entity_names: Vec::new(),
+            date_from: None,
+            date_to: None,
+        };
+
+        let selection = engine.collect_candidates(&input, &expansion);
+
+        assert_eq!(selection.candidates[0].filename, "high.md");
+        assert_eq!(selection.candidates[0].triage_priority, Some(5));
+    }
+
+    #[test]
+    fn heuristic_patterns_skip_prompt_scaffolding_and_add_demand_signals() {
+        let patterns = heuristic_patterns(
+            "Suppose there is a massive growth of AI usage. I want to investigate what companies are best prepared to meet this increased demand.",
+        );
+
+        assert!(patterns
+            .iter()
+            .any(|pattern| pattern.contains("capacity|compute")));
+        assert!(patterns
+            .iter()
+            .any(|pattern| pattern.contains("nvidia|tsmc")));
+        assert!(!patterns.iter().any(|pattern| pattern.contains("Suppose")));
     }
 
     #[tokio::test]
@@ -1260,6 +1487,42 @@ mod tests {
             .unwrap_or_default()
             .contains("[alpha.md]"));
         assert_eq!(provider.recorded_requests().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn smart_query_uses_heuristic_expansion_when_agent_expansion_fails() {
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_response(Err(LlmError::InvalidResponse {
+            detail: "choice missing content (finish_reason=length)".to_string(),
+        }));
+        provider.queue_response(Err(LlmError::InvalidResponse {
+            detail: "choice missing content (finish_reason=length)".to_string(),
+        }));
+        provider.queue_json_success(
+            r#"{"relevance_score":9,"key_facts":["Anthropic discussed stronger security testing."]}"#,
+        );
+        provider.queue_json_success(
+            r#"{"synthesis":"Anthropic emphasized stronger security testing for AI systems [C1]."}"#,
+        );
+
+        let engine = test_engine(Some(provider.clone()), 500);
+        let response = engine
+            .query(QueryKnowledgeBaseInput {
+                question: "What did Anthropic say about AI security?".to_string(),
+                max_results: 5,
+                scope_entities: vec!["Anthropic".to_string()],
+                scope_date_from: None,
+                scope_date_to: None,
+            })
+            .await;
+
+        assert_eq!(response.mode, "smart");
+        assert_eq!(response.ranked_articles[0].filename, "alpha.md");
+        assert!(response
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("used heuristic expansion instead")));
+        assert_eq!(provider.recorded_requests().len(), 4);
     }
 
     #[test]

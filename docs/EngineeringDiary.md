@@ -1395,3 +1395,15 @@ Type: Bug Fix
 Context: On larger corpora, the digest model sometimes shortened bracketed filename citations in the final synthesis even when the ranked articles were correct.
 Change: The digest prompt now uses stable citation IDs like `[C1]`, and the server rewrites those IDs back to exact filenames before returning the MCP response. Added regression coverage for the rewrite path.
 Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Feed persisted triage priority into smart-query candidate ranking
+Type: Retrieval
+Context: `query_knowledge_base` was ranking candidates only from live regex/entity signals even though the harvester pipeline had already persisted article triage assessments in `.triage_cache.ron`.
+Change: Loaded the triage cache in `harvester_mcp`, joined entries to article URLs through `entity_index.content_hash`, and incorporated triage priority into deterministic pre-scoring ranking. Candidate-selection logs now report how many selected articles had triage metadata, and a regression test verifies higher triage priority wins when other signals are similar.
+Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Keep smart-query alive when expansion LLM truncates
+Type: Bug Fix
+Context: Conceptual questions could fail before candidate collection because the GPT-5 expansion call occasionally returned no visible content with `finish_reason=length`, which forced a full raw fallback and let poor heuristic regexes dominate retrieval.
+Change: Expansion now retries once with a larger token budget on empty-length responses, and if it still fails, smart-query falls back to heuristic expansion while continuing through candidate scoring and digest assembly. Tightened the heuristic term filter to ignore prompt-scaffolding words and added demand-growth infrastructure patterns for supply-side AI questions.
+Refs: crates/harvester_mcp/src/smart_query.rs
