@@ -533,15 +533,22 @@ impl SmartQueryEngine {
         input: &QueryKnowledgeBaseInput,
         scored: &[ScoredCandidate],
     ) -> Result<String, LlmError> {
+        let citation_rows: Vec<(String, String)> = scored
+            .iter()
+            .take(input.max_results)
+            .enumerate()
+            .map(|(index, item)| (format!("C{}", index + 1), item.candidate.filename.clone()))
+            .collect();
         let mut article_block = String::new();
-        for item in scored.iter().take(input.max_results) {
+        for ((citation_id, _filename), item) in citation_rows.iter().zip(scored.iter()) {
             let facts = if item.key_facts.is_empty() {
                 item.candidate.key_points.join(" | ")
             } else {
                 item.key_facts.join(" | ")
             };
             article_block.push_str(&format!(
-                "filename: {}\nurl: {}\nscore: {}\nfacts: {}\n\n",
+                "citation_id: [{}]\nfilename: {}\nurl: {}\nscore: {}\nfacts: {}\n\n",
+                citation_id,
                 item.candidate.filename,
                 item.candidate.url.as_deref().unwrap_or("n/a"),
                 item.relevance_score,
@@ -550,7 +557,7 @@ impl SmartQueryEngine {
         }
 
         let user_prompt = format!(
-            "Question: {}\nTop articles:\n{}\nReturn JSON with one field: synthesis. The synthesis should be a short paragraph that answers the question using bracketed filename citations like [article.md].",
+            "Question: {}\nTop articles:\n{}\nReturn JSON with one field: synthesis. The synthesis should be a short paragraph that answers the question using only the provided bracketed citation_id values like [C1] or [C2]. Do not invent, shorten, or alter citations.",
             input.question, article_block
         );
         engine_logging::engine_info!("[smart-query] digest prompt: {}", user_prompt);
@@ -580,7 +587,7 @@ impl SmartQueryEngine {
         );
 
         let parsed: DigestAssemblyResponse = parse_json_response(response.content())?;
-        Ok(parsed.synthesis)
+        Ok(expand_digest_citations(&parsed.synthesis, &citation_rows))
     }
 
     fn build_raw_fallback(
@@ -755,6 +762,14 @@ fn extract_json_payload(text: &str) -> Option<&str> {
     let start = trimmed.find('{')?;
     let end = trimmed.rfind('}')?;
     (start < end).then_some(&trimmed[start..=end])
+}
+
+fn expand_digest_citations(synthesis: &str, citation_rows: &[(String, String)]) -> String {
+    let mut expanded = synthesis.to_string();
+    for (citation_id, filename) in citation_rows {
+        expanded = expanded.replace(&format!("[{}]", citation_id), &format!("[{}]", filename));
+    }
+    expanded
 }
 
 fn normalize_patterns(patterns: Vec<String>) -> Vec<String> {
@@ -1221,7 +1236,9 @@ mod tests {
             r#"{"regex_patterns":["(?i)anthropic","(?i)security"],"entity_names":["Anthropic"],"date_from":null,"date_to":null}"#,
         );
         provider.queue_json_success(r#"{"relevance_score":9,"key_facts":["Anthropic discussed stronger security testing."]}"#);
-        provider.queue_json_success(r#"{"synthesis":"Anthropic emphasized stronger security testing for AI systems [alpha.md]."}"#);
+        provider.queue_json_success(
+            r#"{"synthesis":"Anthropic emphasized stronger security testing for AI systems [C1]."}"#,
+        );
 
         let engine = test_engine(Some(provider.clone()), 500);
         let response = engine
@@ -1243,6 +1260,22 @@ mod tests {
             .unwrap_or_default()
             .contains("[alpha.md]"));
         assert_eq!(provider.recorded_requests().len(), 3);
+    }
+
+    #[test]
+    fn expand_digest_citations_rewrites_ids_to_filenames() {
+        let expanded = expand_digest_citations(
+            "Alpha matters [C1]. Beta matters [C2].",
+            &[
+                ("C1".to_string(), "alpha.md".to_string()),
+                ("C2".to_string(), "beta.md".to_string()),
+            ],
+        );
+
+        assert_eq!(
+            expanded,
+            "Alpha matters [alpha.md]. Beta matters [beta.md]."
+        );
     }
 
     #[tokio::test]

@@ -1389,3 +1389,9 @@ Type: Performance
 Context: The Phase 2 smart-query path already limited regex expansion count, but a broad pattern like `security` could still match a large share of a real corpus and trigger one scoring call per candidate article.
 Change: Added deterministic pre-scoring ranking that prefers title hits, entity hits, and stronger pattern coverage; capped the scored candidate set to 25 articles; and logged regex/entity/unique/capped candidate counts before LLM scoring. Added a regression test for the cap and deterministic ordering.
 Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Make smart-query citations deterministic
+Type: Bug Fix
+Context: On larger corpora, the digest model sometimes shortened bracketed filename citations in the final synthesis even when the ranked articles were correct.
+Change: The digest prompt now uses stable citation IDs like `[C1]`, and the server rewrites those IDs back to exact filenames before returning the MCP response. Added regression coverage for the rewrite path.
+Refs: crates/harvester_mcp/src/smart_query.rs
