@@ -240,16 +240,21 @@ pub struct OpenAiChatCompletionRequest {
     messages: Vec<OpenAiChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
-    #[serde(rename = "max_tokens", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<OpenAiResponseFormat>,
 }
 
 impl OpenAiChatCompletionRequest {
     fn from_llm_request(request: &LlmRequest) -> Self {
+        let max_output_tokens = request.max_output_tokens();
+        let model_name = request.model().model_name().to_string();
+        let use_completion_tokens = prefers_max_completion_tokens(&model_name);
         Self {
-            model: request.model().model_name().to_string(),
+            model: model_name,
             messages: request
                 .messages()
                 .iter()
@@ -259,10 +264,27 @@ impl OpenAiChatCompletionRequest {
                 })
                 .collect(),
             temperature: request.temperature(),
-            max_tokens: request.max_output_tokens(),
+            max_tokens: if use_completion_tokens {
+                None
+            } else {
+                max_output_tokens
+            },
+            max_completion_tokens: if use_completion_tokens {
+                max_output_tokens
+            } else {
+                None
+            },
             response_format: OpenAiResponseFormat::from_response_format(request.response_format()),
         }
     }
+}
+
+fn prefers_max_completion_tokens(model_name: &str) -> bool {
+    let lower = model_name.to_ascii_lowercase();
+    lower.starts_with("gpt-5")
+        || lower.starts_with("o1")
+        || lower.starts_with("o3")
+        || lower.starts_with("o4")
 }
 
 #[derive(Serialize)]

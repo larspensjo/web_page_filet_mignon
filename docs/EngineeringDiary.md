@@ -1359,3 +1359,15 @@ Type: Feature
 Context: Phase 1 exposed deterministic MCP tools, but the server still treated `--agent-model` and `--context-budget` as inert configuration and had no single tool for question-driven retrieval and synthesis.
 Change: Added `query_knowledge_base` to `harvester_mcp` plus a dedicated smart-query engine that uses the Harvester OpenAI provider for query expansion, candidate scoring, and digest assembly. The server now degrades to regex/entity-based raw results when the cheap-model path is unavailable and trims the final response to the configured context budget.
 Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs, README.md
+
+## 2026-04-12 - GPT-5 smart-query requests now use max_completion_tokens
+Type: Bug Fix
+Context: Phase 2 smart queries reached OpenAI but fell back immediately because the shared OpenAI provider still serialized `max_tokens`, which GPT-5.4 models reject on `/chat/completions`.
+Change: Updated the OpenAI request serializer to emit `max_completion_tokens` for GPT-5 and o-series models while preserving `max_tokens` for older chat models. Added regression coverage for both serialization paths.
+Refs: crates/harvester_engine/src/llm/providers/openai.rs, crates/harvester_engine/tests/llm_openai.rs
+
+## 2026-04-12 - Add reusable PowerShell 7 smoke test for harvester_mcp
+Type: Tooling
+Context: The original here-string Phase 2 smoke test could close stdin before `query_knowledge_base` finished, which made longer smart-query runs look like they only returned the `initialize` response.
+Change: Added `scripts/Test-HarvesterMcpSmoke.ps1`, a PowerShell 7 stdio harness that keeps `harvester_mcp` alive, sends the MCP initialize and `query_knowledge_base` requests, and prints the parsed tool payload for a query passed as an argument.
+Refs: scripts/Test-HarvesterMcpSmoke.ps1
