@@ -156,6 +156,7 @@ impl AppState {
         let ai_unavailable_message = self.ai_unavailable_message();
         let triage_blocked_reason = self.triage_blocked_reason();
         let briefing_blocked_reason = self.briefing_blocked_reason();
+        let stop_finish_button = self.stop_finish_button_state();
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -175,6 +176,7 @@ impl AppState {
             briefing_can_start: self.briefing.can_start() && self.briefing_ai_available(),
             briefing_progress: self.briefing.progress_text(),
             briefing_preview,
+            stop_finish_button,
             triage_can_start: self.triage_ai_available()
                 && (!self.briefing_orchestration.is_requested())
                 && self.triage.can_start()

@@ -75,6 +75,19 @@ fn stop_finish_emits_effect() {
 }
 
 #[test]
+fn stop_finish_click_is_ignored_after_work_has_already_settled() {
+    init_logging();
+    let state = AppState::new();
+    let (state, _effects) = submit_urls(state, "https://example.com\n");
+    let (state, _effects) = update(state, Msg::StopFinishClicked);
+
+    let (next, effects) = update(state, Msg::StopFinishClicked);
+
+    assert_eq!(next.view().session, SessionState::Finishing);
+    assert!(effects.is_empty());
+}
+
+#[test]
 fn urls_pasted_ignored_while_finishing() {
     init_logging();
     let state = AppState::new();

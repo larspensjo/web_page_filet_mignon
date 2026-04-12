@@ -1047,6 +1047,63 @@ mod app_state_tests {
     }
 
     #[test]
+    fn stop_button_disables_when_session_is_running_but_work_has_settled() {
+        use crate::briefing::LoadedArticle;
+        use crate::triage::{ArticleTriageResult, TriageSession};
+
+        let mut state = AppState::new();
+        state.start_session();
+
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: "https://example.com/1".to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash-1".to_string(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "News".to_string(),
+                priority: 5,
+                tags: Vec::new(),
+                rationale: "ok".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+        triage.complete();
+        state.set_triage(triage);
+
+        let view = state.view();
+        assert_eq!(view.session, SessionState::Running);
+        assert!(
+            !view.stop_finish_button.is_enabled(),
+            "settled triage should not leave Stop / Finish active"
+        );
+    }
+
+    #[test]
+    fn stop_button_enables_when_running_session_has_in_flight_jobs() {
+        let mut state = AppState::new();
+        state.start_session();
+        state.jobs.insert(
+            1,
+            JobState {
+                url: "https://queued.example".to_string(),
+                stage: Stage::Queued,
+                outcome: None,
+                ..Default::default()
+            },
+        );
+
+        let view = state.view();
+        assert!(view.stop_finish_button.is_enabled());
+    }
+
+    #[test]
     fn operation_progress_poll_takes_precedence() {
         use crate::briefing::LoadedArticle;
 

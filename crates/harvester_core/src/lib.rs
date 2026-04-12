@@ -73,8 +73,9 @@ pub use view_model::{
     JobFilterStatus, JobRowView, LayoutViewModel, LeftPaneHeaderView, LeftPaneView, LinkRowView,
     LlmModelUsageView, OperationProgress, PreviewContextView, PreviewHeaderView,
     PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
-    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, RightPaneView, TrendsTabView,
-    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
-    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
+    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, RightPaneView,
+    StopFinishButtonState, TrendsTabView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH,
+    DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
+    TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};

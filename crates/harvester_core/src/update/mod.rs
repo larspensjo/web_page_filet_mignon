@@ -2,7 +2,7 @@ use engine_logging::{engine_info, engine_warn};
 
 use crate::tabs::{AppTab, JobListScope, LeftTab};
 use crate::{
-    calc_left_width, AppState, Effect, Msg, SessionState, StopPolicy, INPUT_PANEL_FIXED_WIDTH,
+    calc_left_width, AppState, Effect, Msg, SessionState, INPUT_PANEL_FIXED_WIDTH,
     MIN_JOBS_PANEL_WIDTH,
 };
 
@@ -62,11 +62,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             ingest.effects
         }
         Msg::StopFinishClicked => {
-            if state.session() == SessionState::Running {
+            if let Some(policy) = state.stop_finish_button_state().policy() {
                 state.finish_session();
-                vec![Effect::StopFinish {
-                    policy: StopPolicy::Finish,
-                }]
+                vec![Effect::StopFinish { policy }]
             } else {
                 Vec::new()
             }

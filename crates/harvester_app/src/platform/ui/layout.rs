@@ -1986,7 +1986,7 @@ fn build_layout_rules(
             parent_control_id: Some(PANEL_BUTTONS),
             dock_style: DockStyle::Left,
             order: 0,
-            fixed_size: Some(128),
+            fixed_size: Some(144),
             margin: (14, 6, 22, 6),
         },
         LayoutRule {
@@ -4065,9 +4065,51 @@ mod tests {
     }
 
     #[test]
-    fn footer_button_row_is_tall_enough_for_primary_action_presence() {
+    fn stop_button_width_matches_standard_footer_buttons() {
         let cmd = build_layout_command(
             WindowId::new(112),
+            LayoutConfig {
+                left_panel_width: 600,
+                input_panel_visible: true,
+                operation_progress_visible: false,
+                left_header_meta_visible: true,
+                preview_header_override_visible: false,
+                preview_context_visible: false,
+                preview_attention_visible: false,
+                active_tab: AppTab::Summary,
+                left_tab: LeftTab::Jobs,
+                prompt_lab: PromptLabLayoutConfig {
+                    visible: false,
+                    advanced_mode: false,
+                    compare_section_open: false,
+                    context_section_open: false,
+                    template_section_open: false,
+                    run_details_section_open: false,
+                    template_editor_open: false,
+                },
+            },
+        );
+        let rules = match cmd {
+            PlatformCommand::DefineLayout { rules, .. } => rules,
+            _ => panic!("expected DefineLayout"),
+        };
+        let stop_width = rules
+            .iter()
+            .find(|r| r.control_id == BUTTON_STOP)
+            .and_then(|r| r.fixed_size)
+            .expect("stop button width");
+        let poll_width = rules
+            .iter()
+            .find(|r| r.control_id == BUTTON_POLL_SOURCES)
+            .and_then(|r| r.fixed_size)
+            .expect("poll button width");
+        assert_eq!(stop_width, poll_width);
+    }
+
+    #[test]
+    fn footer_button_row_is_tall_enough_for_primary_action_presence() {
+        let cmd = build_layout_command(
+            WindowId::new(113),
             LayoutConfig {
                 left_panel_width: 600,
                 input_panel_visible: true,

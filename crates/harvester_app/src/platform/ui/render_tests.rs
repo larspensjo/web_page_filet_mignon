@@ -9,7 +9,7 @@ use commanductui::{ChartLineEmphasis, ListBoxItemId};
 use harvester_core::Stage;
 use harvester_core::{
     JobFilterStatus, JobListScope, JobResultKind, JobRowView, LeftPaneHeaderView,
-    LlmModelUsageView, SessionState,
+    LlmModelUsageView, SessionState, StopFinishButtonState, StopPolicy,
 };
 use harvester_core::{
     JobOrigin, PreviewContextView, PreviewHeaderView, PromptLabRunId, PromptLabRunSummaryView,
@@ -951,6 +951,9 @@ fn stop_button_uses_destructive_style_when_running() {
     init_logging();
     let mut view = make_view(vec![]);
     view.session = SessionState::Running;
+    view.stop_finish_button = StopFinishButtonState::Enabled {
+        policy: StopPolicy::Finish,
+    };
     let mut tree_state = TreeRenderState::new();
     let window_id = WindowId::new(1);
     let cmds = render(window_id, &view, &mut tree_state);
@@ -965,6 +968,31 @@ fn stop_button_uses_destructive_style_when_running() {
         matches!(
             cmd,
             PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+            if *control_id == BUTTON_STOP
+        )
+    }));
+}
+
+#[test]
+fn stop_button_stays_neutral_when_session_running_but_work_is_idle() {
+    init_logging();
+    let mut view = make_view(vec![]);
+    view.session = SessionState::Running;
+    view.stop_finish_button = StopFinishButtonState::Disabled;
+    let mut tree_state = TreeRenderState::new();
+    let window_id = WindowId::new(1);
+    let cmds = render(window_id, &view, &mut tree_state);
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
+            if *control_id == BUTTON_STOP && *style_id == StyleId::SecondaryButton
+        )
+    }));
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
             if *control_id == BUTTON_STOP
         )
     }));

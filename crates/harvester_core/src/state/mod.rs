@@ -1469,6 +1469,31 @@ impl AppState {
         self.session
     }
 
+    pub(crate) fn stop_finish_button_state(&self) -> crate::StopFinishButtonState {
+        let batch = self.batch_observation();
+        let has_active_work = batch.jobs_in_flight > 0
+            || batch.poll_in_progress
+            || batch.import_in_flight
+            || matches!(
+                batch.triage_phase,
+                crate::TriagePhase::LoadingArticles | crate::TriagePhase::Triaging
+            )
+            || matches!(
+                self.briefing.phase(),
+                crate::BriefingPhase::LoadingArticles
+                    | crate::BriefingPhase::Summarizing
+                    | crate::BriefingPhase::GeneratingBriefing
+            );
+
+        if matches!(self.session, SessionState::Running) && has_active_work {
+            crate::StopFinishButtonState::Enabled {
+                policy: crate::StopPolicy::Finish,
+            }
+        } else {
+            crate::StopFinishButtonState::Disabled
+        }
+    }
+
     pub(crate) fn set_urls(&mut self, urls: Vec<String>) {
         self.ui.urls = urls;
         self.metrics.total_urls = self.ui.urls.len();

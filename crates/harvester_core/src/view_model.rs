@@ -1,3 +1,4 @@
+use crate::effect::StopPolicy;
 use crate::pre_triage_filter::FilterReason;
 use crate::preview::PreviewContentKind;
 use crate::prompt_lab::{
@@ -40,6 +41,28 @@ pub struct OperationProgress {
     pub label: String,
     pub completed: u32,
     pub total: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StopFinishButtonState {
+    #[default]
+    Disabled,
+    Enabled {
+        policy: StopPolicy,
+    },
+}
+
+impl StopFinishButtonState {
+    pub fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled { .. })
+    }
+
+    pub fn policy(self) -> Option<StopPolicy> {
+        match self {
+            Self::Disabled => None,
+            Self::Enabled { policy } => Some(policy),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -236,6 +259,7 @@ pub struct AppViewModel {
     pub briefing_can_start: bool,
     pub briefing_progress: Option<String>,
     pub briefing_preview: Option<String>,
+    pub stop_finish_button: StopFinishButtonState,
     pub triage_can_start: bool,
     pub triage_progress: Option<String>,
     pub ai_unavailable_message: Option<String>,
@@ -289,6 +313,7 @@ impl Default for AppViewModel {
             briefing_can_start: false,
             briefing_progress: None,
             briefing_preview: None,
+            stop_finish_button: StopFinishButtonState::Disabled,
             triage_can_start: false,
             triage_progress: None,
             ai_unavailable_message: None,

@@ -1311,3 +1311,15 @@ Type: Refactor
 Context: `crates/harvester_core/src/update/tests/mod.rs` still mixed briefing-history, entity-index, and UI/state reducer tests after the earlier feature-slice extractions, so it was smaller but still not acting like a wrapper.
 Change: Moved the remaining briefing-history and aggregate-request assertions into `crates/harvester_core/src/update/tests/briefing_history_tests.rs`, the trend/entity-index reducer tests into `crates/harvester_core/src/update/tests/entity_index_tests.rs`, and the LeftTab / JobListScope / AI-availability reducer tests into `crates/harvester_core/src/update/tests/ui_state_tests.rs`. Result: `mod.rs` dropped to 503 lines and now mainly holds the early briefing/cache/browser tests plus child-module declarations.
 Refs: crates/harvester_core/src/update/tests/mod.rs, crates/harvester_core/src/update/tests/briefing_history_tests.rs, crates/harvester_core/src/update/tests/ui_state_tests.rs
+
+## 2026-04-12 - Stop button now follows active work, not stale running session
+Type: Bug Fix
+Context: After triage settled, the footer still rendered `Stop / Finish` as an active destructive button because the UI keyed off `SessionState::Running`, which can outlive actual in-flight work.
+Change: Added a dedicated `stop_button_enabled` view-model flag derived from active batch/triage/briefing/import work, switched footer rendering to use that flag for both style and enabled state, and widened `BUTTON_STOP` to match the standard footer button width.
+Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/view_model.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_app/src/platform/ui/layout.rs
+
+## 2026-04-12 - Stop button gating now comes from one reducer-owned capability
+Type: Refactor
+Context: The earlier footer fix still left `Stop / Finish` with split authority: rendering used a view-model boolean while `Msg::StopFinishClicked` still accepted clicks based on `SessionState::Running`. That allowed UI and reducer legality to drift.
+Change: Introduced typed `StopFinishButtonState` plus `AppState::stop_finish_button_state()`. Both view-building and reducer click handling now consume that single selector, so enabled state, destructive styling, and emitted `Effect::StopFinish` policy stay in lockstep.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/view_model.rs

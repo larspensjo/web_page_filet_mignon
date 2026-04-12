@@ -264,7 +264,7 @@ pub(super) fn render_main_controls_section(
     );
     emit_if_changed(
         &mut tree_state.controls.prev_stop_style,
-        if matches!(view.session, SessionState::Running) {
+        if view.stop_finish_button.is_enabled() {
             StyleId::DestructiveButton
         } else {
             StyleId::SecondaryButton
@@ -278,7 +278,7 @@ pub(super) fn render_main_controls_section(
     );
     emit_if_changed(
         &mut tree_state.controls.prev_stop_enabled,
-        matches!(view.session, SessionState::Running),
+        view.stop_finish_button.is_enabled(),
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
