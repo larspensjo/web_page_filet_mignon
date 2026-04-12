@@ -30,5 +30,6 @@ harvester_mcp [--output-dir <path>] [--log-dir <path>] [--agent-model <model-id>
 - `list_articles` — list articles with optional date/title filters
 - `search_entities` — search the entity index by company, technology, product, or theme
 - `get_article_summary` — retrieve a cached article summary by URL
+- `query_knowledge_base` — expand a free-text question, rank relevant articles, and assemble a bounded digest
 
 Logs are written to `<output-dir>/logs/mcp.log`.

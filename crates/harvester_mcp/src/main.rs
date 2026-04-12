@@ -1,21 +1,25 @@
 mod article_index;
+mod smart_query;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
-use article_index::{ArticleIndex};
+use article_index::ArticleIndex;
 use clap::Parser;
 use harvester_core::{EntityIndex, SummaryCache, SummaryCacheEntry};
+use harvester_engine::llm::{LlmProvider, OpenAiProvider};
 use harvester_io::{load_entity_index, load_summary_cache};
 use regex::Regex;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{Implementation, ServerInfo};
-use rmcp::{ServerHandler, ServiceExt, tool_handler, tool_router};
 use rmcp::transport::stdio;
+use rmcp::{tool_handler, tool_router, ServerHandler, ServiceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use smart_query::{QueryKnowledgeBaseInput, SmartQueryEngine};
 
 #[derive(Parser, Debug)]
 #[command(name = "harvester_mcp", about = "Harvester MCP server")]
@@ -41,12 +45,19 @@ struct Args {
 struct HarvesterMcpServer {
     #[allow(dead_code)]
     output_dir: PathBuf,
-    entity_index: std::sync::Arc<EntityIndex>,
+    entity_index: Arc<EntityIndex>,
     #[allow(dead_code)]
     summary_cache: SummaryCache,
-    article_index: std::sync::Arc<ArticleIndex>,
-    summary_index: std::sync::Arc<HashMap<String, SummaryCacheEntry>>,
+    article_index: Arc<ArticleIndex>,
+    summary_index: Arc<HashMap<String, SummaryCacheEntry>>,
+    smart_query_engine: Arc<SmartQueryEngine>,
     tool_router: ToolRouter<Self>,
+}
+
+struct SmartQueryConfig {
+    agent_model: String,
+    context_budget: usize,
+    agent_provider: Option<Arc<dyn LlmProvider>>,
 }
 
 // ── Parameter structs ────────────────────────────────────────────────────────
@@ -95,6 +106,20 @@ struct SearchEntitiesParams {
 struct GetArticleSummaryParams {
     /// Article URL
     url: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct QueryKnowledgeBaseParams {
+    /// Free-text question to answer from the article corpus
+    question: String,
+    /// Maximum number of ranked articles to include in the digest (default 10)
+    max_results: Option<usize>,
+    /// Optional entity terms used to limit the search scope
+    scope_entities: Option<Vec<String>>,
+    /// ISO date filter on fetched_utc (inclusive lower bound)
+    scope_date_from: Option<String>,
+    /// ISO date filter on fetched_utc (inclusive upper bound)
+    scope_date_to: Option<String>,
 }
 
 // ── Result structs ───────────────────────────────────────────────────────────
@@ -200,12 +225,18 @@ impl HarvesterMcpServer {
         let t = std::time::Instant::now();
         engine_logging::engine_info!("[tool] server_version called");
         let result = env!("CARGO_PKG_VERSION").to_string();
-        engine_logging::engine_info!("[tool] server_version returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        engine_logging::engine_info!(
+            "[tool] server_version returned {} bytes in {}ms",
+            result.len(),
+            t.elapsed().as_millis()
+        );
         result
     }
 
     /// Search article content with a regex pattern, optional date range, and result cap.
-    #[rmcp::tool(description = "Search article content using a regex pattern. Optionally filter by date range (date_from/date_to as ISO date strings) and cap results with max_results (default 20). Returns JSON array of matches with filename, title, url, fetched_utc, and a content snippet.")]
+    #[rmcp::tool(
+        description = "Search article content using a regex pattern. Optionally filter by date range (date_from/date_to as ISO date strings) and cap results with max_results (default 20). Returns JSON array of matches with filename, title, url, fetched_utc, and a content snippet."
+    )]
     async fn search_articles(&self, Parameters(p): Parameters<SearchArticlesParams>) -> String {
         let t = std::time::Instant::now();
         engine_logging::engine_info!(
@@ -214,7 +245,9 @@ impl HarvesterMcpServer {
         );
         let re = match Regex::new(&p.pattern) {
             Ok(r) => r,
-            Err(e) => return serde_json::json!({"error": format!("invalid regex: {}", e)}).to_string(),
+            Err(e) => {
+                return serde_json::json!({"error": format!("invalid regex: {}", e)}).to_string()
+            }
         };
         let max = p.max_results.unwrap_or(20);
         let mut results: Vec<SearchMatch> = Vec::new();
@@ -242,13 +275,20 @@ impl HarvesterMcpServer {
             }
         }
 
-        let result = serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
-        engine_logging::engine_info!("[tool] search_articles returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        let result = serde_json::to_string(&results)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
+        engine_logging::engine_info!(
+            "[tool] search_articles returned {} bytes in {}ms",
+            result.len(),
+            t.elapsed().as_millis()
+        );
         result
     }
 
     /// Return the full markdown content of an article by filename.
-    #[rmcp::tool(description = "Read the full markdown content of an article. Pass the filename (e.g. \"my-article.md\") as returned by list_articles or search_articles.")]
+    #[rmcp::tool(
+        description = "Read the full markdown content of an article. Pass the filename (e.g. \"my-article.md\") as returned by list_articles or search_articles."
+    )]
     async fn read_article(&self, Parameters(p): Parameters<ReadArticleParams>) -> String {
         let t = std::time::Instant::now();
         engine_logging::engine_info!("[tool] read_article called with filename={:?}", p.filename);
@@ -259,14 +299,21 @@ impl HarvesterMcpServer {
             .find(|a| a.filename == p.filename)
         {
             Some(entry) => entry.content.clone(),
-            None => serde_json::json!({"error": format!("article not found: {}", p.filename)}).to_string(),
+            None => serde_json::json!({"error": format!("article not found: {}", p.filename)})
+                .to_string(),
         };
-        engine_logging::engine_info!("[tool] read_article returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        engine_logging::engine_info!(
+            "[tool] read_article returned {} bytes in {}ms",
+            result.len(),
+            t.elapsed().as_millis()
+        );
         result
     }
 
     /// Search articles by entity tags (company, technology, product, theme).
-    #[rmcp::tool(description = "Search articles by entity tags. Provide at least one of: company, technology, product, theme (all case-insensitive substring matches). All provided filters must match (AND logic). Returns JSON array with url, fetched_utc, companies, technologies, products, themes.")]
+    #[rmcp::tool(
+        description = "Search articles by entity tags. Provide at least one of: company, technology, product, theme (all case-insensitive substring matches). All provided filters must match (AND logic). Returns JSON array with url, fetched_utc, companies, technologies, products, themes."
+    )]
     async fn search_entities(&self, Parameters(p): Parameters<SearchEntitiesParams>) -> String {
         let t = std::time::Instant::now();
         engine_logging::engine_info!(
@@ -276,8 +323,10 @@ impl HarvesterMcpServer {
             p.product.as_deref().unwrap_or("None"),
             p.theme.as_deref().unwrap_or("None"),
         );
-        if p.company.is_none() && p.technology.is_none() && p.product.is_none() && p.theme.is_none() {
-            return serde_json::json!({"error": "at least one search parameter required"}).to_string();
+        if p.company.is_none() && p.technology.is_none() && p.product.is_none() && p.theme.is_none()
+        {
+            return serde_json::json!({"error": "at least one search parameter required"})
+                .to_string();
         }
 
         let results: Vec<EntitySearchResult> = self
@@ -287,11 +336,17 @@ impl HarvesterMcpServer {
             .filter_map(|(url, entry)| {
                 let matches_company = p.company.as_ref().is_none_or(|q| {
                     let q = q.to_lowercase();
-                    entry.companies.iter().any(|c| c.to_lowercase().contains(&q))
+                    entry
+                        .companies
+                        .iter()
+                        .any(|c| c.to_lowercase().contains(&q))
                 });
                 let matches_technology = p.technology.as_ref().is_none_or(|q| {
                     let q = q.to_lowercase();
-                    entry.technologies.iter().any(|c| c.to_lowercase().contains(&q))
+                    entry
+                        .technologies
+                        .iter()
+                        .any(|c| c.to_lowercase().contains(&q))
                 });
                 let matches_product = p.product.as_ref().is_none_or(|q| {
                     let q = q.to_lowercase();
@@ -316,14 +371,24 @@ impl HarvesterMcpServer {
             })
             .collect();
 
-        let result = serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
-        engine_logging::engine_info!("[tool] search_entities returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        let result = serde_json::to_string(&results)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
+        engine_logging::engine_info!(
+            "[tool] search_entities returned {} bytes in {}ms",
+            result.len(),
+            t.elapsed().as_millis()
+        );
         result
     }
 
     /// Return the summary for an article by URL.
-    #[rmcp::tool(description = "Get the LLM-generated summary for an article by its URL. Returns title, summary, key_points, and created_at_utc, or a status object if no summary is available.")]
-    async fn get_article_summary(&self, Parameters(p): Parameters<GetArticleSummaryParams>) -> String {
+    #[rmcp::tool(
+        description = "Get the LLM-generated summary for an article by its URL. Returns title, summary, key_points, and created_at_utc, or a status object if no summary is available."
+    )]
+    async fn get_article_summary(
+        &self,
+        Parameters(p): Parameters<GetArticleSummaryParams>,
+    ) -> String {
         let t = std::time::Instant::now();
         engine_logging::engine_info!("[tool] get_article_summary called with url={:?}", p.url);
         let result = match self.summary_index.get(&p.url) {
@@ -335,20 +400,68 @@ impl HarvesterMcpServer {
                     key_points: entry.result.key_points.clone(),
                     created_at_utc: entry.created_at_utc.clone(),
                 };
-                serde_json::to_string(&resp).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
+                serde_json::to_string(&resp)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string())
             }
         };
-        engine_logging::engine_info!("[tool] get_article_summary returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        engine_logging::engine_info!(
+            "[tool] get_article_summary returned {} bytes in {}ms",
+            result.len(),
+            t.elapsed().as_millis()
+        );
+        result
+    }
+
+    /// Query the knowledge base using the smart agent layer.
+    #[rmcp::tool(
+        description = "Answer a free-text question from the article corpus. Uses a cheap-model agent layer for query expansion, relevance scoring, and digest assembly. Returns JSON with mode, synthesis, ranked_articles, warnings, and total_token_count."
+    )]
+    async fn query_knowledge_base(
+        &self,
+        Parameters(p): Parameters<QueryKnowledgeBaseParams>,
+    ) -> String {
+        let t = std::time::Instant::now();
+        engine_logging::engine_info!(
+            "[tool] query_knowledge_base called with question={:?} max_results={:?} scope_entities={:?} scope_date_from={:?} scope_date_to={:?}",
+            p.question,
+            p.max_results,
+            p.scope_entities,
+            p.scope_date_from,
+            p.scope_date_to
+        );
+
+        let response = self
+            .smart_query_engine
+            .query(QueryKnowledgeBaseInput {
+                question: p.question,
+                max_results: p.max_results.unwrap_or(10),
+                scope_entities: p.scope_entities.unwrap_or_default(),
+                scope_date_from: p.scope_date_from,
+                scope_date_to: p.scope_date_to,
+            })
+            .await;
+
+        let result = serde_json::to_string(&response)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
+        engine_logging::engine_info!(
+            "[tool] query_knowledge_base returned {} bytes in {}ms",
+            result.len(),
+            t.elapsed().as_millis()
+        );
         result
     }
 
     /// List articles, optionally filtered by date range and/or title regex.
-    #[rmcp::tool(description = "List articles in the corpus. Optionally filter by date_from/date_to (ISO date strings, inclusive) and/or title_pattern (regex on title). Returns JSON array with filename, title, url, fetched_utc, token_count.")]
+    #[rmcp::tool(
+        description = "List articles in the corpus. Optionally filter by date_from/date_to (ISO date strings, inclusive) and/or title_pattern (regex on title). Returns JSON array with filename, title, url, fetched_utc, token_count."
+    )]
     async fn list_articles(&self, Parameters(p): Parameters<ListArticlesParams>) -> String {
         let t = std::time::Instant::now();
         engine_logging::engine_info!(
             "[tool] list_articles called with date_from={:?} date_to={:?} title_pattern={:?}",
-            p.date_from, p.date_to, p.title_pattern
+            p.date_from,
+            p.date_to,
+            p.title_pattern
         );
         let title_re = if let Some(pat) = &p.title_pattern {
             match Regex::new(pat) {
@@ -389,8 +502,13 @@ impl HarvesterMcpServer {
             })
             .collect();
 
-        let result = serde_json::to_string(&results).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
-        engine_logging::engine_info!("[tool] list_articles returned {} bytes in {}ms", result.len(), t.elapsed().as_millis());
+        let result = serde_json::to_string(&results)
+            .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
+        engine_logging::engine_info!(
+            "[tool] list_articles returned {} bytes in {}ms",
+            result.len(),
+            t.elapsed().as_millis()
+        );
         result
     }
 }
@@ -411,13 +529,26 @@ impl HarvesterMcpServer {
         summary_cache: SummaryCache,
         article_index: ArticleIndex,
         summary_index: HashMap<String, SummaryCacheEntry>,
+        smart_query_config: SmartQueryConfig,
     ) -> Self {
+        let entity_index = Arc::new(entity_index);
+        let article_index = Arc::new(article_index);
+        let summary_index = Arc::new(summary_index);
+        let smart_query_engine = Arc::new(SmartQueryEngine::new(
+            article_index.clone(),
+            entity_index.clone(),
+            summary_index.clone(),
+            smart_query_config.agent_provider,
+            smart_query_config.agent_model,
+            smart_query_config.context_budget,
+        ));
         Self {
             output_dir,
-            entity_index: std::sync::Arc::new(entity_index),
+            entity_index,
             summary_cache,
-            article_index: std::sync::Arc::new(article_index),
-            summary_index: std::sync::Arc::new(summary_index),
+            article_index,
+            summary_index,
+            smart_query_engine,
             tool_router: Self::tool_router(),
         }
     }
@@ -429,9 +560,7 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
 
-    let log_dir = args
-        .log_dir
-        .unwrap_or_else(|| args.output_dir.join("logs"));
+    let log_dir = args.log_dir.unwrap_or_else(|| args.output_dir.join("logs"));
     let log_path = log_dir.join("mcp.log");
 
     engine_logging::initialize_to_path(&log_path);
@@ -441,18 +570,12 @@ async fn main() -> anyhow::Result<()> {
     let t0 = Instant::now();
     let entity_index_path = args.output_dir.join(".entity_index.ron");
     let entity_index = load_entity_index(&entity_index_path);
-    engine_logging::engine_info!(
-        "entity index loaded in {}ms",
-        t0.elapsed().as_millis()
-    );
+    engine_logging::engine_info!("entity index loaded in {}ms", t0.elapsed().as_millis());
 
     let t1 = Instant::now();
     let summary_cache_path = args.output_dir.join(".summary_cache.ron");
     let summary_cache = load_summary_cache(&summary_cache_path);
-    engine_logging::engine_info!(
-        "summary cache loaded in {}ms",
-        t1.elapsed().as_millis()
-    );
+    engine_logging::engine_info!("summary cache loaded in {}ms", t1.elapsed().as_millis());
 
     let t2 = Instant::now();
     let article_index = ArticleIndex::load(&args.output_dir);
@@ -473,7 +596,9 @@ async fn main() -> anyhow::Result<()> {
     let t3 = Instant::now();
     let mut summary_index: HashMap<String, SummaryCacheEntry> = HashMap::new();
     for (url, entity_entry) in &entity_index.entries {
-        let Some(ref content_hash) = entity_entry.content_hash else { continue };
+        let Some(ref content_hash) = entity_entry.content_hash else {
+            continue;
+        };
         let newest = summary_cache
             .iter()
             .filter(|(k, _)| k.content_hash == *content_hash)
@@ -488,12 +613,37 @@ async fn main() -> anyhow::Result<()> {
         t3.elapsed().as_millis()
     );
 
+    let agent_provider: Option<Arc<dyn LlmProvider>> = match OpenAiProvider::from_env() {
+        Ok(provider) => {
+            engine_logging::engine_info!("smart-query provider initialized");
+            Some(Arc::new(provider))
+        }
+        Err(err) => {
+            engine_logging::engine_warn!(
+                "smart-query provider unavailable; query_knowledge_base will degrade to raw results: {}",
+                err
+            );
+            None
+        }
+    };
+
     engine_logging::engine_info!(
         "startup complete in {}ms",
         overall_start.elapsed().as_millis()
     );
 
-    let server = HarvesterMcpServer::new(args.output_dir, entity_index, summary_cache, article_index, summary_index);
+    let server = HarvesterMcpServer::new(
+        args.output_dir,
+        entity_index,
+        summary_cache,
+        article_index,
+        summary_index,
+        SmartQueryConfig {
+            agent_model: args.agent_model,
+            context_budget: args.context_budget,
+            agent_provider,
+        },
+    );
     let transport = stdio();
     server.serve(transport).await?.waiting().await?;
 

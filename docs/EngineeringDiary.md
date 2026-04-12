@@ -1353,3 +1353,9 @@ Type: Implementation
 Context: `crates/harvester_io/src/effect_runner.rs` had grown to ~2,280 lines mixing the `EffectRunner` struct/constructors, a ~1,000-line `execute_effect` match, source-polling logic, free worker functions, and tests into one file.
 Change: Converted `effect_runner.rs` into a directory module and extracted four focused submodules: `dispatch.rs` (`impl EffectRunner { fn execute_effect() }` — the full effect match), `poll.rs` (`impl EffectRunner { fn execute_poll_all_sources() }`), `worker.rs` (`EntityIndexWorkerMsg`, `run_entity_index_worker`, `run_triage_refresh_load`), and `tests.rs` (all 20 tests with explicit imports per repo convention). `mod.rs` retains only the struct definition, constructors, `enqueue`, `Drop`, `spawn_event_loop`, `validate_effect`, and `reject_effect` (~350 lines). All 75 `harvester_io` tests pass; clippy clean.
 Refs: crates/harvester_io/src/effect_runner/mod.rs, crates/harvester_io/src/effect_runner/dispatch.rs, crates/harvester_io/src/effect_runner/poll.rs, crates/harvester_io/src/effect_runner/worker.rs, crates/harvester_io/src/effect_runner/tests.rs
+
+## 2026-04-11 - Add Phase 2 smart-query layer to harvester_mcp
+Type: Feature
+Context: Phase 1 exposed deterministic MCP tools, but the server still treated `--agent-model` and `--context-budget` as inert configuration and had no single tool for question-driven retrieval and synthesis.
+Change: Added `query_knowledge_base` to `harvester_mcp` plus a dedicated smart-query engine that uses the Harvester OpenAI provider for query expansion, candidate scoring, and digest assembly. The server now degrades to regex/entity-based raw results when the cheap-model path is unavailable and trims the final response to the configured context budget.
+Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs, README.md
