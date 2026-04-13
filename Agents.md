@@ -19,6 +19,7 @@
 ## Testing
 - Bug fixes should include a regression test when practical.
 - Prefer tests of reducer behavior, emitted effects, and public contracts over internal details.
+- `use super::*;` is acceptable inside an inline `#[cfg(test)]` block, but extracted test files (e.g. `tests.rs`) must use explicit imports.
 
 ## Logging
 - Use `engine_logging` for runtime logging.

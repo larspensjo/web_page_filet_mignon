@@ -1341,3 +1341,9 @@ Type: Implementation
 Context: Continuing the layout module split. After extracting theme and init code, the inline `#[cfg(test)] mod tests { … }` block (~1210 lines) was still embedded in `layout/mod.rs`, keeping the wrapper file at ~2430 lines.
 Change: Moved the test block into `layout/tests.rs` (de-indented inner content, stripped the outer `mod tests { }` wrapper). `layout/mod.rs` now declares the module via `#[cfg(test)] #[path = "tests.rs"] mod tests;`. `mod.rs` is now ~10 lines shorter than 1220 lines; `tests.rs` holds all 1210 test lines. All 147 tests pass; clippy clean.
 Refs: crates/harvester_app/src/platform/ui/layout/mod.rs, crates/harvester_app/src/platform/ui/layout/tests.rs
+
+## 2026-04-13 - build_layout_rules extracted to layout/rules.rs; mod.rs reduced to thin wrapper
+Type: Implementation
+Context: After extracting theme, init, and tests, `layout/mod.rs` still held ~1078 lines for `build_layout_rules` plus its helpers (`PromptLabVisibility`, `compute_prompt_lab_visibility`, `collapsed_top_rule`) and 10 layout constants. This was the last large production chunk preventing `mod.rs` from being a true thin wrapper.
+Change: Extracted all of the above into `layout/rules.rs` as `pub(super) fn build_layout_rules` (and `pub(super)` constants). `layout/mod.rs` now holds only the two public structs (`PromptLabLayoutConfig`, `LayoutConfig`), `pub fn initial_commands`, and `pub(crate) fn build_layout_command` — 86 lines total. `LayoutConfig` stays in `mod.rs` so tests importing `use super::*` can reach it without extra indirection. `tests.rs` had explicit imports added for `DockStyle`, `LayoutRule`, `ControlId`, the 10 layout constants (from `super::rules`), and the control-ID constants (from `super::super::constants::*`). All 147 tests pass; clippy clean.
+Refs: crates/harvester_app/src/platform/ui/layout/mod.rs, crates/harvester_app/src/platform/ui/layout/rules.rs, crates/harvester_app/src/platform/ui/layout/tests.rs
