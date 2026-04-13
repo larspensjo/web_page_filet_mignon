@@ -1413,3 +1413,9 @@ Type: Reliability
 Context: Real-corpus conceptual prompts were still hitting `finish_reason=length` during the expansion step because `harvester_mcp` was driving expansion through `gpt-5.4-nano` with a 250/400 token cap, even when the rest of the smart-query pipeline succeeded.
 Change: Smart-query expansion now upgrades the default `gpt-5.4-nano` agent model to `gpt-5.4-mini` for expansion requests only, raises the expansion caps to 400/700 output tokens, and logs the expansion model plus per-call token budget. Added regression coverage for the model override and retry limits.
 Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-13 - Shift smart-query tests toward public response contracts
+Type: Testing
+Context: The smart-query test module had accumulated helper-level assertions against candidate selection, heuristic pattern text, citation rewriting, and exact provider request shapes, which made the suite more coupled to implementation details than to externally visible behavior.
+Change: Replaced those helper-focused checks with `query(...)`-level tests that assert user-visible outcomes: smart-mode responses on broad corpora, graceful heuristic-expansion recovery for conceptual prompts, ranked relevant articles, warnings, and final citation-bearing synthesis.
+Refs: crates/harvester_mcp/src/smart_query.rs

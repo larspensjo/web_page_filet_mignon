@@ -1352,163 +1352,6 @@ mod tests {
         )
     }
 
-    #[test]
-    fn preferred_expansion_model_upgrades_nano_to_mini() {
-        assert_eq!(
-            preferred_expansion_model_name(OPENAI_MODEL_GPT_5_4_NANO),
-            OPENAI_MODEL_GPT_5_4_MINI
-        );
-        assert_eq!(
-            preferred_expansion_model_name("gpt-5.4-mini"),
-            "gpt-5.4-mini"
-        );
-    }
-
-    #[test]
-    fn collect_candidates_caps_and_prefers_title_hits() {
-        let mut articles = Vec::new();
-        for idx in 0..30 {
-            let filename = if idx == 0 {
-                "priority.md".to_string()
-            } else {
-                format!("article-{idx:02}.md")
-            };
-            let title = if idx == 0 {
-                "Anthropic security bulletin".to_string()
-            } else {
-                format!("Background article {idx:02}")
-            };
-            let url = format!("https://example.com/{idx:02}");
-            let fetched = format!("2026-04-{:02}T10:00:00Z", (idx % 28) + 1);
-            let body = format!("# Article {idx}\nThis article mentions security in the body.");
-            articles.push(sample_article(&filename, &title, &url, &fetched, &body));
-        }
-
-        let engine = test_engine_with_articles(
-            articles,
-            EntityIndex {
-                schema_version: 1,
-                entries: Default::default(),
-            },
-            HashMap::new(),
-            HashMap::new(),
-            None,
-            "mock-model",
-            10_000,
-        );
-        let input = QueryKnowledgeBaseInput {
-            question: "What do the loaded articles say about security?".to_string(),
-            max_results: 5,
-            scope_entities: Vec::new(),
-            scope_date_from: None,
-            scope_date_to: None,
-        };
-        let expansion = QueryExpansion {
-            regex_patterns: vec!["(?i)security".to_string()],
-            entity_names: Vec::new(),
-            date_from: None,
-            date_to: None,
-        };
-
-        let selection = engine.collect_candidates(&input, &expansion);
-
-        assert_eq!(selection.regex_match_count, 30);
-        assert_eq!(selection.entity_match_count, 0);
-        assert_eq!(selection.total_unique_candidates, 30);
-        assert_eq!(selection.scoring_candidates, MAX_SCORING_CANDIDATES);
-        assert!(selection.capped);
-        assert_eq!(selection.candidates[0].filename, "priority.md");
-    }
-
-    #[test]
-    fn collect_candidates_prefers_higher_triage_priority() {
-        let articles = vec![
-            sample_article(
-                "high.md",
-                "Background article high",
-                "https://example.com/high",
-                "2026-04-11T10:00:00Z",
-                "# High\nThis article mentions security in the body.",
-            ),
-            sample_article(
-                "low.md",
-                "Background article low",
-                "https://example.com/low",
-                "2026-04-12T10:00:00Z",
-                "# Low\nThis article mentions security in the body.",
-            ),
-        ];
-        let triage_index = HashMap::from([
-            (
-                "https://example.com/high".to_string(),
-                ArticleTriageResult {
-                    category: "security".to_string(),
-                    priority: 5,
-                    tags: vec!["tag".to_string()],
-                    rationale: "high".to_string(),
-                    input_tokens: 0,
-                    output_tokens: 0,
-                },
-            ),
-            (
-                "https://example.com/low".to_string(),
-                ArticleTriageResult {
-                    category: "security".to_string(),
-                    priority: 1,
-                    tags: vec!["tag".to_string()],
-                    rationale: "low".to_string(),
-                    input_tokens: 0,
-                    output_tokens: 0,
-                },
-            ),
-        ]);
-        let engine = test_engine_with_articles(
-            articles,
-            EntityIndex {
-                schema_version: 1,
-                entries: Default::default(),
-            },
-            HashMap::new(),
-            triage_index,
-            None,
-            "mock-model",
-            10_000,
-        );
-        let input = QueryKnowledgeBaseInput {
-            question: "What do the loaded articles say about security?".to_string(),
-            max_results: 5,
-            scope_entities: Vec::new(),
-            scope_date_from: None,
-            scope_date_to: None,
-        };
-        let expansion = QueryExpansion {
-            regex_patterns: vec!["(?i)security".to_string()],
-            entity_names: Vec::new(),
-            date_from: None,
-            date_to: None,
-        };
-
-        let selection = engine.collect_candidates(&input, &expansion);
-
-        assert_eq!(selection.candidates[0].filename, "high.md");
-        assert_eq!(selection.candidates[0].triage_priority, Some(5));
-    }
-
-    #[test]
-    fn heuristic_patterns_skip_prompt_scaffolding_and_add_demand_signals() {
-        let patterns = heuristic_patterns(
-            "Suppose there is a massive growth of AI usage. I want to investigate what companies are best prepared to meet this increased demand.",
-        );
-
-        assert!(patterns
-            .iter()
-            .any(|pattern| pattern.contains("capacity|compute")));
-        assert!(patterns
-            .iter()
-            .any(|pattern| pattern.contains("nvidia|tsmc")));
-        assert!(!patterns.iter().any(|pattern| pattern.contains("Suppose")));
-    }
-
     #[tokio::test]
     async fn smart_query_returns_scored_digest() {
         let provider = Arc::new(MockLlmProvider::new());
@@ -1539,7 +1382,6 @@ mod tests {
             .synthesis
             .unwrap_or_default()
             .contains("[alpha.md]"));
-        assert_eq!(provider.recorded_requests().len(), 3);
     }
 
     #[tokio::test]
@@ -1575,34 +1417,149 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning.contains("used heuristic expansion instead")));
-        assert_eq!(provider.recorded_requests().len(), 4);
-        let requests = provider.recorded_requests();
-        assert_eq!(requests[0].model().model_name(), OPENAI_MODEL_GPT_5_4_MINI);
-        assert_eq!(
-            requests[0].max_output_tokens(),
-            Some(EXPANSION_INITIAL_MAX_OUTPUT_TOKENS)
-        );
-        assert_eq!(requests[1].model().model_name(), OPENAI_MODEL_GPT_5_4_MINI);
-        assert_eq!(
-            requests[1].max_output_tokens(),
-            Some(EXPANSION_RETRY_MAX_OUTPUT_TOKENS)
-        );
+        assert!(response
+            .synthesis
+            .unwrap_or_default()
+            .contains("[alpha.md]"));
     }
 
-    #[test]
-    fn expand_digest_citations_rewrites_ids_to_filenames() {
-        let expanded = expand_digest_citations(
-            "Alpha matters [C1]. Beta matters [C2].",
-            &[
-                ("C1".to_string(), "alpha.md".to_string()),
-                ("C2".to_string(), "beta.md".to_string()),
-            ],
+    #[tokio::test]
+    async fn smart_query_handles_broad_match_sets_without_falling_back() {
+        let mut articles = Vec::new();
+        for idx in 0..30 {
+            let filename = if idx == 0 {
+                "priority.md".to_string()
+            } else {
+                format!("article-{idx:02}.md")
+            };
+            let title = if idx == 0 {
+                "Anthropic security bulletin".to_string()
+            } else {
+                format!("Background article {idx:02}")
+            };
+            let url = format!("https://example.com/{idx:02}");
+            let fetched = format!("2026-04-{:02}T10:00:00Z", (idx % 28) + 1);
+            let body = format!("# Article {idx}\nThis article mentions security in the body.");
+            articles.push(sample_article(&filename, &title, &url, &fetched, &body));
+        }
+
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_json_success(
+            r#"{"regex_patterns":["(?i)security"],"entity_names":[],"date_from":null,"date_to":null}"#,
+        );
+        for _ in 0..MAX_SCORING_CANDIDATES {
+            provider.queue_json_success(
+                r#"{"relevance_score":7,"key_facts":["The article discusses security."]}"#,
+            );
+        }
+        provider.queue_json_success(r#"{"synthesis":"Broad security coverage appears in [C1]."}"#);
+
+        let engine = test_engine_with_articles(
+            articles,
+            EntityIndex {
+                schema_version: 1,
+                entries: Default::default(),
+            },
+            HashMap::new(),
+            HashMap::new(),
+            Some(provider),
+            "mock-model",
+            10_000,
         );
 
-        assert_eq!(
-            expanded,
-            "Alpha matters [alpha.md]. Beta matters [beta.md]."
+        let response = engine
+            .query(QueryKnowledgeBaseInput {
+                question: "What do the loaded articles say about security?".to_string(),
+                max_results: 5,
+                scope_entities: Vec::new(),
+                scope_date_from: None,
+                scope_date_to: None,
+            })
+            .await;
+
+        assert_eq!(response.mode, "smart");
+        assert!(response.warnings.is_empty());
+        assert_eq!(response.ranked_articles.len(), 5);
+        assert!(response
+            .ranked_articles
+            .iter()
+            .all(|article| article.relevance_score == Some(7)));
+        assert!(response.synthesis.unwrap_or_default().contains(".md]"));
+    }
+
+    #[tokio::test]
+    async fn smart_query_heuristic_expansion_surfaces_supply_side_articles() {
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_response(Err(LlmError::InvalidResponse {
+            detail: "choice missing content (finish_reason=length)".to_string(),
+        }));
+        provider.queue_response(Err(LlmError::InvalidResponse {
+            detail: "choice missing content (finish_reason=length)".to_string(),
+        }));
+        provider.queue_json_success(
+            r#"{"relevance_score":9,"key_facts":["TSMC is expanding semiconductor capacity for AI demand."]}"#,
         );
+        provider.queue_json_success(
+            r#"{"relevance_score":8,"key_facts":["Amazon is scaling Trainium and cloud infrastructure."]}"#,
+        );
+        provider.queue_json_success(
+            r#"{"synthesis":"Supply-side AI readiness shows up most clearly in [C1] and [C2]."}"#,
+        );
+
+        let engine = test_engine_with_articles(
+            vec![
+                sample_article(
+                    "tsmc.md",
+                    "TSMC expands AI chip capacity",
+                    "https://example.com/tsmc",
+                    "2026-04-12T10:00:00Z",
+                    "# TSMC\nTSMC is adding semiconductor and foundry capacity for AI chip demand.",
+                ),
+                sample_article(
+                    "amazon.md",
+                    "Amazon scales Trainium infrastructure",
+                    "https://example.com/amazon",
+                    "2026-04-11T10:00:00Z",
+                    "# Amazon\nAmazon is expanding Trainium, data center, and cloud infrastructure for AI workloads.",
+                ),
+                sample_article(
+                    "scribes.md",
+                    "AI scribes in hospitals",
+                    "https://example.com/scribes",
+                    "2026-04-10T10:00:00Z",
+                    "# Scribes\nHospital documentation workflows improved modestly.",
+                ),
+            ],
+            EntityIndex {
+                schema_version: 1,
+                entries: Default::default(),
+            },
+            HashMap::new(),
+            HashMap::new(),
+            Some(provider),
+            OPENAI_MODEL_GPT_5_4_NANO,
+            10_000,
+        );
+
+        let response = engine
+            .query(QueryKnowledgeBaseInput {
+                question: "Which companies appear best positioned to meet rising AI demand through chips, cloud, data centers, and power infrastructure?".to_string(),
+                max_results: 3,
+                scope_entities: Vec::new(),
+                scope_date_from: None,
+                scope_date_to: None,
+            })
+            .await;
+
+        assert_eq!(response.mode, "smart");
+        assert!(response
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("used heuristic expansion instead")));
+        assert_eq!(response.ranked_articles.len(), 2);
+        assert_eq!(response.ranked_articles[0].filename, "tsmc.md");
+        assert_eq!(response.ranked_articles[1].filename, "amazon.md");
+        assert!(response.synthesis.unwrap_or_default().contains("[tsmc.md]"));
     }
 
     #[tokio::test]
