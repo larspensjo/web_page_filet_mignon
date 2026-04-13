@@ -5,6 +5,7 @@ use crate::article_index::{ArticleEntry, ArticleIndex};
 use harvester_core::{ArticleTriageResult, EntityIndex, EntityIndexEntry, SummaryCacheEntry};
 use harvester_engine::llm::{
     ChatMessage, ChatRole, LlmError, LlmProvider, LlmRequest, ModelId, ProviderKind,
+    OPENAI_MODEL_GPT_5_4_MINI, OPENAI_MODEL_GPT_5_4_NANO,
 };
 use harvester_engine::{TokenCounter, WhitespaceTokenCounter};
 use regex::Regex;
@@ -17,6 +18,8 @@ const MAX_EXPANSION_ENTITIES: usize = 5;
 const MAX_KEY_FACTS: usize = 2;
 const SCORING_CONCURRENCY: usize = 4;
 const MAX_SCORING_CANDIDATES: usize = 25;
+const EXPANSION_INITIAL_MAX_OUTPUT_TOKENS: u32 = 400;
+const EXPANSION_RETRY_MAX_OUTPUT_TOKENS: u32 = 700;
 
 #[derive(Clone)]
 pub struct SmartQueryEngine {
@@ -26,6 +29,7 @@ pub struct SmartQueryEngine {
     triage_index: Arc<HashMap<String, ArticleTriageResult>>,
     provider: Option<Arc<dyn LlmProvider>>,
     agent_model: ModelId,
+    expansion_model: ModelId,
     context_budget: usize,
 }
 
@@ -134,13 +138,18 @@ impl SmartQueryEngine {
         agent_model: impl Into<String>,
         context_budget: usize,
     ) -> Self {
+        let agent_model_name = agent_model.into();
         Self {
             article_index,
             entity_index,
             summary_index,
             triage_index,
             provider,
-            agent_model: ModelId::new(ProviderKind::OpenAi, agent_model.into()),
+            agent_model: ModelId::new(ProviderKind::OpenAi, agent_model_name.clone()),
+            expansion_model: ModelId::new(
+                ProviderKind::OpenAi,
+                preferred_expansion_model_name(&agent_model_name),
+            ),
             context_budget,
         }
     }
@@ -276,15 +285,22 @@ impl SmartQueryEngine {
         engine_logging::engine_info!("[smart-query] expansion prompt: {}", user_prompt);
 
         let response = match self
-            .request_expansion(provider.clone(), &user_prompt, 250)
+            .request_expansion(
+                provider.clone(),
+                &user_prompt,
+                EXPANSION_INITIAL_MAX_OUTPUT_TOKENS,
+            )
             .await
         {
             Ok(response) => response,
             Err(err) if should_retry_empty_length_response(&err) => {
                 engine_logging::engine_warn!(
-                    "[smart-query] expansion retry activated after empty length response"
+                    "[smart-query] expansion retry activated after empty length response; model={} max_output_tokens={}",
+                    self.expansion_model.model_name(),
+                    EXPANSION_RETRY_MAX_OUTPUT_TOKENS
                 );
-                self.request_expansion(provider, &user_prompt, 400).await?
+                self.request_expansion(provider, &user_prompt, EXPANSION_RETRY_MAX_OUTPUT_TOKENS)
+                    .await?
             }
             Err(err) => return Err(err),
         };
@@ -321,10 +337,15 @@ impl SmartQueryEngine {
         user_prompt: &str,
         max_output_tokens: u32,
     ) -> Result<harvester_engine::llm::LlmResponse, LlmError> {
+        engine_logging::engine_info!(
+            "[smart-query] expansion request model={} max_output_tokens={}",
+            self.expansion_model.model_name(),
+            max_output_tokens
+        );
         provider
             .complete(
                 &LlmRequest::new(
-                    self.agent_model.clone(),
+                    self.expansion_model.clone(),
                     vec![
                         ChatMessage::new(
                             ChatRole::System,
@@ -1192,6 +1213,14 @@ fn should_retry_empty_length_response(err: &LlmError) -> bool {
     )
 }
 
+fn preferred_expansion_model_name(agent_model_name: &str) -> String {
+    if agent_model_name.eq_ignore_ascii_case(OPENAI_MODEL_GPT_5_4_NANO) {
+        OPENAI_MODEL_GPT_5_4_MINI.to_string()
+    } else {
+        agent_model_name.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1232,6 +1261,14 @@ mod tests {
 
     fn test_engine(
         provider: Option<Arc<dyn LlmProvider>>,
+        context_budget: usize,
+    ) -> SmartQueryEngine {
+        test_engine_with_model(provider, OPENAI_MODEL_GPT_5_4_NANO, context_budget)
+    }
+
+    fn test_engine_with_model(
+        provider: Option<Arc<dyn LlmProvider>>,
+        agent_model: &str,
         context_budget: usize,
     ) -> SmartQueryEngine {
         test_engine_with_articles(
@@ -1288,6 +1325,7 @@ mod tests {
             )]),
             HashMap::new(),
             provider,
+            agent_model,
             context_budget,
         )
     }
@@ -1298,6 +1336,7 @@ mod tests {
         summary_index: HashMap<String, SummaryCacheEntry>,
         triage_index: HashMap<String, ArticleTriageResult>,
         provider: Option<Arc<dyn LlmProvider>>,
+        agent_model: &str,
         context_budget: usize,
     ) -> SmartQueryEngine {
         let article_index = ArticleIndex { articles };
@@ -1308,9 +1347,21 @@ mod tests {
             Arc::new(summary_index),
             Arc::new(triage_index),
             provider,
-            "mock-model",
+            agent_model,
             context_budget,
         )
+    }
+
+    #[test]
+    fn preferred_expansion_model_upgrades_nano_to_mini() {
+        assert_eq!(
+            preferred_expansion_model_name(OPENAI_MODEL_GPT_5_4_NANO),
+            OPENAI_MODEL_GPT_5_4_MINI
+        );
+        assert_eq!(
+            preferred_expansion_model_name("gpt-5.4-mini"),
+            "gpt-5.4-mini"
+        );
     }
 
     #[test]
@@ -1342,6 +1393,7 @@ mod tests {
             HashMap::new(),
             HashMap::new(),
             None,
+            "mock-model",
             10_000,
         );
         let input = QueryKnowledgeBaseInput {
@@ -1419,6 +1471,7 @@ mod tests {
             HashMap::new(),
             triage_index,
             None,
+            "mock-model",
             10_000,
         );
         let input = QueryKnowledgeBaseInput {
@@ -1523,6 +1576,17 @@ mod tests {
             .iter()
             .any(|warning| warning.contains("used heuristic expansion instead")));
         assert_eq!(provider.recorded_requests().len(), 4);
+        let requests = provider.recorded_requests();
+        assert_eq!(requests[0].model().model_name(), OPENAI_MODEL_GPT_5_4_MINI);
+        assert_eq!(
+            requests[0].max_output_tokens(),
+            Some(EXPANSION_INITIAL_MAX_OUTPUT_TOKENS)
+        );
+        assert_eq!(requests[1].model().model_name(), OPENAI_MODEL_GPT_5_4_MINI);
+        assert_eq!(
+            requests[1].max_output_tokens(),
+            Some(EXPANSION_RETRY_MAX_OUTPUT_TOKENS)
+        );
     }
 
     #[test]

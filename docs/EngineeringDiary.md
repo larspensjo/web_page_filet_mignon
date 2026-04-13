@@ -1407,3 +1407,9 @@ Type: Bug Fix
 Context: Conceptual questions could fail before candidate collection because the GPT-5 expansion call occasionally returned no visible content with `finish_reason=length`, which forced a full raw fallback and let poor heuristic regexes dominate retrieval.
 Change: Expansion now retries once with a larger token budget on empty-length responses, and if it still fails, smart-query falls back to heuristic expansion while continuing through candidate scoring and digest assembly. Tightened the heuristic term filter to ignore prompt-scaffolding words and added demand-growth infrastructure patterns for supply-side AI questions.
 Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-13 - Use a stronger model and larger caps for query expansion
+Type: Reliability
+Context: Real-corpus conceptual prompts were still hitting `finish_reason=length` during the expansion step because `harvester_mcp` was driving expansion through `gpt-5.4-nano` with a 250/400 token cap, even when the rest of the smart-query pipeline succeeded.
+Change: Smart-query expansion now upgrades the default `gpt-5.4-nano` agent model to `gpt-5.4-mini` for expansion requests only, raises the expansion caps to 400/700 output tokens, and logs the expansion model plus per-call token budget. Added regression coverage for the model override and retry limits.
+Refs: crates/harvester_mcp/src/smart_query.rs
