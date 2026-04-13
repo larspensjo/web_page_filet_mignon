@@ -1323,3 +1323,9 @@ Type: Refactor
 Context: The earlier footer fix still left `Stop / Finish` with split authority: rendering used a view-model boolean while `Msg::StopFinishClicked` still accepted clicks based on `SessionState::Running`. That allowed UI and reducer legality to drift.
 Change: Introduced typed `StopFinishButtonState` plus `AppState::stop_finish_button_state()`. Both view-building and reducer click handling now consume that single selector, so enabled state, destructive styling, and emitted `Effect::StopFinish` policy stay in lockstep.
 Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/view_model.rs
+
+## 2026-04-13 - layout.rs converted to directory module; theme extracted to theme.rs
+Type: Implementation
+Context: `crates/harvester_app/src/platform/ui/layout.rs` had grown to ~4000 lines, mixing control creation, layout rules, dark-theme style definitions, style application, and tests. The file was hard to navigate and would grow further with each new UI feature.
+Change: Converted `layout.rs` into a `layout/` directory module. Extracted `define_dark_theme_styles` and `apply_dark_theme` (~1060 lines) into `layout/theme.rs` as `pub(super)` functions; `layout/mod.rs` declares `mod theme;` and calls them via `theme::`. Dropped `ControlStyle` from `mod.rs` production imports (only used in `theme.rs`); added `use commanductui::StyleId` inside the `#[cfg(test)]` block where it is actually needed. All 147 `harvester_app` tests pass; `cargo clippy --workspace --all-targets -- -D warnings` clean.
+Refs: crates/harvester_app/src/platform/ui/layout/mod.rs, crates/harvester_app/src/platform/ui/layout/theme.rs
