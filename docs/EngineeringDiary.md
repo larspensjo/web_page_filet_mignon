@@ -1335,3 +1335,9 @@ Type: Implementation
 Context: Continuing the layout module split. After extracting theme code, `initial_commands` still held ~750 lines of `PlatformCommand::Create*` calls inside `layout/mod.rs`, making the orchestration flow hard to see at a glance.
 Change: Extracted all `Create*` control commands into `layout/init.rs` as `pub(super) fn create_controls(window_id, commands)`. `initial_commands` in `layout/mod.rs` becomes a thin four-step orchestrator: `theme::define_dark_theme_styles` → `init::create_controls` → `theme::apply_dark_theme` → `build_layout_command`. `init.rs` calls no theme functions (avoids `pub(super)` sibling-visibility issue). Imports in `mod.rs` shrank (`LabelClass`, `MenuItemConfig`, `SplitterOrientation`, `Color`, `FontDescription`, `FontWeight`, `DEFAULT_JOBS_PANEL_WIDTH` removed from production imports; remaining test usages of `Color` handled via explicit `use commanductui::Color` in the test block). All 147 tests pass; clippy clean.
 Refs: crates/harvester_app/src/platform/ui/layout/mod.rs, crates/harvester_app/src/platform/ui/layout/init.rs
+
+## 2026-04-13 - Layout tests extracted to layout/tests.rs
+Type: Implementation
+Context: Continuing the layout module split. After extracting theme and init code, the inline `#[cfg(test)] mod tests { … }` block (~1210 lines) was still embedded in `layout/mod.rs`, keeping the wrapper file at ~2430 lines.
+Change: Moved the test block into `layout/tests.rs` (de-indented inner content, stripped the outer `mod tests { }` wrapper). `layout/mod.rs` now declares the module via `#[cfg(test)] #[path = "tests.rs"] mod tests;`. `mod.rs` is now ~10 lines shorter than 1220 lines; `tests.rs` holds all 1210 test lines. All 147 tests pass; clippy clean.
+Refs: crates/harvester_app/src/platform/ui/layout/mod.rs, crates/harvester_app/src/platform/ui/layout/tests.rs
