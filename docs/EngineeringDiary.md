@@ -1443,3 +1443,9 @@ Type: Retrieval
 Context: Query-overlap tag diagnostics based on raw token splitting were promising but still noisy because the server had no structured notion of which query terms or phrases were actually central to the user’s intent.
 Change: Extended the smart-query expansion schema with `focus_terms` and `focus_phrases`, added heuristic fallbacks for both when expansion is unavailable, logged the extracted focus fields, and switched tag-overlap diagnostics to rank phrase matches above single-term matches using the expansion output instead of plain query tokenization.
 Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Add MCP launcher and shared-output setup docs
+Type: Tooling
+Context: Using `harvester_mcp` from Codex or Claude across multiple worktrees is awkward if clients are pointed directly at a single binary path instead of a stable launcher that can target the active workspace and a shared corpus.
+Change: Added `scripts/Start-HarvesterMcp.ps1` as a stdio-safe launcher that prefers `target\debug\harvester_mcp.exe` and falls back to `cargo run`, and expanded `README.md` with general repo usage plus recommended MCP registration patterns for shared-output workflows.
+Refs: scripts/Start-HarvesterMcp.ps1, README.md
