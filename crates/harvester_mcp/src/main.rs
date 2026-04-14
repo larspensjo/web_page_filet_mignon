@@ -92,6 +92,8 @@ struct SearchArticlesParams {
     date_to: Option<String>,
     /// Maximum number of results (default 20)
     max_results: Option<usize>,
+    /// Maximum characters per returned snippet (default 320, max 1200)
+    snippet_chars: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -211,8 +213,68 @@ fn date_in_range(
     }
 }
 
-/// Build a snippet: up to 3 matching lines with 1 line of context before + after.
-fn build_snippet(content: &str, re: &Regex) -> String {
+const DEFAULT_SEARCH_SNIPPET_CHARS: usize = 320;
+const MAX_SEARCH_SNIPPET_CHARS: usize = 1200;
+
+fn clamp_search_snippet_chars(snippet_chars: Option<usize>) -> usize {
+    snippet_chars
+        .unwrap_or(DEFAULT_SEARCH_SNIPPET_CHARS)
+        .clamp(80, MAX_SEARCH_SNIPPET_CHARS)
+}
+
+fn compact_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn is_frontmatter_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed == "---" {
+        return true;
+    }
+
+    [
+        "url:",
+        "title:",
+        "fetched_utc:",
+        "token_count:",
+        "summary_created_at_utc:",
+        "summary_input_tokens:",
+        "summary_output_tokens:",
+    ]
+    .iter()
+    .any(|prefix| trimmed.starts_with(prefix))
+}
+
+fn truncate_text_boundary(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+
+    let mut end = text.len();
+    for (char_count, (index, _)) in text.char_indices().enumerate() {
+        if char_count == max_chars {
+            end = index;
+            break;
+        }
+    }
+
+    let candidate = &text[..end];
+    let trimmed = candidate
+        .rfind(|ch: char| ch.is_whitespace() || [',', ';', ':', '.'].contains(&ch))
+        .filter(|index| *index >= candidate.len() / 2)
+        .map(|index| &candidate[..index])
+        .unwrap_or(candidate)
+        .trim();
+
+    if trimmed.is_empty() {
+        format!("{}...", candidate.trim())
+    } else {
+        format!("{trimmed}...")
+    }
+}
+
+/// Build a snippet from nearby matches and compress it for chat-oriented payloads.
+fn build_snippet(content: &str, re: &Regex, max_chars: usize) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut included: Vec<usize> = Vec::new();
     let mut match_count = 0usize;
@@ -232,11 +294,14 @@ fn build_snippet(content: &str, re: &Regex) -> String {
         }
     }
     included.sort_unstable();
-    included
+    let compact = included
         .iter()
-        .map(|&i| lines[i])
+        .map(|&i| compact_whitespace(lines[i]))
+        .filter(|line| !is_frontmatter_line(line))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join(" ... ");
+
+    truncate_text_boundary(&compact, max_chars)
 }
 
 #[tool_router]
@@ -257,13 +322,14 @@ impl HarvesterMcpServer {
 
     /// Search article content with a regex pattern, optional date range, and result cap.
     #[rmcp::tool(
-        description = "Search article content using a regex pattern. Optionally filter by date range (date_from/date_to as ISO date strings) and cap results with max_results (default 20). Returns JSON array of matches with filename, title, url, fetched_utc, and a content snippet."
+        description = "Search article content using a regex pattern. Optionally filter by date range (date_from/date_to as ISO date strings), cap results with max_results (default 20), and control snippet size with snippet_chars (default 320, max 1200). Returns JSON array of matches with filename, title, url, fetched_utc, and a compact content snippet."
     )]
     async fn search_articles(&self, Parameters(p): Parameters<SearchArticlesParams>) -> String {
         let t = std::time::Instant::now();
+        let snippet_chars = clamp_search_snippet_chars(p.snippet_chars);
         engine_logging::engine_info!(
-            "[tool] search_articles called with pattern={:?} date_from={:?} date_to={:?} max_results={:?}",
-            p.pattern, p.date_from, p.date_to, p.max_results
+            "[tool] search_articles called with pattern={:?} date_from={:?} date_to={:?} max_results={:?} snippet_chars={}",
+            p.pattern, p.date_from, p.date_to, p.max_results, snippet_chars
         );
         let re = match Regex::new(&p.pattern) {
             Ok(r) => r,
@@ -286,7 +352,7 @@ impl HarvesterMcpServer {
                 continue;
             }
             if re.is_match(&entry.content) {
-                let snippet = build_snippet(&entry.content, &re);
+                let snippet = build_snippet(&entry.content, &re, snippet_chars);
                 results.push(SearchMatch {
                     filename: entry.filename.clone(),
                     title: entry.title.clone(),
@@ -300,7 +366,8 @@ impl HarvesterMcpServer {
         let result = serde_json::to_string(&results)
             .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
         engine_logging::engine_info!(
-            "[tool] search_articles returned {} bytes in {}ms",
+            "[tool] search_articles returned {} matches {} bytes in {}ms",
+            results.len(),
             result.len(),
             t.elapsed().as_millis()
         );
@@ -786,4 +853,74 @@ async fn main() -> anyhow::Result<()> {
     server.serve(transport).await?.waiting().await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::article_index::ArticleEntry;
+    use harvester_core::{EntityIndex, SummaryCache};
+    use serde_json::Value;
+    use std::collections::BTreeMap;
+
+    fn test_server_with_articles(articles: Vec<ArticleEntry>) -> HarvesterMcpServer {
+        HarvesterMcpServer::new(
+            PathBuf::from("output"),
+            EntityIndex {
+                schema_version: 1,
+                entries: BTreeMap::new(),
+            },
+            SummaryCache::new(),
+            ArticleIndex { articles },
+            HashMap::new(),
+            HashMap::new(),
+            SmartQueryConfig {
+                agent_model: "gpt-5.4-nano".to_string(),
+                context_budget: 4000,
+                scoring_candidate_cap: smart_query::DEFAULT_MAX_SCORING_CANDIDATES,
+                too_broad_threshold: smart_query::DEFAULT_TOO_BROAD_THRESHOLD,
+                min_triage_priority: smart_query::DEFAULT_MIN_TRIAGE_PRIORITY,
+                agent_provider: None,
+            },
+        )
+    }
+
+    fn sample_article(filename: &str, title: &str, body: &str) -> ArticleEntry {
+        ArticleEntry {
+            filename: filename.to_string(),
+            path: PathBuf::from(filename),
+            title: Some(title.to_string()),
+            url: Some(format!("https://example.com/{filename}")),
+            fetched_utc: Some("2026-04-14T12:00:00Z".to_string()),
+            token_count: Some(100),
+            content: body.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn search_articles_returns_compact_snippets_by_default() {
+        let body = format!(
+            "---\nurl: \"https://example.com/alpha\"\ntitle: \"Alpha\"\n---\n{}\n{}\n",
+            "Microsoft and OpenAI are renegotiating the partnership while expanding data center capacity. ".repeat(6),
+            "This second paragraph should not all fit into the default snippet budget. ".repeat(6)
+        );
+        let server = test_server_with_articles(vec![sample_article("alpha.md", "Alpha", &body)]);
+
+        let result = server
+            .search_articles(Parameters(SearchArticlesParams {
+                pattern: "Microsoft".to_string(),
+                date_from: None,
+                date_to: None,
+                max_results: Some(5),
+                snippet_chars: None,
+            }))
+            .await;
+
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        let snippet = payload[0]["snippet"].as_str().expect("snippet string");
+        assert!(snippet.len() <= DEFAULT_SEARCH_SNIPPET_CHARS + 3);
+        assert!(snippet.contains("Microsoft and OpenAI"));
+        assert!(!snippet.contains("url:"));
+        assert!(snippet.ends_with("..."));
+    }
 }

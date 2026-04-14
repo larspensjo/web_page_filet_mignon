@@ -396,7 +396,7 @@ impl SmartQueryEngine {
                 selection.top_themes,
                 selection.sample_titles
             );
-            return Ok(self.build_too_broad_response(input, warnings, selection));
+            return Ok(self.build_too_broad_response(input, &expansion, warnings, selection));
         }
 
         let scored = self
@@ -946,9 +946,16 @@ impl SmartQueryEngine {
     fn build_too_broad_response(
         &self,
         input: &QueryKnowledgeBaseInput,
+        expansion: &QueryExpansion,
         warnings: Vec<String>,
         selection: CandidateSelection,
     ) -> QueryKnowledgeBaseResponse {
+        let overlap_tags = query_overlap_tag_counts(
+            &selection.tag_counts,
+            &expansion.focus_terms,
+            &expansion.focus_phrases,
+        );
+
         QueryKnowledgeBaseResponse {
             mode: "too_broad".to_string(),
             question: input.question.clone(),
@@ -966,8 +973,10 @@ impl SmartQueryEngine {
             filtered_low_priority_count: Some(selection.filtered_low_priority_candidates),
             threshold: Some(self.too_broad_threshold),
             refinement_suggestions: build_refinement_suggestions(
+                input,
                 &selection.top_companies,
                 &selection.top_themes,
+                &overlap_tags,
             ),
             top_companies: selection.top_companies,
             top_themes: selection.top_themes,
@@ -1578,11 +1587,64 @@ fn tag_overlap_score(tag: &str, focus_terms: &[String], focus_phrases: &[String]
     (overlap_score > 0).then_some(overlap_score)
 }
 
-fn build_refinement_suggestions(top_companies: &[String], top_themes: &[String]) -> Vec<String> {
+fn build_refinement_suggestions(
+    input: &QueryKnowledgeBaseInput,
+    top_companies: &[String],
+    top_themes: &[String],
+    overlap_tags: &[(String, usize)],
+) -> Vec<String> {
     let mut suggestions = Vec::new();
-    if !top_companies.is_empty() {
+
+    let question_lower = input.question.to_lowercase();
+    let asks_for_company_comparison = question_lower.contains("which companies")
+        || question_lower.contains("what companies")
+        || question_lower.contains("best positioned")
+        || question_lower.contains("winners")
+        || question_lower.contains("beneficiaries");
+    let relationship_query = input.scope_entities.len() >= 2
+        || question_lower.contains("partnership")
+        || question_lower.contains("relationship")
+        || question_lower.contains("collaboration")
+        || question_lower.contains("between ");
+    let overlap_examples = overlap_tags
+        .iter()
+        .filter(|(_, count)| *count >= 2)
+        .map(|(tag, _)| humanize_tag(tag))
+        .take(3)
+        .collect::<Vec<_>>();
+    let theme_examples = top_themes
+        .iter()
+        .map(|theme| humanize_tag(theme))
+        .take(3)
+        .collect::<Vec<_>>();
+
+    if relationship_query {
+        let examples = if !overlap_examples.is_empty() {
+            overlap_examples.join(", ")
+        } else {
+            "contract terms, compute supply, data centers".to_string()
+        };
         suggestions.push(format!(
-            "Narrow to one company or vendor set, for example {}.",
+            "Keep the entities fixed and focus on one relationship dimension, for example {examples}."
+        ));
+    } else if asks_for_company_comparison {
+        let examples = if !overlap_examples.is_empty() {
+            overlap_examples.join(", ")
+        } else if !theme_examples.is_empty() {
+            theme_examples.join(", ")
+        } else {
+            "chips, cloud, data centers".to_string()
+        };
+        suggestions.push(format!(
+            "Focus on one infrastructure layer or subtopic, for example {examples}."
+        ));
+        suggestions.push(
+            "Compare one vendor class at a time, for example chipmakers, cloud providers, or data-center/power suppliers."
+                .to_string(),
+        );
+    } else if !top_companies.is_empty() {
+        suggestions.push(format!(
+            "Narrow to a smaller company or vendor set, for example {}.",
             top_companies
                 .iter()
                 .take(3)
@@ -1591,26 +1653,35 @@ fn build_refinement_suggestions(top_companies: &[String], top_themes: &[String])
                 .join(", ")
         ));
     }
-    if !top_themes.is_empty() {
-        suggestions.push(format!(
-            "Focus on one infrastructure layer, for example {}.",
-            top_themes
-                .iter()
-                .take(3)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
+
+    if input.scope_date_from.is_none() && input.scope_date_to.is_none() {
+        suggestions.push(
+            "Add a date range such as the last 30 or 90 days to reduce the candidate set."
+                .to_string(),
+        );
+    } else {
+        suggestions.push(
+            "Tighten the date window further if you want a smaller, more comparable result set."
+                .to_string(),
+        );
     }
-    suggestions.push(
-        "Add a date range or explicit scope_entities filter to reduce the candidate set."
-            .to_string(),
-    );
+
+    if !relationship_query && input.scope_entities.is_empty() {
+        suggestions.push(
+            "Add explicit entities only if they materially narrow the topic; for saturated topics, prefer a date range or subtopic instead."
+                .to_string(),
+        );
+    }
+
     suggestions.push(
         "Rerun with allow_broad=true only if you want a slower deep pass over a broad topic."
             .to_string(),
     );
     suggestions
+}
+
+fn humanize_tag(tag: &str) -> String {
+    tag.replace('-', " ")
 }
 
 fn merge_strings(target: &mut Vec<String>, source: Vec<String>) {
@@ -2079,6 +2150,94 @@ mod tests {
         assert_eq!(response.threshold, Some(DEFAULT_TOO_BROAD_THRESHOLD));
         assert!(!response.refinement_suggestions.is_empty());
         assert!(!response.sample_titles.is_empty());
+        assert!(response
+            .refinement_suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("infrastructure layer or subtopic")));
+        assert!(!response
+            .refinement_suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("one company")));
+    }
+
+    #[tokio::test]
+    async fn smart_query_relationship_too_broad_suggestions_focus_on_dimensions() {
+        let mut articles = Vec::new();
+        let mut entity_entries = BTreeMap::new();
+        let mut triage_index = HashMap::new();
+        for idx in 0..120 {
+            let filename = format!("relationship-{idx:03}.md");
+            let title = format!("Microsoft and OpenAI shift data center strategy {idx:03}");
+            let url = format!("https://example.com/relationship-{idx:03}");
+            let fetched = format!("2026-04-{:02}T10:00:00Z", (idx % 28) + 1);
+            let body = "# Relationship\nMicrosoft and OpenAI are renegotiating data center and compute terms.";
+            articles.push(sample_article(&filename, &title, &url, &fetched, body));
+            entity_entries.insert(
+                url.clone(),
+                EntityIndexEntry {
+                    fetched_utc: Some(fetched),
+                    content_hash: Some(format!("hash-rel-{idx:03}")),
+                    companies: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                    technologies: vec!["compute".to_string()],
+                    products: vec![],
+                    themes: vec!["partnership".to_string()],
+                },
+            );
+            triage_index.insert(
+                url,
+                ArticleTriageResult {
+                    category: "partnership".to_string(),
+                    priority: 3,
+                    tags: vec!["data-center".to_string(), "contract-terms".to_string()],
+                    rationale: "eligible".to_string(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            );
+        }
+
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_json_success(
+            r#"{"regex_patterns":["(?i)(microsoft|openai|data center|compute)"],"entity_names":["Microsoft","OpenAI"],"focus_terms":["microsoft","openai","data","center","compute"],"focus_phrases":["data center","compute terms"],"date_from":null,"date_to":null}"#,
+        );
+
+        let engine = test_engine_with_articles(
+            articles,
+            EntityIndex {
+                schema_version: 1,
+                entries: entity_entries,
+            },
+            HashMap::new(),
+            triage_index,
+            Some(provider),
+            "mock-model",
+            10_000,
+        );
+
+        let response = engine
+            .query(QueryKnowledgeBaseInput {
+                question: "How is the Microsoft and OpenAI partnership changing around data centers and compute?".to_string(),
+                max_results: 5,
+                allow_broad: false,
+                scope_entities: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                scope_date_from: None,
+                scope_date_to: None,
+            })
+            .await;
+
+        assert_eq!(response.mode, "too_broad");
+        assert!(response
+            .refinement_suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("relationship dimension")));
+        assert!(response
+            .refinement_suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("data center")));
+        assert!(!response
+            .refinement_suggestions
+            .iter()
+            .any(|suggestion| suggestion.contains("one company")));
     }
 
     #[tokio::test]

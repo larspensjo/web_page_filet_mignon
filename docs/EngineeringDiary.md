@@ -1455,3 +1455,9 @@ Type: Tooling
 Context: Real Claude testing showed the MCP server is usable, but the client benefits from a lightweight project-specific workflow cue for when to use `harvester-mcp`, how to react to `too_broad`, and when to fall back to raw MCP tools.
 Change: Added `.claude/skills/harvester-mcp-research/SKILL.md` and a matching note in `CLAUDE.md` so project-local Claude sessions prefer the local corpus and the `harvester-mcp` workflow for research-oriented prompts.
 Refs: .claude/skills/harvester-mcp-research/SKILL.md, CLAUDE.md
+
+## 2026-04-14 - Improve too-broad guidance and shrink raw search payloads
+Type: Retrieval
+Context: Real Claude MCP sessions showed two practical issues: `too_broad` suggestions were too generic for comparative or relationship queries, and raw `search_articles` responses could become unnecessarily large when snippets included long paragraphs or frontmatter noise.
+Change: Made `too_broad` suggestions query-shape aware by distinguishing comparative-company and relationship queries and using focus-aware overlap tags for more relevant narrowing hints. Also made `search_articles` return compact snippets by default, added a `snippet_chars` parameter, filtered obvious frontmatter lines from snippets, and logged result counts alongside payload size.
+Refs: crates/harvester_mcp/src/smart_query.rs, crates/harvester_mcp/src/main.rs
