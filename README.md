@@ -94,7 +94,7 @@ harvester_mcp
   [--retain-log-runs <n>]
 ```
 
-Logs are written to `<output-dir>/logs/mcp.log` by default, with older runs retained as `mcp.log.1`, `mcp.log.2`, and so on.
+Logs are written to `<output-dir>/logs/mcp.log` by default, with older runs retained as `mcp.log.1` through `mcp.log.9` unless you override `--retain-log-runs`.
 
 ### Tools
 

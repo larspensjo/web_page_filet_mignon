@@ -50,7 +50,7 @@ struct Args {
     min_triage_priority: u8,
 
     /// Number of previous log runs to retain as mcp.log.N archives
-    #[arg(long, default_value_t = 3)]
+    #[arg(long, default_value_t = 9)]
     retain_log_runs: usize,
 
     /// Directory for log files (defaults to <output-dir>/logs)
