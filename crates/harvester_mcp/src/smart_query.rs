@@ -146,6 +146,7 @@ struct CandidateArticle {
     matched_entities: Vec<String>,
     companies: Vec<String>,
     themes: Vec<String>,
+    triage_tags: Vec<String>,
     title_pattern_hits: usize,
     url_pattern_hits: usize,
     triage_priority: Option<u8>,
@@ -171,6 +172,7 @@ struct CandidateSelection {
     top_companies: Vec<String>,
     top_themes: Vec<String>,
     sample_titles: Vec<String>,
+    tag_counts: Vec<(String, usize)>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -294,6 +296,14 @@ impl SmartQueryEngine {
             self.too_broad_threshold,
             input.allow_broad
         );
+        if !selection.tag_counts.is_empty() {
+            engine_logging::engine_info!(
+                "[smart-query] triage tag stats eligible_unique_candidates={} unique_tags={} top_tags={}",
+                selection.eligible_unique_candidates,
+                selection.tag_counts.len(),
+                format_ranked_counts(&selection.tag_counts, 25)
+            );
+        }
 
         if selection.candidates.is_empty() {
             return Ok(QueryKnowledgeBaseResponse {
@@ -543,6 +553,11 @@ impl SmartQueryEngine {
                 .flat_map(|candidate| candidate.themes.iter().cloned()),
             5,
         );
+        let tag_counts = ranked_term_counts(
+            ranked
+                .iter()
+                .flat_map(|candidate| candidate.triage_tags.iter().cloned()),
+        );
         let sample_titles = ranked
             .iter()
             .filter_map(|candidate| candidate.title.clone())
@@ -563,6 +578,7 @@ impl SmartQueryEngine {
             top_companies,
             top_themes,
             sample_titles,
+            tag_counts,
         }
     }
 
@@ -691,6 +707,12 @@ impl SmartQueryEngine {
             .as_ref()
             .and_then(|url| self.triage_index.get(url))
             .map(|triage| triage.priority);
+        let triage_tags = entry
+            .url
+            .as_ref()
+            .and_then(|url| self.triage_index.get(url))
+            .map(|triage| triage.tags.clone())
+            .unwrap_or_default();
 
         CandidateArticle {
             filename: entry.filename.clone(),
@@ -708,6 +730,7 @@ impl SmartQueryEngine {
             themes: entity_entry
                 .map(|item| item.themes.clone())
                 .unwrap_or_default(),
+            triage_tags,
             title_pattern_hits: 0,
             url_pattern_hits: 0,
             triage_priority,
@@ -1348,6 +1371,14 @@ fn candidate_is_eligible(candidate: &CandidateArticle, min_triage_priority: u8) 
 }
 
 fn top_terms(terms: impl IntoIterator<Item = String>, limit: usize) -> Vec<String> {
+    ranked_term_counts(terms)
+        .into_iter()
+        .take(limit)
+        .map(|(term, _)| term)
+        .collect()
+}
+
+fn ranked_term_counts(terms: impl IntoIterator<Item = String>) -> Vec<(String, usize)> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     for term in terms {
         let normalized = term.trim();
@@ -1365,10 +1396,15 @@ fn top_terms(terms: impl IntoIterator<Item = String>, limit: usize) -> Vec<Strin
             .then_with(|| left.0.to_lowercase().cmp(&right.0.to_lowercase()))
     });
     ranked
-        .into_iter()
+}
+
+fn format_ranked_counts(counts: &[(String, usize)], limit: usize) -> String {
+    counts
+        .iter()
         .take(limit)
-        .map(|(term, _)| term)
-        .collect()
+        .map(|(term, count)| format!("{term}:{count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn build_refinement_suggestions(top_companies: &[String], top_themes: &[String]) -> Vec<String> {

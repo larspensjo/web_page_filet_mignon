@@ -1425,3 +1425,9 @@ Type: Retrieval
 Context: Large-corpus `query_knowledge_base` runs were still spending time and tokens on very broad candidate sets, and the existing append-only `mcp.log` made tuning passes harder to compare. The desired behavior was to treat untriaged and priority-1 articles as ineligible, return quickly when a query remained too broad after that filter, and keep only the latest run in `mcp.log` while preserving a few recent archives.
 Change: Smart-query now filters out untriaged articles and triage priority `<= 1` before breadth evaluation, lowers the scoring cap from 25 to 10, and returns `mode="too_broad"` with deterministic diagnostics (`candidate_count`, filtered counts, top companies/themes, sample titles, refinement suggestions) unless `allow_broad=true`. Added CLI tuning flags for scoring cap, broad-query threshold, and minimum triage priority, plus simple log rotation that keeps the latest run in `mcp.log` and shifts previous runs to `mcp.log.1`, `.2`, `.3`.
 Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Log triage-tag frequency stats for broad-query evaluation
+Type: Diagnostics
+Context: Before deciding whether triage tags should be surfaced to MCP clients, we wanted evidence from real corpora about which tags are common enough to be useful and which are too generic or too rare.
+Change: Smart-query now counts triage tags across the eligible candidate set before the scoring cap, sorts them by article frequency, and logs the ranked counts as diagnostic-only `triage tag stats` in `mcp.log`.
+Refs: crates/harvester_mcp/src/smart_query.rs
