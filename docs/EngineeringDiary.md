@@ -1449,3 +1449,9 @@ Type: Tooling
 Context: Using `harvester_mcp` from Codex or Claude across multiple worktrees is awkward if clients are pointed directly at a single binary path instead of a stable launcher that can target the active workspace and a shared corpus.
 Change: Added `scripts/Start-HarvesterMcp.ps1` as a stdio-safe launcher that prefers `target\debug\harvester_mcp.exe` and falls back to `cargo run`, and expanded `README.md` with general repo usage plus recommended MCP registration patterns for shared-output workflows.
 Refs: scripts/Start-HarvesterMcp.ps1, README.md
+
+## 2026-04-14 - Add initial Claude project skill for Harvester MCP research
+Type: Tooling
+Context: Real Claude testing showed the MCP server is usable, but the client benefits from a lightweight project-specific workflow cue for when to use `harvester-mcp`, how to react to `too_broad`, and when to fall back to raw MCP tools.
+Change: Added `.claude/skills/harvester-mcp-research/SKILL.md` and a matching note in `CLAUDE.md` so project-local Claude sessions prefer the local corpus and the `harvester-mcp` workflow for research-oriented prompts.
+Refs: .claude/skills/harvester-mcp-research/SKILL.md, CLAUDE.md

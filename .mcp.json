@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "harvester-mcp": {
+      "type": "stdio",
+      "command": "pwsh",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        ".\\scripts\\Start-HarvesterMcp.ps1",
+        "-ProjectRoot",
+        "C:\\Users\\larsp\\src\\web_page_filet_mignon\\.worktrees\\mcp-server",
+        "-OutputDir",
+        "C:\\Users\\larsp\\src\\web_page_filet_mignon\\output"
+      ],
+      "env": {}
+    }
+  }
+}
