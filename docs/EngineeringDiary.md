@@ -1431,3 +1431,9 @@ Type: Diagnostics
 Context: Before deciding whether triage tags should be surfaced to MCP clients, we wanted evidence from real corpora about which tags are common enough to be useful and which are too generic or too rare.
 Change: Smart-query now counts triage tags across the eligible candidate set before the scoring cap, sorts them by article frequency, and logs the ranked counts as diagnostic-only `triage tag stats` in `mcp.log`.
 Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Add mid-band and query-overlap tag diagnostics
+Type: Diagnostics
+Context: Raw top-tag frequency was useful, but real-corpus evaluation showed that the most informative refinement candidates often sit in the middle of the frequency range or overlap directly with the query vocabulary rather than appearing at the absolute top of the tag histogram.
+Change: Extended smart-query logging with `triage tag mid-band stats` for tags whose counts fall in a configurable-looking middle range and `triage tag query-overlap stats` for tags whose tokens overlap the current query terms. This remains log-only for evaluation and does not change the MCP response.
+Refs: crates/harvester_mcp/src/smart_query.rs

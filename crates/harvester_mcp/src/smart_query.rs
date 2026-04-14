@@ -22,6 +22,8 @@ pub const DEFAULT_TOO_BROAD_THRESHOLD: usize = 100;
 pub const DEFAULT_MIN_TRIAGE_PRIORITY: u8 = 2;
 const EXPANSION_INITIAL_MAX_OUTPUT_TOKENS: u32 = 400;
 const EXPANSION_RETRY_MAX_OUTPUT_TOKENS: u32 = 700;
+const MID_BAND_TAG_MIN_COUNT: usize = 5;
+const MID_BAND_TAG_MAX_COUNT: usize = 200;
 
 #[derive(Clone)]
 pub struct SmartQueryEngine {
@@ -303,6 +305,28 @@ impl SmartQueryEngine {
                 selection.tag_counts.len(),
                 format_ranked_counts(&selection.tag_counts, 25)
             );
+            let mid_band_tag_counts = mid_band_tag_counts(
+                &selection.tag_counts,
+                MID_BAND_TAG_MIN_COUNT,
+                MID_BAND_TAG_MAX_COUNT,
+            );
+            if !mid_band_tag_counts.is_empty() {
+                engine_logging::engine_info!(
+                    "[smart-query] triage tag mid-band stats min_count={} max_count={} tags={}",
+                    MID_BAND_TAG_MIN_COUNT,
+                    MID_BAND_TAG_MAX_COUNT,
+                    format_ranked_counts(&mid_band_tag_counts, 25)
+                );
+            }
+            let query_overlap_tag_counts =
+                query_overlap_tag_counts(&selection.tag_counts, &input.question);
+            if !query_overlap_tag_counts.is_empty() {
+                engine_logging::engine_info!(
+                    "[smart-query] triage tag query-overlap stats query_terms={} tags={}",
+                    format_query_terms(&input.question),
+                    format_ranked_counts(&query_overlap_tag_counts, 25)
+                );
+            }
         }
 
         if selection.candidates.is_empty() {
@@ -1405,6 +1429,52 @@ fn format_ranked_counts(counts: &[(String, usize)], limit: usize) -> String {
         .map(|(term, count)| format!("{term}:{count}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn mid_band_tag_counts(
+    counts: &[(String, usize)],
+    min_count: usize,
+    max_count: usize,
+) -> Vec<(String, usize)> {
+    counts
+        .iter()
+        .filter(|(_, count)| *count >= min_count && *count <= max_count)
+        .cloned()
+        .collect()
+}
+
+fn query_overlap_tag_counts(counts: &[(String, usize)], query: &str) -> Vec<(String, usize)> {
+    let query_terms = query_hint_terms(query);
+    counts
+        .iter()
+        .filter(|(tag, _)| tag_overlaps_query_terms(tag, &query_terms))
+        .cloned()
+        .collect()
+}
+
+fn format_query_terms(query: &str) -> String {
+    query_hint_terms(query).join(", ")
+}
+
+fn query_hint_terms(query: &str) -> Vec<String> {
+    significant_terms(query)
+        .into_iter()
+        .map(|term| term.to_lowercase())
+        .collect()
+}
+
+fn tag_overlaps_query_terms(tag: &str, query_terms: &[String]) -> bool {
+    let tag_terms: Vec<String> = tag
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|segment| segment.len() >= 3)
+        .map(|segment| segment.to_lowercase())
+        .collect();
+
+    tag_terms.iter().any(|tag_term| {
+        query_terms
+            .iter()
+            .any(|query_term| query_term.contains(tag_term) || tag_term.contains(query_term))
+    })
 }
 
 fn build_refinement_suggestions(top_companies: &[String], top_themes: &[String]) -> Vec<String> {
