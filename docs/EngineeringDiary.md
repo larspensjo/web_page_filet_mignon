@@ -1419,3 +1419,9 @@ Type: Testing
 Context: The smart-query test module had accumulated helper-level assertions against candidate selection, heuristic pattern text, citation rewriting, and exact provider request shapes, which made the suite more coupled to implementation details than to externally visible behavior.
 Change: Replaced those helper-focused checks with `query(...)`-level tests that assert user-visible outcomes: smart-mode responses on broad corpora, graceful heuristic-expansion recovery for conceptual prompts, ranked relevant articles, warnings, and final citation-bearing synthesis.
 Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Add priority gating, broad-query early exit, and MCP log rotation
+Type: Retrieval
+Context: Large-corpus `query_knowledge_base` runs were still spending time and tokens on very broad candidate sets, and the existing append-only `mcp.log` made tuning passes harder to compare. The desired behavior was to treat untriaged and priority-1 articles as ineligible, return quickly when a query remained too broad after that filter, and keep only the latest run in `mcp.log` while preserving a few recent archives.
+Change: Smart-query now filters out untriaged articles and triage priority `<= 1` before breadth evaluation, lowers the scoring cap from 25 to 10, and returns `mode="too_broad"` with deterministic diagnostics (`candidate_count`, filtered counts, top companies/themes, sample titles, refinement suggestions) unless `allow_broad=true`. Added CLI tuning flags for scoring cap, broad-query threshold, and minimum triage priority, plus simple log rotation that keeps the latest run in `mcp.log` and shifts previous runs to `mcp.log.1`, `.2`, `.3`.
+Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs

@@ -17,7 +17,9 @@ const MAX_EXPANSION_PATTERNS: usize = 3;
 const MAX_EXPANSION_ENTITIES: usize = 5;
 const MAX_KEY_FACTS: usize = 2;
 const SCORING_CONCURRENCY: usize = 4;
-const MAX_SCORING_CANDIDATES: usize = 25;
+pub const DEFAULT_MAX_SCORING_CANDIDATES: usize = 10;
+pub const DEFAULT_TOO_BROAD_THRESHOLD: usize = 100;
+pub const DEFAULT_MIN_TRIAGE_PRIORITY: u8 = 2;
 const EXPANSION_INITIAL_MAX_OUTPUT_TOKENS: u32 = 400;
 const EXPANSION_RETRY_MAX_OUTPUT_TOKENS: u32 = 700;
 
@@ -31,6 +33,45 @@ pub struct SmartQueryEngine {
     agent_model: ModelId,
     expansion_model: ModelId,
     context_budget: usize,
+    scoring_candidate_cap: usize,
+    too_broad_threshold: usize,
+    min_triage_priority: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct SmartQueryOptions {
+    pub agent_model: String,
+    pub context_budget: usize,
+    pub scoring_candidate_cap: usize,
+    pub too_broad_threshold: usize,
+    pub min_triage_priority: u8,
+}
+
+impl SmartQueryOptions {
+    pub fn new(agent_model: impl Into<String>, context_budget: usize) -> Self {
+        Self {
+            agent_model: agent_model.into(),
+            context_budget,
+            scoring_candidate_cap: DEFAULT_MAX_SCORING_CANDIDATES,
+            too_broad_threshold: DEFAULT_TOO_BROAD_THRESHOLD,
+            min_triage_priority: DEFAULT_MIN_TRIAGE_PRIORITY,
+        }
+    }
+
+    pub fn with_scoring_candidate_cap(mut self, scoring_candidate_cap: usize) -> Self {
+        self.scoring_candidate_cap = scoring_candidate_cap;
+        self
+    }
+
+    pub fn with_too_broad_threshold(mut self, too_broad_threshold: usize) -> Self {
+        self.too_broad_threshold = too_broad_threshold;
+        self
+    }
+
+    pub fn with_min_triage_priority(mut self, min_triage_priority: u8) -> Self {
+        self.min_triage_priority = min_triage_priority;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -40,16 +81,35 @@ pub struct QueryKnowledgeBaseInput {
     pub scope_entities: Vec<String>,
     pub scope_date_from: Option<String>,
     pub scope_date_to: Option<String>,
+    pub allow_broad: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct QueryKnowledgeBaseResponse {
     pub mode: String,
     pub question: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     pub synthesis: Option<String>,
     pub ranked_articles: Vec<RankedArticleDigest>,
     pub warnings: Vec<String>,
     pub total_token_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_match_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filtered_low_priority_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refinement_suggestions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_companies: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_themes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sample_titles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,6 +144,8 @@ struct CandidateArticle {
     key_points: Vec<String>,
     matched_patterns: Vec<String>,
     matched_entities: Vec<String>,
+    companies: Vec<String>,
+    themes: Vec<String>,
     title_pattern_hits: usize,
     url_pattern_hits: usize,
     triage_priority: Option<u8>,
@@ -102,8 +164,13 @@ struct CandidateSelection {
     regex_match_count: usize,
     entity_match_count: usize,
     total_unique_candidates: usize,
+    eligible_unique_candidates: usize,
+    filtered_low_priority_candidates: usize,
     scoring_candidates: usize,
     capped: bool,
+    top_companies: Vec<String>,
+    top_themes: Vec<String>,
+    sample_titles: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -135,10 +202,9 @@ impl SmartQueryEngine {
         summary_index: Arc<HashMap<String, SummaryCacheEntry>>,
         triage_index: Arc<HashMap<String, ArticleTriageResult>>,
         provider: Option<Arc<dyn LlmProvider>>,
-        agent_model: impl Into<String>,
-        context_budget: usize,
+        options: SmartQueryOptions,
     ) -> Self {
-        let agent_model_name = agent_model.into();
+        let agent_model_name = options.agent_model;
         Self {
             article_index,
             entity_index,
@@ -150,7 +216,10 @@ impl SmartQueryEngine {
                 ProviderKind::OpenAi,
                 preferred_expansion_model_name(&agent_model_name),
             ),
-            context_budget,
+            context_budget: options.context_budget,
+            scoring_candidate_cap: options.scoring_candidate_cap,
+            too_broad_threshold: options.too_broad_threshold,
+            min_triage_priority: options.min_triage_priority,
         }
     }
 
@@ -209,30 +278,76 @@ impl SmartQueryEngine {
         };
         let selection = self.collect_candidates(input, &expansion);
         engine_logging::engine_info!(
-            "[smart-query] candidate selection regex_matches={} entity_matches={} unique_candidates={} scoring_candidates={} candidates_with_triage={} capped={}",
+            "[smart-query] candidate selection regex_matches={} entity_matches={} total_unique_candidates={} eligible_unique_candidates={} filtered_low_priority_candidates={} scoring_candidates={} candidates_with_triage={} capped={} threshold={} allow_broad={}",
             selection.regex_match_count,
             selection.entity_match_count,
             selection.total_unique_candidates,
+            selection.eligible_unique_candidates,
+            selection.filtered_low_priority_candidates,
             selection.scoring_candidates,
             selection
                 .candidates
                 .iter()
                 .filter(|candidate| candidate.triage_priority.is_some())
                 .count(),
-            selection.capped
+            selection.capped,
+            self.too_broad_threshold,
+            input.allow_broad
         );
 
         if selection.candidates.is_empty() {
             return Ok(QueryKnowledgeBaseResponse {
                 mode: "smart".to_string(),
                 question: input.question.clone(),
-                synthesis: Some(
-                    "No matching articles were found in the current corpus.".to_string(),
-                ),
+                message: Some(if selection.total_unique_candidates > 0 {
+                    format!(
+                        "The query matched articles, but all {} candidates were filtered out because they were untriaged or had triage priority {} or lower.",
+                        selection.total_unique_candidates,
+                        self.min_triage_priority.saturating_sub(1)
+                    )
+                } else {
+                    "No matching articles were found in the current corpus.".to_string()
+                }),
+                synthesis: Some(if selection.total_unique_candidates > 0 {
+                    "No matching high-priority articles were found in the current corpus."
+                        .to_string()
+                } else {
+                    "No matching articles were found in the current corpus.".to_string()
+                }),
                 ranked_articles: Vec::new(),
                 warnings,
                 total_token_count: 0,
+                candidate_count: Some(selection.eligible_unique_candidates),
+                total_match_count: Some(selection.total_unique_candidates),
+                filtered_low_priority_count: Some(selection.filtered_low_priority_candidates),
+                threshold: Some(self.too_broad_threshold),
+                refinement_suggestions: vec![
+                    "Widen the time range or remove scope filters if you want more results."
+                        .to_string(),
+                    format!(
+                        "Only articles with triage priority {} or higher are considered eligible.",
+                        self.min_triage_priority
+                    ),
+                ],
+                top_companies: selection.top_companies,
+                top_themes: selection.top_themes,
+                sample_titles: selection.sample_titles,
             });
+        }
+
+        if !input.allow_broad
+            && self.too_broad_threshold > 0
+            && selection.eligible_unique_candidates > self.too_broad_threshold
+        {
+            engine_logging::engine_warn!(
+                "[smart-query] too broad early exit eligible_unique_candidates={} threshold={} top_companies={:?} top_themes={:?} sample_titles={:?}",
+                selection.eligible_unique_candidates,
+                self.too_broad_threshold,
+                selection.top_companies,
+                selection.top_themes,
+                selection.sample_titles
+            );
+            return Ok(self.build_too_broad_response(input, warnings, selection));
         }
 
         let scored = self
@@ -258,10 +373,19 @@ impl SmartQueryEngine {
         Ok(QueryKnowledgeBaseResponse {
             mode: "smart".to_string(),
             question: input.question.clone(),
+            message: None,
             synthesis: Some(synthesis),
             ranked_articles,
             warnings,
             total_token_count: 0,
+            candidate_count: Some(selection.eligible_unique_candidates),
+            total_match_count: Some(selection.total_unique_candidates),
+            filtered_low_priority_count: Some(selection.filtered_low_priority_candidates),
+            threshold: Some(self.too_broad_threshold),
+            refinement_suggestions: Vec::new(),
+            top_companies: Vec::new(),
+            top_themes: Vec::new(),
+            sample_titles: Vec::new(),
         })
     }
 
@@ -393,16 +517,39 @@ impl SmartQueryEngine {
             date_to,
         );
 
-        let mut ranked: Vec<_> = candidates.into_values().collect();
+        let total_unique_candidates = candidates.len();
+        let mut ranked: Vec<_> = candidates
+            .into_values()
+            .filter(|candidate| candidate_is_eligible(candidate, self.min_triage_priority))
+            .collect();
         ranked.sort_by(|left, right| {
             deterministic_match_score(right)
                 .cmp(&deterministic_match_score(left))
                 .then_with(|| right.fetched_utc.cmp(&left.fetched_utc))
                 .then_with(|| left.filename.cmp(&right.filename))
         });
-        let total_unique_candidates = ranked.len();
-        let capped = ranked.len() > MAX_SCORING_CANDIDATES;
-        ranked.truncate(MAX_SCORING_CANDIDATES);
+        let eligible_unique_candidates = ranked.len();
+        let filtered_low_priority_candidates =
+            total_unique_candidates.saturating_sub(eligible_unique_candidates);
+        let top_companies = top_terms(
+            ranked
+                .iter()
+                .flat_map(|candidate| candidate.companies.iter().cloned()),
+            5,
+        );
+        let top_themes = top_terms(
+            ranked
+                .iter()
+                .flat_map(|candidate| candidate.themes.iter().cloned()),
+            5,
+        );
+        let sample_titles = ranked
+            .iter()
+            .filter_map(|candidate| candidate.title.clone())
+            .take(5)
+            .collect();
+        let capped = ranked.len() > self.scoring_candidate_cap;
+        ranked.truncate(self.scoring_candidate_cap);
 
         CandidateSelection {
             scoring_candidates: ranked.len(),
@@ -410,7 +557,12 @@ impl SmartQueryEngine {
             regex_match_count,
             entity_match_count,
             total_unique_candidates,
+            eligible_unique_candidates,
+            filtered_low_priority_candidates,
             capped,
+            top_companies,
+            top_themes,
+            sample_titles,
         }
     }
 
@@ -518,7 +670,7 @@ impl SmartQueryEngine {
     fn make_candidate(
         &self,
         entry: &ArticleEntry,
-        _entity_entry: Option<&EntityIndexEntry>,
+        entity_entry: Option<&EntityIndexEntry>,
         snippet: String,
     ) -> CandidateArticle {
         let summary_entry = entry
@@ -550,6 +702,12 @@ impl SmartQueryEngine {
             key_points,
             matched_patterns: Vec::new(),
             matched_entities: Vec::new(),
+            companies: entity_entry
+                .map(|item| item.companies.clone())
+                .unwrap_or_default(),
+            themes: entity_entry
+                .map(|item| item.themes.clone())
+                .unwrap_or_default(),
             title_pattern_hits: 0,
             url_pattern_hits: 0,
             triage_priority,
@@ -701,10 +859,51 @@ impl SmartQueryEngine {
         QueryKnowledgeBaseResponse {
             mode: "raw_fallback".to_string(),
             question: input.question.clone(),
+            message: None,
             synthesis: None,
             ranked_articles,
             warnings,
             total_token_count: 0,
+            candidate_count: None,
+            total_match_count: None,
+            filtered_low_priority_count: None,
+            threshold: None,
+            refinement_suggestions: Vec::new(),
+            top_companies: Vec::new(),
+            top_themes: Vec::new(),
+            sample_titles: Vec::new(),
+        }
+    }
+
+    fn build_too_broad_response(
+        &self,
+        input: &QueryKnowledgeBaseInput,
+        warnings: Vec<String>,
+        selection: CandidateSelection,
+    ) -> QueryKnowledgeBaseResponse {
+        QueryKnowledgeBaseResponse {
+            mode: "too_broad".to_string(),
+            question: input.question.clone(),
+            message: Some(format!(
+                "The query matched {} eligible high-priority articles, which exceeds the threshold of {}. Refine the question or rerun with allow_broad=true.",
+                selection.eligible_unique_candidates,
+                self.too_broad_threshold
+            )),
+            synthesis: None,
+            ranked_articles: Vec::new(),
+            warnings,
+            total_token_count: 0,
+            candidate_count: Some(selection.eligible_unique_candidates),
+            total_match_count: Some(selection.total_unique_candidates),
+            filtered_low_priority_count: Some(selection.filtered_low_priority_candidates),
+            threshold: Some(self.too_broad_threshold),
+            refinement_suggestions: build_refinement_suggestions(
+                &selection.top_companies,
+                &selection.top_themes,
+            ),
+            top_companies: selection.top_companies,
+            top_themes: selection.top_themes,
+            sample_titles: selection.sample_titles,
         }
     }
 
@@ -1141,6 +1340,72 @@ fn deterministic_match_score(candidate: &CandidateArticle) -> usize {
     score
 }
 
+fn candidate_is_eligible(candidate: &CandidateArticle, min_triage_priority: u8) -> bool {
+    candidate
+        .triage_priority
+        .map(|priority| priority >= min_triage_priority)
+        .unwrap_or(false)
+}
+
+fn top_terms(terms: impl IntoIterator<Item = String>, limit: usize) -> Vec<String> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for term in terms {
+        let normalized = term.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        *counts.entry(normalized.to_string()).or_insert(0) += 1;
+    }
+
+    let mut ranked: Vec<_> = counts.into_iter().collect();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .cmp(&left.1)
+            .then_with(|| left.0.to_lowercase().cmp(&right.0.to_lowercase()))
+    });
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(term, _)| term)
+        .collect()
+}
+
+fn build_refinement_suggestions(top_companies: &[String], top_themes: &[String]) -> Vec<String> {
+    let mut suggestions = Vec::new();
+    if !top_companies.is_empty() {
+        suggestions.push(format!(
+            "Narrow to one company or vendor set, for example {}.",
+            top_companies
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !top_themes.is_empty() {
+        suggestions.push(format!(
+            "Focus on one infrastructure layer, for example {}.",
+            top_themes
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    suggestions.push(
+        "Add a date range or explicit scope_entities filter to reduce the candidate set."
+            .to_string(),
+    );
+    suggestions.push(
+        "Rerun with allow_broad=true only if you want a slower deep pass over a broad topic."
+            .to_string(),
+    );
+    suggestions
+}
+
 fn merge_strings(target: &mut Vec<String>, source: Vec<String>) {
     for value in source {
         push_unique(target, value);
@@ -1223,6 +1488,8 @@ fn preferred_expansion_model_name(agent_model_name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use harvester_core::{ArticleSummaryResult, EntityIndex, EntityIndexEntry, SummaryCacheEntry};
     use harvester_engine::llm::MockLlmProvider;
@@ -1323,7 +1590,30 @@ mod tests {
                     "Anthropic says stronger model evaluations improve security testing.",
                 ),
             )]),
-            HashMap::new(),
+            HashMap::from([
+                (
+                    "https://example.com/alpha".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 3,
+                        tags: vec!["ai-security".to_string()],
+                        rationale: "high-value".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/beta".to_string(),
+                    ArticleTriageResult {
+                        category: "roi".to_string(),
+                        priority: 1,
+                        tags: vec!["roi".to_string()],
+                        rationale: "low-priority".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+            ]),
             provider,
             agent_model,
             context_budget,
@@ -1347,8 +1637,13 @@ mod tests {
             Arc::new(summary_index),
             Arc::new(triage_index),
             provider,
-            agent_model,
-            context_budget,
+            SmartQueryOptions {
+                agent_model: agent_model.to_string(),
+                context_budget,
+                scoring_candidate_cap: DEFAULT_MAX_SCORING_CANDIDATES,
+                too_broad_threshold: DEFAULT_TOO_BROAD_THRESHOLD,
+                min_triage_priority: DEFAULT_MIN_TRIAGE_PRIORITY,
+            },
         )
     }
 
@@ -1368,6 +1663,7 @@ mod tests {
             .query(QueryKnowledgeBaseInput {
                 question: "What did Anthropic say about AI security?".to_string(),
                 max_results: 5,
+                allow_broad: false,
                 scope_entities: vec!["Anthropic".to_string()],
                 scope_date_from: None,
                 scope_date_to: None,
@@ -1405,6 +1701,7 @@ mod tests {
             .query(QueryKnowledgeBaseInput {
                 question: "What did Anthropic say about AI security?".to_string(),
                 max_results: 5,
+                allow_broad: false,
                 scope_entities: vec!["Anthropic".to_string()],
                 scope_date_from: None,
                 scope_date_to: None,
@@ -1426,6 +1723,7 @@ mod tests {
     #[tokio::test]
     async fn smart_query_handles_broad_match_sets_without_falling_back() {
         let mut articles = Vec::new();
+        let mut triage_index = HashMap::new();
         for idx in 0..30 {
             let filename = if idx == 0 {
                 "priority.md".to_string()
@@ -1441,13 +1739,24 @@ mod tests {
             let fetched = format!("2026-04-{:02}T10:00:00Z", (idx % 28) + 1);
             let body = format!("# Article {idx}\nThis article mentions security in the body.");
             articles.push(sample_article(&filename, &title, &url, &fetched, &body));
+            triage_index.insert(
+                url,
+                ArticleTriageResult {
+                    category: "security".to_string(),
+                    priority: 3,
+                    tags: vec!["security".to_string()],
+                    rationale: "eligible".to_string(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            );
         }
 
         let provider = Arc::new(MockLlmProvider::new());
         provider.queue_json_success(
             r#"{"regex_patterns":["(?i)security"],"entity_names":[],"date_from":null,"date_to":null}"#,
         );
-        for _ in 0..MAX_SCORING_CANDIDATES {
+        for _ in 0..DEFAULT_MAX_SCORING_CANDIDATES {
             provider.queue_json_success(
                 r#"{"relevance_score":7,"key_facts":["The article discusses security."]}"#,
             );
@@ -1461,7 +1770,7 @@ mod tests {
                 entries: Default::default(),
             },
             HashMap::new(),
-            HashMap::new(),
+            triage_index,
             Some(provider),
             "mock-model",
             10_000,
@@ -1471,6 +1780,7 @@ mod tests {
             .query(QueryKnowledgeBaseInput {
                 question: "What do the loaded articles say about security?".to_string(),
                 max_results: 5,
+                allow_broad: true,
                 scope_entities: Vec::new(),
                 scope_date_from: None,
                 scope_date_to: None,
@@ -1485,6 +1795,173 @@ mod tests {
             .iter()
             .all(|article| article.relevance_score == Some(7)));
         assert!(response.synthesis.unwrap_or_default().contains(".md]"));
+        assert_eq!(response.candidate_count, Some(30));
+        assert_eq!(response.filtered_low_priority_count, Some(0));
+    }
+
+    #[tokio::test]
+    async fn smart_query_returns_too_broad_without_scoring_by_default() {
+        let mut articles = Vec::new();
+        let mut entity_entries = BTreeMap::new();
+        let mut triage_index = HashMap::new();
+        for idx in 0..120 {
+            let filename = format!("vendor-{idx:03}.md");
+            let title = format!("Vendor {idx:03} expands AI data center footprint");
+            let url = format!("https://example.com/vendor-{idx:03}");
+            let fetched = format!("2026-04-{:02}T10:00:00Z", (idx % 28) + 1);
+            let body = "# Vendor\nCloud, chips, and data center expansion for AI demand.";
+            articles.push(sample_article(&filename, &title, &url, &fetched, body));
+            entity_entries.insert(
+                url.clone(),
+                EntityIndexEntry {
+                    fetched_utc: Some(fetched),
+                    content_hash: Some(format!("hash-{idx:03}")),
+                    companies: vec![format!("Vendor {idx:03}")],
+                    technologies: vec!["ai infrastructure".to_string()],
+                    products: vec![],
+                    themes: vec!["data centers".to_string()],
+                },
+            );
+            triage_index.insert(
+                url,
+                ArticleTriageResult {
+                    category: "infrastructure".to_string(),
+                    priority: 3,
+                    tags: vec!["capacity".to_string()],
+                    rationale: "eligible".to_string(),
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            );
+        }
+
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_json_success(
+            r#"{"regex_patterns":["(?i)(data center|chip|cloud)"],"entity_names":[],"date_from":null,"date_to":null}"#,
+        );
+
+        let engine = test_engine_with_articles(
+            articles,
+            EntityIndex {
+                schema_version: 1,
+                entries: entity_entries,
+            },
+            HashMap::new(),
+            triage_index,
+            Some(provider),
+            "mock-model",
+            10_000,
+        );
+
+        let response = engine
+            .query(QueryKnowledgeBaseInput {
+                question: "Which companies are best positioned for AI infrastructure demand?"
+                    .to_string(),
+                max_results: 5,
+                allow_broad: false,
+                scope_entities: Vec::new(),
+                scope_date_from: None,
+                scope_date_to: None,
+            })
+            .await;
+
+        assert_eq!(response.mode, "too_broad");
+        assert!(response.ranked_articles.is_empty());
+        assert!(response.synthesis.is_none());
+        assert_eq!(response.candidate_count, Some(120));
+        assert_eq!(response.threshold, Some(DEFAULT_TOO_BROAD_THRESHOLD));
+        assert!(!response.refinement_suggestions.is_empty());
+        assert!(!response.sample_titles.is_empty());
+    }
+
+    #[tokio::test]
+    async fn smart_query_filters_untriaged_and_priority_one_articles() {
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_json_success(
+            r#"{"regex_patterns":["(?i)security"],"entity_names":[],"date_from":null,"date_to":null}"#,
+        );
+        provider.queue_json_success(
+            r#"{"relevance_score":8,"key_facts":["Only the high-priority article remains eligible."]}"#,
+        );
+        provider.queue_json_success(
+            r#"{"synthesis":"Only one eligible article remained after priority filtering [C1]."}"#,
+        );
+
+        let engine = test_engine_with_articles(
+            vec![
+                sample_article(
+                    "high.md",
+                    "High priority security article",
+                    "https://example.com/high",
+                    "2026-04-12T10:00:00Z",
+                    "# High\nSecurity response and mitigations.",
+                ),
+                sample_article(
+                    "low.md",
+                    "Low priority security article",
+                    "https://example.com/low",
+                    "2026-04-11T10:00:00Z",
+                    "# Low\nSecurity response and mitigations.",
+                ),
+                sample_article(
+                    "none.md",
+                    "Untriaged security article",
+                    "https://example.com/none",
+                    "2026-04-10T10:00:00Z",
+                    "# None\nSecurity response and mitigations.",
+                ),
+            ],
+            EntityIndex {
+                schema_version: 1,
+                entries: Default::default(),
+            },
+            HashMap::new(),
+            HashMap::from([
+                (
+                    "https://example.com/high".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 3,
+                        tags: vec!["security".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/low".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 1,
+                        tags: vec!["security".to_string()],
+                        rationale: "filtered".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+            ]),
+            Some(provider),
+            "mock-model",
+            10_000,
+        );
+
+        let response = engine
+            .query(QueryKnowledgeBaseInput {
+                question: "What do the loaded articles say about security?".to_string(),
+                max_results: 5,
+                allow_broad: false,
+                scope_entities: Vec::new(),
+                scope_date_from: None,
+                scope_date_to: None,
+            })
+            .await;
+
+        assert_eq!(response.mode, "smart");
+        assert_eq!(response.ranked_articles.len(), 1);
+        assert_eq!(response.ranked_articles[0].filename, "high.md");
+        assert_eq!(response.candidate_count, Some(1));
+        assert_eq!(response.total_match_count, Some(3));
+        assert_eq!(response.filtered_low_priority_count, Some(2));
     }
 
     #[tokio::test]
@@ -1535,7 +2012,41 @@ mod tests {
                 entries: Default::default(),
             },
             HashMap::new(),
-            HashMap::new(),
+            HashMap::from([
+                (
+                    "https://example.com/tsmc".to_string(),
+                    ArticleTriageResult {
+                        category: "infrastructure".to_string(),
+                        priority: 4,
+                        tags: vec!["chips".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/amazon".to_string(),
+                    ArticleTriageResult {
+                        category: "infrastructure".to_string(),
+                        priority: 3,
+                        tags: vec!["cloud".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/scribes".to_string(),
+                    ArticleTriageResult {
+                        category: "workflow".to_string(),
+                        priority: 1,
+                        tags: vec!["clinical".to_string()],
+                        rationale: "filtered".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+            ]),
             Some(provider),
             OPENAI_MODEL_GPT_5_4_NANO,
             10_000,
@@ -1545,6 +2056,7 @@ mod tests {
             .query(QueryKnowledgeBaseInput {
                 question: "Which companies appear best positioned to meet rising AI demand through chips, cloud, data centers, and power infrastructure?".to_string(),
                 max_results: 3,
+                allow_broad: false,
                 scope_entities: Vec::new(),
                 scope_date_from: None,
                 scope_date_to: None,
@@ -1569,6 +2081,7 @@ mod tests {
             .query(QueryKnowledgeBaseInput {
                 question: "What did Anthropic say about AI security?".to_string(),
                 max_results: 5,
+                allow_broad: false,
                 scope_entities: vec!["Anthropic".to_string()],
                 scope_date_from: None,
                 scope_date_to: None,
@@ -1587,6 +2100,7 @@ mod tests {
             .query(QueryKnowledgeBaseInput {
                 question: "Tell me about AI security and ROI".to_string(),
                 max_results: 5,
+                allow_broad: false,
                 scope_entities: Vec::new(),
                 scope_date_from: None,
                 scope_date_to: None,

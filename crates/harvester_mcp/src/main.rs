@@ -20,7 +20,7 @@ use rmcp::transport::stdio;
 use rmcp::{tool_handler, tool_router, ServerHandler, ServiceExt};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use smart_query::{QueryKnowledgeBaseInput, SmartQueryEngine};
+use smart_query::{QueryKnowledgeBaseInput, SmartQueryEngine, SmartQueryOptions};
 
 #[derive(Parser, Debug)]
 #[command(name = "harvester_mcp", about = "Harvester MCP server")]
@@ -36,6 +36,22 @@ struct Args {
     /// Context budget in tokens
     #[arg(long, default_value_t = 4000)]
     context_budget: usize,
+
+    /// Maximum number of candidates to send to LLM scoring
+    #[arg(long, default_value_t = smart_query::DEFAULT_MAX_SCORING_CANDIDATES)]
+    scoring_candidate_cap: usize,
+
+    /// Broad-query threshold on eligible candidates before early return
+    #[arg(long, default_value_t = smart_query::DEFAULT_TOO_BROAD_THRESHOLD)]
+    too_broad_threshold: usize,
+
+    /// Minimum triage priority required for articles to be eligible
+    #[arg(long, default_value_t = smart_query::DEFAULT_MIN_TRIAGE_PRIORITY)]
+    min_triage_priority: u8,
+
+    /// Number of previous log runs to retain as mcp.log.N archives
+    #[arg(long, default_value_t = 3)]
+    retain_log_runs: usize,
 
     /// Directory for log files (defaults to <output-dir>/logs)
     #[arg(long)]
@@ -58,6 +74,9 @@ struct HarvesterMcpServer {
 struct SmartQueryConfig {
     agent_model: String,
     context_budget: usize,
+    scoring_candidate_cap: usize,
+    too_broad_threshold: usize,
+    min_triage_priority: u8,
     agent_provider: Option<Arc<dyn LlmProvider>>,
 }
 
@@ -115,6 +134,8 @@ struct QueryKnowledgeBaseParams {
     question: String,
     /// Maximum number of ranked articles to include in the digest (default 10)
     max_results: Option<usize>,
+    /// Continue through scoring and synthesis even when the query is too broad
+    allow_broad: Option<bool>,
     /// Optional entity terms used to limit the search scope
     scope_entities: Option<Vec<String>>,
     /// ISO date filter on fetched_utc (inclusive lower bound)
@@ -415,7 +436,7 @@ impl HarvesterMcpServer {
 
     /// Query the knowledge base using the smart agent layer.
     #[rmcp::tool(
-        description = "Answer a free-text question from the article corpus. Uses a cheap-model agent layer for query expansion, relevance scoring, and digest assembly. Returns JSON with mode, synthesis, ranked_articles, warnings, and total_token_count."
+        description = "Answer a free-text question from the article corpus. Uses a cheap-model agent layer for query expansion, relevance scoring, and digest assembly. Returns JSON with mode, message, synthesis, ranked_articles, warnings, total_token_count, and optional breadth diagnostics. If a query is too broad, the tool returns mode=too_broad unless allow_broad=true."
     )]
     async fn query_knowledge_base(
         &self,
@@ -423,9 +444,10 @@ impl HarvesterMcpServer {
     ) -> String {
         let t = std::time::Instant::now();
         engine_logging::engine_info!(
-            "[tool] query_knowledge_base called with question={:?} max_results={:?} scope_entities={:?} scope_date_from={:?} scope_date_to={:?}",
+            "[tool] query_knowledge_base called with question={:?} max_results={:?} allow_broad={:?} scope_entities={:?} scope_date_from={:?} scope_date_to={:?}",
             p.question,
             p.max_results,
+            p.allow_broad,
             p.scope_entities,
             p.scope_date_from,
             p.scope_date_to
@@ -436,6 +458,7 @@ impl HarvesterMcpServer {
             .query(QueryKnowledgeBaseInput {
                 question: p.question,
                 max_results: p.max_results.unwrap_or(10),
+                allow_broad: p.allow_broad.unwrap_or(false),
                 scope_entities: p.scope_entities.unwrap_or_default(),
                 scope_date_from: p.scope_date_from,
                 scope_date_to: p.scope_date_to,
@@ -542,8 +565,13 @@ impl HarvesterMcpServer {
             summary_index.clone(),
             Arc::new(triage_index.clone()),
             smart_query_config.agent_provider,
-            smart_query_config.agent_model,
-            smart_query_config.context_budget,
+            SmartQueryOptions::new(
+                smart_query_config.agent_model,
+                smart_query_config.context_budget,
+            )
+            .with_scoring_candidate_cap(smart_query_config.scoring_candidate_cap)
+            .with_too_broad_threshold(smart_query_config.too_broad_threshold)
+            .with_min_triage_priority(smart_query_config.min_triage_priority),
         ));
         Self {
             output_dir,
@@ -557,6 +585,57 @@ impl HarvesterMcpServer {
     }
 }
 
+fn rotated_log_path(log_path: &std::path::Path, index: usize) -> PathBuf {
+    let file_name = log_path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("mcp.log"));
+    let mut rotated_name = file_name.to_os_string();
+    rotated_name.push(format!(".{index}"));
+    log_path.with_file_name(rotated_name)
+}
+
+fn rotate_log_files(
+    log_path: &std::path::Path,
+    retain_runs: usize,
+) -> std::io::Result<Vec<String>> {
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut actions = Vec::new();
+    if retain_runs == 0 {
+        if log_path.exists() {
+            std::fs::remove_file(log_path)?;
+            actions.push(format!("removed previous log {:?}", log_path));
+        }
+        return Ok(actions);
+    }
+
+    let oldest_archive = rotated_log_path(log_path, retain_runs);
+    if oldest_archive.exists() {
+        std::fs::remove_file(&oldest_archive)?;
+        actions.push(format!("removed oldest archive {:?}", oldest_archive));
+    }
+
+    for index in (1..retain_runs).rev() {
+        let source = rotated_log_path(log_path, index);
+        if !source.exists() {
+            continue;
+        }
+        let target = rotated_log_path(log_path, index + 1);
+        std::fs::rename(&source, &target)?;
+        actions.push(format!("rotated {:?} -> {:?}", source, target));
+    }
+
+    if log_path.exists() {
+        let target = rotated_log_path(log_path, 1);
+        std::fs::rename(log_path, &target)?;
+        actions.push(format!("rotated {:?} -> {:?}", log_path, target));
+    }
+
+    Ok(actions)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let overall_start = Instant::now();
@@ -566,6 +645,7 @@ async fn main() -> anyhow::Result<()> {
     let log_dir = args.log_dir.unwrap_or_else(|| args.output_dir.join("logs"));
     let log_path = log_dir.join("mcp.log");
 
+    let rotation_actions = rotate_log_files(&log_path, args.retain_log_runs)?;
     engine_logging::initialize_to_path(&log_path);
 
     let session_id = SystemTime::now()
@@ -578,6 +658,9 @@ async fn main() -> anyhow::Result<()> {
         session_id
     );
     engine_logging::engine_info!("harvester_mcp starting");
+    for action in rotation_actions {
+        engine_logging::engine_info!("[logging] {}", action);
+    }
 
     let t0 = Instant::now();
     let entity_index_path = args.output_dir.join(".entity_index.ron");
@@ -603,10 +686,14 @@ async fn main() -> anyhow::Result<()> {
     );
 
     engine_logging::engine_info!(
-        "output_dir={:?} agent_model={} context_budget={}",
+        "output_dir={:?} agent_model={} context_budget={} scoring_candidate_cap={} too_broad_threshold={} min_triage_priority={} retain_log_runs={}",
         args.output_dir,
         args.agent_model,
-        args.context_budget
+        args.context_budget,
+        args.scoring_candidate_cap,
+        args.too_broad_threshold,
+        args.min_triage_priority,
+        args.retain_log_runs
     );
 
     // Build URL → summary index
@@ -689,6 +776,9 @@ async fn main() -> anyhow::Result<()> {
         SmartQueryConfig {
             agent_model: args.agent_model,
             context_budget: args.context_budget,
+            scoring_candidate_cap: args.scoring_candidate_cap,
+            too_broad_threshold: args.too_broad_threshold,
+            min_triage_priority: args.min_triage_priority,
             agent_provider,
         },
     );
