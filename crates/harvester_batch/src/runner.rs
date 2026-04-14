@@ -96,34 +96,9 @@ impl CycleCounterBaseline {
     }
 }
 
-/// Determines if the batch cycle should settle (all work done or failed).
-fn should_settle_cycle(obs: &BatchObservation) -> bool {
-    // Settled when:
-    // 1. No poll in progress
-    // 2. Triage is either idle, complete, or failed (not active)
-    // 3. Pre-triage is not actively loading
-    // 4. No jobs in flight
-    // 5. No triage work in flight
-    // 6. No summary work in flight or pending
-    // 7. No import in flight
-    //
-    // `Reviewing` is considered settled in headless batch mode. Manual review
-    // cannot progress there without user input, so single-shot runs must be
-    // allowed to exit once automatic work has quiesced.
-    !obs.poll_in_progress
-        && !matches!(
-            obs.triage_phase,
-            harvester_core::TriagePhase::LoadingArticles | harvester_core::TriagePhase::Triaging
-        )
-        && !matches!(
-            obs.pre_triage_phase,
-            harvester_core::PreTriagePhase::LoadingArticles
-        )
-        && obs.jobs_in_flight == 0
-        && obs.triage_in_flight == 0
-        && obs.summary_in_flight == 0
-        && obs.summary_pending == 0
-        && !obs.import_in_flight
+/// Determines if the batch cycle should settle (all reducer-owned work quiesced).
+fn should_settle_cycle(status: harvester_core::BatchStatus) -> bool {
+    matches!(status, harvester_core::BatchStatus::Settled)
 }
 
 /// Determines if an import-mode cycle should settle.
@@ -813,7 +788,9 @@ fn run_dispatch_loop_with_tick_interval(
 
         // This prevents an immediate idle-state exit before queued actions
         // (like PollSourcesClicked) have been reduced.
-        if should_check_settlement_this_iteration(orchestrated) && should_settle_cycle(&obs) {
+        if should_check_settlement_this_iteration(orchestrated)
+            && should_settle_cycle(state.batch_status())
+        {
             engine_info!(
                 "[batch] Cycle settled after {} iterations: jobs={}/{}, triage={}/{}",
                 iterations,
@@ -827,36 +804,12 @@ fn run_dispatch_loop_with_tick_interval(
     }
 }
 
-fn should_dispatch_batch_triage(obs: &BatchObservation) -> bool {
-    if matches!(
-        obs.pre_triage_phase,
-        harvester_core::PreTriagePhase::Reviewing | harvester_core::PreTriagePhase::ReadyToTriage
-    ) && !matches!(
-        obs.triage_phase,
-        harvester_core::TriagePhase::LoadingArticles | harvester_core::TriagePhase::Triaging
-    ) && obs.pre_triage_included > 0
-        && obs.triage_total < obs.pre_triage_included
-    {
-        return true;
-    }
-    false
-}
-
 fn maybe_dispatch_batch_ai_orchestration(state: &AppState) -> Option<Msg> {
-    let obs = state.batch_observation();
-
-    if should_dispatch_batch_triage(&obs) {
-        return Some(Msg::TriageClicked);
+    match state.batch_next_action() {
+        harvester_core::BatchNextAction::DispatchTriage => Some(Msg::TriageClicked),
+        harvester_core::BatchNextAction::DispatchSummaries => Some(Msg::PrepareSummariesClicked),
+        harvester_core::BatchNextAction::None => None,
     }
-
-    if matches!(obs.triage_phase, harvester_core::TriagePhase::Complete)
-        && obs.triage_completed > 0
-        && obs.summary_total == 0
-    {
-        return Some(Msg::PrepareSummariesClicked);
-    }
-
-    None
 }
 
 /// Formats a token count as a compact human-readable string (e.g. 12K, 1.2M).
@@ -1384,251 +1337,13 @@ mod tests {
     }
 
     #[test]
-    fn test_should_settle_cycle_when_idle() {
-        let obs = BatchObservation {
-            poll_in_progress: false,
-            session_state: harvester_core::SessionState::Idle,
-            jobs_total: 0,
-            jobs_done: 0,
-            jobs_failed: 0,
-            jobs_in_flight: 0,
-            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
-            pre_triage_total: 0,
-            pre_triage_included: 0,
-            pre_triage_review: 0,
-            pre_triage_filtered: 0,
-            triage_phase: harvester_core::TriagePhase::Idle,
-            triage_total: 0,
-            triage_pending: 0,
-            triage_in_flight: 0,
-            triage_completed: 0,
-            triage_failed: 0,
-            summary_total: 0,
-            summary_pending: 0,
-            summary_in_flight: 0,
-            summary_completed: 0,
-            summary_failed: 0,
-            triage_cache_hits: 0,
-            triage_cache_misses: 0,
-            triage_cache_key_unavailable: 0,
-            summary_cache_hits: 0,
-            summary_cache_misses: 0,
-            summary_cache_key_unavailable: 0,
-            import_phase: harvester_core::ImportPhase::Idle,
-            imports_completed: 0,
-            imports_failed: 0,
-            import_in_flight: false,
-            source_poll_stats: vec![],
-        };
-
-        assert!(should_settle_cycle(&obs));
+    fn test_should_settle_cycle_when_batch_status_is_settled() {
+        assert!(should_settle_cycle(harvester_core::BatchStatus::Settled));
     }
 
     #[test]
-    fn test_should_not_settle_when_poll_in_progress() {
-        let obs = BatchObservation {
-            poll_in_progress: true,
-            session_state: harvester_core::SessionState::Running,
-            jobs_total: 0,
-            jobs_done: 0,
-            jobs_failed: 0,
-            jobs_in_flight: 0,
-            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
-            pre_triage_total: 0,
-            pre_triage_included: 0,
-            pre_triage_review: 0,
-            pre_triage_filtered: 0,
-            triage_phase: harvester_core::TriagePhase::Idle,
-            triage_total: 0,
-            triage_pending: 0,
-            triage_in_flight: 0,
-            triage_completed: 0,
-            triage_failed: 0,
-            summary_total: 0,
-            summary_pending: 0,
-            summary_in_flight: 0,
-            summary_completed: 0,
-            summary_failed: 0,
-            triage_cache_hits: 0,
-            triage_cache_misses: 0,
-            triage_cache_key_unavailable: 0,
-            summary_cache_hits: 0,
-            summary_cache_misses: 0,
-            summary_cache_key_unavailable: 0,
-            import_phase: harvester_core::ImportPhase::Idle,
-            imports_completed: 0,
-            imports_failed: 0,
-            import_in_flight: false,
-            source_poll_stats: vec![],
-        };
-
-        assert!(!should_settle_cycle(&obs));
-    }
-
-    #[test]
-    fn test_should_not_settle_when_pre_triage_loading() {
-        let obs = BatchObservation {
-            poll_in_progress: false,
-            session_state: harvester_core::SessionState::Idle,
-            jobs_total: 0,
-            jobs_done: 0,
-            jobs_failed: 0,
-            jobs_in_flight: 0,
-            pre_triage_phase: harvester_core::PreTriagePhase::LoadingArticles,
-            pre_triage_total: 0,
-            pre_triage_included: 0,
-            pre_triage_review: 0,
-            pre_triage_filtered: 0,
-            triage_phase: harvester_core::TriagePhase::Idle,
-            triage_total: 0,
-            triage_pending: 0,
-            triage_in_flight: 0,
-            triage_completed: 0,
-            triage_failed: 0,
-            summary_total: 0,
-            summary_pending: 0,
-            summary_in_flight: 0,
-            summary_completed: 0,
-            summary_failed: 0,
-            triage_cache_hits: 0,
-            triage_cache_misses: 0,
-            triage_cache_key_unavailable: 0,
-            summary_cache_hits: 0,
-            summary_cache_misses: 0,
-            summary_cache_key_unavailable: 0,
-            import_phase: harvester_core::ImportPhase::Idle,
-            imports_completed: 0,
-            imports_failed: 0,
-            import_in_flight: false,
-            source_poll_stats: vec![],
-        };
-
-        assert!(!should_settle_cycle(&obs));
-    }
-
-    #[test]
-    fn test_should_settle_when_pre_triage_reviewing() {
-        let obs = BatchObservation {
-            poll_in_progress: false,
-            session_state: harvester_core::SessionState::Idle,
-            jobs_total: 0,
-            jobs_done: 0,
-            jobs_failed: 0,
-            jobs_in_flight: 0,
-            pre_triage_phase: harvester_core::PreTriagePhase::Reviewing,
-            pre_triage_total: 0,
-            pre_triage_included: 0,
-            pre_triage_review: 0,
-            pre_triage_filtered: 0,
-            triage_phase: harvester_core::TriagePhase::Idle,
-            triage_total: 0,
-            triage_pending: 0,
-            triage_in_flight: 0,
-            triage_completed: 0,
-            triage_failed: 0,
-            summary_total: 0,
-            summary_pending: 0,
-            summary_in_flight: 0,
-            summary_completed: 0,
-            summary_failed: 0,
-            triage_cache_hits: 0,
-            triage_cache_misses: 0,
-            triage_cache_key_unavailable: 0,
-            summary_cache_hits: 0,
-            summary_cache_misses: 0,
-            summary_cache_key_unavailable: 0,
-            import_phase: harvester_core::ImportPhase::Idle,
-            imports_completed: 0,
-            imports_failed: 0,
-            import_in_flight: false,
-            source_poll_stats: vec![],
-        };
-
-        assert!(should_settle_cycle(&obs));
-    }
-
-    #[test]
-    fn test_should_settle_when_pre_triage_ready_to_triage() {
-        let obs = BatchObservation {
-            poll_in_progress: false,
-            session_state: harvester_core::SessionState::Idle,
-            jobs_total: 0,
-            jobs_done: 0,
-            jobs_failed: 0,
-            jobs_in_flight: 0,
-            pre_triage_phase: harvester_core::PreTriagePhase::ReadyToTriage,
-            pre_triage_total: 0,
-            pre_triage_included: 0,
-            pre_triage_review: 0,
-            pre_triage_filtered: 0,
-            triage_phase: harvester_core::TriagePhase::Idle,
-            triage_total: 0,
-            triage_pending: 0,
-            triage_in_flight: 0,
-            triage_completed: 0,
-            triage_failed: 0,
-            summary_total: 0,
-            summary_pending: 0,
-            summary_in_flight: 0,
-            summary_completed: 0,
-            summary_failed: 0,
-            triage_cache_hits: 0,
-            triage_cache_misses: 0,
-            triage_cache_key_unavailable: 0,
-            summary_cache_hits: 0,
-            summary_cache_misses: 0,
-            summary_cache_key_unavailable: 0,
-            import_phase: harvester_core::ImportPhase::Idle,
-            imports_completed: 0,
-            imports_failed: 0,
-            import_in_flight: false,
-            source_poll_stats: vec![],
-        };
-
-        assert!(should_settle_cycle(&obs));
-    }
-
-    #[test]
-    fn test_should_settle_when_pre_triage_failed() {
-        let obs = BatchObservation {
-            poll_in_progress: false,
-            session_state: harvester_core::SessionState::Idle,
-            jobs_total: 0,
-            jobs_done: 0,
-            jobs_failed: 0,
-            jobs_in_flight: 0,
-            pre_triage_phase: harvester_core::PreTriagePhase::Failed {
-                reason: "load failed".to_string(),
-            },
-            pre_triage_total: 0,
-            pre_triage_included: 0,
-            pre_triage_review: 0,
-            pre_triage_filtered: 0,
-            triage_phase: harvester_core::TriagePhase::Idle,
-            triage_total: 0,
-            triage_pending: 0,
-            triage_in_flight: 0,
-            triage_completed: 0,
-            triage_failed: 0,
-            summary_total: 0,
-            summary_pending: 0,
-            summary_in_flight: 0,
-            summary_completed: 0,
-            summary_failed: 0,
-            triage_cache_hits: 0,
-            triage_cache_misses: 0,
-            triage_cache_key_unavailable: 0,
-            summary_cache_hits: 0,
-            summary_cache_misses: 0,
-            summary_cache_key_unavailable: 0,
-            import_phase: harvester_core::ImportPhase::Idle,
-            imports_completed: 0,
-            imports_failed: 0,
-            import_in_flight: false,
-            source_poll_stats: vec![],
-        };
-
-        assert!(should_settle_cycle(&obs));
+    fn test_should_not_settle_cycle_when_batch_status_is_running() {
+        assert!(!should_settle_cycle(harvester_core::BatchStatus::Running));
     }
 
     #[test]
@@ -1668,17 +1383,6 @@ mod tests {
     fn test_should_run_ai_orchestration_when_new_jobs_arrived_since_baseline() {
         let obs = observation_with_totals(11, 0, 0, 0, 0, 0, 0);
         assert!(should_run_ai_orchestration(true, Some(10), &obs));
-    }
-
-    #[test]
-    fn test_maybe_dispatch_batch_ai_orchestration_dispatches_triage_from_reviewing() {
-        let mut obs = observation_with_totals(1, 1, 0, 0, 0, 0, 0);
-        obs.pre_triage_phase = harvester_core::PreTriagePhase::Reviewing;
-        obs.pre_triage_included = 2;
-        obs.triage_total = 0;
-        obs.triage_phase = harvester_core::TriagePhase::Idle;
-
-        assert!(should_dispatch_batch_triage(&obs));
     }
 
     #[test]

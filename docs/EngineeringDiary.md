@@ -1359,3 +1359,9 @@ Type: Bug Fix
 Context: `cargo run -p harvester_batch -- --single-shot` could stall after `[pre-triage-refresh-coord] apply request_id=...` because batch settlement treated `PreTriagePhase::Reviewing` as unfinished even when no more automatic work was possible.
 Change: Batch settling now only blocks on pre-triage loads, not review-only state, and batch AI orchestration can dispatch `TriageClicked` from `Reviewing` as well as `ReadyToTriage`. Added runner regression tests for both behaviors.
 Refs: crates/harvester_batch/src/runner.rs, engine.log
+
+## 2026-04-14 - batch workflow and pre-triage actionability moved into reducer-owned selectors
+Type: Refactor
+Context: Batch runner, reducer, UI, and working-corpus comments were re-deriving workflow legality from raw phase fields, which let `Reviewing` drift into contradictory meanings across modules.
+Change: Added reducer-owned selectors `AppState::pre_triage_actionability()`, `can_start_triage_from_pre_triage()`, `batch_next_action()`, and `batch_status()`, plus exported enums for those concepts. `harvester_batch` now consumes those selectors instead of matching on raw phases, and triage/UI start conditions route through the same core legality check. Updated state tests and aligned working-corpus docs to treat `Reviewing` as a display phase with separate actionability.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/tests.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/working_corpus.rs, crates/harvester_batch/src/runner.rs

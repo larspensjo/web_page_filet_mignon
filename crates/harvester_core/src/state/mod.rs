@@ -227,6 +227,34 @@ pub struct BatchObservation {
     pub source_poll_stats: Vec<crate::SourcePollStat>,
 }
 
+/// Whether pre-triage currently exposes an actionable corpus for triage startup.
+///
+/// This is intentionally separate from [`crate::PreTriagePhase`], which remains
+/// a display/workflow phase. For example, `Reviewing` can still be actionable
+/// because unresolved review rows are tentatively included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreTriageActionability {
+    Loading,
+    Ready,
+    ReadyWithPendingReview,
+    Unavailable,
+}
+
+/// Headless batch run status derived from reducer-owned state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchStatus {
+    Running,
+    Settled,
+}
+
+/// The next automatic action that batch orchestration may dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BatchNextAction {
+    None,
+    DispatchTriage,
+    DispatchSummaries,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
     session: SessionState,
@@ -729,6 +757,37 @@ impl AppState {
         &self.pre_triage
     }
 
+    pub fn pre_triage_actionability(&self) -> crate::PreTriageActionability {
+        match self.pre_triage.phase() {
+            PreTriagePhase::LoadingArticles => crate::PreTriageActionability::Loading,
+            PreTriagePhase::ReadyToTriage => {
+                if self.pre_triage.resolved_included_articles().is_empty() {
+                    crate::PreTriageActionability::Unavailable
+                } else {
+                    crate::PreTriageActionability::Ready
+                }
+            }
+            PreTriagePhase::Reviewing => {
+                if self.pre_triage.resolved_included_articles().is_empty() {
+                    crate::PreTriageActionability::Unavailable
+                } else {
+                    crate::PreTriageActionability::ReadyWithPendingReview
+                }
+            }
+            PreTriagePhase::Idle | PreTriagePhase::Failed { .. } => {
+                crate::PreTriageActionability::Unavailable
+            }
+        }
+    }
+
+    pub fn can_start_triage_from_pre_triage(&self) -> bool {
+        matches!(
+            self.pre_triage_actionability(),
+            crate::PreTriageActionability::Ready
+                | crate::PreTriageActionability::ReadyWithPendingReview
+        )
+    }
+
     /// Consumes the pre-triage included articles for use in a triage session,
     /// resetting pre-triage to Idle. Returns `None` if pre-triage is not in an
     /// interactive phase or has no resolved articles. This is a one-way
@@ -737,10 +796,7 @@ impl AppState {
     pub(crate) fn consume_interactive_pre_triage_articles_for_triage(
         &mut self,
     ) -> Option<Vec<crate::briefing::LoadedArticle>> {
-        if !matches!(
-            self.pre_triage.phase(),
-            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
-        ) {
+        if !self.can_start_triage_from_pre_triage() {
             return None;
         }
         let articles = self.pre_triage.resolved_included_articles();
@@ -761,6 +817,53 @@ impl AppState {
             self.triage(),
             self.briefing_triage_policy(),
         )
+    }
+
+    pub fn batch_next_action(&self) -> crate::BatchNextAction {
+        let pre_triage_included = self.pre_triage.resolved_included_articles().len();
+
+        if self.can_start_triage_from_pre_triage()
+            && !self.briefing_orchestration_requested()
+            && self.triage.can_start()
+            && self.triage.total() < pre_triage_included
+        {
+            return crate::BatchNextAction::DispatchTriage;
+        }
+
+        if matches!(self.triage.phase(), crate::TriagePhase::Complete)
+            && self.triage.completed_count() > 0
+            && self.briefing.can_start()
+            && !self.triage.is_active()
+            && self.briefing.articles().is_empty()
+        {
+            return crate::BatchNextAction::DispatchSummaries;
+        }
+
+        crate::BatchNextAction::None
+    }
+
+    pub fn batch_status(&self) -> crate::BatchStatus {
+        let batch = self.batch_observation();
+        let has_active_work = batch.poll_in_progress
+            || matches!(
+                batch.pre_triage_phase,
+                crate::PreTriagePhase::LoadingArticles
+            )
+            || matches!(
+                batch.triage_phase,
+                crate::TriagePhase::LoadingArticles | crate::TriagePhase::Triaging
+            )
+            || batch.jobs_in_flight > 0
+            || batch.triage_in_flight > 0
+            || batch.summary_in_flight > 0
+            || batch.summary_pending > 0
+            || batch.import_in_flight;
+
+        if has_active_work {
+            crate::BatchStatus::Running
+        } else {
+            crate::BatchStatus::Settled
+        }
     }
 
     /// Returns the corpus for archive export: triage-completed articles only.

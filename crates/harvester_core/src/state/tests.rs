@@ -3,7 +3,10 @@ use super::*;
 #[cfg(test)]
 mod app_state_tests {
     use super::*;
-    use crate::{update, Msg};
+    use crate::{
+        update, BatchNextAction, BatchStatus, ManualDecision, Msg, PreTriageActionability,
+        PreTriagePolicy, PreTriageSession,
+    };
     use harvester_engine::{ExtractedLink, LinkKind};
 
     #[test]
@@ -78,6 +81,93 @@ mod app_state_tests {
         assert_eq!(obs.jobs_in_flight, 1);
         assert_eq!(obs.jobs_done, 1);
         assert_eq!(obs.jobs_failed, 1);
+    }
+
+    fn article_with_words(url: &str, word_count: usize) -> crate::LoadedArticle {
+        crate::LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: std::iter::repeat_n("contentword", word_count)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: format!("hash-{url}"),
+            fetched_utc: None,
+        }
+    }
+
+    #[test]
+    fn pre_triage_actionability_is_ready_when_pre_triage_is_ready() {
+        let mut state = AppState::new();
+        let pre_triage = PreTriageSession::load_articles(
+            vec![article_with_words("https://example.com/ready", 220)],
+            &PreTriagePolicy::default(),
+        );
+        state.set_pre_triage(pre_triage);
+
+        assert_eq!(
+            state.pre_triage_actionability(),
+            PreTriageActionability::Ready
+        );
+        assert!(state.can_start_triage_from_pre_triage());
+    }
+
+    #[test]
+    fn pre_triage_actionability_is_ready_with_pending_review_when_reviewing() {
+        let mut state = AppState::new();
+        let mut pre_triage = PreTriageSession::load_articles(
+            vec![
+                article_with_words("https://example.com/review-a", 100),
+                article_with_words("https://example.com/review-b", 100),
+            ],
+            &PreTriagePolicy::default(),
+        );
+        let key = pre_triage
+            .entry_for_url("https://example.com/review-a")
+            .expect("review entry exists")
+            .key
+            .clone();
+        pre_triage
+            .set_manual_decision(&key, ManualDecision::Exclude)
+            .expect("interactive reviewing should accept manual decisions");
+        state.set_pre_triage(pre_triage);
+
+        assert_eq!(
+            state.pre_triage_actionability(),
+            PreTriageActionability::ReadyWithPendingReview
+        );
+        assert!(state.can_start_triage_from_pre_triage());
+    }
+
+    #[test]
+    fn batch_next_action_dispatches_triage_from_reviewing() {
+        let mut state = AppState::new();
+        let mut pre_triage = PreTriageSession::load_articles(
+            vec![
+                article_with_words("https://example.com/review-a", 100),
+                article_with_words("https://example.com/review-b", 100),
+            ],
+            &PreTriagePolicy::default(),
+        );
+        let key = pre_triage
+            .entry_for_url("https://example.com/review-a")
+            .expect("review entry exists")
+            .key
+            .clone();
+        pre_triage
+            .set_manual_decision(&key, ManualDecision::Exclude)
+            .expect("interactive reviewing should accept manual decisions");
+        state.set_pre_triage(pre_triage);
+
+        assert_eq!(state.batch_next_action(), BatchNextAction::DispatchTriage);
+        assert_eq!(state.batch_status(), BatchStatus::Settled);
+    }
+
+    #[test]
+    fn batch_status_is_running_when_pre_triage_load_is_in_flight() {
+        let mut state = AppState::new();
+        state.set_pre_triage(PreTriageSession::new_loading());
+
+        assert_eq!(state.batch_status(), BatchStatus::Running);
     }
 
     #[test]

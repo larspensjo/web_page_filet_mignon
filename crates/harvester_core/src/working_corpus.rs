@@ -3,8 +3,8 @@
 //! # Source precedence (most important first)
 //!
 //! 1. `PreTriageReady`     — pre-triage session in `ReadyToTriage` phase with ≥1 included URL.
-//! 2. `PreTriageReviewing` — pre-triage session in `Reviewing` phase; informational only, NOT
-//!    action-ready. Lets the UI show progress while the user resolves edge cases.
+//! 2. `PreTriageReviewing` — pre-triage session in `Reviewing` phase; informational for corpus
+//!    selection. Actionability is determined separately by reducer-owned selectors.
 //! 3. `TriageComplete`     — completed triage session with ≥1 eligible URL, used as fallback when
 //!    pre-triage is unavailable or loading.
 //! 4. `Unavailable`        — no actionable corpus exists.
@@ -23,7 +23,8 @@ pub enum CurrentWorkingCorpusSource {
     /// Pre-triage resolved and ready: all review items settled, ≥1 article passes filters.
     PreTriageReady,
     /// Pre-triage session is in the `Reviewing` phase (unresolved items remain).
-    /// The corpus is informational only — callers must not dispatch actions against it.
+    /// The corpus is informational for source selection; callers should consult
+    /// reducer-owned actionability selectors before dispatching actions.
     PreTriageReviewing,
     /// Triage completed and at least one article met the selection policy priority cutoff.
     TriageComplete,

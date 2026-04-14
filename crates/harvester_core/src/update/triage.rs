@@ -1,6 +1,6 @@
 use super::summary_cache_support::short_hash;
 use crate::pre_triage_filter::{
-    ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriagePolicy, PreTriageSession,
+    ArticleFilterKey, ManualDecision, PreTriagePolicy, PreTriageSession,
 };
 use crate::state::TriageCacheLookupResult;
 use crate::tabs::LeftTab;
@@ -41,10 +41,7 @@ pub(super) fn handle_triage_clicked(state: &mut AppState) -> Vec<Effect> {
     if !state.triage().can_start() {
         return Vec::new();
     }
-    if !matches!(
-        state.pre_triage().phase(),
-        PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
-    ) {
+    if !state.can_start_triage_from_pre_triage() {
         return Vec::new();
     }
     state.set_left_tab(LeftTab::TriageResults);

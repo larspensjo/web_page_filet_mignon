@@ -180,11 +180,7 @@ impl AppState {
             triage_can_start: self.triage_ai_available()
                 && (!self.briefing_orchestration.is_requested())
                 && self.triage.can_start()
-                && matches!(
-                    self.pre_triage.phase(),
-                    PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
-                )
-                && !self.pre_triage.resolved_included_articles().is_empty(),
+                && self.can_start_triage_from_pre_triage(),
             triage_progress: self
                 .triage
                 .progress_text()
