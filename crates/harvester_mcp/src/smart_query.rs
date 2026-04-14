@@ -131,6 +131,8 @@ pub struct RankedArticleDigest {
 struct QueryExpansion {
     regex_patterns: Vec<String>,
     entity_names: Vec<String>,
+    focus_terms: Vec<String>,
+    focus_phrases: Vec<String>,
     date_from: Option<String>,
     date_to: Option<String>,
 }
@@ -183,6 +185,10 @@ struct QueryExpansionResponse {
     regex_patterns: Vec<String>,
     #[serde(default)]
     entity_names: Vec<String>,
+    #[serde(default)]
+    focus_terms: Vec<String>,
+    #[serde(default)]
+    focus_phrases: Vec<String>,
     date_from: Option<String>,
     date_to: Option<String>,
 }
@@ -280,6 +286,11 @@ impl SmartQueryEngine {
                 heuristic_query_expansion(input)
             }
         };
+        engine_logging::engine_info!(
+            "[smart-query] expansion focus_terms={:?} focus_phrases={:?}",
+            expansion.focus_terms,
+            expansion.focus_phrases
+        );
         let selection = self.collect_candidates(input, &expansion);
         engine_logging::engine_info!(
             "[smart-query] candidate selection regex_matches={} entity_matches={} total_unique_candidates={} eligible_unique_candidates={} filtered_low_priority_candidates={} scoring_candidates={} candidates_with_triage={} capped={} threshold={} allow_broad={}",
@@ -318,12 +329,16 @@ impl SmartQueryEngine {
                     format_ranked_counts(&mid_band_tag_counts, 25)
                 );
             }
-            let query_overlap_tag_counts =
-                query_overlap_tag_counts(&selection.tag_counts, &input.question);
+            let query_overlap_tag_counts = query_overlap_tag_counts(
+                &selection.tag_counts,
+                &expansion.focus_terms,
+                &expansion.focus_phrases,
+            );
             if !query_overlap_tag_counts.is_empty() {
                 engine_logging::engine_info!(
-                    "[smart-query] triage tag query-overlap stats query_terms={} tags={}",
-                    format_query_terms(&input.question),
+                    "[smart-query] triage tag query-overlap stats focus_terms={} focus_phrases={} tags={}",
+                    expansion.focus_terms.join(", "),
+                    expansion.focus_phrases.join(", "),
                     format_ranked_counts(&query_overlap_tag_counts, 25)
                 );
             }
@@ -434,7 +449,7 @@ impl SmartQueryEngine {
             input.scope_entities.join(", ")
         };
         let user_prompt = format!(
-            "Question: {}\nScope entities: {}\nScope date_from: {}\nScope date_to: {}\nReturn JSON with regex_patterns, entity_names, date_from, date_to. regex_patterns must be safe Rust regex strings and prefer (?i) case-insensitive patterns. Use null for absent dates.",
+            "Question: {}\nScope entities: {}\nScope date_from: {}\nScope date_to: {}\nReturn JSON with regex_patterns, entity_names, focus_terms, focus_phrases, date_from, date_to. regex_patterns must be safe Rust regex strings and prefer (?i) case-insensitive patterns. focus_terms should contain the most important content words for refinement. focus_phrases should contain short noun phrases like 'data centers' or 'inference capacity' when relevant. Use null for absent dates.",
             input.question,
             scope_text,
             input.scope_date_from.as_deref().unwrap_or("null"),
@@ -480,10 +495,14 @@ impl SmartQueryEngine {
             push_unique(&mut entity_names, scope);
         }
         entity_names.truncate(MAX_EXPANSION_ENTITIES);
+        let focus_terms = normalize_focus_terms(parsed.focus_terms, &input.question);
+        let focus_phrases = normalize_focus_phrases(parsed.focus_phrases, &input.question);
 
         Ok(QueryExpansion {
             regex_patterns,
             entity_names,
+            focus_terms,
+            focus_phrases,
             date_from: parsed.date_from.or_else(|| input.scope_date_from.clone()),
             date_to: parsed.date_to.or_else(|| input.scope_date_to.clone()),
         })
@@ -877,6 +896,8 @@ impl SmartQueryEngine {
         let expansion = QueryExpansion {
             regex_patterns: heuristic_patterns(&input.question),
             entity_names: normalize_terms(input.scope_entities.clone()),
+            focus_terms: heuristic_focus_terms(&input.question),
+            focus_phrases: heuristic_focus_phrases(&input.question),
             date_from: input.scope_date_from.clone(),
             date_to: input.scope_date_to.clone(),
         };
@@ -1079,6 +1100,8 @@ fn heuristic_query_expansion(input: &QueryKnowledgeBaseInput) -> QueryExpansion 
     QueryExpansion {
         regex_patterns: heuristic_patterns(&input.question),
         entity_names,
+        focus_terms: heuristic_focus_terms(&input.question),
+        focus_phrases: heuristic_focus_phrases(&input.question),
         date_from: input.scope_date_from.clone(),
         date_to: input.scope_date_to.clone(),
     }
@@ -1128,6 +1151,71 @@ fn normalize_terms(terms: Vec<String>) -> Vec<String> {
         push_unique(&mut normalized, trimmed.to_string());
     }
     normalized
+}
+
+fn normalize_focus_terms(terms: Vec<String>, question: &str) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for term in terms {
+        let trimmed = term.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        push_unique(&mut normalized, trimmed.to_lowercase());
+    }
+    if normalized.is_empty() {
+        normalized = heuristic_focus_terms(question);
+    }
+    normalized.truncate(6);
+    normalized
+}
+
+fn normalize_focus_phrases(phrases: Vec<String>, question: &str) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for phrase in phrases {
+        let trimmed = phrase.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        push_unique(&mut normalized, trimmed.to_lowercase());
+    }
+    if normalized.is_empty() {
+        normalized = heuristic_focus_phrases(question);
+    }
+    normalized.truncate(4);
+    normalized
+}
+
+fn heuristic_focus_terms(question: &str) -> Vec<String> {
+    significant_terms(question)
+        .into_iter()
+        .map(|term| term.to_lowercase())
+        .take(6)
+        .collect()
+}
+
+fn heuristic_focus_phrases(question: &str) -> Vec<String> {
+    let lower = question.to_lowercase();
+    let candidate_phrases = [
+        "data center",
+        "data centers",
+        "data centre",
+        "data centres",
+        "inference capacity",
+        "inference",
+        "capacity",
+        "cloud infrastructure",
+        "ai infrastructure",
+        "power infrastructure",
+        "gpu demand",
+    ];
+
+    let mut phrases = Vec::new();
+    for phrase in candidate_phrases {
+        if lower.contains(phrase) {
+            push_unique(&mut phrases, phrase.to_string());
+        }
+    }
+    phrases
 }
 
 fn heuristic_patterns(question: &str) -> Vec<String> {
@@ -1443,38 +1531,51 @@ fn mid_band_tag_counts(
         .collect()
 }
 
-fn query_overlap_tag_counts(counts: &[(String, usize)], query: &str) -> Vec<(String, usize)> {
-    let query_terms = query_hint_terms(query);
-    counts
-        .iter()
-        .filter(|(tag, _)| tag_overlaps_query_terms(tag, &query_terms))
-        .cloned()
-        .collect()
-}
-
-fn format_query_terms(query: &str) -> String {
-    query_hint_terms(query).join(", ")
-}
-
-fn query_hint_terms(query: &str) -> Vec<String> {
-    significant_terms(query)
+fn query_overlap_tag_counts(
+    counts: &[(String, usize)],
+    focus_terms: &[String],
+    focus_phrases: &[String],
+) -> Vec<(String, usize)> {
+    let mut ranked = Vec::new();
+    for (tag, count) in counts {
+        if let Some(overlap_score) = tag_overlap_score(tag, focus_terms, focus_phrases) {
+            ranked.push((tag.clone(), *count, overlap_score));
+        }
+    }
+    ranked.sort_by(|left, right| {
+        right
+            .2
+            .cmp(&left.2)
+            .then_with(|| right.1.cmp(&left.1))
+            .then_with(|| left.0.to_lowercase().cmp(&right.0.to_lowercase()))
+    });
+    ranked
         .into_iter()
-        .map(|term| term.to_lowercase())
+        .map(|(tag, count, _)| (tag, count))
         .collect()
 }
 
-fn tag_overlaps_query_terms(tag: &str, query_terms: &[String]) -> bool {
-    let tag_terms: Vec<String> = tag
+fn tag_overlap_score(tag: &str, focus_terms: &[String], focus_phrases: &[String]) -> Option<usize> {
+    let tag_lower = tag.to_lowercase();
+    let tag_terms: Vec<String> = tag_lower
         .split(|ch: char| !ch.is_alphanumeric())
         .filter(|segment| segment.len() >= 3)
-        .map(|segment| segment.to_lowercase())
+        .map(|segment| segment.to_string())
         .collect();
-
-    tag_terms.iter().any(|tag_term| {
-        query_terms
-            .iter()
-            .any(|query_term| query_term.contains(tag_term) || tag_term.contains(query_term))
-    })
+    let phrase_hits = focus_phrases
+        .iter()
+        .filter(|phrase| tag_lower.contains(phrase.as_str()))
+        .count();
+    let term_hits = tag_terms
+        .iter()
+        .filter(|tag_term| {
+            focus_terms.iter().any(|focus_term| {
+                focus_term.contains(tag_term.as_str()) || tag_term.contains(focus_term.as_str())
+            })
+        })
+        .count();
+    let overlap_score = phrase_hits * 100 + term_hits * 10;
+    (overlap_score > 0).then_some(overlap_score)
 }
 
 fn build_refinement_suggestions(top_companies: &[String], top_themes: &[String]) -> Vec<String> {

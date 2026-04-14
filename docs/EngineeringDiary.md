@@ -1437,3 +1437,9 @@ Type: Diagnostics
 Context: Raw top-tag frequency was useful, but real-corpus evaluation showed that the most informative refinement candidates often sit in the middle of the frequency range or overlap directly with the query vocabulary rather than appearing at the absolute top of the tag histogram.
 Change: Extended smart-query logging with `triage tag mid-band stats` for tags whose counts fall in a configurable-looking middle range and `triage tag query-overlap stats` for tags whose tokens overlap the current query terms. This remains log-only for evaluation and does not change the MCP response.
 Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Extend expansion with focus terms and phrases for tag diagnostics
+Type: Retrieval
+Context: Query-overlap tag diagnostics based on raw token splitting were promising but still noisy because the server had no structured notion of which query terms or phrases were actually central to the user’s intent.
+Change: Extended the smart-query expansion schema with `focus_terms` and `focus_phrases`, added heuristic fallbacks for both when expansion is unavailable, logged the extracted focus fields, and switched tag-overlap diagnostics to rank phrase matches above single-term matches using the expansion output instead of plain query tokenization.
+Refs: crates/harvester_mcp/src/smart_query.rs
