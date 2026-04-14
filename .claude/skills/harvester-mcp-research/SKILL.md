@@ -13,6 +13,7 @@ Prefer this skill for:
 - requests to find supporting articles or evidence in the local output
 
 Do not rely on model memory first when this skill applies. Start with MCP.
+Do not inspect repository files or `output/*.md` directly as a first step when this skill applies.
 
 ## Workflow
 
@@ -32,11 +33,23 @@ Do not rely on model memory first when this skill applies. Start with MCP.
 
 ## Guidance
 
+- Treat `harvester-mcp` as a tools-only MCP server. Do not use `listMcpResources` to test whether it is available; a lack of resources does not mean the server is unusable.
+- For corpus research in this project, do not use `Search`, `Read`, `grep`, or `Bash` to inspect `output/*.md` unless the MCP tools fail or explicitly prove insufficient.
+- If you need evidence, obtain it through MCP first: `query_knowledge_base`, then `search_articles`, `list_articles`, `read_article`, or `get_article_summary`.
 - Treat `mode="too_broad"` as a useful result, not a tool failure.
 - Avoid `allow_broad=true` unless the query is already reasonably constrained; it can be slow in chat usage.
 - For saturated topics involving very common companies, targeted `search_articles` queries may outperform repeated smart-query attempts.
 - If `search_articles` returns many results, refine the regex or add a date filter before reading articles.
 - Prefer short iterative narrowing over large raw result dumps.
+
+## Fallback Boundary
+
+Only leave the MCP path if one of these is true:
+- MCP tool calls fail repeatedly
+- the MCP response says the corpus is insufficient
+- the user explicitly asks for repository inspection or non-MCP sources
+
+If you leave the MCP path, state briefly why.
 
 ## This Project
 
