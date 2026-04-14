@@ -1353,3 +1353,9 @@ Type: Implementation
 Context: `crates/harvester_io/src/effect_runner.rs` had grown to ~2,280 lines mixing the `EffectRunner` struct/constructors, a ~1,000-line `execute_effect` match, source-polling logic, free worker functions, and tests into one file.
 Change: Converted `effect_runner.rs` into a directory module and extracted four focused submodules: `dispatch.rs` (`impl EffectRunner { fn execute_effect() }` — the full effect match), `poll.rs` (`impl EffectRunner { fn execute_poll_all_sources() }`), `worker.rs` (`EntityIndexWorkerMsg`, `run_entity_index_worker`, `run_triage_refresh_load`), and `tests.rs` (all 20 tests with explicit imports per repo convention). `mod.rs` retains only the struct definition, constructors, `enqueue`, `Drop`, `spawn_event_loop`, `validate_effect`, and `reject_effect` (~350 lines). All 75 `harvester_io` tests pass; clippy clean.
 Refs: crates/harvester_io/src/effect_runner/mod.rs, crates/harvester_io/src/effect_runner/dispatch.rs, crates/harvester_io/src/effect_runner/poll.rs, crates/harvester_io/src/effect_runner/worker.rs, crates/harvester_io/src/effect_runner/tests.rs
+
+## 2026-04-14 - harvester_batch single-shot no longer hangs in pre-triage reviewing
+Type: Bug Fix
+Context: `cargo run -p harvester_batch -- --single-shot` could stall after `[pre-triage-refresh-coord] apply request_id=...` because batch settlement treated `PreTriagePhase::Reviewing` as unfinished even when no more automatic work was possible.
+Change: Batch settling now only blocks on pre-triage loads, not review-only state, and batch AI orchestration can dispatch `TriageClicked` from `Reviewing` as well as `ReadyToTriage`. Added runner regression tests for both behaviors.
+Refs: crates/harvester_batch/src/runner.rs, engine.log

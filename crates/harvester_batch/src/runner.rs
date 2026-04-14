@@ -101,10 +101,15 @@ fn should_settle_cycle(obs: &BatchObservation) -> bool {
     // Settled when:
     // 1. No poll in progress
     // 2. Triage is either idle, complete, or failed (not active)
-    // 3. No jobs in flight
-    // 4. No triage work in flight
-    // 5. No summary work in flight or pending
-    // 6. No import in flight
+    // 3. Pre-triage is not actively loading
+    // 4. No jobs in flight
+    // 5. No triage work in flight
+    // 6. No summary work in flight or pending
+    // 7. No import in flight
+    //
+    // `Reviewing` is considered settled in headless batch mode. Manual review
+    // cannot progress there without user input, so single-shot runs must be
+    // allowed to exit once automatic work has quiesced.
     !obs.poll_in_progress
         && !matches!(
             obs.triage_phase,
@@ -113,7 +118,6 @@ fn should_settle_cycle(obs: &BatchObservation) -> bool {
         && !matches!(
             obs.pre_triage_phase,
             harvester_core::PreTriagePhase::LoadingArticles
-                | harvester_core::PreTriagePhase::Reviewing
         )
         && obs.jobs_in_flight == 0
         && obs.triage_in_flight == 0
@@ -823,18 +827,25 @@ fn run_dispatch_loop_with_tick_interval(
     }
 }
 
-fn maybe_dispatch_batch_ai_orchestration(state: &AppState) -> Option<Msg> {
-    let obs = state.batch_observation();
-
+fn should_dispatch_batch_triage(obs: &BatchObservation) -> bool {
     if matches!(
         obs.pre_triage_phase,
-        harvester_core::PreTriagePhase::ReadyToTriage
+        harvester_core::PreTriagePhase::Reviewing | harvester_core::PreTriagePhase::ReadyToTriage
     ) && !matches!(
         obs.triage_phase,
         harvester_core::TriagePhase::LoadingArticles | harvester_core::TriagePhase::Triaging
     ) && obs.pre_triage_included > 0
         && obs.triage_total < obs.pre_triage_included
     {
+        return true;
+    }
+    false
+}
+
+fn maybe_dispatch_batch_ai_orchestration(state: &AppState) -> Option<Msg> {
+    let obs = state.batch_observation();
+
+    if should_dispatch_batch_triage(&obs) {
         return Some(Msg::TriageClicked);
     }
 
@@ -1496,7 +1507,7 @@ mod tests {
     }
 
     #[test]
-    fn test_should_not_settle_when_pre_triage_reviewing() {
+    fn test_should_settle_when_pre_triage_reviewing() {
         let obs = BatchObservation {
             poll_in_progress: false,
             session_state: harvester_core::SessionState::Idle,
@@ -1533,7 +1544,7 @@ mod tests {
             source_poll_stats: vec![],
         };
 
-        assert!(!should_settle_cycle(&obs));
+        assert!(should_settle_cycle(&obs));
     }
 
     #[test]
@@ -1657,6 +1668,17 @@ mod tests {
     fn test_should_run_ai_orchestration_when_new_jobs_arrived_since_baseline() {
         let obs = observation_with_totals(11, 0, 0, 0, 0, 0, 0);
         assert!(should_run_ai_orchestration(true, Some(10), &obs));
+    }
+
+    #[test]
+    fn test_maybe_dispatch_batch_ai_orchestration_dispatches_triage_from_reviewing() {
+        let mut obs = observation_with_totals(1, 1, 0, 0, 0, 0, 0);
+        obs.pre_triage_phase = harvester_core::PreTriagePhase::Reviewing;
+        obs.pre_triage_included = 2;
+        obs.triage_total = 0;
+        obs.triage_phase = harvester_core::TriagePhase::Idle;
+
+        assert!(should_dispatch_batch_triage(&obs));
     }
 
     #[test]
