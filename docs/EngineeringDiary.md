@@ -1467,3 +1467,9 @@ Type: Tooling
 Context: Real Claude testing showed the MCP server was available and healthy, but Claude sometimes treated `listMcpResources` as a capability check and fell back to reading `output/*.md` directly instead of using the MCP tools.
 Change: Strengthened the project skill and `CLAUDE.md` instructions so corpus-research prompts use `harvester-mcp` tools first, treat the server as tools-only, avoid direct `output/*.md` inspection unless MCP fails, and explain briefly when leaving the MCP path.
 Refs: .claude/skills/harvester-mcp-research/SKILL.md, CLAUDE.md
+
+## 2026-04-14 - Advertise MCP tool capability so Claude can discover harvester-mcp tools
+Type: Integration
+Context: Claude's `/mcp` UI showed `harvester-mcp` as connected but with `Capabilities: none`, which meant the client attached to the server but did not expose any of its tool handlers in the deferred tool registry.
+Change: Updated `HarvesterMcpServer::get_info()` to advertise MCP tool capability explicitly via `ServerCapabilities::builder().enable_tools().build()` instead of the default empty capability set.
+Refs: crates/harvester_mcp/src/main.rs

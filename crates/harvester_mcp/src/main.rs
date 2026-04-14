@@ -607,9 +607,15 @@ impl HarvesterMcpServer {
 #[tool_handler]
 impl ServerHandler for HarvesterMcpServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(rmcp::model::ServerCapabilities::default()).with_server_info(
-            Implementation::new("harvester-mcp", env!("CARGO_PKG_VERSION")),
+        ServerInfo::new(
+            rmcp::model::ServerCapabilities::builder()
+                .enable_tools()
+                .build(),
         )
+        .with_server_info(Implementation::new(
+            "harvester-mcp",
+            env!("CARGO_PKG_VERSION"),
+        ))
     }
 }
 
