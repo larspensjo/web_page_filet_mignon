@@ -45,6 +45,8 @@ pub(crate) struct ListArticlesParams {
     pub(crate) date_to: Option<String>,
     /// Regex filter on article title
     pub(crate) title_pattern: Option<String>,
+    /// Maximum number of articles to return (default 500)
+    pub(crate) max_results: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -57,6 +59,8 @@ pub(crate) struct SearchEntitiesParams {
     pub(crate) product: Option<String>,
     /// Substring to match against themes (case-insensitive)
     pub(crate) theme: Option<String>,
+    /// Maximum number of results to return (default 200)
+    pub(crate) max_results: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -123,6 +127,10 @@ pub(crate) struct ArticleSummary {
 
 pub(crate) const DEFAULT_SEARCH_SNIPPET_CHARS: usize = 320;
 const MAX_SEARCH_SNIPPET_CHARS: usize = 1200;
+const MAX_SEARCH_RESULTS: usize = 200;
+const MAX_READ_ARTICLE_CHARS: usize = 100_000;
+const MAX_LIST_ARTICLES_RESULTS: usize = 500;
+const MAX_SEARCH_ENTITIES_RESULTS: usize = 200;
 
 fn clamp_search_snippet_chars(snippet_chars: Option<usize>) -> usize {
     snippet_chars
@@ -235,7 +243,7 @@ impl HarvesterMcpServer {
 
     /// Search article content with a regex pattern, optional date range, and result cap.
     #[rmcp::tool(
-        description = "Search article content using a regex pattern. Optionally filter by date range (date_from/date_to as ISO date strings), cap results with max_results (default 20), and control snippet size with snippet_chars (default 320, max 1200). Returns JSON array of matches with filename, title, url, fetched_utc, and a compact content snippet."
+        description = "Search article content using a regex pattern. Optionally filter by date range (date_from/date_to as ISO date strings), cap results with max_results (default 20, max 200), and control snippet size with snippet_chars (default 320, min 80, max 1200). Returns JSON array of matches with filename, title, url, fetched_utc, and a compact content snippet."
     )]
     async fn search_articles(&self, Parameters(p): Parameters<SearchArticlesParams>) -> String {
         let t = std::time::Instant::now();
@@ -250,7 +258,7 @@ impl HarvesterMcpServer {
                 return serde_json::json!({"error": format!("invalid regex: {}", e)}).to_string()
             }
         };
-        let max = p.max_results.unwrap_or(20);
+        let max = p.max_results.unwrap_or(20).min(MAX_SEARCH_RESULTS);
         let mut results: Vec<SearchMatch> = Vec::new();
 
         for entry in &self.article_index.articles {
@@ -287,9 +295,9 @@ impl HarvesterMcpServer {
         result
     }
 
-    /// Return the full markdown content of an article by filename.
+    /// Return the markdown content of an article by filename, truncated at 100k characters.
     #[rmcp::tool(
-        description = "Read the full markdown content of an article. Pass the filename (e.g. \"my-article.md\") as returned by list_articles or search_articles."
+        description = "Read the markdown content of an article. Pass the filename (e.g. \"my-article.md\") as returned by list_articles or search_articles. Content is returned as-is up to 100,000 characters; longer articles are truncated with a note."
     )]
     async fn read_article(&self, Parameters(p): Parameters<ReadArticleParams>) -> String {
         let t = std::time::Instant::now();
@@ -300,7 +308,18 @@ impl HarvesterMcpServer {
             .iter()
             .find(|a| a.filename == p.filename)
         {
-            Some(entry) => entry.content.clone(),
+            Some(entry) => {
+                let content = &entry.content;
+                if content.chars().count() > MAX_READ_ARTICLE_CHARS {
+                    let truncated: String = content.chars().take(MAX_READ_ARTICLE_CHARS).collect();
+                    format!(
+                        "{truncated}\n\n[Article truncated at {MAX_READ_ARTICLE_CHARS} characters. Full article is {} characters.]",
+                        content.chars().count()
+                    )
+                } else {
+                    content.clone()
+                }
+            }
             None => serde_json::json!({"error": format!("article not found: {}", p.filename)})
                 .to_string(),
         };
@@ -314,7 +333,7 @@ impl HarvesterMcpServer {
 
     /// Search articles by entity tags (company, technology, product, theme).
     #[rmcp::tool(
-        description = "Search articles by entity tags. Provide at least one of: company, technology, product, theme (all case-insensitive substring matches). All provided filters must match (AND logic). Returns JSON array with url, fetched_utc, companies, technologies, products, themes."
+        description = "Search articles by entity tags. Provide at least one of: company, technology, product, theme (all case-insensitive substring matches). All provided filters must match (AND logic). Limit results with max_results (default 200, max 200). Returns JSON array with url, fetched_utc, companies, technologies, products, themes."
     )]
     async fn search_entities(&self, Parameters(p): Parameters<SearchEntitiesParams>) -> String {
         let t = std::time::Instant::now();
@@ -330,6 +349,11 @@ impl HarvesterMcpServer {
             return serde_json::json!({"error": "at least one search parameter required"})
                 .to_string();
         }
+
+        let max_entities = p
+            .max_results
+            .unwrap_or(MAX_SEARCH_ENTITIES_RESULTS)
+            .min(MAX_SEARCH_ENTITIES_RESULTS);
 
         let results: Vec<EntitySearchResult> = self
             .entity_index
@@ -371,6 +395,7 @@ impl HarvesterMcpServer {
                     None
                 }
             })
+            .take(max_entities)
             .collect();
 
         let result = serde_json::to_string(&results)
@@ -457,7 +482,7 @@ impl HarvesterMcpServer {
 
     /// List articles, optionally filtered by date range and/or title regex.
     #[rmcp::tool(
-        description = "List articles in the corpus. Optionally filter by date_from/date_to (ISO date strings, inclusive) and/or title_pattern (regex on title). Returns JSON array with filename, title, url, fetched_utc, token_count."
+        description = "List articles in the corpus. Optionally filter by date_from/date_to (ISO date strings, inclusive) and/or title_pattern (regex on title). Limit results with max_results (default 500, max 500). Returns JSON array with filename, title, url, fetched_utc, token_count."
     )]
     async fn list_articles(&self, Parameters(p): Parameters<ListArticlesParams>) -> String {
         let t = std::time::Instant::now();
@@ -477,6 +502,11 @@ impl HarvesterMcpServer {
         } else {
             None
         };
+
+        let max_list = p
+            .max_results
+            .unwrap_or(MAX_LIST_ARTICLES_RESULTS)
+            .min(MAX_LIST_ARTICLES_RESULTS);
 
         let results: Vec<ArticleSummary> = self
             .article_index
@@ -504,12 +534,14 @@ impl HarvesterMcpServer {
                 fetched_utc: entry.fetched_utc.clone(),
                 token_count: entry.token_count,
             })
+            .take(max_list)
             .collect();
 
         let result = serde_json::to_string(&results)
             .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}).to_string());
         engine_logging::engine_info!(
-            "[tool] list_articles returned {} bytes in {}ms",
+            "[tool] list_articles returned {} entries {} bytes in {}ms",
+            results.len(),
             result.len(),
             t.elapsed().as_millis()
         );
@@ -588,6 +620,61 @@ mod tests {
         )
     }
 
+    fn test_server_with_entities(
+        entries: Vec<(String, harvester_core::EntityIndexEntry)>,
+    ) -> HarvesterMcpServer {
+        let mut map = BTreeMap::new();
+        for (url, entry) in entries {
+            map.insert(url, entry);
+        }
+        HarvesterMcpServer::new(
+            PathBuf::from("output"),
+            EntityIndex {
+                schema_version: 1,
+                entries: map,
+            },
+            SummaryCache::new(),
+            crate::article_index::ArticleIndex { articles: vec![] },
+            HashMap::new(),
+            HashMap::new(),
+            SmartQueryConfig {
+                agent_model: "gpt-5.4-nano".to_string(),
+                context_budget: 4000,
+                scoring_candidate_cap: smart_query::DEFAULT_MAX_SCORING_CANDIDATES,
+                too_broad_threshold: smart_query::DEFAULT_TOO_BROAD_THRESHOLD,
+                min_triage_priority: smart_query::DEFAULT_MIN_TRIAGE_PRIORITY,
+                agent_provider: None,
+            },
+        )
+    }
+
+    fn test_server_with_summary(
+        url: &str,
+        entry: harvester_core::SummaryCacheEntry,
+    ) -> HarvesterMcpServer {
+        let mut summary_index = HashMap::new();
+        summary_index.insert(url.to_string(), entry);
+        HarvesterMcpServer::new(
+            PathBuf::from("output"),
+            EntityIndex {
+                schema_version: 1,
+                entries: BTreeMap::new(),
+            },
+            SummaryCache::new(),
+            crate::article_index::ArticleIndex { articles: vec![] },
+            summary_index,
+            HashMap::new(),
+            SmartQueryConfig {
+                agent_model: "gpt-5.4-nano".to_string(),
+                context_budget: 4000,
+                scoring_candidate_cap: smart_query::DEFAULT_MAX_SCORING_CANDIDATES,
+                too_broad_threshold: smart_query::DEFAULT_TOO_BROAD_THRESHOLD,
+                min_triage_priority: smart_query::DEFAULT_MIN_TRIAGE_PRIORITY,
+                agent_provider: None,
+            },
+        )
+    }
+
     fn sample_article(filename: &str, title: &str, body: &str) -> ArticleEntry {
         ArticleEntry {
             filename: filename.to_string(),
@@ -625,5 +712,179 @@ mod tests {
         assert!(snippet.contains("Microsoft and OpenAI"));
         assert!(!snippet.contains("url:"));
         assert!(snippet.ends_with("..."));
+    }
+
+    #[tokio::test]
+    async fn read_article_returns_content_when_found() {
+        let server =
+            test_server_with_articles(vec![sample_article("beta.md", "Beta", "Hello from beta.")]);
+        let result = server
+            .read_article(Parameters(ReadArticleParams {
+                filename: "beta.md".to_string(),
+            }))
+            .await;
+        assert!(result.contains("Hello from beta."));
+    }
+
+    #[tokio::test]
+    async fn read_article_returns_error_when_not_found() {
+        let server = test_server_with_articles(vec![]);
+        let result = server
+            .read_article(Parameters(ReadArticleParams {
+                filename: "ghost.md".to_string(),
+            }))
+            .await;
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        assert!(payload["error"].as_str().unwrap().contains("ghost.md"));
+    }
+
+    #[tokio::test]
+    async fn read_article_truncates_at_cap() {
+        let long_content = "x".repeat(MAX_READ_ARTICLE_CHARS + 500);
+        let server =
+            test_server_with_articles(vec![sample_article("long.md", "Long", &long_content)]);
+        let result = server
+            .read_article(Parameters(ReadArticleParams {
+                filename: "long.md".to_string(),
+            }))
+            .await;
+        assert!(result.chars().count() < long_content.chars().count());
+        assert!(result.contains("[Article truncated"));
+    }
+
+    #[tokio::test]
+    async fn list_articles_filters_by_date() {
+        let mut old = sample_article("old.md", "Old", "old content");
+        old.fetched_utc = Some("2025-01-01T00:00:00Z".to_string());
+        let mut new = sample_article("new.md", "New", "new content");
+        new.fetched_utc = Some("2026-03-01T00:00:00Z".to_string());
+        let server = test_server_with_articles(vec![old, new]);
+
+        let result = server
+            .list_articles(Parameters(ListArticlesParams {
+                date_from: Some("2026-01-01".to_string()),
+                date_to: None,
+                title_pattern: None,
+                max_results: None,
+            }))
+            .await;
+
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        let arr = payload.as_array().expect("array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["filename"].as_str().unwrap(), "new.md");
+    }
+
+    #[tokio::test]
+    async fn list_articles_filters_by_title_regex() {
+        let server = test_server_with_articles(vec![
+            sample_article("alpha.md", "Alpha Article", "content"),
+            sample_article("beta.md", "Beta Post", "content"),
+        ]);
+
+        let result = server
+            .list_articles(Parameters(ListArticlesParams {
+                date_from: None,
+                date_to: None,
+                title_pattern: Some("Alpha".to_string()),
+                max_results: None,
+            }))
+            .await;
+
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        let arr = payload.as_array().expect("array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["filename"].as_str().unwrap(), "alpha.md");
+    }
+
+    #[tokio::test]
+    async fn search_entities_matches_company() {
+        use harvester_core::EntityIndexEntry;
+        let entry = EntityIndexEntry {
+            companies: vec!["Acme Corp".to_string()],
+            ..Default::default()
+        };
+        let server =
+            test_server_with_entities(vec![("https://example.com/acme".to_string(), entry)]);
+        let result = server
+            .search_entities(Parameters(SearchEntitiesParams {
+                company: Some("acme".to_string()),
+                technology: None,
+                product: None,
+                theme: None,
+                max_results: None,
+            }))
+            .await;
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        let arr = payload.as_array().expect("array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["url"].as_str().unwrap(), "https://example.com/acme");
+    }
+
+    #[tokio::test]
+    async fn search_entities_and_logic_requires_all_filters() {
+        use harvester_core::EntityIndexEntry;
+        let acme_tech = EntityIndexEntry {
+            companies: vec!["Acme".to_string()],
+            technologies: vec!["Rust".to_string()],
+            ..Default::default()
+        };
+        let acme_only = EntityIndexEntry {
+            companies: vec!["Acme".to_string()],
+            ..Default::default()
+        };
+        let server = test_server_with_entities(vec![
+            ("https://example.com/both".to_string(), acme_tech),
+            ("https://example.com/company-only".to_string(), acme_only),
+        ]);
+        let result = server
+            .search_entities(Parameters(SearchEntitiesParams {
+                company: Some("acme".to_string()),
+                technology: Some("Rust".to_string()),
+                product: None,
+                theme: None,
+                max_results: None,
+            }))
+            .await;
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        let arr = payload.as_array().expect("array");
+        assert_eq!(arr.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn get_article_summary_returns_no_summary_when_missing() {
+        let server = test_server_with_articles(vec![]);
+        let result = server
+            .get_article_summary(Parameters(GetArticleSummaryParams {
+                url: "https://example.com/unknown".to_string(),
+            }))
+            .await;
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        assert_eq!(payload["status"].as_str().unwrap(), "no summary available");
+    }
+
+    #[tokio::test]
+    async fn get_article_summary_returns_summary_when_present() {
+        use harvester_core::{ArticleSummaryResult, SummaryCacheEntry, SummaryEntities};
+        let entry = SummaryCacheEntry {
+            result: ArticleSummaryResult {
+                title: "Known Article".to_string(),
+                summary: "A test summary.".to_string(),
+                key_points: vec!["Point A".to_string()],
+                input_tokens: 100,
+                output_tokens: 50,
+                entities: SummaryEntities::default(),
+            },
+            created_at_utc: "2026-04-01T00:00:00Z".to_string(),
+        };
+        let server = test_server_with_summary("https://example.com/known", entry);
+        let result = server
+            .get_article_summary(Parameters(GetArticleSummaryParams {
+                url: "https://example.com/known".to_string(),
+            }))
+            .await;
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        assert!(payload.get("summary").is_some());
+        assert!(payload.get("key_points").is_some());
     }
 }
