@@ -8,7 +8,7 @@
 ## Architecture
 - Preserve the unidirectional data flow: input -> action -> reducer -> state -> render, with side effects isolated and fed back as actions.
 - Reducers must stay pure and unit-testable.
-- Keep `mod.rs` and `lib.rs` files as thin wrappers only.
+- Keep entry points (`main.rs`, `mod.rs` and `lib.rs`) files as thin wrappers only.
 - Keep shared constants and behavior DRY; prefer one source of truth over duplicated definitions.
 
 ## CommanDuctUI Boundary
