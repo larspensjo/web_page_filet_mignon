@@ -1,5 +1,6 @@
 mod article_index;
 mod smart_query;
+mod util;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -186,33 +187,6 @@ struct ArticleSummary {
 
 // ── Tool implementations ─────────────────────────────────────────────────────
 
-/// Check whether fetched_utc matches the date range filters.
-fn date_in_range(
-    fetched_utc: Option<&str>,
-    date_from: Option<&str>,
-    date_to: Option<&str>,
-) -> bool {
-    if date_from.is_none() && date_to.is_none() {
-        return true;
-    }
-    match fetched_utc {
-        None => false,
-        Some(ts) => {
-            if let Some(from) = date_from {
-                if ts < from {
-                    return false;
-                }
-            }
-            if let Some(to) = date_to {
-                if ts > to {
-                    return false;
-                }
-            }
-            true
-        }
-    }
-}
-
 const DEFAULT_SEARCH_SNIPPET_CHARS: usize = 320;
 const MAX_SEARCH_SNIPPET_CHARS: usize = 1200;
 
@@ -273,8 +247,11 @@ fn truncate_text_boundary(text: &str, max_chars: usize) -> String {
     }
 }
 
-/// Build a snippet from nearby matches and compress it for chat-oriented payloads.
-fn build_snippet(content: &str, re: &Regex, max_chars: usize) -> String {
+/// Build a compact snippet from nearby regex matches for chat-oriented MCP tool responses.
+///
+/// Unlike the LLM-context snippet in `smart_query`, this version compacts whitespace,
+/// filters frontmatter lines, and truncates to a character budget.
+fn build_search_snippet(content: &str, re: &Regex, max_chars: usize) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let mut included: Vec<usize> = Vec::new();
     let mut match_count = 0usize;
@@ -344,7 +321,7 @@ impl HarvesterMcpServer {
             if results.len() >= max {
                 break;
             }
-            if !date_in_range(
+            if !util::date_in_range(
                 entry.fetched_utc.as_deref(),
                 p.date_from.as_deref(),
                 p.date_to.as_deref(),
@@ -352,7 +329,7 @@ impl HarvesterMcpServer {
                 continue;
             }
             if re.is_match(&entry.content) {
-                let snippet = build_snippet(&entry.content, &re, snippet_chars);
+                let snippet = build_search_snippet(&entry.content, &re, snippet_chars);
                 results.push(SearchMatch {
                     filename: entry.filename.clone(),
                     title: entry.title.clone(),
@@ -570,7 +547,7 @@ impl HarvesterMcpServer {
             .articles
             .iter()
             .filter(|entry| {
-                date_in_range(
+                util::date_in_range(
                     entry.fetched_utc.as_deref(),
                     p.date_from.as_deref(),
                     p.date_to.as_deref(),

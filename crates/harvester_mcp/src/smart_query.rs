@@ -635,7 +635,7 @@ impl SmartQueryEngine {
     ) -> usize {
         let mut matched_articles = 0;
         for entry in &self.article_index.articles {
-            if !date_in_range(entry.fetched_utc.as_deref(), date_from, date_to) {
+            if !crate::util::date_in_range(entry.fetched_utc.as_deref(), date_from, date_to) {
                 continue;
             }
             let entity_entry = self.url_entity_entry(entry.url.as_deref());
@@ -709,7 +709,7 @@ impl SmartQueryEngine {
                 let Some(article) = self.article_by_url(url) else {
                     continue;
                 };
-                if !date_in_range(article.fetched_utc.as_deref(), date_from, date_to) {
+                if !crate::util::date_in_range(article.fetched_utc.as_deref(), date_from, date_to) {
                     continue;
                 }
                 if !matches_scope_entities(article, Some(entity_entry), scope_entities) {
@@ -1384,32 +1384,6 @@ fn matches_scope_entities(
 
 fn candidate_key(entry: &ArticleEntry) -> String {
     entry.url.clone().unwrap_or_else(|| entry.filename.clone())
-}
-
-fn date_in_range(
-    fetched_utc: Option<&str>,
-    date_from: Option<&str>,
-    date_to: Option<&str>,
-) -> bool {
-    if date_from.is_none() && date_to.is_none() {
-        return true;
-    }
-    match fetched_utc {
-        None => false,
-        Some(ts) => {
-            if let Some(from) = date_from {
-                if ts < from {
-                    return false;
-                }
-            }
-            if let Some(to) = date_to {
-                if ts > to {
-                    return false;
-                }
-            }
-            true
-        }
-    }
 }
 
 fn build_snippet(content: &str, regex: &Regex) -> String {
