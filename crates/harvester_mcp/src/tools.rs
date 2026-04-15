@@ -310,11 +310,11 @@ impl HarvesterMcpServer {
         {
             Some(entry) => {
                 let content = &entry.content;
-                if content.chars().count() > MAX_READ_ARTICLE_CHARS {
+                let char_count = content.chars().count();
+                if char_count > MAX_READ_ARTICLE_CHARS {
                     let truncated: String = content.chars().take(MAX_READ_ARTICLE_CHARS).collect();
                     format!(
-                        "{truncated}\n\n[Article truncated at {MAX_READ_ARTICLE_CHARS} characters. Full article is {} characters.]",
-                        content.chars().count()
+                        "{truncated}\n\n[Article truncated at {MAX_READ_ARTICLE_CHARS} characters. Full article is {char_count} characters.]",
                     )
                 } else {
                     content.clone()
@@ -748,8 +748,9 @@ mod tests {
                 filename: "long.md".to_string(),
             }))
             .await;
-        assert!(result.chars().count() < long_content.chars().count());
         assert!(result.contains("[Article truncated"));
+        let note_start = result.find("\n\n[Article truncated").unwrap();
+        assert_eq!(result[..note_start].chars().count(), MAX_READ_ARTICLE_CHARS);
     }
 
     #[tokio::test]
@@ -849,6 +850,7 @@ mod tests {
         let payload: Value = serde_json::from_str(&result).expect("valid json");
         let arr = payload.as_array().expect("array");
         assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["url"].as_str().unwrap(), "https://example.com/both");
     }
 
     #[tokio::test]
@@ -884,7 +886,73 @@ mod tests {
             }))
             .await;
         let payload: Value = serde_json::from_str(&result).expect("valid json");
-        assert!(payload.get("summary").is_some());
-        assert!(payload.get("key_points").is_some());
+        assert_eq!(payload["title"].as_str().unwrap(), "Known Article");
+        assert_eq!(payload["summary"].as_str().unwrap(), "A test summary.");
+        assert_eq!(payload["key_points"][0].as_str().unwrap(), "Point A");
+    }
+
+    #[tokio::test]
+    async fn search_articles_respects_max_results_parameter() {
+        let server = test_server_with_articles(vec![
+            sample_article("a.md", "A", "Rust programming language"),
+            sample_article("b.md", "B", "Rust programming language"),
+            sample_article("c.md", "C", "Rust programming language"),
+        ]);
+        let result = server
+            .search_articles(Parameters(SearchArticlesParams {
+                pattern: "Rust".to_string(),
+                date_from: None,
+                date_to: None,
+                max_results: Some(2),
+                snippet_chars: None,
+            }))
+            .await;
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        assert_eq!(payload.as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_articles_respects_max_results_parameter() {
+        let server = test_server_with_articles(vec![
+            sample_article("a.md", "A", "content"),
+            sample_article("b.md", "B", "content"),
+            sample_article("c.md", "C", "content"),
+        ]);
+        let result = server
+            .list_articles(Parameters(ListArticlesParams {
+                date_from: None,
+                date_to: None,
+                title_pattern: None,
+                max_results: Some(2),
+            }))
+            .await;
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        assert_eq!(payload.as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn search_entities_respects_max_results_parameter() {
+        use harvester_core::EntityIndexEntry;
+        let entries = (0..5)
+            .map(|i| {
+                let entry = EntityIndexEntry {
+                    companies: vec!["Acme".to_string()],
+                    ..Default::default()
+                };
+                (format!("https://example.com/{i}"), entry)
+            })
+            .collect::<Vec<_>>();
+        let server = test_server_with_entities(entries);
+        let result = server
+            .search_entities(Parameters(SearchEntitiesParams {
+                company: Some("acme".to_string()),
+                technology: None,
+                product: None,
+                theme: None,
+                max_results: Some(3),
+            }))
+            .await;
+        let payload: Value = serde_json::from_str(&result).expect("valid json");
+        assert_eq!(payload.as_array().unwrap().len(), 3);
     }
 }
