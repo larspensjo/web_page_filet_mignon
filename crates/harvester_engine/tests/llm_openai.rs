@@ -34,9 +34,26 @@ fn request_serialization_matches_openai_api_format() {
     assert_eq!(json["messages"][1]["role"], "user");
     assert_eq!(json["messages"][1]["content"], "user prompt");
     assert_eq!(json["max_tokens"], 128);
+    assert!(json["max_completion_tokens"].is_null());
     assert_eq!(json["response_format"]["type"], "json_object");
     let temperature = json["temperature"].as_f64().unwrap();
     assert!((temperature - 0.2).abs() < 1e-6);
+}
+
+#[test]
+fn request_serialization_uses_max_completion_tokens_for_gpt5_models() {
+    let request = LlmRequest::new(
+        ModelId::new(ProviderKind::OpenAi, "gpt-5.4-nano"),
+        vec![ChatMessage::new(ChatRole::User, "hello")],
+    )
+    .with_max_output_tokens(64);
+
+    let body = OpenAiProvider::build_request_body(&request);
+    let json = serde_json::to_value(&body).unwrap();
+
+    assert_eq!(json["model"], "gpt-5.4-nano");
+    assert_eq!(json["max_completion_tokens"], 64);
+    assert!(json["max_tokens"].is_null());
 }
 
 #[test]
@@ -60,6 +77,83 @@ fn response_parsing_handles_all_fields_correctly() {
     assert_eq!(response.usage().input_tokens, 5);
     assert_eq!(response.usage().output_tokens, 3);
     assert_eq!(response.model_id().model_name(), "gpt-4.1");
+}
+
+#[test]
+fn response_parsing_handles_content_part_arrays() {
+    let payload = serde_json::json!({
+        "model": "gpt-5.4-nano",
+        "choices": [
+            {
+                "message": {
+                    "content": [
+                        { "type": "text", "text": "{\"synthesis\":\"" },
+                        { "type": "text", "text": "hello\"}" }
+                    ]
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": { "prompt_tokens": 8, "completion_tokens": 4 }
+    });
+
+    let bytes = serde_json::to_vec(&payload).unwrap();
+    let response = OpenAiProvider::parse_response_body(&bytes).unwrap();
+
+    assert_eq!(response.content(), "{\"synthesis\":\"hello\"}");
+    assert_eq!(response.finish_reason(), FinishReason::Stop);
+}
+
+#[test]
+fn response_parsing_surfaces_refusal_messages() {
+    let payload = serde_json::json!({
+        "model": "gpt-5.4-nano",
+        "choices": [
+            {
+                "message": {
+                    "content": null,
+                    "refusal": "I can’t help with that request."
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "usage": { "prompt_tokens": 8, "completion_tokens": 0 }
+    });
+
+    let bytes = serde_json::to_vec(&payload).unwrap();
+    let err = OpenAiProvider::parse_response_body(&bytes).unwrap_err();
+
+    assert!(matches!(
+        err,
+        LlmError::InvalidResponse { detail }
+            if detail.contains("assistant refusal")
+                && detail.contains("I can’t help with that request.")
+                && detail.contains("finish_reason=stop")
+    ));
+}
+
+#[test]
+fn response_parsing_marks_empty_length_responses_as_max_tokens() {
+    let payload = serde_json::json!({
+        "model": "gpt-5.4-nano",
+        "choices": [
+            {
+                "message": { "content": "" },
+                "finish_reason": "length"
+            }
+        ],
+        "usage": { "prompt_tokens": 8, "completion_tokens": 220 }
+    });
+
+    let bytes = serde_json::to_vec(&payload).unwrap();
+    let err = OpenAiProvider::parse_response_body(&bytes).unwrap_err();
+
+    assert!(matches!(
+        err,
+        LlmError::InvalidResponse { detail }
+            if detail.contains("choice missing content")
+                && detail.contains("finish_reason=length")
+    ));
 }
 
 #[test]
@@ -309,4 +403,23 @@ async fn list_models_filters_supported_rolling_chat_categories() {
             "o4-synthetic-general".to_string(),
         ]
     );
+}
+
+#[test]
+fn length_finish_reason_maps_to_max_tokens() {
+    let payload = serde_json::json!({
+        "model": "gpt-5.4-nano",
+        "choices": [
+            {
+                "message": { "content": "ok" },
+                "finish_reason": "length"
+            }
+        ],
+        "usage": { "prompt_tokens": 2, "completion_tokens": 1 }
+    });
+
+    let bytes = serde_json::to_vec(&payload).unwrap();
+    let response = OpenAiProvider::parse_response_body(&bytes).unwrap();
+
+    assert_eq!(response.finish_reason(), FinishReason::MaxTokens);
 }

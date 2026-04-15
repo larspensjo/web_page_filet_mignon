@@ -1365,3 +1365,135 @@ Type: Refactor
 Context: Batch runner, reducer, UI, and working-corpus comments were re-deriving workflow legality from raw phase fields, which let `Reviewing` drift into contradictory meanings across modules.
 Change: Added reducer-owned selectors `AppState::pre_triage_actionability()`, `can_start_triage_from_pre_triage()`, `batch_next_action()`, and `batch_status()`, plus exported enums for those concepts. `harvester_batch` now consumes those selectors instead of matching on raw phases, and triage/UI start conditions route through the same core legality check. Updated state tests and aligned working-corpus docs to treat `Reviewing` as a display phase with separate actionability.
 Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/tests.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/working_corpus.rs, crates/harvester_batch/src/runner.rs
+
+## 2026-04-11 - Add Phase 2 smart-query layer to harvester_mcp
+Type: Feature
+Context: Phase 1 exposed deterministic MCP tools, but the server still treated `--agent-model` and `--context-budget` as inert configuration and had no single tool for question-driven retrieval and synthesis.
+Change: Added `query_knowledge_base` to `harvester_mcp` plus a dedicated smart-query engine that uses the Harvester OpenAI provider for query expansion, candidate scoring, and digest assembly. The server now degrades to regex/entity-based raw results when the cheap-model path is unavailable and trims the final response to the configured context budget.
+Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs, README.md
+
+## 2026-04-12 - GPT-5 smart-query requests now use max_completion_tokens
+Type: Bug Fix
+Context: Phase 2 smart queries reached OpenAI but fell back immediately because the shared OpenAI provider still serialized `max_tokens`, which GPT-5.4 models reject on `/chat/completions`.
+Change: Updated the OpenAI request serializer to emit `max_completion_tokens` for GPT-5 and o-series models while preserving `max_tokens` for older chat models. Added regression coverage for both serialization paths.
+Refs: crates/harvester_engine/src/llm/providers/openai.rs, crates/harvester_engine/tests/llm_openai.rs
+
+## 2026-04-12 - Add reusable PowerShell 7 smoke test for harvester_mcp
+Type: Tooling
+Context: The original here-string Phase 2 smoke test could close stdin before `query_knowledge_base` finished, which made longer smart-query runs look like they only returned the `initialize` response.
+Change: Added `scripts/Test-HarvesterMcpSmoke.ps1`, a PowerShell 7 stdio harness that keeps `harvester_mcp` alive, sends the MCP initialize and `query_knowledge_base` requests, and prints the parsed tool payload for a query passed as an argument.
+Refs: scripts/Test-HarvesterMcpSmoke.ps1
+
+## 2026-04-12 - Make OpenAI chat parsing tolerate modern message shapes
+Type: Bug Fix
+Context: Phase 2 digest assembly could reach OpenAI and score articles successfully, then still fall back because the shared chat parser only accepted non-empty string `message.content` and collapsed newer response variants into `choice missing content`.
+Change: Updated the OpenAI chat parser to accept content-part arrays, surface assistant refusals explicitly, and annotate empty/truncated responses with the finish reason. Also raised the smart-query digest completion budget to reduce empty visible responses from GPT-5 reasoning models.
+Refs: crates/harvester_engine/src/llm/providers/openai.rs, crates/harvester_engine/tests/llm_openai.rs, crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Add structured smart-query fallback reasons to MCP logs
+Type: Tooling
+Context: `mcp.log` kept historical Phase 2 fallbacks, but the warning lines only contained free-form error text, which made it harder to distinguish network outages from parser defects or provider compatibility issues.
+Change: Added a per-process startup session marker to `harvester_mcp` logs and changed smart-query fallback warnings to emit structured `fallback_reason=...` codes alongside the detailed error text.
+Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Cap and rank smart-query candidates before LLM scoring
+Type: Performance
+Context: The Phase 2 smart-query path already limited regex expansion count, but a broad pattern like `security` could still match a large share of a real corpus and trigger one scoring call per candidate article.
+Change: Added deterministic pre-scoring ranking that prefers title hits, entity hits, and stronger pattern coverage; capped the scored candidate set to 25 articles; and logged regex/entity/unique/capped candidate counts before LLM scoring. Added a regression test for the cap and deterministic ordering.
+Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Make smart-query citations deterministic
+Type: Bug Fix
+Context: On larger corpora, the digest model sometimes shortened bracketed filename citations in the final synthesis even when the ranked articles were correct.
+Change: The digest prompt now uses stable citation IDs like `[C1]`, and the server rewrites those IDs back to exact filenames before returning the MCP response. Added regression coverage for the rewrite path.
+Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Feed persisted triage priority into smart-query candidate ranking
+Type: Retrieval
+Context: `query_knowledge_base` was ranking candidates only from live regex/entity signals even though the harvester pipeline had already persisted article triage assessments in `.triage_cache.ron`.
+Change: Loaded the triage cache in `harvester_mcp`, joined entries to article URLs through `entity_index.content_hash`, and incorporated triage priority into deterministic pre-scoring ranking. Candidate-selection logs now report how many selected articles had triage metadata, and a regression test verifies higher triage priority wins when other signals are similar.
+Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-12 - Keep smart-query alive when expansion LLM truncates
+Type: Bug Fix
+Context: Conceptual questions could fail before candidate collection because the GPT-5 expansion call occasionally returned no visible content with `finish_reason=length`, which forced a full raw fallback and let poor heuristic regexes dominate retrieval.
+Change: Expansion now retries once with a larger token budget on empty-length responses, and if it still fails, smart-query falls back to heuristic expansion while continuing through candidate scoring and digest assembly. Tightened the heuristic term filter to ignore prompt-scaffolding words and added demand-growth infrastructure patterns for supply-side AI questions.
+Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-13 - Use a stronger model and larger caps for query expansion
+Type: Reliability
+Context: Real-corpus conceptual prompts were still hitting `finish_reason=length` during the expansion step because `harvester_mcp` was driving expansion through `gpt-5.4-nano` with a 250/400 token cap, even when the rest of the smart-query pipeline succeeded.
+Change: Smart-query expansion now upgrades the default `gpt-5.4-nano` agent model to `gpt-5.4-mini` for expansion requests only, raises the expansion caps to 400/700 output tokens, and logs the expansion model plus per-call token budget. Added regression coverage for the model override and retry limits.
+Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-13 - Shift smart-query tests toward public response contracts
+Type: Testing
+Context: The smart-query test module had accumulated helper-level assertions against candidate selection, heuristic pattern text, citation rewriting, and exact provider request shapes, which made the suite more coupled to implementation details than to externally visible behavior.
+Change: Replaced those helper-focused checks with `query(...)`-level tests that assert user-visible outcomes: smart-mode responses on broad corpora, graceful heuristic-expansion recovery for conceptual prompts, ranked relevant articles, warnings, and final citation-bearing synthesis.
+Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Add priority gating, broad-query early exit, and MCP log rotation
+Type: Retrieval
+Context: Large-corpus `query_knowledge_base` runs were still spending time and tokens on very broad candidate sets, and the existing append-only `mcp.log` made tuning passes harder to compare. The desired behavior was to treat untriaged and priority-1 articles as ineligible, return quickly when a query remained too broad after that filter, and keep only the latest run in `mcp.log` while preserving a few recent archives.
+Change: Smart-query now filters out untriaged articles and triage priority `<= 1` before breadth evaluation, lowers the scoring cap from 25 to 10, and returns `mode="too_broad"` with deterministic diagnostics (`candidate_count`, filtered counts, top companies/themes, sample titles, refinement suggestions) unless `allow_broad=true`. Added CLI tuning flags for scoring cap, broad-query threshold, and minimum triage priority, plus simple log rotation that keeps the latest run in `mcp.log` and shifts previous runs to `mcp.log.1`, `.2`, `.3`.
+Refs: crates/harvester_mcp/src/main.rs, crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Log triage-tag frequency stats for broad-query evaluation
+Type: Diagnostics
+Context: Before deciding whether triage tags should be surfaced to MCP clients, we wanted evidence from real corpora about which tags are common enough to be useful and which are too generic or too rare.
+Change: Smart-query now counts triage tags across the eligible candidate set before the scoring cap, sorts them by article frequency, and logs the ranked counts as diagnostic-only `triage tag stats` in `mcp.log`.
+Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Add mid-band and query-overlap tag diagnostics
+Type: Diagnostics
+Context: Raw top-tag frequency was useful, but real-corpus evaluation showed that the most informative refinement candidates often sit in the middle of the frequency range or overlap directly with the query vocabulary rather than appearing at the absolute top of the tag histogram.
+Change: Extended smart-query logging with `triage tag mid-band stats` for tags whose counts fall in a configurable-looking middle range and `triage tag query-overlap stats` for tags whose tokens overlap the current query terms. This remains log-only for evaluation and does not change the MCP response.
+Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Extend expansion with focus terms and phrases for tag diagnostics
+Type: Retrieval
+Context: Query-overlap tag diagnostics based on raw token splitting were promising but still noisy because the server had no structured notion of which query terms or phrases were actually central to the user’s intent.
+Change: Extended the smart-query expansion schema with `focus_terms` and `focus_phrases`, added heuristic fallbacks for both when expansion is unavailable, logged the extracted focus fields, and switched tag-overlap diagnostics to rank phrase matches above single-term matches using the expansion output instead of plain query tokenization.
+Refs: crates/harvester_mcp/src/smart_query.rs
+
+## 2026-04-14 - Add MCP launcher and shared-output setup docs
+Type: Tooling
+Context: Using `harvester_mcp` from Codex or Claude across multiple worktrees is awkward if clients are pointed directly at a single binary path instead of a stable launcher that can target the active workspace and a shared corpus.
+Change: Added `scripts/Start-HarvesterMcp.ps1` as a stdio-safe launcher that prefers `target\debug\harvester_mcp.exe` and falls back to `cargo run`, and expanded `README.md` with general repo usage plus recommended MCP registration patterns for shared-output workflows.
+Refs: scripts/Start-HarvesterMcp.ps1, README.md
+
+## 2026-04-14 - Add initial Claude project skill for Harvester MCP research
+Type: Tooling
+Context: Real Claude testing showed the MCP server is usable, but the client benefits from a lightweight project-specific workflow cue for when to use `harvester-mcp`, how to react to `too_broad`, and when to fall back to raw MCP tools.
+Change: Added `.claude/skills/harvester-mcp-research/SKILL.md` and a matching note in `CLAUDE.md` so project-local Claude sessions prefer the local corpus and the `harvester-mcp` workflow for research-oriented prompts.
+Refs: .claude/skills/harvester-mcp-research/SKILL.md, CLAUDE.md
+
+## 2026-04-14 - Improve too-broad guidance and shrink raw search payloads
+Type: Retrieval
+Context: Real Claude MCP sessions showed two practical issues: `too_broad` suggestions were too generic for comparative or relationship queries, and raw `search_articles` responses could become unnecessarily large when snippets included long paragraphs or frontmatter noise.
+Change: Made `too_broad` suggestions query-shape aware by distinguishing comparative-company and relationship queries and using focus-aware overlap tags for more relevant narrowing hints. Also made `search_articles` return compact snippets by default, added a `snippet_chars` parameter, filtered obvious frontmatter lines from snippets, and logged result counts alongside payload size.
+Refs: crates/harvester_mcp/src/smart_query.rs, crates/harvester_mcp/src/main.rs
+
+## 2026-04-14 - Tighten Claude skill boundary around MCP-first corpus research
+Type: Tooling
+Context: Real Claude testing showed the MCP server was available and healthy, but Claude sometimes treated `listMcpResources` as a capability check and fell back to reading `output/*.md` directly instead of using the MCP tools.
+Change: Strengthened the project skill and `CLAUDE.md` instructions so corpus-research prompts use `harvester-mcp` tools first, treat the server as tools-only, avoid direct `output/*.md` inspection unless MCP fails, and explain briefly when leaving the MCP path.
+Refs: .claude/skills/harvester-mcp-research/SKILL.md, CLAUDE.md
+
+## 2026-04-14 - Advertise MCP tool capability so Claude can discover harvester-mcp tools
+Type: Integration
+Context: Claude's `/mcp` UI showed `harvester-mcp` as connected but with `Capabilities: none`, which meant the client attached to the server but did not expose any of its tool handlers in the deferred tool registry.
+Change: Updated `HarvesterMcpServer::get_info()` to advertise MCP tool capability explicitly via `ServerCapabilities::builder().enable_tools().build()` instead of the default empty capability set.
+Refs: crates/harvester_mcp/src/main.rs
+
+## 2026-04-15 - Require co-occurrence before smart-query candidate admission
+Type: Retrieval
+Context: Smart-query candidate admission still let broad single-signal matches through, especially on saturated company topics and two-entity relationship prompts.
+Change: Added a query-shape-aware admission gate in `candidates.rs` that requires entity-scoped queries to match both the company/entity and a non-entity focus dimension, and relationship queries to match both entities plus a narrowing dimension before scoring. Added regression tests covering single-entity and two-entity filtering behavior.
+Refs: crates/harvester_mcp/src/smart_query/candidates.rs, crates/harvester_mcp/src/smart_query/mod.rs, docs/SmartQueryCandidateFilteringChecklist.md
+
+## 2026-04-15 - Add deterministic admission scoring, focus boosts, and snippet-quality penalties
+Type: Retrieval
+Context: Real Claude/MCP runs still let weak contract and rivalry candidates into pre-scoring because co-occurrence alone did not rank or reject low-signal tails strongly enough, and imported boilerplate snippets could survive into the candidate set.
+Change: Added a minimum deterministic admission score in `candidates.rs`, promoted `focus_terms` and `focus_phrases` into real ranking and broad-query admission signals, expanded heuristic focus-phrase coverage for relationship/infrastructure queries, and penalized or discarded low-signal snippet evidence using shared snippet-cleanup helpers now reused by both smart-query candidate building and `search_articles`. Added regression tests for weak-tail filtering, exact focus-phrase preference, and boilerplate-snippet rejection.
+Refs: crates/harvester_mcp/src/smart_query/candidates.rs, crates/harvester_mcp/src/smart_query/expansion.rs, crates/harvester_mcp/src/smart_query/heuristics.rs, crates/harvester_mcp/src/smart_query/mod.rs, crates/harvester_mcp/src/tools.rs, crates/harvester_mcp/src/util.rs, docs/SmartQueryCandidateFilteringChecklist.md

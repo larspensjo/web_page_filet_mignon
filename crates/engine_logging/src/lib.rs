@@ -134,3 +134,30 @@ pub fn initialize_file_only() {
     // Ignore the error if a logger was already set.
     let _ = CombinedLogger::init(vec![WriteLogger::new(level, Config::default(), log_file)]);
 }
+
+/// Initializes file-only logging to a specified path (no console output).
+///
+/// Intended for processes where stdout is used as a transport (e.g. MCP stdio)
+/// and stderr must not be written to by the logger.
+/// Creates parent directories if they do not exist.
+/// This safely no-ops if another logger has already been initialized.
+pub fn initialize_to_path(log_path: &std::path::Path) {
+    use simplelog::{CombinedLogger, Config, WriteLogger};
+    use std::fs::OpenOptions;
+
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|e| panic!("Failed to create log directory {:?}: {}", parent, e));
+    }
+
+    let level = log::LevelFilter::Info;
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .unwrap_or_else(|e| panic!("Failed to open log file {:?}: {}", log_path, e));
+
+    // Ignore the error if a logger was already set.
+    let _ = CombinedLogger::init(vec![WriteLogger::new(level, Config::default(), log_file)]);
+}

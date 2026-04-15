@@ -91,12 +91,14 @@ impl OpenAiProvider {
                 detail: "response missing choices".to_string(),
             })?;
 
-        let content = choice.message.content.clone();
-        if content.is_empty() {
-            return Err(LlmError::InvalidResponse {
-                detail: "choice missing content".to_string(),
-            });
-        }
+        let finish_reason = Self::finish_reason(choice.finish_reason.as_deref());
+        let content =
+            choice
+                .message
+                .extract_text()
+                .map_err(|detail| LlmError::InvalidResponse {
+                    detail: append_finish_reason(detail, choice.finish_reason.as_deref()),
+                })?;
 
         let cached = parsed
             .usage
@@ -111,17 +113,13 @@ impl OpenAiProvider {
         .with_cached_input_tokens(cached);
         let model_id = ModelId::new(ProviderKind::OpenAi, parsed.model);
 
-        Ok(LlmResponse::new(
-            content,
-            usage,
-            model_id,
-            Self::finish_reason(choice.finish_reason.as_deref()),
-        ))
+        Ok(LlmResponse::new(content, usage, model_id, finish_reason))
     }
 
     fn finish_reason(reason: Option<&str>) -> FinishReason {
         match reason {
             Some("stop") => FinishReason::Stop,
+            Some("length") => FinishReason::MaxTokens,
             Some("max_tokens") => FinishReason::MaxTokens,
             Some("content_filter") => FinishReason::ContentFilter,
             _ => FinishReason::Unknown,
@@ -240,16 +238,21 @@ pub struct OpenAiChatCompletionRequest {
     messages: Vec<OpenAiChatMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
-    #[serde(rename = "max_tokens", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_completion_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<OpenAiResponseFormat>,
 }
 
 impl OpenAiChatCompletionRequest {
     fn from_llm_request(request: &LlmRequest) -> Self {
+        let max_output_tokens = request.max_output_tokens();
+        let model_name = request.model().model_name().to_string();
+        let use_completion_tokens = prefers_max_completion_tokens(&model_name);
         Self {
-            model: request.model().model_name().to_string(),
+            model: model_name,
             messages: request
                 .messages()
                 .iter()
@@ -259,10 +262,27 @@ impl OpenAiChatCompletionRequest {
                 })
                 .collect(),
             temperature: request.temperature(),
-            max_tokens: request.max_output_tokens(),
+            max_tokens: if use_completion_tokens {
+                None
+            } else {
+                max_output_tokens
+            },
+            max_completion_tokens: if use_completion_tokens {
+                max_output_tokens
+            } else {
+                None
+            },
             response_format: OpenAiResponseFormat::from_response_format(request.response_format()),
         }
     }
+}
+
+fn prefers_max_completion_tokens(model_name: &str) -> bool {
+    let lower = model_name.to_ascii_lowercase();
+    lower.starts_with("gpt-5")
+        || lower.starts_with("o1")
+        || lower.starts_with("o3")
+        || lower.starts_with("o4")
 }
 
 #[derive(Serialize)]
@@ -314,7 +334,78 @@ pub(crate) struct OpenAiChoice {
 #[derive(Deserialize)]
 pub(crate) struct OpenAiMessage {
     #[serde(default)]
-    content: String,
+    content: Option<OpenAiMessageContent>,
+    #[serde(default)]
+    refusal: Option<String>,
+}
+
+impl OpenAiMessage {
+    fn extract_text(&self) -> Result<String, String> {
+        let mut text_parts = Vec::new();
+        let mut refusals = Vec::new();
+
+        match &self.content {
+            Some(OpenAiMessageContent::Text(text)) => {
+                if !text.is_empty() {
+                    text_parts.push(text.clone());
+                }
+            }
+            Some(OpenAiMessageContent::Parts(parts)) => {
+                for part in parts {
+                    match part.kind.as_str() {
+                        "text" => {
+                            if let Some(text) = part.text.as_ref().filter(|text| !text.is_empty()) {
+                                text_parts.push(text.clone());
+                            }
+                        }
+                        "refusal" => {
+                            if let Some(refusal) =
+                                part.refusal.as_ref().filter(|text| !text.is_empty())
+                            {
+                                refusals.push(refusal.clone());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None => {}
+        }
+
+        let joined = text_parts.join("");
+        if !joined.trim().is_empty() {
+            return Ok(joined);
+        }
+
+        if let Some(refusal) = self
+            .refusal
+            .as_ref()
+            .filter(|text| !text.trim().is_empty())
+            .cloned()
+            .or_else(|| refusals.into_iter().find(|text| !text.trim().is_empty()))
+        {
+            return Err(format!("assistant refusal: {refusal}"));
+        }
+
+        Err("choice missing content".to_string())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(crate) enum OpenAiMessageContent {
+    Text(String),
+    Parts(Vec<OpenAiContentPart>),
+}
+
+#[derive(Deserialize)]
+pub(crate) struct OpenAiContentPart {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    refusal: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -378,6 +469,13 @@ fn is_dated_snapshot(id: &str) -> bool {
     }
 
     false
+}
+
+fn append_finish_reason(detail: String, finish_reason: Option<&str>) -> String {
+    match finish_reason {
+        Some(reason) if !reason.is_empty() => format!("{detail} (finish_reason={reason})"),
+        _ => detail,
+    }
 }
 
 #[cfg(test)]

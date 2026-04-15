@@ -278,6 +278,7 @@ Sidecars are loaded once at startup. At ~1,461 articles, they fit comfortably in
 - [ ] Tune cheap-model prompts based on evaluation findings
 - [ ] Fine-tune summary cache lookup policy (handle re-fetched articles with new content hashes, multiple summary versions)
 - [ ] Consider digest caching for repeated queries
+- [ ] Trim tool descriptions to be short and distinctive — remove parameter details and return-field lists that are already captured in the JSON schema; descriptions should state what the tool does, not repeat the schema. This reduces per-connection token cost.
 - [ ] Update `docs/EngineeringDiary.md` per Agents.md
 - [ ] `cargo clippy --all-targets -- -D warnings` passes
 
