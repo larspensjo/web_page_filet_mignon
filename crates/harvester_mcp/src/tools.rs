@@ -138,57 +138,6 @@ fn clamp_search_snippet_chars(snippet_chars: Option<usize>) -> usize {
         .clamp(80, MAX_SEARCH_SNIPPET_CHARS)
 }
 
-fn compact_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn is_frontmatter_line(line: &str) -> bool {
-    let trimmed = line.trim();
-    if trimmed.is_empty() || trimmed == "---" {
-        return true;
-    }
-
-    [
-        "url:",
-        "title:",
-        "fetched_utc:",
-        "token_count:",
-        "summary_created_at_utc:",
-        "summary_input_tokens:",
-        "summary_output_tokens:",
-    ]
-    .iter()
-    .any(|prefix| trimmed.starts_with(prefix))
-}
-
-fn truncate_text_boundary(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
-        return text.to_string();
-    }
-
-    let mut end = text.len();
-    for (char_count, (index, _)) in text.char_indices().enumerate() {
-        if char_count == max_chars {
-            end = index;
-            break;
-        }
-    }
-
-    let candidate = &text[..end];
-    let trimmed = candidate
-        .rfind(|ch: char| ch.is_whitespace() || [',', ';', ':', '.'].contains(&ch))
-        .filter(|index| *index >= candidate.len() / 2)
-        .map(|index| &candidate[..index])
-        .unwrap_or(candidate)
-        .trim();
-
-    if trimmed.is_empty() {
-        format!("{}...", candidate.trim())
-    } else {
-        format!("{trimmed}...")
-    }
-}
-
 /// Build a compact snippet from nearby regex matches for chat-oriented MCP tool responses.
 ///
 /// Unlike the LLM-context snippet in `smart_query`, this version compacts whitespace,
@@ -215,12 +164,12 @@ fn build_search_snippet(content: &str, re: &Regex, max_chars: usize) -> String {
     included.sort_unstable();
     let compact = included
         .iter()
-        .map(|&i| compact_whitespace(lines[i]))
-        .filter(|line| !is_frontmatter_line(line))
+        .map(|&i| util::compact_whitespace(lines[i]))
+        .filter(|line| !util::is_low_signal_snippet_line(line))
         .collect::<Vec<_>>()
         .join(" ... ");
 
-    truncate_text_boundary(&compact, max_chars)
+    util::truncate_text_boundary(&compact, max_chars)
 }
 
 // ── Tool implementations ─────────────────────────────────────────────────────

@@ -24,10 +24,19 @@ pub(super) fn heuristic_focus_terms(question: &str) -> Vec<String> {
 pub(super) fn heuristic_focus_phrases(question: &str) -> Vec<String> {
     let lower = question.to_lowercase();
     let candidate_phrases = [
+        "contract terms",
+        "revenue sharing",
+        "equity stake",
+        "licensing rights",
+        "cloud dependence",
+        "azure reliance",
         "data center",
         "data centers",
         "data centre",
         "data centres",
+        "competitive tensions",
+        "competitive rivalry",
+        "competition",
         "inference capacity",
         "inference",
         "capacity",

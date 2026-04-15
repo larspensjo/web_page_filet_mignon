@@ -21,26 +21,26 @@ Why first:
 - should cut obvious false positives before LLM scoring
 
 ### 2. Add a minimum deterministic admission threshold
-- [ ] Define a minimum pre-scoring score for candidate admission
-- [ ] Score should be based on existing cheap signals such as:
+- [x] Define a minimum pre-scoring score for candidate admission
+- [x] Score should be based on existing cheap signals such as:
   - title hits
   - entity hits
   - focus-term/focus-phrase hits
   - triage priority
   - matched-pattern count
-- [ ] Drop candidates below the threshold instead of always taking the top `N`
-- [ ] Implement in `crates/harvester_mcp/src/smart_query/candidates.rs`
+- [x] Drop candidates below the threshold instead of always taking the top `N`
+- [x] Implement in `crates/harvester_mcp/src/smart_query/candidates.rs`
 
 Why first:
 - high leverage
 - avoids forcing weak tail candidates into the expensive scoring pass
 
 ### 3. Use focus terms and focus phrases as real filtering signals
-- [ ] Promote `focus_terms` and `focus_phrases` from logging/diagnostics into candidate admission and ranking
-- [ ] Strongly boost exact focus-phrase matches
-- [ ] Require at least one focus-term hit for broad queries when appropriate
-- [ ] Keep the logic shared with current expansion/heuristics paths
-- [ ] Implement across:
+- [x] Promote `focus_terms` and `focus_phrases` from logging/diagnostics into candidate admission and ranking
+- [x] Strongly boost exact focus-phrase matches
+- [x] Require at least one focus-term hit for broad queries when appropriate
+- [x] Keep the logic shared with current expansion/heuristics paths
+- [x] Implement across:
   - `crates/harvester_mcp/src/smart_query/expansion.rs`
   - `crates/harvester_mcp/src/smart_query/heuristics.rs`
   - `crates/harvester_mcp/src/smart_query/candidates.rs`
@@ -50,14 +50,14 @@ Why first:
 - best path to making retrieval more query-aware without another model call
 
 ### 4. Penalize low-quality snippet evidence
-- [ ] Detect candidates whose snippet is mostly:
+- [x] Detect candidates whose snippet is mostly:
   - frontmatter
   - related-links text
   - navigation/boilerplate
   - tag clouds or footer material
-- [ ] Down-rank or discard those candidates before scoring
-- [ ] Reuse the compaction/frontmatter cleanup ideas already added to `search_articles`
-- [ ] Implement in:
+- [x] Down-rank or discard those candidates before scoring
+- [x] Reuse the compaction/frontmatter cleanup ideas already added to `search_articles`
+- [x] Implement in:
   - `crates/harvester_mcp/src/smart_query/candidates.rs`
   - optionally shared helpers in `crates/harvester_mcp/src/util.rs`
 

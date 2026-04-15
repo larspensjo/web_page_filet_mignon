@@ -1479,3 +1479,9 @@ Type: Retrieval
 Context: Smart-query candidate admission still let broad single-signal matches through, especially on saturated company topics and two-entity relationship prompts.
 Change: Added a query-shape-aware admission gate in `candidates.rs` that requires entity-scoped queries to match both the company/entity and a non-entity focus dimension, and relationship queries to match both entities plus a narrowing dimension before scoring. Added regression tests covering single-entity and two-entity filtering behavior.
 Refs: crates/harvester_mcp/src/smart_query/candidates.rs, crates/harvester_mcp/src/smart_query/mod.rs, docs/SmartQueryCandidateFilteringChecklist.md
+
+## 2026-04-15 - Add deterministic admission scoring, focus boosts, and snippet-quality penalties
+Type: Retrieval
+Context: Real Claude/MCP runs still let weak contract and rivalry candidates into pre-scoring because co-occurrence alone did not rank or reject low-signal tails strongly enough, and imported boilerplate snippets could survive into the candidate set.
+Change: Added a minimum deterministic admission score in `candidates.rs`, promoted `focus_terms` and `focus_phrases` into real ranking and broad-query admission signals, expanded heuristic focus-phrase coverage for relationship/infrastructure queries, and penalized or discarded low-signal snippet evidence using shared snippet-cleanup helpers now reused by both smart-query candidate building and `search_articles`. Added regression tests for weak-tail filtering, exact focus-phrase preference, and boilerplate-snippet rejection.
+Refs: crates/harvester_mcp/src/smart_query/candidates.rs, crates/harvester_mcp/src/smart_query/expansion.rs, crates/harvester_mcp/src/smart_query/heuristics.rs, crates/harvester_mcp/src/smart_query/mod.rs, crates/harvester_mcp/src/tools.rs, crates/harvester_mcp/src/util.rs, docs/SmartQueryCandidateFilteringChecklist.md

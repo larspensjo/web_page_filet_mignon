@@ -23,7 +23,7 @@ impl SmartQueryEngine {
             input.scope_entities.join(", ")
         };
         let user_prompt = format!(
-            "Question: {}\nScope entities: {}\nScope date_from: {}\nScope date_to: {}\nReturn JSON with regex_patterns, entity_names, focus_terms, focus_phrases, date_from, date_to. regex_patterns must be safe Rust regex strings and prefer (?i) case-insensitive patterns. focus_terms should contain the most important content words for refinement. focus_phrases should contain short noun phrases like 'data centers' or 'inference capacity' when relevant. Use null for absent dates.",
+            "Question: {}\nScope entities: {}\nScope date_from: {}\nScope date_to: {}\nReturn JSON with regex_patterns, entity_names, focus_terms, focus_phrases, date_from, date_to. regex_patterns must be safe Rust regex strings and prefer (?i) case-insensitive patterns. focus_terms will be used directly for candidate admission and ranking, so prefer concrete narrowing dimensions instead of repeating entity names. focus_phrases should contain short noun phrases like 'data centers' or 'inference capacity' when relevant and should favor exact phrases that would distinguish relevant articles from broad background mentions. Use null for absent dates.",
             input.question,
             scope_text,
             input.scope_date_from.as_deref().unwrap_or("null"),

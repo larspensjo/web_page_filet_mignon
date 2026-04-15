@@ -5,9 +5,15 @@ use regex::Regex;
 
 use super::refinement;
 use super::types::{
-    CandidateArticle, CandidateSelection, QueryExpansion, QueryKnowledgeBaseInput, SmartQueryEngine,
+    CandidateArticle, CandidateSelection, QueryExpansion, QueryKnowledgeBaseInput,
+    SmartQueryEngine, DEFAULT_MIN_DETERMINISTIC_ADMISSION_SCORE,
 };
 use crate::article_index::ArticleEntry;
+use crate::util;
+
+const MAX_CANDIDATE_SNIPPET_CHARS: usize = 700;
+const HIGH_SNIPPET_QUALITY_PENALTY: i32 = 360;
+const MEDIUM_SNIPPET_QUALITY_PENALTY: i32 = 180;
 
 impl SmartQueryEngine {
     pub(super) fn collect_candidates(
@@ -55,7 +61,12 @@ impl SmartQueryEngine {
         let mut ranked: Vec<_> = priority_eligible
             .into_iter()
             .filter(|candidate| candidate_matches_admission_policy(candidate, &admission_policy))
+            .filter(|candidate| {
+                candidate_admission_score(candidate) >= DEFAULT_MIN_DETERMINISTIC_ADMISSION_SCORE
+            })
             .collect();
+        let filtered_admission_candidates =
+            total_unique_candidates.saturating_sub(filtered_low_priority_candidates + ranked.len());
         ranked.sort_by(|left, right| {
             deterministic_match_score(right)
                 .cmp(&deterministic_match_score(left))
@@ -96,6 +107,7 @@ impl SmartQueryEngine {
             total_unique_candidates,
             eligible_unique_candidates,
             filtered_low_priority_candidates,
+            filtered_admission_candidates,
             capped,
             top_companies,
             top_themes,
@@ -125,6 +137,7 @@ impl SmartQueryEngine {
 
             let mut matched_patterns = Vec::new();
             let mut snippet = String::new();
+            let mut snippet_quality_penalty = HIGH_SNIPPET_QUALITY_PENALTY;
             let mut title_pattern_hits = 0usize;
             let mut url_pattern_hits = 0usize;
             for (pattern, regex) in regexes {
@@ -143,7 +156,9 @@ impl SmartQueryEngine {
                 if content_match || title_match || url_match {
                     super::push_unique(&mut matched_patterns, pattern.clone());
                     if snippet.is_empty() {
-                        snippet = build_snippet(&entry.content, regex);
+                        let snippet_evidence = build_snippet(&entry.content, regex);
+                        snippet = snippet_evidence.text;
+                        snippet_quality_penalty = snippet_evidence.quality_penalty;
                     }
                     if title_match {
                         title_pattern_hits += 1;
@@ -160,13 +175,22 @@ impl SmartQueryEngine {
             matched_articles += 1;
 
             let candidate = candidates.entry(candidate_key(entry)).or_insert_with(|| {
-                self.make_candidate(entry, entity_entry, snippet.clone(), admission_policy)
+                self.make_candidate(
+                    entry,
+                    entity_entry,
+                    snippet.clone(),
+                    snippet_quality_penalty,
+                    admission_policy,
+                )
             });
             super::merge_strings(&mut candidate.matched_patterns, matched_patterns);
             candidate.title_pattern_hits += title_pattern_hits;
             candidate.url_pattern_hits += url_pattern_hits;
-            if candidate.snippet.is_empty() {
+            if candidate.snippet.is_empty()
+                || snippet_quality_penalty < candidate.snippet_quality_penalty
+            {
                 candidate.snippet = snippet;
+                candidate.snippet_quality_penalty = snippet_quality_penalty;
             }
         }
         matched_articles
@@ -203,6 +227,7 @@ impl SmartQueryEngine {
                         article,
                         Some(entity_entry),
                         String::new(),
+                        HIGH_SNIPPET_QUALITY_PENALTY,
                         admission_policy,
                     )
                 });
@@ -217,6 +242,7 @@ impl SmartQueryEngine {
         entry: &ArticleEntry,
         entity_entry: Option<&EntityIndexEntry>,
         snippet: String,
+        snippet_quality_penalty: i32,
         admission_policy: &AdmissionPolicy,
     ) -> CandidateArticle {
         let summary_entry = entry
@@ -227,10 +253,11 @@ impl SmartQueryEngine {
         let key_points = summary_entry
             .map(|item| item.result.key_points.clone())
             .unwrap_or_default();
-        let default_snippet = if !snippet.is_empty() {
-            snippet
+        let fallback_snippet = fallback_excerpt(&entry.content);
+        let (default_snippet, snippet_quality_penalty) = if !snippet.is_empty() {
+            (snippet, snippet_quality_penalty)
         } else {
-            fallback_excerpt(&entry.content)
+            (fallback_snippet.text, fallback_snippet.quality_penalty)
         };
         let triage_priority = entry
             .url
@@ -254,6 +281,11 @@ impl SmartQueryEngine {
         let focus_term_hits = count_unique_matches(&match_haystack, &admission_policy.focus_terms);
         let focus_phrase_hits =
             count_unique_matches(&match_haystack, &admission_policy.focus_phrases);
+        let title_haystack = entry.title.as_deref().unwrap_or("").to_lowercase();
+        let title_focus_term_hits =
+            count_unique_matches(&title_haystack, &admission_policy.focus_terms);
+        let title_focus_phrase_hits =
+            count_unique_matches(&title_haystack, &admission_policy.focus_phrases);
 
         CandidateArticle {
             filename: entry.filename.clone(),
@@ -277,6 +309,9 @@ impl SmartQueryEngine {
             query_entity_hits,
             focus_term_hits,
             focus_phrase_hits,
+            title_focus_term_hits,
+            title_focus_phrase_hits,
+            snippet_quality_penalty,
             triage_priority,
         }
     }
@@ -308,21 +343,30 @@ fn match_score(candidate: &CandidateArticle) -> usize {
     candidate.matched_patterns.len() + candidate.matched_entities.len()
 }
 
-fn deterministic_match_score(candidate: &CandidateArticle) -> usize {
-    let mut score = 0usize;
-    score += candidate.title_pattern_hits * 1_000;
-    score += candidate.triage_priority.unwrap_or(0) as usize * 200;
-    score += candidate.matched_entities.len() * 250;
-    score += candidate.matched_patterns.len() * 50;
-    score += candidate.url_pattern_hits * 25;
+fn deterministic_match_score(candidate: &CandidateArticle) -> i32 {
+    let mut score = 0i32;
+    score += candidate.title_pattern_hits as i32 * 500;
+    score += candidate.triage_priority.unwrap_or(0) as i32 * 125;
+    score += candidate.query_entity_hits as i32 * 90;
+    score += candidate.title_focus_term_hits as i32 * 120;
+    score += candidate.title_focus_phrase_hits as i32 * 260;
+    score += candidate.focus_term_hits as i32 * 70;
+    score += candidate.focus_phrase_hits as i32 * 220;
+    score += candidate.matched_patterns.len() as i32 * 35;
+    score += candidate.url_pattern_hits as i32 * 20;
     if candidate.summary.is_some() {
-        score += 10;
+        score += 30;
     }
     if !candidate.key_points.is_empty() {
-        score += 5;
+        score += 15;
     }
-    score += match_score(candidate);
+    score -= effective_snippet_quality_penalty(candidate);
+    score += match_score(candidate) as i32;
     score
+}
+
+fn candidate_admission_score(candidate: &CandidateArticle) -> i32 {
+    deterministic_match_score(candidate)
 }
 
 fn compile_patterns(patterns: &[String]) -> Vec<(String, Regex)> {
@@ -376,7 +420,7 @@ fn matches_scope_entities(
     })
 }
 
-fn build_snippet(content: &str, regex: &Regex) -> String {
+fn build_snippet(content: &str, regex: &Regex) -> SnippetEvidence {
     let lines: Vec<&str> = content.lines().collect();
     let mut included = HashSet::new();
     let mut ordered = Vec::new();
@@ -396,20 +440,30 @@ fn build_snippet(content: &str, regex: &Regex) -> String {
     }
 
     ordered.sort_unstable();
-    ordered
+    let compact = ordered
         .into_iter()
-        .map(|index| lines[index])
+        .map(|index| util::compact_whitespace(lines[index]))
+        .filter(|line| !util::is_low_signal_snippet_line(line))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join(" ... ");
+    SnippetEvidence {
+        text: util::truncate_text_boundary(&compact, MAX_CANDIDATE_SNIPPET_CHARS),
+        quality_penalty: assess_snippet_quality_penalty(&compact),
+    }
 }
 
-fn fallback_excerpt(content: &str) -> String {
-    content
+fn fallback_excerpt(content: &str) -> SnippetEvidence {
+    let compact = content
         .lines()
-        .filter(|line| !line.trim().is_empty())
+        .map(util::compact_whitespace)
+        .filter(|line| !util::is_low_signal_snippet_line(line))
         .take(6)
         .collect::<Vec<_>>()
-        .join("\n")
+        .join(" ... ");
+    SnippetEvidence {
+        text: util::truncate_text_boundary(&compact, MAX_CANDIDATE_SNIPPET_CHARS),
+        quality_penalty: assess_snippet_quality_penalty(&compact),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -489,7 +543,14 @@ fn candidate_matches_admission_policy(
     admission_policy: &AdmissionPolicy,
 ) -> bool {
     match admission_policy.mode {
-        AdmissionMode::Broad => true,
+        AdmissionMode::Broad => {
+            if admission_policy.focus_terms.is_empty() && admission_policy.focus_phrases.is_empty()
+            {
+                true
+            } else {
+                candidate_has_focus_match(candidate)
+            }
+        }
         AdmissionMode::EntityScoped => {
             candidate.query_entity_hits >= 1
                 && (!admission_policy.focus_terms.is_empty()
@@ -622,4 +683,50 @@ fn is_generic_relationship_dimension(value: &str) -> bool {
             | "shift"
             | "shifts"
     )
+}
+
+#[derive(Debug, Clone)]
+struct SnippetEvidence {
+    text: String,
+    quality_penalty: i32,
+}
+
+fn assess_snippet_quality_penalty(text: &str) -> i32 {
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if lines.is_empty() {
+        return HIGH_SNIPPET_QUALITY_PENALTY;
+    }
+
+    let total_chars: usize = lines.iter().map(|line| line.len()).sum();
+    let noisy_chars: usize = lines
+        .iter()
+        .filter(|line| util::is_low_signal_snippet_line(line))
+        .map(|line| line.len())
+        .sum();
+    let signal_lines = lines
+        .iter()
+        .filter(|line| !util::is_low_signal_snippet_line(line) && line.trim().len() >= 24)
+        .count();
+
+    if total_chars == 0 || signal_lines == 0 {
+        return HIGH_SNIPPET_QUALITY_PENALTY;
+    }
+    if noisy_chars * 100 / total_chars >= 65 {
+        return HIGH_SNIPPET_QUALITY_PENALTY;
+    }
+    if noisy_chars * 100 / total_chars >= 40 {
+        return MEDIUM_SNIPPET_QUALITY_PENALTY;
+    }
+    0
+}
+
+fn effective_snippet_quality_penalty(candidate: &CandidateArticle) -> i32 {
+    if candidate.summary.is_some() {
+        candidate.snippet_quality_penalty / 2
+    } else {
+        candidate.snippet_quality_penalty
+    }
 }

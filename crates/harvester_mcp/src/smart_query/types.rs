@@ -13,6 +13,7 @@ pub(crate) const SCORING_CONCURRENCY: usize = 4;
 pub const DEFAULT_MAX_SCORING_CANDIDATES: usize = 10;
 pub const DEFAULT_TOO_BROAD_THRESHOLD: usize = 100;
 pub const DEFAULT_MIN_TRIAGE_PRIORITY: u8 = 2;
+pub(crate) const DEFAULT_MIN_DETERMINISTIC_ADMISSION_SCORE: i32 = 450;
 pub(crate) const EXPANSION_INITIAL_MAX_OUTPUT_TOKENS: u32 = 400;
 pub(crate) const EXPANSION_RETRY_MAX_OUTPUT_TOKENS: u32 = 700;
 pub(crate) const MID_BAND_TAG_MIN_COUNT: usize = 5;
@@ -149,6 +150,9 @@ pub(crate) struct CandidateArticle {
     pub(crate) query_entity_hits: usize,
     pub(crate) focus_term_hits: usize,
     pub(crate) focus_phrase_hits: usize,
+    pub(crate) title_focus_term_hits: usize,
+    pub(crate) title_focus_phrase_hits: usize,
+    pub(crate) snippet_quality_penalty: i32,
     pub(crate) triage_priority: Option<u8>,
 }
 
@@ -167,6 +171,7 @@ pub(crate) struct CandidateSelection {
     pub(crate) total_unique_candidates: usize,
     pub(crate) eligible_unique_candidates: usize,
     pub(crate) filtered_low_priority_candidates: usize,
+    pub(crate) filtered_admission_candidates: usize,
     pub(crate) scoring_candidates: usize,
     pub(crate) capped: bool,
     pub(crate) top_companies: Vec<String>,

@@ -114,12 +114,13 @@ impl SmartQueryEngine {
         );
         let selection = self.collect_candidates(input, &expansion);
         engine_logging::engine_info!(
-            "[smart-query] candidate selection regex_matches={} entity_matches={} total_unique_candidates={} eligible_unique_candidates={} filtered_low_priority_candidates={} scoring_candidates={} candidates_with_triage={} capped={} threshold={} allow_broad={}",
+            "[smart-query] candidate selection regex_matches={} entity_matches={} total_unique_candidates={} eligible_unique_candidates={} filtered_low_priority_candidates={} filtered_admission_candidates={} scoring_candidates={} candidates_with_triage={} capped={} threshold={} allow_broad={}",
             selection.regex_match_count,
             selection.entity_match_count,
             selection.total_unique_candidates,
             selection.eligible_unique_candidates,
             selection.filtered_low_priority_candidates,
+            selection.filtered_admission_candidates,
             selection.scoring_candidates,
             selection
                 .candidates
@@ -171,15 +172,14 @@ impl SmartQueryEngine {
                 question: input.question.clone(),
                 message: Some(if selection.total_unique_candidates > 0 {
                     format!(
-                        "The query matched articles, but all {} candidates were filtered out because they were untriaged or had triage priority {} or lower.",
-                        selection.total_unique_candidates,
-                        self.min_triage_priority.saturating_sub(1)
+                        "The query matched articles, but all {} candidates were filtered out before scoring because they were low-priority or lacked enough query-specific evidence.",
+                        selection.total_unique_candidates
                     )
                 } else {
                     "No matching articles were found in the current corpus.".to_string()
                 }),
                 synthesis: Some(if selection.total_unique_candidates > 0 {
-                    "No matching high-priority articles were found in the current corpus."
+                    "No matching high-confidence articles were found in the current corpus."
                         .to_string()
                 } else {
                     "No matching articles were found in the current corpus.".to_string()
@@ -194,10 +194,8 @@ impl SmartQueryEngine {
                 refinement_suggestions: vec![
                     "Widen the time range or remove scope filters if you want more results."
                         .to_string(),
-                    format!(
-                        "Only articles with triage priority {} or higher are considered eligible.",
-                        self.min_triage_priority
-                    ),
+                    "Add a more specific subtopic phrase so weak broad mentions are less likely to survive admission filtering."
+                        .to_string(),
                 ],
                 top_companies: selection.top_companies,
                 top_themes: selection.top_themes,
@@ -365,6 +363,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::smart_query::types::QueryExpansion;
     use harvester_core::{ArticleSummaryResult, EntityIndex, EntityIndexEntry, SummaryCacheEntry};
     use harvester_engine::llm::MockLlmProvider;
 
@@ -1199,6 +1198,261 @@ mod tests {
         assert_eq!(response.candidate_count, Some(1));
         assert_eq!(response.total_match_count, Some(3));
         assert_eq!(response.filtered_low_priority_count, Some(0));
+    }
+
+    #[test]
+    fn collect_candidates_drops_low_scoring_weak_tail_candidates() {
+        let engine = test_engine_with_articles(
+            vec![
+                sample_article(
+                    "strong.md",
+                    "Security bulletin for enterprise AI",
+                    "https://example.com/strong",
+                    "2026-04-12T10:00:00Z",
+                    "# Strong\nSecurity controls were tightened after model red-team findings.",
+                ),
+                sample_article(
+                    "weak.md",
+                    "Enterprise update",
+                    "https://example.com/weak",
+                    "2026-04-11T10:00:00Z",
+                    "# Weak\nA short note mentioned security in passing near the footer.",
+                ),
+            ],
+            EntityIndex {
+                schema_version: 1,
+                entries: Default::default(),
+            },
+            HashMap::new(),
+            HashMap::from([
+                (
+                    "https://example.com/strong".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 3,
+                        tags: vec!["security".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/weak".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 2,
+                        tags: vec!["security".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+            ]),
+            None,
+            "mock-model",
+            10_000,
+        );
+
+        let selection = engine.collect_candidates(
+            &QueryKnowledgeBaseInput {
+                question: "What do the loaded articles say about security?".to_string(),
+                max_results: 5,
+                allow_broad: false,
+                scope_entities: Vec::new(),
+                scope_date_from: None,
+                scope_date_to: None,
+            },
+            &QueryExpansion {
+                regex_patterns: vec!["(?i)security".to_string()],
+                entity_names: Vec::new(),
+                focus_terms: vec!["security".to_string()],
+                focus_phrases: Vec::new(),
+                date_from: None,
+                date_to: None,
+            },
+        );
+
+        assert_eq!(selection.eligible_unique_candidates, 1);
+        assert_eq!(selection.filtered_admission_candidates, 1);
+        assert_eq!(selection.candidates[0].filename, "strong.md");
+    }
+
+    #[test]
+    fn collect_candidates_strongly_boosts_exact_focus_phrase_matches() {
+        let engine = test_engine_with_articles(
+            vec![
+                sample_article(
+                    "phrase.md",
+                    "Microsoft faces competitive rivalry with OpenAI",
+                    "https://example.com/phrase",
+                    "2026-04-12T10:00:00Z",
+                    "# Phrase\nMicrosoft described the competitive rivalry with OpenAI in detail.",
+                ),
+                sample_article(
+                    "terms.md",
+                    "Microsoft expands model lineup",
+                    "https://example.com/terms",
+                    "2026-04-11T10:00:00Z",
+                    "# Terms\nMicrosoft said it sees OpenAI as a competitor and that rivalry is increasing.",
+                ),
+            ],
+            EntityIndex {
+                schema_version: 1,
+                entries: BTreeMap::from([
+                    (
+                        "https://example.com/phrase".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-12T10:00:00Z".to_string()),
+                            content_hash: Some("hash-phrase".to_string()),
+                            companies: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                            technologies: vec![],
+                            products: vec![],
+                            themes: vec!["competition".to_string()],
+                        },
+                    ),
+                    (
+                        "https://example.com/terms".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-11T10:00:00Z".to_string()),
+                            content_hash: Some("hash-terms".to_string()),
+                            companies: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                            technologies: vec![],
+                            products: vec![],
+                            themes: vec!["competition".to_string()],
+                        },
+                    ),
+                ]),
+            },
+            HashMap::new(),
+            HashMap::from([
+                (
+                    "https://example.com/phrase".to_string(),
+                    ArticleTriageResult {
+                        category: "competition".to_string(),
+                        priority: 3,
+                        tags: vec!["competition".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/terms".to_string(),
+                    ArticleTriageResult {
+                        category: "competition".to_string(),
+                        priority: 3,
+                        tags: vec!["competition".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+            ]),
+            None,
+            "mock-model",
+            10_000,
+        );
+
+        let selection = engine.collect_candidates(
+            &QueryKnowledgeBaseInput {
+                question: "How is the Microsoft and OpenAI relationship changing around competitive rivalry?"
+                    .to_string(),
+                max_results: 5,
+                allow_broad: false,
+                scope_entities: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                scope_date_from: None,
+                scope_date_to: None,
+            },
+            &QueryExpansion {
+                regex_patterns: vec!["(?i)(microsoft|openai|competition|rivalry)".to_string()],
+                entity_names: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                focus_terms: vec!["competition".to_string(), "rivalry".to_string()],
+                focus_phrases: vec!["competitive rivalry".to_string()],
+                date_from: None,
+                date_to: None,
+            },
+        );
+
+        assert_eq!(selection.eligible_unique_candidates, 2);
+        assert_eq!(selection.candidates[0].filename, "phrase.md");
+    }
+
+    #[test]
+    fn collect_candidates_penalizes_boilerplate_snippet_evidence() {
+        let boilerplate = "window.__s_data={\"routing\":{\"locationBeforeTransitions\":null},\"navStatus\":{\"pageType\":\"page\"},\"article\":\"security security security\"}";
+        let engine = test_engine_with_articles(
+            vec![
+                sample_article(
+                    "clean.md",
+                    "Security review of Microsoft systems",
+                    "https://example.com/clean",
+                    "2026-04-12T10:00:00Z",
+                    "# Clean\nSecurity review found concrete Microsoft identity hardening work.",
+                ),
+                sample_article(
+                    "boilerplate.md",
+                    "Imported page shell",
+                    "https://example.com/boilerplate",
+                    "2026-04-11T10:00:00Z",
+                    boilerplate,
+                ),
+            ],
+            EntityIndex {
+                schema_version: 1,
+                entries: Default::default(),
+            },
+            HashMap::new(),
+            HashMap::from([
+                (
+                    "https://example.com/clean".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 3,
+                        tags: vec!["security".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/boilerplate".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 3,
+                        tags: vec!["security".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+            ]),
+            None,
+            "mock-model",
+            10_000,
+        );
+
+        let selection = engine.collect_candidates(
+            &QueryKnowledgeBaseInput {
+                question: "What do the loaded articles say about security?".to_string(),
+                max_results: 5,
+                allow_broad: false,
+                scope_entities: Vec::new(),
+                scope_date_from: None,
+                scope_date_to: None,
+            },
+            &QueryExpansion {
+                regex_patterns: vec!["(?i)security".to_string()],
+                entity_names: Vec::new(),
+                focus_terms: vec!["security".to_string()],
+                focus_phrases: Vec::new(),
+                date_from: None,
+                date_to: None,
+            },
+        );
+
+        assert_eq!(selection.eligible_unique_candidates, 1);
+        assert_eq!(selection.filtered_admission_candidates, 1);
+        assert_eq!(selection.candidates[0].filename, "clean.md");
     }
 
     #[tokio::test]
