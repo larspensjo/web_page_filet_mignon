@@ -24,12 +24,14 @@ impl SmartQueryEngine {
             .as_deref()
             .or(input.scope_date_to.as_deref());
         let scope_entities = super::expansion::normalize_terms(input.scope_entities.clone());
+        let admission_policy = build_admission_policy(input, expansion, &scope_entities);
         let regexes = compile_patterns(&expansion.regex_patterns);
         let mut candidates = HashMap::new();
 
         let regex_match_count = self.collect_regex_matches(
             &mut candidates,
             &regexes,
+            &admission_policy,
             &scope_entities,
             date_from,
             date_to,
@@ -37,15 +39,22 @@ impl SmartQueryEngine {
         let entity_match_count = self.collect_entity_matches(
             &mut candidates,
             &expansion.entity_names,
+            &admission_policy,
             &scope_entities,
             date_from,
             date_to,
         );
 
         let total_unique_candidates = candidates.len();
-        let mut ranked: Vec<_> = candidates
+        let priority_eligible: Vec<_> = candidates
             .into_values()
-            .filter(|candidate| candidate_is_eligible(candidate, self.min_triage_priority))
+            .filter(|candidate| candidate_is_priority_eligible(candidate, self.min_triage_priority))
+            .collect();
+        let filtered_low_priority_candidates =
+            total_unique_candidates.saturating_sub(priority_eligible.len());
+        let mut ranked: Vec<_> = priority_eligible
+            .into_iter()
+            .filter(|candidate| candidate_matches_admission_policy(candidate, &admission_policy))
             .collect();
         ranked.sort_by(|left, right| {
             deterministic_match_score(right)
@@ -54,8 +63,6 @@ impl SmartQueryEngine {
                 .then_with(|| left.filename.cmp(&right.filename))
         });
         let eligible_unique_candidates = ranked.len();
-        let filtered_low_priority_candidates =
-            total_unique_candidates.saturating_sub(eligible_unique_candidates);
         let top_companies = refinement::top_terms(
             ranked
                 .iter()
@@ -97,10 +104,11 @@ impl SmartQueryEngine {
         }
     }
 
-    pub(super) fn collect_regex_matches(
+    fn collect_regex_matches(
         &self,
         candidates: &mut HashMap<String, CandidateArticle>,
         regexes: &[(String, Regex)],
+        admission_policy: &AdmissionPolicy,
         scope_entities: &[String],
         date_from: Option<&str>,
         date_to: Option<&str>,
@@ -151,9 +159,9 @@ impl SmartQueryEngine {
             }
             matched_articles += 1;
 
-            let candidate = candidates
-                .entry(candidate_key(entry))
-                .or_insert_with(|| self.make_candidate(entry, entity_entry, snippet.clone()));
+            let candidate = candidates.entry(candidate_key(entry)).or_insert_with(|| {
+                self.make_candidate(entry, entity_entry, snippet.clone(), admission_policy)
+            });
             super::merge_strings(&mut candidate.matched_patterns, matched_patterns);
             candidate.title_pattern_hits += title_pattern_hits;
             candidate.url_pattern_hits += url_pattern_hits;
@@ -164,10 +172,11 @@ impl SmartQueryEngine {
         matched_articles
     }
 
-    pub(super) fn collect_entity_matches(
+    fn collect_entity_matches(
         &self,
         candidates: &mut HashMap<String, CandidateArticle>,
         entity_names: &[String],
+        admission_policy: &AdmissionPolicy,
         scope_entities: &[String],
         date_from: Option<&str>,
         date_to: Option<&str>,
@@ -190,7 +199,12 @@ impl SmartQueryEngine {
 
                 matched_articles.insert(candidate_key(article));
                 let candidate = candidates.entry(candidate_key(article)).or_insert_with(|| {
-                    self.make_candidate(article, Some(entity_entry), String::new())
+                    self.make_candidate(
+                        article,
+                        Some(entity_entry),
+                        String::new(),
+                        admission_policy,
+                    )
                 });
                 super::push_unique(&mut candidate.matched_entities, entity_name.clone());
             }
@@ -198,11 +212,12 @@ impl SmartQueryEngine {
         matched_articles.len()
     }
 
-    pub(super) fn make_candidate(
+    fn make_candidate(
         &self,
         entry: &ArticleEntry,
         entity_entry: Option<&EntityIndexEntry>,
         snippet: String,
+        admission_policy: &AdmissionPolicy,
     ) -> CandidateArticle {
         let summary_entry = entry
             .url
@@ -228,6 +243,17 @@ impl SmartQueryEngine {
             .and_then(|url| self.triage_index.get(url))
             .map(|triage| triage.tags.clone())
             .unwrap_or_default();
+        let match_haystack = build_match_haystack(
+            entry,
+            entity_entry,
+            summary.as_deref(),
+            &key_points,
+            &triage_tags,
+        );
+        let query_entity_hits = count_unique_matches(&match_haystack, &admission_policy.entities);
+        let focus_term_hits = count_unique_matches(&match_haystack, &admission_policy.focus_terms);
+        let focus_phrase_hits =
+            count_unique_matches(&match_haystack, &admission_policy.focus_phrases);
 
         CandidateArticle {
             filename: entry.filename.clone(),
@@ -248,6 +274,9 @@ impl SmartQueryEngine {
             triage_tags,
             title_pattern_hits: 0,
             url_pattern_hits: 0,
+            query_entity_hits,
+            focus_term_hits,
+            focus_phrase_hits,
             triage_priority,
         }
     }
@@ -268,7 +297,7 @@ fn candidate_key(entry: &ArticleEntry) -> String {
     entry.url.clone().unwrap_or_else(|| entry.filename.clone())
 }
 
-fn candidate_is_eligible(candidate: &CandidateArticle, min_triage_priority: u8) -> bool {
+fn candidate_is_priority_eligible(candidate: &CandidateArticle, min_triage_priority: u8) -> bool {
     candidate
         .triage_priority
         .map(|priority| priority >= min_triage_priority)
@@ -381,4 +410,216 @@ fn fallback_excerpt(content: &str) -> String {
         .take(6)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdmissionMode {
+    Broad,
+    EntityScoped,
+    Relationship,
+}
+
+#[derive(Debug, Clone)]
+struct AdmissionPolicy {
+    mode: AdmissionMode,
+    entities: Vec<String>,
+    focus_terms: Vec<String>,
+    focus_phrases: Vec<String>,
+}
+
+fn build_admission_policy(
+    input: &QueryKnowledgeBaseInput,
+    expansion: &QueryExpansion,
+    scope_entities: &[String],
+) -> AdmissionPolicy {
+    let relationship_query = is_relationship_query(input);
+    let mut entities = if relationship_query && scope_entities.len() >= 2 {
+        scope_entities.to_vec()
+    } else if relationship_query {
+        expansion
+            .entity_names
+            .iter()
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>()
+    } else if !scope_entities.is_empty() {
+        scope_entities.to_vec()
+    } else {
+        expansion
+            .entity_names
+            .iter()
+            .take(1)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    entities = normalize_needles(entities);
+
+    let focus_terms = expansion
+        .focus_terms
+        .iter()
+        .filter(|term| !overlaps_with_any_entity(term, &entities))
+        .filter(|term| !relationship_query || !is_generic_relationship_dimension(term))
+        .cloned()
+        .collect::<Vec<_>>();
+    let focus_phrases = expansion
+        .focus_phrases
+        .iter()
+        .filter(|phrase| !overlaps_with_any_entity(phrase, &entities))
+        .filter(|phrase| !relationship_query || !is_generic_relationship_dimension(phrase))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mode = if relationship_query && entities.len() >= 2 {
+        AdmissionMode::Relationship
+    } else if !entities.is_empty() {
+        AdmissionMode::EntityScoped
+    } else {
+        AdmissionMode::Broad
+    };
+
+    AdmissionPolicy {
+        mode,
+        entities,
+        focus_terms,
+        focus_phrases,
+    }
+}
+
+fn candidate_matches_admission_policy(
+    candidate: &CandidateArticle,
+    admission_policy: &AdmissionPolicy,
+) -> bool {
+    match admission_policy.mode {
+        AdmissionMode::Broad => true,
+        AdmissionMode::EntityScoped => {
+            candidate.query_entity_hits >= 1
+                && (!admission_policy.focus_terms.is_empty()
+                    || !admission_policy.focus_phrases.is_empty())
+                && candidate_has_focus_match(candidate)
+        }
+        AdmissionMode::Relationship => {
+            candidate.query_entity_hits >= admission_policy.entities.len()
+                && (!admission_policy.focus_terms.is_empty()
+                    || !admission_policy.focus_phrases.is_empty())
+                && candidate_has_focus_match(candidate)
+        }
+    }
+}
+
+fn candidate_has_focus_match(candidate: &CandidateArticle) -> bool {
+    candidate.focus_term_hits > 0 || candidate.focus_phrase_hits > 0
+}
+
+fn is_relationship_query(input: &QueryKnowledgeBaseInput) -> bool {
+    let question_lower = input.question.to_lowercase();
+    input.scope_entities.len() >= 2
+        || question_lower.contains("partnership")
+        || question_lower.contains("relationship")
+        || question_lower.contains("collaboration")
+        || question_lower.contains("between ")
+}
+
+fn build_match_haystack(
+    entry: &ArticleEntry,
+    entity_entry: Option<&EntityIndexEntry>,
+    summary: Option<&str>,
+    key_points: &[String],
+    triage_tags: &[String],
+) -> String {
+    let mut segments = Vec::new();
+    if let Some(title) = &entry.title {
+        segments.push(title.as_str());
+    }
+    if let Some(url) = &entry.url {
+        segments.push(url.as_str());
+    }
+    segments.push(&entry.content);
+    if let Some(summary) = summary {
+        segments.push(summary);
+    }
+    for key_point in key_points {
+        segments.push(key_point.as_str());
+    }
+    if let Some(entity_entry) = entity_entry {
+        for item in entity_entry
+            .companies
+            .iter()
+            .chain(entity_entry.technologies.iter())
+            .chain(entity_entry.products.iter())
+            .chain(entity_entry.themes.iter())
+        {
+            segments.push(item.as_str());
+        }
+    }
+    for tag in triage_tags {
+        segments.push(tag.as_str());
+    }
+    segments.join("\n").to_lowercase()
+}
+
+fn count_unique_matches(haystack: &str, needles: &[String]) -> usize {
+    needles
+        .iter()
+        .filter(|needle| haystack.contains(needle.as_str()))
+        .count()
+}
+
+fn normalize_needles(terms: Vec<String>) -> Vec<String> {
+    let mut normalized = Vec::new();
+    for term in terms {
+        let trimmed = term.trim().to_lowercase();
+        if trimmed.is_empty() {
+            continue;
+        }
+        super::push_unique(&mut normalized, trimmed);
+    }
+    normalized
+}
+
+fn overlaps_with_any_entity(value: &str, entities: &[String]) -> bool {
+    let value_lower = value.trim().to_lowercase();
+    if value_lower.is_empty() {
+        return false;
+    }
+
+    let value_terms = tokenize_for_overlap(&value_lower);
+    entities.iter().any(|entity| {
+        let entity_lower = entity.trim().to_lowercase();
+        if entity_lower.is_empty() {
+            return false;
+        }
+        if entity_lower.contains(&value_lower) || value_lower.contains(&entity_lower) {
+            return true;
+        }
+        let entity_terms = tokenize_for_overlap(&entity_lower);
+        !value_terms.is_empty()
+            && value_terms
+                .iter()
+                .all(|term| entity_terms.iter().any(|entity_term| entity_term == term))
+    })
+}
+
+fn tokenize_for_overlap(value: &str) -> Vec<String> {
+    value
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|segment| segment.len() >= 3)
+        .map(|segment| segment.to_string())
+        .collect()
+}
+
+fn is_generic_relationship_dimension(value: &str) -> bool {
+    matches!(
+        value.trim().to_lowercase().as_str(),
+        "relationship"
+            | "relationships"
+            | "partnership"
+            | "partnerships"
+            | "collaboration"
+            | "collaborations"
+            | "between"
+            | "change"
+            | "changes"
+            | "changing"
+            | "shift"
+            | "shifts"
+    )
 }

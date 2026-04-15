@@ -1473,3 +1473,9 @@ Type: Integration
 Context: Claude's `/mcp` UI showed `harvester-mcp` as connected but with `Capabilities: none`, which meant the client attached to the server but did not expose any of its tool handlers in the deferred tool registry.
 Change: Updated `HarvesterMcpServer::get_info()` to advertise MCP tool capability explicitly via `ServerCapabilities::builder().enable_tools().build()` instead of the default empty capability set.
 Refs: crates/harvester_mcp/src/main.rs
+
+## 2026-04-15 - Require co-occurrence before smart-query candidate admission
+Type: Retrieval
+Context: Smart-query candidate admission still let broad single-signal matches through, especially on saturated company topics and two-entity relationship prompts.
+Change: Added a query-shape-aware admission gate in `candidates.rs` that requires entity-scoped queries to match both the company/entity and a non-entity focus dimension, and relationship queries to match both entities plus a narrowing dimension before scoring. Added regression tests covering single-entity and two-entity filtering behavior.
+Refs: crates/harvester_mcp/src/smart_query/candidates.rs, crates/harvester_mcp/src/smart_query/mod.rs, docs/SmartQueryCandidateFilteringChecklist.md

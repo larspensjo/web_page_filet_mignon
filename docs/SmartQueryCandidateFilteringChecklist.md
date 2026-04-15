@@ -7,13 +7,13 @@ Status: proposed follow-up checklist after real Claude + MCP testing.
 ## Best ROI First
 
 ### 1. Require stronger co-occurrence before admitting a candidate
-- [ ] For entity-scoped queries, require both:
+- [x] For entity-scoped queries, require both:
   - an entity/company match
   - and at least one topic/focus match
-- [ ] For relationship-style queries, require:
+- [x] For relationship-style queries, require:
   - both entities
   - plus one narrowing dimension such as `contract`, `Azure`, `data center`, `licensing`, `competition`
-- [ ] Implement this in `crates/harvester_mcp/src/smart_query/candidates.rs`
+- [x] Implement this in `crates/harvester_mcp/src/smart_query/candidates.rs`
 
 Why first:
 - cheap

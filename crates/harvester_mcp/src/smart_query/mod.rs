@@ -927,6 +927,281 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn smart_query_requires_entity_and_focus_cooccurrence_for_entity_scoped_queries() {
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_json_success(
+            r#"{"regex_patterns":["(?i)(anthropic|security)"],"entity_names":["Anthropic"],"focus_terms":["anthropic","security"],"focus_phrases":["ai security"],"date_from":null,"date_to":null}"#,
+        );
+        provider.queue_json_success(
+            r#"{"relevance_score":9,"key_facts":["Anthropic discussed AI security controls."]}"#,
+        );
+        provider.queue_json_success(
+            r#"{"synthesis":"Only the article that matched Anthropic and AI security survived filtering [C1]."}"#,
+        );
+
+        let engine = test_engine_with_articles(
+            vec![
+                sample_article(
+                    "relevant.md",
+                    "Anthropic expands AI security testing",
+                    "https://example.com/relevant",
+                    "2026-04-12T10:00:00Z",
+                    "# Relevant\nAnthropic detailed new AI security evaluations.",
+                ),
+                sample_article(
+                    "entity-only.md",
+                    "Anthropic launches enterprise program",
+                    "https://example.com/entity-only",
+                    "2026-04-11T10:00:00Z",
+                    "# Entity\nAnthropic described enterprise rollout milestones.",
+                ),
+                sample_article(
+                    "focus-only.md",
+                    "Security teams harden AI deployments",
+                    "https://example.com/focus-only",
+                    "2026-04-10T10:00:00Z",
+                    "# Focus\nSecurity teams added new AI safeguards.",
+                ),
+            ],
+            EntityIndex {
+                schema_version: 1,
+                entries: BTreeMap::from([
+                    (
+                        "https://example.com/relevant".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-12T10:00:00Z".to_string()),
+                            content_hash: Some("hash-relevant".to_string()),
+                            companies: vec!["Anthropic".to_string()],
+                            technologies: vec!["AI security".to_string()],
+                            products: vec![],
+                            themes: vec!["security".to_string()],
+                        },
+                    ),
+                    (
+                        "https://example.com/entity-only".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-11T10:00:00Z".to_string()),
+                            content_hash: Some("hash-entity-only".to_string()),
+                            companies: vec!["Anthropic".to_string()],
+                            technologies: vec!["enterprise".to_string()],
+                            products: vec![],
+                            themes: vec!["rollout".to_string()],
+                        },
+                    ),
+                    (
+                        "https://example.com/focus-only".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-10T10:00:00Z".to_string()),
+                            content_hash: Some("hash-focus-only".to_string()),
+                            companies: vec!["Example Security".to_string()],
+                            technologies: vec!["AI security".to_string()],
+                            products: vec![],
+                            themes: vec!["security".to_string()],
+                        },
+                    ),
+                ]),
+            },
+            HashMap::new(),
+            HashMap::from([
+                (
+                    "https://example.com/relevant".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 4,
+                        tags: vec!["ai-security".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/entity-only".to_string(),
+                    ArticleTriageResult {
+                        category: "company".to_string(),
+                        priority: 3,
+                        tags: vec!["enterprise".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/focus-only".to_string(),
+                    ArticleTriageResult {
+                        category: "security".to_string(),
+                        priority: 3,
+                        tags: vec!["ai-security".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+            ]),
+            Some(provider),
+            "mock-model",
+            10_000,
+        );
+
+        let response = engine
+            .query(QueryKnowledgeBaseInput {
+                question: "What did Anthropic say about AI security?".to_string(),
+                max_results: 5,
+                allow_broad: false,
+                scope_entities: vec!["Anthropic".to_string()],
+                scope_date_from: None,
+                scope_date_to: None,
+            })
+            .await;
+
+        assert_eq!(response.mode, "smart");
+        assert_eq!(response.ranked_articles.len(), 1);
+        assert_eq!(response.ranked_articles[0].filename, "relevant.md");
+        assert_eq!(response.candidate_count, Some(1));
+        assert_eq!(response.total_match_count, Some(2));
+        assert_eq!(response.filtered_low_priority_count, Some(0));
+    }
+
+    #[tokio::test]
+    async fn smart_query_requires_both_entities_and_a_dimension_for_relationship_queries() {
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_json_success(
+            r#"{"regex_patterns":["(?i)(microsoft|openai|partnership|data center|contract|azure)"],"entity_names":["Microsoft","OpenAI"],"focus_terms":["microsoft","openai","partnership","contract","azure"],"focus_phrases":["data center"],"date_from":null,"date_to":null}"#,
+        );
+        provider.queue_json_success(
+            r#"{"relevance_score":9,"key_facts":["Microsoft and OpenAI renegotiated data-center contract terms."]}"#,
+        );
+        provider.queue_json_success(
+            r#"{"synthesis":"Only the article that matched both entities plus a specific relationship dimension survived filtering [C1]."}"#,
+        );
+
+        let engine = test_engine_with_articles(
+            vec![
+                sample_article(
+                    "relevant-relationship.md",
+                    "Microsoft and OpenAI revisit data center contract terms",
+                    "https://example.com/relevant-relationship",
+                    "2026-04-12T10:00:00Z",
+                    "# Relevant\nMicrosoft and OpenAI are renegotiating data center contract details.",
+                ),
+                sample_article(
+                    "entity-pair-only.md",
+                    "Microsoft and OpenAI partnership remains important",
+                    "https://example.com/entity-pair-only",
+                    "2026-04-11T10:00:00Z",
+                    "# Pair\nMicrosoft and OpenAI said the partnership is still important.",
+                ),
+                sample_article(
+                    "single-entity-dimension.md",
+                    "Microsoft expands Azure data center footprint",
+                    "https://example.com/single-entity-dimension",
+                    "2026-04-10T10:00:00Z",
+                    "# Single\nMicrosoft is expanding Azure data center capacity.",
+                ),
+            ],
+            EntityIndex {
+                schema_version: 1,
+                entries: BTreeMap::from([
+                    (
+                        "https://example.com/relevant-relationship".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-12T10:00:00Z".to_string()),
+                            content_hash: Some("hash-relevant-relationship".to_string()),
+                            companies: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                            technologies: vec!["Azure".to_string()],
+                            products: vec![],
+                            themes: vec!["data centers".to_string()],
+                        },
+                    ),
+                    (
+                        "https://example.com/entity-pair-only".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-11T10:00:00Z".to_string()),
+                            content_hash: Some("hash-entity-pair-only".to_string()),
+                            companies: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                            technologies: vec![],
+                            products: vec![],
+                            themes: vec!["partnership".to_string()],
+                        },
+                    ),
+                    (
+                        "https://example.com/single-entity-dimension".to_string(),
+                        EntityIndexEntry {
+                            fetched_utc: Some("2026-04-10T10:00:00Z".to_string()),
+                            content_hash: Some("hash-single-entity-dimension".to_string()),
+                            companies: vec!["Microsoft".to_string()],
+                            technologies: vec!["Azure".to_string()],
+                            products: vec![],
+                            themes: vec!["data centers".to_string()],
+                        },
+                    ),
+                ]),
+            },
+            HashMap::new(),
+            HashMap::from([
+                (
+                    "https://example.com/relevant-relationship".to_string(),
+                    ArticleTriageResult {
+                        category: "partnership".to_string(),
+                        priority: 4,
+                        tags: vec!["contract-terms".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/entity-pair-only".to_string(),
+                    ArticleTriageResult {
+                        category: "partnership".to_string(),
+                        priority: 3,
+                        tags: vec!["partnership".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+                (
+                    "https://example.com/single-entity-dimension".to_string(),
+                    ArticleTriageResult {
+                        category: "cloud".to_string(),
+                        priority: 3,
+                        tags: vec!["azure".to_string()],
+                        rationale: "eligible".to_string(),
+                        input_tokens: 0,
+                        output_tokens: 0,
+                    },
+                ),
+            ]),
+            Some(provider),
+            "mock-model",
+            10_000,
+        );
+
+        let response = engine
+            .query(QueryKnowledgeBaseInput {
+                question:
+                    "How is the Microsoft and OpenAI relationship changing around data centers and contract terms?"
+                        .to_string(),
+                max_results: 5,
+                allow_broad: false,
+                scope_entities: vec!["Microsoft".to_string(), "OpenAI".to_string()],
+                scope_date_from: None,
+                scope_date_to: None,
+            })
+            .await;
+
+        assert_eq!(response.mode, "smart");
+        assert_eq!(response.ranked_articles.len(), 1);
+        assert_eq!(
+            response.ranked_articles[0].filename,
+            "relevant-relationship.md"
+        );
+        assert_eq!(response.candidate_count, Some(1));
+        assert_eq!(response.total_match_count, Some(3));
+        assert_eq!(response.filtered_low_priority_count, Some(0));
+    }
+
+    #[tokio::test]
     async fn smart_query_heuristic_expansion_surfaces_supply_side_articles() {
         let provider = Arc::new(MockLlmProvider::new());
         provider.queue_response(Err(LlmError::InvalidResponse {

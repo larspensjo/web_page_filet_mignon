@@ -146,6 +146,9 @@ pub(crate) struct CandidateArticle {
     pub(crate) triage_tags: Vec<String>,
     pub(crate) title_pattern_hits: usize,
     pub(crate) url_pattern_hits: usize,
+    pub(crate) query_entity_hits: usize,
+    pub(crate) focus_term_hits: usize,
+    pub(crate) focus_phrase_hits: usize,
     pub(crate) triage_priority: Option<u8>,
 }
 
