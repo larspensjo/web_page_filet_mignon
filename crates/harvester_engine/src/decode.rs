@@ -1,4 +1,4 @@
-use chardetng::EncodingDetector;
+use chardetng::{EncodingDetector, Iso2022JpDetection, Utf8Detection};
 use encoding_rs::Encoding;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,9 +28,9 @@ pub fn decode_html(bytes: &[u8], content_type: Option<&str>) -> Result<DecodedHt
     }
 
     // 3) chardetng detection with hint from meta tags (full HTML)
-    let mut detector = EncodingDetector::new();
+    let mut detector = EncodingDetector::new(Iso2022JpDetection::Deny);
     detector.feed(bytes, true);
-    let enc = detector.guess(None, true);
+    let enc = detector.guess(None, Utf8Detection::Allow);
     decode_with(bytes, enc)
 }
 

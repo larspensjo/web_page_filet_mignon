@@ -23,6 +23,14 @@ fn decode_handles_utf8_bom() {
 }
 
 #[test]
+fn decode_falls_back_to_detector_for_unlabeled_utf8() {
+    let bytes = "Hej, världen!".as_bytes();
+    let decoded = decode_html(bytes, Some("text/html")).unwrap();
+    assert_eq!(decoded.html, "Hej, världen!");
+    assert_eq!(decoded.encoding_label, "UTF-8");
+}
+
+#[test]
 fn extractor_prefers_article_then_body() {
     let html = r#"
     <html><head><title>Title</title></head>

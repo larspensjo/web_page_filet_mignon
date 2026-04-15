@@ -1497,3 +1497,9 @@ Type: Retrieval
 Context: Real Claude/MCP runs still let weak contract and rivalry candidates into pre-scoring because co-occurrence alone did not rank or reject low-signal tails strongly enough, and imported boilerplate snippets could survive into the candidate set.
 Change: Added a minimum deterministic admission score in `candidates.rs`, promoted `focus_terms` and `focus_phrases` into real ranking and broad-query admission signals, expanded heuristic focus-phrase coverage for relationship/infrastructure queries, and penalized or discarded low-signal snippet evidence using shared snippet-cleanup helpers now reused by both smart-query candidate building and `search_articles`. Added regression tests for weak-tail filtering, exact focus-phrase preference, and boilerplate-snippet rejection.
 Refs: crates/harvester_mcp/src/smart_query/candidates.rs, crates/harvester_mcp/src/smart_query/expansion.rs, crates/harvester_mcp/src/smart_query/heuristics.rs, crates/harvester_mcp/src/smart_query/mod.rs, crates/harvester_mcp/src/tools.rs, crates/harvester_mcp/src/util.rs, docs/SmartQueryCandidateFilteringChecklist.md
+
+## 2026-04-15 - Fix dependency-upgrade compatibility for `chardetng`, `sha2`, and `toml`
+Type: Maintenance
+Context: Workspace dependency bumps exposed API changes in `chardetng` 1.0 and `sha2` 0.11, plus Cargo warning noise from a `toml` requirement that included ignored semver metadata.
+Change: Updated HTML decoding to use explicit `chardetng` detection enums, switched summary-cache hashing to manual byte-to-hex encoding compatible with `sha2` 0.11 output types, added a regression test for unlabeled UTF-8 detector fallback, and removed ignored `toml` semver metadata from the workspace dependency requirement.
+Refs: crates/harvester_engine/src/decode.rs, crates/harvester_engine/tests/extract_convert.rs, crates/harvester_core/src/summary_cache.rs, Cargo.toml
