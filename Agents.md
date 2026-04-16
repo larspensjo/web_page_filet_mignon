@@ -3,6 +3,7 @@
 ## Workflow
 - Build with `cargo build`.
 - When a task is complete, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
+- For plan-driven work, write commit messages about the code change, not the plan. Follow recommended practices for teh design of the comment.
 - When adding a CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change.
 
 ## Architecture
