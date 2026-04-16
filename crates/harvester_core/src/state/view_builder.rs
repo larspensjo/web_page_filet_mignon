@@ -150,6 +150,12 @@ impl AppState {
                     completed: completed as u32,
                     total: self.briefing.total() as u32,
                 })
+            } else if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
+                Some(OperationProgress {
+                    label: self.pre_triage_loading_operation_label(),
+                    completed: 0,
+                    total: 1,
+                })
             } else {
                 None
             };
@@ -264,7 +270,8 @@ impl AppState {
             input_panel_visible: self.ui.input_panel_visible(),
             operation_progress_visible: self.source_states.poll_progress().is_some()
                 || matches!(self.triage.phase(), TriagePhase::Triaging)
-                || matches!(self.briefing.phase(), BriefingPhase::Summarizing),
+                || matches!(self.briefing.phase(), BriefingPhase::Summarizing)
+                || matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles),
             active_tab: self.active_tab(),
             left_tab: self.left_tab(),
             left_header_meta_visible: matches!(

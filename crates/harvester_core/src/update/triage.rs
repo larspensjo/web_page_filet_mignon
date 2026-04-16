@@ -154,6 +154,7 @@ fn schedule_pre_triage_refresh(
     reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
     ordered_urls: Vec<String>,
 ) -> Vec<Effect> {
+    let ordered_url_count = ordered_urls.len();
     let tick = state.current_tick();
     let result = state
         .pre_triage_coordinator
@@ -177,6 +178,7 @@ fn schedule_pre_triage_refresh(
                 reason
             );
             // Set pre-triage to loading so the UI shows a spinner immediately.
+            state.set_pre_triage_load_context(reason, ordered_url_count);
             state.set_pre_triage(PreTriageSession::new_loading());
             state.mark_dirty();
             Vec::new()

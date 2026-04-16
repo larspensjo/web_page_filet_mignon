@@ -1503,3 +1503,9 @@ Type: Maintenance
 Context: Workspace dependency bumps exposed API changes in `chardetng` 1.0 and `sha2` 0.11, plus Cargo warning noise from a `toml` requirement that included ignored semver metadata.
 Change: Updated HTML decoding to use explicit `chardetng` detection enums, switched summary-cache hashing to manual byte-to-hex encoding compatible with `sha2` 0.11 output types, added a regression test for unlabeled UTF-8 detector fallback, and removed ignored `toml` semver metadata from the workspace dependency requirement.
 Refs: crates/harvester_engine/src/decode.rs, crates/harvester_engine/tests/extract_convert.rs, crates/harvester_core/src/summary_cache.rs, Cargo.toml
+
+## 2026-04-16 - Startup pre-triage footer progress and clearer blocked-state copy
+Type: Implementation
+Context: Restored completed jobs trigger a real pre-triage corpus rebuild at startup, but the footer previously looked idle and the disabled `Triage` action did not explain why the app was still busy.
+Change: Reused the existing footer operation-progress slot for `PreTriagePhase::LoadingArticles`, added reducer-owned load context for startup vs refresh reason plus saved-article count, and updated the triage progress and blocked text so startup loading explicitly explains that the triage set is being prepared from saved articles.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/state/tests.rs, crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs

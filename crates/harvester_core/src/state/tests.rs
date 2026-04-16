@@ -1136,6 +1136,50 @@ mod app_state_tests {
         );
     }
 
+    fn startup_pre_triage_loading_state(saved_count: usize) -> AppState {
+        let mut state = AppState::new();
+        state.set_pre_triage_load_context(
+            crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
+            saved_count,
+        );
+        state.set_pre_triage(PreTriageSession::new_loading());
+        state
+    }
+
+    #[test]
+    fn operation_progress_from_pre_triage_loading() {
+        let state = startup_pre_triage_loading_state(2);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Preparing triage set (2 saved)".to_string(),
+                completed: 0,
+                total: 1,
+            })
+        );
+        assert_eq!(
+            view.triage_progress,
+            Some("Preparing triage set from 2 saved articles...".to_string())
+        );
+        assert_eq!(
+            view.triage_blocked_reason,
+            Some("Triage is unavailable while startup prepares the article set".to_string())
+        );
+    }
+
+    #[test]
+    fn layout_view_shows_operation_progress_during_pre_triage_loading() {
+        let state = startup_pre_triage_loading_state(1);
+
+        let layout = state.layout_view();
+        assert!(
+            layout.operation_progress_visible,
+            "pre-triage loading must show footer progress controls"
+        );
+    }
+
     #[test]
     fn stop_button_disables_when_session_is_running_but_work_has_settled() {
         use crate::briefing::LoadedArticle;
@@ -1224,10 +1268,74 @@ mod app_state_tests {
     }
 
     #[test]
+    fn operation_progress_poll_still_takes_precedence_over_pre_triage_loading() {
+        let mut state = startup_pre_triage_loading_state(3);
+        assert!(state.start_poll());
+        state.set_poll_total(4);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Polling".to_string(),
+                completed: 0,
+                total: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn operation_progress_triage_still_takes_precedence_over_pre_triage_loading() {
+        use crate::briefing::LoadedArticle;
+
+        let mut state = startup_pre_triage_loading_state(2);
+        let mut triage = crate::triage::TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: "https://example.com/1".to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash-1".to_string(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        state.set_triage(triage);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Triaging".to_string(),
+                completed: 0,
+                total: 1,
+            })
+        );
+    }
+
+    #[test]
     fn operation_progress_none_when_idle() {
         let state = AppState::new();
         let view = state.view();
         assert!(view.operation_progress.is_none());
+    }
+
+    #[test]
+    fn operation_progress_none_after_pre_triage_ready() {
+        let mut state = startup_pre_triage_loading_state(1);
+        let pre_triage = PreTriageSession::load_articles(
+            vec![article_with_words("https://example.com/ready", 220)],
+            &PreTriagePolicy::default(),
+        );
+        state.set_pre_triage(pre_triage);
+
+        let view = state.view();
+        assert!(view.operation_progress.is_none());
+        assert_eq!(
+            view.triage_progress,
+            Some(
+                "Pre-triage: 1 include, 0 review, 0 filtered; Run Triage uses current selection"
+                    .to_string()
+            )
+        );
     }
 
     #[test]

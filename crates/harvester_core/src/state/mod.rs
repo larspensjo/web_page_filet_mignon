@@ -51,6 +51,11 @@ pub type JobId = u64;
 const MAX_EXTRACTED_LINKS: usize = 5_000;
 const CHECKPOINT_SAVING_STATUS_MESSAGE: &str = "Checkpoint saving...";
 
+fn format_saved_article_count(count: usize) -> String {
+    let noun = if count == 1 { "article" } else { "articles" };
+    format!("{count} saved {noun}")
+}
+
 fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSnapshot> {
     let registry = PromptRegistry::with_defaults();
     let prompt_ids = [
@@ -79,6 +84,12 @@ struct PendingBriefingCheckpointSave {
     save_id: u64,
     previous_since_utc: Option<chrono::DateTime<chrono::Utc>>,
     pending_since_utc: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreTriageLoadContext {
+    reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
+    ordered_url_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,6 +288,7 @@ pub struct AppState {
     briefing_checkpoint_status_message: Option<String>,
     triage: TriageSession,
     pre_triage: PreTriageSession,
+    pre_triage_load_context: Option<PreTriageLoadContext>,
     pre_triage_manual_overrides: HashMap<ArticleFilterKey, ManualDecision>,
     indirect_link_pool: IndirectLinkPool,
     indirect_poll_in_progress: bool,
@@ -378,6 +390,7 @@ impl Default for AppState {
             briefing_checkpoint_status_message: None,
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
+            pre_triage_load_context: None,
             pre_triage_manual_overrides: HashMap::new(),
             indirect_link_pool: IndirectLinkPool::new(),
             indirect_poll_in_progress: false,
@@ -877,7 +890,22 @@ impl AppState {
     }
 
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
+        if !matches!(pre_triage.phase(), PreTriagePhase::LoadingArticles) {
+            self.pre_triage_load_context = None;
+        }
         self.pre_triage = pre_triage;
+        self.dirty = true;
+    }
+
+    pub(crate) fn set_pre_triage_load_context(
+        &mut self,
+        reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
+        ordered_url_count: usize,
+    ) {
+        self.pre_triage_load_context = Some(PreTriageLoadContext {
+            reason,
+            ordered_url_count,
+        });
         self.dirty = true;
     }
 
@@ -960,28 +988,36 @@ impl AppState {
     }
 
     fn pre_triage_progress_text(&self) -> Option<String> {
-        let total = self.pre_triage.entries().len();
-        if total == 0 {
-            return None;
-        }
-        let include = self.pre_triage.resolved_included_articles().len();
-        let review = self
-            .pre_triage
-            .entries()
-            .iter()
-            .filter(|entry| {
-                matches!(entry.auto_verdict, crate::AutoVerdict::Review)
-                    && entry.manual_decision.is_none()
-            })
-            .count();
-        let filtered = total.saturating_sub(include + review);
         match self.pre_triage.phase() {
-            PreTriagePhase::LoadingArticles => Some("Pre-triage loading...".to_string()),
-            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage => Some(format!(
-                "Pre-triage: {} include, {} review, {} filtered; Run Triage uses current selection",
-                include, review, filtered
-            )),
-            PreTriagePhase::Failed { reason } => Some(format!("Pre-triage failed: {reason}")),
+            PreTriagePhase::LoadingArticles => Some(self.pre_triage_loading_progress_text()),
+            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage => {
+                let total = self.pre_triage.entries().len();
+                if total == 0 {
+                    return None;
+                }
+                let include = self.pre_triage.resolved_included_articles().len();
+                let review = self
+                    .pre_triage
+                    .entries()
+                    .iter()
+                    .filter(|entry| {
+                        matches!(entry.auto_verdict, crate::AutoVerdict::Review)
+                            && entry.manual_decision.is_none()
+                    })
+                    .count();
+                let filtered = total.saturating_sub(include + review);
+                Some(format!(
+                    "Pre-triage: {} include, {} review, {} filtered; Run Triage uses current selection",
+                    include, review, filtered
+                ))
+            }
+            PreTriagePhase::Failed { reason } => {
+                if self.pre_triage.entries().is_empty() {
+                    None
+                } else {
+                    Some(format!("Pre-triage failed: {reason}"))
+                }
+            }
             PreTriagePhase::Idle => None,
         }
     }
@@ -1199,11 +1235,60 @@ impl AppState {
     }
 
     fn triage_blocked_reason(&self) -> Option<String> {
-        self.ai_unavailable_reason_text().map(str::to_string)
+        if let Some(reason) = self.ai_unavailable_reason_text() {
+            return Some(reason.to_string());
+        }
+
+        if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
+            return Some(match self.pre_triage_load_context {
+                Some(PreTriageLoadContext {
+                    reason:
+                        crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
+                    ..
+                }) => "Triage is unavailable while startup prepares the article set".to_string(),
+                _ => "Triage is unavailable while the article set is being prepared".to_string(),
+            });
+        }
+
+        None
     }
 
     fn briefing_blocked_reason(&self) -> Option<String> {
         self.ai_unavailable_reason_text().map(str::to_string)
+    }
+
+    fn pre_triage_loading_progress_text(&self) -> String {
+        match self.pre_triage_load_context {
+            Some(PreTriageLoadContext {
+                reason: crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
+                ordered_url_count,
+            }) => format!(
+                "Preparing triage set from {}...",
+                format_saved_article_count(ordered_url_count)
+            ),
+            Some(PreTriageLoadContext {
+                reason: crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone,
+                ordered_url_count,
+            }) => format!(
+                "Refreshing triage set from {}...",
+                format_saved_article_count(ordered_url_count)
+            ),
+            None => "Preparing triage set from saved articles...".to_string(),
+        }
+    }
+
+    fn pre_triage_loading_operation_label(&self) -> String {
+        match self.pre_triage_load_context {
+            Some(PreTriageLoadContext {
+                reason: crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
+                ordered_url_count,
+            }) => format!("Preparing triage set ({} saved)", ordered_url_count),
+            Some(PreTriageLoadContext {
+                reason: crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone,
+                ordered_url_count,
+            }) => format!("Refreshing triage set ({} saved)", ordered_url_count),
+            None => "Preparing triage set".to_string(),
+        }
     }
 
     pub(crate) fn set_llm_metadata(
@@ -1238,6 +1323,9 @@ impl AppState {
         self.last_paste_stats = None;
         self.next_job_id = 1;
         self.reset_llm_requests();
+        self.pre_triage = PreTriageSession::default();
+        self.pre_triage_load_context = None;
+        self.pre_triage_manual_overrides.clear();
 
         for entry in entries {
             let CompletedJobSnapshot {

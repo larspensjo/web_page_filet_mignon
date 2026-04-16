@@ -218,6 +218,51 @@ fn restore_completed_jobs_schedules_and_dispatches_after_quiet_window() {
 }
 
 #[test]
+fn restore_completed_jobs_loading_text_explains_startup_preparation() {
+    init_logging();
+    let snapshot = vec![crate::CompletedJobSnapshot {
+        url: "https://example.com/restored".to_string(),
+        tokens: None,
+        bytes: None,
+        links: Vec::new(),
+        fetched_utc: None,
+    }];
+
+    let (state, _) = update(AppState::new(), Msg::RestoreCompletedJobs(snapshot));
+    let state = apply_pending_pre_triage_refresh_evaluation(state);
+
+    let view = state.view();
+    assert_eq!(
+        view.triage_progress,
+        Some("Preparing triage set from 1 saved article...".to_string())
+    );
+    assert_eq!(
+        view.triage_blocked_reason,
+        Some("Triage is unavailable while startup prepares the article set".to_string())
+    );
+}
+
+#[test]
+fn job_done_loading_text_explains_refresh_preparation() {
+    init_logging();
+    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+
+    let view = state.view();
+    assert_eq!(
+        view.triage_progress,
+        Some("Refreshing triage set from 1 saved article...".to_string())
+    );
+    assert_eq!(
+        view.operation_progress,
+        Some(crate::view_model::OperationProgress {
+            label: "Refreshing triage set (1 saved)".to_string(),
+            completed: 0,
+            total: 1,
+        })
+    );
+}
+
+#[test]
 fn new_demand_while_in_flight_queues_and_dispatches_after_response() {
     init_logging();
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
