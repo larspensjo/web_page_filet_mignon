@@ -1378,6 +1378,45 @@ fn status_bar_uses_warning_severity_for_ai_unavailable_message() {
 }
 
 #[test]
+fn ai_warning_banner_text_is_emitted_when_present() {
+    let window_id = WindowId::new(44);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![]);
+    view.ai_warning_banner = Some(harvester_core::InlineWarningView {
+        title: "AI features are disabled".to_string(),
+        body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
+    });
+
+    let cmds = render(window_id, &view, &mut tree_state);
+    assert_eq!(
+        control_text(&cmds, LABEL_AI_WARNING_TITLE),
+        Some("AI features are disabled")
+    );
+    assert_eq!(
+        control_text(&cmds, LABEL_AI_WARNING_BODY),
+        Some("Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.")
+    );
+}
+
+#[test]
+fn ai_warning_banner_text_clears_when_hidden() {
+    let window_id = WindowId::new(45);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![]);
+    view.ai_warning_banner = Some(harvester_core::InlineWarningView {
+        title: "AI features are disabled".to_string(),
+        body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
+    });
+
+    let _ = render(window_id, &view, &mut tree_state);
+
+    view.ai_warning_banner = None;
+    let cmds = render(window_id, &view, &mut tree_state);
+    assert_eq!(control_text(&cmds, LABEL_AI_WARNING_TITLE), Some(""));
+    assert_eq!(control_text(&cmds, LABEL_AI_WARNING_BODY), Some(""));
+}
+
+#[test]
 fn triage_results_meta_uses_ai_unavailable_copy_when_blocked() {
     let window_id = WindowId::new(42);
     let mut tree_state = TreeRenderState::new();

@@ -1509,3 +1509,12 @@ Type: Implementation
 Context: Restored completed jobs trigger a real pre-triage corpus rebuild at startup, but the footer previously looked idle and the disabled `Triage` action did not explain why the app was still busy.
 Change: Reused the existing footer operation-progress slot for `PreTriagePhase::LoadingArticles`, added reducer-owned load context for startup vs refresh reason plus saved-article count, and updated the triage progress and blocked text so startup loading explicitly explains that the triage set is being prepared from saved articles.
 Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/state/tests.rs, crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs
+
+ ## 2026-04-16 - Missing API key now surfaces as a persistent setup warning
+ Type: Bug Fix
+ Context: `OPENAI_API_KEY` missing at startup only surfaced in the footer, which made triage and briefing look quietly broken instead of visibly blocked on setup.
+ Change: Added a reducer-owned inline warning banner view for the `MissingApiKey` case, inserted a persistent warning strip below the right-pane tab bar, and rewrote triage/briefing empty states to use setup-required copy only when the API key is missing while preserving generic copy for other blocked reasons.
+ Lessons Learned: Configuration prerequisites need both a global persistent signal and feature-local blocked-state copy; relying on footer status alone is too easy to miss.
+ Prevention: Keep setup blockers in core view data, gate high-visibility UI from explicit availability reasons, and add paired state/layout/render tests whenever a disabled workflow gets new explanatory chrome.
+ Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/view_model.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/rules.rs, crates/harvester_app/src/platform/ui/layout/theme.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_preview.rs
+Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/llm_completed.rs, docs/plans/Plan.RefactorUpdateIntoModules.md

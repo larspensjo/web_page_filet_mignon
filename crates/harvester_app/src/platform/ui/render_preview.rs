@@ -88,6 +88,32 @@ pub(super) fn render_preview_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
+    let (ai_warning_title, ai_warning_body) = view
+        .ai_warning_banner
+        .as_ref()
+        .map(|banner| (banner.title.clone(), banner.body.clone()))
+        .unwrap_or_else(|| (String::new(), String::new()));
+    emit_if_changed(
+        &mut tree_state.preview.prev_ai_warning_title_text,
+        ai_warning_title,
+        cmds,
+        |text| PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_AI_WARNING_TITLE,
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.preview.prev_ai_warning_body_text,
+        ai_warning_body,
+        cmds,
+        |text| PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_AI_WARNING_BODY,
+            text,
+        },
+    );
+
     // Summary tab: only show the selected article summary; never fall back to shared preview text.
     let summary_markdown = view
         .right_pane

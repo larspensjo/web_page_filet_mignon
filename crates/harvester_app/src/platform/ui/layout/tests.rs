@@ -4,10 +4,11 @@ use harvester_core::{AppTab, LeftTab};
 
 use super::super::constants::*;
 use super::rules::{
-    PREVIEW_CONTEXT_ROW_HEIGHT, PROMPT_LAB_ROW_HEIGHT_ACTION, PROMPT_LAB_ROW_HEIGHT_CONTEXT_INPUT,
-    PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY, PROMPT_LAB_ROW_HEIGHT_STANDARD,
-    PROMPT_LAB_ROW_HEIGHT_STATUS, PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT,
-    PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH, TOKEN_METER_BAR_WIDTH, TOKEN_METER_LABEL_WIDTH,
+    AI_WARNING_ROW_HEIGHT, PREVIEW_CONTEXT_ROW_HEIGHT, PROMPT_LAB_ROW_HEIGHT_ACTION,
+    PROMPT_LAB_ROW_HEIGHT_CONTEXT_INPUT, PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY,
+    PROMPT_LAB_ROW_HEIGHT_STANDARD, PROMPT_LAB_ROW_HEIGHT_STATUS,
+    PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT, PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH,
+    TOKEN_METER_BAR_WIDTH, TOKEN_METER_LABEL_WIDTH,
 };
 use super::{build_layout_command, initial_commands, LayoutConfig, PromptLabLayoutConfig};
 
@@ -19,6 +20,7 @@ fn layout_rules_for_prompt_lab(prompt_lab: PromptLabLayoutConfig) -> Vec<LayoutR
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -63,6 +65,7 @@ fn operation_controls_have_width_when_visible() {
             input_panel_visible: true,
             operation_progress_visible: true,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -96,6 +99,7 @@ fn operation_controls_collapse_when_hidden() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -202,6 +206,7 @@ fn toolbar_contains_scope_and_token_controls_on_same_row() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -256,6 +261,7 @@ fn jobs_panel_visible_for_all_job_oriented_tabs() {
                 input_panel_visible: true,
                 operation_progress_visible: false,
                 left_header_meta_visible: true,
+                ai_warning_banner_visible: false,
                 preview_header_override_visible: false,
                 preview_context_visible: false,
                 preview_attention_visible: false,
@@ -413,6 +419,7 @@ fn inactive_tab_panel_is_collapsed() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -468,6 +475,7 @@ fn preview_tab_panels_use_single_fill_rule() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -519,6 +527,7 @@ fn preview_context_row_is_tall_enough_for_metadata_label() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: true,
             preview_attention_visible: false,
@@ -552,6 +561,147 @@ fn preview_context_row_is_tall_enough_for_metadata_label() {
 }
 
 #[test]
+fn ai_warning_controls_created_in_initial_commands() {
+    let commands = initial_commands(WindowId::new(33));
+    assert!(commands.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::CreatePanel { control_id, .. } if *control_id == PANEL_AI_WARNING
+        )
+    }));
+    assert!(commands.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::CreateLabel { control_id, .. } if *control_id == LABEL_AI_WARNING_TITLE
+        )
+    }));
+    assert!(commands.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::CreateLabel { control_id, .. } if *control_id == LABEL_AI_WARNING_BODY
+        )
+    }));
+}
+
+#[test]
+fn ai_warning_row_sits_immediately_below_right_tab_bar() {
+    let cmd = build_layout_command(
+        WindowId::new(34),
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: false,
+            left_header_meta_visible: true,
+            ai_warning_banner_visible: true,
+            preview_header_override_visible: true,
+            preview_context_visible: true,
+            preview_attention_visible: false,
+            active_tab: AppTab::Summary,
+            left_tab: LeftTab::Jobs,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: false,
+                advanced_mode: false,
+                compare_section_open: false,
+                context_section_open: false,
+                template_section_open: false,
+                run_details_section_open: false,
+                template_editor_open: false,
+            },
+        },
+    );
+    let rules = match cmd {
+        PlatformCommand::DefineLayout { rules, .. } => rules,
+        _ => panic!("expected DefineLayout"),
+    };
+
+    let tab_bar = rules
+        .iter()
+        .find(|r| r.control_id == TAB_BAR_RIGHT)
+        .expect("right tab bar rule");
+    let ai_warning = rules
+        .iter()
+        .find(|r| r.control_id == PANEL_AI_WARNING)
+        .expect("ai warning rule");
+    let preview_header = rules
+        .iter()
+        .find(|r| r.control_id == LABEL_PREVIEW_HEADER)
+        .expect("preview header rule");
+
+    assert_eq!(tab_bar.parent_control_id, Some(PANEL_PREVIEW));
+    assert_eq!(tab_bar.order, 0);
+    assert_eq!(ai_warning.parent_control_id, Some(PANEL_PREVIEW));
+    assert_eq!(ai_warning.order, 1);
+    assert_eq!(preview_header.parent_control_id, Some(PANEL_PREVIEW));
+    assert_eq!(preview_header.order, 2);
+}
+
+#[test]
+fn ai_warning_row_collapses_when_hidden() {
+    let hidden = build_layout_command(
+        WindowId::new(35),
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: false,
+            left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
+            preview_header_override_visible: false,
+            preview_context_visible: false,
+            preview_attention_visible: false,
+            active_tab: AppTab::Summary,
+            left_tab: LeftTab::Jobs,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: false,
+                advanced_mode: false,
+                compare_section_open: false,
+                context_section_open: false,
+                template_section_open: false,
+                run_details_section_open: false,
+                template_editor_open: false,
+            },
+        },
+    );
+    let hidden_rules = match hidden {
+        PlatformCommand::DefineLayout { rules, .. } => rules,
+        _ => panic!("expected DefineLayout"),
+    };
+    assert_eq!(fixed_size_for(&hidden_rules, PANEL_AI_WARNING), 0);
+
+    let visible = build_layout_command(
+        WindowId::new(36),
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: false,
+            left_header_meta_visible: true,
+            ai_warning_banner_visible: true,
+            preview_header_override_visible: false,
+            preview_context_visible: false,
+            preview_attention_visible: false,
+            active_tab: AppTab::Summary,
+            left_tab: LeftTab::Jobs,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: false,
+                advanced_mode: false,
+                compare_section_open: false,
+                context_section_open: false,
+                template_section_open: false,
+                run_details_section_open: false,
+                template_editor_open: false,
+            },
+        },
+    );
+    let visible_rules = match visible {
+        PlatformCommand::DefineLayout { rules, .. } => rules,
+        _ => panic!("expected DefineLayout"),
+    };
+    assert_eq!(
+        fixed_size_for(&visible_rules, PANEL_AI_WARNING),
+        AI_WARNING_ROW_HEIGHT
+    );
+}
+
+#[test]
 fn expanded_layout_includes_all_controls() {
     let cmd = build_layout_command(
         WindowId::new(4),
@@ -560,6 +710,7 @@ fn expanded_layout_includes_all_controls() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -612,6 +763,7 @@ fn template_editor_rows_are_collapsed_when_editor_is_closed() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -654,6 +806,7 @@ fn template_toggle_button_width_fits_state_text() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -996,6 +1149,7 @@ fn preview_viewers_use_editorial_inner_margins() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -1045,6 +1199,7 @@ fn footer_buttons_share_a_common_vertical_alignment() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -1097,6 +1252,7 @@ fn footer_buttons_follow_workflow_order() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -1146,6 +1302,7 @@ fn stop_button_width_matches_standard_footer_buttons() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
@@ -1188,6 +1345,7 @@ fn footer_button_row_is_tall_enough_for_primary_action_presence() {
             input_panel_visible: true,
             operation_progress_visible: false,
             left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,

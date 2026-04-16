@@ -52,6 +52,27 @@ pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     });
 
     commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::StatusLabelWarning,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x4A,
+                g: 0x33,
+                b: 0x1D,
+            }),
+            text_color: Some(Color {
+                r: 0xFF,
+                g: 0xF1,
+                b: 0xD6,
+            }),
+            font: Some(FontDescription {
+                name: Some("Segoe UI".to_string()),
+                size: Some(10),
+                weight: Some(FontWeight::Normal),
+            }),
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
         style_id: StyleId::DefaultText,
         style: ControlStyle {
             background_color: Some(Color {
@@ -664,6 +685,7 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
         PANEL_INPUT,
         PANEL_JOBS,
         PANEL_PREVIEW,
+        PANEL_AI_WARNING,
         PANEL_TAB_TRIAGE,
         PANEL_TAB_SUMMARY,
         PANEL_TAB_BRIEFING,
@@ -737,6 +759,21 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
         window_id,
         control_id: LABEL_PREVIEW_HEADER,
         style_id: StyleId::SectionTitle,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PANEL_AI_WARNING,
+        style_id: StyleId::StatusLabelWarning,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_AI_WARNING_TITLE,
+        style_id: StyleId::StatusLabelWarning,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_AI_WARNING_BODY,
+        style_id: StyleId::StatusLabelWarning,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,

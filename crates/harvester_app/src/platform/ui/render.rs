@@ -19,6 +19,7 @@ pub(super) struct LayoutRenderState {
     pub(super) prev_left_panel_width: i32,
     pub(super) prev_input_panel_visible: bool,
     pub(super) prev_operation_progress_visible: bool,
+    pub(super) prev_ai_warning_banner_visible: bool,
     pub(super) prev_active_tab: AppTab,
     pub(super) prev_left_tab: LeftTab,
     pub(super) prev_prompt_lab_visible: bool,
@@ -37,6 +38,7 @@ impl Default for LayoutRenderState {
             prev_left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
             prev_input_panel_visible: false,
             prev_operation_progress_visible: false,
+            prev_ai_warning_banner_visible: false,
             prev_active_tab: AppTab::Summary,
             prev_left_tab: LeftTab::default(),
             prev_prompt_lab_visible: false,
@@ -122,6 +124,8 @@ pub(super) struct PreviewRenderState {
     pub(super) prev_triage_text: Option<String>,
     pub(super) prev_briefing_text: Option<String>,
     pub(super) prev_poll_stats_text: Option<String>,
+    pub(super) prev_ai_warning_title_text: Option<String>,
+    pub(super) prev_ai_warning_body_text: Option<String>,
     pub(super) prev_preview_header_override_text: Option<String>,
     pub(super) prev_preview_source_text: Option<String>,
     pub(super) prev_preview_status_text: Option<String>,
@@ -207,6 +211,7 @@ fn layout_view_from_app_view(view: &AppViewModel) -> LayoutViewModel {
         left_header_meta_visible: view.left_pane_header.scope_label.is_some()
             || view.left_pane_header.count_label.is_some()
             || view.left_pane_header.state_label.is_some(),
+        ai_warning_banner_visible: view.ai_warning_banner.is_some(),
         preview_header_override_visible: view.preview_header_text.is_some(),
         preview_context_visible: view.preview_context.is_some()
             && view.preview_header_text.is_none(),
@@ -236,6 +241,7 @@ fn render_layout_section(
         || layout.left_panel_width != tree_state.layout.prev_left_panel_width
         || layout.input_panel_visible != tree_state.layout.prev_input_panel_visible
         || layout.operation_progress_visible != tree_state.layout.prev_operation_progress_visible
+        || layout.ai_warning_banner_visible != tree_state.layout.prev_ai_warning_banner_visible
         || layout.active_tab != tree_state.layout.prev_active_tab
         || layout.left_tab != tree_state.layout.prev_left_tab
         || prompt_lab_tab_visible != tree_state.layout.prev_prompt_lab_visible
@@ -269,6 +275,7 @@ fn render_layout_section(
             input_panel_visible: layout.input_panel_visible,
             operation_progress_visible: layout.operation_progress_visible,
             left_header_meta_visible: layout.left_header_meta_visible,
+            ai_warning_banner_visible: layout.ai_warning_banner_visible,
             preview_header_override_visible: layout.preview_header_override_visible,
             preview_context_visible: layout.preview_context_visible,
             preview_attention_visible: layout.preview_attention_visible,
@@ -292,6 +299,7 @@ fn render_layout_section(
     tree_state.layout.prev_left_panel_width = layout.left_panel_width;
     tree_state.layout.prev_input_panel_visible = layout.input_panel_visible;
     tree_state.layout.prev_operation_progress_visible = layout.operation_progress_visible;
+    tree_state.layout.prev_ai_warning_banner_visible = layout.ai_warning_banner_visible;
     tree_state.layout.prev_active_tab = layout.active_tab;
     tree_state.layout.prev_left_tab = layout.left_tab;
     tree_state.layout.prev_prompt_lab_visible = prompt_lab_tab_visible;

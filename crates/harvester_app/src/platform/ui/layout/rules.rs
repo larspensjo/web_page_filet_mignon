@@ -11,6 +11,7 @@ pub(super) const PROMPT_LAB_ROW_HEIGHT_STATUS: i32 = 24;
 pub(super) const PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT: i32 = 120;
 pub(super) const PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY: i32 = 42;
 pub(super) const PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH: i32 = 120;
+pub(super) const AI_WARNING_ROW_HEIGHT: i32 = 42;
 pub(super) const PREVIEW_CONTEXT_ROW_HEIGHT: i32 = 32;
 pub(super) const TOKEN_METER_BAR_WIDTH: i32 = 190;
 pub(super) const TOKEN_METER_LABEL_WIDTH: i32 = 120;
@@ -65,6 +66,7 @@ pub(super) fn build_layout_rules(
     input_panel_visible: bool,
     operation_progress_visible: bool,
     left_header_meta_visible: bool,
+    ai_warning_banner_visible: bool,
     preview_header_override_visible: bool,
     preview_context_visible: bool,
     _preview_attention_visible: bool,
@@ -302,7 +304,7 @@ pub(super) fn build_layout_rules(
             control_id: LABEL_PREVIEW_HEADER,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
-            order: 1,
+            order: 2,
             fixed_size: if preview_header_override_visible {
                 Some(18)
             } else {
@@ -311,16 +313,44 @@ pub(super) fn build_layout_rules(
             margin: (2, 2, 8, 0),
         },
         LayoutRule {
+            control_id: PANEL_AI_WARNING,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: DockStyle::Top,
+            order: 1,
+            fixed_size: if ai_warning_banner_visible {
+                Some(AI_WARNING_ROW_HEIGHT)
+            } else {
+                Some(0)
+            },
+            margin: (0, 2, 0, 6),
+        },
+        LayoutRule {
             control_id: PANEL_PREVIEW_CONTEXT,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: DockStyle::Top,
-            order: 2,
+            order: 3,
             fixed_size: if preview_context_visible {
                 Some(PREVIEW_CONTEXT_ROW_HEIGHT)
             } else {
                 Some(0)
             },
             margin: (2, 4, 4, 2),
+        },
+        LayoutRule {
+            control_id: LABEL_AI_WARNING_TITLE,
+            parent_control_id: Some(PANEL_AI_WARNING),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(18),
+            margin: (12, 6, 12, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_AI_WARNING_BODY,
+            parent_control_id: Some(PANEL_AI_WARNING),
+            dock_style: DockStyle::Fill,
+            order: 1,
+            fixed_size: None,
+            margin: (12, 0, 12, 8),
         },
         LayoutRule {
             control_id: LABEL_PREVIEW_SOURCE,
@@ -360,7 +390,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_TRIAGE,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::Triage),
-            order: 2,
+            order: 4,
             fixed_size: tab_size(AppTab::Triage),
             margin: (0, 0, 0, 0),
         },
@@ -376,7 +406,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_SUMMARY,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::Summary),
-            order: 3,
+            order: 5,
             fixed_size: tab_size(AppTab::Summary),
             margin: (0, 0, 0, 0),
         },
@@ -392,7 +422,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_BRIEFING,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::Briefing),
-            order: 4,
+            order: 6,
             fixed_size: tab_size(AppTab::Briefing),
             margin: (0, 0, 0, 0),
         },
@@ -408,7 +438,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_TRENDS,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::Trends),
-            order: 5,
+            order: 7,
             fixed_size: tab_size(AppTab::Trends),
             margin: (0, 0, 0, 0),
         },
@@ -442,7 +472,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_POLL_STATS,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::PollStats),
-            order: 6,
+            order: 8,
             fixed_size: tab_size(AppTab::PollStats),
             margin: (0, 0, 0, 0),
         },

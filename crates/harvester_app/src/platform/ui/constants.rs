@@ -26,6 +26,7 @@ pub const PANEL_BUTTONS: ControlId = ControlId::new(2004);
 pub const PANEL_PREVIEW: ControlId = ControlId::new(2005);
 pub const PANEL_JOBS: ControlId = ControlId::new(2006);
 pub const PANEL_PREVIEW_CONTEXT: ControlId = ControlId::new(2007);
+pub const PANEL_AI_WARNING: ControlId = ControlId::new(2008);
 pub const PANEL_TOOLBAR: ControlId = ControlId::new(2015);
 
 pub const PANEL_PROMPT_LAB: ControlId = ControlId::new(2100);
@@ -77,6 +78,8 @@ pub const LABEL_PROMPT_LAB_CONTEXT_STATUS: ControlId = ControlId::new(3012);
 pub const LABEL_PROMPT_LAB_TEMPLATE_STATUS: ControlId = ControlId::new(3013);
 pub const TS_JOBS_SCOPE: ControlId = ControlId::new(3020);
 pub const LABEL_PREVIEW_ATTENTION: ControlId = ControlId::new(3015);
+pub const LABEL_AI_WARNING_TITLE: ControlId = ControlId::new(3016);
+pub const LABEL_AI_WARNING_BODY: ControlId = ControlId::new(3017);
 pub const BTN_COMPARE_ADD_CURRENT: ControlId = ControlId::new(3100);
 pub const BTN_COMPARE_ADD_BASELINE: ControlId = ControlId::new(3101);
 pub const BTN_COMPARE_RESET_DRAFT: ControlId = ControlId::new(3102);

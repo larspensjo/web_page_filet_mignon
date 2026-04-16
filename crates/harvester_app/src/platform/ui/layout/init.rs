@@ -122,6 +122,11 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
     commands.push(PlatformCommand::CreatePanel {
         window_id,
         parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_AI_WARNING,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
         control_id: PANEL_PREVIEW_CONTEXT,
     });
 
@@ -137,6 +142,20 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         window_id,
         parent_control_id: Some(PANEL_PREVIEW),
         control_id: LABEL_PREVIEW_HEADER,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_AI_WARNING),
+        control_id: LABEL_AI_WARNING_TITLE,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_AI_WARNING),
+        control_id: LABEL_AI_WARNING_BODY,
         initial_text: String::new(),
         class: LabelClass::Default,
     });
