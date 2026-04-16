@@ -151,10 +151,16 @@ impl AppState {
                     total: self.briefing.total() as u32,
                 })
             } else if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
+                let (completed, total) = self
+                    .pre_triage_load_progress()
+                    .and_then(|(files_scanned, files_total, _, _)| {
+                        (files_total > 0).then_some((files_scanned as u32, files_total as u32))
+                    })
+                    .unwrap_or((0, 1));
                 Some(OperationProgress {
                     label: self.pre_triage_loading_operation_label(),
-                    completed: 0,
-                    total: 1,
+                    completed,
+                    total,
                 })
             } else {
                 None

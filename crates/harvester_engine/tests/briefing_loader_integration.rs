@@ -4,7 +4,8 @@ use std::path::Path;
 use harvester_engine::llm::{PromptId, PromptRegistry};
 use harvester_engine::{
     build_markdown_document, compute_prompt_overhead, load_and_prepare_articles,
-    load_and_prepare_articles_filtered, WhitespaceTokenCounter,
+    load_and_prepare_articles_filtered, load_and_prepare_articles_filtered_with_progress,
+    WhitespaceTokenCounter,
 };
 use tempfile::tempdir;
 
@@ -544,4 +545,45 @@ fn filtered_loader_selected_urls_older_than_since_utc_produce_empty_result() {
 
     assert!(articles.is_empty());
     assert!(collection.is_empty());
+}
+
+#[test]
+fn filtered_loader_with_progress_reports_scan_progress() {
+    let registry = prompt_registry_with_defaults();
+    let tmp = tempdir().unwrap();
+    write_markdown_file(
+        tmp.path(),
+        "first.md",
+        "https://example.com/first",
+        Some("First"),
+        "first body",
+    );
+    write_markdown_file(
+        tmp.path(),
+        "second.md",
+        "https://example.com/second",
+        Some("Second"),
+        "second body",
+    );
+
+    let mut progress = Vec::new();
+    let selected = vec!["https://example.com/second".to_string()];
+    let (articles, collection) = load_and_prepare_articles_filtered_with_progress(
+        tmp.path(),
+        10_000,
+        &registry,
+        &selected,
+        None,
+        |scan| progress.push(scan),
+    )
+    .unwrap();
+
+    assert_eq!(articles.len(), 1);
+    assert_eq!(articles[0].url, "https://example.com/second");
+    assert!(collection.contains("second body"));
+    assert!(!progress.is_empty());
+    assert_eq!(progress[0].files_scanned, 1);
+    assert_eq!(progress[0].files_total, 2);
+    assert_eq!(progress.last().unwrap().files_scanned, 2);
+    assert_eq!(progress.last().unwrap().files_total, 2);
 }

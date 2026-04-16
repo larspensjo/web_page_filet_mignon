@@ -198,6 +198,13 @@ pub enum Msg {
         request_id: u64,
         articles: Vec<LoadedArticle>,
     },
+    /// Incremental loader progress for a triage-specific article load.
+    TriageArticlesLoadProgress {
+        request_id: u64,
+        files_scanned: usize,
+        files_total: usize,
+        matched_urls: usize,
+    },
     /// Loader failed for triage.
     TriageArticlesLoadFailed {
         request_id: u64,

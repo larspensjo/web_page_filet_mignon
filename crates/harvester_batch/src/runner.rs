@@ -316,6 +316,14 @@ fn summarize_batch_msg(msg: &Msg) -> String {
         Msg::TriageArticlesLoaded { articles, .. } => {
             format!("TriageArticlesLoaded {{ articles: {} }}", articles.len())
         }
+        Msg::TriageArticlesLoadProgress {
+            files_scanned,
+            files_total,
+            ..
+        } => format!(
+            "TriageArticlesLoadProgress {{ files_scanned: {}, files_total: {} }}",
+            files_scanned, files_total
+        ),
         Msg::ArticlesLoaded { articles, .. } => {
             format!("ArticlesLoaded {{ articles: {} }}", articles.len())
         }

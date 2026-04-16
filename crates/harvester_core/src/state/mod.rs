@@ -92,6 +92,14 @@ struct PreTriageLoadContext {
     ordered_url_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreTriageLoadProgress {
+    request_id: u64,
+    files_scanned: usize,
+    files_total: usize,
+    matched_urls: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AiAvailability {
     Available,
@@ -289,6 +297,7 @@ pub struct AppState {
     triage: TriageSession,
     pre_triage: PreTriageSession,
     pre_triage_load_context: Option<PreTriageLoadContext>,
+    pre_triage_load_progress: Option<PreTriageLoadProgress>,
     pre_triage_manual_overrides: HashMap<ArticleFilterKey, ManualDecision>,
     indirect_link_pool: IndirectLinkPool,
     indirect_poll_in_progress: bool,
@@ -391,6 +400,7 @@ impl Default for AppState {
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
             pre_triage_load_context: None,
+            pre_triage_load_progress: None,
             pre_triage_manual_overrides: HashMap::new(),
             indirect_link_pool: IndirectLinkPool::new(),
             indirect_poll_in_progress: false,
@@ -892,6 +902,7 @@ impl AppState {
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
         if !matches!(pre_triage.phase(), PreTriagePhase::LoadingArticles) {
             self.pre_triage_load_context = None;
+            self.pre_triage_load_progress = None;
         }
         self.pre_triage = pre_triage;
         self.dirty = true;
@@ -907,6 +918,42 @@ impl AppState {
             ordered_url_count,
         });
         self.dirty = true;
+    }
+
+    pub(crate) fn set_pre_triage_load_progress(
+        &mut self,
+        request_id: u64,
+        files_scanned: usize,
+        files_total: usize,
+        matched_urls: usize,
+    ) {
+        let progress = PreTriageLoadProgress {
+            request_id,
+            files_scanned,
+            files_total,
+            matched_urls,
+        };
+        if self.pre_triage_load_progress != Some(progress) {
+            self.pre_triage_load_progress = Some(progress);
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn clear_pre_triage_load_progress(&mut self) {
+        if self.pre_triage_load_progress.take().is_some() {
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn pre_triage_load_progress(&self) -> Option<(usize, usize, usize, u64)> {
+        self.pre_triage_load_progress.map(
+            |PreTriageLoadProgress {
+                 request_id,
+                 files_scanned,
+                 files_total,
+                 matched_urls,
+             }| { (files_scanned, files_total, matched_urls, request_id) },
+        )
     }
 
     pub fn is_pre_triage_reviewing(&self) -> bool {
@@ -1346,6 +1393,7 @@ impl AppState {
         self.reset_llm_requests();
         self.pre_triage = PreTriageSession::default();
         self.pre_triage_load_context = None;
+        self.pre_triage_load_progress = None;
         self.pre_triage_manual_overrides.clear();
 
         for entry in entries {

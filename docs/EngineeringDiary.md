@@ -1518,3 +1518,9 @@ Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/vi
  Prevention: Keep setup blockers in core view data, gate high-visibility UI from explicit availability reasons, and add paired state/layout/render tests whenever a disabled workflow gets new explanatory chrome.
  Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/view_model.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/rules.rs, crates/harvester_app/src/platform/ui/layout/theme.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_preview.rs
 Refs: crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/llm_completed.rs, docs/plans/Plan.RefactorUpdateIntoModules.md
+
+## 2026-04-16 - Pre-triage scan progress in footer
+Type: Implementation
+Context: Startup pre-triage refresh could spend noticeable time scanning saved articles while the footer only showed a static placeholder, making the app look idle before Triage became available.
+Change: Added reducer-owned pre-triage load progress, a new `Msg::TriageArticlesLoadProgress` message, engine scan callbacks, throttled worker progress emission, and footer mapping from live `files_scanned/files_total` counts while preserving existing non-progress loader call sites.
+Refs: crates/harvester_core/src/msg.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_engine/src/briefing.rs, crates/harvester_io/src/effect_runner/worker.rs, filtered_loader_with_progress_reports_scan_progress

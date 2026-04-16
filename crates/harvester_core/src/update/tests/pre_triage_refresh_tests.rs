@@ -156,6 +156,110 @@ fn triage_load_failed_stale_request_id_is_ignored() {
 }
 
 #[test]
+fn triage_articles_load_progress_updates_matching_request() {
+    init_logging();
+    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+    let (state, request_id) = tick_until_dispatch(state);
+
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoadProgress {
+            request_id,
+            files_scanned: 25,
+            files_total: 80,
+            matched_urls: 1,
+        },
+    );
+
+    assert_eq!(
+        state.view().operation_progress,
+        Some(crate::view_model::OperationProgress {
+            label: "Refreshing triage set (1 saved)".to_string(),
+            completed: 25,
+            total: 80,
+        })
+    );
+}
+
+#[test]
+fn triage_articles_load_progress_ignores_stale_request() {
+    init_logging();
+    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+    let (state, _request_id) = tick_until_dispatch(state);
+
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoadProgress {
+            request_id: 999,
+            files_scanned: 25,
+            files_total: 80,
+            matched_urls: 1,
+        },
+    );
+
+    assert_eq!(
+        state.view().operation_progress,
+        Some(crate::view_model::OperationProgress {
+            label: "Refreshing triage set (1 saved)".to_string(),
+            completed: 0,
+            total: 1,
+        })
+    );
+}
+
+#[test]
+fn triage_articles_load_progress_cleared_on_success() {
+    init_logging();
+    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+    let (state, request_id) = tick_until_dispatch(state);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoadProgress {
+            request_id,
+            files_scanned: 25,
+            files_total: 80,
+            matched_urls: 1,
+        },
+    );
+
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            articles: loaded_triage_articles(1),
+        },
+    );
+
+    assert!(state.view().operation_progress.is_none());
+}
+
+#[test]
+fn triage_articles_load_progress_cleared_on_failure() {
+    init_logging();
+    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+    let (state, request_id) = tick_until_dispatch(state);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoadProgress {
+            request_id,
+            files_scanned: 25,
+            files_total: 80,
+            matched_urls: 1,
+        },
+    );
+
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoadFailed {
+            request_id,
+            reason: "boom".to_string(),
+        },
+    );
+
+    assert!(state.view().operation_progress.is_none());
+}
+
+#[test]
 fn multiple_job_dones_within_quiet_window_emit_exactly_one_triage_load() {
     init_logging();
     let mut state = AppState::new();

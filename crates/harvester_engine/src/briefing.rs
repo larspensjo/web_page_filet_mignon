@@ -49,6 +49,13 @@ pub struct ArchiveArticleMeta {
     pub content_hash: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArticleScanProgress {
+    pub files_scanned: usize,
+    pub files_total: usize,
+    pub matched_urls: usize,
+}
+
 struct ArticlePackage {
     url: String,
     source_title: Option<String>,
@@ -87,6 +94,17 @@ fn scan_and_prepare_articles(
     output_dir: &Path,
     since_utc: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<Vec<ArticlePackage>, String> {
+    scan_and_prepare_articles_with_progress(output_dir, since_utc, |_| {})
+}
+
+fn scan_and_prepare_articles_with_progress<F>(
+    output_dir: &Path,
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    mut on_progress: F,
+) -> Result<Vec<ArticlePackage>, String>
+where
+    F: FnMut(ArticleScanProgress),
+{
     let config = build_content_prep_config();
 
     let mut markdown_files = Vec::new();
@@ -116,11 +134,14 @@ fn scan_and_prepare_articles(
 
     markdown_files.sort();
 
+    let files_total = markdown_files.len();
+
     let mut missing_fetched_utc_count: usize = 0;
     let mut malformed_fetched_utc_count: usize = 0;
 
     let mut packages = Vec::with_capacity(markdown_files.len());
-    for path in markdown_files {
+    for (index, path) in markdown_files.into_iter().enumerate() {
+        let files_scanned = index + 1;
         let markdown = fs::read_to_string(&path)
             .map_err(|err| format!("failed to read {}: {}", path.display(), err))?;
         let fields = match parse_frontmatter(&markdown) {
@@ -140,6 +161,11 @@ fn scan_and_prepare_articles(
                         path.display()
                     );
                 }
+                on_progress(ArticleScanProgress {
+                    files_scanned,
+                    files_total,
+                    matched_urls: packages.len(),
+                });
                 continue;
             }
         };
@@ -155,6 +181,11 @@ fn scan_and_prepare_articles(
                     "[briefing-loader] skipping {}: no url field",
                     path.display()
                 );
+                on_progress(ArticleScanProgress {
+                    files_scanned,
+                    files_total,
+                    matched_urls: packages.len(),
+                });
                 continue;
             }
         };
@@ -170,6 +201,11 @@ fn scan_and_prepare_articles(
                     }
                     Ok(art_ts) => {
                         if art_ts < since_dt {
+                            on_progress(ArticleScanProgress {
+                                files_scanned,
+                                files_total,
+                                matched_urls: packages.len(),
+                            });
                             continue;
                         }
                     }
@@ -184,6 +220,11 @@ fn scan_and_prepare_articles(
             source_title: fields.title,
             clean_text,
             fetched_utc,
+        });
+        on_progress(ArticleScanProgress {
+            files_scanned,
+            files_total,
+            matched_urls: packages.len(),
         });
     }
 
@@ -429,15 +470,39 @@ pub fn load_and_prepare_articles_filtered(
     ordered_urls: &[String],
     since_utc: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<(Vec<LoadedArticle>, String), String> {
+    load_and_prepare_articles_filtered_with_progress(
+        output_dir,
+        max_input_bytes,
+        registry,
+        ordered_urls,
+        since_utc,
+        |_| {},
+    )
+}
+
+pub fn load_and_prepare_articles_filtered_with_progress<F>(
+    output_dir: &Path,
+    max_input_bytes: usize,
+    registry: &PromptRegistry,
+    ordered_urls: &[String],
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    mut on_progress: F,
+) -> Result<(Vec<LoadedArticle>, String), String>
+where
+    F: FnMut(ArticleScanProgress),
+{
     if ordered_urls.is_empty() {
         return Ok((Vec::new(), String::new()));
     }
 
     if ordered_urls.len() == 1 {
         let selected_url = &ordered_urls[0];
-        if let Some(package) =
-            find_article_package_for_selected_url(output_dir, selected_url, since_utc)?
-        {
+        if let Some(package) = find_article_package_for_selected_url_with_progress(
+            output_dir,
+            selected_url,
+            since_utc,
+            &mut on_progress,
+        )? {
             return prepare_loaded_articles_and_collection(
                 vec![package],
                 max_input_bytes,
@@ -460,7 +525,8 @@ pub fn load_and_prepare_articles_filtered(
         return Ok((Vec::new(), String::new()));
     }
 
-    let packages = scan_and_prepare_articles(output_dir, since_utc)?;
+    let packages =
+        scan_and_prepare_articles_with_progress(output_dir, since_utc, &mut on_progress)?;
     let mut indexed: HashMap<String, ArticlePackage> = HashMap::with_capacity(packages.len());
     for package in packages {
         for key in url_lookup_aliases(&package.url) {
@@ -506,11 +572,15 @@ pub fn load_and_prepare_articles_filtered(
     prepare_loaded_articles_and_collection(selected_packages, max_input_bytes, registry)
 }
 
-fn find_article_package_for_selected_url(
+fn find_article_package_for_selected_url_with_progress<F>(
     output_dir: &Path,
     selected_url: &str,
     since_utc: Option<chrono::DateTime<chrono::Utc>>,
-) -> Result<Option<ArticlePackage>, String> {
+    mut on_progress: F,
+) -> Result<Option<ArticlePackage>, String>
+where
+    F: FnMut(ArticleScanProgress),
+{
     let config = build_content_prep_config();
     let selected_aliases: HashSet<String> = url_lookup_aliases(selected_url).into_iter().collect();
     let mut markdown_files = Vec::new();
@@ -539,10 +609,18 @@ fn find_article_package_for_selected_url(
     }
     markdown_files.sort();
 
-    for path in markdown_files {
+    let files_total = markdown_files.len();
+
+    for (index, path) in markdown_files.into_iter().enumerate() {
+        let files_scanned = index + 1;
         let markdown = fs::read_to_string(&path)
             .map_err(|err| format!("failed to read {}: {}", path.display(), err))?;
         let Some(fields) = parse_frontmatter(&markdown) else {
+            on_progress(ArticleScanProgress {
+                files_scanned,
+                files_total,
+                matched_urls: 0,
+            });
             continue;
         };
         let Some(url) = fields
@@ -552,6 +630,11 @@ fn find_article_package_for_selected_url(
             .filter(|u| !u.is_empty())
             .map(ToString::to_string)
         else {
+            on_progress(ArticleScanProgress {
+                files_scanned,
+                files_total,
+                matched_urls: 0,
+            });
             continue;
         };
 
@@ -559,6 +642,11 @@ fn find_article_package_for_selected_url(
             if let Some(raw_fetched_utc) = &fields.fetched_utc {
                 if let Ok(article_ts) = parse_rfc3339_utc("article", raw_fetched_utc) {
                     if article_ts < since_dt {
+                        on_progress(ArticleScanProgress {
+                            files_scanned,
+                            files_total,
+                            matched_urls: 0,
+                        });
                         continue;
                     }
                 }
@@ -570,10 +658,20 @@ fn find_article_package_for_selected_url(
             .iter()
             .any(|alias| selected_aliases.contains(alias))
         {
+            on_progress(ArticleScanProgress {
+                files_scanned,
+                files_total,
+                matched_urls: 0,
+            });
             continue;
         }
 
         let clean_text = derive_clean_text(&markdown, &url, fields.title.as_deref(), &config);
+        on_progress(ArticleScanProgress {
+            files_scanned,
+            files_total,
+            matched_urls: 1,
+        });
         return Ok(Some(ArticlePackage {
             url,
             source_title: fields.title,

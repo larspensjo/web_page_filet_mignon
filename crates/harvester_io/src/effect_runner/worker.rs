@@ -5,7 +5,7 @@ use std::time::Instant;
 use engine_logging::{engine_debug, engine_error, engine_info, engine_warn};
 use harvester_core::{LoadedArticle, Msg};
 use harvester_engine::llm::PromptRegistry;
-use harvester_engine::load_and_prepare_articles_filtered;
+use harvester_engine::{load_and_prepare_articles_filtered_with_progress, ArticleScanProgress};
 
 use crate::entity_index_store::EntityIndexPatch;
 
@@ -67,6 +67,8 @@ pub(super) fn run_triage_refresh_load(
     max_input_bytes: usize,
 ) {
     let load_started = Instant::now();
+    let progress_tx = msg_tx.clone();
+    let mut last_progress: Option<ArticleScanProgress> = None;
     engine_info!(
         "[pre-triage-refresh] load start request_id={} urls={}",
         request_id,
@@ -74,12 +76,28 @@ pub(super) fn run_triage_refresh_load(
     );
 
     let guard = registry.read().unwrap();
-    match load_and_prepare_articles_filtered(
+    match load_and_prepare_articles_filtered_with_progress(
         &output_dir,
         max_input_bytes,
         &guard,
         &ordered_urls,
         since_utc,
+        |progress| {
+            last_progress = Some(progress);
+            let should_emit = progress.files_scanned == 1
+                || progress.files_scanned == progress.files_total
+                || progress.files_scanned % 25 == 0;
+            if !should_emit {
+                return;
+            }
+
+            let _ = progress_tx.send(Msg::TriageArticlesLoadProgress {
+                request_id,
+                files_scanned: progress.files_scanned,
+                files_total: progress.files_total,
+                matched_urls: progress.matched_urls,
+            });
+        },
     ) {
         Ok((engine_articles, _)) => {
             let articles: Vec<LoadedArticle> = engine_articles
@@ -92,11 +110,16 @@ pub(super) fn run_triage_refresh_load(
                     fetched_utc: article.fetched_utc,
                 })
                 .collect();
+            let (files_scanned, files_total) = last_progress
+                .map(|progress| (progress.files_scanned, progress.files_total))
+                .unwrap_or((0, 0));
             engine_info!(
-                "[pre-triage-refresh] load done request_id={} urls={} prepared={} elapsed_ms={}",
+                "[pre-triage-refresh] load done request_id={} urls={} prepared={} files_scanned={} files_total={} elapsed_ms={}",
                 request_id,
                 ordered_urls.len(),
                 articles.len(),
+                files_scanned,
+                files_total,
                 load_started.elapsed().as_millis()
             );
             let _ = msg_tx.send(Msg::TriageArticlesLoaded {
@@ -105,10 +128,15 @@ pub(super) fn run_triage_refresh_load(
             });
         }
         Err(reason) => {
+            let (files_scanned, files_total) = last_progress
+                .map(|progress| (progress.files_scanned, progress.files_total))
+                .unwrap_or((0, 0));
             engine_warn!(
-                "[pre-triage-refresh] load failed request_id={} urls={} elapsed_ms={} reason={}",
+                "[pre-triage-refresh] load failed request_id={} urls={} files_scanned={} files_total={} elapsed_ms={} reason={}",
                 request_id,
                 ordered_urls.len(),
+                files_scanned,
+                files_total,
                 load_started.elapsed().as_millis(),
                 reason
             );

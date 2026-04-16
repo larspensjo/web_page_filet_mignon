@@ -68,6 +68,7 @@ pub(super) fn handle_articles_loaded(
         return Vec::new();
     }
     engine_info!("[pre-triage-refresh-coord] apply request_id={}", request_id);
+    state.clear_pre_triage_load_progress();
     state.clear_triage_in_flight();
     state.pre_triage_coordinator.complete_request(request_id);
     // Backfill fetched_utc from frontmatter for jobs restored without it (pre-feature state).
@@ -96,6 +97,26 @@ pub(super) fn handle_articles_loaded(
     Vec::new()
 }
 
+pub(super) fn handle_articles_load_progress(
+    state: &mut AppState,
+    request_id: u64,
+    files_scanned: usize,
+    files_total: usize,
+    matched_urls: usize,
+) -> Vec<Effect> {
+    if Some(request_id) != state.triage_in_flight_request_id() {
+        engine_info!(
+            "[pre-triage-refresh-coord] stale progress ignored request_id={} in_flight={:?}",
+            request_id,
+            state.triage_in_flight_request_id()
+        );
+        return Vec::new();
+    }
+
+    state.set_pre_triage_load_progress(request_id, files_scanned, files_total, matched_urls);
+    Vec::new()
+}
+
 pub(super) fn handle_articles_load_failed(
     state: &mut AppState,
     request_id: u64,
@@ -114,6 +135,7 @@ pub(super) fn handle_articles_load_failed(
         request_id,
         reason
     );
+    state.clear_pre_triage_load_progress();
     state.clear_triage_in_flight();
     state.pre_triage_coordinator.complete_request(request_id);
     // Clear manual overrides to avoid stale decisions on the blank pre-triage.
@@ -178,6 +200,7 @@ fn schedule_pre_triage_refresh(
                 reason
             );
             // Set pre-triage to loading so the UI shows a spinner immediately.
+            state.clear_pre_triage_load_progress();
             state.set_pre_triage_load_context(reason, ordered_url_count);
             state.set_pre_triage(PreTriageSession::new_loading());
             state.mark_dirty();
@@ -205,6 +228,7 @@ pub(super) fn dispatch_pre_triage_if_due(
 
     // Keep Slice 1 in-flight tracker in sync with the coordinator.
     state.set_triage_in_flight(request_id);
+    state.clear_pre_triage_load_progress();
     state.mark_dirty();
     engine_info!(
         "[pre-triage-refresh-coord] dispatch request_id={} urls={}",

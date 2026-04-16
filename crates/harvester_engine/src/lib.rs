@@ -34,8 +34,9 @@ pub use brave_poll::{parse_brave_news_response, BraveNewsItem, BravePollError};
 pub use brave_seen_set::{normalize_url_for_dedupe, BraveSeenSet};
 pub use briefing::{
     load_and_prepare_articles, load_and_prepare_articles_by_path,
-    load_and_prepare_articles_filtered, load_and_prepare_articles_for_triage,
-    scan_archive_article_metadata, ArchiveArticleMeta, LoadedArticle,
+    load_and_prepare_articles_filtered, load_and_prepare_articles_filtered_with_progress,
+    load_and_prepare_articles_for_triage, scan_archive_article_metadata, ArchiveArticleMeta,
+    ArticleScanProgress, LoadedArticle,
 };
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};

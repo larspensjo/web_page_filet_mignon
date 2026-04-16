@@ -346,6 +346,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             request_id,
             articles,
         } => triage::handle_articles_loaded(&mut state, request_id, articles),
+        Msg::TriageArticlesLoadProgress {
+            request_id,
+            files_scanned,
+            files_total,
+            matched_urls,
+        } => triage::handle_articles_load_progress(
+            &mut state,
+            request_id,
+            files_scanned,
+            files_total,
+            matched_urls,
+        ),
         Msg::TriageArticlesLoadFailed { request_id, reason } => {
             triage::handle_articles_load_failed(&mut state, request_id, reason)
         }

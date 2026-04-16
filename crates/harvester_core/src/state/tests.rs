@@ -1170,6 +1170,40 @@ mod app_state_tests {
     }
 
     #[test]
+    fn operation_progress_from_pre_triage_scan_progress() {
+        let mut state = startup_pre_triage_loading_state(2);
+        state.set_triage_in_flight(7);
+        state.set_pre_triage_load_progress(7, 42, 190, 1);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Preparing triage set (2 saved)".to_string(),
+                completed: 42,
+                total: 190,
+            })
+        );
+    }
+
+    #[test]
+    fn operation_progress_from_pre_triage_loading_falls_back_when_total_unknown() {
+        let mut state = startup_pre_triage_loading_state(2);
+        state.set_triage_in_flight(7);
+        state.set_pre_triage_load_progress(7, 0, 0, 0);
+
+        let view = state.view();
+        assert_eq!(
+            view.operation_progress,
+            Some(OperationProgress {
+                label: "Preparing triage set (2 saved)".to_string(),
+                completed: 0,
+                total: 1,
+            })
+        );
+    }
+
+    #[test]
     fn ai_warning_banner_present_for_missing_api_key() {
         let mut state = AppState::new();
         state.set_ai_availability(AiAvailability::Unavailable {

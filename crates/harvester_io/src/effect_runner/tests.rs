@@ -415,19 +415,38 @@ fn load_articles_for_triage_respects_since_utc_filter() {
         since_utc: Some(since),
     }]);
 
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected triage loaded message");
-    match msg {
-        Msg::TriageArticlesLoaded {
-            request_id,
-            articles,
-        } => {
-            assert_eq!(request_id, 1);
-            assert_eq!(articles.len(), 1);
-            assert_eq!(articles[0].url, "https://example.com/new");
+    let mut saw_progress = false;
+    loop {
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("expected triage load message");
+        match msg {
+            Msg::TriageArticlesLoadProgress {
+                request_id,
+                files_scanned,
+                files_total,
+                ..
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(files_total, 2);
+                assert!(files_scanned >= 1);
+                saw_progress = true;
+            }
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles,
+            } => {
+                assert_eq!(request_id, 1);
+                assert_eq!(articles.len(), 1);
+                assert_eq!(articles[0].url, "https://example.com/new");
+                assert!(
+                    saw_progress,
+                    "triage loads should emit progress before completion"
+                );
+                break;
+            }
+            other => panic!("unexpected message: {:?}", other),
         }
-        other => panic!("unexpected message: {:?}", other),
     }
 }
 
