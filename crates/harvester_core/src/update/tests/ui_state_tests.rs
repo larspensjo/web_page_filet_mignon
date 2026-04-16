@@ -125,6 +125,7 @@ fn ai_availability_defaults_to_available_before_startup_evidence_arrives() {
     let state = AppState::new();
     assert_eq!(state.ai_availability(), &crate::AiAvailability::Available);
     assert!(state.view().ai_unavailable_message.is_none());
+    assert!(state.view().ai_warning_banner.is_none());
 }
 
 #[test]
@@ -146,6 +147,25 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
     assert_eq!(
         view.ai_unavailable_message.as_deref(),
         Some("AI features unavailable: OPENAI_API_KEY is not set")
+    );
+    assert_eq!(
+        view.ai_warning_banner,
+        Some(crate::InlineWarningView {
+            title: "AI features are disabled".to_string(),
+            body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
+        })
+    );
+    assert_eq!(
+        view.right_pane.triage_markdown.as_deref(),
+        Some(
+            "AI setup required\n\nTriage is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable article triage."
+        )
+    );
+    assert_eq!(
+        view.right_pane.briefing_markdown.as_deref(),
+        Some(
+            "AI setup required\n\nBriefing is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable briefing generation."
+        )
     );
 
     let pre_triage_before = state.pre_triage().resolved_included_urls().to_vec();
@@ -191,6 +211,7 @@ fn llm_metadata_without_triage_model_sets_ai_unavailable_reason() {
             reason: crate::AiUnavailableReason::NoTriageModel,
         }
     );
+    assert!(state.view().ai_warning_banner.is_none());
 }
 
 #[test]

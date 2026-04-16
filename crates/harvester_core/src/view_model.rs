@@ -104,6 +104,12 @@ pub struct PreviewContextView {
     pub attention_label: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineWarningView {
+    pub title: String,
+    pub body: String,
+}
+
 /// View data for one entity in the trends tab.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntityLineView {
@@ -228,6 +234,7 @@ pub struct LayoutViewModel {
     pub active_tab: AppTab,
     pub left_tab: LeftTab,
     pub left_header_meta_visible: bool,
+    pub ai_warning_banner_visible: bool,
     pub preview_header_override_visible: bool,
     pub preview_context_visible: bool,
     pub preview_attention_visible: bool,
@@ -254,6 +261,7 @@ pub struct AppViewModel {
     pub left_pane_header: LeftPaneHeaderView,
     pub preview_header: Option<PreviewHeaderView>,
     pub preview_context: Option<PreviewContextView>,
+    pub ai_warning_banner: Option<InlineWarningView>,
     pub preview_header_text: Option<String>,
     pub preview_source: Option<PreviewContentKind>,
     pub briefing_can_start: bool,
@@ -308,6 +316,7 @@ impl Default for AppViewModel {
             },
             preview_header: None,
             preview_context: None,
+            ai_warning_banner: None,
             preview_header_text: None,
             preview_source: None,
             briefing_can_start: false,

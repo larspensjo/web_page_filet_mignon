@@ -1234,9 +1234,25 @@ impl AppState {
             .map(|reason| format!("AI features unavailable: {reason}"))
     }
 
+    fn ai_warning_banner(&self) -> Option<crate::InlineWarningView> {
+        matches!(
+            self.ai_unavailable_reason(),
+            Some(AiUnavailableReason::MissingApiKey)
+        )
+        .then(|| crate::InlineWarningView {
+            title: "AI features are disabled".to_string(),
+            body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
+        })
+    }
+
     fn triage_blocked_reason(&self) -> Option<String> {
-        if let Some(reason) = self.ai_unavailable_reason_text() {
-            return Some(reason.to_string());
+        if let Some(reason) = self.ai_unavailable_reason() {
+            return Some(match reason {
+                AiUnavailableReason::MissingApiKey => {
+                    "AI setup is incomplete because OPENAI_API_KEY is not set".to_string()
+                }
+                AiUnavailableReason::NoTriageModel => "no triage model is available".to_string(),
+            });
         }
 
         if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
@@ -1254,7 +1270,12 @@ impl AppState {
     }
 
     fn briefing_blocked_reason(&self) -> Option<String> {
-        self.ai_unavailable_reason_text().map(str::to_string)
+        self.ai_unavailable_reason().map(|reason| match reason {
+            AiUnavailableReason::MissingApiKey => {
+                "AI setup is incomplete because OPENAI_API_KEY is not set".to_string()
+            }
+            AiUnavailableReason::NoTriageModel => "no triage model is available".to_string(),
+        })
     }
 
     fn pre_triage_loading_progress_text(&self) -> String {

@@ -1170,6 +1170,70 @@ mod app_state_tests {
     }
 
     #[test]
+    fn ai_warning_banner_present_for_missing_api_key() {
+        let mut state = AppState::new();
+        state.set_ai_availability(AiAvailability::Unavailable {
+            reason: AiUnavailableReason::MissingApiKey,
+        });
+
+        let view = state.view();
+        assert_eq!(
+            view.ai_warning_banner,
+            Some(crate::InlineWarningView {
+                title: "AI features are disabled".to_string(),
+                body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
+            })
+        );
+        assert_eq!(
+            view.triage_blocked_reason,
+            Some("AI setup is incomplete because OPENAI_API_KEY is not set".to_string())
+        );
+        assert_eq!(
+            view.briefing_blocked_reason,
+            Some("AI setup is incomplete because OPENAI_API_KEY is not set".to_string())
+        );
+        assert_eq!(
+            view.right_pane.triage_markdown,
+            Some(
+                "AI setup required\n\nTriage is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable article triage.".to_string()
+            )
+        );
+        assert_eq!(
+            view.right_pane.briefing_markdown,
+            Some(
+                "AI setup required\n\nBriefing is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable briefing generation.".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn ai_warning_banner_absent_when_ai_available() {
+        let state = AppState::new();
+
+        let view = state.view();
+        assert!(view.ai_warning_banner.is_none());
+    }
+
+    #[test]
+    fn ai_warning_banner_absent_for_non_key_ai_unavailability() {
+        let mut state = AppState::new();
+        state.set_ai_availability(AiAvailability::Unavailable {
+            reason: AiUnavailableReason::NoTriageModel,
+        });
+
+        let view = state.view();
+        assert!(view.ai_warning_banner.is_none());
+        assert_eq!(
+            view.right_pane.triage_markdown,
+            Some("Article triage is unavailable because no triage model is available.".to_string())
+        );
+        assert_eq!(
+            view.right_pane.briefing_markdown,
+            Some("Briefing is unavailable because no triage model is available.".to_string())
+        );
+    }
+
+    #[test]
     fn layout_view_shows_operation_progress_during_pre_triage_loading() {
         let state = startup_pre_triage_loading_state(1);
 

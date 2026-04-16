@@ -159,6 +159,7 @@ impl AppState {
             } else {
                 None
             };
+        let ai_warning_banner = self.ai_warning_banner();
         let ai_unavailable_message = self.ai_unavailable_message();
         let triage_blocked_reason = self.triage_blocked_reason();
         let briefing_blocked_reason = self.briefing_blocked_reason();
@@ -177,6 +178,7 @@ impl AppState {
             left_pane_header,
             preview_header,
             preview_context,
+            ai_warning_banner,
             preview_header_text,
             preview_source,
             briefing_can_start: self.briefing.can_start() && self.briefing_ai_available(),
@@ -278,6 +280,7 @@ impl AppState {
                 self.left_tab(),
                 LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults
             ),
+            ai_warning_banner_visible: self.ai_warning_banner().is_some(),
             preview_header_override_visible,
             preview_context_visible: selected_job.is_some() && !preview_header_override_visible,
             preview_attention_visible: selected_job
@@ -327,20 +330,26 @@ impl AppState {
 
         let briefing_markdown = self.briefing.format_preview();
         let triage_placeholder = if triage_markdown.is_none() {
-            self.triage_blocked_reason().map(|reason| {
-                format!(
-                    "Article triage is unavailable because {reason}.\n\nSet OPENAI_API_KEY and restart the app to enable triage."
-                )
-            })
+            match self.ai_unavailable_reason() {
+                Some(crate::AiUnavailableReason::MissingApiKey) => Some(
+                    "AI setup required\n\nTriage is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable article triage.".to_string(),
+                ),
+                _ => self
+                    .triage_blocked_reason()
+                    .map(|reason| format!("Article triage is unavailable because {reason}.")),
+            }
         } else {
             None
         };
         let briefing_placeholder = if briefing_markdown.is_none() {
-            self.briefing_blocked_reason().map(|reason| {
-                format!(
-                    "Briefing is unavailable because {reason}.\n\nSet OPENAI_API_KEY and restart the app to enable briefing."
-                )
-            })
+            match self.ai_unavailable_reason() {
+                Some(crate::AiUnavailableReason::MissingApiKey) => Some(
+                    "AI setup required\n\nBriefing is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable briefing generation.".to_string(),
+                ),
+                _ => self
+                    .briefing_blocked_reason()
+                    .map(|reason| format!("Briefing is unavailable because {reason}.")),
+            }
         } else {
             None
         };
