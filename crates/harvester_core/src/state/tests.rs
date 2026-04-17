@@ -1173,7 +1173,7 @@ mod app_state_tests {
     fn operation_progress_from_pre_triage_scan_progress() {
         let mut state = startup_pre_triage_loading_state(2);
         state.set_triage_in_flight(7);
-        state.set_pre_triage_load_progress(7, 42, 190, 1);
+        state.set_pre_triage_load_progress(7, 42, 190);
 
         let view = state.view();
         assert_eq!(
@@ -1190,7 +1190,7 @@ mod app_state_tests {
     fn operation_progress_from_pre_triage_loading_falls_back_when_total_unknown() {
         let mut state = startup_pre_triage_loading_state(2);
         state.set_triage_in_flight(7);
-        state.set_pre_triage_load_progress(7, 0, 0, 0);
+        state.set_pre_triage_load_progress(7, 0, 0);
 
         let view = state.view();
         assert_eq!(

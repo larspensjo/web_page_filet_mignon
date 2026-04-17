@@ -167,7 +167,6 @@ fn triage_articles_load_progress_updates_matching_request() {
             request_id,
             files_scanned: 25,
             files_total: 80,
-            matched_urls: 1,
         },
     );
 
@@ -193,7 +192,6 @@ fn triage_articles_load_progress_ignores_stale_request() {
             request_id: 999,
             files_scanned: 25,
             files_total: 80,
-            matched_urls: 1,
         },
     );
 
@@ -218,7 +216,6 @@ fn triage_articles_load_progress_cleared_on_success() {
             request_id,
             files_scanned: 25,
             files_total: 80,
-            matched_urls: 1,
         },
     );
 
@@ -244,7 +241,6 @@ fn triage_articles_load_progress_cleared_on_failure() {
             request_id,
             files_scanned: 25,
             files_total: 80,
-            matched_urls: 1,
         },
     );
 

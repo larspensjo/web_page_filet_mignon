@@ -153,7 +153,7 @@ impl AppState {
             } else if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
                 let (completed, total) = self
                     .pre_triage_load_progress()
-                    .and_then(|(files_scanned, files_total, _, _)| {
+                    .and_then(|(files_scanned, files_total, _)| {
                         (files_total > 0).then_some((files_scanned as u32, files_total as u32))
                     })
                     .unwrap_or((0, 1));

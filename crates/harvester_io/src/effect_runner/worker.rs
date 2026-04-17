@@ -95,7 +95,6 @@ pub(super) fn run_triage_refresh_load(
                 request_id,
                 files_scanned: progress.files_scanned,
                 files_total: progress.files_total,
-                matched_urls: progress.matched_urls,
             });
         },
     ) {

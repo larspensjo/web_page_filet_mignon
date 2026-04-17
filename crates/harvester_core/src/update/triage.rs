@@ -102,7 +102,6 @@ pub(super) fn handle_articles_load_progress(
     request_id: u64,
     files_scanned: usize,
     files_total: usize,
-    matched_urls: usize,
 ) -> Vec<Effect> {
     if Some(request_id) != state.triage_in_flight_request_id() {
         engine_info!(
@@ -113,7 +112,7 @@ pub(super) fn handle_articles_load_progress(
         return Vec::new();
     }
 
-    state.set_pre_triage_load_progress(request_id, files_scanned, files_total, matched_urls);
+    state.set_pre_triage_load_progress(request_id, files_scanned, files_total);
     Vec::new()
 }
 

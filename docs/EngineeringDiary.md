@@ -1524,3 +1524,9 @@ Type: Implementation
 Context: Startup pre-triage refresh could spend noticeable time scanning saved articles while the footer only showed a static placeholder, making the app look idle before Triage became available.
 Change: Added reducer-owned pre-triage load progress, a new `Msg::TriageArticlesLoadProgress` message, engine scan callbacks, throttled worker progress emission, and footer mapping from live `files_scanned/files_total` counts while preserving existing non-progress loader call sites.
 Refs: crates/harvester_core/src/msg.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_engine/src/briefing.rs, crates/harvester_io/src/effect_runner/worker.rs, filtered_loader_with_progress_reports_scan_progress
+
+## 2026-04-17 - Remove dead `matched_urls` pre-triage progress field
+Type: Maintenance
+Context: The startup pre-triage progress pipeline still carried `matched_urls`, but nothing derived behavior or rendering from it; it was only forwarded from engine scan callbacks into reducer state.
+Change: Removed `matched_urls` from `ArticleScanProgress`, `Msg::TriageArticlesLoadProgress`, reducer/state plumbing, footer progress accessors, and the related state/update tests so the pre-triage progress shape now carries only scan counts plus request identity.
+Refs: crates/harvester_engine/src/briefing.rs, crates/harvester_io/src/effect_runner/worker.rs, crates/harvester_core/src/msg.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs, crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs

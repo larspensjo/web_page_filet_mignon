@@ -97,7 +97,6 @@ struct PreTriageLoadProgress {
     request_id: u64,
     files_scanned: usize,
     files_total: usize,
-    matched_urls: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -925,13 +924,11 @@ impl AppState {
         request_id: u64,
         files_scanned: usize,
         files_total: usize,
-        matched_urls: usize,
     ) {
         let progress = PreTriageLoadProgress {
             request_id,
             files_scanned,
             files_total,
-            matched_urls,
         };
         if self.pre_triage_load_progress != Some(progress) {
             self.pre_triage_load_progress = Some(progress);
@@ -945,14 +942,13 @@ impl AppState {
         }
     }
 
-    pub(crate) fn pre_triage_load_progress(&self) -> Option<(usize, usize, usize, u64)> {
+    pub(crate) fn pre_triage_load_progress(&self) -> Option<(usize, usize, u64)> {
         self.pre_triage_load_progress.map(
             |PreTriageLoadProgress {
                  request_id,
                  files_scanned,
                  files_total,
-                 matched_urls,
-             }| { (files_scanned, files_total, matched_urls, request_id) },
+             }| { (files_scanned, files_total, request_id) },
         )
     }
 

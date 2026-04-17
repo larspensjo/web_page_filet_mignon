@@ -53,7 +53,6 @@ pub struct ArchiveArticleMeta {
 pub struct ArticleScanProgress {
     pub files_scanned: usize,
     pub files_total: usize,
-    pub matched_urls: usize,
 }
 
 struct ArticlePackage {
@@ -164,7 +163,6 @@ where
                 on_progress(ArticleScanProgress {
                     files_scanned,
                     files_total,
-                    matched_urls: packages.len(),
                 });
                 continue;
             }
@@ -184,7 +182,6 @@ where
                 on_progress(ArticleScanProgress {
                     files_scanned,
                     files_total,
-                    matched_urls: packages.len(),
                 });
                 continue;
             }
@@ -204,7 +201,6 @@ where
                             on_progress(ArticleScanProgress {
                                 files_scanned,
                                 files_total,
-                                matched_urls: packages.len(),
                             });
                             continue;
                         }
@@ -224,7 +220,6 @@ where
         on_progress(ArticleScanProgress {
             files_scanned,
             files_total,
-            matched_urls: packages.len(),
         });
     }
 
@@ -619,7 +614,6 @@ where
             on_progress(ArticleScanProgress {
                 files_scanned,
                 files_total,
-                matched_urls: 0,
             });
             continue;
         };
@@ -633,7 +627,6 @@ where
             on_progress(ArticleScanProgress {
                 files_scanned,
                 files_total,
-                matched_urls: 0,
             });
             continue;
         };
@@ -645,7 +638,6 @@ where
                         on_progress(ArticleScanProgress {
                             files_scanned,
                             files_total,
-                            matched_urls: 0,
                         });
                         continue;
                     }
@@ -661,7 +653,6 @@ where
             on_progress(ArticleScanProgress {
                 files_scanned,
                 files_total,
-                matched_urls: 0,
             });
             continue;
         }
@@ -670,7 +661,6 @@ where
         on_progress(ArticleScanProgress {
             files_scanned,
             files_total,
-            matched_urls: 1,
         });
         return Ok(Some(ArticlePackage {
             url,
