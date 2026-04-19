@@ -54,7 +54,7 @@ impl ListBoxRenderModel {
         let items = build_list_box_items(view);
         let selected_item_id = view
             .selected_job_id
-            .map(ListBoxItemId)
+            .map(ListBoxItemId::new)
             .filter(|selected_item_id| items.iter().any(|item| item.id == *selected_item_id));
         Self {
             items,
@@ -198,7 +198,7 @@ pub(super) fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItem
     );
 
     ListBoxItemDescriptor {
-        id: ListBoxItemId(job.job_id),
+        id: ListBoxItemId::new(job.job_id),
         badges,
         title,
         metadata,

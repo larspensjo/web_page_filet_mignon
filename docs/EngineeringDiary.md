@@ -1530,3 +1530,9 @@ Type: Maintenance
 Context: The startup pre-triage progress pipeline still carried `matched_urls`, but nothing derived behavior or rendering from it; it was only forwarded from engine scan callbacks into reducer state.
 Change: Removed `matched_urls` from `ArticleScanProgress`, `Msg::TriageArticlesLoadProgress`, reducer/state plumbing, footer progress accessors, and the related state/update tests so the pre-triage progress shape now carries only scan counts plus request identity.
 Refs: crates/harvester_engine/src/briefing.rs, crates/harvester_io/src/effect_runner/worker.rs, crates/harvester_core/src/msg.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs, crates/harvester_core/src/update/tests/pre_triage_refresh_tests.rs
+
+## 2026-04-19 - Adapt Harvester UI to CommanDuctUI v2 typed IDs
+Type: Maintenance
+Context: Upgrading `CommanDuctUI` to v2.0.1 tightened its typed ID API, replacing direct tuple-style construction and field access with constructor/accessor methods.
+Change: Updated Harvester UI event handling, list/tree item ID helpers, and UI regression tests to use `::new()` and `.raw()` for `MenuActionId`, `ListBoxItemId`, and `TreeItemId`, and bumped the submodule and lockfile to the new `commanductui` version.
+Refs: Cargo.lock, src/CommanDuctUI, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/constants.rs, crates/harvester_app/src/platform/ui/render_list_box.rs, crates/harvester_app/src/platform/ui/render_tests.rs, crates/harvester_app/src/platform/ui/tree_item_ids.rs

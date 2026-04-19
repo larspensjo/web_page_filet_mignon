@@ -1,6 +1,6 @@
 use commanductui::types::{ControlId, MenuActionId};
 
-pub const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId(1);
+pub const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId::new(1);
 
 pub const INPUT_URLS: ControlId = ControlId::new(1001);
 pub const BUTTON_STOP: ControlId = ControlId::new(1003);

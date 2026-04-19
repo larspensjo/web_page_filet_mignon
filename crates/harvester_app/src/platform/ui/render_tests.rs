@@ -231,7 +231,7 @@ fn tree_updates_text_without_repopulate_on_progress_change() {
         })
         .expect("updated list emitted");
     assert_eq!(populated.len(), 1);
-    assert_eq!(populated[0].id, ListBoxItemId(1));
+    assert_eq!(populated[0].id, ListBoxItemId::new(1));
     assert_eq!(populated[0].title, "example.com");
     assert_eq!(populated[0].badges[0].text, "Fetch");
     assert_eq!(populated[0].metadata, "example.com · 100 · 2.0 KB");
@@ -586,14 +586,14 @@ fn scope_since_checkpoint_skips_selection_for_filtered_job() {
         matches!(
             cmd,
             PlatformCommand::PopulateListBox { items, .. }
-                if items.iter().all(|item| item.id != ListBoxItemId(2))
+                if items.iter().all(|item| item.id != ListBoxItemId::new(2))
         )
     }));
     assert!(!cmds.iter().any(|cmd| {
         matches!(
             cmd,
             PlatformCommand::SetListBoxSelection { control_id, item_id, .. }
-                if *control_id == TREE_JOBS && *item_id == ListBoxItemId(2)
+                if *control_id == TREE_JOBS && *item_id == ListBoxItemId::new(2)
         )
     }));
 }
@@ -827,7 +827,7 @@ fn triage_results_in_progress_updates_rows_without_repopulating_tree() {
         })
         .expect("updated list emitted");
     assert_eq!(populated.len(), 2);
-    assert_eq!(populated[0].id, ListBoxItemId(1));
+    assert_eq!(populated[0].id, ListBoxItemId::new(1));
     assert!(populated[0].title.contains("Now Highest"));
     assert!(populated[0].metadata.contains("0 tags"));
 }

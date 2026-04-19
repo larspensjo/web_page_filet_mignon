@@ -1136,7 +1136,9 @@ impl PlatformEventHandler for AppEventHandler {
             AppEvent::ListBoxItemSelectionChanged {
                 window_id, item_id, ..
             } if window_id == self.window_id => {
-                let _ = self.msg_tx.send(Msg::JobSelected { job_id: item_id.0 });
+                let _ = self.msg_tx.send(Msg::JobSelected {
+                    job_id: item_id.raw(),
+                });
             }
             AppEvent::ListBoxItemKeyDown {
                 window_id,
