@@ -200,6 +200,7 @@ impl SmartQueryEngine {
                 top_companies: selection.top_companies,
                 top_themes: selection.top_themes,
                 sample_titles: selection.sample_titles,
+                breadth_diagnostics: None,
             });
         }
 
@@ -254,6 +255,7 @@ impl SmartQueryEngine {
             top_companies: Vec::new(),
             top_themes: Vec::new(),
             sample_titles: Vec::new(),
+            breadth_diagnostics: None,
         })
     }
 }
@@ -710,7 +712,7 @@ mod tests {
 
         let provider = Arc::new(MockLlmProvider::new());
         provider.queue_json_success(
-            r#"{"regex_patterns":["(?i)(data center|chip|cloud)"],"entity_names":[],"date_from":null,"date_to":null}"#,
+            r#"{"regex_patterns":["(?i)(data center|chip|cloud)"],"entity_names":[],"focus_terms":["cloud","chip"],"focus_phrases":["data center"],"date_from":null,"date_to":null}"#,
         );
 
         let engine = test_engine_with_articles(
@@ -745,6 +747,47 @@ mod tests {
         assert_eq!(response.threshold, Some(DEFAULT_TOO_BROAD_THRESHOLD));
         assert!(!response.refinement_suggestions.is_empty());
         assert!(!response.sample_titles.is_empty());
+        let diagnostics = response
+            .breadth_diagnostics
+            .expect("too_broad response should include breadth diagnostics");
+        assert_eq!(diagnostics.filter_breakdown.total_unique_candidates, 120);
+        assert_eq!(
+            diagnostics
+                .filter_breakdown
+                .filtered_low_priority_candidates,
+            0
+        );
+        assert_eq!(
+            diagnostics.filter_breakdown.filtered_admission_candidates,
+            0
+        );
+        assert_eq!(diagnostics.filter_breakdown.eligible_unique_candidates, 120);
+        assert_eq!(diagnostics.priority_band_counts.len(), 1);
+        assert_eq!(diagnostics.priority_band_counts[0].priority, 3);
+        assert_eq!(diagnostics.priority_band_counts[0].count, 120);
+        assert_eq!(diagnostics.match_signal_counts.entity_only_candidates, 0);
+        assert_eq!(diagnostics.match_signal_counts.focus_only_candidates, 120);
+        assert_eq!(
+            diagnostics.match_signal_counts.entity_and_focus_candidates,
+            0
+        );
+        assert_eq!(
+            diagnostics.match_signal_counts.title_supported_candidates,
+            120
+        );
+        assert_eq!(diagnostics.match_signal_counts.body_only_candidates, 0);
+        assert_eq!(diagnostics.focus_term_coverage.len(), 2);
+        assert!(diagnostics
+            .focus_term_coverage
+            .iter()
+            .all(|coverage| coverage.count == 120));
+        assert_eq!(diagnostics.focus_phrase_coverage.len(), 1);
+        assert_eq!(diagnostics.focus_phrase_coverage[0].value, "data center");
+        assert_eq!(diagnostics.focus_phrase_coverage[0].count, 120);
+        assert_eq!(diagnostics.top_themes[0].value, "data centers");
+        assert_eq!(diagnostics.top_themes[0].count, 120);
+        assert_eq!(diagnostics.top_tags[0].value, "capacity");
+        assert_eq!(diagnostics.top_tags[0].count, 120);
         assert!(response
             .refinement_suggestions
             .iter()

@@ -4,11 +4,14 @@ use harvester_engine::llm::{ChatMessage, ChatRole, LlmError, LlmProvider, LlmReq
 use harvester_engine::{TokenCounter, WhitespaceTokenCounter};
 
 use super::types::{
-    CandidateSelection, DigestAssemblyResponse, QueryExpansion, QueryKnowledgeBaseInput,
+    BreadthDiagnostics, BreadthFilterBreakdown, CandidateSelection, CountedDiagnosticValue,
+    DigestAssemblyResponse, PriorityBandCount, QueryExpansion, QueryKnowledgeBaseInput,
     QueryKnowledgeBaseResponse, RankedArticleDigest, ScoredCandidate, SmartQueryEngine,
     MAX_KEY_FACTS,
 };
 use super::{expansion, heuristics, refinement};
+
+const BREADTH_DIAGNOSTIC_LIMIT: usize = 8;
 
 impl SmartQueryEngine {
     pub(super) async fn assemble_digest(
@@ -126,6 +129,7 @@ impl SmartQueryEngine {
             top_companies: Vec::new(),
             top_themes: Vec::new(),
             sample_titles: Vec::new(),
+            breadth_diagnostics: None,
         }
     }
 
@@ -141,6 +145,7 @@ impl SmartQueryEngine {
             &expansion.focus_terms,
             &expansion.focus_phrases,
         );
+        let breadth_diagnostics = build_breadth_diagnostics(&selection);
 
         QueryKnowledgeBaseResponse {
             mode: "too_broad".to_string(),
@@ -167,6 +172,7 @@ impl SmartQueryEngine {
             top_companies: selection.top_companies,
             top_themes: selection.top_themes,
             sample_titles: selection.sample_titles,
+            breadth_diagnostics: Some(breadth_diagnostics),
         }
     }
 
@@ -211,6 +217,42 @@ impl SmartQueryEngine {
             return response;
         }
     }
+}
+
+fn build_breadth_diagnostics(selection: &CandidateSelection) -> BreadthDiagnostics {
+    BreadthDiagnostics {
+        filter_breakdown: BreadthFilterBreakdown {
+            total_unique_candidates: selection.total_unique_candidates,
+            filtered_low_priority_candidates: selection.filtered_low_priority_candidates,
+            filtered_admission_candidates: selection.filtered_admission_candidates,
+            eligible_unique_candidates: selection.eligible_unique_candidates,
+        },
+        priority_band_counts: selection
+            .priority_band_counts
+            .iter()
+            .map(|(priority, count)| PriorityBandCount {
+                priority: *priority,
+                count: *count,
+            })
+            .collect(),
+        match_signal_counts: selection.match_signal_counts.clone(),
+        focus_term_coverage: counted_values(&selection.focus_term_coverage),
+        focus_phrase_coverage: counted_values(&selection.focus_phrase_coverage),
+        top_companies: counted_values(&selection.company_counts),
+        top_themes: counted_values(&selection.theme_counts),
+        top_tags: counted_values(&selection.tag_counts),
+    }
+}
+
+fn counted_values(counts: &[(String, usize)]) -> Vec<CountedDiagnosticValue> {
+    counts
+        .iter()
+        .take(BREADTH_DIAGNOSTIC_LIMIT)
+        .map(|(value, count)| CountedDiagnosticValue {
+            value: value.clone(),
+            count: *count,
+        })
+        .collect()
 }
 
 fn expand_digest_citations(synthesis: &str, citation_rows: &[(String, String)]) -> String {

@@ -1536,3 +1536,15 @@ Type: Maintenance
 Context: Upgrading `CommanDuctUI` to v2.0.1 tightened its typed ID API, replacing direct tuple-style construction and field access with constructor/accessor methods.
 Change: Updated Harvester UI event handling, list/tree item ID helpers, and UI regression tests to use `::new()` and `.raw()` for `MenuActionId`, `ListBoxItemId`, and `TreeItemId`, and bumped the submodule and lockfile to the new `commanductui` version.
 Refs: Cargo.lock, src/CommanDuctUI, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/constants.rs, crates/harvester_app/src/platform/ui/render_list_box.rs, crates/harvester_app/src/platform/ui/render_tests.rs, crates/harvester_app/src/platform/ui/tree_item_ids.rs
+
+## 2026-04-21 - Add structured broad-query diagnostics to `harvester_mcp`
+Type: Retrieval
+Context: Returning `mode="too_broad"` was useful, but clients still lacked deterministic detail about whether the breadth came from low-priority noise, weak focus-term coverage, or a genuinely large surviving high-confidence set.
+Change: Added a `breadth_diagnostics` object to smart-query `too_broad` responses with filter breakdown counts, priority-band counts, match-signal counts, and counted focus/company/theme/tag facets drawn from the eligible pre-scoring candidate set. Added a contract test that asserts the diagnostics for a broad infrastructure query.
+Refs: crates/harvester_mcp/src/smart_query/types.rs, crates/harvester_mcp/src/smart_query/candidates.rs, crates/harvester_mcp/src/smart_query/digest.rs, crates/harvester_mcp/src/smart_query/mod.rs
+
+## 2026-04-21 - Fix stale Claude MCP workspace path
+Type: Bug Fix
+Context: Claude showed `harvester-mcp` as failed with `Connection closed` because the workspace-local `.mcp.json` still pointed `-ProjectRoot` at a deleted `.worktrees\mcp-server` checkout, so `Start-HarvesterMcp.ps1` failed before the server could start.
+Change: Updated `.mcp.json` to use an absolute launcher path and the live repository root as `-ProjectRoot`, then verified the exact Claude-style `pwsh` command by completing MCP initialize and a `list_articles` tool call.
+Refs: .mcp.json, scripts/Start-HarvesterMcp.ps1

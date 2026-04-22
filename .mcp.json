@@ -7,9 +7,9 @@
         "-NoLogo",
         "-NoProfile",
         "-File",
-        ".\\scripts\\Start-HarvesterMcp.ps1",
+        "C:\\Users\\larsp\\src\\web_page_filet_mignon\\scripts\\Start-HarvesterMcp.ps1",
         "-ProjectRoot",
-        "C:\\Users\\larsp\\src\\web_page_filet_mignon\\.worktrees\\mcp-server",
+        "C:\\Users\\larsp\\src\\web_page_filet_mignon",
         "-OutputDir",
         "C:\\Users\\larsp\\src\\web_page_filet_mignon\\output"
       ],

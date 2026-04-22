@@ -106,6 +106,8 @@ pub struct QueryKnowledgeBaseResponse {
     pub top_themes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sample_titles: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub breadth_diagnostics: Option<BreadthDiagnostics>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -119,6 +121,53 @@ pub struct RankedArticleDigest {
     pub excerpt: String,
     pub matched_patterns: Vec<String>,
     pub matched_entities: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BreadthDiagnostics {
+    pub filter_breakdown: BreadthFilterBreakdown,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub priority_band_counts: Vec<PriorityBandCount>,
+    pub match_signal_counts: MatchSignalCounts,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub focus_term_coverage: Vec<CountedDiagnosticValue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub focus_phrase_coverage: Vec<CountedDiagnosticValue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_companies: Vec<CountedDiagnosticValue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_themes: Vec<CountedDiagnosticValue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_tags: Vec<CountedDiagnosticValue>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BreadthFilterBreakdown {
+    pub total_unique_candidates: usize,
+    pub filtered_low_priority_candidates: usize,
+    pub filtered_admission_candidates: usize,
+    pub eligible_unique_candidates: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PriorityBandCount {
+    pub priority: u8,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MatchSignalCounts {
+    pub entity_only_candidates: usize,
+    pub focus_only_candidates: usize,
+    pub entity_and_focus_candidates: usize,
+    pub title_supported_candidates: usize,
+    pub body_only_candidates: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CountedDiagnosticValue {
+    pub value: String,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +191,8 @@ pub(crate) struct CandidateArticle {
     pub(crate) key_points: Vec<String>,
     pub(crate) matched_patterns: Vec<String>,
     pub(crate) matched_entities: Vec<String>,
+    pub(crate) matched_focus_terms: Vec<String>,
+    pub(crate) matched_focus_phrases: Vec<String>,
     pub(crate) companies: Vec<String>,
     pub(crate) themes: Vec<String>,
     pub(crate) triage_tags: Vec<String>,
@@ -178,6 +229,12 @@ pub(crate) struct CandidateSelection {
     pub(crate) top_themes: Vec<String>,
     pub(crate) sample_titles: Vec<String>,
     pub(crate) tag_counts: Vec<(String, usize)>,
+    pub(crate) company_counts: Vec<(String, usize)>,
+    pub(crate) theme_counts: Vec<(String, usize)>,
+    pub(crate) focus_term_coverage: Vec<(String, usize)>,
+    pub(crate) focus_phrase_coverage: Vec<(String, usize)>,
+    pub(crate) priority_band_counts: Vec<(u8, usize)>,
+    pub(crate) match_signal_counts: MatchSignalCounts,
 }
 
 #[derive(Debug, Deserialize)]

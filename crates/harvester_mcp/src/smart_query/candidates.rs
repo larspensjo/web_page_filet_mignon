@@ -5,8 +5,8 @@ use regex::Regex;
 
 use super::refinement;
 use super::types::{
-    CandidateArticle, CandidateSelection, QueryExpansion, QueryKnowledgeBaseInput,
-    SmartQueryEngine, DEFAULT_MIN_DETERMINISTIC_ADMISSION_SCORE,
+    CandidateArticle, CandidateSelection, MatchSignalCounts, QueryExpansion,
+    QueryKnowledgeBaseInput, SmartQueryEngine, DEFAULT_MIN_DETERMINISTIC_ADMISSION_SCORE,
 };
 use crate::article_index::ArticleEntry;
 use crate::util;
@@ -91,6 +91,28 @@ impl SmartQueryEngine {
                 .iter()
                 .flat_map(|candidate| candidate.triage_tags.iter().cloned()),
         );
+        let company_counts = refinement::ranked_term_counts(
+            ranked
+                .iter()
+                .flat_map(|candidate| candidate.companies.iter().cloned()),
+        );
+        let theme_counts = refinement::ranked_term_counts(
+            ranked
+                .iter()
+                .flat_map(|candidate| candidate.themes.iter().cloned()),
+        );
+        let focus_term_coverage = refinement::ranked_term_counts(
+            ranked
+                .iter()
+                .flat_map(|candidate| candidate.matched_focus_terms.iter().cloned()),
+        );
+        let focus_phrase_coverage = refinement::ranked_term_counts(
+            ranked
+                .iter()
+                .flat_map(|candidate| candidate.matched_focus_phrases.iter().cloned()),
+        );
+        let priority_band_counts = ranked_priority_band_counts(&ranked);
+        let match_signal_counts = ranked_match_signal_counts(&ranked);
         let sample_titles = ranked
             .iter()
             .filter_map(|candidate| candidate.title.clone())
@@ -113,6 +135,12 @@ impl SmartQueryEngine {
             top_themes,
             sample_titles,
             tag_counts,
+            company_counts,
+            theme_counts,
+            focus_term_coverage,
+            focus_phrase_coverage,
+            priority_band_counts,
+            match_signal_counts,
         }
     }
 
@@ -278,9 +306,12 @@ impl SmartQueryEngine {
             &triage_tags,
         );
         let query_entity_hits = count_unique_matches(&match_haystack, &admission_policy.entities);
-        let focus_term_hits = count_unique_matches(&match_haystack, &admission_policy.focus_terms);
-        let focus_phrase_hits =
-            count_unique_matches(&match_haystack, &admission_policy.focus_phrases);
+        let matched_focus_terms =
+            collect_unique_matches(&match_haystack, &admission_policy.focus_terms);
+        let matched_focus_phrases =
+            collect_unique_matches(&match_haystack, &admission_policy.focus_phrases);
+        let focus_term_hits = matched_focus_terms.len();
+        let focus_phrase_hits = matched_focus_phrases.len();
         let title_haystack = entry.title.as_deref().unwrap_or("").to_lowercase();
         let title_focus_term_hits =
             count_unique_matches(&title_haystack, &admission_policy.focus_terms);
@@ -297,6 +328,8 @@ impl SmartQueryEngine {
             key_points,
             matched_patterns: Vec::new(),
             matched_entities: Vec::new(),
+            matched_focus_terms,
+            matched_focus_phrases,
             companies: entity_entry
                 .map(|item| item.companies.clone())
                 .unwrap_or_default(),
@@ -618,10 +651,65 @@ fn build_match_haystack(
 }
 
 fn count_unique_matches(haystack: &str, needles: &[String]) -> usize {
+    collect_unique_matches(haystack, needles).len()
+}
+
+fn collect_unique_matches(haystack: &str, needles: &[String]) -> Vec<String> {
     needles
         .iter()
         .filter(|needle| haystack.contains(needle.as_str()))
-        .count()
+        .cloned()
+        .collect()
+}
+
+fn ranked_priority_band_counts(candidates: &[CandidateArticle]) -> Vec<(u8, usize)> {
+    let mut counts: HashMap<u8, usize> = HashMap::new();
+    for candidate in candidates {
+        let Some(priority) = candidate.triage_priority else {
+            continue;
+        };
+        *counts.entry(priority).or_insert(0) += 1;
+    }
+
+    let mut ranked: Vec<_> = counts.into_iter().collect();
+    ranked.sort_by(|left, right| right.0.cmp(&left.0));
+    ranked
+}
+
+fn ranked_match_signal_counts(candidates: &[CandidateArticle]) -> MatchSignalCounts {
+    let mut entity_only_candidates = 0usize;
+    let mut focus_only_candidates = 0usize;
+    let mut entity_and_focus_candidates = 0usize;
+    let mut title_supported_candidates = 0usize;
+    let mut body_only_candidates = 0usize;
+
+    for candidate in candidates {
+        let has_entity_signal = candidate.query_entity_hits > 0;
+        let has_focus_signal = candidate_has_focus_match(candidate);
+        match (has_entity_signal, has_focus_signal) {
+            (true, false) => entity_only_candidates += 1,
+            (false, true) => focus_only_candidates += 1,
+            (true, true) => entity_and_focus_candidates += 1,
+            (false, false) => {}
+        }
+
+        let title_supported = candidate.title_pattern_hits > 0
+            || candidate.title_focus_term_hits > 0
+            || candidate.title_focus_phrase_hits > 0;
+        if title_supported {
+            title_supported_candidates += 1;
+        } else {
+            body_only_candidates += 1;
+        }
+    }
+
+    MatchSignalCounts {
+        entity_only_candidates,
+        focus_only_candidates,
+        entity_and_focus_candidates,
+        title_supported_candidates,
+        body_only_candidates,
+    }
 }
 
 fn normalize_needles(terms: Vec<String>) -> Vec<String> {
