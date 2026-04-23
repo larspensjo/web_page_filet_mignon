@@ -4,7 +4,8 @@ param(
     # Leave empty (default) to invoke via 'cargo run -p harvester_batch --'.
     # Pass an explicit path (e.g. '.\target\release\harvester_batch.exe') to run that binary directly.
     [string]$HarvesterBatchCmd = '',
-    [string]$ProjectRoot       = (Split-Path -Parent $PSScriptRoot)
+    [string]$ProjectRoot       = (Split-Path -Parent $PSScriptRoot),
+    [int]$RefreshStaleSummariesLimit = 0
 )
 
 # Resolve invocation style: cargo run (default) vs direct binary
@@ -12,6 +13,18 @@ $script:useCargoRun = [string]::IsNullOrEmpty($HarvesterBatchCmd)
 $script:harvesterDisplayCmd = if ($script:useCargoRun) { 'harvester_batch' } else { $HarvesterBatchCmd }
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# Optional direct batch mode for bounded summary refreshes without entering the TUI.
+if ($RefreshStaleSummariesLimit -gt 0) {
+    if ($script:useCargoRun) {
+        Write-Host "Running: cargo run -p harvester_batch -- --refresh-stale-summaries-limit $RefreshStaleSummariesLimit"
+        & cargo run -p harvester_batch -- '--refresh-stale-summaries-limit' "$RefreshStaleSummariesLimit"
+    } else {
+        Write-Host "Running: $HarvesterBatchCmd --refresh-stale-summaries-limit $RefreshStaleSummariesLimit"
+        & $HarvesterBatchCmd '--refresh-stale-summaries-limit' "$RefreshStaleSummariesLimit"
+    }
+    return
+}
 
 # Force UTF-8 so box-drawing characters render correctly on Windows consoles.
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { $null = $_ }

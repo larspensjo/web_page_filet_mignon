@@ -23,6 +23,10 @@ fn main() {
     engine_info!("[batch] sources: {:?}", args.sources);
     engine_info!("[batch] dry_run: {}", args.dry_run);
     engine_info!("[batch] single_shot: {}", args.single_shot);
+    engine_info!(
+        "[batch] refresh_stale_summaries_limit: {:?}",
+        args.refresh_stale_summaries_limit
+    );
 
     let exit_code = match runner::run(args) {
         Ok(code) => code,

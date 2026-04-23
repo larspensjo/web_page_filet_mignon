@@ -1554,3 +1554,9 @@ Type: Retrieval
 Context: The active article-summary and aggregate-briefing prompts were still framed around the `Long Infrastructure, Short Services` portfolio thesis, which risked suppressing new business-level signals and over-weighting thesis-confirming evidence.
 Change: Updated the prompt context files to emphasize business-significant change detection, major product/platform updates, and thesis-challenging evidence. Added `SUMMARY_PROMPT_V5` and `BRIEFING_PROMPT_V8` with neutral signal-detection instructions, made article summaries consume prompt context as background rather than ignoring it, and switched the active defaults to the new versions so cache keys and prompt metadata roll forward cleanly.
 Refs: contexts/article_summary.toml, contexts/aggregate_briefing.toml, crates/harvester_engine/src/llm/prompts/summary.rs, crates/harvester_engine/src/llm/prompts/briefing.rs, crates/harvester_engine/src/llm/prompts/mod.rs
+
+## 2026-04-23 - Add bounded batch refresh for stale article summaries
+Type: Retrieval
+Context: After moving the active summary prompt to V5, the archive still contained many older summary cache entries. `harvester_mcp` would keep using those older summaries until newer ones existed for the same content hash, but there was no cost-controlled way to roll the cache forward gradually.
+Change: Added `harvester_batch --refresh-stale-summaries-limit N`, which scans the archive, finds content hashes missing the current summary prompt/model/context cache key, refreshes only the first `N` unique hashes, and persists both the summary cache and entity index. Also added a direct `-RefreshStaleSummariesLimit` shortcut to `scripts/Start-HarvesterBatch.ps1` for bounded refresh runs without entering the launcher TUI.
+Refs: crates/harvester_batch/src/cli.rs, crates/harvester_batch/src/runner.rs, crates/harvester_batch/src/main.rs, crates/harvester_io/src/lib.rs, scripts/Start-HarvesterBatch.ps1

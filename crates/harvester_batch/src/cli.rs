@@ -72,6 +72,20 @@ pub struct Args {
         conflicts_with = "single_shot"
     )]
     pub import_saved_web_dir: Option<PathBuf>,
+
+    /// Refresh up to N article summaries that are missing the current summary prompt/model/context cache key
+    #[arg(
+        long,
+        value_name = "N",
+        conflicts_with = "dry_run",
+        conflicts_with = "single_shot",
+        conflicts_with = "import_saved_web_dir",
+        conflicts_with = "set_briefing_since",
+        conflicts_with = "set_briefing_since_now",
+        conflicts_with = "clear_briefing_since",
+        conflicts_with = "show_briefing_since"
+    )]
+    pub refresh_stale_summaries_limit: Option<usize>,
 }
 
 /// A resolved checkpoint management command.
@@ -276,5 +290,22 @@ mod tests {
 
         let args = Args::parse_from(&["harvester_batch", "--poll-interval", "0"]);
         assert_eq!(args.poll_interval, 1);
+    }
+
+    #[test]
+    fn refresh_stale_summaries_limit_is_parsed() {
+        let args = Args::parse_from(&["harvester_batch", "--refresh-stale-summaries-limit", "100"]);
+        assert_eq!(args.refresh_stale_summaries_limit, Some(100));
+    }
+
+    #[test]
+    fn refresh_stale_summaries_limit_conflicts_with_dry_run() {
+        let result = <Args as Parser>::try_parse_from([
+            "harvester_batch",
+            "--refresh-stale-summaries-limit",
+            "100",
+            "--dry-run",
+        ]);
+        assert!(result.is_err());
     }
 }
