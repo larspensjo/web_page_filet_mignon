@@ -1,29 +1,34 @@
 [meta]
 prompt_id = "ArticleSummary"
 schema_version = 1
-version = 1
-updated = "2026-02-12"
-description = "Strategic context for per-article summary extraction"
+version = 2
+updated = "2026-04-23"
+description = "Business-significant change detection context for per-article summary extraction"
 
 [variables]
 summary_instructions = """
-STRATEGIC LENS: "Long Infrastructure, Short Services".
-We track the physical build-out of AI (inflationary) vs. the replacement of human labor (deflationary).
+OPERATING GOAL:
+Detect business-significant change and emerging signals. Treat this context as background, not as a thesis that must be confirmed.
 
-PRIORITY ENTITIES:
-Alphabet, Amazon, AMD, Anthropic, Arm, ASML, Broadcom, Google, Huawei, Meta, Micron, Microsoft, Mistral AI,
-NVIDIA, OpenAI, Palantir, Perplexity, Qualcomm, Rambus, Rocket Lab, Samsung, SkHynix, SpaceX, Tesla, TSMC, xAI.
+SIGNALS TO PRIORITIZE:
+1. Major product, platform, or model updates that could affect enterprise buying, developer behavior, customer workflows, or competitive position.
+2. Pricing, packaging, monetization, margin, or unit-economics changes.
+3. Adoption, distribution, channel, or customer concentration changes.
+4. Partnerships, M&A, financing, capex, supply constraints, and operating bottlenecks.
+5. Regulatory, policy, or procurement shifts with commercial impact.
+6. Competitive moves that strengthen, weaken, or complicate prevailing assumptions.
+7. Evidence that could challenge an existing investment thesis or force a reassessment of prior beliefs.
 
-EXTRACTION TARGETS (Capture specific numbers, dates, and actors):
-1. "The Resource Grab": Capex figures ($B), "front-loading" infrastructure, 100-year bonds, or disregarding short-term ROI for capacity.
-2. "The Physical Wall": Grid connection delays, power shortages, construction bottlenecks, or cooling constraints.
-3. "Silicon Wars": Hyperscalers (Google/AWS) deploying custom chips (TPU/Trainium) to reduce Nvidia reliance.
-4. "Jobless Boom": Layoffs explicitly linked to AI funding; pricing pressure on "per-seat" SaaS (Salesforce/ServiceNow).
-5. "Sovereign AI": Governments bypassing procurement to partner directly with tech firms or buying hardware stockpiles.
-6. Space: Orbital data centers, launch cost reductions, or terrestrial energy limits forcing off-world compute.
+BUSINESS-LEVEL QUESTIONS:
+- What changed?
+- Who is affected?
+- Why does it matter commercially or strategically?
+- Over what timeframe?
+- What remains uncertain?
 
 NEGATIVE GUIDANCE:
-- Ignore generic "AI is the future" fluff or consumer gadget reviews.
-- Ignore "AI for Good/Ethics" PR unless it triggers specific regulations.
+- Ignore generic "AI is the future" fluff, minor UX tweaks, or low-signal launch marketing.
+- Ignore consumer gadget coverage unless it signals a meaningful change in distribution, pricing power, workflow, or model commoditization.
+- Ignore "AI for Good/Ethics" PR unless it has a business, regulatory, or procurement consequence.
 - If implications are ambiguous, state "Unknown" rather than inferring.
 """

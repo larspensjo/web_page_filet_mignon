@@ -1548,3 +1548,9 @@ Type: Bug Fix
 Context: Claude showed `harvester-mcp` as failed with `Connection closed` because the workspace-local `.mcp.json` still pointed `-ProjectRoot` at a deleted `.worktrees\mcp-server` checkout, so `Start-HarvesterMcp.ps1` failed before the server could start.
 Change: Updated `.mcp.json` to use an absolute launcher path and the live repository root as `-ProjectRoot`, then verified the exact Claude-style `pwsh` command by completing MCP initialize and a `list_articles` tool call.
 Refs: .mcp.json, scripts/Start-HarvesterMcp.ps1
+
+## 2026-04-23 - Shift summary and briefing prompts from thesis confirmation to signal detection
+Type: Retrieval
+Context: The active article-summary and aggregate-briefing prompts were still framed around the `Long Infrastructure, Short Services` portfolio thesis, which risked suppressing new business-level signals and over-weighting thesis-confirming evidence.
+Change: Updated the prompt context files to emphasize business-significant change detection, major product/platform updates, and thesis-challenging evidence. Added `SUMMARY_PROMPT_V5` and `BRIEFING_PROMPT_V8` with neutral signal-detection instructions, made article summaries consume prompt context as background rather than ignoring it, and switched the active defaults to the new versions so cache keys and prompt metadata roll forward cleanly.
+Refs: contexts/article_summary.toml, contexts/aggregate_briefing.toml, crates/harvester_engine/src/llm/prompts/summary.rs, crates/harvester_engine/src/llm/prompts/briefing.rs, crates/harvester_engine/src/llm/prompts/mod.rs

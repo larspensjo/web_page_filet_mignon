@@ -1,33 +1,35 @@
 [meta]
 prompt_id = "AggregateBriefing"
 schema_version = 1
-version = 1
-updated = "2026-02-12"
-description = "Strategic briefing context: Long Infrastructure, Short Services"
+version = 2
+updated = "2026-04-23"
+description = "Business-significant change detection context for aggregate briefing"
 
 [variables]
 briefing_instructions = """
-STRATEGIC POSTURE: "The Great Bifurcation"
-This briefing is for a high-conviction investment portfolio positioned "Long Infrastructure, Short Services." We believe the AI Super-Cycle is inflationary for physical assets (Hardware, Energy, Space) but deflationary for human-centric service models (SaaS, Consulting).
+BRIEFING OBJECTIVE:
+Surface noteworthy business-level change and emerging signals for an analyst who wants to notice what is changing, including signals that may challenge an existing thesis.
 
-CORE HOLDINGS (The "Builders"):
-- Compute & Chips: NVIDIA, TSMC, Broadcom, AMD, Micron, ASML, Arm.
-- Hyperscale Infrastructure: Amazon, Microsoft, Alphabet.
-- Space & Defense: Rocket Lab.
+EDITORIAL PRIORITIES:
+1. Novelty: What is genuinely new or meaningfully changed since prior briefings?
+2. Business impact: What could affect revenue, margins, demand, pricing power, distribution, hiring, capex, customer behavior, or competitive position?
+3. Decision relevance: Which developments are most likely to matter for strategic positioning rather than just news volume?
+4. Contradiction: Highlight evidence that weakens, complicates, or falsifies previously comfortable assumptions.
+5. Major product updates: Include them when they may change enterprise adoption, developer workflows, unit economics, bundling power, or competitive dynamics.
 
-WATCHLIST (The "Signals"):
-- OpenAI, SpaceX/xAI, Meta, Anthropic, Palantir, Vistra, Qualcomm.
-
-CRITICAL THEMES TO HIGHLIGHT:
-1. The "Resource Grab" & Capex: Prioritize news confirming "front-loading" of infrastructure spend (e.g., $100B+ capex plans) decoupled from immediate revenue. Look for "100-year bonds" or "multi-decade financing."
-2. The "Physical Wall": Highlight delays caused by energy shortages, grid connection moratoriums, or construction labor bottlenecks. This validates our "Long Plateau" thesis.
-3. Sovereign AI & "State-Tech Fusion": Flag governments bypassing procurement to partner directly with tech firms (e.g., "Tech Force") or funding domestic hardware stacks.
-4. "Jobless Boom" & SaaS Deflation: Highlight signals of AI replacing "seats" or "billable hours" (e.g., layoffs to fund AI, pricing pressure on Salesforce/ServiceNow).
-5. The "Industrialization of Space": Prioritize news linking terrestrial energy limits to orbital solutions (e.g., SpaceX/xAI merger, orbital data centers, launch cost reductions).
+STORY TYPES TO PRIORITIZE:
+- Major product/model/platform launches or updates with commercial implications
+- Pricing or packaging changes
+- Large partnerships, acquisitions, financing rounds, or capex commitments
+- Regulatory, procurement, or policy changes with business impact
+- Adoption signals, customer wins/losses, or distribution shifts
+- Infrastructure or supply constraints
+- Competitive moves that materially change the landscape
 
 INTERPRETIVE INSTRUCTIONS:
-- If news mentions "efficiency" or "cost-cutting" in software, frame it as a risk to SaaS pricing power.
-- If news mentions "nuclear," "copper," or "grid upgrades," frame it as validation of "Indispensable Infrastructure."
-- If news mentions "custom silicon" (Trainium, TPU), frame it as a margin driver for Hyperscalers but a competitive check on Nvidia.
-- Ignore generic consumer gadget reviews unless they signal a commoditization of the model layer (e.g., Apple swapping models).
+- Treat prior theses and context as background, not as preferred conclusions.
+- Do not over-weight stories because they fit an existing narrative.
+- If evidence is mixed, say so directly.
+- If the most important signal is thesis-challenging, surface it prominently rather than burying it.
+- Ignore generic consumer gadget coverage unless it indicates a meaningful shift in market structure, product economics, or model-layer commoditization.
 """
