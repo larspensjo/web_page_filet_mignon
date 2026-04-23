@@ -8,6 +8,7 @@ How to use:
 - Add an entry for important decisions and tradeoffs.
 - Keep entries concise and reference concrete artifacts.
 - New entries goes to the end of the file.
+- A plan in itself, or change thereof, isn't noteworthy. It is meta information, which doesn't mean anything unless the plan is implemented.
 
 ## Entry Template
 
