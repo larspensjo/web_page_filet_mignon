@@ -74,7 +74,19 @@ impl PricingRegistry {
     }
 
     pub fn get(&self, model_name: &str) -> Option<&ModelPricing> {
-        self.prices.get(model_name)
+        self.prices.get(model_name).or_else(|| {
+            self.prices
+                .iter()
+                .filter(|(known_name, _)| {
+                    model_name.starts_with(known_name.as_str())
+                        && model_name
+                            .as_bytes()
+                            .get(known_name.len())
+                            .is_some_and(|b| *b == b'-')
+                })
+                .max_by_key(|(known_name, _)| known_name.len())
+                .map(|(_, pricing)| pricing)
+        })
     }
 
     pub fn is_empty(&self) -> bool {
@@ -95,5 +107,40 @@ impl PricingRegistry {
 impl Default for PricingRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_returns_exact_match_when_present() {
+        let registry = PricingRegistry::with_defaults();
+        assert_eq!(
+            registry.get("gpt-5.4-mini"),
+            Some(&ModelPricing::new(0.75, 4.50))
+        );
+    }
+
+    #[test]
+    fn get_falls_back_to_dated_variant_prefix_match() {
+        let registry = PricingRegistry::with_defaults();
+        assert_eq!(
+            registry.get("gpt-5.4-mini-2026-03-17"),
+            Some(&ModelPricing::new(0.75, 4.50))
+        );
+    }
+
+    #[test]
+    fn get_uses_longest_prefix_match() {
+        let mut registry = PricingRegistry::new();
+        registry.insert("gpt-5.4", ModelPricing::new(2.50, 15.00));
+        registry.insert("gpt-5.4-mini", ModelPricing::new(0.75, 4.50));
+
+        assert_eq!(
+            registry.get("gpt-5.4-mini-2026-03-17"),
+            Some(&ModelPricing::new(0.75, 4.50))
+        );
     }
 }

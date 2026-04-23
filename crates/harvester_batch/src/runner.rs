@@ -14,14 +14,19 @@ use harvester_engine::llm::{
     PromptRegistry, ProviderKind, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL,
     DEFAULT_TRIAGE_MODEL, OPENAI_MODEL_GPT_4O_MINI,
 };
-use harvester_engine::{load_and_prepare_articles_filtered, scan_archive_article_metadata};
+use harvester_engine::{
+    ensure_output_dir, load_and_prepare_articles_filtered, scan_archive_article_metadata,
+    AtomicFileWriter,
+};
 use harvester_io::{
     load_briefing_checkpoint, load_completed_jobs, load_entity_index, load_prompt_templates,
     load_sources, load_summary_cache, load_triage_cache, persist_completed_jobs,
     persist_summary_cache, save_briefing_checkpoint, save_entity_index, upsert_entry, EffectRunner,
     EntityIndexPatch, NoOpPlatformHandler, RuntimePaths,
 };
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -89,6 +94,39 @@ type SummaryRefreshRuntime = (
     String,
     Vec<(String, String)>,
 );
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SummaryRefreshFailure {
+    request_id: Option<u64>,
+    url: String,
+    reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct SummaryRefreshReport {
+    started_at_utc: String,
+    finished_at_utc: String,
+    status: String,
+    output_dir: String,
+    prompt_version: u32,
+    configured_model: String,
+    limit: usize,
+    stale_total_before: usize,
+    selected: usize,
+    attempted: usize,
+    succeeded: usize,
+    failed: usize,
+    skipped_unloadable: usize,
+    remaining_stale_estimate: usize,
+    summary_cache_entries_before: usize,
+    summary_cache_entries_after: usize,
+    usage_calls: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    estimated_cost_microdollars: u64,
+    estimated_cost_display: String,
+    failures: Vec<SummaryRefreshFailure>,
+}
 
 impl CycleCounterBaseline {
     fn from_observation(obs: &BatchObservation) -> Self {
@@ -489,6 +527,60 @@ fn format_llm_completion_error(error: &LlmCompletionError) -> String {
     }
 }
 
+fn summary_refresh_status_label(successes: usize, failures: usize) -> &'static str {
+    match (successes, failures) {
+        (0, 0) => "noop",
+        (_, 0) => "success",
+        (0, _) => "failed",
+        _ => "partial_success",
+    }
+}
+
+fn summary_refresh_exit_code(successes: usize, failures: usize) -> i32 {
+    if failures > 0 && successes == 0 {
+        1
+    } else {
+        0
+    }
+}
+
+fn persist_summary_refresh_report(
+    paths: &RuntimePaths,
+    started_at_utc: &str,
+    report: &SummaryRefreshReport,
+) -> Result<PathBuf, String> {
+    let reports_dir = paths.output_dir.join("summary_refresh_reports");
+    ensure_output_dir(&reports_dir)
+        .map_err(|err| format!("failed to create summary refresh report directory: {err}"))?;
+
+    let serialized = serde_json::to_string_pretty(report)
+        .map_err(|err| format!("failed to serialize summary refresh report: {err}"))?;
+
+    let compact_timestamp: String = started_at_utc
+        .chars()
+        .filter(|ch| ch.is_ascii_digit())
+        .take(14)
+        .collect();
+    let timestamp = if compact_timestamp.is_empty() {
+        "latest".to_string()
+    } else {
+        compact_timestamp
+    };
+
+    let report_filename = format!("summary-refresh-{timestamp}.json");
+    let reports_writer = AtomicFileWriter::new(reports_dir.clone());
+    let report_path = reports_writer
+        .write(&report_filename, &serialized)
+        .map_err(|err| format!("failed to write summary refresh report: {err}"))?;
+
+    let latest_writer = AtomicFileWriter::new(paths.output_dir.clone());
+    latest_writer
+        .write(".summary_refresh_last.json", &serialized)
+        .map_err(|err| format!("failed to write latest summary refresh report: {err}"))?;
+
+    Ok(report_path)
+}
+
 fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
     let limit = args
         .refresh_stale_summaries_limit
@@ -496,12 +588,14 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
     if limit == 0 {
         return Err("--refresh-stale-summaries-limit must be greater than zero".to_string());
     }
+    let started_at_utc = Utc::now().to_rfc3339();
 
     let (llm_handle, registry, prompt_version, summary_model, summary_context) =
         build_summary_refresh_runtime(paths, args.llm_concurrency)?;
 
-    let result = (|| -> Result<i32, String> {
+    let result = (|| -> Result<(SummaryRefreshReport, i32), String> {
         let mut summary_cache = load_summary_cache(&paths.summary_cache_path);
+        let summary_cache_entries_before = summary_cache.len();
         let article_metas = scan_archive_article_metadata(&paths.output_dir)?;
         let selection = select_stale_summary_targets(
             &article_metas,
@@ -521,9 +615,35 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
             summary_model
         );
 
+        let mut report = SummaryRefreshReport {
+            started_at_utc: started_at_utc.clone(),
+            finished_at_utc: started_at_utc.clone(),
+            status: "noop".to_string(),
+            output_dir: paths.output_dir.display().to_string(),
+            prompt_version,
+            configured_model: summary_model.clone(),
+            limit,
+            stale_total_before: selection.total_stale,
+            selected: selection.targets.len(),
+            attempted: 0,
+            succeeded: 0,
+            failed: 0,
+            skipped_unloadable: 0,
+            remaining_stale_estimate: selection.total_stale,
+            summary_cache_entries_before,
+            summary_cache_entries_after: summary_cache_entries_before,
+            usage_calls: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            estimated_cost_microdollars: 0,
+            estimated_cost_display: microdollars_to_display(0),
+            failures: Vec::new(),
+        };
+
         if selection.total_stale == 0 {
             engine_info!("[summary-refresh] all summaries already match current cache key");
-            return Ok(0);
+            report.finished_at_utc = Utc::now().to_rfc3339();
+            return Ok((report, 0));
         }
 
         let selected_urls: Vec<String> = selection
@@ -571,13 +691,21 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
             pending.insert(request_id, target);
         }
 
-        let mut failures = 0usize;
+        report.attempted = pending.len();
         if !targets_by_url.is_empty() {
-            failures += targets_by_url.len();
+            report.failed += targets_by_url.len();
+            report.skipped_unloadable = targets_by_url.len();
             engine_warn!(
                 "[summary-refresh] {} selected article(s) could not be loaded from archive",
                 targets_by_url.len()
             );
+            for (_, target) in targets_by_url {
+                report.failures.push(SummaryRefreshFailure {
+                    request_id: None,
+                    url: target.primary_url,
+                    reason: "selected article could not be loaded from archive".to_string(),
+                });
+            }
         }
         if pending.is_empty() {
             return Err("no stale summaries could be dispatched".to_string());
@@ -585,7 +713,6 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
 
         let event_rx = llm_handle.event_receiver();
         let mut entity_index = load_entity_index(&paths.entity_index_path);
-        let mut successes = 0usize;
 
         while !pending.is_empty() {
             let event = {
@@ -639,7 +766,7 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                             );
                         }
 
-                        successes += 1;
+                        report.succeeded += 1;
                         engine_info!(
                             "[summary-refresh] refreshed request_id={} url={} content_hash={}",
                             request_id,
@@ -648,55 +775,94 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                         );
                     }
                     Err(err) => {
-                        failures += 1;
                         engine_warn!(
                             "[summary-refresh] validation failed after success request_id={} url={} reason={}",
                             request_id,
                             target.primary_url,
                             err
                         );
+                        report.failed += 1;
+                        report.failures.push(SummaryRefreshFailure {
+                            request_id: Some(request_id),
+                            url: target.primary_url,
+                            reason: format!("validation failed after success: {err}"),
+                        });
                     }
                 },
                 Err(err) => {
-                    failures += 1;
+                    report.failed += 1;
+                    let reason = format_llm_completion_error(&err);
                     engine_warn!(
                         "[summary-refresh] request failed request_id={} url={} reason={}",
                         request_id,
                         target.primary_url,
-                        format_llm_completion_error(&err)
+                        reason
                     );
+                    report.failures.push(SummaryRefreshFailure {
+                        request_id: Some(request_id),
+                        url: target.primary_url,
+                        reason,
+                    });
                 }
             }
         }
 
-        if successes > 0 {
+        if report.succeeded > 0 {
             persist_summary_cache(&summary_cache, &paths.summary_cache_path)
                 .map_err(|err| format!("failed to persist summary cache: {err}"))?;
             save_entity_index(&paths.entity_index_path, &entity_index)
                 .map_err(|err| format!("failed to persist entity index: {err}"))?;
         }
+        report.summary_cache_entries_after = summary_cache.len();
+        report.remaining_stale_estimate =
+            report.stale_total_before.saturating_sub(report.succeeded);
+        report.status = summary_refresh_status_label(report.succeeded, report.failed).to_string();
+        report.finished_at_utc = Utc::now().to_rfc3339();
 
         engine_info!(
             "[summary-refresh] completed successes={} failures={}",
-            successes,
-            failures
+            report.succeeded,
+            report.failed
         );
-        Ok(if failures > 0 { 1 } else { 0 })
+        let exit_code = summary_refresh_exit_code(report.succeeded, report.failed);
+        Ok((report, exit_code))
     })();
 
     let usage_totals = llm_handle.usage_totals();
     llm_handle.drain_and_stop();
-    if let Some(totals) = usage_totals {
-        engine_info!(
-            "[summary-refresh] usage calls={} input_tokens={} output_tokens={} cost={}",
-            totals.calls,
-            totals.input_tokens,
-            totals.output_tokens,
-            microdollars_to_display(totals.cost_microdollars)
-        );
-    }
+    match result {
+        Ok((mut report, exit_code)) => {
+            let totals = usage_totals.unwrap_or(harvester_engine::llm::LlmUsageTotals {
+                calls: 0,
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_microdollars: 0,
+            });
+            report.usage_calls = totals.calls;
+            report.input_tokens = totals.input_tokens;
+            report.output_tokens = totals.output_tokens;
+            report.estimated_cost_microdollars = totals.cost_microdollars;
+            report.estimated_cost_display = microdollars_to_display(totals.cost_microdollars);
 
-    result
+            engine_info!(
+                "[summary-refresh] usage calls={} input_tokens={} output_tokens={} cost={}",
+                totals.calls,
+                totals.input_tokens,
+                totals.output_tokens,
+                report.estimated_cost_display
+            );
+
+            let report_path = persist_summary_refresh_report(paths, &started_at_utc, &report)?;
+            engine_info!(
+                "[summary-refresh] report written path={} status={} remaining_stale_estimate={}",
+                report_path.display(),
+                report.status,
+                report.remaining_stale_estimate
+            );
+            Ok(exit_code)
+        }
+        Err(err) => Err(err),
+    }
 }
 
 fn is_ai_orchestration_enabled() -> bool {
@@ -2216,6 +2382,16 @@ mod tests {
     fn format_llm_usage_lines_empty_returns_empty() {
         let lines = format_llm_usage_lines(&[]);
         assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn summary_refresh_exit_code_is_zero_for_partial_success() {
+        assert_eq!(summary_refresh_exit_code(92, 8), 0);
+    }
+
+    #[test]
+    fn summary_refresh_exit_code_is_nonzero_when_all_attempts_fail() {
+        assert_eq!(summary_refresh_exit_code(0, 8), 1);
     }
 
     #[test]

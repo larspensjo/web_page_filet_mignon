@@ -1560,3 +1560,9 @@ Type: Retrieval
 Context: After moving the active summary prompt to V5, the archive still contained many older summary cache entries. `harvester_mcp` would keep using those older summaries until newer ones existed for the same content hash, but there was no cost-controlled way to roll the cache forward gradually.
 Change: Added `harvester_batch --refresh-stale-summaries-limit N`, which scans the archive, finds content hashes missing the current summary prompt/model/context cache key, refreshes only the first `N` unique hashes, and persists both the summary cache and entity index. Also added a direct `-RefreshStaleSummariesLimit` shortcut to `scripts/Start-HarvesterBatch.ps1` for bounded refresh runs without entering the launcher TUI.
 Refs: crates/harvester_batch/src/cli.rs, crates/harvester_batch/src/runner.rs, crates/harvester_batch/src/main.rs, crates/harvester_io/src/lib.rs, scripts/Start-HarvesterBatch.ps1
+
+## 2026-04-23 - Persist summary refresh reports and treat partial success as success
+Type: Retrieval
+Context: A bounded summary refresh run could complete useful work but still exit `1` if a minority of articles failed validation, and there was no persisted report showing progress, failure reasons, or estimated LLM cost for the batch.
+Change: Changed stale-summary refresh exit handling so mixed success/failure returns `0` while total failure still returns non-zero, persisted a JSON report for each run under `output/summary_refresh_reports/` plus `output/.summary_refresh_last.json`, and added pricing fallback for dated model variants so estimated costs work for model names like `gpt-5.4-mini-2026-03-17`.
+Refs: crates/harvester_batch/src/runner.rs, crates/harvester_engine/src/llm/pricing.rs
