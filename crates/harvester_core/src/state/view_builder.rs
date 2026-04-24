@@ -5,6 +5,7 @@ use super::{
 };
 use crate::briefing::BriefingPhase;
 use crate::pre_triage_filter::PreTriagePhase;
+use crate::preview::format_summary_for_preview;
 use crate::tabs::{AppTab, JobListScope, LeftTab};
 use crate::triage::{ArticleTriageState, TriagePhase};
 use crate::view_model::{
@@ -320,19 +321,9 @@ impl AppState {
                 .map(|result| crate::preview::format_triage_for_preview(title.as_deref(), result))
         });
 
-        let summary_markdown = selected_url.and_then(|url| {
-            self.briefing.summary_for_url(url).map(|summary| {
-                let kp_lines: String = summary
-                    .key_points
-                    .iter()
-                    .map(|kp| format!("- {kp}\n"))
-                    .collect();
-                format!(
-                    "# {}\n\n{}\n\n**Key Points:**\n\n{}\n",
-                    summary.title, summary.summary, kp_lines
-                )
-            })
-        });
+        let summary_markdown = selected_url
+            .and_then(|url| self.briefing.summary_for_url(url))
+            .map(format_summary_for_preview);
 
         let briefing_markdown = self.briefing.format_preview();
         let triage_placeholder = if triage_markdown.is_none() {

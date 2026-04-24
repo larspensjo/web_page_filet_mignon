@@ -1573,3 +1573,11 @@ Type: Retrieval
 Context: Article triage still used thesis-weighted scoring and did not consume the editable `ArticleTriage` context, while summary and briefing prompts had already moved to neutral business-signal detection. The context loader also degraded to empty context when files were missing, which would allow paid triage calls without the scoring policy.
 Change: Updated `article_triage.toml` to neutral AI-focused business-signal selection guidance, added and activated `TRIAGE_PROMPT_V4`, shortened the Rust prompt so it owns only the invariant frame and JSON contract, made `article_triage.toml` a required prompt context, preserved successfully loaded sibling contexts when triage context loading fails, and kept triage metadata unready while the required context is unavailable.
 Refs: contexts/article_triage.toml, crates/harvester_engine/src/llm/prompts/triage.rs, crates/harvester_engine/src/llm/prompts/mod.rs, crates/harvester_io/src/effect_runner/dispatch.rs, crates/harvester_core/src/update/mod.rs
+
+## 2026-04-24 - Reuse shared article-summary preview formatter
+Type: Bug Fix
+Context: Selected article summaries in the right pane duplicated markdown formatting and rendered `Key Points` as bold body text instead of the shared section heading, making the summary hierarchy flatter.
+Change: Routed `AppState::build_right_pane_view` through `preview::format_summary_for_preview` and added a regression assertion for the `## Key Points` heading.
+Lessons Learned: Keeping preview markdown in one formatter prevents subtle UI drift between summary display paths.
+Prevention: Prefer shared pure preview formatters whenever view builders expose markdown for renderer consumption.
+Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs

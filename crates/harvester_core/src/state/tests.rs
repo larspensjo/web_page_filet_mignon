@@ -836,6 +836,8 @@ mod app_state_tests {
         assert!(text.contains("My Title"));
         assert!(text.contains("My summary"));
         assert!(text.contains("Point A"));
+        assert!(text.contains("## Key Points"));
+        assert!(!text.contains("**Key Points:**"));
     }
 
     #[test]
