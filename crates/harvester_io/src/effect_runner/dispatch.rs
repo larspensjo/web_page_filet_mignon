@@ -667,17 +667,17 @@ impl EffectRunner {
                 let contexts_dir = self.paths.contexts_dir.clone();
                 thread::spawn(move || {
                     if !contexts_dir.exists() {
-                        engine_warn!(
-                            "[PromptContext] contexts directory not found at {:?}",
+                        let reason = format!(
+                            "required prompt contexts directory not found at {:?}",
                             contexts_dir
                         );
-                        let _ = msg_tx.send(Msg::PromptContextsLoaded {
-                            contexts: HashMap::new(),
-                        });
+                        engine_warn!("[PromptContext] {}", reason);
+                        let _ = msg_tx.send(Msg::PromptContextsLoadFailed { reason });
                         return;
                     }
 
                     let mut contexts = HashMap::new();
+                    let mut required_context_failure = None;
                     let prompt_ids = [
                         PromptId::ArticleTriage,
                         PromptId::ArticleSummary,
@@ -689,6 +689,12 @@ impl EffectRunner {
                         let path = contexts_dir.join(filename);
 
                         if !path.exists() {
+                            if prompt_id == PromptId::ArticleTriage {
+                                required_context_failure = Some(format!(
+                                    "required ArticleTriage context file missing at {:?}",
+                                    path
+                                ));
+                            }
                             continue;
                         }
 
@@ -699,12 +705,27 @@ impl EffectRunner {
                                 contexts.insert(prompt_id, vec);
                             }
                             Err(e) => {
+                                if prompt_id == PromptId::ArticleTriage {
+                                    required_context_failure = Some(format!(
+                                        "required ArticleTriage context failed to load from {:?}: {}",
+                                        path, e
+                                    ));
+                                    continue;
+                                }
                                 engine_warn!("[PromptContext] Failed to load {:?}: {}", path, e);
                             }
                         }
                     }
 
-                    let _ = msg_tx.send(Msg::PromptContextsLoaded { contexts });
+                    if let Some(reason) = required_context_failure {
+                        if !contexts.is_empty() {
+                            let _ = msg_tx.send(Msg::PromptContextsLoaded { contexts });
+                        }
+                        engine_warn!("[PromptContext] {}", reason);
+                        let _ = msg_tx.send(Msg::PromptContextsLoadFailed { reason });
+                    } else {
+                        let _ = msg_tx.send(Msg::PromptContextsLoaded { contexts });
+                    }
                 });
             }
             Effect::LoadPromptTemplateFiles => {

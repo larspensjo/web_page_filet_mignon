@@ -43,6 +43,18 @@ fn runner_with_receiver(base: &Path) -> (EffectRunner, mpsc::Receiver<Msg>) {
     (EffectRunner::new(paths, tx, platform_handler), rx)
 }
 
+fn write_prompt_context(dir: &Path, filename: &str, prompt_id: PromptId) {
+    fs::create_dir_all(dir).expect("create contexts dir");
+    fs::write(
+        dir.join(filename),
+        format!(
+            "[meta]\nprompt_id = \"{}\"\nschema_version = 1\nversion = 1\nupdated = \"2026-04-24\"\n\n[variables]\npolicy = \"test policy\"\n",
+            prompt_id
+        ),
+    )
+    .expect("write context");
+}
+
 fn write_markdown(dir: &Path, filename: &str, url: &str) {
     use harvester_engine::{build_markdown_document, WhitespaceTokenCounter};
     let counter = WhitespaceTokenCounter;
@@ -63,6 +75,83 @@ fn write_markdown_with_fetched_utc(dir: &Path, filename: &str, url: &str, fetche
     let (_, markdown) =
         build_markdown_document(url, Some("Title"), "utf-8", fetched_utc, "body", &counter);
     fs::write(dir.join(filename), markdown).expect("write markdown");
+}
+
+#[test]
+fn load_prompt_contexts_fails_when_required_triage_context_is_missing() {
+    let temp = tempdir().expect("tempdir");
+    let contexts_dir = temp.path().join("contexts");
+    fs::create_dir_all(&contexts_dir).expect("create contexts dir");
+    write_prompt_context(
+        &contexts_dir,
+        "article_summary.toml",
+        PromptId::ArticleSummary,
+    );
+
+    let (runner, rx) = runner_with_receiver(temp.path());
+    runner.enqueue(vec![Effect::LoadPromptContexts]);
+
+    let msg = rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("expected contexts loaded msg");
+    match msg {
+        Msg::PromptContextsLoaded { contexts } => {
+            assert!(contexts.contains_key(&PromptId::ArticleSummary));
+            assert!(!contexts.contains_key(&PromptId::ArticleTriage));
+        }
+        other => panic!("unexpected message: {:?}", other),
+    }
+
+    let msg = rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("expected context load failed msg");
+
+    match msg {
+        Msg::PromptContextsLoadFailed { reason } => {
+            assert!(reason.contains("required ArticleTriage context file missing"));
+            assert!(reason.contains("article_triage.toml"));
+        }
+        other => panic!("unexpected message: {:?}", other),
+    }
+}
+
+#[test]
+fn load_prompt_contexts_fails_when_required_triage_context_is_invalid() {
+    let temp = tempdir().expect("tempdir");
+    let contexts_dir = temp.path().join("contexts");
+    fs::create_dir_all(&contexts_dir).expect("create contexts dir");
+    fs::write(contexts_dir.join("article_triage.toml"), "bad toml").expect("write invalid file");
+    write_prompt_context(
+        &contexts_dir,
+        "article_summary.toml",
+        PromptId::ArticleSummary,
+    );
+
+    let (runner, rx) = runner_with_receiver(temp.path());
+    runner.enqueue(vec![Effect::LoadPromptContexts]);
+
+    let msg = rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("expected contexts loaded msg");
+    match msg {
+        Msg::PromptContextsLoaded { contexts } => {
+            assert!(contexts.contains_key(&PromptId::ArticleSummary));
+            assert!(!contexts.contains_key(&PromptId::ArticleTriage));
+        }
+        other => panic!("unexpected message: {:?}", other),
+    }
+
+    let msg = rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("expected context load failed msg");
+
+    match msg {
+        Msg::PromptContextsLoadFailed { reason } => {
+            assert!(reason.contains("required ArticleTriage context failed to load"));
+            assert!(reason.contains("article_triage.toml"));
+        }
+        other => panic!("unexpected message: {:?}", other),
+    }
 }
 
 #[test]

@@ -1567,3 +1567,9 @@ Type: Retrieval
 Context: A bounded summary refresh run could complete useful work but still exit `1` if a minority of articles failed validation, and there was no persisted report showing progress, failure reasons, or estimated LLM cost for the batch.
 Change: Changed stale-summary refresh exit handling so mixed success/failure returns `0` while total failure still returns non-zero, persisted a JSON report for each run under `output/summary_refresh_reports/` plus `output/.summary_refresh_last.json`, and added pricing fallback for dated model variants so estimated costs work for model names like `gpt-5.4-mini-2026-03-17`.
 Refs: crates/harvester_batch/src/runner.rs, crates/harvester_engine/src/llm/pricing.rs
+
+## 2026-04-24 - Shift triage scoring to required signal-admission context
+Type: Retrieval
+Context: Article triage still used thesis-weighted scoring and did not consume the editable `ArticleTriage` context, while summary and briefing prompts had already moved to neutral business-signal detection. The context loader also degraded to empty context when files were missing, which would allow paid triage calls without the scoring policy.
+Change: Updated `article_triage.toml` to neutral AI-focused business-signal selection guidance, added and activated `TRIAGE_PROMPT_V4`, shortened the Rust prompt so it owns only the invariant frame and JSON contract, made `article_triage.toml` a required prompt context, preserved successfully loaded sibling contexts when triage context loading fails, and kept triage metadata unready while the required context is unavailable.
+Refs: contexts/article_triage.toml, crates/harvester_engine/src/llm/prompts/triage.rs, crates/harvester_engine/src/llm/prompts/mod.rs, crates/harvester_io/src/effect_runner/dispatch.rs, crates/harvester_core/src/update/mod.rs

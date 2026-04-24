@@ -302,6 +302,7 @@ pub struct AppState {
     indirect_poll_in_progress: bool,
     source_states: SourceStateIndex,
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
+    prompt_contexts_load_failed: bool,
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
     effective_models: HashMap<PromptId, String>,
     ai_availability: AiAvailability,
@@ -405,6 +406,7 @@ impl Default for AppState {
             indirect_poll_in_progress: false,
             source_states: SourceStateIndex::default(),
             prompt_contexts: HashMap::new(),
+            prompt_contexts_load_failed: false,
             active_prompt_versions: HashMap::new(),
             effective_models: HashMap::new(),
             ai_availability: AiAvailability::Available,
@@ -1211,6 +1213,15 @@ impl AppState {
         contexts: HashMap<PromptId, Vec<(String, String)>>,
     ) {
         self.prompt_contexts = contexts;
+        self.prompt_contexts_load_failed = false;
+    }
+
+    pub(crate) fn mark_prompt_contexts_load_failed(&mut self) {
+        self.prompt_contexts_load_failed = true;
+    }
+
+    pub(crate) fn prompt_contexts_load_failed(&self) -> bool {
+        self.prompt_contexts_load_failed
     }
 
     /// Get the active prompt version for a specific prompt.

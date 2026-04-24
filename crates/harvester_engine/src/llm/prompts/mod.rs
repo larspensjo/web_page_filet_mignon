@@ -13,14 +13,15 @@ pub use summary::SUMMARY_PROMPT_V5 as SUMMARY_PROMPT;
 pub use summary::{
     SUMMARY_PROMPT_V1, SUMMARY_PROMPT_V2, SUMMARY_PROMPT_V3, SUMMARY_PROMPT_V4, SUMMARY_PROMPT_V5,
 };
-pub use triage::TRIAGE_PROMPT_V3 as TRIAGE_PROMPT;
-pub use triage::{TRIAGE_PROMPT_V1, TRIAGE_PROMPT_V2, TRIAGE_PROMPT_V3};
+pub use triage::TRIAGE_PROMPT_V4 as TRIAGE_PROMPT;
+pub use triage::{TRIAGE_PROMPT_V1, TRIAGE_PROMPT_V2, TRIAGE_PROMPT_V3, TRIAGE_PROMPT_V4};
 
 pub fn register_defaults(registry: &mut super::PromptRegistry) {
     registry.register(triage::TRIAGE_PROMPT_V1);
     registry.register(triage::TRIAGE_PROMPT_V2);
     registry.register(triage::TRIAGE_PROMPT_V3);
-    registry.set_active(PromptId::ArticleTriage, triage::TRIAGE_PROMPT_V3.version);
+    registry.register(triage::TRIAGE_PROMPT_V4);
+    registry.set_active(PromptId::ArticleTriage, triage::TRIAGE_PROMPT_V4.version);
     registry.register(summary::SUMMARY_PROMPT_V1);
     registry.register(summary::SUMMARY_PROMPT_V2);
     registry.register(summary::SUMMARY_PROMPT_V3);

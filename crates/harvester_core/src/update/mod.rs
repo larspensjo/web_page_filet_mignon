@@ -374,8 +374,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::PromptContextsLoadFailed { reason } => {
             engine_warn!("[PromptContext] Failed to load contexts: {}", reason);
-            // Continue with empty contexts (degraded but functional)
-            state.mark_triage_metadata_ready();
+            state.mark_prompt_contexts_load_failed();
+            state.mark_triage_metadata_pending();
             state.mark_dirty();
             Vec::new()
         }

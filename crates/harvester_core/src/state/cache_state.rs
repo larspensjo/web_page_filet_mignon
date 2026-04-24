@@ -196,6 +196,12 @@ impl AppState {
     }
 
     pub(crate) fn mark_triage_metadata_ready(&mut self) {
+        if self.prompt_contexts_load_failed() {
+            self.triage_metadata_state = MetadataLoadState::Pending;
+            self.triage_cache_metadata_snapshot = None;
+            return;
+        }
+
         let snapshot = match (
             self.active_prompt_versions
                 .get(&PromptId::ArticleTriage)

@@ -8,6 +8,53 @@ mod support;
 use support::*;
 
 #[test]
+fn prompt_context_load_failure_keeps_triage_metadata_unready() {
+    init_logging();
+    let mut active_versions = std::collections::HashMap::new();
+    active_versions.insert(PromptId::ArticleTriage, 4);
+    let mut effective_models = std::collections::HashMap::new();
+    effective_models.insert(PromptId::ArticleTriage, "test-model".to_string());
+    let mut contexts = std::collections::HashMap::new();
+    contexts.insert(
+        PromptId::ArticleTriage,
+        vec![("policy".to_string(), "test policy".to_string())],
+    );
+
+    let (state, _) = update(
+        AppState::new(),
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+            templates: std::collections::HashMap::new(),
+        },
+    );
+    let (state, _) = update(state, Msg::PromptContextsLoaded { contexts });
+    assert!(state.triage_metadata_ready());
+
+    let (state, _) = update(
+        state,
+        Msg::PromptContextsLoadFailed {
+            reason: "required ArticleTriage context file missing".to_string(),
+        },
+    );
+    assert!(!state.triage_metadata_ready());
+
+    let mut active_versions = std::collections::HashMap::new();
+    active_versions.insert(PromptId::ArticleTriage, 4);
+    let mut effective_models = std::collections::HashMap::new();
+    effective_models.insert(PromptId::ArticleTriage, "test-model".to_string());
+    let (state, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+            templates: std::collections::HashMap::new(),
+        },
+    );
+    assert!(!state.triage_metadata_ready());
+}
+
+#[test]
 fn generate_briefing_emits_load_effect() {
     init_logging();
     let state = AppState::new();
