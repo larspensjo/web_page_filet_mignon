@@ -1581,3 +1581,11 @@ Change: Routed `AppState::build_right_pane_view` through `preview::format_summar
 Lessons Learned: Keeping preview markdown in one formatter prevents subtle UI drift between summary display paths.
 Prevention: Prefer shared pure preview formatters whenever view builders expose markdown for renderer consumption.
 Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs
+
+## 2026-04-24 - Align wrapped markdown list text in Rich Edit previews
+Type: Bug Fix
+Context: Markdown bullets in summary and briefing previews could wrap back toward the marker column because the RTF renderer emitted a hanging indent without an explicit text tab stop.
+Change: Added an explicit list text tab stop, widened the hanging indent so markers sit near the body margin, and covered unordered and loose ordered list RTF shapes with regression assertions.
+Lessons Learned: Rich Edit needs the marker position and text tab stop specified together for stable wrapped list alignment.
+Prevention: List rendering tests should assert paragraph geometry controls, not just marker text.
+Refs: crates/harvester_app/src/platform/ui/markdown_to_rtf.rs

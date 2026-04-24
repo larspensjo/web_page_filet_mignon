@@ -11,7 +11,7 @@ const HEADING_SPACING_AFTER_TWIPS: usize = 160;
 const HEADING_SPACING_BEFORE_TWIPS: usize = 140;
 const BODY_SPACING_AFTER_TWIPS: usize = 140;
 const LIST_INDENT_TWIPS: usize = 920;
-const LIST_HANGING_INDENT_TWIPS: usize = 220;
+const LIST_HANGING_INDENT_TWIPS: usize = 360;
 const COLOR_BODY_TEXT_RTF: &str = "\\red176\\green174\\blue165;";
 const COLOR_HEADING_TEXT_RTF: &str = "\\red250\\green249\\blue245;";
 const COLOR_BACKGROUND_RTF: &str = "\\red48\\green48\\blue46;";
@@ -183,7 +183,7 @@ fn handle_start_tag(rtf: &mut String, tag: &Tag<'_>, list_stack: &mut Vec<ListSt
         },
         Tag::Item => {
             rtf.push_str(&format!(
-                "\\par\\pard\\li{LIST_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\fi-{LIST_HANGING_INDENT_TWIPS} "
+                "\\par\\pard\\li{LIST_INDENT_TWIPS}\\ri{BODY_INDENT_TWIPS}\\fi-{LIST_HANGING_INDENT_TWIPS}\\tx{LIST_INDENT_TWIPS} "
             ));
             match list_stack.last_mut() {
                 Some(list_state @ ListState::Unordered { .. }) => {
@@ -308,6 +308,14 @@ mod tests {
     }
 
     #[test]
+    fn unordered_list_uses_explicit_hanging_indent_and_text_tab() {
+        let rtf = convert_markdown_to_rtf(
+            "- A long bullet item that should wrap under the first line text column",
+        );
+        assert!(rtf.contains("\\pard\\li920\\ri520\\fi-360\\tx920 \\bullet\\tab "));
+    }
+
+    #[test]
     fn breaks_are_mapped() {
         let rtf = convert_markdown_to_rtf("a\nb  \nc");
         assert!(rtf.contains("a b"));
@@ -341,7 +349,7 @@ mod tests {
     fn loose_ordered_list_item_body_starts_on_new_paragraph() {
         let rtf = convert_markdown_to_rtf("1. **Headline**\n\n   Body text");
         assert!(rtf.contains(
-            "1.\\tab \\sa80\\sb0\\sl360\\slmult1 \\b Headline\\b0 \\par \\pard\\li920\\ri520\\sa80\\sb0\\sl360\\slmult1 Body text"
+            "\\pard\\li920\\ri520\\fi-360\\tx920 1.\\tab \\sa80\\sb0\\sl360\\slmult1 \\b Headline\\b0 \\par \\pard\\li920\\ri520\\sa80\\sb0\\sl360\\slmult1 Body text"
         ));
     }
 
