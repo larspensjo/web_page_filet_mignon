@@ -7,6 +7,7 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
     let article_count = corpus.count();
     let fingerprint = corpus.fingerprint();
     let source = corpus.source();
+    let token_estimates = state.archive_token_estimates(corpus.ordered_urls());
     engine_info!(
         "[working-corpus] source={:?} count={} fingerprint={:#010x} caller=archive-open request_id={}",
         source,
@@ -25,6 +26,7 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
         since_utc,
         default_basename: "archive.md".to_string(),
         pending_pre_triage_count,
+        token_estimates,
     }]
 }
 
@@ -38,6 +40,7 @@ pub(super) fn handle_dialog_ready(
     default_file_exists: bool,
     export_dir: std::path::PathBuf,
     pending_pre_triage_count: usize,
+    token_estimates: crate::ArchiveTokenEstimates,
 ) -> Vec<Effect> {
     if request_id != state.archive_request_id() {
         return Vec::new();
@@ -50,6 +53,7 @@ pub(super) fn handle_dialog_ready(
         default_file_exists,
         export_dir,
         pending_pre_triage_count,
+        token_estimates,
     }]
 }
 
@@ -59,6 +63,7 @@ pub(super) fn handle_dialog_submitted(
     basename: String,
     set_checkpoint: bool,
     submitted_at: chrono::DateTime<chrono::Utc>,
+    use_summaries: bool,
 ) -> Vec<Effect> {
     if request_id != state.archive_request_id() {
         return Vec::new();
@@ -94,12 +99,19 @@ pub(super) fn handle_dialog_submitted(
     );
     let since_utc = state.briefing_since_utc();
     let requested_checkpoint = set_checkpoint.then_some(submitted_at);
+    let summaries = if use_summaries {
+        build_summary_map(state, &ordered_urls)
+    } else {
+        std::collections::HashMap::new()
+    };
     vec![Effect::ArchiveRequested {
         request_id,
         basename,
         ordered_urls,
         since_utc,
         requested_checkpoint,
+        use_summaries,
+        summaries,
     }]
 }
 
@@ -153,4 +165,32 @@ fn is_safe_archive_basename(name: &str) -> bool {
         return false;
     }
     !std::path::Path::new(name).is_absolute()
+}
+
+fn build_summary_map(
+    state: &AppState,
+    ordered_urls: &[String],
+) -> std::collections::HashMap<String, String> {
+    use harvester_engine::archive_url_key;
+
+    let mut map = std::collections::HashMap::new();
+    for url in ordered_urls {
+        if let Some(hash) = state.triage().article_content_hash(url) {
+            if let Some(entry) = state.summary_cache().lookup_any_by_content_hash(hash) {
+                map.insert(archive_url_key(url), format_summary_body(&entry.result));
+            }
+        }
+    }
+    map
+}
+
+fn format_summary_body(result: &crate::briefing::ArticleSummaryResult) -> String {
+    let mut body = format!("## Summary\n{}\n", result.summary.trim_end());
+    if !result.key_points.is_empty() {
+        body.push_str("\n## Key Points\n");
+        for point in &result.key_points {
+            body.push_str(&format!("- {}\n", point.trim_end()));
+        }
+    }
+    body
 }

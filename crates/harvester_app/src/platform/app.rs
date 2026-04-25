@@ -15,9 +15,9 @@ use commanductui::{
     WindowConfig, WindowId,
 };
 use harvester_core::{
-    update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel, Effect,
-    JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel, LeftTab, LinkDownloadState,
-    ManualDecision, Msg, PromptLabStage, TrendCategory,
+    update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel,
+    ArchiveTokenEstimates, Effect, JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel,
+    LeftTab, LinkDownloadState, ManualDecision, Msg, PromptLabStage, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -42,6 +42,7 @@ use super::Win32PlatformHandler;
 
 const ARCHIVE_DIALOG_CONTEXT_PREFIX: &str = "archive:";
 const ARCHIVE_DIALOG_FILENAME_FIELD_ID: &str = "archive.basename";
+const ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID: &str = "archive.use_summaries";
 const ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID: &str = "archive.set_checkpoint";
 const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
 const LLM_MAX_CONCURRENT_REQUESTS_ENV: &str = "LLM_MAX_CONCURRENT_REQUESTS";
@@ -482,6 +483,17 @@ fn format_archive_since_label(since_utc: Option<chrono::DateTime<Utc>>) -> Optio
     })
 }
 
+fn format_tokens(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.0}k", tokens as f64 / 1_000.0)
+    } else {
+        tokens.to_string()
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_archive_form_descriptor(
     request_id: u64,
     article_count: usize,
@@ -490,6 +502,7 @@ fn build_archive_form_descriptor(
     _default_file_exists: bool,
     export_dir: PathBuf,
     pending_pre_triage_count: usize,
+    token_estimates: ArchiveTokenEstimates,
 ) -> FormDialogDescriptor {
     let mut rows = Vec::new();
     let articles_label = if since_utc.is_some() {
@@ -510,6 +523,23 @@ fn build_archive_form_descriptor(
     rows.push(FormRow::ReadOnlyText {
         label: "Up to".to_string(),
         value: Utc::now().format("%Y-%m-%d %H:%M UTC").to_string(),
+    });
+    rows.push(FormRow::ReadOnlyText {
+        label: "Full archive".to_string(),
+        value: format!(
+            "~{} tokens ({} articles)",
+            format_tokens(token_estimates.full_tokens),
+            article_count,
+        ),
+    });
+    rows.push(FormRow::ReadOnlyText {
+        label: "Summary archive".to_string(),
+        value: format!(
+            "~{} tokens ({}/{} with summaries)",
+            format_tokens(token_estimates.summary_tokens),
+            token_estimates.summary_coverage,
+            article_count,
+        ),
     });
     if article_count == 0 {
         rows.push(FormRow::Note {
@@ -546,6 +576,11 @@ fn build_archive_form_descriptor(
                     base_dir: export_dir,
                     message: "file already exists - will be overwritten".to_string(),
                 }),
+            },
+            FormField::CheckBox {
+                field_id: ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID.to_string(),
+                label: "Use summaries (recommended)".to_string(),
+                checked: true,
             },
             FormField::CheckBox {
                 field_id: ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID.to_string(),
@@ -713,6 +748,7 @@ impl AppEventHandler {
                     default_file_exists,
                     export_dir,
                     pending_pre_triage_count,
+                    token_estimates,
                 } => {
                     let form = build_archive_form_descriptor(
                         request_id,
@@ -722,6 +758,7 @@ impl AppEventHandler {
                         default_file_exists,
                         export_dir,
                         pending_pre_triage_count,
+                        token_estimates,
                     );
                     self.commands.push_back(PlatformCommand::ShowFormDialog {
                         window_id: self.window_id,
@@ -1083,17 +1120,22 @@ impl PlatformEventHandler for AppEventHandler {
                 let set_checkpoint =
                     archive_field_checked(&field_values, ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID)
                         .unwrap_or(true);
+                let use_summaries =
+                    archive_field_checked(&field_values, ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID)
+                        .unwrap_or(true);
                 engine_info!(
-                    "[archive-dialog] submitted request_id={} basename={} set_checkpoint={}",
+                    "[archive-dialog] submitted request_id={} basename={} set_checkpoint={} use_summaries={}",
                     request_id,
                     basename,
-                    set_checkpoint
+                    set_checkpoint,
+                    use_summaries
                 );
                 let _ = self.msg_tx.send(Msg::ArchiveDialogSubmitted {
                     request_id,
                     basename,
                     set_checkpoint,
                     submitted_at: Utc::now(),
+                    use_summaries,
                 });
             }
             AppEvent::InputTextChanged {

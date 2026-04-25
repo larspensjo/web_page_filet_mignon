@@ -1,4 +1,5 @@
 //! Harvester engine: IO pipeline and effect execution.
+mod archive_url;
 mod blocker_page;
 mod brave_poll;
 mod brave_seen_set;
@@ -30,6 +31,7 @@ mod token;
 mod types;
 mod url_policy;
 
+pub use archive_url::archive_url_key;
 pub use brave_poll::{parse_brave_news_response, BraveNewsItem, BravePollError};
 pub use brave_seen_set::{normalize_url_for_dedupe, BraveSeenSet};
 pub use briefing::{

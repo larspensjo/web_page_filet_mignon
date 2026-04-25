@@ -302,6 +302,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             default_file_exists,
             export_dir,
             pending_pre_triage_count,
+            token_estimates,
         } => archive::handle_dialog_ready(
             &mut state,
             request_id,
@@ -311,18 +312,21 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             default_file_exists,
             export_dir,
             pending_pre_triage_count,
+            token_estimates,
         ),
         Msg::ArchiveDialogSubmitted {
             request_id,
             basename,
             set_checkpoint,
             submitted_at,
+            use_summaries,
         } => archive::handle_dialog_submitted(
             &mut state,
             request_id,
             basename,
             set_checkpoint,
             submitted_at,
+            use_summaries,
         ),
         Msg::ArchiveExportCompleted {
             request_id,

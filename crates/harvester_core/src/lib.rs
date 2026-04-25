@@ -48,10 +48,10 @@ pub use prompt_lab::{
 };
 pub use source_state::{SourceInstanceState, SourcePollStat, SourceStateIndex};
 pub use state::{
-    normalize_url_for_dedupe, AiAvailability, AiUnavailableReason, AppState, BatchNextAction,
-    BatchObservation, BatchStatus, CompletedJobSnapshot, JobId, JobOrigin, JobResultKind,
-    LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex, PreTriageActionability,
-    SessionState, Stage,
+    normalize_url_for_dedupe, AiAvailability, AiUnavailableReason, AppState, ArchiveTokenEstimates,
+    BatchNextAction, BatchObservation, BatchStatus, CompletedJobSnapshot, JobId, JobOrigin,
+    JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
+    PreTriageActionability, SessionState, Stage,
 };
 // ImportPhase is re-exported from import_session above; BatchObservation uses it.
 pub use summary_cache::{

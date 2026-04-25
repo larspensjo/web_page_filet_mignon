@@ -49,6 +49,7 @@ impl EffectRunner {
                 since_utc,
                 default_basename,
                 pending_pre_triage_count,
+                token_estimates,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
@@ -69,6 +70,7 @@ impl EffectRunner {
                         default_file_exists,
                         export_dir: output_dir,
                         pending_pre_triage_count,
+                        token_estimates,
                     });
                 });
             }
@@ -78,6 +80,8 @@ impl EffectRunner {
                 ordered_urls,
                 since_utc,
                 requested_checkpoint,
+                use_summaries,
+                summaries,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
@@ -93,6 +97,8 @@ impl EffectRunner {
                         &ordered_urls,
                         since_utc,
                         options,
+                        use_summaries,
+                        &summaries,
                     ) {
                         Ok(summary) => {
                             engine_info!(

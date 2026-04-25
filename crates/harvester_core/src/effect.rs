@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use harvester_engine::llm::dto::SummaryEntities;
@@ -66,6 +67,8 @@ pub enum Effect {
         ordered_urls: Vec<String>,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
         requested_checkpoint: Option<chrono::DateTime<chrono::Utc>>,
+        use_summaries: bool,
+        summaries: HashMap<String, String>,
     },
     OpenArchiveDialog {
         request_id: u64,
@@ -73,6 +76,7 @@ pub enum Effect {
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
         default_basename: String,
         pending_pre_triage_count: usize,
+        token_estimates: crate::ArchiveTokenEstimates,
     },
     ShowArchiveDialog {
         request_id: u64,
@@ -82,6 +86,7 @@ pub enum Effect {
         default_file_exists: bool,
         export_dir: PathBuf,
         pending_pre_triage_count: usize,
+        token_estimates: crate::ArchiveTokenEstimates,
     },
     DownloadLinkedPage {
         job_id: crate::JobId,

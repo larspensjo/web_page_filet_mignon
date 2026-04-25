@@ -1589,3 +1589,10 @@ Change: Added an explicit list text tab stop, widened the hanging indent so mark
 Lessons Learned: Rich Edit needs the marker position and text tab stop specified together for stable wrapped list alignment.
 Prevention: List rendering tests should assert paragraph geometry controls, not just marker text.
 Refs: crates/harvester_app/src/platform/ui/markdown_to_rtf.rs
+
+## 2026-04-25 - Add summary archive toggle
+Type: Feature
+Context: Archive exports were always full-article concatenations, which made downstream LLM analysis consume far more context than needed when cached article summaries were available.
+Change: Added an archive dialog "Use summaries" checkbox plus full/summary token estimates. Summary mode emits flat records with `content: summary`, `content: full`, or `content: full-truncated`; legacy mode still preserves each article's original YAML frontmatter and body. Summary maps are built in the reducer from triage URL to content-hash linkage, and exporter/reducer URL lookup now shares `harvester_engine::archive_url_key`.
+Lessons Learned: The archive format now intentionally has two header shapes, so consumers must accept both. The token estimate helper reads `JobState::tokens`, so pruned jobs and imported articles without jobs can underreport archive size.
+Refs: crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/state/mod.rs, crates/harvester_engine/src/export.rs, crates/harvester_app/src/platform/app.rs

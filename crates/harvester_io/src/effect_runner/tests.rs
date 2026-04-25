@@ -733,6 +733,8 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
         ordered_urls: vec!["https://example.com/b".to_string()],
         since_utc: None,
         requested_checkpoint: None,
+        use_summaries: false,
+        summaries: HashMap::new(),
     }]);
 
     let msg = rx

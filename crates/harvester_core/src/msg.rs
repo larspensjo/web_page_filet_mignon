@@ -14,7 +14,7 @@ use crate::prompt_lab::{
 
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
-use crate::state::AiAvailability;
+use crate::state::{AiAvailability, ArchiveTokenEstimates};
 use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,6 +46,7 @@ pub enum Msg {
         default_file_exists: bool,
         export_dir: PathBuf,
         pending_pre_triage_count: usize,
+        token_estimates: ArchiveTokenEstimates,
     },
     /// Archive dialog was confirmed by the user.
     ArchiveDialogSubmitted {
@@ -53,6 +54,7 @@ pub enum Msg {
         basename: String,
         set_checkpoint: bool,
         submitted_at: DateTime<Utc>,
+        use_summaries: bool,
     },
     /// Archive export completed successfully.
     ArchiveExportCompleted {

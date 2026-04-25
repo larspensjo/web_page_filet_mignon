@@ -158,6 +158,101 @@ fn archive_clicked_with_triage_complete_and_no_pre_triage_has_zero_pending_count
     );
 }
 
+#[test]
+fn archive_token_estimates_uses_summary_output_tokens_when_available() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let url = "https://triage-complete.com/0".to_string();
+    let state = complete_triage_state_for_test(1);
+    let mut state = add_completed_job_with_tokens_for_test(state, &url, 500);
+    let key = SummaryCacheKey {
+        content_hash: "hash-tc-0".to_string(),
+        prompt_id: PromptId::ArticleSummary,
+        prompt_version: 4,
+        model_id: "claude-sonnet".to_string(),
+        context_hash: "ctx".to_string(),
+    };
+    let result = ArticleSummaryResult {
+        title: "Art".to_string(),
+        summary: "summary text".to_string(),
+        key_points: vec![],
+        input_tokens: 100,
+        output_tokens: 42,
+        entities: SummaryEntities::default(),
+    };
+    state.store_summary_result(key, result, "2026-04-01T00:00:00Z".to_string());
+
+    let estimates = state.archive_token_estimates(&[url]);
+
+    assert_eq!(estimates.full_tokens, 500);
+    assert_eq!(estimates.summary_tokens, 42);
+    assert_eq!(estimates.summary_coverage, 1);
+}
+
+#[test]
+fn archive_token_estimates_falls_back_to_full_tokens_when_no_summary() {
+    init_logging();
+    let url = "https://triage-complete.com/0".to_string();
+    let state = complete_triage_state_for_test(1);
+    let state = add_completed_job_with_tokens_for_test(state, &url, 300);
+
+    let estimates = state.archive_token_estimates(&[url]);
+
+    assert_eq!(estimates.full_tokens, 300);
+    assert_eq!(estimates.summary_tokens, 300);
+    assert_eq!(estimates.summary_coverage, 0);
+}
+
+#[test]
+fn archive_clicked_emits_real_token_estimates_from_state() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let url = "https://triage-complete.com/0".to_string();
+    let state = complete_triage_state_for_test(1);
+    let mut state = add_completed_job_with_tokens_for_test(state, &url, 400);
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: "hash-tc-0".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 4,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "Art".to_string(),
+            summary: "s".to_string(),
+            key_points: vec![],
+            input_tokens: 10,
+            output_tokens: 99,
+            entities: SummaryEntities::default(),
+        },
+        "2026-04-01T00:00:00Z".to_string(),
+    );
+
+    let (_, effects) = update(state, Msg::ArchiveClicked);
+    let estimates = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog {
+                token_estimates, ..
+            } => Some(*token_estimates),
+            _ => None,
+        })
+        .expect("OpenArchiveDialog expected");
+
+    assert_eq!(estimates.full_tokens, 400);
+    assert_eq!(estimates.summary_tokens, 99);
+    assert_eq!(estimates.summary_coverage, 1);
+}
+
 fn complete_all_triage_llm_requests(mut state: AppState, effects: Vec<Effect>) -> AppState {
     let request_ids: Vec<u64> = effects
         .iter()
@@ -552,6 +647,7 @@ fn archive_dialog_ready_ignores_stale_request() {
             default_file_exists: false,
             export_dir: std::path::PathBuf::from("/tmp"),
             pending_pre_triage_count: 0,
+            token_estimates: crate::ArchiveTokenEstimates::default(),
         },
     );
     assert!(effects.is_empty());
@@ -574,6 +670,7 @@ fn archive_dialog_ready_emits_show_dialog_for_current_request() {
             default_file_exists: false,
             export_dir: std::path::PathBuf::from("/tmp"),
             pending_pre_triage_count: 0,
+            token_estimates: crate::ArchiveTokenEstimates::default(),
         },
     );
     assert_eq!(state.archive_request_id(), 1);
@@ -619,6 +716,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             basename: "custom-archive.md".to_string(),
             set_checkpoint: true,
             submitted_at: since,
+            use_summaries: false,
         },
     );
     let effect = effects
@@ -632,12 +730,16 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             ordered_urls,
             since_utc,
             requested_checkpoint,
+            use_summaries,
+            summaries,
         } => {
             assert_eq!(request_id, 1);
             assert_eq!(basename, "custom-archive.md");
             assert_eq!(ordered_urls.len(), 0);
             assert!(since_utc.is_none());
             assert_eq!(requested_checkpoint, Some(since));
+            assert!(!use_summaries);
+            assert!(summaries.is_empty());
         }
         _ => unreachable!(),
     }
@@ -660,6 +762,7 @@ fn archive_dialog_submitted_with_only_pre_triage_ready_exports_zero_urls() {
             basename: "archive.md".to_string(),
             set_checkpoint: false,
             submitted_at: since,
+            use_summaries: false,
         },
     );
     let effect = effects
@@ -682,6 +785,109 @@ fn archive_dialog_submitted_with_only_pre_triage_ready_exports_zero_urls() {
 }
 
 #[test]
+fn archive_submitted_with_use_summaries_true_and_cached_summary_populates_map() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::archive_url_key;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let url = "https://triage-complete.com/0".to_string();
+    let mut state = complete_triage_state_for_test(1);
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: "hash-tc-0".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 4,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "Art".to_string(),
+            summary: "compact".to_string(),
+            key_points: vec!["point one".to_string()],
+            input_tokens: 10,
+            output_tokens: 5,
+            entities: SummaryEntities::default(),
+        },
+        "2026-04-01T00:00:00Z".to_string(),
+    );
+
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: since,
+            use_summaries: true,
+        },
+    );
+    let effect = effects
+        .into_iter()
+        .find(|effect| matches!(effect, Effect::ArchiveRequested { .. }))
+        .expect("ArchiveRequested effect expected");
+    match effect {
+        Effect::ArchiveRequested {
+            use_summaries,
+            summaries,
+            ..
+        } => {
+            assert!(use_summaries);
+            let body = summaries
+                .get(&archive_url_key(&url))
+                .expect("summary body for url");
+            assert!(body.contains("## Summary\ncompact"));
+            assert!(body.contains("## Key Points\n- point one"));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn archive_submitted_with_use_summaries_false_emits_empty_summary_map() {
+    init_logging();
+    let since = chrono::DateTime::parse_from_rfc3339("2026-03-21T18:17:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let state = complete_triage_state_for_test(1);
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: since,
+            use_summaries: false,
+        },
+    );
+    let effect = effects
+        .into_iter()
+        .find(|effect| matches!(effect, Effect::ArchiveRequested { .. }))
+        .expect("ArchiveRequested effect expected");
+    match effect {
+        Effect::ArchiveRequested {
+            use_summaries,
+            summaries,
+            ..
+        } => {
+            assert!(!use_summaries);
+            assert!(summaries.is_empty());
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn archive_dialog_submitted_rejects_invalid_basename() {
     init_logging();
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
@@ -693,6 +899,7 @@ fn archive_dialog_submitted_rejects_invalid_basename() {
             basename: "../bad.md".to_string(),
             set_checkpoint: true,
             submitted_at: chrono::Utc::now(),
+            use_summaries: false,
         },
     );
     assert!(effects.is_empty());
@@ -898,6 +1105,7 @@ fn archive_open_and_submit_use_identical_pinned_corpus() {
             basename: "archive.md".to_string(),
             set_checkpoint: false,
             submitted_at: since,
+            use_summaries: false,
         },
     );
     let submit_effect = submit_effects
@@ -963,6 +1171,7 @@ fn refresh_between_open_and_submit_uses_pinned_snapshot() {
             basename: "archive.md".to_string(),
             set_checkpoint: false,
             submitted_at: since,
+            use_summaries: false,
         },
     );
     let submit_effect = submit_effects
@@ -1067,6 +1276,7 @@ fn parity_a_pre_triage_ready_archive_count_is_zero_pending_count_is_nonzero() {
             basename: "archive.md".to_string(),
             set_checkpoint: false,
             submitted_at: since,
+            use_summaries: false,
         },
     );
     let submit_urls = submit_effects
@@ -1125,6 +1335,7 @@ fn parity_b_triage_complete_corpus_count_dialog_count_urls_match() {
             basename: "archive.md".to_string(),
             set_checkpoint: false,
             submitted_at: since,
+            use_summaries: false,
         },
     );
     let submit_urls = submit_effects
@@ -1214,6 +1425,7 @@ fn checkpoint_set_does_not_reduce_corpus_count_to_zero() {
             basename: "archive.md".to_string(),
             set_checkpoint: false,
             submitted_at: submit_since,
+            use_summaries: false,
         },
     );
     let submit_urls = submit_effects

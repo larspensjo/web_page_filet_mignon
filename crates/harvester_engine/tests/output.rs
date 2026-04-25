@@ -1,5 +1,5 @@
 use harvester_engine::{
-    build_concatenated_export, build_markdown_document, build_triage_archive,
+    archive_url_key, build_concatenated_export, build_markdown_document, build_triage_archive,
     deterministic_filename, Converter, ExportOptions, Extractor, Html2MdConverter,
     ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter,
 };
@@ -170,6 +170,8 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
         &["https://b".to_string(), "https://a".to_string()],
         None,
         options,
+        false,
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -219,6 +221,8 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
         &["https://old".to_string(), "https://bad".to_string()],
         Some(since),
         options,
+        false,
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -261,6 +265,8 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
         &["https://keep".to_string()],
         None,
         options,
+        false,
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -274,6 +280,138 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
     assert_eq!(summary.doc_count, 1);
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
     assert!(archive.contains("url: \"https://keep\""));
+}
+
+#[test]
+fn triage_archive_uses_summary_body_when_provided() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md = "---\nurl: \"https://example.com/a\"\ntitle: \"Article A\"\ntoken_count: 500\nfetched_utc: \"2026-04-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nFull article body text.\n";
+    std::fs::write(dir.join("a.md"), md).unwrap();
+
+    let mut summaries = std::collections::HashMap::new();
+    summaries.insert(
+        archive_url_key("https://example.com/a"),
+        "## Summary\nCompact summary.\n\n## Key Points\n- Key point one\n".to_string(),
+    );
+
+    let options = ExportOptions {
+        output_filename: "archive.md".to_string(),
+        manifest_filename: None,
+        ..ExportOptions::default()
+    };
+    let summary = build_triage_archive(
+        dir,
+        "archive.md",
+        &["https://example.com/a".to_string()],
+        None,
+        options,
+        true,
+        &summaries,
+    )
+    .unwrap();
+
+    let content = std::fs::read_to_string(&summary.output_path).unwrap();
+    assert!(content.contains("content: summary"));
+    assert!(content.contains("Compact summary."));
+    assert!(!content.contains("Full article body text."));
+}
+
+#[test]
+fn triage_archive_falls_back_to_full_body_when_no_summary() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md = "---\nurl: \"https://example.com/b\"\ntitle: \"Article B\"\ntoken_count: 100\nfetched_utc: \"2026-04-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nFull fallback body.\n";
+    std::fs::write(dir.join("b.md"), md).unwrap();
+
+    let mut summaries = std::collections::HashMap::new();
+    summaries.insert(
+        archive_url_key("https://other.com/x"),
+        "## Summary\nOther.\n".to_string(),
+    );
+
+    let options = ExportOptions {
+        output_filename: "archive.md".to_string(),
+        manifest_filename: None,
+        ..ExportOptions::default()
+    };
+    let summary = build_triage_archive(
+        dir,
+        "archive.md",
+        &["https://example.com/b".to_string()],
+        None,
+        options,
+        true,
+        &summaries,
+    )
+    .unwrap();
+
+    let content = std::fs::read_to_string(&summary.output_path).unwrap();
+    assert!(content.contains("Full fallback body."));
+    assert!(content.contains("content: full"));
+    assert!(!content.contains("content: summary"));
+}
+
+#[test]
+fn triage_archive_summary_mode_with_empty_map_uses_fallback_format() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md = "---\nurl: \"https://example.com/e\"\ntitle: \"No Summary\"\ntoken_count: 50\nfetched_utc: \"2026-04-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nBody text.\n";
+    std::fs::write(dir.join("e.md"), md).unwrap();
+
+    let options = ExportOptions {
+        output_filename: "archive.md".to_string(),
+        manifest_filename: None,
+        ..ExportOptions::default()
+    };
+    let summary = build_triage_archive(
+        dir,
+        "archive.md",
+        &["https://example.com/e".to_string()],
+        None,
+        options,
+        true,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+
+    let content = std::fs::read_to_string(&summary.output_path).unwrap();
+    assert!(content.contains("Body text."));
+    assert!(content.contains("content: full"));
+    assert!(
+        !content.contains("token_count: 50"),
+        "YAML frontmatter must not appear in summary mode"
+    );
+}
+
+#[test]
+fn triage_archive_truncates_large_fallback_body_safely() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let prefix = "x".repeat(50_010);
+    let suffix = "😀".repeat(5);
+    let body = format!("{prefix}{suffix}");
+    let md = format!("---\nurl: \"https://example.com/c\"\ntitle: \"Big\"\ntoken_count: 15000\nfetched_utc: \"2026-04-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\n{body}\n");
+    std::fs::write(dir.join("c.md"), md).unwrap();
+
+    let options = ExportOptions {
+        output_filename: "archive.md".to_string(),
+        manifest_filename: None,
+        ..ExportOptions::default()
+    };
+    let summary = build_triage_archive(
+        dir,
+        "archive.md",
+        &["https://example.com/c".to_string()],
+        None,
+        options,
+        true,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+
+    let content = std::fs::read_to_string(&summary.output_path).unwrap();
+    assert!(content.contains("content: full-truncated"));
 }
 
 #[test]

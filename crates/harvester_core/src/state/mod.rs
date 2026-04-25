@@ -245,6 +245,22 @@ pub struct BatchObservation {
     pub source_poll_stats: Vec<crate::SourcePollStat>,
 }
 
+/// Token cost estimates for the two archive modes, computed at dialog-open time.
+///
+/// **Limitation:** `full_tokens` is summed from `AppState::jobs`. Articles whose
+/// `JobState` has been pruned, or imported articles without a job, contribute 0.
+/// The dialog may therefore show a smaller archive size than the file produces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ArchiveTokenEstimates {
+    /// Sum of article token counts from job state in full-article mode.
+    pub full_tokens: u64,
+    /// Estimated tokens in summary mode: cached summary output tokens, falling
+    /// back to full article tokens when no summary is cached.
+    pub summary_tokens: u64,
+    /// Number of requested articles with a cached summary.
+    pub summary_coverage: usize,
+}
+
 /// Whether pre-triage currently exposes an actionable corpus for triage startup.
 ///
 /// This is intentionally separate from [`crate::PreTriagePhase`], which remains
@@ -898,6 +914,52 @@ impl AppState {
             self.triage(),
             self.briefing_triage_policy(),
         )
+    }
+
+    /// Compute token estimates for the two archive modes for the given ordered URL list.
+    ///
+    /// **Limitation:** `full_tokens` aggregates `JobState::tokens`; articles whose job
+    /// has been pruned, or imported articles without a job, contribute 0 and are likely
+    /// underreported. Summary coverage uses the active triage session's URL to
+    /// content-hash map.
+    pub(crate) fn archive_token_estimates(&self, urls: &[String]) -> ArchiveTokenEstimates {
+        use harvester_engine::archive_url_key;
+
+        let url_tokens: HashMap<String, u64> = self
+            .jobs
+            .values()
+            .filter_map(|job| {
+                job.tokens
+                    .map(|tokens| (archive_url_key(&job.url), tokens as u64))
+            })
+            .collect();
+
+        let mut full_tokens = 0u64;
+        let mut summary_tokens = 0u64;
+        let mut summary_coverage = 0usize;
+
+        for url in urls {
+            let article_tokens = url_tokens.get(&archive_url_key(url)).copied().unwrap_or(0);
+            full_tokens = full_tokens.saturating_add(article_tokens);
+
+            let maybe_summary = self
+                .triage()
+                .article_content_hash(url)
+                .and_then(|hash| self.summary_cache().lookup_any_by_content_hash(hash));
+
+            if let Some(entry) = maybe_summary {
+                summary_tokens = summary_tokens.saturating_add(entry.result.output_tokens as u64);
+                summary_coverage += 1;
+            } else {
+                summary_tokens = summary_tokens.saturating_add(article_tokens);
+            }
+        }
+
+        ArchiveTokenEstimates {
+            full_tokens,
+            summary_tokens,
+            summary_coverage,
+        }
     }
 
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {

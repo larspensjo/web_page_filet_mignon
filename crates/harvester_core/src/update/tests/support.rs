@@ -350,6 +350,45 @@ pub(super) fn add_completed_job_for_test(state: AppState, url: &str) -> AppState
     apply_pending_pre_triage_refresh_evaluation(state)
 }
 
+pub(super) fn add_completed_job_with_tokens_for_test(
+    state: AppState,
+    url: &str,
+    tokens: u32,
+) -> AppState {
+    use crate::JobResultKind;
+    let (state, effects) = update(state, Msg::InputChanged(format!("{url}\n")));
+    let (state, effects2) = update(state, Msg::UrlsSubmitted);
+    let job_id = effects
+        .into_iter()
+        .chain(effects2)
+        .find_map(|e| match e {
+            Effect::EnqueueUrl { job_id, .. } => Some(job_id),
+            _ => None,
+        })
+        .expect("EnqueueUrl effect expected");
+    let (state, _) = update(
+        state,
+        Msg::JobProgress {
+            job_id,
+            stage: crate::Stage::Tokenizing,
+            tokens: Some(tokens),
+            bytes: None,
+            content_preview: None,
+        },
+    );
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id,
+            result: JobResultKind::Success,
+            content_preview: None,
+            extracted_links: Vec::new(),
+            fetched_utc: None,
+        },
+    );
+    apply_pending_pre_triage_refresh_evaluation(state)
+}
+
 pub(super) fn apply_pending_pre_triage_refresh_evaluation(mut state: AppState) -> AppState {
     if let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request() {
         let ordered_urls = state.ordered_completed_job_urls_snapshot();

@@ -5,9 +5,13 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Utc};
 use serde_json::json;
 
+use crate::archive_url_key;
 use crate::frontmatter::{parse_frontmatter, strip_frontmatter};
 use crate::persist::{ensure_output_dir, AtomicFileWriter, PersistError};
-use url::Url;
+use crate::truncate_to_char_boundary;
+
+/// Maximum character count for full-article fallback bodies in summary mode.
+const MAX_FALLBACK_BODY_CHARS: usize = 50_000;
 
 #[derive(Debug, Clone)]
 pub struct ExportOptions {
@@ -81,7 +85,7 @@ pub fn build_concatenated_export(
             .to_string();
         let content = fs::read_to_string(&path)?;
         let meta = parse_doc(&content, &relative)?;
-        let normalized = normalize_url(&meta.url);
+        let normalized = archive_url_key(&meta.url);
         if seen.insert(normalized) {
             docs.push(meta);
         }
@@ -127,6 +131,8 @@ pub fn build_triage_archive(
     ordered_urls: &[String],
     since_utc: Option<DateTime<Utc>>,
     options: ExportOptions,
+    use_summaries: bool,
+    summaries: &HashMap<String, String>,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     let mut entries = collect_archive_md_files(output_dir)?;
@@ -150,14 +156,14 @@ pub fn build_triage_archive(
         if !passes_since_filter(&meta, since_utc) {
             continue;
         }
-        let normalized = normalize_url(&meta.url);
+        let normalized = archive_url_key(&meta.url);
         docs_by_url.entry(normalized).or_insert(meta);
     }
 
     let mut docs = Vec::new();
     let mut selected = HashSet::new();
     for url in ordered_urls {
-        let normalized = normalize_url(url);
+        let normalized = archive_url_key(url);
         if !selected.insert(normalized.clone()) {
             continue;
         }
@@ -174,8 +180,47 @@ pub fn build_triage_archive(
         }
         buffer.push_str(&options.delimiter_start);
         buffer.push('\n');
-        buffer.push_str(&doc.raw_content);
-        if !doc.raw_content.ends_with('\n') {
+
+        if !use_summaries {
+            buffer.push_str(&doc.raw_content);
+            if !doc.raw_content.ends_with('\n') {
+                buffer.push('\n');
+            }
+        } else {
+            let normalized = archive_url_key(&doc.url);
+            if let Some(summary_body) = summaries.get(&normalized) {
+                buffer.push_str(&format!(
+                    "url: {}\ntitle: {}\ntokens: {}\nfetched_utc: {}\nfilename: {}\ncontent: summary\n\n",
+                    doc.url,
+                    doc.title,
+                    doc.token_count.unwrap_or(0),
+                    doc.fetched_utc,
+                    doc.filename,
+                ));
+                buffer.push_str(summary_body.trim_end());
+                buffer.push('\n');
+            } else {
+                let body = doc.body.trim_end();
+                let truncated = truncate_to_char_boundary(body, MAX_FALLBACK_BODY_CHARS);
+                let was_truncated = body.chars().count() > MAX_FALLBACK_BODY_CHARS;
+                let content_label = if was_truncated {
+                    "full-truncated"
+                } else {
+                    "full"
+                };
+                buffer.push_str(&format!(
+                    "url: {}\ntitle: {}\ntokens: {}\nfetched_utc: {}\nfilename: {}\ncontent: {content_label}\n\n",
+                    doc.url,
+                    doc.title,
+                    doc.token_count.unwrap_or(0),
+                    doc.fetched_utc,
+                    doc.filename,
+                ));
+                buffer.push_str(truncated);
+                buffer.push('\n');
+            }
+        }
+        if !buffer.ends_with('\n') {
             buffer.push('\n');
         }
         buffer.push_str(&options.delimiter_end);
@@ -259,25 +304,6 @@ fn collect_md_files(dir: &Path) -> Result<Vec<PathBuf>, ExportError> {
         }
     }
     Ok(entries)
-}
-
-fn normalize_url(url: &str) -> String {
-    let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return trimmed.to_string();
-    }
-    if let Ok(mut parsed) = Url::parse(trimmed) {
-        parsed.set_fragment(None);
-        if let Some(port) = parsed.port() {
-            let normalized_port = match (parsed.scheme(), port) {
-                ("http", 80) | ("https", 443) => None,
-                _ => Some(port),
-            };
-            let _ = parsed.set_port(normalized_port);
-        }
-        return parsed.into();
-    }
-    trimmed.to_lowercase()
 }
 
 fn write_export_file(

@@ -211,6 +211,7 @@ fn archive_click_emits_effect_without_state_change() {
         since_utc,
         default_basename,
         pending_pre_triage_count,
+        token_estimates,
     } = &effects[0]
     else {
         panic!("expected OpenArchiveDialog effect, got {:?}", effects[0]);
@@ -220,6 +221,10 @@ fn archive_click_emits_effect_without_state_change() {
     assert!(since_utc.is_none());
     assert_eq!(default_basename, "archive.md");
     assert_eq!(*pending_pre_triage_count, 0);
+    assert_eq!(
+        *token_estimates,
+        harvester_core::ArchiveTokenEstimates::default()
+    );
 }
 
 fn send_llm_request_with_context(state: AppState) -> (AppState, Vec<Effect>) {

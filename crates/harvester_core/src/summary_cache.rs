@@ -78,6 +78,16 @@ impl SummaryCache {
         self.entries.get(key)
     }
 
+    pub fn lookup_any_by_content_hash(&self, content_hash: &str) -> Option<&SummaryCacheEntry> {
+        self.entries
+            .iter()
+            .filter(|(key, _)| {
+                key.content_hash == content_hash && key.prompt_id == PromptId::ArticleSummary
+            })
+            .max_by(|(_, a), (_, b)| a.created_at_utc.cmp(&b.created_at_utc))
+            .map(|(_, entry)| entry)
+    }
+
     /// Insert a new cache entry, replacing any existing entry with the same key.
     /// Automatically evicts oldest entries if capacity limit is exceeded.
     pub fn insert(&mut self, key: SummaryCacheKey, entry: SummaryCacheEntry) {
@@ -290,6 +300,74 @@ mod tests {
         assert_eq!(cache.len(), 2);
         assert_eq!(cache.lookup(&key1).unwrap().result.title, "Title1");
         assert_eq!(cache.lookup(&key2).unwrap().result.title, "Title2");
+    }
+
+    #[test]
+    fn lookup_any_by_content_hash_returns_most_recent_article_summary() {
+        use harvester_engine::llm::dto::SummaryEntities;
+        let mut cache = SummaryCache::new();
+
+        let make_key = |version: u32, model: &str| SummaryCacheKey {
+            content_hash: "hash-abc".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: version,
+            model_id: model.to_string(),
+            context_hash: "ctx".to_string(),
+        };
+        let make_entry = |title: &str, output_tokens: u32, created: &str| SummaryCacheEntry {
+            result: ArticleSummaryResult {
+                title: title.to_string(),
+                summary: "s".to_string(),
+                key_points: vec![],
+                input_tokens: 10,
+                output_tokens,
+                entities: SummaryEntities::default(),
+            },
+            created_at_utc: created.to_string(),
+        };
+
+        cache.insert(
+            make_key(3, "model-a"),
+            make_entry("Old", 5, "2026-01-01T00:00:00Z"),
+        );
+        cache.insert(
+            make_key(4, "model-b"),
+            make_entry("New", 8, "2026-04-01T00:00:00Z"),
+        );
+
+        let found = cache.lookup_any_by_content_hash("hash-abc").unwrap();
+        assert_eq!(found.result.title, "New");
+        assert_eq!(found.result.output_tokens, 8);
+
+        assert!(cache.lookup_any_by_content_hash("no-such-hash").is_none());
+    }
+
+    #[test]
+    fn lookup_any_by_content_hash_ignores_non_article_summary_prompts() {
+        use harvester_engine::llm::dto::SummaryEntities;
+        let mut cache = SummaryCache::new();
+        let key = SummaryCacheKey {
+            content_hash: "hash-xyz".to_string(),
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: 1,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        };
+        cache.insert(
+            key,
+            SummaryCacheEntry {
+                result: ArticleSummaryResult {
+                    title: "Triage".to_string(),
+                    summary: "t".to_string(),
+                    key_points: vec![],
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    entities: SummaryEntities::default(),
+                },
+                created_at_utc: "2026-01-01T00:00:00Z".to_string(),
+            },
+        );
+        assert!(cache.lookup_any_by_content_hash("hash-xyz").is_none());
     }
 
     #[test]
