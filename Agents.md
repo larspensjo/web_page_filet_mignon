@@ -6,6 +6,9 @@
 - For plan-driven work, write commit messages about the code change, not the plan. Follow recommended practices for teh design of the comment.
 - When adding a CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change.
 
+## Planning & Documentation
+- When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.
+
 ## Architecture
 - Preserve the unidirectional data flow: input -> action -> reducer -> state -> render, with side effects isolated and fed back as actions.
 - Reducers must stay pure and unit-testable.
@@ -25,6 +28,9 @@
 ## Logging
 - Use `engine_logging` for runtime logging.
 - Include enough context in error logs to identify the failing job, URL, or operation.
+
+## Skills
+- For research questions that should be answered from the local harvested article corpus, use `$harvester-mcp-research`.
 
 ## Diary
 - Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations, important decisions, and bug fixes with reusable lessons.
