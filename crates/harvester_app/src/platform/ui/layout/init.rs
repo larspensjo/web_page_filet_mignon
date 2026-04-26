@@ -3,6 +3,7 @@ use commanductui::{Color, FontDescription, FontWeight, PlatformCommand, WindowId
 use harvester_core::TOKEN_LIMIT;
 
 use super::super::constants::*;
+use super::super::groups::bottom_buttons;
 
 /// Creates all Win32 controls for the main window.
 ///
@@ -712,50 +713,7 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         class: LabelClass::Default,
     });
 
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_STOP,
-        text: "Stop / Finish".to_string(),
-    });
-
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_POLL_SOURCES,
-        text: "Poll sources".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_TRIAGE,
-        text: "Run Triage".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_SUMMARIZE,
-        text: "Summarize Articles".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_BRIEFING,
-        text: "Generate Briefing".to_string(),
-    });
-
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_OPEN_BROWSER,
-        text: "Open in Browser".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_BUTTONS),
-        control_id: BUTTON_ARCHIVE,
-        text: "Archive".to_string(),
-    });
+    bottom_buttons::create_controls(window_id, commands);
 
     commands.push(PlatformCommand::CreateLabel {
         window_id,

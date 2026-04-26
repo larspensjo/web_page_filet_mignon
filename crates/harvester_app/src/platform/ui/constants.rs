@@ -3,6 +3,8 @@ use commanductui::types::{ControlId, MenuActionId};
 pub const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId::new(1);
 
 pub const INPUT_URLS: ControlId = ControlId::new(1001);
+// Bottom button labels, order, widths, styles, and routing live in
+// ui/groups/bottom_buttons.rs; keep new footer actions described there.
 pub const BUTTON_STOP: ControlId = ControlId::new(1003);
 pub const BUTTON_BRIEFING: ControlId = ControlId::new(1005);
 pub const BUTTON_SUMMARIZE: ControlId = ControlId::new(1006);

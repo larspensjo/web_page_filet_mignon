@@ -1608,3 +1608,10 @@ Type: Bug Fix
 Context: Article summary responses could fail validation when the model returned more than 15 companies, technologies, or products, even though the prompt did not state that limit.
 Change: Added `SUMMARY_PROMPT_V6` with explicit per-category entity limits, activated it for summary cache keys, and changed summary validation to accept up to 100 raw entity items before deduplicating and clamping stored entity arrays to 15 items.
 Refs: crates/harvester_engine/src/llm/prompts/summary.rs, crates/harvester_engine/src/llm/prompts/mod.rs, crates/harvester_engine/src/llm/validation.rs
+
+## 2026-04-26 - Extract bottom button UI group
+Type: Refactor
+Context: Footer action button metadata and behavior were spread across creation, layout, theme, render, and event routing files.
+Change: Added `ui/groups/bottom_buttons.rs` to own Harvester bottom-button descriptors, creation commands, layout rules, initial styles, dynamic enablement, and click routing without changing CommanDuctUI.
+Lessons Learned: Group Harvester UI regions in the app adapter while keeping generic infrastructure generic.
+Refs: crates/harvester_app/src/platform/ui/groups/bottom_buttons.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/app.rs

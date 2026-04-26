@@ -852,44 +852,16 @@ impl Drop for AppEventHandler {
 
 impl PlatformEventHandler for AppEventHandler {
     fn handle_event(&mut self, event: AppEvent) {
+        if let AppEvent::ButtonClicked { control_id, .. } = &event {
+            if let Some(msg) = ui::groups::bottom_buttons::msg_for_control(*control_id) {
+                let _ = self.msg_tx.send(msg);
+                return;
+            }
+        }
+
         match event {
             AppEvent::MainWindowUISetupComplete { .. } => {
                 let _ = self.msg_tx.send(Msg::Tick);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_STOP =>
-            {
-                let _ = self.msg_tx.send(Msg::StopFinishClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_BRIEFING =>
-            {
-                let _ = self.msg_tx.send(Msg::GenerateBriefingClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_SUMMARIZE =>
-            {
-                let _ = self.msg_tx.send(Msg::PrepareSummariesClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_TRIAGE =>
-            {
-                let _ = self.msg_tx.send(Msg::TriageClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_POLL_SOURCES =>
-            {
-                let _ = self.msg_tx.send(Msg::PollSourcesClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_OPEN_BROWSER =>
-            {
-                let _ = self.msg_tx.send(Msg::OpenInBrowserClicked);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BUTTON_ARCHIVE =>
-            {
-                let _ = self.msg_tx.send(Msg::ArchiveClicked);
             }
             AppEvent::TabBarSelectionChanged {
                 control_id,

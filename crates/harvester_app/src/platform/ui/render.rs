@@ -3,6 +3,7 @@ use engine_logging::engine_debug;
 use harvester_core::{AppTab, AppViewModel, LayoutViewModel, LeftTab, DEFAULT_JOBS_PANEL_WIDTH};
 use harvester_engine::llm::ModelId;
 
+use super::groups::bottom_buttons::BottomButtonsRenderState;
 use super::layout::{build_layout_command, LayoutConfig, PromptLabLayoutConfig};
 use super::render_controls::{
     render_left_tab_bar_section, render_main_controls_section, render_operation_progress_section,
@@ -56,21 +57,14 @@ impl Default for LayoutRenderState {
 pub(super) struct ControlsRenderState {
     pub(super) prev_status_label: Option<(String, MessageSeverity)>,
     pub(super) prev_progress_text: Option<String>,
-    pub(super) prev_stop_enabled: Option<bool>,
-    pub(super) prev_briefing_enabled: Option<bool>,
-    pub(super) prev_summarize_enabled: Option<bool>,
-    pub(super) prev_triage_enabled: Option<bool>,
-    pub(super) prev_poll_enabled: Option<bool>,
     pub(super) prev_briefing_progress: Option<String>,
     pub(super) prev_triage_progress: Option<String>,
     pub(super) prev_progress_range: Option<(u32, u32)>,
     pub(super) prev_progress_pos: Option<u32>,
     pub(super) prev_token_progress_style: Option<StyleId>,
-    pub(super) prev_stop_style: Option<StyleId>,
     pub(super) prev_operation_progress_text: Option<String>,
     pub(super) prev_operation_progress_range: Option<(u32, u32)>,
     pub(super) prev_operation_progress_pos: Option<u32>,
-    pub(super) prev_open_browser_enabled: Option<bool>,
     pub(super) prev_jobs_header_meta_text: Option<String>,
     pub(super) prev_jobs_scope_since_checkpoint_checked: Option<bool>,
 }
@@ -137,6 +131,7 @@ pub(super) struct PreviewRenderState {
 pub struct TreeRenderState {
     pub(super) layout: LayoutRenderState,
     pub(super) controls: ControlsRenderState,
+    pub(super) bottom_buttons: BottomButtonsRenderState,
     pub(super) prompt_lab: PromptLabRenderState,
     pub(super) preview: PreviewRenderState,
 }
@@ -165,6 +160,12 @@ pub fn render(
     render_operation_progress_section(window_id, view, tree_state, &mut cmds);
     render_token_progress_section(window_id, view, tree_state, &mut cmds);
     render_main_controls_section(window_id, view, tree_state, &mut cmds);
+    super::groups::bottom_buttons::render(
+        window_id,
+        view,
+        &mut tree_state.bottom_buttons,
+        &mut cmds,
+    );
     render_prompt_lab_section(window_id, view, tree_state, &mut cmds);
 
     let list_box = ListBoxRenderModel::from_view(view);

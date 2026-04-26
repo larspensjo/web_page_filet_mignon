@@ -2,6 +2,7 @@ use commanductui::types::{ControlId, DockStyle, LayoutRule};
 use harvester_core::{AppTab, LeftTab, INPUT_PANEL_FIXED_WIDTH};
 
 use super::super::constants::*;
+use super::super::groups::bottom_buttons;
 use super::PromptLabLayoutConfig;
 
 pub(super) const PROMPT_LAB_ROW_HEIGHT_STANDARD: i32 = 26;
@@ -532,63 +533,8 @@ pub(super) fn build_layout_rules(
             fixed_size: Some(operation_progress_label_width),
             margin: (8, 10, 6, 10),
         },
-        LayoutRule {
-            control_id: BUTTON_STOP,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 0,
-            fixed_size: Some(144),
-            margin: (14, 6, 22, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_POLL_SOURCES,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 1,
-            fixed_size: Some(144),
-            margin: (0, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_TRIAGE,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 2,
-            fixed_size: Some(144),
-            margin: (0, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_SUMMARIZE,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 3,
-            fixed_size: Some(144),
-            margin: (0, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_BRIEFING,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 4,
-            fixed_size: Some(168),
-            margin: (0, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_OPEN_BROWSER,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 5,
-            fixed_size: Some(144),
-            margin: (0, 6, 6, 6),
-        },
-        LayoutRule {
-            control_id: BUTTON_ARCHIVE,
-            parent_control_id: Some(PANEL_BUTTONS),
-            dock_style: DockStyle::Left,
-            order: 6,
-            fixed_size: Some(112),
-            margin: (0, 6, 6, 6),
-        },
     ];
+    rules.extend(bottom_buttons::layout_rules());
 
     // Always emit Prompt Lab sub-panel rules; tab collapse handles outer visibility.
     {

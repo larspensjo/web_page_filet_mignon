@@ -3,6 +3,7 @@ use commanductui::{
 };
 
 use super::super::constants::*;
+use super::super::groups::bottom_buttons;
 
 pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::DefineStyle {
@@ -859,41 +860,7 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
         });
     }
 
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_STOP,
-        style_id: StyleId::SecondaryButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_POLL_SOURCES,
-        style_id: StyleId::PrimaryButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_TRIAGE,
-        style_id: StyleId::SecondaryButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_SUMMARIZE,
-        style_id: StyleId::SecondaryButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_BRIEFING,
-        style_id: StyleId::SecondaryButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_OPEN_BROWSER,
-        style_id: StyleId::SecondaryButton,
-    });
-    commands.push(PlatformCommand::ApplyStyleToControl {
-        window_id,
-        control_id: BUTTON_ARCHIVE,
-        style_id: StyleId::SecondaryButton,
-    });
+    bottom_buttons::apply_theme(window_id, commands);
     for control_id in [
         BTN_PROMPT_LAB_RESOLVE,
         BTN_PROMPT_LAB_RUN,

@@ -1,4 +1,5 @@
 pub mod constants;
+pub(in crate::platform) mod groups;
 pub mod layout;
 pub mod markdown_to_rtf;
 pub mod render;
