@@ -4,6 +4,7 @@ use harvester_core::{AppViewModel, PromptLabStage};
 use harvester_engine::llm::ModelId;
 
 use super::constants::*;
+use super::groups::prompt_lab_sections;
 use super::render::{emit_if_changed, TreeRenderState};
 
 /// Helper: Convert optional ModelId to combo box selection index.
@@ -84,54 +85,7 @@ pub(super) fn render_prompt_lab_section(
             checked,
         },
     );
-    emit_if_changed(
-        &mut tree_state
-            .prompt_lab
-            .prev_prompt_lab_section_compare_checked,
-        view.left_pane.prompt_lab.compare_section_open,
-        cmds,
-        |checked| PlatformCommand::SetCheckBoxChecked {
-            window_id,
-            control_id: CHK_PROMPT_LAB_SECTION_COMPARE,
-            checked,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state
-            .prompt_lab
-            .prev_prompt_lab_section_context_checked,
-        view.left_pane.prompt_lab.context_section_open,
-        cmds,
-        |checked| PlatformCommand::SetCheckBoxChecked {
-            window_id,
-            control_id: CHK_PROMPT_LAB_SECTION_CONTEXT,
-            checked,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state
-            .prompt_lab
-            .prev_prompt_lab_section_template_checked,
-        view.left_pane.prompt_lab.template_section_open,
-        cmds,
-        |checked| PlatformCommand::SetCheckBoxChecked {
-            window_id,
-            control_id: CHK_PROMPT_LAB_SECTION_TEMPLATE,
-            checked,
-        },
-    );
-    emit_if_changed(
-        &mut tree_state
-            .prompt_lab
-            .prev_prompt_lab_section_run_details_checked,
-        view.left_pane.prompt_lab.run_details_section_open,
-        cmds,
-        |checked| PlatformCommand::SetCheckBoxChecked {
-            window_id,
-            control_id: CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
-            checked,
-        },
-    );
+    prompt_lab_sections::render(window_id, view, &mut tree_state.prompt_lab_sections, cmds);
 
     let model_catalog = &view.left_pane.prompt_lab.model_catalog;
     let selected_model = view.left_pane.prompt_lab.selected_model_override.as_ref();

@@ -102,6 +102,8 @@ pub const BTN_COMPARE_AUTO_SELECT: ControlId = ControlId::new(3105);
 pub const BTN_COMPARE_WINNER_CLEAR: ControlId = ControlId::new(3106);
 pub const BTN_PROMPT_LAB_MODE_BASIC: ControlId = ControlId::new(3107);
 pub const BTN_PROMPT_LAB_MODE_ADVANCED: ControlId = ControlId::new(3108);
+// Prompt Lab section-toggle descriptors live in
+// ui/groups/prompt_lab_sections.rs.
 pub const CHK_PROMPT_LAB_SECTION_COMPARE: ControlId = ControlId::new(3109);
 pub const CHK_PROMPT_LAB_SECTION_CONTEXT: ControlId = ControlId::new(3110);
 pub const CHK_PROMPT_LAB_SECTION_TEMPLATE: ControlId = ControlId::new(3111);

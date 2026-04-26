@@ -867,6 +867,10 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(msg);
                 return;
             }
+            if let Some(msg) = ui::groups::prompt_lab_sections::msg_for_checkbox(*control_id) {
+                let _ = self.msg_tx.send(msg);
+                return;
+            }
         }
 
         match event {
@@ -913,26 +917,6 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self
                     .msg_tx
                     .send(Msg::PromptLabAdvancedModeSet { enabled: true });
-            }
-            AppEvent::CheckBoxToggled { control_id, .. }
-                if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_COMPARE =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabCompareSectionToggled);
-            }
-            AppEvent::CheckBoxToggled { control_id, .. }
-                if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_CONTEXT =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabContextSectionToggled);
-            }
-            AppEvent::CheckBoxToggled { control_id, .. }
-                if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_TEMPLATE =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabTemplateSectionToggled);
-            }
-            AppEvent::CheckBoxToggled { control_id, .. }
-                if control_id == ui::constants::CHK_PROMPT_LAB_SECTION_RUN_DETAILS =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabRunDetailsSectionToggled);
             }
             AppEvent::ToggleSwitchToggled {
                 control_id,

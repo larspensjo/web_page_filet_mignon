@@ -1622,3 +1622,9 @@ Context: Prompt Lab action controls repeated static UI facts across creation, th
 Change: Added `ui/groups/prompt_lab_actions.rs` to own action descriptors, creation, initial styles, click/toggle routing, and dynamic enabled/checked rendering without changing CommanDuctUI.
 Lessons Learned: Action groups work best when descriptors hold static UI facts and dynamic render logic stays explicit.
 Refs: crates/harvester_app/src/platform/ui/groups/prompt_lab_actions.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/theme.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/render.rs
+
+## 2026-04-26 - Extract Prompt Lab section toggle group
+Type: Refactor
+Context: `docs/plans/Plan.PromptLabSectionTogglesGroup.md` called for moving the four Prompt Lab section expand/collapse checkbox descriptors out of scattered init/theme/routing/render sites.
+Change: Added `ui/groups/prompt_lab_sections.rs` to own section checkbox metadata, creation, style application, toggle routing, and checked-state render caching while leaving layout-rule recomputation state in the layout renderer.
+Refs: crates/harvester_app/src/platform/ui/groups/prompt_lab_sections.rs, crates/harvester_app/src/platform/ui/render_tests.rs::prompt_lab_section_checkbox_states_reflect_view_state

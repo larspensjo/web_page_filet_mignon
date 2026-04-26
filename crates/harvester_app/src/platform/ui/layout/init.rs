@@ -3,7 +3,7 @@ use commanductui::{Color, FontDescription, FontWeight, PlatformCommand, WindowId
 use harvester_core::TOKEN_LIMIT;
 
 use super::super::constants::*;
-use super::super::groups::{bottom_buttons, prompt_lab_actions};
+use super::super::groups::{bottom_buttons, prompt_lab_actions, prompt_lab_sections};
 
 /// Creates all Win32 controls for the main window.
 ///
@@ -524,30 +524,7 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         multiline: false,
         vertical_scroll: false,
     });
-    commands.push(PlatformCommand::CreateCheckBox {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_HEADER_ROW),
-        control_id: CHK_PROMPT_LAB_SECTION_COMPARE,
-        text: "Compare".to_string(),
-    });
-    commands.push(PlatformCommand::CreateCheckBox {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW),
-        control_id: CHK_PROMPT_LAB_SECTION_CONTEXT,
-        text: "Context".to_string(),
-    });
-    commands.push(PlatformCommand::CreateCheckBox {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_HEADER_ROW),
-        control_id: CHK_PROMPT_LAB_SECTION_TEMPLATE,
-        text: "Templates".to_string(),
-    });
-    commands.push(PlatformCommand::CreateCheckBox {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_RUN_DETAILS_HEADER_ROW),
-        control_id: CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
-        text: "Run details".to_string(),
-    });
+    prompt_lab_sections::create_controls(window_id, commands);
     commands.push(PlatformCommand::CreateInput {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_SYSTEM_ROW),

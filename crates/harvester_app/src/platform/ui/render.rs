@@ -5,6 +5,7 @@ use harvester_engine::llm::ModelId;
 
 use super::groups::bottom_buttons::BottomButtonsRenderState;
 use super::groups::prompt_lab_actions::PromptLabActionsRenderState;
+use super::groups::prompt_lab_sections::PromptLabSectionsRenderState;
 use super::layout::{build_layout_command, LayoutConfig, PromptLabLayoutConfig};
 use super::render_controls::{
     render_left_tab_bar_section, render_main_controls_section, render_operation_progress_section,
@@ -77,10 +78,6 @@ pub(super) struct PromptLabRenderState {
     pub(super) prev_prompt_lab_stage_triage_checked: Option<bool>,
     pub(super) prev_prompt_lab_stage_summary_checked: Option<bool>,
     pub(super) prev_prompt_lab_stage_briefing_checked: Option<bool>,
-    pub(super) prev_prompt_lab_section_compare_checked: Option<bool>,
-    pub(super) prev_prompt_lab_section_context_checked: Option<bool>,
-    pub(super) prev_prompt_lab_section_template_checked: Option<bool>,
-    pub(super) prev_prompt_lab_section_run_details_checked: Option<bool>,
     pub(super) prev_prompt_lab_status_text: Option<String>,
     pub(super) prev_prompt_lab_metadata_text: Option<String>,
     pub(super) prev_prompt_lab_url_input: Option<String>,
@@ -116,6 +113,7 @@ pub struct TreeRenderState {
     pub(super) controls: ControlsRenderState,
     pub(super) bottom_buttons: BottomButtonsRenderState,
     pub(super) prompt_lab_actions: PromptLabActionsRenderState,
+    pub(super) prompt_lab_sections: PromptLabSectionsRenderState,
     pub(super) prompt_lab: PromptLabRenderState,
     pub(super) preview: PreviewRenderState,
 }

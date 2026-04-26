@@ -3,7 +3,7 @@ use commanductui::{
 };
 
 use super::super::constants::*;
-use super::super::groups::{bottom_buttons, prompt_lab_actions};
+use super::super::groups::{bottom_buttons, prompt_lab_actions, prompt_lab_sections};
 
 pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::DefineStyle {
@@ -876,18 +876,7 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
             style_id: StyleId::RadioButton,
         });
     }
-    for control_id in [
-        CHK_PROMPT_LAB_SECTION_COMPARE,
-        CHK_PROMPT_LAB_SECTION_CONTEXT,
-        CHK_PROMPT_LAB_SECTION_TEMPLATE,
-        CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
-    ] {
-        commands.push(PlatformCommand::ApplyStyleToControl {
-            window_id,
-            control_id,
-            style_id: StyleId::CheckBox,
-        });
-    }
+    prompt_lab_sections::apply_theme(window_id, commands);
 
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
