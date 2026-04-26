@@ -3,7 +3,7 @@ use commanductui::{Color, FontDescription, FontWeight, PlatformCommand, WindowId
 use harvester_core::TOKEN_LIMIT;
 
 use super::super::constants::*;
-use super::super::groups::bottom_buttons;
+use super::super::groups::{bottom_buttons, prompt_lab_actions};
 
 /// Creates all Win32 controls for the main window.
 ///
@@ -514,18 +514,7 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         text: "Briefing".to_string(),
         group_start: false,
     });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_SOURCE_ROW),
-        control_id: BTN_SOURCE_FROM_TRIAGE,
-        text: "Selected article".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_SOURCE_ROW),
-        control_id: BTN_SOURCE_TYPE_URL,
-        text: "Type URL".to_string(),
-    });
+    prompt_lab_actions::create_controls(window_id, commands);
     commands.push(PlatformCommand::CreateInput {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_INPUT_ROW),
@@ -535,101 +524,17 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         multiline: false,
         vertical_scroll: false,
     });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_INPUT_ROW),
-        control_id: BTN_PROMPT_LAB_RESOLVE,
-        text: "Resolve".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_RUN,
-        text: "Run".to_string(),
-    });
     commands.push(PlatformCommand::CreateCheckBox {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_HEADER_ROW),
         control_id: CHK_PROMPT_LAB_SECTION_COMPARE,
         text: "Compare".to_string(),
     });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-        control_id: BTN_COMPARE_ADD_CURRENT,
-        text: "Add current settings".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-        control_id: BTN_COMPARE_ADD_BASELINE,
-        text: "Add baseline".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-        control_id: BTN_COMPARE_RESET_DRAFT,
-        text: "Reset draft".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-        control_id: BTN_COMPARE_START,
-        text: "Start compare".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-        control_id: BTN_COMPARE_CANCEL,
-        text: "Cancel compare".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-        control_id: BTN_COMPARE_AUTO_SELECT,
-        text: "Auto-select".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_COMPARE_ROW),
-        control_id: BTN_COMPARE_WINNER_CLEAR,
-        text: "Clear winner".to_string(),
-    });
     commands.push(PlatformCommand::CreateCheckBox {
         window_id,
         parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_HEADER_ROW),
         control_id: CHK_PROMPT_LAB_SECTION_CONTEXT,
         text: "Context".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_CONTEXT_APPLY,
-        text: "Apply".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
-        text: "Apply+Run".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_CONTEXT_REVERT,
-        text: "Revert".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_CONTEXT_SAVE,
-        text: "Save".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_CONTEXT_RELOAD,
-        text: "Reload".to_string(),
     });
     commands.push(PlatformCommand::CreateCheckBox {
         window_id,
@@ -642,36 +547,6 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         parent_control_id: Some(PANEL_PROMPT_LAB_RUN_DETAILS_HEADER_ROW),
         control_id: CHK_PROMPT_LAB_SECTION_RUN_DETAILS,
         text: "Run details".to_string(),
-    });
-    commands.push(PlatformCommand::CreateCheckBox {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-        control_id: CHK_PROMPT_LAB_TEMPLATE_OPEN,
-        text: "Edit Templates".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY,
-        text: "Apply".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
-        text: "Apply+Run".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_TEMPLATE_REVERT,
-        text: "Revert".to_string(),
-    });
-    commands.push(PlatformCommand::CreateButton {
-        window_id,
-        parent_control_id: Some(PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW),
-        control_id: BTN_PROMPT_LAB_TEMPLATE_SAVE,
-        text: "Save".to_string(),
     });
     commands.push(PlatformCommand::CreateInput {
         window_id,

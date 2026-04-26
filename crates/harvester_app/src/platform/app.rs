@@ -857,6 +857,16 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(msg);
                 return;
             }
+            if let Some(msg) = ui::groups::prompt_lab_actions::msg_for_button(*control_id) {
+                let _ = self.msg_tx.send(msg);
+                return;
+            }
+        }
+        if let AppEvent::CheckBoxToggled { control_id, .. } = &event {
+            if let Some(msg) = ui::groups::prompt_lab_actions::msg_for_checkbox(*control_id) {
+                let _ = self.msg_tx.send(msg);
+                return;
+            }
         }
 
         match event {
@@ -969,107 +979,6 @@ impl PlatformEventHandler for AppEventHandler {
                     &view.left_pane.prompt_lab.model_catalog,
                 );
                 let _ = self.msg_tx.send(Msg::PromptLabModelOverrideSet { model });
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_RESOLVE =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabResolveRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_RUN =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabRunRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_COMPARE_ADD_CURRENT =>
-            {
-                let _ = self
-                    .msg_tx
-                    .send(Msg::PromptLabCompareCurrentSettingsCaptured);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_COMPARE_ADD_BASELINE =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabCompareBaselineCaptured);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_COMPARE_RESET_DRAFT =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabCompareDraftReset);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_COMPARE_START =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabCompareBatchStartRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_COMPARE_CANCEL =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabCompareBatchCancelRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_COMPARE_AUTO_SELECT =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabCompareAutoSelectRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_COMPARE_WINNER_CLEAR =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabCompareWinnerCleared);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_APPLY =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabContextApplyRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN =>
-            {
-                let _ = self
-                    .msg_tx
-                    .send(Msg::PromptLabContextApplyAndRerunRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_REVERT =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabContextRevertRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_SAVE =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabContextSaveRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_CONTEXT_RELOAD =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabContextReloadRequested);
-            }
-            AppEvent::CheckBoxToggled { control_id, .. }
-                if control_id == ui::constants::CHK_PROMPT_LAB_TEMPLATE_OPEN =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabTemplateEditorToggled);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_APPLY =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabTemplateApplyRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN =>
-            {
-                let _ = self
-                    .msg_tx
-                    .send(Msg::PromptLabTemplateApplyAndRerunRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_REVERT =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabTemplateRevertRequested);
-            }
-            AppEvent::ButtonClicked { control_id, .. }
-                if control_id == ui::constants::BTN_PROMPT_LAB_TEMPLATE_SAVE =>
-            {
-                let _ = self.msg_tx.send(Msg::PromptLabTemplateSaveRequested);
             }
             AppEvent::MenuActionClicked { action_id }
                 if action_id == ui::constants::MENU_ACTION_ADD_URL =>

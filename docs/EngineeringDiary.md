@@ -1615,3 +1615,10 @@ Context: Footer action button metadata and behavior were spread across creation,
 Change: Added `ui/groups/bottom_buttons.rs` to own Harvester bottom-button descriptors, creation commands, layout rules, initial styles, dynamic enablement, and click routing without changing CommanDuctUI.
 Lessons Learned: Group Harvester UI regions in the app adapter while keeping generic infrastructure generic.
 Refs: crates/harvester_app/src/platform/ui/groups/bottom_buttons.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/app.rs
+
+## 2026-04-26 - Extract Prompt Lab action control group
+Type: Refactor
+Context: Prompt Lab action controls repeated static UI facts across creation, theme, event routing, and render-state code.
+Change: Added `ui/groups/prompt_lab_actions.rs` to own action descriptors, creation, initial styles, click/toggle routing, and dynamic enabled/checked rendering without changing CommanDuctUI.
+Lessons Learned: Action groups work best when descriptors hold static UI facts and dynamic render logic stays explicit.
+Refs: crates/harvester_app/src/platform/ui/groups/prompt_lab_actions.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/theme.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/render.rs

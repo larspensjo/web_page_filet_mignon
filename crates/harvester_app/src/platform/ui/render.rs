@@ -4,6 +4,7 @@ use harvester_core::{AppTab, AppViewModel, LayoutViewModel, LeftTab, DEFAULT_JOB
 use harvester_engine::llm::ModelId;
 
 use super::groups::bottom_buttons::BottomButtonsRenderState;
+use super::groups::prompt_lab_actions::PromptLabActionsRenderState;
 use super::layout::{build_layout_command, LayoutConfig, PromptLabLayoutConfig};
 use super::render_controls::{
     render_left_tab_bar_section, render_main_controls_section, render_operation_progress_section,
@@ -83,32 +84,14 @@ pub(super) struct PromptLabRenderState {
     pub(super) prev_prompt_lab_status_text: Option<String>,
     pub(super) prev_prompt_lab_metadata_text: Option<String>,
     pub(super) prev_prompt_lab_url_input: Option<String>,
-    pub(super) prev_prompt_lab_run_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_resolve_enabled: Option<bool>,
     pub(super) prev_prompt_lab_url_enabled: Option<bool>,
     pub(super) prev_prompt_lab_context_text: Option<String>,
     pub(super) prev_prompt_lab_context_status_text: Option<String>,
-    pub(super) prev_prompt_lab_context_apply_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_context_apply_rerun_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_context_revert_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_context_save_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_template_open_checked: Option<bool>,
     pub(super) prev_prompt_lab_template_system_text: Option<String>,
     pub(super) prev_prompt_lab_template_user_text: Option<String>,
     pub(super) prev_prompt_lab_template_status_text: Option<String>,
-    pub(super) prev_prompt_lab_template_apply_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_template_apply_rerun_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_template_revert_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_template_save_enabled: Option<bool>,
     pub(super) prev_prompt_lab_template_system_enabled: Option<bool>,
     pub(super) prev_prompt_lab_template_user_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_compare_add_current_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_compare_add_baseline_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_compare_reset_draft_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_compare_start_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_compare_cancel_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_compare_auto_select_enabled: Option<bool>,
-    pub(super) prev_prompt_lab_compare_winner_clear_enabled: Option<bool>,
     pub(super) prev_prompt_lab_model_catalog: Option<Vec<ModelId>>,
     pub(super) prev_prompt_lab_selected_model: Option<String>,
 }
@@ -132,6 +115,7 @@ pub struct TreeRenderState {
     pub(super) layout: LayoutRenderState,
     pub(super) controls: ControlsRenderState,
     pub(super) bottom_buttons: BottomButtonsRenderState,
+    pub(super) prompt_lab_actions: PromptLabActionsRenderState,
     pub(super) prompt_lab: PromptLabRenderState,
     pub(super) preview: PreviewRenderState,
 }
@@ -164,6 +148,12 @@ pub fn render(
         window_id,
         view,
         &mut tree_state.bottom_buttons,
+        &mut cmds,
+    );
+    super::groups::prompt_lab_actions::render(
+        window_id,
+        view,
+        &mut tree_state.prompt_lab_actions,
         &mut cmds,
     );
     render_prompt_lab_section(window_id, view, tree_state, &mut cmds);

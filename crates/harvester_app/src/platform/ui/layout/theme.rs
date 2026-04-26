@@ -3,7 +3,7 @@ use commanductui::{
 };
 
 use super::super::constants::*;
-use super::super::groups::bottom_buttons;
+use super::super::groups::{bottom_buttons, prompt_lab_actions};
 
 pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
     commands.push(PlatformCommand::DefineStyle {
@@ -861,35 +861,7 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
     }
 
     bottom_buttons::apply_theme(window_id, commands);
-    for control_id in [
-        BTN_PROMPT_LAB_RESOLVE,
-        BTN_PROMPT_LAB_RUN,
-        BTN_PROMPT_LAB_CONTEXT_APPLY,
-        BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN,
-        BTN_PROMPT_LAB_CONTEXT_REVERT,
-        BTN_PROMPT_LAB_CONTEXT_SAVE,
-        BTN_PROMPT_LAB_CONTEXT_RELOAD,
-        CHK_PROMPT_LAB_TEMPLATE_OPEN,
-        BTN_PROMPT_LAB_TEMPLATE_APPLY,
-        BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN,
-        BTN_PROMPT_LAB_TEMPLATE_REVERT,
-        BTN_PROMPT_LAB_TEMPLATE_SAVE,
-        BTN_COMPARE_ADD_CURRENT,
-        BTN_COMPARE_ADD_BASELINE,
-        BTN_COMPARE_RESET_DRAFT,
-        BTN_COMPARE_START,
-        BTN_COMPARE_CANCEL,
-        BTN_COMPARE_AUTO_SELECT,
-        BTN_COMPARE_WINNER_CLEAR,
-        BTN_SOURCE_FROM_TRIAGE,
-        BTN_SOURCE_TYPE_URL,
-    ] {
-        commands.push(PlatformCommand::ApplyStyleToControl {
-            window_id,
-            control_id,
-            style_id: StyleId::DefaultButton,
-        });
-    }
+    prompt_lab_actions::apply_theme(window_id, commands);
 
     for control_id in [
         BTN_PROMPT_LAB_MODE_BASIC,

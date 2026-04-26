@@ -17,9 +17,13 @@ pub const TREE_JOBS: ControlId = ControlId::new(1501);
 pub const BTN_STAGE_TRIAGE: ControlId = ControlId::new(1011);
 pub const BTN_STAGE_SUMMARY: ControlId = ControlId::new(1012);
 pub const BTN_STAGE_BRIEFING: ControlId = ControlId::new(1013);
+// Prompt Lab source-action labels, parent rows, styles, and routing live in
+// ui/groups/prompt_lab_actions.rs; source buttons remain intentionally unrouted.
 pub const BTN_SOURCE_FROM_TRIAGE: ControlId = ControlId::new(1014);
 pub const BTN_SOURCE_TYPE_URL: ControlId = ControlId::new(1015);
 pub const INPUT_PROMPT_LAB_URL: ControlId = ControlId::new(1016);
+// Prompt Lab input/action row button descriptors live in
+// ui/groups/prompt_lab_actions.rs.
 pub const BTN_PROMPT_LAB_RESOLVE: ControlId = ControlId::new(1017);
 pub const BTN_PROMPT_LAB_RUN: ControlId = ControlId::new(1018);
 pub const PANEL_BOTTOM: ControlId = ControlId::new(2001);
@@ -40,6 +44,8 @@ pub const PANEL_PROMPT_LAB_ACTION_ROW: ControlId = ControlId::new(2104);
 pub const PANEL_PROMPT_LAB_CONTEXT_ROW: ControlId = ControlId::new(2105);
 pub const PANEL_PROMPT_LAB_CONTEXT_ACTION_ROW: ControlId = ControlId::new(2106);
 pub const INPUT_PROMPT_LAB_CONTEXT: ControlId = ControlId::new(2107);
+// Prompt Lab context action descriptors live in
+// ui/groups/prompt_lab_actions.rs.
 pub const BTN_PROMPT_LAB_CONTEXT_APPLY: ControlId = ControlId::new(2108);
 pub const BTN_PROMPT_LAB_CONTEXT_APPLY_RERUN: ControlId = ControlId::new(2109);
 pub const BTN_PROMPT_LAB_CONTEXT_REVERT: ControlId = ControlId::new(2110);
@@ -50,6 +56,8 @@ pub const PANEL_PROMPT_LAB_TEMPLATE_USER_ROW: ControlId = ControlId::new(2114);
 pub const PANEL_PROMPT_LAB_TEMPLATE_ACTION_ROW: ControlId = ControlId::new(2115);
 pub const INPUT_PROMPT_LAB_TEMPLATE_SYSTEM: ControlId = ControlId::new(2116);
 pub const INPUT_PROMPT_LAB_TEMPLATE_USER: ControlId = ControlId::new(2117);
+// Prompt Lab template action descriptors live in
+// ui/groups/prompt_lab_actions.rs.
 pub const CHK_PROMPT_LAB_TEMPLATE_OPEN: ControlId = ControlId::new(2118);
 pub const BTN_PROMPT_LAB_TEMPLATE_APPLY: ControlId = ControlId::new(2119);
 pub const BTN_PROMPT_LAB_TEMPLATE_APPLY_RERUN: ControlId = ControlId::new(2120);
@@ -83,6 +91,8 @@ pub const TS_JOBS_SCOPE: ControlId = ControlId::new(3020);
 pub const LABEL_PREVIEW_ATTENTION: ControlId = ControlId::new(3015);
 pub const LABEL_AI_WARNING_TITLE: ControlId = ControlId::new(3016);
 pub const LABEL_AI_WARNING_BODY: ControlId = ControlId::new(3017);
+// Prompt Lab compare action descriptors live in
+// ui/groups/prompt_lab_actions.rs.
 pub const BTN_COMPARE_ADD_CURRENT: ControlId = ControlId::new(3100);
 pub const BTN_COMPARE_ADD_BASELINE: ControlId = ControlId::new(3101);
 pub const BTN_COMPARE_RESET_DRAFT: ControlId = ControlId::new(3102);
