@@ -1596,3 +1596,9 @@ Context: Archive exports were always full-article concatenations, which made dow
 Change: Added an archive dialog "Use summaries" checkbox plus full/summary token estimates. Summary mode emits flat records with `content: summary`, `content: full`, or `content: full-truncated`; legacy mode still preserves each article's original YAML frontmatter and body. Summary maps are built in the reducer from triage URL to content-hash linkage, and exporter/reducer URL lookup now shares `harvester_engine::archive_url_key`.
 Lessons Learned: The archive format now intentionally has two header shapes, so consumers must accept both. The token estimate helper reads `JobState::tokens`, so pruned jobs and imported articles without jobs can underreport archive size.
 Refs: crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/state/mod.rs, crates/harvester_engine/src/export.rs, crates/harvester_app/src/platform/app.rs
+
+## 2026-04-26 - Add summarize-only footer action
+Type: Feature
+Context: The reducer already had a summary-only workflow via `PrepareSummariesClicked`, but the desktop UI only exposed full briefing generation.
+Change: Added a `Summarize` footer button between `Run Triage` and `Generate Briefing`, wired it to `PrepareSummariesClicked`, and guarded summary-only starts when AI is unavailable.
+Refs: crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_core/src/update/briefing.rs

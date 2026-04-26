@@ -1099,6 +1099,7 @@ fn secondary_footer_buttons_use_secondary_button_style() {
     let cmds = initial_commands(WindowId::new(99));
     for button_id in [
         BUTTON_TRIAGE,
+        BUTTON_SUMMARIZE,
         BUTTON_BRIEFING,
         BUTTON_OPEN_BROWSER,
         BUTTON_ARCHIVE,
@@ -1225,6 +1226,7 @@ fn footer_buttons_share_a_common_vertical_alignment() {
     for button_id in [
         BUTTON_STOP,
         BUTTON_BRIEFING,
+        BUTTON_SUMMARIZE,
         BUTTON_TRIAGE,
         BUTTON_POLL_SOURCES,
         BUTTON_OPEN_BROWSER,
@@ -1286,9 +1288,10 @@ fn footer_buttons_follow_workflow_order() {
             (0, BUTTON_STOP),
             (1, BUTTON_POLL_SOURCES),
             (2, BUTTON_TRIAGE),
-            (3, BUTTON_BRIEFING),
-            (4, BUTTON_OPEN_BROWSER),
-            (5, BUTTON_ARCHIVE),
+            (3, BUTTON_SUMMARIZE),
+            (4, BUTTON_BRIEFING),
+            (5, BUTTON_OPEN_BROWSER),
+            (6, BUTTON_ARCHIVE),
         ]
     );
 }

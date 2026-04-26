@@ -10,11 +10,12 @@ use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
 
+fn briefing_ready_to_start(state: &AppState) -> bool {
+    state.briefing_ai_available() && state.briefing().can_start()
+}
+
 pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
-    if !state.briefing_ai_available() {
-        return Vec::new();
-    }
-    if !state.briefing().can_start() {
+    if !briefing_ready_to_start(state) {
         return Vec::new();
     }
     if state.triage().is_active() {
@@ -48,7 +49,7 @@ pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
 }
 
 pub(super) fn handle_prepare_summaries_clicked(state: &mut AppState) -> Vec<Effect> {
-    if !state.briefing().can_start() {
+    if !briefing_ready_to_start(state) {
         return Vec::new();
     }
     if state.triage().is_active() {

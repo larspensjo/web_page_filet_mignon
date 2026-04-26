@@ -876,6 +876,11 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
+        control_id: BUTTON_SUMMARIZE,
+        style_id: StyleId::SecondaryButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
         control_id: BUTTON_BRIEFING,
         style_id: StyleId::SecondaryButton,
     });

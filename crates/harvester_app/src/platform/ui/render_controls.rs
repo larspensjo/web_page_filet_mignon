@@ -297,6 +297,16 @@ pub(super) fn render_main_controls_section(
         },
     );
     emit_if_changed(
+        &mut tree_state.controls.prev_summarize_enabled,
+        view.briefing_can_start,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_SUMMARIZE,
+            enabled,
+        },
+    );
+    emit_if_changed(
         &mut tree_state.controls.prev_triage_enabled,
         view.triage_can_start,
         cmds,

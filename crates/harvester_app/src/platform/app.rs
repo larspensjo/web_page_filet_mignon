@@ -867,6 +867,11 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(Msg::GenerateBriefingClicked);
             }
             AppEvent::ButtonClicked { control_id, .. }
+                if control_id == ui::constants::BUTTON_SUMMARIZE =>
+            {
+                let _ = self.msg_tx.send(Msg::PrepareSummariesClicked);
+            }
+            AppEvent::ButtonClicked { control_id, .. }
                 if control_id == ui::constants::BUTTON_TRIAGE =>
             {
                 let _ = self.msg_tx.send(Msg::TriageClicked);
@@ -1954,6 +1959,17 @@ mod tests {
         });
         let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
         assert_eq!(msg, Msg::ArchiveClicked);
+    }
+
+    #[test]
+    fn summarize_footer_button_emits_prepare_summaries_clicked() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BUTTON_SUMMARIZE,
+        });
+        let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
+        assert_eq!(msg, Msg::PrepareSummariesClicked);
     }
 
     #[test]

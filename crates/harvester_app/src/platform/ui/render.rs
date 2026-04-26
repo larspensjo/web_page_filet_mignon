@@ -58,6 +58,7 @@ pub(super) struct ControlsRenderState {
     pub(super) prev_progress_text: Option<String>,
     pub(super) prev_stop_enabled: Option<bool>,
     pub(super) prev_briefing_enabled: Option<bool>,
+    pub(super) prev_summarize_enabled: Option<bool>,
     pub(super) prev_triage_enabled: Option<bool>,
     pub(super) prev_poll_enabled: Option<bool>,
     pub(super) prev_briefing_progress: Option<String>,

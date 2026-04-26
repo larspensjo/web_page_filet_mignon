@@ -734,6 +734,12 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
     commands.push(PlatformCommand::CreateButton {
         window_id,
         parent_control_id: Some(PANEL_BUTTONS),
+        control_id: BUTTON_SUMMARIZE,
+        text: "Summarize Articles".to_string(),
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_BUTTONS),
         control_id: BUTTON_BRIEFING,
         text: "Generate Briefing".to_string(),
     });

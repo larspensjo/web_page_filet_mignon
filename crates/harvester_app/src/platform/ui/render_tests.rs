@@ -924,6 +924,41 @@ fn render_disables_open_browser_when_selected_url_is_none() {
 }
 
 #[test]
+fn render_enables_summarize_when_briefing_can_start() {
+    init_logging();
+    let mut view = make_view(vec![]);
+    view.briefing_can_start = true;
+    let mut tree_state = TreeRenderState::new();
+    let window_id = WindowId::new(1);
+    let cmds = render(window_id, &view, &mut tree_state);
+    let enabled = cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+            if *control_id == BUTTON_SUMMARIZE
+        )
+    });
+    assert!(enabled, "BUTTON_SUMMARIZE should be enabled");
+}
+
+#[test]
+fn render_disables_summarize_when_briefing_cannot_start() {
+    init_logging();
+    let view = make_view(vec![]);
+    let mut tree_state = TreeRenderState::new();
+    let window_id = WindowId::new(1);
+    let cmds = render(window_id, &view, &mut tree_state);
+    let disabled = cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+            if *control_id == BUTTON_SUMMARIZE
+        )
+    });
+    assert!(disabled, "BUTTON_SUMMARIZE should be disabled");
+}
+
+#[test]
 fn stop_button_uses_secondary_style_when_not_running() {
     init_logging();
     let view = make_view(vec![]);

@@ -5,6 +5,7 @@ pub const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId::new(1);
 pub const INPUT_URLS: ControlId = ControlId::new(1001);
 pub const BUTTON_STOP: ControlId = ControlId::new(1003);
 pub const BUTTON_BRIEFING: ControlId = ControlId::new(1005);
+pub const BUTTON_SUMMARIZE: ControlId = ControlId::new(1006);
 pub const BUTTON_TRIAGE: ControlId = ControlId::new(1007);
 pub const BUTTON_POLL_SOURCES: ControlId = ControlId::new(1008);
 pub const BUTTON_OPEN_BROWSER: ControlId = ControlId::new(1009);

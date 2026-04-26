@@ -186,6 +186,13 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
         "blocked briefing must dispatch nothing"
     );
     assert_eq!(state.active_tab(), AppTab::Summary);
+
+    let (state, summary_effects) = update(state, Msg::PrepareSummariesClicked);
+    assert!(
+        summary_effects.is_empty(),
+        "blocked summary preparation must dispatch nothing"
+    );
+    assert_eq!(state.active_tab(), AppTab::Summary);
 }
 
 #[test]
