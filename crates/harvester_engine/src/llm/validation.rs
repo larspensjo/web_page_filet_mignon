@@ -38,6 +38,7 @@ const FIELD_ENTITIES_COMPANIES: &str = "companies";
 const FIELD_ENTITIES_TECHNOLOGIES: &str = "technologies";
 const FIELD_ENTITIES_PRODUCTS: &str = "products";
 const MAX_ENTITY_ITEMS: usize = 15;
+const MAX_ENTITY_INPUT_ITEMS: usize = 100;
 const MAX_ENTITY_ITEM_LEN: usize = 100;
 const EXEC_SUMMARY_TRUNCATION_SUFFIX: &str =
     "\n\n[Truncated response: removed {removed} characters to fit the 3000-character limit.]";
@@ -143,7 +144,8 @@ pub fn validate_summary(content: &str) -> Result<ArticleSummary, ValidationError
 
 /// Parse, validate, and deduplicate an entity list from a JSON object field.
 ///
-/// - Max `MAX_ENTITY_ITEMS` items.
+/// - Accepts modest model overshoot up to `MAX_ENTITY_INPUT_ITEMS` raw items.
+/// - Silently keeps at most `MAX_ENTITY_ITEMS` items after deduplication.
 /// - Each item: non-empty string, no internal newlines, max `MAX_ENTITY_ITEM_LEN` chars.
 /// - Deduplicate case-insensitively; first occurrence wins.
 /// - Missing field treated as empty array (backward compatible).
@@ -157,7 +159,7 @@ fn parse_entity_list(
             ValidationError::SchemaViolation(format!("entities.{field} must be an array"))
         })?,
     };
-    ensure_max_items(array.len(), MAX_ENTITY_ITEMS, field)?;
+    ensure_max_items(array.len(), MAX_ENTITY_INPUT_ITEMS, field)?;
 
     let mut seen_lower: Vec<String> = Vec::new();
     let mut result: Vec<String> = Vec::new();
@@ -180,7 +182,9 @@ fn parse_entity_list(
         let lower = item.to_lowercase();
         if !seen_lower.contains(&lower) {
             seen_lower.push(lower);
-            result.push(item.to_string());
+            if result.len() < MAX_ENTITY_ITEMS {
+                result.push(item.to_string());
+            }
         }
     }
     Ok(result)
@@ -485,6 +489,56 @@ mod tests {
         assert!(
             matches!(err, ValidationError::SchemaViolation(_)),
             "expected SchemaViolation, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_summary_clamps_entity_lists_after_deduplication() {
+        let companies = (0..20)
+            .map(|idx| format!(r#""Company {idx}""#))
+            .collect::<Vec<_>>()
+            .join(",");
+        let json = format!(
+            r#"{{
+                "title": "T",
+                "summary": "S",
+                "key_points": ["P"],
+                "entities": {{
+                    "companies": ["Company 0", "company 0", {companies}],
+                    "technologies": [],
+                    "products": []
+                }}
+            }}"#
+        );
+
+        let result = validate_summary(&json).expect("entity overflow should be clamped");
+        assert_eq!(result.entities.companies.len(), MAX_ENTITY_ITEMS);
+        assert_eq!(result.entities.companies[0], "Company 0");
+        assert_eq!(result.entities.companies[14], "Company 14");
+    }
+
+    #[test]
+    fn validate_summary_rejects_pathological_entity_list_size() {
+        let companies = (0..=MAX_ENTITY_INPUT_ITEMS)
+            .map(|idx| format!(r#""Company {idx}""#))
+            .collect::<Vec<_>>()
+            .join(",");
+        let json = format!(
+            r#"{{
+                "title": "T",
+                "summary": "S",
+                "key_points": ["P"],
+                "entities": {{
+                    "companies": [{companies}],
+                    "technologies": [],
+                    "products": []
+                }}
+            }}"#
+        );
+
+        assert_eq!(
+            validate_summary(&json).unwrap_err(),
+            ValidationError::ValueOutOfRange("companies")
         );
     }
 

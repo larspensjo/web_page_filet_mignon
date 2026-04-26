@@ -1602,3 +1602,9 @@ Type: Feature
 Context: The reducer already had a summary-only workflow via `PrepareSummariesClicked`, but the desktop UI only exposed full briefing generation.
 Change: Added a `Summarize` footer button between `Run Triage` and `Generate Briefing`, wired it to `PrepareSummariesClicked`, and guarded summary-only starts when AI is unavailable.
 Refs: crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_core/src/update/briefing.rs
+
+## 2026-04-26 - Bound summary entity extraction
+Type: Bug Fix
+Context: Article summary responses could fail validation when the model returned more than 15 companies, technologies, or products, even though the prompt did not state that limit.
+Change: Added `SUMMARY_PROMPT_V6` with explicit per-category entity limits, activated it for summary cache keys, and changed summary validation to accept up to 100 raw entity items before deduplicating and clamping stored entity arrays to 15 items.
+Refs: crates/harvester_engine/src/llm/prompts/summary.rs, crates/harvester_engine/src/llm/prompts/mod.rs, crates/harvester_engine/src/llm/validation.rs

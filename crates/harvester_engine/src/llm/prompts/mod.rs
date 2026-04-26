@@ -9,9 +9,10 @@ pub use briefing::{
     BRIEFING_PROMPT_V1, BRIEFING_PROMPT_V2, BRIEFING_PROMPT_V3, BRIEFING_PROMPT_V4,
     BRIEFING_PROMPT_V5, BRIEFING_PROMPT_V6, BRIEFING_PROMPT_V7, BRIEFING_PROMPT_V8,
 };
-pub use summary::SUMMARY_PROMPT_V5 as SUMMARY_PROMPT;
+pub use summary::SUMMARY_PROMPT_V6 as SUMMARY_PROMPT;
 pub use summary::{
     SUMMARY_PROMPT_V1, SUMMARY_PROMPT_V2, SUMMARY_PROMPT_V3, SUMMARY_PROMPT_V4, SUMMARY_PROMPT_V5,
+    SUMMARY_PROMPT_V6,
 };
 pub use triage::TRIAGE_PROMPT_V4 as TRIAGE_PROMPT;
 pub use triage::{TRIAGE_PROMPT_V1, TRIAGE_PROMPT_V2, TRIAGE_PROMPT_V3, TRIAGE_PROMPT_V4};
@@ -27,7 +28,8 @@ pub fn register_defaults(registry: &mut super::PromptRegistry) {
     registry.register(summary::SUMMARY_PROMPT_V3);
     registry.register(summary::SUMMARY_PROMPT_V4);
     registry.register(summary::SUMMARY_PROMPT_V5);
-    registry.set_active(PromptId::ArticleSummary, summary::SUMMARY_PROMPT_V5.version);
+    registry.register(summary::SUMMARY_PROMPT_V6);
+    registry.set_active(PromptId::ArticleSummary, summary::SUMMARY_PROMPT_V6.version);
     registry.register(briefing::BRIEFING_PROMPT_V1);
     registry.register(briefing::BRIEFING_PROMPT_V2);
     registry.register(briefing::BRIEFING_PROMPT_V3);
