@@ -42,17 +42,6 @@ pub(super) fn compact_url_label(url: &str, max_chars: usize) -> String {
     truncate_with_ellipsis(&compact, max_chars)
 }
 
-pub(super) fn compact_triage_tag_count(tags: &[String]) -> Option<String> {
-    if tags.is_empty() {
-        return None;
-    }
-    if tags.len() == 1 {
-        Some("1 tag".to_string())
-    } else {
-        Some(format!("{} tags", tags.len()))
-    }
-}
-
 pub(super) fn title_case_label(value: &str) -> String {
     let mut out = Vec::new();
     for word in value.split(['-', '_', ' ']).filter(|word| !word.is_empty()) {

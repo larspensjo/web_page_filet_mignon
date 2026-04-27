@@ -1,5 +1,6 @@
 use commanductui::{
-    BadgeDescriptor, ListBoxItemDescriptor, ListBoxItemId, PlatformCommand, StyleId, WindowId,
+    BadgeDescriptor, ListBoxItemDescriptor, ListBoxItemId, ListBoxRowDensity, PlatformCommand,
+    StyleId, WindowId,
 };
 use harvester_core::{
     AppViewModel, JobFilterStatus, JobListScope, JobOrigin, JobResultKind, JobRowView, LeftTab,
@@ -8,8 +9,8 @@ use harvester_core::{
 
 use super::constants::*;
 use super::render_text::{
-    compact_triage_tag_count, compact_url_label, domain_from_url, format_compact_bytes,
-    format_compact_tokens, title_case_label, truncate_with_ellipsis,
+    compact_url_label, domain_from_url, format_compact_bytes, format_compact_tokens,
+    title_case_label, truncate_with_ellipsis,
 };
 
 const LIST_BOX_DEFAULT_BADGE_COLUMN_WIDTH: i32 = 44;
@@ -24,11 +25,17 @@ pub(super) fn append_list_box_commands(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     let ListBoxRenderModel {
+        row_density,
         items,
         selected_item_id,
     } = list_box;
     let badge_column_width = compute_list_box_badge_column_width(&items);
     let badge_column_width = badge_column_width.clamp(0, u16::MAX as i32) as u16;
+    cmds.push(PlatformCommand::SetListBoxRowDensity {
+        window_id,
+        control_id: TREE_JOBS,
+        density: row_density,
+    });
     cmds.push(PlatformCommand::PopulateListBox {
         window_id,
         control_id: TREE_JOBS,
@@ -45,18 +52,24 @@ pub(super) fn append_list_box_commands(
 }
 
 pub(super) struct ListBoxRenderModel {
+    row_density: ListBoxRowDensity,
     items: Vec<ListBoxItemDescriptor>,
     selected_item_id: Option<ListBoxItemId>,
 }
 
 impl ListBoxRenderModel {
     pub(super) fn from_view(view: &AppViewModel) -> Self {
+        let row_density = match view.left_pane.left_tab {
+            LeftTab::TriageResults => ListBoxRowDensity::Compact,
+            _ => ListBoxRowDensity::Expanded,
+        };
         let items = build_list_box_items(view);
         let selected_item_id = view
             .selected_job_id
             .map(ListBoxItemId::new)
             .filter(|selected_item_id| items.iter().any(|item| item.id == *selected_item_id));
         Self {
+            row_density,
             items,
             selected_item_id,
         }
@@ -180,11 +193,7 @@ pub(super) fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItem
             .as_ref()
             .map(|triage| title_case_label(&triage.category))
             .unwrap_or_else(|| "Untriaged".to_string()),
-        LeftTab::TriageResults => job
-            .triage_annotation
-            .as_ref()
-            .and_then(|triage| compact_triage_tag_count(&triage.tags))
-            .unwrap_or_else(|| "0 tags".to_string()),
+        LeftTab::TriageResults => String::new(),
         LeftTab::PromptLab => format!("{} · {}", job_source_label(job), job_status_label(job)),
     };
     let enabled = !matches!(

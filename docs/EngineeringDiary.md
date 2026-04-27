@@ -1628,3 +1628,9 @@ Type: Refactor
 Context: `docs/plans/Plan.PromptLabSectionTogglesGroup.md` called for moving the four Prompt Lab section expand/collapse checkbox descriptors out of scattered init/theme/routing/render sites.
 Change: Added `ui/groups/prompt_lab_sections.rs` to own section checkbox metadata, creation, style application, toggle routing, and checked-state render caching while leaving layout-rule recomputation state in the layout renderer.
 Refs: crates/harvester_app/src/platform/ui/groups/prompt_lab_sections.rs, crates/harvester_app/src/platform/ui/render_tests.rs::prompt_lab_section_checkbox_states_reflect_view_state
+
+## 2026-04-27 - Triage Results rows now collapse to a single line
+Type: Bug Fix
+Context: Screenshot review showed the Triage Results list spending a full second line on tag counts that were not helping scan speed, so the pane fit fewer articles per viewport than necessary.
+Change: Stopped emitting tag-count metadata for Triage Results rows, then replaced the initial `CommanDuctUI` metadata-based compact-row heuristic with an explicit generic `SetListBoxRowDensity` contract so Harvester requests compact rows directly. Added regression coverage for both the Harvester command emission and the toolkit density-to-height mapping.
+Refs: crates/harvester_app/src/platform/ui/render_list_box.rs, crates/harvester_app/src/platform/ui/render_tests.rs, src/CommanDuctUI/src/types.rs, src/CommanDuctUI/src/controls/listbox_handler.rs

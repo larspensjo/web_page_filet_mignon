@@ -5,7 +5,7 @@ use super::super::render_list_box::{build_list_box_item, build_list_box_items};
 use super::super::render_preview::SUMMARY_EMPTY_STATE_MARKDOWN;
 use super::super::render_text::MAX_VIEWER_CHARS;
 use super::*;
-use commanductui::{ChartLineEmphasis, ListBoxItemId};
+use commanductui::{ChartLineEmphasis, ListBoxItemId, ListBoxRowDensity};
 use harvester_core::Stage;
 use harvester_core::{
     JobFilterStatus, JobListScope, JobResultKind, JobRowView, LeftPaneHeaderView,
@@ -291,10 +291,34 @@ fn triage_results_priority_badge_maps_full_scale() {
         );
         assert_eq!(item.badges[1].text, "Business");
         assert_eq!(item.badges[1].style, StyleId::BadgeCategory);
-        // Metadata should NOT repeat the domain — the URL in the title row
-        // already shows it. Only the tag count remains.
-        assert_eq!(item.metadata, "1 tag");
+        assert_eq!(item.metadata, "");
     }
+}
+
+#[test]
+fn triage_results_request_compact_list_density() {
+    init_logging();
+    let window_id = WindowId::new(66);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![make_job(
+        1,
+        "https://example.com",
+        Stage::Done,
+        Some(JobResultKind::Success),
+        None,
+        None,
+    )]);
+    view.left_pane.left_tab = LeftTab::TriageResults;
+
+    let commands = render(window_id, &view, &mut tree_state);
+
+    assert!(commands.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetListBoxRowDensity { density, .. }
+                if *density == ListBoxRowDensity::Compact
+        )
+    }));
 }
 
 #[test]
@@ -733,11 +757,7 @@ fn triage_results_tab_keeps_stable_order_while_triage_in_progress() {
         "first should stay job 1 while triage is running, got: {}",
         populated[0].title
     );
-    assert!(
-        populated[0].metadata.contains("0 tags"),
-        "first should still show zero tags, got: {}",
-        populated[0].metadata
-    );
+    assert!(populated[0].metadata.is_empty());
     assert!(
         populated[1].title.contains("High Priority"),
         "second should stay job 2 while triage is running, got: {}",
@@ -829,7 +849,7 @@ fn triage_results_in_progress_updates_rows_without_repopulating_tree() {
     assert_eq!(populated.len(), 2);
     assert_eq!(populated[0].id, ListBoxItemId::new(1));
     assert!(populated[0].title.contains("Now Highest"));
-    assert!(populated[0].metadata.contains("0 tags"));
+    assert!(populated[0].metadata.is_empty());
 }
 
 #[test]
