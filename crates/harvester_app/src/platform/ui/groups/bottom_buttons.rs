@@ -3,8 +3,8 @@ use commanductui::{PlatformCommand, StyleId, WindowId};
 use harvester_core::{AppViewModel, Msg};
 
 use crate::platform::ui::constants::{
-    BUTTON_ARCHIVE, BUTTON_BRIEFING, BUTTON_OPEN_BROWSER, BUTTON_POLL_SOURCES, BUTTON_STOP,
-    BUTTON_SUMMARIZE, BUTTON_TRIAGE, PANEL_BUTTONS,
+    BUTTON_ARCHIVE, BUTTON_BRIEFING, BUTTON_POLL_SOURCES, BUTTON_STOP, BUTTON_SUMMARIZE,
+    BUTTON_TRIAGE, PANEL_BUTTONS,
 };
 use crate::platform::ui::render::emit_if_changed;
 
@@ -66,18 +66,9 @@ const BUTTONS: &[BottomButtonDescriptor] = &[
         msg: || Msg::GenerateBriefingClicked,
     },
     BottomButtonDescriptor {
-        control_id: BUTTON_OPEN_BROWSER,
-        label: "Open in Browser",
-        order: 5,
-        width: 144,
-        margin: (0, 6, 6, 6),
-        initial_style: StyleId::SecondaryButton,
-        msg: || Msg::OpenInBrowserClicked,
-    },
-    BottomButtonDescriptor {
         control_id: BUTTON_ARCHIVE,
         label: "Archive",
-        order: 6,
+        order: 5,
         width: 112,
         margin: (0, 6, 6, 6),
         initial_style: StyleId::SecondaryButton,
@@ -93,7 +84,6 @@ pub(in crate::platform) struct BottomButtonsRenderState {
     prev_summarize_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
     prev_poll_enabled: Option<bool>,
-    prev_open_browser_enabled: Option<bool>,
 }
 
 pub(in crate::platform) fn create_controls(
@@ -204,16 +194,6 @@ pub(in crate::platform) fn render(
             enabled,
         },
     );
-    emit_if_changed(
-        &mut state.prev_open_browser_enabled,
-        view.selected_url.is_some(),
-        cmds,
-        |enabled| PlatformCommand::SetControlEnabled {
-            window_id,
-            control_id: BUTTON_OPEN_BROWSER,
-            enabled,
-        },
-    );
     // BUTTON_ARCHIVE intentionally has no dynamic enablement today.
 }
 
@@ -301,15 +281,8 @@ mod tests {
                     StyleId::SecondaryButton
                 ),
                 (
-                    BUTTON_OPEN_BROWSER,
-                    5,
-                    144,
-                    (0, 6, 6, 6),
-                    StyleId::SecondaryButton
-                ),
-                (
                     BUTTON_ARCHIVE,
-                    6,
+                    5,
                     112,
                     (0, 6, 6, 6),
                     StyleId::SecondaryButton
@@ -333,10 +306,6 @@ mod tests {
         assert_eq!(
             msg_for_control(BUTTON_BRIEFING),
             Some(Msg::GenerateBriefingClicked)
-        );
-        assert_eq!(
-            msg_for_control(BUTTON_OPEN_BROWSER),
-            Some(Msg::OpenInBrowserClicked)
         );
         assert_eq!(msg_for_control(BUTTON_ARCHIVE), Some(Msg::ArchiveClicked));
     }

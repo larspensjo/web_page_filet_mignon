@@ -354,12 +354,20 @@ pub(super) fn build_layout_rules(
             margin: (12, 0, 12, 8),
         },
         LayoutRule {
-            control_id: LABEL_PREVIEW_SOURCE,
+            control_id: LABEL_PREVIEW_SOURCE_CAPTION,
+            parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
+            dock_style: DockStyle::Left,
+            order: 0,
+            fixed_size: Some(68),
+            margin: (0, 0, 8, 0),
+        },
+        LayoutRule {
+            control_id: BUTTON_PREVIEW_SOURCE_LINK,
             parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
             dock_style: DockStyle::Fill,
-            order: 0,
+            order: 1,
             fixed_size: None,
-            margin: (0, 0, 8, 0),
+            margin: (0, 0, 12, 0),
         },
         LayoutRule {
             control_id: LABEL_PREVIEW_ATTENTION,

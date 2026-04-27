@@ -850,9 +850,20 @@ impl Drop for AppEventHandler {
     }
 }
 
+fn msg_for_preview_context_button(control_id: commanductui::ControlId) -> Option<Msg> {
+    match control_id {
+        ui::constants::BUTTON_PREVIEW_SOURCE_LINK => Some(Msg::OpenInBrowserClicked),
+        _ => None,
+    }
+}
+
 impl PlatformEventHandler for AppEventHandler {
     fn handle_event(&mut self, event: AppEvent) {
         if let AppEvent::ButtonClicked { control_id, .. } = &event {
+            if let Some(msg) = msg_for_preview_context_button(*control_id) {
+                let _ = self.msg_tx.send(msg);
+                return;
+            }
             if let Some(msg) = ui::groups::bottom_buttons::msg_for_control(*control_id) {
                 let _ = self.msg_tx.send(msg);
                 return;
@@ -1835,6 +1846,17 @@ mod tests {
         });
         let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
         assert_eq!(msg, Msg::PrepareSummariesClicked);
+    }
+
+    #[test]
+    fn preview_source_link_emits_open_in_browser_clicked() {
+        let (mut handler, rx) = test_handler_with_outbound();
+        handler.handle_event(AppEvent::ButtonClicked {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::BUTTON_PREVIEW_SOURCE_LINK,
+        });
+        let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
+        assert_eq!(msg, Msg::OpenInBrowserClicked);
     }
 
     #[test]

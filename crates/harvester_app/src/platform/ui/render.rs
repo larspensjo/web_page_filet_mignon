@@ -102,7 +102,9 @@ pub(super) struct PreviewRenderState {
     pub(super) prev_ai_warning_title_text: Option<String>,
     pub(super) prev_ai_warning_body_text: Option<String>,
     pub(super) prev_preview_header_override_text: Option<String>,
-    pub(super) prev_preview_source_text: Option<String>,
+    pub(super) prev_preview_source_caption_text: Option<String>,
+    pub(super) prev_preview_source_link_text: Option<String>,
+    pub(super) prev_preview_source_link_enabled: Option<bool>,
     pub(super) prev_preview_status_text: Option<String>,
     pub(super) prev_preview_attention_text: Option<String>,
 }

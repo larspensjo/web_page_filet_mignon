@@ -11,13 +11,8 @@ use super::render_text::{strip_leading_h1, truncate_markdown_for_preview};
 pub(super) const SUMMARY_EMPTY_STATE_MARKDOWN: &str =
     "No article selected\n\nSelect a job/article from the list to view its summary.";
 
-fn format_preview_source_label(source_label: &str) -> String {
-    let source_label = source_label.trim();
-    if source_label.is_empty() {
-        String::new()
-    } else {
-        format!("Source: {source_label}")
-    }
+fn normalize_preview_source_label(source_label: &str) -> String {
+    source_label.trim().to_string()
 }
 
 pub(super) fn build_chart_data(trends: &TrendsTabView) -> ChartDataPacket {
@@ -219,13 +214,33 @@ pub(super) fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.preview.prev_preview_source_text,
+            &mut tree_state.preview.prev_preview_source_caption_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
                 window_id,
-                control_id: LABEL_PREVIEW_SOURCE,
+                control_id: LABEL_PREVIEW_SOURCE_CAPTION,
                 text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_preview_source_link_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: BUTTON_PREVIEW_SOURCE_LINK,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_preview_source_link_enabled,
+            false,
+            cmds,
+            |enabled| PlatformCommand::SetControlEnabled {
+                window_id,
+                control_id: BUTTON_PREVIEW_SOURCE_LINK,
+                enabled,
             },
         );
         emit_if_changed(
@@ -249,6 +264,12 @@ pub(super) fn render_preview_section(
             },
         );
     } else if let Some(context) = view.preview_context.as_ref() {
+        let source_link_text = normalize_preview_source_label(&context.source_label);
+        let source_caption_text = if source_link_text.is_empty() {
+            String::new()
+        } else {
+            "Source".to_string()
+        };
         emit_if_changed(
             &mut tree_state.preview.prev_preview_header_override_text,
             String::new(),
@@ -260,13 +281,33 @@ pub(super) fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.preview.prev_preview_source_text,
-            format_preview_source_label(&context.source_label),
+            &mut tree_state.preview.prev_preview_source_caption_text,
+            source_caption_text,
             cmds,
             |text| PlatformCommand::SetControlText {
                 window_id,
-                control_id: LABEL_PREVIEW_SOURCE,
+                control_id: LABEL_PREVIEW_SOURCE_CAPTION,
                 text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_preview_source_link_text,
+            source_link_text,
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: BUTTON_PREVIEW_SOURCE_LINK,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_preview_source_link_enabled,
+            view.selected_url.is_some(),
+            cmds,
+            |enabled| PlatformCommand::SetControlEnabled {
+                window_id,
+                control_id: BUTTON_PREVIEW_SOURCE_LINK,
+                enabled,
             },
         );
         emit_if_changed(
@@ -301,13 +342,33 @@ pub(super) fn render_preview_section(
             },
         );
         emit_if_changed(
-            &mut tree_state.preview.prev_preview_source_text,
+            &mut tree_state.preview.prev_preview_source_caption_text,
             String::new(),
             cmds,
             |text| PlatformCommand::SetControlText {
                 window_id,
-                control_id: LABEL_PREVIEW_SOURCE,
+                control_id: LABEL_PREVIEW_SOURCE_CAPTION,
                 text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_preview_source_link_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: BUTTON_PREVIEW_SOURCE_LINK,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_preview_source_link_enabled,
+            false,
+            cmds,
+            |enabled| PlatformCommand::SetControlEnabled {
+                window_id,
+                control_id: BUTTON_PREVIEW_SOURCE_LINK,
+                enabled,
             },
         );
         emit_if_changed(

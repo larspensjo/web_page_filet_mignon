@@ -1,7 +1,5 @@
 # Visual Design Spec
 
-Date: 2026-04-02
-
 This document defines the target visual system for the Harvester desktop UI. It is the single authoritative reference for both design principles and concrete implementation values.
 
 The target aesthetic is a contemporary, dense expert-tool: calm, restrained, highly scannable, and optimized for long working sessions on a warm dark theme.
@@ -165,6 +163,35 @@ Buttons should clearly express priority and intent.
 - Add spacing between bottom-bar actions and visually separate destructive actions from constructive ones.
 - Support clear visual treatment for default, hover, focus, active, selected, and disabled states.
 - State changes should be visible through tone, accent, or fill changes rather than through heavy animation or dramatic shadow shifts.
+
+## Links
+
+Links should feel clearly interactive without introducing a second accent system or adding visual noise to dense reading surfaces.
+
+### Link styling
+
+| State | Color | Decoration | Notes |
+|-------|-------|------------|-------|
+| Default | `#c96442` | none | Use Accent Primary for standalone links and key metadata links |
+| Hover | `#d97757` | underline | Hover should strengthen affordance without changing layout |
+| Focus | `#d97757` | underline + focus ring | Use Ring Focus for keyboard focus |
+| Active | `#d97757` | underline | Keep the pressed state subtle and flat |
+| Disabled / Unavailable | `#5e5d59` | none | Use only when a link-shaped control cannot currently be activated |
+
+### Guidance
+
+- Use links for lightweight navigation actions embedded in content or metadata, not for primary workflow actions.
+- Prefer link-styled controls near the content they act on, such as an article source line at the top of the reading pane.
+- In reading surfaces, avoid persistent underlines by default; reserve underlines for hover and focus so text remains calm and scannable.
+- In metadata-heavy areas, pair Text Tertiary labels with an Accent Primary link target rather than coloring the whole line.
+- Do not introduce a separate visited-link color unless the screen materially benefits from browsing history; the default system should preserve one accent language.
+
+Avoid:
+
+- Bright blue web-style links that break the warm palette.
+- Underlining large volumes of body text by default.
+- Styling primary actions as links when they should read as buttons.
+- Adding icons, glow, or ornamental treatments unless they solve a real recognition problem.
 
 ## Lists and Triage Rows
 

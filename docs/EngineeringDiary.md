@@ -218,6 +218,12 @@ StartCommit: `7904f581`
 Context: _Last updated: 2026-02-15_
 Refs: docs/Plan.Step2.PromptLab.RunMetadataContract.md
 
+## 2026-04-27 - Summary preview source link
+Type: Implementation
+Context: Replace the redundant footer browser action with an inline source link in the Summary preview metadata row while keeping browser opening on the existing Msg::OpenInBrowserClicked path.
+Change: Added a generic CommanDuctUI LinkButton style plus text-alignment support, then rewired harvester_app preview layout/render/routing so the source domain renders as a link-styled button and the footer no longer owns an Open in Browser action.
+Refs: src/CommanDuctUI/src/styling_primitives.rs, src/CommanDuctUI/src/controls/button_handler.rs, crates/harvester_app/src/platform/ui/render_preview.rs, crates/harvester_app/src/platform/app.rs
+
 ## 2026-02-14 - Plan.Step3.PromptLab.PerRunOverrides.md
 
 Type: Implementation

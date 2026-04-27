@@ -115,7 +115,8 @@ fn preview_header_text_override_wins_over_article_header() {
         _ => None,
     });
     assert_eq!(header, Some("Executive Briefing | 3 articles | Done"));
-    assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE), Some(""));
+    assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION), Some(""));
+    assert_eq!(control_text(&commands, BUTTON_PREVIEW_SOURCE_LINK), Some(""));
     assert_eq!(control_text(&commands, LABEL_PREVIEW_STATUS), Some(""));
     assert_eq!(control_text(&commands, LABEL_PREVIEW_ATTENTION), Some(""));
 }
@@ -130,13 +131,14 @@ fn preview_metadata_clears_when_no_article_is_selected() {
     let commands = render(window_id, &view, &mut tree_state);
 
     assert_eq!(control_text(&commands, LABEL_PREVIEW_HEADER), Some(""));
-    assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE), Some(""));
+    assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION), Some(""));
+    assert_eq!(control_text(&commands, BUTTON_PREVIEW_SOURCE_LINK), Some(""));
     assert_eq!(control_text(&commands, LABEL_PREVIEW_STATUS), Some(""));
     assert_eq!(control_text(&commands, LABEL_PREVIEW_ATTENTION), Some(""));
 }
 
 #[test]
-fn preview_source_is_labeled_as_metadata() {
+fn preview_source_renders_caption_and_link_text() {
     init_logging();
     let window_id = WindowId::new(3);
     let mut tree_state = TreeRenderState::new();
@@ -146,14 +148,16 @@ fn preview_source_is_labeled_as_metadata() {
             status_label: "Done".to_string(),
             attention_label: None,
         }),
+        selected_url: Some("https://epochai.substack.com/p/what".to_string()),
         ..AppViewModel::default()
     };
 
     let commands = render(window_id, &view, &mut tree_state);
 
+    assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION), Some("Source"));
     assert_eq!(
-        control_text(&commands, LABEL_PREVIEW_SOURCE),
-        Some("Source: epochai.substack.com")
+        control_text(&commands, BUTTON_PREVIEW_SOURCE_LINK),
+        Some("epochai.substack.com")
     );
 }
 
@@ -188,7 +192,8 @@ fn header_texts_do_not_reemit_when_unchanged() {
                 if *control_id == LABEL_JOBS_HEADER_TITLE
                     || *control_id == LABEL_JOBS_HEADER_META
                     || *control_id == LABEL_PREVIEW_HEADER
-                    || *control_id == LABEL_PREVIEW_SOURCE
+                    || *control_id == LABEL_PREVIEW_SOURCE_CAPTION
+                    || *control_id == BUTTON_PREVIEW_SOURCE_LINK
                     || *control_id == LABEL_PREVIEW_STATUS
                     || *control_id == LABEL_PREVIEW_ATTENTION
         )
@@ -909,10 +914,15 @@ fn jobs_tab_stable_order_unaffected_by_triage_priority() {
 }
 
 #[test]
-fn render_enables_open_browser_when_selected_url_is_some() {
+fn render_enables_preview_source_link_when_selected_url_is_some() {
     init_logging();
     let mut view = make_view(vec![]);
     view.selected_url = Some("https://example.com".to_string());
+    view.preview_context = Some(PreviewContextView {
+        source_label: "example.com".to_string(),
+        status_label: "Done".to_string(),
+        attention_label: None,
+    });
     let mut tree_state = TreeRenderState::new();
     let window_id = WindowId::new(1);
     let cmds = render(window_id, &view, &mut tree_state);
@@ -920,16 +930,21 @@ fn render_enables_open_browser_when_selected_url_is_some() {
         matches!(
             cmd,
             PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
-            if *control_id == BUTTON_OPEN_BROWSER
+            if *control_id == BUTTON_PREVIEW_SOURCE_LINK
         )
     });
-    assert!(enabled, "BUTTON_OPEN_BROWSER should be enabled");
+    assert!(enabled, "BUTTON_PREVIEW_SOURCE_LINK should be enabled");
 }
 
 #[test]
-fn render_disables_open_browser_when_selected_url_is_none() {
+fn render_disables_preview_source_link_when_selected_url_is_none() {
     init_logging();
-    let view = make_view(vec![]);
+    let mut view = make_view(vec![]);
+    view.preview_context = Some(PreviewContextView {
+        source_label: "example.com".to_string(),
+        status_label: "Done".to_string(),
+        attention_label: None,
+    });
     let mut tree_state = TreeRenderState::new();
     let window_id = WindowId::new(1);
     let cmds = render(window_id, &view, &mut tree_state);
@@ -937,10 +952,10 @@ fn render_disables_open_browser_when_selected_url_is_none() {
         matches!(
             cmd,
             PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
-            if *control_id == BUTTON_OPEN_BROWSER
+            if *control_id == BUTTON_PREVIEW_SOURCE_LINK
         )
     });
-    assert!(disabled, "BUTTON_OPEN_BROWSER should be disabled");
+    assert!(disabled, "BUTTON_PREVIEW_SOURCE_LINK should be disabled");
 }
 
 #[test]
@@ -1054,25 +1069,30 @@ fn stop_button_stays_neutral_when_session_running_but_work_is_idle() {
 }
 
 #[test]
-fn render_is_idempotent_for_open_browser_state() {
+fn render_is_idempotent_for_preview_source_link_state() {
     init_logging();
-    let view = make_view(vec![]);
+    let mut view = make_view(vec![]);
+    view.preview_context = Some(PreviewContextView {
+        source_label: "example.com".to_string(),
+        status_label: "Done".to_string(),
+        attention_label: None,
+    });
     let mut tree_state = TreeRenderState::new();
     let window_id = WindowId::new(1);
     // First render sets initial state
     render(window_id, &view, &mut tree_state);
-    // Second render should not emit SetControlEnabled for BUTTON_OPEN_BROWSER
+    // Second render should not emit SetControlEnabled for BUTTON_PREVIEW_SOURCE_LINK
     let cmds = render(window_id, &view, &mut tree_state);
     let changed = cmds.iter().any(|cmd| {
         matches!(
             cmd,
             PlatformCommand::SetControlEnabled { control_id, .. }
-            if *control_id == BUTTON_OPEN_BROWSER
+            if *control_id == BUTTON_PREVIEW_SOURCE_LINK
         )
     });
     assert!(
         !changed,
-        "BUTTON_OPEN_BROWSER state should not change on second render"
+        "BUTTON_PREVIEW_SOURCE_LINK state should not change on second render"
     );
 }
 

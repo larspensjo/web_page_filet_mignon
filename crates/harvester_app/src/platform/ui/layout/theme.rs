@@ -1,5 +1,6 @@
 use commanductui::{
-    Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, WindowId,
+    Color, ControlStyle, FontDescription, FontWeight, PlatformCommand, StyleId, TextAlignment,
+    WindowId,
 };
 
 use super::super::constants::*;
@@ -70,6 +71,7 @@ pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 size: Some(10),
                 weight: Some(FontWeight::Normal),
             }),
+            ..Default::default()
         },
     });
 
@@ -121,6 +123,7 @@ pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 size: Some(12),
                 weight: Some(FontWeight::Normal),
             }),
+            ..Default::default()
         },
     });
 
@@ -172,6 +175,28 @@ pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 b: 0xA5,
             }),
             ..Default::default()
+        },
+    });
+
+    commands.push(PlatformCommand::DefineStyle {
+        style_id: StyleId::LinkButton,
+        style: ControlStyle {
+            background_color: Some(Color {
+                r: 0x1E,
+                g: 0x1E,
+                b: 0x1C,
+            }),
+            text_color: Some(Color {
+                r: 0xC9,
+                g: 0x64,
+                b: 0x42,
+            }),
+            font: Some(FontDescription {
+                name: Some("Segoe UI".to_string()),
+                size: Some(12),
+                weight: Some(FontWeight::Normal),
+            }),
+            text_alignment: Some(TextAlignment::Left),
         },
     });
 
@@ -273,6 +298,7 @@ pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 size: Some(10),
                 weight: Some(FontWeight::Normal),
             }),
+            ..Default::default()
         },
     });
 
@@ -294,6 +320,7 @@ pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 size: Some(12),
                 weight: Some(FontWeight::Normal),
             }),
+            ..Default::default()
         },
     });
 
@@ -619,6 +646,7 @@ pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 size: Some(10),
                 weight: Some(FontWeight::Normal),
             }),
+            ..Default::default()
         },
     });
 
@@ -640,6 +668,7 @@ pub(super) fn define_dark_theme_styles(commands: &mut Vec<PlatformCommand>) {
                 size: Some(12),
                 weight: Some(FontWeight::Bold),
             }),
+            ..Default::default()
         },
     });
 
@@ -793,7 +822,22 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
-        control_id: LABEL_PREVIEW_SOURCE,
+        control_id: LABEL_PREVIEW_SOURCE_CAPTION,
+        style_id: StyleId::MetadataText,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: BUTTON_PREVIEW_SOURCE_LINK,
+        style_id: StyleId::LinkButton,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_PREVIEW_STATUS,
+        style_id: StyleId::MetadataText,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_PREVIEW_ATTENTION,
         style_id: StyleId::MetadataText,
     });
     commands.push(PlatformCommand::ApplyStyleToControl {

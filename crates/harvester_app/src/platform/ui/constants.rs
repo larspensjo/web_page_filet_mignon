@@ -10,7 +10,7 @@ pub const BUTTON_BRIEFING: ControlId = ControlId::new(1005);
 pub const BUTTON_SUMMARIZE: ControlId = ControlId::new(1006);
 pub const BUTTON_TRIAGE: ControlId = ControlId::new(1007);
 pub const BUTTON_POLL_SOURCES: ControlId = ControlId::new(1008);
-pub const BUTTON_OPEN_BROWSER: ControlId = ControlId::new(1009);
+pub const BUTTON_PREVIEW_SOURCE_LINK: ControlId = ControlId::new(1009);
 pub const BUTTON_ARCHIVE: ControlId = ControlId::new(1010);
 pub const TREE_JOBS: ControlId = ControlId::new(1501);
 
@@ -79,7 +79,7 @@ pub const LABEL_JOBS_HEADER_TITLE: ControlId = ControlId::new(3005);
 pub const LABEL_JOBS_HEADER: ControlId = LABEL_JOBS_HEADER_TITLE;
 pub const LABEL_OPERATION_PROGRESS: ControlId = ControlId::new(3006);
 pub const LABEL_JOBS_HEADER_META: ControlId = ControlId::new(3007);
-pub const LABEL_PREVIEW_SOURCE: ControlId = ControlId::new(3008);
+pub const LABEL_PREVIEW_SOURCE_CAPTION: ControlId = ControlId::new(3008);
 pub const LABEL_PREVIEW_STATUS: ControlId = ControlId::new(3009);
 
 pub const LABEL_TRENDS_DESCRIPTION: ControlId = ControlId::new(3014);

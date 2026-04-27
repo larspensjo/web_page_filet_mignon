@@ -163,9 +163,15 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
     commands.push(PlatformCommand::CreateLabel {
         window_id,
         parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
-        control_id: LABEL_PREVIEW_SOURCE,
+        control_id: LABEL_PREVIEW_SOURCE_CAPTION,
         initial_text: String::new(),
         class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateButton {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW_CONTEXT),
+        control_id: BUTTON_PREVIEW_SOURCE_LINK,
+        text: String::new(),
     });
     commands.push(PlatformCommand::CreateLabel {
         window_id,

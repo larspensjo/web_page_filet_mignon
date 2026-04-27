@@ -346,7 +346,9 @@ fn metadata_style_is_transparent_and_applied_to_metadata_labels() {
 
     for label_id in [
         LABEL_JOBS_HEADER_META,
-        LABEL_PREVIEW_SOURCE,
+        LABEL_PREVIEW_SOURCE_CAPTION,
+        LABEL_PREVIEW_STATUS,
+        LABEL_PREVIEW_ATTENTION,
         LABEL_TRENDS_DESCRIPTION,
     ] {
         assert!(
@@ -362,6 +364,38 @@ fn metadata_style_is_transparent_and_applied_to_metadata_labels() {
             label_id
         );
     }
+}
+
+#[test]
+fn preview_source_link_uses_link_button_style() {
+    let commands = initial_commands(WindowId::new(3));
+    let link_style = commands.iter().find_map(|cmd| match cmd {
+        PlatformCommand::DefineStyle { style_id, style } if *style_id == StyleId::LinkButton => {
+            Some(style)
+        }
+        _ => None,
+    });
+    let link_style = link_style.expect("LinkButton style should be defined");
+    assert_eq!(
+        link_style.text_alignment,
+        Some(commanductui::TextAlignment::Left)
+    );
+    assert_eq!(
+        link_style.text_color,
+        Some(Color {
+            r: 0xC9,
+            g: 0x64,
+            b: 0x42,
+        })
+    );
+    assert!(commands.iter().any(|cmd| matches!(
+        cmd,
+        PlatformCommand::ApplyStyleToControl {
+            control_id,
+            style_id,
+            ..
+        } if *control_id == BUTTON_PREVIEW_SOURCE_LINK && *style_id == StyleId::LinkButton
+    )));
 }
 
 /// General regression guard: every StyleId that appears in an ApplyStyleToControl command
@@ -1101,7 +1135,6 @@ fn secondary_footer_buttons_use_secondary_button_style() {
         BUTTON_TRIAGE,
         BUTTON_SUMMARIZE,
         BUTTON_BRIEFING,
-        BUTTON_OPEN_BROWSER,
         BUTTON_ARCHIVE,
     ] {
         let has_style = cmds.iter().any(|cmd| {
@@ -1229,7 +1262,6 @@ fn footer_buttons_share_a_common_vertical_alignment() {
         BUTTON_SUMMARIZE,
         BUTTON_TRIAGE,
         BUTTON_POLL_SOURCES,
-        BUTTON_OPEN_BROWSER,
         BUTTON_ARCHIVE,
     ] {
         let rule = rules
@@ -1290,10 +1322,55 @@ fn footer_buttons_follow_workflow_order() {
             (2, BUTTON_TRIAGE),
             (3, BUTTON_SUMMARIZE),
             (4, BUTTON_BRIEFING),
-            (5, BUTTON_OPEN_BROWSER),
-            (6, BUTTON_ARCHIVE),
+            (5, BUTTON_ARCHIVE),
         ]
     );
+}
+
+#[test]
+fn preview_context_row_uses_caption_then_fill_link_layout() {
+    let cmd = build_layout_command(
+        WindowId::new(113),
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: false,
+            left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
+            preview_header_override_visible: false,
+            preview_context_visible: true,
+            preview_attention_visible: false,
+            active_tab: AppTab::Summary,
+            left_tab: LeftTab::Jobs,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: false,
+                advanced_mode: false,
+                compare_section_open: false,
+                context_section_open: false,
+                template_section_open: false,
+                run_details_section_open: false,
+                template_editor_open: false,
+            },
+        },
+    );
+    let rules = match cmd {
+        PlatformCommand::DefineLayout { rules, .. } => rules,
+        _ => panic!("expected DefineLayout"),
+    };
+
+    let caption = rules
+        .iter()
+        .find(|rule| rule.control_id == LABEL_PREVIEW_SOURCE_CAPTION)
+        .expect("caption rule");
+    assert_eq!(caption.dock_style, DockStyle::Left);
+    assert_eq!(caption.fixed_size, Some(68));
+
+    let link = rules
+        .iter()
+        .find(|rule| rule.control_id == BUTTON_PREVIEW_SOURCE_LINK)
+        .expect("link rule");
+    assert_eq!(link.dock_style, DockStyle::Fill);
+    assert_eq!(link.margin, (0, 0, 12, 0));
 }
 
 #[test]
