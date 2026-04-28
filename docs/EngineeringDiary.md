@@ -1640,3 +1640,9 @@ Type: Bug Fix
 Context: Screenshot review showed the Triage Results list spending a full second line on tag counts that were not helping scan speed, so the pane fit fewer articles per viewport than necessary.
 Change: Stopped emitting tag-count metadata for Triage Results rows, then replaced the initial `CommanDuctUI` metadata-based compact-row heuristic with an explicit generic `SetListBoxRowDensity` contract so Harvester requests compact rows directly. Added regression coverage for both the Harvester command emission and the toolkit density-to-height mapping.
 Refs: crates/harvester_app/src/platform/ui/render_list_box.rs, crates/harvester_app/src/platform/ui/render_tests.rs, src/CommanDuctUI/src/types.rs, src/CommanDuctUI/src/controls/listbox_handler.rs
+
+## 2026-04-28 - Token meter follows summary archive size
+Type: Bug Fix
+Context: The archive dialog defaulted to `Use summaries` and showed a lower summary archive estimate, but the main-window token meter still summed full article tokens.
+Change: Added cached summary token counts to job row view data and changed the header token meter to prefer summary tokens with full article tokens as fallback. Summary lookup now uses pre-triage article hashes as well as completed triage hashes, so restored startup jobs do not require rerunning triage before the meter updates. Also replaced a CommanDuctUI hover sentinel with `std::ptr::dangling_mut()` so strict clippy checks pass.
+Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/pre_triage_filter.rs, crates/harvester_app/src/platform/ui/render_controls.rs, src/CommanDuctUI/src/controls/button_handler.rs

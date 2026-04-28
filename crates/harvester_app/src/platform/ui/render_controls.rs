@@ -1,6 +1,6 @@
 use commanductui::{MessageSeverity, PlatformCommand, StyleId, WindowId};
 use harvester_core::{
-    AppViewModel, JobListScope, LeftPaneHeaderView, LlmModelUsageView, SessionState,
+    AppViewModel, JobListScope, JobRowView, LeftPaneHeaderView, LlmModelUsageView, SessionState,
 };
 
 use super::constants::*;
@@ -175,12 +175,13 @@ pub(super) fn render_token_progress_section(
     cmds: &mut Vec<PlatformCommand>,
 ) {
     let scoped_total_tokens = match view.left_pane.job_list_scope {
-        JobListScope::All => view.total_tokens,
+        JobListScope::All if view.jobs.is_empty() => view.total_tokens,
+        JobListScope::All => view.jobs.iter().map(token_meter_tokens_for_job).sum(),
         JobListScope::SinceCheckpoint => view
             .jobs
             .iter()
             .filter(|job| job.is_since_checkpoint)
-            .filter_map(|job| job.tokens.map(u64::from))
+            .map(token_meter_tokens_for_job)
             .sum(),
     };
     let raw_limit = view.token_limit;
@@ -244,6 +245,10 @@ pub(super) fn render_token_progress_section(
             text,
         },
     );
+}
+
+fn token_meter_tokens_for_job(job: &JobRowView) -> u64 {
+    job.summary_tokens.or(job.tokens).map_or(0, u64::from)
 }
 
 pub(super) fn render_main_controls_section(

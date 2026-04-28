@@ -43,6 +43,7 @@ fn make_job(
         triage_annotation: None,
         has_summary: false,
         summary_title: None,
+        summary_tokens: None,
         filter_status: None,
         has_analysis: false,
         origin: JobOrigin::Direct,
@@ -1326,6 +1327,44 @@ fn token_progress_uses_since_checkpoint_scope_total_when_enabled() {
 }
 
 #[test]
+fn token_progress_prefers_summary_tokens_when_available() {
+    let window_id = WindowId::new(44);
+    let mut tree_state = TreeRenderState::new();
+    let mut summarized_job = make_job(
+        1,
+        "https://since.example",
+        Stage::Done,
+        Some(JobResultKind::Success),
+        Some(50_000),
+        None,
+    );
+    summarized_job.is_since_checkpoint = true;
+    summarized_job.summary_tokens = Some(16_000);
+    let mut view = make_view(vec![summarized_job]);
+    view.total_tokens = 50_000;
+    view.token_limit = 100_000;
+    view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+
+    let cmds = render(window_id, &view, &mut tree_state);
+
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlText { control_id, text, .. }
+            if *control_id == LABEL_TOKEN_PROGRESS
+                && text == "16K / 100K"
+        )
+    }));
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetProgressBarPosition { control_id, position, .. }
+            if *control_id == PROGRESS_TOKENS && *position == 16_000
+        )
+    }));
+}
+
+#[test]
 fn token_progress_stays_muted_below_limit_even_when_high() {
     let window_id = WindowId::new(42);
     let mut tree_state = TreeRenderState::new();
@@ -1396,6 +1435,7 @@ fn left_header_only_renders_meta_row() {
         triage_annotation: None,
         has_summary: false,
         summary_title: None,
+        summary_tokens: None,
         filter_status: None,
         has_analysis: false,
         origin: JobOrigin::Direct,
@@ -1533,6 +1573,7 @@ fn triage_results_meta_preserves_count_when_ai_unavailable() {
         }),
         has_summary: false,
         summary_title: None,
+        summary_tokens: None,
         filter_status: None,
         has_analysis: true,
         origin: JobOrigin::Direct,

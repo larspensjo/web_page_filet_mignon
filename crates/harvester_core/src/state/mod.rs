@@ -962,6 +962,16 @@ impl AppState {
         }
     }
 
+    pub(crate) fn summary_output_tokens_for_url(&self, url: &str) -> Option<u32> {
+        let hash = self
+            .triage()
+            .article_content_hash(url)
+            .or_else(|| self.pre_triage.article_content_hash(url))?;
+        self.summary_cache()
+            .lookup_any_by_content_hash(hash)
+            .map(|entry| entry.result.output_tokens)
+    }
+
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
         if !matches!(pre_triage.phase(), PreTriagePhase::LoadingArticles) {
             self.pre_triage_load_context = None;

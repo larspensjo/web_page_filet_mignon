@@ -6,6 +6,7 @@
 - For plan-driven work, write commit messages about the code change, not the plan. Follow recommended practices for teh design of the comment.
 - When adding a CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change.
 - When creating complex plans, they should be divided into incremental phases that can be tested.
+- If harvester_mcp processes block building and testing, kill these processes.
 
 ## Planning & Documentation
 - When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.

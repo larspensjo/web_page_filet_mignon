@@ -44,6 +44,7 @@ impl JobState {
             triage_annotation: None,
             has_summary: false,
             summary_title: None,
+            summary_tokens: None,
             filter_status: None,
             has_analysis: false,
             is_since_checkpoint,

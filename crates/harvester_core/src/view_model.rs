@@ -1064,6 +1064,7 @@ pub struct JobRowView {
     pub triage_annotation: Option<TriageAnnotationView>,
     pub has_summary: bool,
     pub summary_title: Option<String>,
+    pub summary_tokens: Option<u32>,
     pub filter_status: Option<JobFilterStatus>,
     pub has_analysis: bool,
     pub is_since_checkpoint: bool,

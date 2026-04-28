@@ -194,6 +194,104 @@ fn archive_token_estimates_uses_summary_output_tokens_when_available() {
 }
 
 #[test]
+fn view_job_rows_include_cached_summary_tokens() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let url = "https://triage-complete.com/0".to_string();
+    let state = complete_triage_state_for_test(1);
+    let mut state = add_completed_job_with_tokens_for_test(state, &url, 500);
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: "hash-tc-0".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 4,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "Art".to_string(),
+            summary: "summary text".to_string(),
+            key_points: vec![],
+            input_tokens: 100,
+            output_tokens: 42,
+            entities: SummaryEntities::default(),
+        },
+        "2026-04-01T00:00:00Z".to_string(),
+    );
+
+    let view = state.view();
+    let row = view
+        .jobs
+        .iter()
+        .find(|job| job.url == url)
+        .expect("expected matching job row");
+
+    assert_eq!(row.tokens, Some(500));
+    assert_eq!(row.summary_tokens, Some(42));
+    assert!(row.has_summary);
+}
+
+#[test]
+fn view_job_rows_use_pre_triage_content_hash_for_cached_summary_tokens() {
+    use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+    use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let url = "https://startup.example.com/a".to_string();
+    let state = add_completed_job_with_tokens_for_test(AppState::new(), &url, 500);
+    let mut state = state;
+    let pre_triage = PreTriageSession::load_articles(
+        vec![LoadedArticle {
+            url: url.clone(),
+            source_title: None,
+            prepared_text: std::iter::repeat_n("startup", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: "startup-hash".to_string(),
+            fetched_utc: None,
+        }],
+        &PreTriagePolicy::default(),
+    );
+    state.set_pre_triage(pre_triage);
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: "startup-hash".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 4,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "Startup".to_string(),
+            summary: "summary text".to_string(),
+            key_points: vec![],
+            input_tokens: 100,
+            output_tokens: 42,
+            entities: SummaryEntities::default(),
+        },
+        "2026-04-01T00:00:00Z".to_string(),
+    );
+
+    let view = state.view();
+    let row = view
+        .jobs
+        .iter()
+        .find(|job| job.url == url)
+        .expect("expected matching job row");
+
+    assert_eq!(row.tokens, Some(500));
+    assert_eq!(row.summary_tokens, Some(42));
+    assert!(row.has_summary);
+}
+
+#[test]
 fn archive_token_estimates_falls_back_to_full_tokens_when_no_summary() {
     init_logging();
     let url = "https://triage-complete.com/0".to_string();

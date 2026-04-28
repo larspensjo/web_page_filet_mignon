@@ -376,6 +376,12 @@ impl PreTriageSession {
         self.entries.iter().find(|entry| entry.key.url == url)
     }
 
+    pub fn article_content_hash(&self, url: &str) -> Option<&str> {
+        self.loaded_by_url
+            .get(url)
+            .map(|article| article.content_hash.as_str())
+    }
+
     pub fn reset(&mut self) {
         *self = Self::default();
     }
