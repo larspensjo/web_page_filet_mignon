@@ -8,6 +8,8 @@ use crate::platform::ui::constants::{
 };
 use crate::platform::ui::render::emit_if_changed;
 
+pub(in crate::platform) const FOOTER_BUTTON_VERTICAL_MARGIN: (i32, i32) = (0, 6);
+
 #[derive(Debug, Clone, Copy)]
 struct BottomButtonDescriptor {
     control_id: ControlId,
@@ -19,13 +21,22 @@ struct BottomButtonDescriptor {
     msg: fn() -> Msg,
 }
 
+const fn footer_button_margin(left: i32, right: i32) -> (i32, i32, i32, i32) {
+    (
+        FOOTER_BUTTON_VERTICAL_MARGIN.0,
+        right,
+        FOOTER_BUTTON_VERTICAL_MARGIN.1,
+        left,
+    )
+}
+
 const BUTTONS: &[BottomButtonDescriptor] = &[
     BottomButtonDescriptor {
         control_id: BUTTON_STOP,
         label: "Stop / Finish",
         order: 0,
         width: 144,
-        margin: (14, 6, 22, 6),
+        margin: footer_button_margin(14, 22),
         initial_style: StyleId::SecondaryButton,
         msg: || Msg::StopFinishClicked,
     },
@@ -34,7 +45,7 @@ const BUTTONS: &[BottomButtonDescriptor] = &[
         label: "Poll sources",
         order: 1,
         width: 144,
-        margin: (0, 6, 6, 6),
+        margin: footer_button_margin(6, 6),
         initial_style: StyleId::PrimaryButton,
         msg: || Msg::PollSourcesClicked,
     },
@@ -43,7 +54,7 @@ const BUTTONS: &[BottomButtonDescriptor] = &[
         label: "Run Triage",
         order: 2,
         width: 144,
-        margin: (0, 6, 6, 6),
+        margin: footer_button_margin(6, 6),
         initial_style: StyleId::SecondaryButton,
         msg: || Msg::TriageClicked,
     },
@@ -52,7 +63,7 @@ const BUTTONS: &[BottomButtonDescriptor] = &[
         label: "Summarize Articles",
         order: 3,
         width: 144,
-        margin: (0, 6, 6, 6),
+        margin: footer_button_margin(6, 6),
         initial_style: StyleId::SecondaryButton,
         msg: || Msg::PrepareSummariesClicked,
     },
@@ -61,7 +72,7 @@ const BUTTONS: &[BottomButtonDescriptor] = &[
         label: "Generate Briefing",
         order: 4,
         width: 168,
-        margin: (0, 6, 6, 6),
+        margin: footer_button_margin(6, 6),
         initial_style: StyleId::SecondaryButton,
         msg: || Msg::GenerateBriefingClicked,
     },
@@ -70,7 +81,7 @@ const BUTTONS: &[BottomButtonDescriptor] = &[
         label: "Archive",
         order: 5,
         width: 112,
-        margin: (0, 6, 6, 6),
+        margin: footer_button_margin(6, 6),
         initial_style: StyleId::SecondaryButton,
         msg: || Msg::ArchiveClicked,
     },
@@ -249,7 +260,7 @@ mod tests {
                     BUTTON_STOP,
                     0,
                     144,
-                    (14, 6, 22, 6),
+                    (0, 22, 6, 14),
                     StyleId::SecondaryButton
                 ),
                 (

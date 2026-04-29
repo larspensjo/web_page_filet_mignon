@@ -3,6 +3,7 @@ use commanductui::{Color, PlatformCommand, StyleId, WindowId};
 use harvester_core::{AppTab, LeftTab};
 
 use super::super::constants::*;
+use super::super::groups::bottom_buttons::FOOTER_BUTTON_VERTICAL_MARGIN;
 use super::rules::{
     AI_WARNING_ROW_HEIGHT, PREVIEW_CONTEXT_ROW_HEIGHT, PROMPT_LAB_ROW_HEIGHT_ACTION,
     PROMPT_LAB_ROW_HEIGHT_CONTEXT_INPUT, PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY,
@@ -1255,7 +1256,6 @@ fn footer_buttons_share_a_common_vertical_alignment() {
         _ => panic!("expected DefineLayout"),
     };
 
-    let expected_vertical = (6, 6);
     for button_id in [
         BUTTON_STOP,
         BUTTON_BRIEFING,
@@ -1269,8 +1269,8 @@ fn footer_buttons_share_a_common_vertical_alignment() {
             .find(|r| r.control_id == button_id)
             .expect("button rule");
         assert_eq!(
-            (rule.margin.1, rule.margin.3),
-            expected_vertical,
+            (rule.margin.0, rule.margin.2),
+            FOOTER_BUTTON_VERTICAL_MARGIN,
             "BUTTON {:?} should share the footer row baseline",
             button_id
         );

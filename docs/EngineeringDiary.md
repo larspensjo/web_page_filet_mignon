@@ -1646,3 +1646,9 @@ Type: Bug Fix
 Context: The archive dialog defaulted to `Use summaries` and showed a lower summary archive estimate, but the main-window token meter still summed full article tokens.
 Change: Added cached summary token counts to job row view data and changed the header token meter to prefer summary tokens with full article tokens as fallback. Summary lookup now uses pre-triage article hashes as well as completed triage hashes, so restored startup jobs do not require rerunning triage before the meter updates. Also replaced a CommanDuctUI hover sentinel with `std::ptr::dangling_mut()` so strict clippy checks pass.
 Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/pre_triage_filter.rs, crates/harvester_app/src/platform/ui/render_controls.rs, src/CommanDuctUI/src/controls/button_handler.rs
+
+## 2026-04-29 - Stop footer button margin order
+Type: Bug Fix
+Context: During `Poll Sources`, `Stop / Finish` rendered as a short strip because its footer descriptor put left/right spacing in `LayoutRule`'s top/bottom margin slots.
+Change: Corrected the Stop button descriptor to use `(top, right, bottom, left)` margin order, named the shared vertical footer-button margin, and tightened the footer alignment test to assert that source of truth.
+Refs: crates/harvester_app/src/platform/ui/groups/bottom_buttons.rs, crates/harvester_app/src/platform/ui/layout/tests.rs
