@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
+description = "Small Rust client abstraction for OpenAI chat-style API calls"
+repository = "https://github.com/larspensjo/rs-openai-provider-kit"
+readme = "README.md"
+keywords = ["openai", "llm", "api", "chat"]
+categories = ["api-bindings", "asynchronous"]
 publish = false
 
 [features]

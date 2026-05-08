@@ -1658,3 +1658,9 @@ Type: Refactor
 Context: Reusable OpenAI client code lived inside `harvester_engine`, which made it hard to reuse from other Rust projects without taking Harvester-specific orchestration, prompt, pricing, replay, and UI dependencies.
 Change: Added `crates/openai_provider_kit` as a workspace crate owning the LLM request/response/error types, provider trait, OpenAI provider, test-support mocks, and OpenAI protocol tests. Harvester now depends on that crate and keeps its old `llm::{types,provider,providers,mock_provider}` paths as compatibility re-export shims.
 Refs: crates/openai_provider_kit, crates/harvester_engine/src/llm/types.rs, crates/harvester_engine/src/llm/provider.rs, crates/harvester_engine/src/llm/providers/openai.rs, crates/harvester_engine/src/llm/mock_provider.rs
+
+## 2026-05-08 - Prepare OpenAI provider kit for repository split
+Type: Implementation
+Context: The local OpenAI provider kit needs enough standalone package metadata and documentation to be split into `rs-openai-provider-kit` without carrying Harvester-specific instructions.
+Change: Added crate README, changelog, MIT license, simple chat example, publication metadata, and a future GitHub Actions CI workflow under the crate subtree.
+Refs: crates/openai_provider_kit/README.md, crates/openai_provider_kit/CHANGELOG.md, crates/openai_provider_kit/examples/simple_chat.rs, crates/openai_provider_kit/.github/workflows/ci.yml
