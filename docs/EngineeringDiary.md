@@ -1652,3 +1652,9 @@ Type: Bug Fix
 Context: During `Poll Sources`, `Stop / Finish` rendered as a short strip because its footer descriptor put left/right spacing in `LayoutRule`'s top/bottom margin slots.
 Change: Corrected the Stop button descriptor to use `(top, right, bottom, left)` margin order, named the shared vertical footer-button margin, and tightened the footer alignment test to assert that source of truth.
 Refs: crates/harvester_app/src/platform/ui/groups/bottom_buttons.rs, crates/harvester_app/src/platform/ui/layout/tests.rs
+
+## 2026-05-08 - Add local OpenAI provider kit crate
+Type: Refactor
+Context: Reusable OpenAI client code lived inside `harvester_engine`, which made it hard to reuse from other Rust projects without taking Harvester-specific orchestration, prompt, pricing, replay, and UI dependencies.
+Change: Added `crates/openai_provider_kit` as a workspace crate owning the LLM request/response/error types, provider trait, OpenAI provider, test-support mocks, and OpenAI protocol tests. Harvester now depends on that crate and keeps its old `llm::{types,provider,providers,mock_provider}` paths as compatibility re-export shims.
+Refs: crates/openai_provider_kit, crates/harvester_engine/src/llm/types.rs, crates/harvester_engine/src/llm/provider.rs, crates/harvester_engine/src/llm/providers/openai.rs, crates/harvester_engine/src/llm/mock_provider.rs

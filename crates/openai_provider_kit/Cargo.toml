@@ -1,0 +1,27 @@
+[package]
+name = "openai_provider_kit"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+default = ["rustls"]
+rustls = ["reqwest/rustls"]
+native-tls = ["reqwest/native-tls"]
+test-support = ["dep:tokio", "tokio/sync"]
+reqwest-passthrough = []
+
+[dependencies]
+async-trait = "0.1"
+reqwest = { version = "0.13.1", default-features = false, features = [] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", default-features = false, optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+wiremock = "0.6"

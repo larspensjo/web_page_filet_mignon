@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/openai_provider_kit",
     "crates/harvester_app",
     "crates/harvester_core",
     "crates/harvester_engine",

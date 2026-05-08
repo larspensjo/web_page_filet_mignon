@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 engine_logging = { path = "../engine_logging" }
+openai_provider_kit = { path = "../openai_provider_kit", features = ["test-support"] }
 log.workspace = true
 bytes = "1"
 async-trait = "0.1"
