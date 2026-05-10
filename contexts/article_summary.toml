@@ -1,8 +1,8 @@
 [meta]
 prompt_id = "ArticleSummary"
 schema_version = 1
-version = 2
-updated = "2026-04-23"
+version = 3
+updated = "2026-05-10"
 description = "Business-significant change detection context for per-article summary extraction"
 
 [variables]
@@ -17,14 +17,21 @@ SIGNALS TO PRIORITIZE:
 4. Partnerships, M&A, financing, capex, supply constraints, and operating bottlenecks.
 5. Regulatory, policy, or procurement shifts with commercial impact.
 6. Competitive moves that strengthen, weaken, or complicate prevailing assumptions.
-7. Evidence that could challenge an existing investment thesis or force a reassessment of prior beliefs.
+7. Power & energy posture: GW/MW commitments and capacity figures; power source mix (natural gas, nuclear/SMR, fuel cell, solar+storage, behind-the-meter); interconnection or permit timelines; on-site generation deals; hyperscaler equity into power assets; stranded-chip risk where contracted compute cannot be powered on schedule.
+8. Evidence that could challenge an existing investment thesis or force a reassessment of prior beliefs.
 
 BUSINESS-LEVEL QUESTIONS:
 - What changed?
 - Who is affected?
 - Why does it matter commercially or strategically?
 - Over what timeframe?
+- What power capacity (GW/MW), source, and timeline does this imply, and is it secured or aspirational?
 - What remains uncertain?
+
+ENTITY NORMALIZATION (canonical spellings — when these actors appear, use exactly these names so longitudinal entity queries return consistent results):
+- Power & utilities: GE Vernova, Siemens Energy, Mitsubishi Heavy Industries, Bloom Energy, Constellation Energy, Vistra, Talen Energy, Brookfield Renewable, NuScale, BWX Technologies, Cameco, TerraPower, Intersect Power, Pacifico Energy, ERCOT, Diamondback Energy, Chevron, Exxon Mobil.
+- AI compute & infrastructure: Nvidia, AMD, Broadcom, TSMC, Micron, Microsoft, Alphabet, Amazon, AWS, Meta, Oracle, OpenAI, Anthropic, CoreWeave, Nebius.
+- Canonical technology terms (use under "technologies"): small modular reactor, natural gas turbine, fuel cell, behind-the-meter generation, power purchase agreement, interconnection queue, custom silicon, large language model.
 
 NEGATIVE GUIDANCE:
 - Ignore generic "AI is the future" fluff, minor UX tweaks, or low-signal launch marketing.

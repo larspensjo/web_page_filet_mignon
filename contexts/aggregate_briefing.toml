@@ -1,8 +1,8 @@
 [meta]
 prompt_id = "AggregateBriefing"
 schema_version = 1
-version = 2
-updated = "2026-04-23"
+version = 3
+updated = "2026-05-10"
 description = "Business-significant change detection context for aggregate briefing"
 
 [variables]
@@ -16,6 +16,7 @@ EDITORIAL PRIORITIES:
 3. Decision relevance: Which developments are most likely to matter for strategic positioning rather than just news volume?
 4. Contradiction: Highlight evidence that weakens, complicates, or falsifies previously comfortable assumptions.
 5. Major product updates: Include them when they may change enterprise adoption, developer workflows, unit economics, bundling power, or competitive dynamics.
+6. Bottleneck tracing: where the binding constraint is shifting (chips → power → permitting → cooling), and which actors capture rent at the new constraint.
 
 STORY TYPES TO PRIORITIZE:
 - Major product/model/platform launches or updates with commercial implications
@@ -24,6 +25,7 @@ STORY TYPES TO PRIORITIZE:
 - Regulatory, procurement, or policy changes with business impact
 - Adoption signals, customer wins/losses, or distribution shifts
 - Infrastructure or supply constraints
+- Power & energy: GW commitments, supply-gap forecasts, hyperscaler moves into generation, interconnection or permit timelines, gas-turbine/SMR/fuel-cell deals, stranded-capacity risk
 - Competitive moves that materially change the landscape
 
 INTERPRETIVE INSTRUCTIONS:

@@ -1,8 +1,8 @@
 [meta]
 prompt_id = "ArticleTriage"
 schema_version = 1
-version = 2
-updated = "2026-04-24"
+version = 3
+updated = "2026-05-10"
 description = "Business-significant triage selection context for AI-focused signal admission"
 
 [variables]
@@ -22,6 +22,13 @@ ADMISSION PRIORITIES:
 - Do not over-weight an article because it confirms an existing assumption.
 - Do not automatically down-rank major product, platform, or model releases; score them by commercial impact.
 - Treat a major foundation-model release, hyperscaler platform launch, or developer-tool repricing as a priority-4 candidate when enterprise adoption, workflow change, distribution, pricing power, or competitive position is implicated.
+
+POWER & ENERGY ADMISSION (always evaluate; this thread is bottleneck-defining):
+- Treat any specific GW or MW power commitment, contract, or capacity number as priority-4 by default.
+- Treat power-supply/demand gap forecasts, interconnection-queue timelines, or permit decisions as priority-4.
+- Treat hyperscaler-as-utility moves (acquiring generation, restarting nuclear, equity in SMR/turbine OEMs, signing PPAs at GW scale) as priority-4 or 5.
+- Treat behind-the-meter or off-grid data-center moves, gas-turbine shortages, transformer or HBM-style supply constraints as priority-3 or 4 depending on specificity.
+- Treat stranded-chip or delayed-energization risk (contracted compute that cannot be powered on schedule) as priority-4.
 
 PRIORITY SCALE:
 - 5: Highly material, specific, decision-relevant development with clear commercial, strategic, regulatory, financial, operational, or competitive implications.
@@ -49,6 +56,7 @@ TIE-BREAKER LOGIC:
 - If implications are ambiguous, use the rationale to say what is unknown rather than forcing confidence.
 
 TAG GUIDANCE:
-- Keep tags short, stable, and useful for search.
+- Keep tags short, stable, and useful for search. Spelling stability matters more than completeness; reuse existing tags before coining new ones.
 - Prefer concrete tags such as capex, power-grid, custom-silicon, model-release, enterprise-ai, developer-tools, pricing, distribution, partnership, regulation, antitrust, export-controls, data-centers, supply-chain, adoption, competition, margins, open-source, cloud-platforms.
+- Power & energy sub-tags (use under the power-grid umbrella when specific): gigawatt-commitment, gas-turbine, smr-nuclear, nuclear-restart, fuel-cell, behind-the-meter, off-grid-datacenter, ppa-deal, interconnection-queue, hyperscaler-utility, power-equipment-oem, stranded-capacity-risk, ercot, virginia-grid.
 """
