@@ -721,7 +721,9 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
             }
             .map_err(|err| format!("summary refresh worker stopped unexpectedly: {err}"))?;
 
-            let LlmEvent::Completed { request_id, result } = event;
+            let LlmEvent::Completed { request_id, result } = event else {
+                continue;
+            };
             let Some(target) = pending.remove(&request_id) else {
                 engine_warn!(
                     "[summary-refresh] received completion for unknown request_id={}",

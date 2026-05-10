@@ -183,6 +183,27 @@ pub enum LlmEvent {
         request_id: u64,
         result: Result<LlmCompletionResult, LlmCompletionError>,
     },
+    UsageUpdated {
+        usage: LlmUsageTotals,
+    },
+}
+
+fn send_llm_completed(
+    event_tx: &mpsc::Sender<LlmEvent>,
+    request_id: u64,
+    result: Result<LlmCompletionResult, LlmCompletionError>,
+    quota_tracker: &Mutex<LlmQuotaTracker>,
+) {
+    let _ = event_tx.send(LlmEvent::Completed { request_id, result });
+    send_llm_usage_update(event_tx, quota_tracker);
+}
+
+fn send_llm_usage_update(
+    event_tx: &mpsc::Sender<LlmEvent>,
+    quota_tracker: &Mutex<LlmQuotaTracker>,
+) {
+    let usage = quota_tracker.lock().unwrap().totals();
+    let _ = event_tx.send(LlmEvent::UsageUpdated { usage });
 }
 
 fn worker_loop(
@@ -288,10 +309,7 @@ async fn handle_completion_concurrent(
             size: input_bytes,
             limit: max_bytes,
         };
-        let _ = event_tx.send(LlmEvent::Completed {
-            request_id,
-            result: Err(err),
-        });
+        send_llm_completed(event_tx, request_id, Err(err), quota_tracker);
         return;
     }
 
@@ -311,13 +329,15 @@ async fn handle_completion_concurrent(
                 request_id,
                 failure
             );
-            let _ = event_tx.send(LlmEvent::Completed {
+            send_llm_completed(
+                event_tx,
                 request_id,
-                result: Err(LlmCompletionError::QuotaExhausted {
+                Err(LlmCompletionError::QuotaExhausted {
                     description: failure.to_string(),
                     failure_metadata: None,
                 }),
-            });
+                quota_tracker,
+            );
             return;
         }
         engine_info!(
@@ -331,10 +351,12 @@ async fn handle_completion_concurrent(
     if let Some(ref override_model) = model_override {
         if let Err(validation_err) = validate_model_override(override_model, config, None) {
             quota_tracker.lock().unwrap().release_call();
-            let _ = event_tx.send(LlmEvent::Completed {
+            send_llm_completed(
+                event_tx,
                 request_id,
-                result: Err(validation_err.into_completion_error(override_model.clone())),
-            });
+                Err(validation_err.into_completion_error(override_model.clone())),
+                quota_tracker,
+            );
             return;
         }
     }
@@ -362,10 +384,12 @@ async fn handle_completion_concurrent(
             Some(pair) => pair,
             None => {
                 quota_tracker.lock().unwrap().release_call();
-                let _ = event_tx.send(LlmEvent::Completed {
+                send_llm_completed(
+                    event_tx,
                     request_id,
-                    result: Err(LlmCompletionError::PromptNotFound { prompt_id }),
-                });
+                    Err(LlmCompletionError::PromptNotFound { prompt_id }),
+                    quota_tracker,
+                );
                 return;
             }
         };
@@ -404,12 +428,14 @@ async fn handle_completion_concurrent(
         Err(e) => {
             engine_error!("[llm-render] Failed to render system template: {}", e);
             quota_tracker.lock().unwrap().release_call();
-            let _ = event_tx.send(LlmEvent::Completed {
+            send_llm_completed(
+                event_tx,
                 request_id,
-                result: Err(LlmCompletionError::TemplateRenderFailed {
+                Err(LlmCompletionError::TemplateRenderFailed {
                     detail: format!("system template: {}", e),
                 }),
-            });
+                quota_tracker,
+            );
             return;
         }
     };
@@ -418,12 +444,14 @@ async fn handle_completion_concurrent(
         Err(e) => {
             engine_error!("[llm-render] Failed to render user template: {}", e);
             quota_tracker.lock().unwrap().release_call();
-            let _ = event_tx.send(LlmEvent::Completed {
+            send_llm_completed(
+                event_tx,
                 request_id,
-                result: Err(LlmCompletionError::TemplateRenderFailed {
+                Err(LlmCompletionError::TemplateRenderFailed {
                     detail: format!("user template: {}", e),
                 }),
-            });
+                quota_tracker,
+            );
             return;
         }
     };
@@ -470,10 +498,7 @@ async fn handle_completion_concurrent(
                     output_json,
                     metadata,
                 };
-                let _ = event_tx.send(LlmEvent::Completed {
-                    request_id,
-                    result: Ok(result),
-                });
+                send_llm_completed(event_tx, request_id, Ok(result), quota_tracker);
                 return;
             }
         }
@@ -546,10 +571,12 @@ async fn handle_completion_concurrent(
             wall_ms: Some(wall_ms),
             timestamp_utc: timestamp_utc.clone(),
         };
-        let _ = event_tx.send(LlmEvent::Completed {
+        send_llm_completed(
+            event_tx,
             request_id,
-            result: Err(LlmCompletionError::ProviderError(err)),
-        });
+            Err(LlmCompletionError::ProviderError(err)),
+            quota_tracker,
+        );
         drop(failure_metadata); // metadata available if needed in future
         return;
     }
@@ -589,13 +616,15 @@ async fn handle_completion_concurrent(
                 wall_ms: Some(wall_ms),
                 timestamp_utc: timestamp_utc.clone(),
             };
-            let _ = event_tx.send(LlmEvent::Completed {
+            send_llm_completed(
+                event_tx,
                 request_id,
-                result: Err(LlmCompletionError::QuotaExhausted {
+                Err(LlmCompletionError::QuotaExhausted {
                     description: failure.to_string(),
                     failure_metadata: Some(failure_metadata),
                 }),
-            });
+                quota_tracker,
+            );
             return;
         }
         let totals = tracker.totals();
@@ -664,13 +693,15 @@ async fn handle_completion_concurrent(
                     wall_ms: Some(wall_ms),
                     timestamp_utc: timestamp_utc.clone(),
                 };
-                let _ = event_tx.send(LlmEvent::Completed {
+                send_llm_completed(
+                    event_tx,
                     request_id,
-                    result: Err(LlmCompletionError::PersistenceFailed {
+                    Err(LlmCompletionError::PersistenceFailed {
                         detail: err.to_string(),
                         failure_metadata: Some(failure_metadata),
                     }),
-                });
+                    quota_tracker,
+                );
                 return;
             }
 
@@ -706,10 +737,7 @@ async fn handle_completion_concurrent(
                 metadata,
             };
 
-            let _ = event_tx.send(LlmEvent::Completed {
-                request_id,
-                result: Ok(result),
-            });
+            send_llm_completed(event_tx, request_id, Ok(result), quota_tracker);
         }
         Err(validation_error) => {
             let reason = validation_error.to_string();
@@ -739,13 +767,15 @@ async fn handle_completion_concurrent(
                     wall_ms: Some(wall_ms),
                     timestamp_utc: timestamp_utc.clone(),
                 };
-                let _ = event_tx.send(LlmEvent::Completed {
+                send_llm_completed(
+                    event_tx,
                     request_id,
-                    result: Err(LlmCompletionError::PersistenceFailed {
+                    Err(LlmCompletionError::PersistenceFailed {
                         detail: err.to_string(),
                         failure_metadata: Some(failure_metadata),
                     }),
-                });
+                    quota_tracker,
+                );
                 return;
             }
 
@@ -757,14 +787,16 @@ async fn handle_completion_concurrent(
                 wall_ms: Some(wall_ms),
                 timestamp_utc: timestamp_utc.clone(),
             };
-            let _ = event_tx.send(LlmEvent::Completed {
+            send_llm_completed(
+                event_tx,
                 request_id,
-                result: Err(LlmCompletionError::ValidationFailed {
+                Err(LlmCompletionError::ValidationFailed {
                     reason,
                     raw_response,
                     failure_metadata: Some(failure_metadata),
                 }),
-            });
+                quota_tracker,
+            );
         }
     }
 }

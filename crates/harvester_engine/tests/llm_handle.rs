@@ -67,12 +67,7 @@ fn llm_handle_dispatches_completion_event() {
         })))
         .expect("LLM command should dispatch");
 
-    let event = handle
-        .event_receiver()
-        .lock()
-        .expect("lock receiver")
-        .recv()
-        .expect("should receive event");
+    let event = recv_event(&handle);
 
     match event {
         LlmEvent::Completed { request_id, result } => {
@@ -86,6 +81,7 @@ fn llm_handle_dispatches_completion_event() {
                 panic!("LLM completion failed unexpectedly");
             }
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 }
 
@@ -134,12 +130,7 @@ fn llm_handle_skips_provider_when_cache_hit() {
         })))
         .expect("LLM command should dispatch");
 
-    let event = handle
-        .event_receiver()
-        .lock()
-        .expect("lock receiver")
-        .recv()
-        .expect("should receive event");
+    let event = recv_event(&handle);
 
     match event {
         LlmEvent::Completed { request_id, result } => {
@@ -152,9 +143,52 @@ fn llm_handle_skips_provider_when_cache_hit() {
                 panic!("cached completion failed");
             }
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 
     assert_eq!(provider.recorded_requests().len(), 0);
+}
+
+#[test]
+fn llm_handle_emits_usage_update_after_completion() {
+    let provider = Arc::new(MockLlmProvider::new());
+    let provider_trait: Arc<dyn LlmProvider> = provider.clone();
+    provider
+        .queue_json_success(r#"{"category":"news","priority":3,"tags":["a"],"rationale":"ok"}"#);
+    let registry = prompt_registry_arc();
+    let dir = tempdir().unwrap();
+    let handle = LlmHandle::new(make_config(provider_trait, registry, &dir));
+
+    handle
+        .send(LlmCommand::Complete(Box::new(LlmCompletionCommand {
+            request_id: 7,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: Some(1),
+            model_override: None,
+            input_content: "document text".to_string(),
+            context: Vec::new(),
+            template_override: None,
+            extra_template_vars: vec![],
+        })))
+        .expect("LLM command should dispatch");
+
+    let receiver = handle.event_receiver();
+    let first = receiver
+        .lock()
+        .expect("lock receiver")
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("completion event");
+    assert!(matches!(first, LlmEvent::Completed { .. }));
+
+    let second = receiver
+        .lock()
+        .expect("lock receiver")
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("usage event");
+    match second {
+        LlmEvent::UsageUpdated { usage } => assert_eq!(usage.calls, 1),
+        LlmEvent::Completed { .. } => panic!("expected usage update after completion"),
+    }
 }
 
 #[test]
@@ -185,17 +219,13 @@ fn llm_handle_inserts_cache_after_successful_response() {
         })))
         .expect("LLM command should dispatch");
 
-    let first_event = handle
-        .event_receiver()
-        .lock()
-        .expect("lock receiver")
-        .recv()
-        .expect("should receive first event");
+    let first_event = recv_event(&handle);
 
     match first_event {
         LlmEvent::Completed { result, .. } => {
             assert!(result.is_ok());
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 
     assert_eq!(provider.recorded_requests().len(), 1);
@@ -213,17 +243,13 @@ fn llm_handle_inserts_cache_after_successful_response() {
         })))
         .expect("LLM command should dispatch");
 
-    let second_event = handle
-        .event_receiver()
-        .lock()
-        .expect("lock receiver")
-        .recv()
-        .expect("should receive second event");
+    let second_event = recv_event(&handle);
 
     match second_event {
         LlmEvent::Completed { result, .. } => {
             assert!(result.is_ok());
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 
     assert_eq!(provider.recorded_requests().len(), 1);
@@ -311,12 +337,17 @@ fn concurrent_requests_never_exceed_cap() {
 // -----------------------------------------------------------------------
 
 fn recv_event(handle: &LlmHandle) -> LlmEvent {
-    handle
-        .event_receiver()
-        .lock()
-        .expect("lock receiver")
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .expect("should receive event within 5s")
+    loop {
+        let event = handle
+            .event_receiver()
+            .lock()
+            .expect("lock receiver")
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("should receive event within 5s");
+        if matches!(event, LlmEvent::Completed { .. }) {
+            return event;
+        }
+    }
 }
 
 #[test]
@@ -431,6 +462,7 @@ fn unsupported_model_wrong_provider_fires_before_provider_call() {
                 "wrong provider should yield UnsupportedModel"
             );
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
     assert_eq!(
         provider.recorded_requests().len(),
@@ -470,6 +502,7 @@ fn unsupported_model_unknown_name_fires_before_provider_call() {
                 "unknown name should yield UnsupportedModel"
             );
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
     assert_eq!(
         provider.recorded_requests().len(),
@@ -510,6 +543,7 @@ fn valid_override_cache_miss_records_override_in_metadata() {
             let metadata = result.expect("should succeed").metadata;
             assert_eq!(metadata.resolved_model, "mock");
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 }
 
@@ -566,6 +600,7 @@ fn valid_override_cache_hit_records_override_in_metadata() {
             let metadata = result.expect("cache hit should succeed").metadata;
             assert_eq!(metadata.resolved_model, "mock");
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
     assert_eq!(
         provider.recorded_requests().len(),
@@ -655,18 +690,14 @@ fn retry_under_concurrency_pressure() {
         .expect("retry send should succeed");
 
     // Await the retry result with a generous timeout (retry delay is 2 s).
-    let result = retry_handle
-        .event_receiver()
-        .lock()
-        .unwrap()
-        .recv_timeout(std::time::Duration::from_secs(10))
-        .expect("retry should complete within 10 s — possible deadlock");
+    let result = recv_event(&retry_handle);
 
     match result {
         LlmEvent::Completed { request_id, result } => {
             assert_eq!(request_id, 200);
             assert!(result.is_ok(), "retry should succeed on second attempt");
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 
     assert_eq!(
@@ -731,6 +762,7 @@ fn retry_succeeds_on_transient_timeout() {
         LlmEvent::Completed { result, .. } => {
             assert!(result.is_ok(), "should succeed after retry");
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 
     assert_eq!(
@@ -767,6 +799,7 @@ fn retry_exhausted_returns_error() {
                 "should propagate the provider error"
             );
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 
     assert_eq!(
@@ -804,6 +837,7 @@ fn no_retry_on_non_transient_error() {
                 "should propagate authentication error"
             );
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 
     assert_eq!(
@@ -836,6 +870,7 @@ fn retry_on_http_502() {
         LlmEvent::Completed { result, .. } => {
             assert!(result.is_ok(), "should succeed after retrying HTTP 502");
         }
+        LlmEvent::UsageUpdated { .. } => unreachable!(),
     }
 
     assert_eq!(

@@ -149,6 +149,14 @@ pub enum Msg {
         /// before timing/model info is available (e.g. `PromptNotFound`).
         metadata: Option<LlmRunMetadata>,
     },
+    /// Startup/effect boundary configured session LLM quota limits.
+    LlmQuotaConfigured {
+        limits: crate::LlmQuotaLimits,
+    },
+    /// Authoritative session LLM quota usage snapshot from the worker.
+    LlmQuotaUsageUpdated {
+        usage: crate::LlmQuotaUsage,
+    },
     /// User requested generation of a briefing.
     GenerateBriefingClicked,
     /// Headless batch flow: run triage + per-article summaries but skip aggregate briefing.

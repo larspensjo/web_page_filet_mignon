@@ -26,6 +26,8 @@ pub struct LlmModelUsageView {
     pub output_tokens: u64,
 }
 
+pub use crate::llm_quota_view::LlmQuotaView;
+
 pub const INPUT_PANEL_FIXED_WIDTH: i32 = 500;
 pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
 
@@ -291,6 +293,8 @@ pub struct AppViewModel {
     pub indirect_link_summary: Option<IndirectLinkSummary>,
     /// Per-model LLM token usage, sorted alphabetically by model name. Only Miss runs counted.
     pub llm_usage_by_model: Vec<LlmModelUsageView>,
+    /// Session LLM call quota meter.
+    pub llm_quota: LlmQuotaView,
     /// Right-pane tab content area view.
     pub right_pane: RightPaneView,
 }
@@ -341,6 +345,7 @@ impl Default for AppViewModel {
             is_pre_triage_reviewing: false,
             indirect_link_summary: None,
             llm_usage_by_model: Vec::new(),
+            llm_quota: crate::build_llm_quota_view(&crate::LlmQuotaState::default()),
             right_pane: RightPaneView::default(),
         }
     }

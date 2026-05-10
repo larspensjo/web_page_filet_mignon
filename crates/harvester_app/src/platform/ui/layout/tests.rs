@@ -5,11 +5,11 @@ use harvester_core::{AppTab, LeftTab};
 use super::super::constants::*;
 use super::super::groups::bottom_buttons::FOOTER_BUTTON_VERTICAL_MARGIN;
 use super::rules::{
-    AI_WARNING_ROW_HEIGHT, PREVIEW_CONTEXT_ROW_HEIGHT, PROMPT_LAB_ROW_HEIGHT_ACTION,
-    PROMPT_LAB_ROW_HEIGHT_CONTEXT_INPUT, PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY,
-    PROMPT_LAB_ROW_HEIGHT_STANDARD, PROMPT_LAB_ROW_HEIGHT_STATUS,
-    PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT, PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH,
-    TOKEN_METER_BAR_WIDTH, TOKEN_METER_LABEL_WIDTH,
+    AI_WARNING_ROW_HEIGHT, LLM_QUOTA_BAR_WIDTH, LLM_QUOTA_LABEL_WIDTH, PREVIEW_CONTEXT_ROW_HEIGHT,
+    PROMPT_LAB_ROW_HEIGHT_ACTION, PROMPT_LAB_ROW_HEIGHT_CONTEXT_INPUT,
+    PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY, PROMPT_LAB_ROW_HEIGHT_STANDARD,
+    PROMPT_LAB_ROW_HEIGHT_STATUS, PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT,
+    PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH, TOKEN_METER_BAR_WIDTH, TOKEN_METER_LABEL_WIDTH,
 };
 use super::{build_layout_command, initial_commands, LayoutConfig, PromptLabLayoutConfig};
 
@@ -89,6 +89,14 @@ fn operation_controls_have_width_when_visible() {
     };
     assert_eq!(fixed_size_for(&rules, PROGRESS_OPERATION), 80);
     assert_eq!(fixed_size_for(&rules, LABEL_OPERATION_PROGRESS), 120);
+    assert_eq!(
+        fixed_size_for(&rules, PROGRESS_LLM_QUOTA),
+        LLM_QUOTA_BAR_WIDTH
+    );
+    assert_eq!(
+        fixed_size_for(&rules, LABEL_LLM_QUOTA),
+        LLM_QUOTA_LABEL_WIDTH
+    );
 }
 
 #[test]
@@ -123,6 +131,14 @@ fn operation_controls_collapse_when_hidden() {
     };
     assert_eq!(fixed_size_for(&rules, PROGRESS_OPERATION), 0);
     assert_eq!(fixed_size_for(&rules, LABEL_OPERATION_PROGRESS), 0);
+    assert_eq!(
+        fixed_size_for(&rules, PROGRESS_LLM_QUOTA),
+        LLM_QUOTA_BAR_WIDTH
+    );
+    assert_eq!(
+        fixed_size_for(&rules, LABEL_LLM_QUOTA),
+        LLM_QUOTA_LABEL_WIDTH
+    );
 }
 
 #[test]

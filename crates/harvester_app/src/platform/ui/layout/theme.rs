@@ -867,6 +867,11 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
+        control_id: LABEL_LLM_QUOTA,
+        style_id: StyleId::StatusBarBackground,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
         control_id: LABEL_PROMPT_LAB_STATUS,
         style_id: StyleId::HeaderLabel,
     });
@@ -973,6 +978,11 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
         window_id,
         control_id: PROGRESS_OPERATION,
         style_id: StyleId::ProgressBar,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: PROGRESS_LLM_QUOTA,
+        style_id: StyleId::StatusMeter,
     });
 
     commands.push(PlatformCommand::ApplyStyleToControl {

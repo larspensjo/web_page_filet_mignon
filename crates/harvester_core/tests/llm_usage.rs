@@ -1,6 +1,6 @@
 use std::sync::Once;
 
-use harvester_core::{update, AppState, LlmResultKind, Msg};
+use harvester_core::{update, AppState, LlmQuotaLimits, LlmQuotaUsage, LlmResultKind, Msg};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::run_metadata::{CacheStatus, LlmRunMetadata, LlmRunMetadataInit};
 
@@ -139,6 +139,41 @@ fn view_contains_sorted_llm_usage_rows() {
     assert_eq!(view.llm_usage_by_model.len(), 2);
     assert_eq!(view.llm_usage_by_model[0].model, "amodel");
     assert_eq!(view.llm_usage_by_model[1].model, "zmodel");
+}
+
+#[test]
+fn quota_usage_snapshot_is_authoritative_and_model_usage_stays_separate() {
+    init_logging();
+    let state = AppState::new();
+    let (state, _) = update(
+        state,
+        Msg::LlmQuotaConfigured {
+            limits: LlmQuotaLimits {
+                max_calls_per_session: Some(100),
+                max_input_tokens_per_session: Some(1_000),
+                max_output_tokens_per_session: Some(1_000),
+                max_cost_microdollars_per_session: Some(1_000),
+            },
+        },
+    );
+    let (state, _) = update(
+        state,
+        Msg::LlmQuotaUsageUpdated {
+            usage: LlmQuotaUsage {
+                calls: 7,
+                input_tokens: 700,
+                output_tokens: 300,
+                cost_microdollars: 42,
+            },
+        },
+    );
+    let state = send_llm_completed(state, "test-model", 10, 5, CacheStatus::Miss);
+
+    let view = state.view();
+
+    assert_eq!(view.llm_quota.used, 7);
+    assert_eq!(view.llm_quota.limit, Some(100));
+    assert_eq!(view.llm_usage_by_model[0].input_tokens, 10);
 }
 
 #[test]

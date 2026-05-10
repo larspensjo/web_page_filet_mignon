@@ -669,6 +669,32 @@ fn map_llm_event_unsupported_model_has_none_metadata() {
 }
 
 #[test]
+fn map_llm_event_usage_updated_dispatches_quota_usage() {
+    let event = LlmEvent::UsageUpdated {
+        usage: harvester_engine::llm::LlmUsageTotals {
+            calls: 37,
+            input_tokens: 100,
+            output_tokens: 50,
+            cost_microdollars: 25,
+        },
+    };
+
+    let msg = map_llm_event(event);
+
+    assert_eq!(
+        msg,
+        Msg::LlmQuotaUsageUpdated {
+            usage: harvester_core::LlmQuotaUsage {
+                calls: 37,
+                input_tokens: 100,
+                output_tokens: 50,
+                cost_microdollars: 25,
+            }
+        }
+    );
+}
+
+#[test]
 fn resolve_effect_success_emits_ok_msg() {
     let temp = tempdir().expect("tempdir");
     write_markdown(temp.path(), "a.md", "https://example.com/a");

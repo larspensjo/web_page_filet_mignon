@@ -236,6 +236,7 @@ impl AppState {
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
             indirect_link_summary: self.build_indirect_link_summary(),
             llm_usage_by_model: self.llm_usage_rows(),
+            llm_quota: crate::build_llm_quota_view(self.llm_quota()),
             right_pane: self.build_right_pane_view(selected_triage_article_available),
         }
     }
@@ -413,7 +414,11 @@ impl AppState {
             if stats.is_empty() {
                 None
             } else {
-                Some(crate::poll_stats_fmt::format_poll_stats(stats))
+                let warning = crate::build_poll_quota_warning(stats, self.llm_quota());
+                Some(crate::poll_stats_fmt::format_poll_stats_with_warning(
+                    stats,
+                    warning.as_ref(),
+                ))
             }
         };
 

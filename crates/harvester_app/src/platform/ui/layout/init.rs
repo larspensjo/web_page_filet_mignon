@@ -592,4 +592,16 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         parent_control_id: Some(PANEL_BOTTOM),
         control_id: PROGRESS_OPERATION,
     });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_BOTTOM),
+        control_id: LABEL_LLM_QUOTA,
+        initial_text: "LLM calls unavailable".to_string(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateProgressBar {
+        window_id,
+        parent_control_id: Some(PANEL_BOTTOM),
+        control_id: PROGRESS_LLM_QUOTA,
+    });
 }

@@ -9,7 +9,8 @@ use commanductui::{ChartLineEmphasis, ListBoxItemId, ListBoxRowDensity};
 use harvester_core::Stage;
 use harvester_core::{
     JobFilterStatus, JobListScope, JobResultKind, JobRowView, LeftPaneHeaderView,
-    LlmModelUsageView, SessionState, StopFinishButtonState, StopPolicy,
+    LlmModelUsageView, LlmQuotaSeverity, LlmQuotaView, SessionState, StopFinishButtonState,
+    StopPolicy,
 };
 use harvester_core::{
     JobOrigin, PreviewContextView, PreviewHeaderView, PromptLabRunId, PromptLabRunSummaryView,
@@ -1360,6 +1361,68 @@ fn token_progress_prefers_summary_tokens_when_available() {
             cmd,
             PlatformCommand::SetProgressBarPosition { control_id, position, .. }
             if *control_id == PROGRESS_TOKENS && *position == 16_000
+        )
+    }));
+}
+
+#[test]
+fn llm_quota_progress_renders_label_range_and_position() {
+    let window_id = WindowId::new(45);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(Vec::new());
+    view.llm_quota = LlmQuotaView {
+        label: "LLM calls 37 / 100".to_string(),
+        used: 37,
+        limit: Some(100),
+        percent: Some(37),
+        severity: LlmQuotaSeverity::Normal,
+    };
+
+    let cmds = render(window_id, &view, &mut tree_state);
+
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlText { control_id, text, .. }
+            if *control_id == LABEL_LLM_QUOTA && text == "LLM calls 37 / 100"
+        )
+    }));
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetProgressBarRange { control_id, min, max, .. }
+            if *control_id == PROGRESS_LLM_QUOTA && *min == 0 && *max == 100
+        )
+    }));
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetProgressBarPosition { control_id, position, .. }
+            if *control_id == PROGRESS_LLM_QUOTA && *position == 37
+        )
+    }));
+}
+
+#[test]
+fn llm_quota_progress_uses_accent_style_when_exhausted() {
+    let window_id = WindowId::new(46);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(Vec::new());
+    view.llm_quota = LlmQuotaView {
+        label: "LLM calls 100 / 100".to_string(),
+        used: 100,
+        limit: Some(100),
+        percent: Some(100),
+        severity: LlmQuotaSeverity::Exhausted,
+    };
+
+    let cmds = render(window_id, &view, &mut tree_state);
+
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
+            if *control_id == PROGRESS_LLM_QUOTA && *style_id == StyleId::ProgressBar
         )
     }));
 }

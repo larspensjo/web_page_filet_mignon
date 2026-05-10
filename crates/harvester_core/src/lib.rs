@@ -5,6 +5,7 @@ mod context_draft;
 mod effect;
 pub mod entity_index;
 pub mod import_session;
+mod llm_quota_view;
 mod msg;
 mod poll_stats_fmt;
 mod pre_triage_coordinator;
@@ -35,6 +36,10 @@ pub use effect::{Effect, StopPolicy};
 pub use entity_index::{EntityIndex, EntityIndexEntry};
 pub use harvester_engine::llm::SummaryEntities;
 pub use import_session::{ImportPhase, ImportSessionState};
+pub use llm_quota_view::{
+    build_llm_quota_view, build_poll_quota_warning, LlmQuotaLimits, LlmQuotaSeverity,
+    LlmQuotaState, LlmQuotaUsage, LlmQuotaView, PollQuotaWarning,
+};
 pub use msg::{LlmResultKind, Msg};
 pub use poll_stats_fmt::format_poll_stats;
 pub use pre_triage_filter::{

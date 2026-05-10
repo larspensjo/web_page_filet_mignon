@@ -8,8 +8,9 @@ use super::groups::prompt_lab_actions::PromptLabActionsRenderState;
 use super::groups::prompt_lab_sections::PromptLabSectionsRenderState;
 use super::layout::{build_layout_command, LayoutConfig, PromptLabLayoutConfig};
 use super::render_controls::{
-    render_left_tab_bar_section, render_main_controls_section, render_operation_progress_section,
-    render_status_section, render_tab_bar_section, render_token_progress_section,
+    render_left_tab_bar_section, render_llm_quota_progress_section, render_main_controls_section,
+    render_operation_progress_section, render_status_section, render_tab_bar_section,
+    render_token_progress_section,
 };
 use super::render_list_box::{append_list_box_commands, ListBoxRenderModel};
 use super::render_preview::render_preview_section;
@@ -67,6 +68,10 @@ pub(super) struct ControlsRenderState {
     pub(super) prev_operation_progress_text: Option<String>,
     pub(super) prev_operation_progress_range: Option<(u32, u32)>,
     pub(super) prev_operation_progress_pos: Option<u32>,
+    pub(super) prev_llm_quota_text: Option<String>,
+    pub(super) prev_llm_quota_range: Option<(u32, u32)>,
+    pub(super) prev_llm_quota_pos: Option<u32>,
+    pub(super) prev_llm_quota_style: Option<StyleId>,
     pub(super) prev_jobs_header_meta_text: Option<String>,
     pub(super) prev_jobs_scope_since_checkpoint_checked: Option<bool>,
 }
@@ -142,6 +147,7 @@ pub fn render(
     render_left_tab_bar_section(window_id, view, tree_state, &mut cmds);
     render_status_section(window_id, view, tree_state, &mut cmds);
     render_operation_progress_section(window_id, view, tree_state, &mut cmds);
+    render_llm_quota_progress_section(window_id, view, tree_state, &mut cmds);
     render_token_progress_section(window_id, view, tree_state, &mut cmds);
     render_main_controls_section(window_id, view, tree_state, &mut cmds);
     super::groups::bottom_buttons::render(

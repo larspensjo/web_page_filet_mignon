@@ -1,6 +1,7 @@
 use commanductui::{MessageSeverity, PlatformCommand, StyleId, WindowId};
 use harvester_core::{
-    AppViewModel, JobListScope, JobRowView, LeftPaneHeaderView, LlmModelUsageView, SessionState,
+    AppViewModel, JobListScope, JobRowView, LeftPaneHeaderView, LlmModelUsageView,
+    LlmQuotaSeverity, SessionState,
 };
 
 use super::constants::*;
@@ -164,6 +165,71 @@ pub(super) fn render_operation_progress_section(
             window_id,
             control_id: PROGRESS_OPERATION,
             position,
+        },
+    );
+}
+
+pub(super) fn render_llm_quota_progress_section(
+    window_id: WindowId,
+    view: &AppViewModel,
+    tree_state: &mut TreeRenderState,
+    cmds: &mut Vec<PlatformCommand>,
+) {
+    let quota = &view.llm_quota;
+    let (range, pos) = match quota.limit {
+        Some(limit) => {
+            let max = limit.min(u64::from(u32::MAX)).max(1) as u32;
+            let position = quota.used.min(u64::from(max)) as u32;
+            ((0u32, max), position)
+        }
+        None => ((0u32, 1u32), 0u32),
+    };
+    let progress_style = match quota.severity {
+        LlmQuotaSeverity::Danger | LlmQuotaSeverity::Exhausted => StyleId::ProgressBar,
+        LlmQuotaSeverity::Normal | LlmQuotaSeverity::Warning | LlmQuotaSeverity::Unavailable => {
+            StyleId::StatusMeter
+        }
+    };
+
+    emit_if_changed(
+        &mut tree_state.controls.prev_llm_quota_text,
+        quota.label.clone(),
+        cmds,
+        |text| PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_LLM_QUOTA,
+            text,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.controls.prev_llm_quota_range,
+        range,
+        cmds,
+        |(min, max)| PlatformCommand::SetProgressBarRange {
+            window_id,
+            control_id: PROGRESS_LLM_QUOTA,
+            min,
+            max,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.controls.prev_llm_quota_pos,
+        pos,
+        cmds,
+        |position| PlatformCommand::SetProgressBarPosition {
+            window_id,
+            control_id: PROGRESS_LLM_QUOTA,
+            position,
+        },
+    );
+    emit_if_changed(
+        &mut tree_state.controls.prev_llm_quota_style,
+        progress_style,
+        cmds,
+        |style_id| PlatformCommand::ApplyStyleToControl {
+            window_id,
+            control_id: PROGRESS_LLM_QUOTA,
+            style_id,
         },
     );
 }

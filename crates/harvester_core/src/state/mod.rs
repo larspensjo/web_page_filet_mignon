@@ -343,6 +343,8 @@ pub struct AppState {
     prompt_lab_next_resolve_id: u64,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
+    /// Authoritative session-scoped quota usage and configured limits.
+    llm_quota: crate::LlmQuotaState,
     /// Currently active right-pane tab.
     active_tab: AppTab,
     /// Currently active left-pane tab.
@@ -444,6 +446,7 @@ impl Default for AppState {
             prompt_lab_next_resolve_id: 1,
             prompt_lab_templates: default_prompt_template_snapshots(),
             llm_usage_by_model: BTreeMap::new(),
+            llm_quota: crate::LlmQuotaState::default(),
             active_tab: AppTab::default(),
             left_tab: LeftTab::default(),
             job_list_scope: JobListScope::default(),
@@ -646,6 +649,19 @@ impl AppState {
                 },
             )
             .collect()
+    }
+
+    pub fn llm_quota(&self) -> &crate::LlmQuotaState {
+        &self.llm_quota
+    }
+
+    pub(crate) fn set_llm_quota_limits(&mut self, limits: crate::LlmQuotaLimits) {
+        self.llm_quota.limits = Some(limits);
+        self.llm_quota.ai_available = true;
+    }
+
+    pub(crate) fn set_llm_quota_usage(&mut self, usage: crate::LlmQuotaUsage) {
+        self.llm_quota.usage = usage;
     }
 
     pub fn record_pending_llm_request(&mut self, request_id: u64, prompt_id: PromptId) {
@@ -1319,6 +1335,7 @@ impl AppState {
     }
 
     pub(crate) fn set_ai_availability(&mut self, availability: AiAvailability) {
+        self.llm_quota.ai_available = matches!(availability, AiAvailability::Available);
         self.ai_availability = availability;
     }
 
@@ -1331,11 +1348,15 @@ impl AppState {
                 },
                 _,
             ) => {}
-            (_, true) => self.ai_availability = AiAvailability::Available,
+            (_, true) => {
+                self.ai_availability = AiAvailability::Available;
+                self.llm_quota.ai_available = true;
+            }
             (_, false) => {
                 self.ai_availability = AiAvailability::Unavailable {
                     reason: AiUnavailableReason::NoTriageModel,
                 };
+                self.llm_quota.ai_available = false;
             }
         }
     }

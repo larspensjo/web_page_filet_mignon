@@ -9,7 +9,7 @@ use std::{error::Error as StdError, fmt};
 
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{LlmResultKind, Msg, Stage};
+use harvester_core::{LlmQuotaUsage, LlmResultKind, Msg, Stage};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::types::{ModelId, ProviderKind};
 use harvester_engine::llm::{LlmCompletionError, LlmEvent, LlmRunMetadata};
@@ -417,6 +417,14 @@ pub fn map_llm_event(event: LlmEvent) -> Msg {
                 metadata,
             }
         }
+        LlmEvent::UsageUpdated { usage } => Msg::LlmQuotaUsageUpdated {
+            usage: LlmQuotaUsage {
+                calls: usage.calls,
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cost_microdollars: usage.cost_microdollars,
+            },
+        },
     }
 }
 

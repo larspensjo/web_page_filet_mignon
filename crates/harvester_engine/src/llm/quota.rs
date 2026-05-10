@@ -1,7 +1,7 @@
 use crate::types::FailureKind;
 
 /// Session-level caps for LLM usage.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LlmQuotas {
     pub max_calls_per_session: Option<u32>,
     pub max_input_tokens_per_session: Option<u64>,
@@ -157,6 +157,7 @@ impl LlmQuotaTracker {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LlmUsageTotals {
     pub calls: u64,
     pub input_tokens: u64,

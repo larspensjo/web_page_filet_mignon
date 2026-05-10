@@ -17,7 +17,7 @@ use commanductui::{
 use harvester_core::{
     update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel,
     ArchiveTokenEstimates, Effect, JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel,
-    LeftTab, LinkDownloadState, ManualDecision, Msg, PromptLabStage, TrendCategory,
+    LeftTab, LinkDownloadState, LlmQuotaLimits, ManualDecision, Msg, PromptLabStage, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -60,6 +60,7 @@ fn prepare_startup_state(
     initial_width: i32,
     llm_max_concurrent_requests: usize,
     startup_ai_availability: Option<AiAvailability>,
+    llm_quota_limits: Option<LlmQuotaLimits>,
 ) -> (AppState, Vec<Effect>) {
     let mut startup_effects = Vec::new();
 
@@ -79,6 +80,13 @@ fn prepare_startup_state(
         state = apply_startup_msg(
             state,
             Msg::AiAvailabilityDetected { availability },
+            &mut startup_effects,
+        );
+    }
+    if let Some(limits) = llm_quota_limits {
+        state = apply_startup_msg(
+            state,
+            Msg::LlmQuotaConfigured { limits },
             &mut startup_effects,
         );
     }
@@ -201,6 +209,8 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         let mut registry = PromptRegistry::new();
         register_defaults(&mut registry);
         let registry = Arc::new(RwLock::new(registry));
+        let quotas = LlmQuotas::default();
+        let quota_limits = llm_quota_limits_from_engine(&quotas);
         let config = LlmConfig {
             provider,
             default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_5_4_NANO),
@@ -208,7 +218,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
             briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
             registry: Arc::clone(&registry),
-            quotas: LlmQuotas::default(),
+            quotas,
             output_dir: output_dir.clone(),
             pricing: PricingRegistry::with_defaults(),
             max_input_bytes: 100_000,
@@ -221,7 +231,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         };
         let model_map = effective_model_map(&config);
         let handle = LlmHandle::new(config);
-        EffectRunner::new_with_llm(
+        let runner = EffectRunner::new_with_llm(
             paths.clone(),
             msg_tx.clone(),
             handle,
@@ -231,11 +241,16 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             provider_clone,
             ProviderKind::OpenAi,
             platform_handler,
-        )
+        );
+        (runner, Some(quota_limits))
     } else {
         engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
-        EffectRunner::new(paths.clone(), msg_tx.clone(), platform_handler)
+        (
+            EffectRunner::new(paths.clone(), msg_tx.clone(), platform_handler),
+            None,
+        )
     };
+    let (effect_runner, startup_llm_quota_limits) = effect_runner;
     effect_runner.enqueue(vec![Effect::LoadPromptTemplateFiles]);
     {
         let mut guard = shared_state.lock().expect("lock shared state");
@@ -246,6 +261,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             initial_width,
             llm_max_concurrent_requests,
             startup_ai_availability,
+            startup_llm_quota_limits,
         );
         if !startup_effects.is_empty() {
             effect_runner.enqueue(startup_effects);
@@ -337,6 +353,15 @@ fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
     map.insert(PromptId::AggregateBriefing, briefing_model);
 
     map
+}
+
+fn llm_quota_limits_from_engine(quotas: &LlmQuotas) -> LlmQuotaLimits {
+    LlmQuotaLimits {
+        max_calls_per_session: quotas.max_calls_per_session.map(u64::from),
+        max_input_tokens_per_session: quotas.max_input_tokens_per_session,
+        max_output_tokens_per_session: quotas.max_output_tokens_per_session,
+        max_cost_microdollars_per_session: quotas.max_cost_microdollars_per_session,
+    }
 }
 
 #[derive(Default)]
@@ -1725,6 +1750,7 @@ mod tests {
             Some(AiAvailability::Unavailable {
                 reason: AiUnavailableReason::MissingApiKey,
             }),
+            None,
         );
 
         assert_eq!(
@@ -1746,7 +1772,7 @@ mod tests {
     #[test]
     fn assembled_startup_commands_render_before_reveal() {
         let (_temp, paths) = startup_test_paths();
-        let (state, _effects) = prepare_startup_state(AppState::new(), &paths, 1200, 4, None);
+        let (state, _effects) = prepare_startup_state(AppState::new(), &paths, 1200, 4, None, None);
         let view = state.view();
         let window_id = WindowId::new(1);
         let mut tree_render_state = ui::render::TreeRenderState::new();

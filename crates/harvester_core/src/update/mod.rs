@@ -273,6 +273,16 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             result,
             metadata,
         } => llm_completed::handle(&mut state, request_id, result, metadata),
+        Msg::LlmQuotaConfigured { limits } => {
+            state.set_llm_quota_limits(limits);
+            state.mark_dirty();
+            Vec::new()
+        }
+        Msg::LlmQuotaUsageUpdated { usage } => {
+            state.set_llm_quota_usage(usage);
+            state.mark_dirty();
+            Vec::new()
+        }
         Msg::GenerateBriefingClicked => briefing::handle_generate_clicked(&mut state),
         Msg::PrepareSummariesClicked => briefing::handle_prepare_summaries_clicked(&mut state),
         Msg::BriefingPrereqArticlesLoaded { articles } => {

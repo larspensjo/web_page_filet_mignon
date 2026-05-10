@@ -1,6 +1,6 @@
 use harvester_engine::SourceKind;
 
-use crate::SourcePollStat;
+use crate::{LlmQuotaSeverity, PollQuotaWarning, SourcePollStat};
 
 /// Formats a grouped poll-stats summary (RSS / Brave / other source types) as a
 /// multi-line string.
@@ -9,6 +9,13 @@ use crate::SourcePollStat;
 /// Source kinds with no stats are omitted.
 /// No surrounding banner is included; that is the caller's responsibility.
 pub fn format_poll_stats(stats: &[SourcePollStat]) -> String {
+    format_poll_stats_with_warning(stats, None)
+}
+
+pub fn format_poll_stats_with_warning(
+    stats: &[SourcePollStat],
+    warning: Option<&PollQuotaWarning>,
+) -> String {
     if stats.is_empty() {
         return "No poll data yet.".to_string();
     }
@@ -53,7 +60,33 @@ pub fn format_poll_stats(stats: &[SourcePollStat]) -> String {
         sections.push(lines.join("\n"));
     }
 
-    sections.join("\n\n")
+    let formatted_stats = sections.join("\n\n");
+    match warning {
+        Some(warning) => format!(
+            "{}\n\n{}",
+            format_poll_quota_warning(warning),
+            formatted_stats
+        ),
+        None => formatted_stats,
+    }
+}
+
+fn format_poll_quota_warning(warning: &PollQuotaWarning) -> String {
+    let severity = match warning.severity {
+        LlmQuotaSeverity::Danger => "danger",
+        LlmQuotaSeverity::Warning => "warning",
+        LlmQuotaSeverity::Normal | LlmQuotaSeverity::Exhausted | LlmQuotaSeverity::Unavailable => {
+            "warning"
+        }
+    };
+    format!(
+        "## LLM quota warning\n\nThe latest poll emitted {} URLs. This is an upper-bound estimate and may require up to {} triage LLM calls before summaries or briefing generation.\n\nLLM calls remaining this session: {} / {}.\nSummary and briefing calls use the same internal quota.\nRestart harvester_app to reset the internal session quota, or reduce the batch before running AI workflows.\n\nSeverity: {}.",
+        warning.estimated_triage_calls,
+        warning.estimated_triage_calls,
+        warning.remaining_calls,
+        warning.max_calls,
+        severity
+    )
 }
 
 #[cfg(test)]
@@ -100,5 +133,25 @@ mod tests {
         );
         assert!(formatted.contains("\n\n## Brave\n"));
         assert!(formatted.contains("- **brave-ai-data-center**: 0 parsed"));
+    }
+
+    #[test]
+    fn can_prepend_quota_warning() {
+        let warning = PollQuotaWarning {
+            severity: LlmQuotaSeverity::Danger,
+            estimated_triage_calls: 103,
+            remaining_calls: 0,
+            max_calls: 100,
+        };
+
+        let formatted = format_poll_stats_with_warning(
+            &[stat("google-alerts-rss", SourceKind::Rss, 103, 0, 103)],
+            Some(&warning),
+        );
+
+        assert!(formatted.starts_with("## LLM quota warning"));
+        assert!(formatted.contains("latest poll emitted 103 URLs"));
+        assert!(formatted.contains("LLM calls remaining this session: 0 / 100."));
+        assert!(formatted.contains("\n\n## RSS\n"));
     }
 }
