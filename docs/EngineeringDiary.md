@@ -1683,3 +1683,9 @@ Context: Prompt context changes can invalidate triage and summary caches, causin
 Change: Added core LLM quota state/view helpers, propagated authoritative worker usage snapshots through `LlmEvent::UsageUpdated`, configured quota limits at app startup, rendered an always-visible footer LLM call meter, and prepended Poll Stats quota-risk warnings from latest emitted URL counts.
 Lessons Learned: Keep quota totals authoritative from the enforcing worker; per-model metadata usage remains a separate rendering breakdown.
 Refs: crates/harvester_core/src/llm_quota_view.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/effect_helpers.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_core/src/poll_stats_fmt.rs
+
+## 2026-05-10 - Harvester batch refresh-stale-summaries stdout progress
+Type: Implementation
+Context: `harvester_batch --refresh-stale-summaries-limit N` gave no interactive progress feedback, so operators had to tail `engine.log` while refreshes were running.
+Change: Added `crates/harvester_batch/src/progress.rs` with a TTY-gated `ProgressReporter`, then wired it additively into `run_refresh_stale_summaries_mode`. Interactive runs now show startup fields, a rewriting status line, sticky failure rows, and a final report-path summary; redirected scheduled runs remain silent.
+Refs: crates/harvester_batch/src/progress.rs, crates/harvester_batch/src/runner.rs, docs/plans/Plan.HarvesterBatchRefreshProgress.md

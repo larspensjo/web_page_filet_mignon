@@ -2,6 +2,7 @@
 
 mod cli;
 mod lock;
+mod progress;
 mod runner;
 
 use cli::Args;

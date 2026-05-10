@@ -1,5 +1,6 @@
 use crate::cli::{Args, CheckpointCommand};
 use crate::lock;
+use crate::progress::ProgressReporter;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{
@@ -26,6 +27,7 @@ use harvester_io::{
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -589,6 +591,8 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
         return Err("--refresh-stale-summaries-limit must be greater than zero".to_string());
     }
     let started_at_utc = Utc::now().to_rfc3339();
+    let progress_enabled = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
+    let mut progress: Option<ProgressReporter> = None;
 
     let (llm_handle, registry, prompt_version, summary_model, summary_context) =
         build_summary_refresh_runtime(paths, args.llm_concurrency)?;
@@ -614,6 +618,16 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
             prompt_version,
             summary_model
         );
+        progress = Some(ProgressReporter::new(
+            selection.targets.len(),
+            selection.total_stale,
+            limit,
+            args.llm_concurrency,
+            progress_enabled,
+        ));
+        if let Some(p) = progress.as_ref() {
+            p.startup_line(&mut std::io::stdout());
+        }
 
         let mut report = SummaryRefreshReport {
             started_at_utc: started_at_utc.clone(),
@@ -689,6 +703,9 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                 })))
                 .map_err(|err| format!("failed to dispatch summary refresh request: {err}"))?;
             pending.insert(request_id, target);
+            if let Some(p) = progress.as_mut() {
+                p.request_dispatched();
+            }
         }
 
         report.attempted = pending.len();
@@ -705,6 +722,15 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                     url: target.primary_url,
                     reason: "selected article could not be loaded from archive".to_string(),
                 });
+                if let Some(p) = progress.as_mut() {
+                    let failure = report.failures.last().expect("failure was just pushed");
+                    p.unloadable_target(
+                        &failure.url,
+                        "selected article could not be loaded from archive",
+                        &mut std::io::stdout(),
+                        &mut std::io::stderr(),
+                    );
+                }
             }
         }
         if pending.is_empty() {
@@ -769,6 +795,9 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                         }
 
                         report.succeeded += 1;
+                        if let Some(p) = progress.as_mut() {
+                            p.completed_ok(&mut std::io::stdout());
+                        }
                         engine_info!(
                             "[summary-refresh] refreshed request_id={} url={} content_hash={}",
                             request_id,
@@ -789,6 +818,15 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                             url: target.primary_url,
                             reason: format!("validation failed after success: {err}"),
                         });
+                        if let Some(p) = progress.as_mut() {
+                            let failure = report.failures.last().expect("failure was just pushed");
+                            p.completed_fail(
+                                &failure.url,
+                                &failure.reason,
+                                &mut std::io::stdout(),
+                                &mut std::io::stderr(),
+                            );
+                        }
                     }
                 },
                 Err(err) => {
@@ -805,6 +843,15 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                         url: target.primary_url,
                         reason,
                     });
+                    if let Some(p) = progress.as_mut() {
+                        let failure = report.failures.last().expect("failure was just pushed");
+                        p.completed_fail(
+                            &failure.url,
+                            &failure.reason,
+                            &mut std::io::stdout(),
+                            &mut std::io::stderr(),
+                        );
+                    }
                 }
             }
         }
@@ -861,6 +908,15 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                 report.status,
                 report.remaining_stale_estimate
             );
+            if let Some(p) = progress.as_mut() {
+                p.finish(
+                    report.succeeded,
+                    report.failed,
+                    &report.estimated_cost_display,
+                    &report_path,
+                    &mut std::io::stdout(),
+                );
+            }
             Ok(exit_code)
         }
         Err(err) => Err(err),
