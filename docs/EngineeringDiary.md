@@ -1689,3 +1689,9 @@ Type: Implementation
 Context: `harvester_batch --refresh-stale-summaries-limit N` gave no interactive progress feedback, so operators had to tail `engine.log` while refreshes were running.
 Change: Added `crates/harvester_batch/src/progress.rs` with a TTY-gated `ProgressReporter`, then wired it additively into `run_refresh_stale_summaries_mode`. Interactive runs now show startup fields, a rewriting status line, sticky failure rows, and a final report-path summary; redirected scheduled runs remain silent.
 Refs: crates/harvester_batch/src/progress.rs, crates/harvester_batch/src/runner.rs, docs/plans/Plan.HarvesterBatchRefreshProgress.md
+
+## 2026-05-13 - Raise default LLM session call quota
+Type: Change
+Context: The default internal LLM session call cap was too low for current poll and AI workflow volume.
+Change: Increased `LlmQuotas::default().max_calls_per_session` from 100 to 150 and added a contract test for the new default.
+Refs: crates/harvester_engine/src/llm/quota.rs, crates/harvester_engine/tests/llm_quota.rs
