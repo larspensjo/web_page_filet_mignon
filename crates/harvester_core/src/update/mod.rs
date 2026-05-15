@@ -31,6 +31,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.set_input_buffer(text);
             Vec::new()
         }
+        Msg::JobsSearchQueryChanged(text) => {
+            state.set_jobs_search_query(text);
+            Vec::new()
+        }
+        Msg::JobsSearchCleared => {
+            state.clear_jobs_search_query();
+            Vec::new()
+        }
+        Msg::FocusJobsSearchRequested => {
+            state.set_left_tab(LeftTab::Jobs);
+            Vec::new()
+        }
         Msg::StartupHydrationRequested => {
             state.mark_triage_metadata_pending();
             vec![

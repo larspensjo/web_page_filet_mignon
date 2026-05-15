@@ -21,6 +21,12 @@ use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 pub enum Msg {
     /// User edited the URL input box (debounced text).
     InputChanged(String),
+    /// User typed in the Jobs search box.
+    JobsSearchQueryChanged(String),
+    /// User pressed Esc inside the Jobs search box.
+    JobsSearchCleared,
+    /// User pressed Ctrl+F to switch to and focus the Jobs search box.
+    FocusJobsSearchRequested,
     /// App startup hook for reducer-owned metadata hydration.
     StartupHydrationRequested,
     /// User submitted the current URL input for ingestion.

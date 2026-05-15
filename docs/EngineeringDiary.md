@@ -1695,3 +1695,9 @@ Type: Change
 Context: The default internal LLM session call cap was too low for current poll and AI workflow volume.
 Change: Increased `LlmQuotas::default().max_calls_per_session` from 100 to 150 and added a contract test for the new default.
 Refs: crates/harvester_engine/src/llm/quota.rs, crates/harvester_engine/tests/llm_quota.rs
+
+## 2026-05-15 - Jobs tab quick-search core contract
+Type: Implementation
+Context: The Jobs tab search needs one reducer-owned query and one derived visibility contract so header counts, rendered rows, and keyboard first-match behavior cannot drift.
+Change: Added `jobs_search_query` to core UI state, reducer messages for query changes/clear/focus, and `LeftPaneView` fields for the filtered job IDs, first visible job, and selected-job visibility. The view builder now scopes jobs once, applies the search predicate to that scoped slice, and leaves `view.jobs` unfiltered for preview/right-pane consumers.
+Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/view_model.rs, crates/harvester_core/src/update/tests/ui_state_tests.rs, crates/harvester_core/src/state/tests.rs

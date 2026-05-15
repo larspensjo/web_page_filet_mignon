@@ -93,6 +93,85 @@ fn job_list_scope_persists_across_tab_switches() {
 }
 
 #[test]
+fn jobs_search_query_changed_updates_state() {
+    init_logging();
+    assert!(
+        !AppState::new().view().dirty,
+        "new state should start clean so this dirty assertion is load-bearing"
+    );
+    let (state, effects) = update(
+        AppState::new(),
+        Msg::JobsSearchQueryChanged("kube".to_string()),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.jobs_search_query(), "kube");
+    assert!(state.view().dirty);
+}
+
+#[test]
+fn jobs_search_cleared_resets_query() {
+    init_logging();
+    let (state, _) = update(
+        AppState::new(),
+        Msg::JobsSearchQueryChanged("kube".to_string()),
+    );
+    let mut state = state;
+    assert!(state.consume_dirty(), "setup should dirty the state");
+    let (state, effects) = update(state, Msg::JobsSearchCleared);
+
+    assert!(effects.is_empty());
+    assert_eq!(state.jobs_search_query(), "");
+    assert!(state.view().dirty);
+}
+
+#[test]
+fn focus_jobs_search_switches_left_tab() {
+    init_logging();
+    let (state, _) = update(
+        AppState::new(),
+        Msg::LeftTabSelected {
+            tab: LeftTab::TriageResults,
+        },
+    );
+    let (state, effects) = update(state, Msg::FocusJobsSearchRequested);
+
+    assert!(effects.is_empty());
+    assert_eq!(state.left_tab(), LeftTab::Jobs);
+}
+
+#[test]
+fn jobs_search_query_persists_across_tab_switch() {
+    init_logging();
+    let (state, _) = update(
+        AppState::new(),
+        Msg::JobsSearchQueryChanged("rust".to_string()),
+    );
+    let (state, _) = update(
+        state,
+        Msg::LeftTabSelected {
+            tab: LeftTab::TriageReview,
+        },
+    );
+    let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
+
+    assert_eq!(state.jobs_search_query(), "rust");
+}
+
+#[test]
+fn jobs_search_query_persists_when_jobs_mutate() {
+    init_logging();
+    let (state, _) = update(
+        AppState::new(),
+        Msg::JobsSearchQueryChanged("example".to_string()),
+    );
+    let state = add_completed_job_for_test(state, "https://example.com/article");
+
+    assert_eq!(state.jobs_search_query(), "example");
+    assert_eq!(state.view().left_pane.visible_jobs_after_filter, vec![1]);
+}
+
+#[test]
 fn prompt_lab_close_restores_jobs_tab() {
     init_logging();
     let mut state = AppState::new();

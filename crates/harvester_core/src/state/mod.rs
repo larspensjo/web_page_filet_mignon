@@ -1872,6 +1872,24 @@ impl AppState {
         self.ui.clear_input_buffer();
     }
 
+    pub(crate) fn jobs_search_query(&self) -> &str {
+        self.ui.jobs_search_query()
+    }
+
+    pub(crate) fn set_jobs_search_query(&mut self, text: String) {
+        if self.ui.jobs_search_query() != text {
+            self.ui.set_jobs_search_query(text);
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn clear_jobs_search_query(&mut self) {
+        if !self.ui.jobs_search_query().is_empty() {
+            self.ui.clear_jobs_search_query();
+            self.dirty = true;
+        }
+    }
+
     pub(crate) fn enqueue_jobs_from_ui(&mut self) -> Vec<(JobId, String)> {
         let mut enqueued = Vec::new();
         for url in self.ui.urls.iter() {

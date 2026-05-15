@@ -106,10 +106,22 @@ impl AppState {
                     nav_heavy: quality.nav_heavy(),
                 }
             });
+        let scoped_jobs = scoped_jobs_for_job_list(&jobs, self.job_list_scope);
+        let jobs_search_query = self.jobs_search_query().to_string();
+        let visible_jobs_after_filter = if self.left_tab == LeftTab::Jobs {
+            compute_visible_jobs_for_jobs_tab(&scoped_jobs, &jobs_search_query)
+        } else {
+            Vec::new()
+        };
+        let first_visible_job_id = visible_jobs_after_filter.first().copied();
+        let selected_jobs_visible_in_filter =
+            selected_job_id.is_some_and(|job_id| visible_jobs_after_filter.contains(&job_id));
         let left_pane_header = build_left_pane_header_view(
             self.left_tab,
             self.job_list_scope,
-            &jobs,
+            &scoped_jobs,
+            &visible_jobs_after_filter,
+            &jobs_search_query,
             self.ai_unavailable_message().as_deref(),
         );
         let preview_context = preview_header.as_ref().map(build_preview_context_view);
@@ -226,6 +238,10 @@ impl AppState {
             left_pane: crate::view_model::LeftPaneView {
                 left_tab: self.left_tab,
                 job_list_scope: self.job_list_scope,
+                jobs_search_query,
+                visible_jobs_after_filter,
+                first_visible_job_id,
+                selected_jobs_visible_in_filter,
                 prompt_lab: crate::view_model::PromptLabView::from_state(
                     &self.prompt_lab,
                     &self.prompt_contexts,
@@ -449,14 +465,11 @@ impl AppState {
 fn build_left_pane_header_view(
     left_tab: LeftTab,
     job_list_scope: JobListScope,
-    jobs: &[JobRowView],
+    scoped_jobs: &[&JobRowView],
+    visible_jobs_after_filter: &[crate::JobId],
+    jobs_search_query: &str,
     ai_unavailable_message: Option<&str>,
 ) -> LeftPaneHeaderView {
-    let scoped_jobs: Vec<&JobRowView> = if job_list_scope == JobListScope::SinceCheckpoint {
-        jobs.iter().filter(|job| job.is_since_checkpoint).collect()
-    } else {
-        jobs.iter().collect()
-    };
     let scope_label = if job_list_scope == JobListScope::SinceCheckpoint {
         Some("Since checkpoint".to_string())
     } else {
@@ -465,12 +478,18 @@ fn build_left_pane_header_view(
 
     match left_tab {
         LeftTab::Jobs => {
-            let count = scoped_jobs.len();
+            let scope_count = scoped_jobs.len();
+            let visible_count = visible_jobs_after_filter.len();
+            let search_active = !jobs_search_query.is_empty();
             LeftPaneHeaderView {
                 title: "Jobs".to_string(),
                 scope_label,
-                count_label: Some(format!("{count} jobs")),
-                state_label: if count == 0 {
+                count_label: Some(if search_active {
+                    format!("{visible_count} of {scope_count} jobs")
+                } else {
+                    format!("{scope_count} jobs")
+                }),
+                state_label: if scope_count == 0 {
                     Some("no jobs in scope".to_string())
                 } else {
                     None
@@ -521,6 +540,33 @@ fn build_left_pane_header_view(
             state_label: None,
         },
     }
+}
+
+fn scoped_jobs_for_job_list(jobs: &[JobRowView], job_list_scope: JobListScope) -> Vec<&JobRowView> {
+    if job_list_scope == JobListScope::SinceCheckpoint {
+        jobs.iter().filter(|job| job.is_since_checkpoint).collect()
+    } else {
+        jobs.iter().collect()
+    }
+}
+
+fn compute_visible_jobs_for_jobs_tab(
+    scoped_jobs: &[&JobRowView],
+    query: &str,
+) -> Vec<crate::JobId> {
+    let query_lower = query.to_lowercase();
+    scoped_jobs
+        .iter()
+        .filter(|job| {
+            query_lower.is_empty()
+                || job
+                    .summary_title
+                    .as_ref()
+                    .is_some_and(|title| title.to_lowercase().contains(&query_lower))
+                || job.url.to_lowercase().contains(&query_lower)
+        })
+        .map(|job| job.job_id)
+        .collect()
 }
 
 fn build_preview_context_view(header: &PreviewHeaderView) -> PreviewContextView {

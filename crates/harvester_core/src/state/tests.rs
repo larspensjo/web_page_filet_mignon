@@ -1803,6 +1803,171 @@ mod app_state_tests {
         assert_eq!(view.left_pane_header.state_label.as_deref(), None);
     }
 
+    fn insert_done_job(state: &mut AppState, job_id: JobId, url: &str) {
+        state.jobs.insert(
+            job_id,
+            JobState {
+                url: url.to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+    }
+
+    fn utc(ts: &str) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::parse_from_rfc3339(ts)
+            .expect("valid rfc3339 test timestamp")
+            .with_timezone(&chrono::Utc)
+    }
+
+    fn set_summary_titles(state: &mut AppState, titles: &[(&str, &str)]) {
+        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+
+        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
+        briefing.set_articles(
+            titles
+                .iter()
+                .map(|(url, _)| LoadedArticle {
+                    url: (*url).to_string(),
+                    source_title: None,
+                    prepared_text: "text".to_string(),
+                    content_hash: format!("hash-{url}"),
+                    fetched_utc: None,
+                })
+                .collect(),
+            "collection".to_string(),
+        );
+        briefing.transition_to_summarizing();
+        for (idx, (_, title)) in titles.iter().enumerate() {
+            briefing.start_article(idx, (idx + 1) as u64);
+            briefing.complete_article(
+                idx,
+                ArticleSummaryResult {
+                    title: (*title).to_string(),
+                    summary: "summary".to_string(),
+                    key_points: vec![],
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    entities: Default::default(),
+                },
+            );
+        }
+        state.set_briefing(briefing);
+    }
+
+    #[test]
+    fn visible_jobs_match_scope_when_query_empty() {
+        let mut state = AppState::new();
+        state.job_list_scope = JobListScope::SinceCheckpoint;
+        state.briefing_since_utc = Some(utc("2026-05-01T00:00:00Z"));
+        insert_done_job(&mut state, 1, "https://example.com/new");
+        insert_done_job(&mut state, 2, "https://example.com/old");
+        insert_done_job(&mut state, 3, "https://example.com/undated");
+        state.jobs.get_mut(&1).unwrap().fetched_utc = Some(utc("2026-05-02T00:00:00Z"));
+        state.jobs.get_mut(&2).unwrap().fetched_utc = Some(utc("2026-04-30T00:00:00Z"));
+
+        let view = state.view();
+
+        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![1]);
+        assert_eq!(view.left_pane.first_visible_job_id, Some(1));
+    }
+
+    #[test]
+    fn visible_jobs_substring_case_insensitive() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/a");
+        insert_done_job(&mut state, 2, "https://example.com/b");
+        insert_done_job(&mut state, 3, "https://example.com/c");
+        set_summary_titles(
+            &mut state,
+            &[
+                ("https://example.com/a", "Kubernetes Pods"),
+                ("https://example.com/b", "Rust Async"),
+                ("https://example.com/c", "K-quotes"),
+            ],
+        );
+        state.set_jobs_search_query("KUBE".to_string());
+
+        let view = state.view();
+
+        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![1]);
+    }
+
+    #[test]
+    fn visible_jobs_match_url_when_title_lacks_term() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://github.com/example/project");
+        insert_done_job(&mut state, 2, "https://example.com/plain");
+        set_summary_titles(
+            &mut state,
+            &[
+                ("https://github.com/example/project", "Release notes"),
+                ("https://example.com/plain", "Git workflow"),
+            ],
+        );
+        state.set_jobs_search_query("github".to_string());
+
+        let view = state.view();
+
+        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![1]);
+    }
+
+    #[test]
+    fn selected_jobs_visible_in_filter_tracks_selection_without_clearing_preview() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/kube");
+        insert_done_job(&mut state, 2, "https://example.com/rust");
+        state.select_job(1);
+        state.set_jobs_search_query("kube".to_string());
+
+        let view = state.view();
+        assert_eq!(view.selected_job_id, Some(1));
+        assert!(view.left_pane.selected_jobs_visible_in_filter);
+
+        state.set_jobs_search_query("rust".to_string());
+        let view = state.view();
+        assert_eq!(view.selected_job_id, Some(1));
+        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![2]);
+        assert_eq!(view.left_pane.first_visible_job_id, Some(2));
+        assert_eq!(
+            view.left_pane.first_visible_job_id,
+            view.left_pane.visible_jobs_after_filter.first().copied()
+        );
+        assert!(!view.left_pane.selected_jobs_visible_in_filter);
+    }
+
+    #[test]
+    fn view_jobs_unchanged_by_search_query() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/kube");
+        insert_done_job(&mut state, 2, "https://example.com/rust");
+
+        let unfiltered_jobs = state.view().jobs;
+        state.set_jobs_search_query("kube".to_string());
+        let filtered_view = state.view();
+
+        assert_eq!(filtered_view.jobs, unfiltered_jobs);
+        assert_eq!(filtered_view.left_pane.visible_jobs_after_filter, vec![1]);
+    }
+
+    #[test]
+    fn left_pane_header_count_label_reflects_jobs_filter() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/kube");
+        insert_done_job(&mut state, 2, "https://example.com/rust");
+
+        let view = state.view();
+        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("2 jobs"));
+
+        state.set_jobs_search_query("kube".to_string());
+        let view = state.view();
+        assert_eq!(
+            view.left_pane_header.count_label.as_deref(),
+            Some("1 of 2 jobs")
+        );
+    }
+
     #[test]
     fn preview_metadata_for_selected_done_job_exposes_source_and_status() {
         let mut state = AppState::new();

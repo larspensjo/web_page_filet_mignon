@@ -224,6 +224,14 @@ pub struct LeftPaneView {
     pub left_tab: LeftTab,
     /// Scope filter applied to job-oriented tabs.
     pub job_list_scope: JobListScope,
+    /// Current Jobs-tab search query.
+    pub jobs_search_query: String,
+    /// Job IDs visible on the Jobs tab after scope and search filtering.
+    pub visible_jobs_after_filter: Vec<JobId>,
+    /// First entry in `visible_jobs_after_filter`.
+    pub first_visible_job_id: Option<JobId>,
+    /// Whether the selected job remains visible under the Jobs-tab filter.
+    pub selected_jobs_visible_in_filter: bool,
     /// Prompt Lab controls (shown when left_tab == PromptLab).
     pub prompt_lab: PromptLabView,
 }

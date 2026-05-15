@@ -64,6 +64,7 @@ pub(super) enum PreviewMode {
 pub(super) struct UiState {
     pub(super) urls: Vec<String>,
     input_buffer: String,
+    jobs_search_query: String,
     pub(super) preview: PreviewState,
     preview_mode: PreviewMode,
     left_panel_width: i32,
@@ -76,6 +77,7 @@ impl Default for UiState {
         Self {
             urls: Vec::new(),
             input_buffer: String::new(),
+            jobs_search_query: String::new(),
             preview: PreviewState::default(),
             preview_mode: PreviewMode::default(),
             left_panel_width: DEFAULT_JOBS_PANEL_WIDTH,
@@ -141,6 +143,18 @@ impl UiState {
 
     pub(super) fn clear_input_buffer(&mut self) {
         self.input_buffer.clear();
+    }
+
+    pub(super) fn set_jobs_search_query(&mut self, text: String) {
+        self.jobs_search_query = text;
+    }
+
+    pub(super) fn jobs_search_query(&self) -> &str {
+        &self.jobs_search_query
+    }
+
+    pub(super) fn clear_jobs_search_query(&mut self) {
+        self.jobs_search_query.clear();
     }
 
     pub(super) fn left_panel_width(&self) -> i32 {
