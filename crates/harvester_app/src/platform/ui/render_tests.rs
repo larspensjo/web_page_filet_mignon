@@ -53,12 +53,16 @@ fn make_job(
 }
 
 fn make_view(jobs: Vec<JobRowView>) -> AppViewModel {
+    let visible_jobs_after_filter = jobs.iter().map(|job| job.job_id).collect::<Vec<_>>();
+    let first_visible_job_id = visible_jobs_after_filter.first().copied();
     let mut view = AppViewModel {
         job_count: jobs.len(),
         jobs,
         ..AppViewModel::default()
     };
     view.left_pane.job_list_scope = JobListScope::All;
+    view.left_pane.visible_jobs_after_filter = visible_jobs_after_filter;
+    view.left_pane.first_visible_job_id = first_visible_job_id;
     view
 }
 
@@ -200,6 +204,30 @@ fn header_texts_do_not_reemit_when_unchanged() {
                     || *control_id == LABEL_PREVIEW_ATTENTION
         )
     }));
+}
+
+#[test]
+fn jobs_search_input_text_resyncs_to_state() {
+    init_logging();
+    let window_id = WindowId::new(64);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![]);
+
+    let initial_commands = render(window_id, &view, &mut tree_state);
+    assert!(
+        input_text(&initial_commands, INPUT_JOBS_SEARCH).is_none(),
+        "empty default query should not emit a command before the control exists"
+    );
+
+    view.left_pane.jobs_search_query = "kube".to_string();
+    let changed_commands = render(window_id, &view, &mut tree_state);
+    assert_eq!(input_text(&changed_commands, INPUT_JOBS_SEARCH), Some("kube"));
+
+    let unchanged_commands = render(window_id, &view, &mut tree_state);
+    assert!(
+        input_text(&unchanged_commands, INPUT_JOBS_SEARCH).is_none(),
+        "unchanged query should not re-emit SetInputText"
+    );
 }
 
 #[test]
@@ -537,10 +565,10 @@ fn render_layout_only_skips_tree_and_preview_updates() {
 // ── Scope filter tests ────────────────────────────────────────────────────
 
 #[test]
-fn scope_since_checkpoint_filters_jobs_in_tree() {
+fn list_box_items_for_jobs_tab_follow_visible_jobs_after_filter() {
     init_logging();
 
-    let mut job_in = make_job(
+    let mut job_visible = make_job(
         1,
         "https://a.com/",
         Stage::Done,
@@ -548,11 +576,10 @@ fn scope_since_checkpoint_filters_jobs_in_tree() {
         None,
         None,
     );
-    job_in.is_since_checkpoint = true;
-    job_in.has_summary = true;
-    job_in.summary_title = Some("In Scope".to_string());
+    job_visible.has_summary = true;
+    job_visible.summary_title = Some("Visible".to_string());
 
-    let mut job_out = make_job(
+    let mut job_hidden = make_job(
         2,
         "https://b.com/",
         Stage::Done,
@@ -560,25 +587,22 @@ fn scope_since_checkpoint_filters_jobs_in_tree() {
         None,
         None,
     );
-    job_out.is_since_checkpoint = false;
-    job_out.has_summary = true;
-    job_out.summary_title = Some("Out of Scope".to_string());
+    job_hidden.has_summary = true;
+    job_hidden.summary_title = Some("Hidden".to_string());
 
-    let mut view = make_view(vec![job_in, job_out]);
-    view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+    let mut view = make_view(vec![job_visible, job_hidden]);
+    view.left_pane.left_tab = LeftTab::Jobs;
+    view.left_pane.visible_jobs_after_filter = vec![1];
 
     let populated = build_list_box_items(&view);
 
-    assert_eq!(populated.len(), 1, "only the in-scope job should appear");
-    assert!(
-        populated[0].title.contains("In Scope"),
-        "wrong item: {}",
-        populated[0].title
-    );
+    assert_eq!(populated.len(), 1);
+    assert_eq!(populated[0].id, ListBoxItemId::new(1));
+    assert!(populated[0].title.contains("Visible"));
 }
 
 #[test]
-fn scope_since_checkpoint_skips_selection_for_filtered_job() {
+fn list_box_selected_id_omitted_when_selection_filtered_out() {
     init_logging();
     let window_id = WindowId::new(61);
     let mut tree_state = TreeRenderState::new();
@@ -591,9 +615,8 @@ fn scope_since_checkpoint_skips_selection_for_filtered_job() {
         None,
         None,
     );
-    job_in.is_since_checkpoint = true;
     job_in.has_summary = true;
-    job_in.summary_title = Some("In Scope".to_string());
+    job_in.summary_title = Some("Visible".to_string());
 
     let mut job_out = make_job(
         2,
@@ -603,13 +626,13 @@ fn scope_since_checkpoint_skips_selection_for_filtered_job() {
         None,
         None,
     );
-    job_out.is_since_checkpoint = false;
     job_out.has_summary = true;
-    job_out.summary_title = Some("Out of Scope".to_string());
+    job_out.summary_title = Some("Filtered".to_string());
 
     let mut view = make_view(vec![job_in, job_out]);
     view.selected_job_id = Some(2);
-    view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+    view.left_pane.left_tab = LeftTab::Jobs;
+    view.left_pane.visible_jobs_after_filter = vec![1];
 
     let cmds = render(window_id, &view, &mut tree_state);
 
@@ -630,39 +653,52 @@ fn scope_since_checkpoint_skips_selection_for_filtered_job() {
 }
 
 #[test]
-fn scope_all_shows_all_jobs() {
+fn list_box_items_for_non_jobs_tabs_ignore_visible_jobs_after_filter() {
     init_logging();
 
-    let mut job1 = make_job(
-        1,
-        "https://a.com/",
-        Stage::Done,
-        Some(JobResultKind::Success),
-        None,
-        None,
-    );
-    job1.is_since_checkpoint = true;
-    job1.has_summary = true;
-    job1.summary_title = Some("Job A".to_string());
+    for tab in [
+        LeftTab::TriageReview,
+        LeftTab::TriageResults,
+        LeftTab::PromptLab,
+    ] {
+        let mut job1 = make_job(
+            1,
+            "https://a.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        job1.is_since_checkpoint = true;
+        job1.has_summary = true;
+        job1.summary_title = Some("Job A".to_string());
 
-    let mut job2 = make_job(
-        2,
-        "https://b.com/",
-        Stage::Done,
-        Some(JobResultKind::Success),
-        None,
-        None,
-    );
-    job2.is_since_checkpoint = false;
-    job2.has_summary = true;
-    job2.summary_title = Some("Job B".to_string());
+        let mut job2 = make_job(
+            2,
+            "https://b.com/",
+            Stage::Done,
+            Some(JobResultKind::Success),
+            None,
+            None,
+        );
+        job2.is_since_checkpoint = false;
+        job2.has_summary = true;
+        job2.summary_title = Some("Job B".to_string());
 
-    let mut view = make_view(vec![job1, job2]);
-    view.left_pane.job_list_scope = JobListScope::All;
+        let mut view = make_view(vec![job1, job2]);
+        view.left_pane.left_tab = tab;
+        view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+        view.left_pane.visible_jobs_after_filter = vec![2];
 
-    let populated = build_list_box_items(&view);
+        let populated = build_list_box_items(&view);
 
-    assert_eq!(populated.len(), 2, "all jobs should appear with All scope");
+        assert_eq!(
+            populated.len(),
+            1,
+            "{tab:?} should still use its own scope filter"
+        );
+        assert_eq!(populated[0].id, ListBoxItemId::new(1));
+    }
 }
 
 #[test]
@@ -1922,6 +1958,20 @@ fn control_text(
 ) -> Option<&str> {
     cmds.iter().find_map(|cmd| match cmd {
         PlatformCommand::SetControlText {
+            control_id: rendered_id,
+            text,
+            ..
+        } if *rendered_id == control_id => Some(text.as_str()),
+        _ => None,
+    })
+}
+
+fn input_text(
+    cmds: &[PlatformCommand],
+    control_id: commanductui::types::ControlId,
+) -> Option<&str> {
+    cmds.iter().find_map(|cmd| match cmd {
+        PlatformCommand::SetInputText {
             control_id: rendered_id,
             text,
             ..

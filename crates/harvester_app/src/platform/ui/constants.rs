@@ -13,6 +13,7 @@ pub const BUTTON_POLL_SOURCES: ControlId = ControlId::new(1008);
 pub const BUTTON_PREVIEW_SOURCE_LINK: ControlId = ControlId::new(1009);
 pub const BUTTON_ARCHIVE: ControlId = ControlId::new(1010);
 pub const TREE_JOBS: ControlId = ControlId::new(1501);
+pub const INPUT_JOBS_SEARCH: ControlId = ControlId::new(1502);
 
 pub const BTN_STAGE_TRIAGE: ControlId = ControlId::new(1011);
 pub const BTN_STAGE_SUMMARY: ControlId = ControlId::new(1012);

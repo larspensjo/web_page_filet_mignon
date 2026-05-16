@@ -2,7 +2,7 @@
 
 Purpose: durable project memory for AI-assisted development.
 
-How to use:
+## How to use
 - Add an entry when a noteworthy implementation lands.
 - Add an entry for every bug fix, including lessons learned and prevention.
 - Add an entry for important decisions and tradeoffs.
@@ -1701,3 +1701,9 @@ Type: Implementation
 Context: The Jobs tab search needs one reducer-owned query and one derived visibility contract so header counts, rendered rows, and keyboard first-match behavior cannot drift.
 Change: Added `jobs_search_query` to core UI state, reducer messages for query changes/clear/focus, and `LeftPaneView` fields for the filtered job IDs, first visible job, and selected-job visibility. The view builder now scopes jobs once, applies the search predicate to that scoped slice, and leaves `view.jobs` unfiltered for preview/right-pane consumers.
 Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/view_model.rs, crates/harvester_core/src/update/tests/ui_state_tests.rs, crates/harvester_core/src/state/tests.rs
+
+## 2026-05-16 - Jobs tab quick-search render contract
+Type: Implementation
+Context: After core started deriving the Jobs tab visible set, app render needed to consume that contract instead of re-deriving Jobs visibility from raw rows.
+Change: Changed Jobs list rendering to follow `LeftPaneView::visible_jobs_after_filter`, kept non-Jobs tabs on their existing scope-specific filtering, and added render-state text sync for the future Jobs search input without emitting an initial empty command before the control exists.
+Refs: crates/harvester_app/src/platform/ui/render_list_box.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_tests.rs

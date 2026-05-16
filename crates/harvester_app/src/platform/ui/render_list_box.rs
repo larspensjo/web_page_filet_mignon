@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use commanductui::{
     BadgeDescriptor, ListBoxItemDescriptor, ListBoxItemId, ListBoxRowDensity, PlatformCommand,
     StyleId, WindowId,
@@ -101,12 +103,20 @@ pub(super) fn compute_list_box_badge_column_width(items: &[ListBoxItemDescriptor
 
 pub(super) fn build_list_box_items(view: &AppViewModel) -> Vec<ListBoxItemDescriptor> {
     let tab = view.left_pane.left_tab;
-    let scope_filtered: Vec<&JobRowView> =
-        if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
+    let scope_filtered: Vec<&JobRowView> = match tab {
+        LeftTab::Jobs => {
+            let jobs_by_id: HashMap<_, _> = view.jobs.iter().map(|job| (job.job_id, job)).collect();
+            view.left_pane
+                .visible_jobs_after_filter
+                .iter()
+                .filter_map(|job_id| jobs_by_id.get(job_id).copied())
+                .collect()
+        }
+        _ if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint => {
             view.jobs.iter().filter(|j| j.is_since_checkpoint).collect()
-        } else {
-            view.jobs.iter().collect()
-        };
+        }
+        _ => view.jobs.iter().collect(),
+    };
 
     let mut sorted_buf: Vec<&JobRowView>;
     let jobs_iter: &[&JobRowView] =

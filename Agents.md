@@ -35,6 +35,5 @@
 - For research questions that should be answered from the local harvested article corpus, use `$harvester-mcp-research`.
 
 ## Diary
-- Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations, important decisions, and bug fixes with reusable lessons.
-- Keep diary entries short and reference concrete artifacts.
-- Add new entries to the end.
+- Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations, and bug fixes with reusable lessons.
+- See the How to use section in the beginning.

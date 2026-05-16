@@ -56,7 +56,7 @@ impl Default for LayoutRenderState {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct ControlsRenderState {
     pub(super) prev_status_label: Option<(String, MessageSeverity)>,
     pub(super) prev_progress_text: Option<String>,
@@ -74,6 +74,32 @@ pub(super) struct ControlsRenderState {
     pub(super) prev_llm_quota_style: Option<StyleId>,
     pub(super) prev_jobs_header_meta_text: Option<String>,
     pub(super) prev_jobs_scope_since_checkpoint_checked: Option<bool>,
+    // Seeded to Some("") so initial render stays silent before the Phase 3 input exists.
+    pub(super) prev_jobs_search_query: Option<String>,
+}
+
+impl Default for ControlsRenderState {
+    fn default() -> Self {
+        Self {
+            prev_status_label: None,
+            prev_progress_text: None,
+            prev_briefing_progress: None,
+            prev_triage_progress: None,
+            prev_progress_range: None,
+            prev_progress_pos: None,
+            prev_token_progress_style: None,
+            prev_operation_progress_text: None,
+            prev_operation_progress_range: None,
+            prev_operation_progress_pos: None,
+            prev_llm_quota_text: None,
+            prev_llm_quota_range: None,
+            prev_llm_quota_pos: None,
+            prev_llm_quota_style: None,
+            prev_jobs_header_meta_text: None,
+            prev_jobs_scope_since_checkpoint_checked: None,
+            prev_jobs_search_query: Some(String::new()),
+        }
+    }
 }
 
 #[derive(Debug, Default)]

@@ -343,6 +343,16 @@ pub(super) fn render_main_controls_section(
             checked,
         },
     );
+    emit_if_changed(
+        &mut tree_state.controls.prev_jobs_search_query,
+        view.left_pane.jobs_search_query.clone(),
+        cmds,
+        |text| PlatformCommand::SetInputText {
+            window_id,
+            control_id: INPUT_JOBS_SEARCH,
+            text,
+        },
+    );
 }
 
 pub(super) fn format_left_pane_header_meta(header: &LeftPaneHeaderView) -> String {
