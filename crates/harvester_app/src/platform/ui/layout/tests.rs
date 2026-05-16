@@ -36,6 +36,37 @@ fn layout_rules_for_prompt_lab(prompt_lab: PromptLabLayoutConfig) -> Vec<LayoutR
     }
 }
 
+fn layout_rules_for_left_tab(left_tab: LeftTab) -> Vec<LayoutRule> {
+    let cmd = build_layout_command(
+        WindowId::new(98),
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: false,
+            left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
+            preview_header_override_visible: false,
+            preview_context_visible: false,
+            preview_attention_visible: false,
+            active_tab: AppTab::Summary,
+            left_tab,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: left_tab == LeftTab::PromptLab,
+                advanced_mode: false,
+                compare_section_open: false,
+                context_section_open: false,
+                template_section_open: false,
+                run_details_section_open: false,
+                template_editor_open: false,
+            },
+        },
+    );
+    match cmd {
+        PlatformCommand::DefineLayout { rules, .. } => rules,
+        _ => panic!("expected DefineLayout"),
+    }
+}
+
 fn fixed_size_for(rules: &[LayoutRule], control_id: ControlId) -> i32 {
     rules
         .iter()
@@ -201,6 +232,54 @@ fn new_controls_created_in_initial_commands() {
         )),
         "jobs scope toggle switch should be created"
     );
+    assert!(
+        commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::CreateInput { control_id, .. }
+                if *control_id == INPUT_JOBS_SEARCH
+        )),
+        "jobs search input should be created"
+    );
+}
+
+#[test]
+fn jobs_search_input_has_layout_rule_on_jobs_tab() {
+    let rules = layout_rules_for_left_tab(LeftTab::Jobs);
+    let search_rule = rules
+        .iter()
+        .find(|rule| rule.control_id == INPUT_JOBS_SEARCH)
+        .expect("jobs search rule");
+    let tree_rule = rules
+        .iter()
+        .find(|rule| rule.control_id == TREE_JOBS)
+        .expect("jobs tree rule");
+
+    assert_eq!(search_rule.parent_control_id, Some(PANEL_JOBS));
+    assert_eq!(search_rule.dock_style, DockStyle::Top);
+    assert_eq!(search_rule.fixed_size, Some(24));
+    assert!(search_rule.order < tree_rule.order);
+
+    for tab in [
+        LeftTab::TriageReview,
+        LeftTab::TriageResults,
+        LeftTab::PromptLab,
+    ] {
+        let rules = layout_rules_for_left_tab(tab);
+        assert_eq!(fixed_size_for(&rules, INPUT_JOBS_SEARCH), 0);
+    }
+}
+
+#[test]
+fn jobs_search_input_receives_default_input_style() {
+    let commands = initial_commands(WindowId::new(2));
+    assert!(commands.iter().any(|cmd| matches!(
+        cmd,
+        PlatformCommand::ApplyStyleToControl {
+            control_id,
+            style_id,
+            ..
+        } if *control_id == INPUT_JOBS_SEARCH && *style_id == StyleId::DefaultInput
+    )));
 }
 
 #[test]

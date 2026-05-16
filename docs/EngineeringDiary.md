@@ -1707,3 +1707,9 @@ Type: Implementation
 Context: After core started deriving the Jobs tab visible set, app render needed to consume that contract instead of re-deriving Jobs visibility from raw rows.
 Change: Changed Jobs list rendering to follow `LeftPaneView::visible_jobs_after_filter`, kept non-Jobs tabs on their existing scope-specific filtering, and added render-state text sync for the future Jobs search input without emitting an initial empty command before the control exists.
 Refs: crates/harvester_app/src/platform/ui/render_list_box.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_tests.rs
+
+## 2026-05-16 - Jobs tab quick-search keyboard focus contract
+Type: Implementation
+Context: Quick search needs keyboard ownership across the platform boundary: Ctrl+F should focus the search input, Esc should clear and return to the list, and Enter should move to the first visible job when the current selection is filtered out.
+Change: Added CommanDuctUI edit-key and focus commands, created the Jobs search input with layout/theme coverage, wired the Harvester File/Find accelerator and Jobs search key handling through reducer messages, and queued focus commands after state/render processing so they observe the derived Jobs visibility view.
+Refs: src/CommanDuctUI/src/types.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/command_executor.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/rules.rs

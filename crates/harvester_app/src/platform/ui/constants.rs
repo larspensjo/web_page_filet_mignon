@@ -1,6 +1,7 @@
 use commanductui::types::{ControlId, MenuActionId};
 
 pub const MENU_ACTION_ADD_URL: MenuActionId = MenuActionId::new(1);
+pub const MENU_ACTION_FIND_JOBS: MenuActionId = MenuActionId::new(2);
 
 pub const INPUT_URLS: ControlId = ControlId::new(1001);
 // Bottom button labels, order, widths, styles, and routing live in

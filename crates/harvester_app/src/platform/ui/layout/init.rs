@@ -15,11 +15,18 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         menu_items: vec![MenuItemConfig {
             action: None,
             text: "File".to_string(),
-            children: vec![MenuItemConfig {
-                action: Some(MENU_ACTION_ADD_URL),
-                text: "Add URL...\tCtrl+L".to_string(),
-                children: Vec::new(),
-            }],
+            children: vec![
+                MenuItemConfig {
+                    action: Some(MENU_ACTION_ADD_URL),
+                    text: "Add URL...\tCtrl+L".to_string(),
+                    children: Vec::new(),
+                },
+                MenuItemConfig {
+                    action: Some(MENU_ACTION_FIND_JOBS),
+                    text: "Find...\tCtrl+F".to_string(),
+                    children: Vec::new(),
+                },
+            ],
         }],
     });
 
@@ -339,6 +346,15 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         control_id: LABEL_JOBS_HEADER_META,
         initial_text: String::new(),
         class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateInput {
+        window_id,
+        parent_control_id: Some(PANEL_JOBS),
+        control_id: INPUT_JOBS_SEARCH,
+        initial_text: String::new(),
+        read_only: false,
+        multiline: false,
+        vertical_scroll: false,
     });
     commands.push(PlatformCommand::CreateListBox {
         window_id,

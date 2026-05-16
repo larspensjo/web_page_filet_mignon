@@ -893,6 +893,11 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
+        control_id: INPUT_JOBS_SEARCH,
+        style_id: StyleId::DefaultInput,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
         control_id: COMBO_PROMPT_LAB_MODEL_SELECTOR,
         style_id: StyleId::ComboBox,
     });

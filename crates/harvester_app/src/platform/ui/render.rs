@@ -155,6 +155,10 @@ impl TreeRenderState {
     pub fn new() -> Self {
         Self::default()
     }
+
+    pub(crate) fn note_jobs_search_input_text_from_user(&mut self, text: String) {
+        self.controls.prev_jobs_search_query = Some(text);
+    }
 }
 
 pub fn render(

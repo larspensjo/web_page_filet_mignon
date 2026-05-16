@@ -262,10 +262,26 @@ pub(super) fn build_layout_rules(
             margin: (2, 2, 8, 0),
         },
         LayoutRule {
+            control_id: INPUT_JOBS_SEARCH,
+            parent_control_id: Some(PANEL_JOBS),
+            dock_style: DockStyle::Top,
+            order: 2,
+            fixed_size: if left_tab == LeftTab::Jobs {
+                Some(24)
+            } else {
+                Some(0)
+            },
+            margin: if left_tab == LeftTab::Jobs {
+                (0, 2, 6, 0)
+            } else {
+                (0, 0, 0, 0)
+            },
+        },
+        LayoutRule {
             control_id: TREE_JOBS,
             parent_control_id: Some(PANEL_JOBS),
             dock_style: DockStyle::Fill,
-            order: 2,
+            order: 3,
             fixed_size: None,
             margin: (0, 0, 0, 0),
         },

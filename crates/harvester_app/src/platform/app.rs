@@ -11,9 +11,14 @@ use commanductui::types::{
     FormTextValidation, MessageSeverity, TreeItemMarkerKind,
 };
 use commanductui::{
-    AppEvent, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
+    AppEvent, ControlId, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
     WindowConfig, WindowId,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{VK_ESCAPE, VK_RETURN};
+
+const VK_RETURN_CODE: u16 = VK_RETURN.0;
+const VK_ESCAPE_CODE: u16 = VK_ESCAPE.0;
+
 use harvester_core::{
     update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel,
     ArchiveTokenEstimates, Effect, JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel,
@@ -369,6 +374,11 @@ struct SharedState {
     state: AppState,
 }
 
+struct PendingFocus {
+    control_id: ControlId,
+    select_all: bool,
+}
+
 struct AppEventHandler {
     window_id: WindowId,
     shared: Arc<Mutex<SharedState>>,
@@ -378,6 +388,7 @@ struct AppEventHandler {
     effect_runner: EffectRunner,
     persistence_worker: PersistenceWorker,
     tree_render_state: ui::render::TreeRenderState,
+    pending_focus_after_render: Vec<PendingFocus>,
 }
 
 fn triage_marker_for_priority(priority: u8) -> TreeItemMarkerKind {
@@ -640,6 +651,7 @@ impl AppEventHandler {
             effect_runner,
             persistence_worker,
             tree_render_state,
+            pending_focus_after_render: Vec::new(),
         }
     }
 
@@ -836,6 +848,7 @@ impl AppEventHandler {
             }
             None => {}
         }
+        self.enqueue_pending_focus_commands();
 
         if !geometry_stats.is_empty() {
             engine_info!(
@@ -867,6 +880,28 @@ impl AppEventHandler {
             &mut self.tree_render_state,
         ));
     }
+
+    fn queue_focus_after_render(&mut self, control_id: ControlId, select_all: bool) {
+        self.pending_focus_after_render.push(PendingFocus {
+            control_id,
+            select_all,
+        });
+    }
+
+    fn enqueue_pending_focus_commands(&mut self) {
+        let pending = std::mem::take(&mut self.pending_focus_after_render);
+        for PendingFocus {
+            control_id,
+            select_all,
+        } in pending
+        {
+            self.commands.push_back(PlatformCommand::SetFocus {
+                window_id: self.window_id,
+                control_id,
+                select_all,
+            });
+        }
+    }
 }
 
 impl Drop for AppEventHandler {
@@ -884,6 +919,12 @@ fn msg_for_preview_context_button(control_id: commanductui::ControlId) -> Option
 
 impl PlatformEventHandler for AppEventHandler {
     fn handle_event(&mut self, event: AppEvent) {
+        // Invariant: every handler observes state with all prior AppEvents
+        // already applied. Without this, a handler that reads `self.shared`
+        // to decide what `Msg` to send (e.g. the Jobs-search Enter branch)
+        // sees state one keystroke behind the widget. Cheap when the channel
+        // is empty — `process_pending_messages` short-circuits on no msgs.
+        self.process_pending_messages();
         if let AppEvent::ButtonClicked { control_id, .. } = &event {
             if let Some(msg) = msg_for_preview_context_button(*control_id) {
                 let _ = self.msg_tx.send(msg);
@@ -1005,6 +1046,12 @@ impl PlatformEventHandler for AppEventHandler {
             {
                 let _ = self.msg_tx.send(Msg::ToggleInputPanel);
             }
+            AppEvent::MenuActionClicked { action_id }
+                if action_id == ui::constants::MENU_ACTION_FIND_JOBS =>
+            {
+                let _ = self.msg_tx.send(Msg::FocusJobsSearchRequested);
+                self.queue_focus_after_render(ui::constants::INPUT_JOBS_SEARCH, true);
+            }
             AppEvent::FormDialogCompleted {
                 window_id,
                 context_tag,
@@ -1080,6 +1127,44 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self
                     .msg_tx
                     .send(Msg::PromptLabTemplateUserDraftChanged { text });
+            }
+            AppEvent::InputTextChanged {
+                control_id, text, ..
+            } if control_id == ui::constants::INPUT_JOBS_SEARCH => {
+                self.tree_render_state
+                    .note_jobs_search_input_text_from_user(text.clone());
+                let _ = self.msg_tx.send(Msg::JobsSearchQueryChanged(text));
+            }
+            AppEvent::InputKeyDown {
+                window_id,
+                control_id,
+                key_code,
+                ..
+            } if window_id == self.window_id && control_id == ui::constants::INPUT_JOBS_SEARCH => {
+                match key_code {
+                    VK_ESCAPE_CODE => {
+                        let _ = self.msg_tx.send(Msg::JobsSearchCleared);
+                        self.queue_focus_after_render(ui::constants::TREE_JOBS, false);
+                    }
+                    VK_RETURN_CODE => {
+                        let first_visible = {
+                            let guard = self.shared.lock().unwrap();
+                            let view = guard.state.view();
+                            if view.left_pane.selected_jobs_visible_in_filter {
+                                None
+                            } else {
+                                view.left_pane.first_visible_job_id
+                            }
+                        };
+                        if let Some(job_id) = first_visible {
+                            let _ = self.msg_tx.send(Msg::JobSelected { job_id });
+                            self.queue_focus_after_render(ui::constants::TREE_JOBS, false);
+                        } else {
+                            self.queue_focus_after_render(ui::constants::TREE_JOBS, false);
+                        }
+                    }
+                    _ => {}
+                }
             }
             AppEvent::ListBoxItemSelectionChanged {
                 window_id, item_id, ..
@@ -1512,6 +1597,28 @@ mod tests {
 
     fn test_handler_with_outbound() -> (AppEventHandler, mpsc::Receiver<Msg>) {
         test_handler_with_shared(Arc::new(Mutex::new(SharedState::default())))
+    }
+
+    fn test_handler_with_loopback(shared: Arc<Mutex<SharedState>>) -> AppEventHandler {
+        let (tx, rx) = mpsc::channel();
+        let output_dir = std::env::temp_dir();
+        let paths = RuntimePaths::new(
+            output_dir.clone(),
+            output_dir.join("sources.ron"),
+            output_dir.join("contexts"),
+            output_dir.join("prompts"),
+        );
+        let platform_handler = Box::new(Win32PlatformHandler);
+        let effect_runner = EffectRunner::new(paths.clone(), tx.clone(), platform_handler);
+        AppEventHandler::new(
+            WindowId::new(1),
+            shared,
+            rx,
+            tx,
+            effect_runner,
+            PersistenceWorker::new(paths.state_path.clone()),
+            ui::render::TreeRenderState::new(),
+        )
     }
 
     fn startup_test_paths() -> (tempfile::TempDir, RuntimePaths) {
@@ -2171,5 +2278,249 @@ mod tests {
                 scope: JobListScope::All
             }
         );
+    }
+
+    #[test]
+    fn jobs_search_input_text_changed_updates_query_state() {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        let mut handler = test_handler_with_loopback(shared.clone());
+
+        handler.handle_event(AppEvent::InputTextChanged {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_JOBS_SEARCH,
+            text: "kube".to_string(),
+        });
+        handler.process_pending_messages();
+
+        let view = shared.lock().unwrap().state.view();
+        assert_eq!(view.left_pane.jobs_search_query, "kube");
+    }
+
+    #[test]
+    fn jobs_search_user_typing_does_not_echo_set_input_text() {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        let mut handler = test_handler_with_loopback(shared.clone());
+
+        handler.handle_event(AppEvent::InputTextChanged {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_JOBS_SEARCH,
+            text: "a".to_string(),
+        });
+        handler.process_pending_messages();
+
+        assert_eq!(
+            shared
+                .lock()
+                .unwrap()
+                .state
+                .view()
+                .left_pane
+                .jobs_search_query,
+            "a"
+        );
+        assert!(
+            !handler.commands.iter().any(|cmd| matches!(
+                cmd,
+                PlatformCommand::SetInputText {
+                    control_id,
+                    text,
+                    ..
+                } if *control_id == ui::constants::INPUT_JOBS_SEARCH && text == "a"
+            )),
+            "user-originated search text is already in the edit control; echoing it resets the caret"
+        );
+    }
+
+    #[test]
+    fn find_jobs_menu_switches_to_jobs_and_focuses_search() {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        apply_msg(
+            &shared,
+            Msg::LeftTabSelected {
+                tab: LeftTab::PromptLab,
+            },
+        );
+        let mut handler = test_handler_with_loopback(shared.clone());
+
+        handler.handle_event(AppEvent::MenuActionClicked {
+            action_id: ui::constants::MENU_ACTION_FIND_JOBS,
+        });
+        handler.process_pending_messages();
+
+        assert_eq!(shared.lock().unwrap().state.left_tab(), LeftTab::Jobs);
+        assert!(handler.commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::SetFocus { control_id, select_all, .. }
+                if *control_id == ui::constants::INPUT_JOBS_SEARCH && *select_all
+        )));
+    }
+
+    #[test]
+    fn escape_in_jobs_search_clears_query_and_focuses_list() {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        apply_msg(&shared, Msg::JobsSearchQueryChanged("github".to_string()));
+        let mut handler = test_handler_with_loopback(shared.clone());
+
+        handler.handle_event(AppEvent::InputKeyDown {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_JOBS_SEARCH,
+            key_code: VK_ESCAPE_CODE,
+            modifiers: commanductui::KeyModifiers::default(),
+        });
+        handler.process_pending_messages();
+
+        let view = shared.lock().unwrap().state.view();
+        assert_eq!(view.left_pane.jobs_search_query, "");
+        assert!(handler.commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::SetFocus { control_id, select_all, .. }
+                if *control_id == ui::constants::TREE_JOBS && !*select_all
+        )));
+    }
+
+    #[test]
+    fn enter_in_jobs_search_selects_first_visible_when_selection_filtered_out() {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        apply_msg(
+            &shared,
+            Msg::RestoreCompletedJobs(vec![
+                completed_job_snapshot("https://hidden.example/a"),
+                completed_job_snapshot("https://visible.example/b"),
+            ]),
+        );
+        apply_msg(&shared, Msg::JobSelected { job_id: 1 });
+        apply_msg(
+            &shared,
+            Msg::JobsSearchQueryChanged("visible.example".to_string()),
+        );
+        let mut handler = test_handler_with_loopback(shared.clone());
+
+        handler.handle_event(AppEvent::InputKeyDown {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_JOBS_SEARCH,
+            key_code: VK_RETURN_CODE,
+            modifiers: commanductui::KeyModifiers::default(),
+        });
+        handler.process_pending_messages();
+
+        assert_eq!(shared.lock().unwrap().state.selected_job_id(), Some(2));
+        assert!(handler.commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::SetFocus { control_id, select_all, .. }
+                if *control_id == ui::constants::TREE_JOBS && !*select_all
+        )));
+    }
+
+    /// Regression: when the user types in the search box and hits Enter
+    /// quickly, the JobsSearchQueryChanged message from InputTextChanged
+    /// is still sitting unprocessed in msg_tx. The Enter handler must
+    /// drain pending messages before reading state.view(), or it sees a
+    /// stale view and picks the wrong first-visible job.
+    #[test]
+    fn enter_in_jobs_search_drains_pending_query_before_reading_view() {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        apply_msg(
+            &shared,
+            Msg::RestoreCompletedJobs(vec![
+                completed_job_snapshot("https://hidden.example/a"),
+                completed_job_snapshot("https://visible.example/b"),
+            ]),
+        );
+        apply_msg(&shared, Msg::JobSelected { job_id: 1 });
+        // Do NOT apply JobsSearchQueryChanged via apply_msg — instead
+        // route it through the event handler so it lands in the loopback
+        // channel unprocessed, simulating a fast keystroke+Enter.
+        let mut handler = test_handler_with_loopback(shared.clone());
+
+        handler.handle_event(AppEvent::InputTextChanged {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_JOBS_SEARCH,
+            text: "visible.example".to_string(),
+        });
+        // Immediately fire Enter without draining — the dispatcher invariant
+        // (drain at top of handle_event) must apply the prior query before the
+        // Enter branch reads the view.
+        handler.handle_event(AppEvent::InputKeyDown {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_JOBS_SEARCH,
+            key_code: VK_RETURN_CODE,
+            modifiers: commanductui::KeyModifiers::default(),
+        });
+        handler.process_pending_messages();
+
+        // Without the fix selected_job_id stays 1 (stale, invisible under
+        // the new query => no-op). With the fix, it's 2 (first visible).
+        assert_eq!(shared.lock().unwrap().state.selected_job_id(), Some(2));
+        assert!(handler.commands.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::SetFocus { control_id, select_all, .. }
+                if *control_id == ui::constants::TREE_JOBS && !*select_all
+        )));
+    }
+
+    #[test]
+    fn enter_in_jobs_search_focuses_tree_when_filter_is_empty() {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        apply_msg(
+            &shared,
+            Msg::RestoreCompletedJobs(vec![
+                completed_job_snapshot("https://example.com/a"),
+                completed_job_snapshot("https://example.com/b"),
+            ]),
+        );
+        apply_msg(&shared, Msg::JobSelected { job_id: 1 });
+        apply_msg(&shared, Msg::JobsSearchQueryChanged("no-match".to_string()));
+        let mut handler = test_handler_with_loopback(shared.clone());
+
+        handler.handle_event(AppEvent::InputKeyDown {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_JOBS_SEARCH,
+            key_code: VK_RETURN_CODE,
+            modifiers: commanductui::KeyModifiers::default(),
+        });
+        handler.process_pending_messages();
+
+        // Filter matches nothing → no JobSelected sent, selection unchanged.
+        assert_eq!(shared.lock().unwrap().state.selected_job_id(), Some(1));
+        // Focus command is enqueued via queue_focus_after_render, which
+        // lands in pending_focus_after_render (not yet flushed to commands
+        // because no message triggered a render cycle).
+        assert!(handler
+            .pending_focus_after_render
+            .iter()
+            .any(|pf| pf.control_id == ui::constants::TREE_JOBS && !pf.select_all));
+    }
+
+    #[test]
+    fn enter_in_jobs_search_focuses_tree_when_selection_already_visible() {
+        let shared = Arc::new(Mutex::new(SharedState::default()));
+        apply_msg(
+            &shared,
+            Msg::RestoreCompletedJobs(vec![
+                completed_job_snapshot("https://example.com/a"),
+                completed_job_snapshot("https://other.example/b"),
+            ]),
+        );
+        apply_msg(&shared, Msg::JobSelected { job_id: 1 });
+        apply_msg(
+            &shared,
+            Msg::JobsSearchQueryChanged("example.com/a".to_string()),
+        );
+        let mut handler = test_handler_with_loopback(shared.clone());
+
+        handler.handle_event(AppEvent::InputKeyDown {
+            window_id: WindowId::new(1),
+            control_id: ui::constants::INPUT_JOBS_SEARCH,
+            key_code: VK_RETURN_CODE,
+            modifiers: commanductui::KeyModifiers::default(),
+        });
+        handler.process_pending_messages();
+
+        // The selected job (1) is visible in the filter → no JobSelected.
+        assert_eq!(shared.lock().unwrap().state.selected_job_id(), Some(1));
+        assert!(handler
+            .pending_focus_after_render
+            .iter()
+            .any(|pf| pf.control_id == ui::constants::TREE_JOBS && !pf.select_all));
     }
 }
