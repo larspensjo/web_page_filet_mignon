@@ -264,7 +264,7 @@ impl TriageSession {
                 _ => None,
             })
             .collect();
-        results.sort_by(|a, b| b.priority.cmp(&a.priority));
+        results.sort_by_key(|result| std::cmp::Reverse(result.priority));
         results
     }
 }

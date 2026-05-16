@@ -1177,21 +1177,22 @@ impl PlatformEventHandler for AppEventHandler {
                 window_id,
                 control_id,
                 key_code,
-            } if window_id == self.window_id && control_id == ui::constants::TREE_JOBS => {
-                if key_code == b'X' as u16 {
-                    let maybe_msg = {
-                        let guard = self.shared.lock().unwrap();
-                        if guard.state.left_tab() == LeftTab::TriageReview
-                            && guard.state.is_pre_triage_reviewing()
-                        {
-                            pre_triage_toggle_message(&guard.state)
-                        } else {
-                            None
-                        }
-                    };
-                    if let Some(msg) = maybe_msg {
-                        let _ = self.msg_tx.send(msg);
+            } if window_id == self.window_id
+                && control_id == ui::constants::TREE_JOBS
+                && key_code == b'X' as u16 =>
+            {
+                let maybe_msg = {
+                    let guard = self.shared.lock().unwrap();
+                    if guard.state.left_tab() == LeftTab::TriageReview
+                        && guard.state.is_pre_triage_reviewing()
+                    {
+                        pre_triage_toggle_message(&guard.state)
+                    } else {
+                        None
                     }
+                };
+                if let Some(msg) = maybe_msg {
+                    let _ = self.msg_tx.send(msg);
                 }
             }
             AppEvent::ListBoxScrolled { .. } => {}

@@ -1209,8 +1209,8 @@ impl AppState {
 
     pub fn ordered_completed_job_urls_snapshot(&self) -> Vec<String> {
         self.jobs
-            .iter()
-            .filter_map(|(_, job)| {
+            .values()
+            .filter_map(|job| {
                 if job.stage == Stage::Done && job.outcome == Some(JobResultKind::Success) {
                     Some(job.url.clone())
                 } else {

@@ -342,11 +342,10 @@ impl OpenAiMessage {
         let mut refusals = Vec::new();
 
         match &self.content {
-            Some(OpenAiMessageContent::Text(text)) => {
-                if !text.is_empty() {
-                    text_parts.push(text.clone());
-                }
+            Some(OpenAiMessageContent::Text(text)) if !text.is_empty() => {
+                text_parts.push(text.clone());
             }
+            Some(OpenAiMessageContent::Text(_)) => {}
             Some(OpenAiMessageContent::Parts(parts)) => {
                 for part in parts {
                     match part.kind.as_str() {

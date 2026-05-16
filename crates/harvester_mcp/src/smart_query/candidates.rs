@@ -672,7 +672,7 @@ fn ranked_priority_band_counts(candidates: &[CandidateArticle]) -> Vec<(u8, usiz
     }
 
     let mut ranked: Vec<_> = counts.into_iter().collect();
-    ranked.sort_by(|left, right| right.0.cmp(&left.0));
+    ranked.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     ranked
 }
 
