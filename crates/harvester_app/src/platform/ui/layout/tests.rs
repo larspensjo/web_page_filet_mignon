@@ -119,7 +119,7 @@ fn operation_controls_have_width_when_visible() {
         _ => panic!("expected DefineLayout"),
     };
     assert_eq!(fixed_size_for(&rules, PROGRESS_OPERATION), 80);
-    assert_eq!(fixed_size_for(&rules, LABEL_OPERATION_PROGRESS), 120);
+    assert_eq!(fixed_size_for(&rules, LABEL_OPERATION_PROGRESS), 170);
     assert_eq!(
         fixed_size_for(&rules, PROGRESS_LLM_QUOTA),
         LLM_QUOTA_BAR_WIDTH

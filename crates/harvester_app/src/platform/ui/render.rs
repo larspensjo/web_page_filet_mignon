@@ -60,8 +60,6 @@ impl Default for LayoutRenderState {
 pub(super) struct ControlsRenderState {
     pub(super) prev_status_label: Option<(String, MessageSeverity)>,
     pub(super) prev_progress_text: Option<String>,
-    pub(super) prev_briefing_progress: Option<String>,
-    pub(super) prev_triage_progress: Option<String>,
     pub(super) prev_progress_range: Option<(u32, u32)>,
     pub(super) prev_progress_pos: Option<u32>,
     pub(super) prev_token_progress_style: Option<StyleId>,
@@ -83,8 +81,6 @@ impl Default for ControlsRenderState {
         Self {
             prev_status_label: None,
             prev_progress_text: None,
-            prev_briefing_progress: None,
-            prev_triage_progress: None,
             prev_progress_range: None,
             prev_progress_pos: None,
             prev_token_progress_style: None,

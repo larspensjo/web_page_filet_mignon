@@ -227,7 +227,7 @@ fn triage_articles_loaded_empty_fails() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = simulate_triage_loaded(state, Vec::new());
     assert!(!state.view().triage_can_start);
-    assert!(state.view().triage_progress.is_none());
+    assert!(!state.view().triage_results_reorder_suppressed);
 }
 
 #[test]
@@ -236,7 +236,7 @@ fn triage_load_failed_transitions_to_failed() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = simulate_triage_load_failed(state, "boom");
     assert!(!state.view().triage_can_start);
-    assert!(state.view().triage_progress.is_none());
+    assert!(!state.view().triage_results_reorder_suppressed);
 }
 
 fn triage_flow_with_two_articles() -> (AppState, Vec<LoadedArticle>) {
@@ -576,7 +576,7 @@ fn restore_completed_jobs_resets_triage() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let snapshot = state.completed_jobs_snapshot();
     let (state, _) = update(state, Msg::RestoreCompletedJobs(snapshot));
-    assert!(state.view().triage_progress.is_none());
+    assert!(!state.view().triage_results_reorder_suppressed);
 }
 
 #[test]

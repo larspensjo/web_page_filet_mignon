@@ -120,7 +120,7 @@ pub(super) fn build_list_box_items(view: &AppViewModel) -> Vec<ListBoxItemDescri
 
     let mut sorted_buf: Vec<&JobRowView>;
     let jobs_iter: &[&JobRowView] =
-        if matches!(tab, LeftTab::TriageResults) && view.triage_progress.is_none() {
+        if matches!(tab, LeftTab::TriageResults) && !view.triage_results_reorder_suppressed {
             sorted_buf = scope_filtered;
             sorted_buf.sort_by(|a, b| {
                 let p_a = a

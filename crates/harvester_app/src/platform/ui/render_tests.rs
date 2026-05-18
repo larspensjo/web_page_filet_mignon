@@ -790,7 +790,7 @@ fn triage_results_tab_keeps_stable_order_while_triage_in_progress() {
 
     let mut view = make_view(vec![low, high]);
     view.left_pane.left_tab = LeftTab::TriageResults;
-    view.triage_progress = Some("Triaging 1/2 articles...".to_string());
+    view.triage_results_reorder_suppressed = true;
 
     let populated = build_list_box_items(&view);
 
@@ -806,6 +806,50 @@ fn triage_results_tab_keeps_stable_order_while_triage_in_progress() {
         "second should stay job 2 while triage is running, got: {}",
         populated[1].title
     );
+}
+
+#[test]
+fn triage_results_tab_sorts_by_priority_during_download_progress() {
+    init_logging();
+
+    let low = make_job(
+        1,
+        "https://low.com/",
+        Stage::Done,
+        Some(JobResultKind::Success),
+        None,
+        None,
+    );
+
+    let mut high = make_job(
+        2,
+        "https://high.com/",
+        Stage::Done,
+        Some(JobResultKind::Success),
+        None,
+        None,
+    );
+    high.has_summary = true;
+    high.summary_title = Some("High Priority".to_string());
+    high.triage_annotation = Some(harvester_core::TriageAnnotationView {
+        priority: 5,
+        category: "tech".to_string(),
+        tags: vec![],
+    });
+
+    let mut view = make_view(vec![low, high]);
+    view.left_pane.left_tab = LeftTab::TriageResults;
+    view.operation_progress = Some(harvester_core::OperationProgress {
+        label: "Downloading articles".to_string(),
+        completed: 1,
+        total: 2,
+    });
+
+    let populated = build_list_box_items(&view);
+
+    assert_eq!(populated.len(), 2);
+    assert_eq!(populated[0].id, ListBoxItemId::new(2));
+    assert!(populated[0].title.contains("High Priority"));
 }
 
 #[test]
@@ -841,7 +885,7 @@ fn triage_results_in_progress_updates_rows_without_repopulating_tree() {
 
     let mut initial_view = make_view(vec![low_initial, high_initial]);
     initial_view.left_pane.left_tab = LeftTab::TriageResults;
-    initial_view.triage_progress = Some("Triaging 1/2 articles...".to_string());
+    initial_view.triage_results_reorder_suppressed = true;
     let _ = render(window_id, &initial_view, &mut tree_state);
 
     let mut low_updated = make_job(
@@ -878,7 +922,7 @@ fn triage_results_in_progress_updates_rows_without_repopulating_tree() {
 
     let mut updated_view = make_view(vec![low_updated, high_updated]);
     updated_view.left_pane.left_tab = LeftTab::TriageResults;
-    updated_view.triage_progress = Some("Triaging 2/2 articles...".to_string());
+    updated_view.triage_results_reorder_suppressed = true;
 
     let cmds = render(window_id, &updated_view, &mut tree_state);
 
@@ -1589,6 +1633,74 @@ fn status_bar_uses_warning_severity_for_ai_unavailable_message() {
                 if *control_id == LABEL_STATUS && text.contains("OPENAI_API_KEY is not set")
             )
         }));
+}
+
+#[test]
+fn status_bar_renders_dense_operational_context() {
+    let window_id = WindowId::new(43);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![]);
+    view.session = SessionState::Running;
+    view.job_count = 7;
+    view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
+    view.checkpoint_status_message = Some("Checkpoint saved".to_string());
+    view.llm_usage_by_model = vec![LlmModelUsageView {
+        model: "model-a".to_string(),
+        input_tokens: 12,
+        output_tokens: 34,
+    }];
+    view.ai_unavailable_message =
+        Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
+
+    let cmds = render(window_id, &view, &mut tree_state);
+    let (status_text, severity) = cmds
+        .iter()
+        .find_map(|cmd| match cmd {
+            PlatformCommand::UpdateLabelText {
+                control_id,
+                text,
+                severity,
+                ..
+            } if *control_id == LABEL_STATUS => Some((text.as_str(), *severity)),
+            _ => None,
+        })
+        .expect("status label rendered");
+
+    assert_eq!(severity, MessageSeverity::Warning);
+    assert!(status_text.contains("Session: Running | Jobs: 7"));
+    assert!(status_text.contains("Since checkpoint"));
+    assert!(status_text.contains("Checkpoint saved"));
+    assert!(status_text.contains("model-a: in=12 out=34"));
+    assert!(status_text.contains("OPENAI_API_KEY is not set"));
+}
+
+#[test]
+fn status_bar_omits_summary_progress_when_operation_progress_shows_it() {
+    let window_id = WindowId::new(42);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![]);
+    view.operation_progress_visible = true;
+    view.operation_progress = Some(harvester_core::OperationProgress {
+        label: "Summarizing".to_string(),
+        completed: 3,
+        total: 5,
+    });
+
+    let cmds = render(window_id, &view, &mut tree_state);
+    let status_text = cmds
+        .iter()
+        .find_map(|cmd| match cmd {
+            PlatformCommand::UpdateLabelText {
+                control_id, text, ..
+            } if *control_id == LABEL_STATUS => Some(text.as_str()),
+            _ => None,
+        })
+        .expect("status label rendered");
+    assert!(!status_text.contains("Summarizing"));
+    assert_eq!(
+        control_text(&cmds, LABEL_OPERATION_PROGRESS),
+        Some("Summarizing: 3/5")
+    );
 }
 
 #[test]

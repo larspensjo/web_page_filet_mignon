@@ -1713,3 +1713,9 @@ Type: Implementation
 Context: Quick search needs keyboard ownership across the platform boundary: Ctrl+F should focus the search input, Esc should clear and return to the list, and Enter should move to the first visible job when the current selection is filtered out.
 Change: Added CommanDuctUI edit-key and focus commands, created the Jobs search input with layout/theme coverage, wired the Harvester File/Find accelerator and Jobs search key handling through reducer messages, and queued focus commands after state/render processing so they observe the derived Jobs visibility view.
 Refs: src/CommanDuctUI/src/types.rs, src/CommanDuctUI/src/window_common.rs, src/CommanDuctUI/src/command_executor.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/rules.rs
+
+## 2026-05-18 - Poll pipeline footer progress
+Type: Implementation
+Context: The footer progress bar went idle after source scanning even when poll-spawned article downloads and candidate refresh work were still active, and summary counts were duplicated in the main status label.
+Change: Added reducer-owned poll pipeline job tracking, centralized operation progress selection for view and layout, moved summary/triage counts exclusively to the operation progress area, renamed background candidate refresh labels, and replaced triage-result sorting suppression with an explicit view-model boolean.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_app/src/platform/ui/render_list_box.rs, docs/plans/Plan.PollPipelineAndSummaryProgressUx.md

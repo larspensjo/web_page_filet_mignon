@@ -54,6 +54,7 @@ pub(super) fn handle_source_poll_completed(
         dedup_filtered,
         emitted: ingest.enqueued,
     });
+    state.record_poll_pipeline_jobs(&ingest.enqueued_job_ids);
     ingest.effects
 }
 

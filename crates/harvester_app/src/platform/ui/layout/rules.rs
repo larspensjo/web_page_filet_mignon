@@ -84,7 +84,7 @@ pub(super) fn build_layout_rules(
         0
     };
     let operation_progress_bar_width = if operation_progress_visible { 80 } else { 0 };
-    let operation_progress_label_width = if operation_progress_visible { 120 } else { 0 };
+    let operation_progress_label_width = if operation_progress_visible { 170 } else { 0 };
     let jobs_width = (left_panel_width - input_width).max(0);
     let _ = jobs_width; // jobs panel fills remaining space inside PANEL_LEFT_JOBS
 

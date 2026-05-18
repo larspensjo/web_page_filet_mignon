@@ -88,12 +88,6 @@ pub(super) fn render_status_section(
     if view.left_pane.job_list_scope == JobListScope::SinceCheckpoint {
         status_parts.push("Since checkpoint".to_string());
     }
-    if let Some(progress) = view.briefing_progress.as_deref() {
-        status_parts.push(progress.to_string());
-    }
-    if let Some(progress) = view.triage_progress.as_deref() {
-        status_parts.push(progress.to_string());
-    }
     if let Some(status) = view.checkpoint_status_message.as_deref() {
         status_parts.push(status.to_string());
     }
@@ -117,8 +111,6 @@ pub(super) fn render_status_section(
             severity,
         },
     );
-    tree_state.controls.prev_briefing_progress = view.briefing_progress.clone();
-    tree_state.controls.prev_triage_progress = view.triage_progress.clone();
 }
 
 pub(super) fn render_operation_progress_section(

@@ -333,10 +333,6 @@ fn aggregate_briefing_failure_surfaces_reason_in_briefing_ui() {
         }
     );
     let view = state.view();
-    assert_eq!(
-        view.briefing_progress.as_deref(),
-        Some("Briefing failed: request timed out")
-    );
     assert!(view
         .right_pane
         .briefing_markdown

@@ -148,43 +148,7 @@ impl AppState {
             })
             .is_some();
         let preview_source = self.ui.preview.content_kind();
-        let operation_progress =
-            if let Some((completed, total)) = self.source_states.poll_progress() {
-                Some(OperationProgress {
-                    label: "Polling".to_string(),
-                    completed: completed as u32,
-                    total: total as u32,
-                })
-            } else if matches!(self.triage.phase(), TriagePhase::Triaging) {
-                let completed = self.triage.completed_count() + self.triage.failed_count();
-                Some(OperationProgress {
-                    label: "Triaging".to_string(),
-                    completed: completed as u32,
-                    total: self.triage.total() as u32,
-                })
-            } else if matches!(self.briefing.phase(), BriefingPhase::Summarizing) {
-                let completed =
-                    self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
-                Some(OperationProgress {
-                    label: "Summarizing".to_string(),
-                    completed: completed as u32,
-                    total: self.briefing.total() as u32,
-                })
-            } else if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
-                let (completed, total) = self
-                    .pre_triage_load_progress()
-                    .and_then(|(files_scanned, files_total, _)| {
-                        (files_total > 0).then_some((files_scanned as u32, files_total as u32))
-                    })
-                    .unwrap_or((0, 1));
-                Some(OperationProgress {
-                    label: self.pre_triage_loading_operation_label(),
-                    completed,
-                    total,
-                })
-            } else {
-                None
-            };
+        let operation_progress = self.build_operation_progress();
         let ai_warning_banner = self.ai_warning_banner();
         let ai_unavailable_message = self.ai_unavailable_message();
         let triage_blocked_reason = self.triage_blocked_reason();
@@ -208,17 +172,13 @@ impl AppState {
             preview_header_text,
             preview_source,
             briefing_can_start: self.briefing.can_start() && self.briefing_ai_available(),
-            briefing_progress: self.briefing.progress_text(),
             briefing_preview,
             stop_finish_button,
             triage_can_start: self.triage_ai_available()
                 && (!self.briefing_orchestration.is_requested())
                 && self.triage.can_start()
                 && self.can_start_triage_from_pre_triage(),
-            triage_progress: self
-                .triage
-                .progress_text()
-                .or_else(|| self.pre_triage_progress_text()),
+            triage_results_reorder_suppressed: matches!(self.triage.phase(), TriagePhase::Triaging),
             ai_unavailable_message,
             triage_blocked_reason,
             briefing_blocked_reason,
@@ -255,6 +215,59 @@ impl AppState {
             llm_quota: crate::build_llm_quota_view(self.llm_quota()),
             right_pane: self.build_right_pane_view(selected_triage_article_available),
         }
+    }
+
+    fn build_operation_progress(&self) -> Option<OperationProgress> {
+        if let Some((completed, total)) = self.source_states.poll_progress() {
+            return Some(OperationProgress {
+                label: "Scanning sources".to_string(),
+                completed: completed as u32,
+                total: total as u32,
+            });
+        }
+
+        if matches!(self.triage.phase(), TriagePhase::Triaging) {
+            let completed = self.triage.completed_count() + self.triage.failed_count();
+            return Some(OperationProgress {
+                label: "Triaging".to_string(),
+                completed: completed as u32,
+                total: self.triage.total() as u32,
+            });
+        }
+
+        if matches!(self.briefing.phase(), BriefingPhase::Summarizing) {
+            let completed =
+                self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
+            return Some(OperationProgress {
+                label: "Summarizing".to_string(),
+                completed: completed as u32,
+                total: self.briefing.total() as u32,
+            });
+        }
+
+        if let Some((completed, total)) = self.poll_pipeline_article_progress() {
+            return Some(OperationProgress {
+                label: "Downloading articles".to_string(),
+                completed: completed as u32,
+                total: total as u32,
+            });
+        }
+
+        if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
+            let (completed, total) = self
+                .pre_triage_load_progress()
+                .and_then(|(files_scanned, files_total, _)| {
+                    (files_total > 0).then_some((files_scanned as u32, files_total as u32))
+                })
+                .unwrap_or((0, 1));
+            return Some(OperationProgress {
+                label: self.pre_triage_loading_operation_label(),
+                completed,
+                total,
+            });
+        }
+
+        None
     }
 
     fn format_briefing_preview_header(&self) -> String {
@@ -301,10 +314,7 @@ impl AppState {
         LayoutViewModel {
             left_panel_width: self.ui.left_panel_width(),
             input_panel_visible: self.ui.input_panel_visible(),
-            operation_progress_visible: self.source_states.poll_progress().is_some()
-                || matches!(self.triage.phase(), TriagePhase::Triaging)
-                || matches!(self.briefing.phase(), BriefingPhase::Summarizing)
-                || matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles),
+            operation_progress_visible: self.build_operation_progress().is_some(),
             active_tab: self.active_tab(),
             left_tab: self.left_tab(),
             left_header_meta_visible: matches!(

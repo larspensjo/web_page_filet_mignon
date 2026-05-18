@@ -20,7 +20,7 @@ use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::{ExtractedLink, ImportedArchiveRef, LinkKind, SourceId};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
 mod briefing_orchestration;
@@ -50,11 +50,6 @@ pub type JobId = u64;
 
 const MAX_EXTRACTED_LINKS: usize = 5_000;
 const CHECKPOINT_SAVING_STATUS_MESSAGE: &str = "Checkpoint saving...";
-
-fn format_saved_article_count(count: usize) -> String {
-    let noun = if count == 1 { "article" } else { "articles" };
-    format!("{count} saved {noun}")
-}
 
 fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSnapshot> {
     let registry = PromptRegistry::with_defaults();
@@ -89,7 +84,6 @@ struct PendingBriefingCheckpointSave {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PreTriageLoadContext {
     reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
-    ordered_url_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +91,12 @@ struct PreTriageLoadProgress {
     request_id: u64,
     files_scanned: usize,
     files_total: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct PollPipelineProgressState {
+    source_scan_done: bool,
+    job_ids: BTreeSet<JobId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -365,6 +365,8 @@ pub struct AppState {
     /// The request ID of the currently in-flight pre-triage load, if any.
     /// Kept in sync with the coordinator's in-flight ID.
     triage_in_flight_request_id: Option<u64>,
+    /// Reducer-owned tracker for article jobs emitted by the current source poll.
+    poll_pipeline: Option<PollPipelineProgressState>,
     /// Logical tick counter driven by `Msg::Tick`; used by the pre-triage refresh coordinator.
     tick: u64,
     /// Reducer-owned coordinator for batching pre-triage refresh demand.
@@ -392,6 +394,7 @@ pub struct IngestResult {
     pub effects: Vec<Effect>,
     pub enqueued: usize,
     pub skipped: usize,
+    pub enqueued_job_ids: Vec<JobId>,
 }
 
 impl Default for AppState {
@@ -456,6 +459,7 @@ impl Default for AppState {
             #[cfg(test)]
             next_triage_request_id: 1,
             triage_in_flight_request_id: None,
+            poll_pipeline: None,
             tick: 0,
             pre_triage_coordinator: crate::pre_triage_coordinator::PreTriageRefreshCoordinator::new(
             ),
@@ -1000,12 +1004,8 @@ impl AppState {
     pub(crate) fn set_pre_triage_load_context(
         &mut self,
         reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
-        ordered_url_count: usize,
     ) {
-        self.pre_triage_load_context = Some(PreTriageLoadContext {
-            reason,
-            ordered_url_count,
-        });
+        self.pre_triage_load_context = Some(PreTriageLoadContext { reason });
         self.dirty = true;
     }
 
@@ -1120,41 +1120,6 @@ impl AppState {
         self.tick
     }
 
-    fn pre_triage_progress_text(&self) -> Option<String> {
-        match self.pre_triage.phase() {
-            PreTriagePhase::LoadingArticles => Some(self.pre_triage_loading_progress_text()),
-            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage => {
-                let total = self.pre_triage.entries().len();
-                if total == 0 {
-                    return None;
-                }
-                let include = self.pre_triage.resolved_included_articles().len();
-                let review = self
-                    .pre_triage
-                    .entries()
-                    .iter()
-                    .filter(|entry| {
-                        matches!(entry.auto_verdict, crate::AutoVerdict::Review)
-                            && entry.manual_decision.is_none()
-                    })
-                    .count();
-                let filtered = total.saturating_sub(include + review);
-                Some(format!(
-                    "Pre-triage: {} include, {} review, {} filtered; Run Triage uses current selection",
-                    include, review, filtered
-                ))
-            }
-            PreTriagePhase::Failed { reason } => {
-                if self.pre_triage.entries().is_empty() {
-                    None
-                } else {
-                    Some(format!("Pre-triage failed: {reason}"))
-                }
-            }
-            PreTriagePhase::Idle => None,
-        }
-    }
-
     #[allow(dead_code)]
     pub(crate) fn source_states(&self) -> &SourceStateIndex {
         &self.source_states
@@ -1186,9 +1151,20 @@ impl AppState {
     pub(crate) fn start_poll(&mut self) -> bool {
         let started = self.source_states.start_poll();
         if started {
+            self.poll_pipeline = Some(PollPipelineProgressState::default());
             self.dirty = true;
         }
         started
+    }
+
+    pub(crate) fn record_poll_pipeline_jobs(&mut self, job_ids: &[JobId]) {
+        if job_ids.is_empty() {
+            return;
+        }
+        if let Some(tracker) = &mut self.poll_pipeline {
+            tracker.job_ids.extend(job_ids.iter().copied());
+            self.dirty = true;
+        }
     }
 
     pub(crate) fn set_poll_total(&mut self, total: usize) {
@@ -1199,6 +1175,10 @@ impl AppState {
     #[allow(dead_code)]
     pub(crate) fn end_poll(&mut self) {
         self.source_states.end_poll();
+        if let Some(tracker) = &mut self.poll_pipeline {
+            tracker.source_scan_done = true;
+        }
+        self.clear_settled_poll_pipeline_if_complete();
         self.dirty = true;
     }
 
@@ -1339,6 +1319,44 @@ impl AppState {
         self.ai_availability = availability;
     }
 
+    fn poll_pipeline_article_progress(&self) -> Option<(usize, usize)> {
+        let tracker = self.poll_pipeline.as_ref()?;
+        if !tracker.source_scan_done || tracker.job_ids.is_empty() {
+            return None;
+        }
+        let total = tracker.job_ids.len();
+        let settled = tracker
+            .job_ids
+            .iter()
+            .filter(|job_id| {
+                self.jobs
+                    .get(job_id)
+                    .and_then(|job| job.outcome.as_ref())
+                    .is_some()
+            })
+            .count();
+        (settled < total).then_some((settled, total))
+    }
+
+    fn clear_settled_poll_pipeline_if_complete(&mut self) {
+        let Some(tracker) = self.poll_pipeline.as_ref() else {
+            return;
+        };
+        if !tracker.source_scan_done {
+            return;
+        }
+        let all_settled = tracker.job_ids.iter().all(|job_id| {
+            self.jobs
+                .get(job_id)
+                .and_then(|job| job.outcome.as_ref())
+                .is_some()
+        });
+        if all_settled {
+            self.poll_pipeline = None;
+            self.dirty = true;
+        }
+    }
+
     pub(crate) fn reconcile_ai_availability_from_metadata(&mut self) {
         let triage_model_available = self.effective_models.contains_key(&PromptId::ArticleTriage);
         match (&self.ai_availability, triage_model_available) {
@@ -1425,37 +1443,15 @@ impl AppState {
         })
     }
 
-    fn pre_triage_loading_progress_text(&self) -> String {
-        match self.pre_triage_load_context {
-            Some(PreTriageLoadContext {
-                reason: crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
-                ordered_url_count,
-            }) => format!(
-                "Preparing triage set from {}...",
-                format_saved_article_count(ordered_url_count)
-            ),
-            Some(PreTriageLoadContext {
-                reason: crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone,
-                ordered_url_count,
-            }) => format!(
-                "Refreshing triage set from {}...",
-                format_saved_article_count(ordered_url_count)
-            ),
-            None => "Preparing triage set from saved articles...".to_string(),
-        }
-    }
-
     fn pre_triage_loading_operation_label(&self) -> String {
-        match self.pre_triage_load_context {
-            Some(PreTriageLoadContext {
-                reason: crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
-                ordered_url_count,
-            }) => format!("Preparing triage set ({} saved)", ordered_url_count),
-            Some(PreTriageLoadContext {
-                reason: crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone,
-                ordered_url_count,
-            }) => format!("Refreshing triage set ({} saved)", ordered_url_count),
-            None => "Preparing triage set".to_string(),
+        match self.pre_triage_load_context.map(|context| context.reason) {
+            Some(crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs) => {
+                "Preparing triage list".to_string()
+            }
+            Some(crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone) => {
+                "Updating triage candidates".to_string()
+            }
+            None => "Preparing triage list".to_string(),
         }
     }
 
@@ -1923,6 +1919,7 @@ impl AppState {
                 effects: Vec::new(),
                 enqueued: 0,
                 skipped,
+                enqueued_job_ids: Vec::new(),
             };
         }
 
@@ -1938,6 +1935,7 @@ impl AppState {
         if should_start {
             effects.push(Effect::StartSession);
         }
+        let enqueued_job_ids = enqueued.iter().map(|(job_id, _)| *job_id).collect();
         for (job_id, url) in enqueued {
             effects.push(Effect::EnqueueUrl { job_id, url });
         }
@@ -1946,6 +1944,7 @@ impl AppState {
             effects,
             enqueued: enqueued_count,
             skipped,
+            enqueued_job_ids,
         }
     }
 
@@ -2014,6 +2013,7 @@ impl AppState {
                 effects: Vec::new(),
                 enqueued: 0,
                 skipped,
+                enqueued_job_ids: Vec::new(),
             };
         }
 
@@ -2027,9 +2027,11 @@ impl AppState {
             effects.push(Effect::StartSession);
         }
         let mut enqueued = 0;
+        let mut enqueued_job_ids = Vec::new();
         for link in unique {
             let job_id = self.next_job_id;
             self.next_job_id += 1;
+            enqueued_job_ids.push(job_id);
             self.jobs.insert(
                 job_id,
                 Self::build_job_state(
@@ -2050,6 +2052,7 @@ impl AppState {
             effects,
             enqueued,
             skipped,
+            enqueued_job_ids,
         }
     }
 
@@ -2143,6 +2146,7 @@ impl AppState {
             self.refresh_selected_preview();
         }
         if job_updated {
+            self.clear_settled_poll_pipeline_if_complete();
             self.dirty = true;
         }
     }

@@ -173,7 +173,7 @@ fn triage_articles_load_progress_updates_matching_request() {
     assert_eq!(
         state.view().operation_progress,
         Some(crate::view_model::OperationProgress {
-            label: "Refreshing triage set (1 saved)".to_string(),
+            label: "Updating triage candidates".to_string(),
             completed: 25,
             total: 80,
         })
@@ -198,7 +198,7 @@ fn triage_articles_load_progress_ignores_stale_request() {
     assert_eq!(
         state.view().operation_progress,
         Some(crate::view_model::OperationProgress {
-            label: "Refreshing triage set (1 saved)".to_string(),
+            label: "Updating triage candidates".to_string(),
             completed: 0,
             total: 1,
         })
@@ -333,8 +333,12 @@ fn restore_completed_jobs_loading_text_explains_startup_preparation() {
 
     let view = state.view();
     assert_eq!(
-        view.triage_progress,
-        Some("Preparing triage set from 1 saved article...".to_string())
+        view.operation_progress,
+        Some(crate::view_model::OperationProgress {
+            label: "Preparing triage list".to_string(),
+            completed: 0,
+            total: 1,
+        })
     );
     assert_eq!(
         view.triage_blocked_reason,
@@ -349,13 +353,9 @@ fn job_done_loading_text_explains_refresh_preparation() {
 
     let view = state.view();
     assert_eq!(
-        view.triage_progress,
-        Some("Refreshing triage set from 1 saved article...".to_string())
-    );
-    assert_eq!(
         view.operation_progress,
         Some(crate::view_model::OperationProgress {
-            label: "Refreshing triage set (1 saved)".to_string(),
+            label: "Updating triage candidates".to_string(),
             completed: 0,
             total: 1,
         })
