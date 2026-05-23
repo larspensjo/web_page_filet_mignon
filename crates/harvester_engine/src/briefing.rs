@@ -1,8 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    path::Path,
-    sync::Arc,
+    path::{Path, PathBuf},
+    sync::{mpsc, Arc},
+    thread,
 };
 
 use engine_logging::{engine_debug, engine_info, engine_warn};
@@ -63,6 +64,13 @@ struct ArticlePackage {
     fetched_utc: Option<String>,
 }
 
+struct ArticleScanOutcome {
+    index: usize,
+    package: Option<ArticlePackage>,
+    missing_fetched_utc: bool,
+    malformed_fetched_utc: bool,
+}
+
 impl ArticlePackage {
     fn title(&self) -> &str {
         self.clean_text
@@ -85,27 +93,7 @@ fn build_content_prep_config() -> ContentPrepConfig {
     }
 }
 
-/// Scan `output_dir` for markdown files, parse frontmatter, and derive clean text.
-/// Packages are ordered by filename so callers can rely on deterministic order.
-/// If `since_utc` is `Some`, articles with a `fetched_utc` older than the threshold are excluded.
-/// Articles missing or with malformed `fetched_utc` are always included (with a summary warning).
-fn scan_and_prepare_articles(
-    output_dir: &Path,
-    since_utc: Option<chrono::DateTime<chrono::Utc>>,
-) -> Result<Vec<ArticlePackage>, String> {
-    scan_and_prepare_articles_with_progress(output_dir, since_utc, |_| {})
-}
-
-fn scan_and_prepare_articles_with_progress<F>(
-    output_dir: &Path,
-    since_utc: Option<chrono::DateTime<chrono::Utc>>,
-    mut on_progress: F,
-) -> Result<Vec<ArticlePackage>, String>
-where
-    F: FnMut(ArticleScanProgress),
-{
-    let config = build_content_prep_config();
-
+fn list_markdown_files(output_dir: &Path) -> Result<Vec<PathBuf>, String> {
     let mut markdown_files = Vec::new();
     for entry in fs::read_dir(output_dir).map_err(|err| {
         format!(
@@ -132,96 +120,189 @@ where
     }
 
     markdown_files.sort();
+    Ok(markdown_files)
+}
 
+fn scan_article_path(
+    index: usize,
+    path: PathBuf,
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    config: &ContentPrepConfig,
+) -> Result<ArticleScanOutcome, String> {
+    let markdown = fs::read_to_string(&path)
+        .map_err(|err| format!("failed to read {}: {}", path.display(), err))?;
+    let fields = match parse_frontmatter(&markdown) {
+        Some(fields) => fields,
+        None => {
+            // Archive files (multi-doc format) start with "=====" and live in the
+            // same output directory as article files — skip them silently at DEBUG.
+            // Any other .md file without valid frontmatter is unexpected and warrants a WARN.
+            if markdown.starts_with("=====") {
+                engine_debug!(
+                    "[briefing-loader] skipping {}: archive format (not an article)",
+                    path.display()
+                );
+            } else {
+                engine_warn!(
+                    "[briefing-loader] skipping {}: no valid frontmatter",
+                    path.display()
+                );
+            }
+            return Ok(ArticleScanOutcome {
+                index,
+                package: None,
+                missing_fetched_utc: false,
+                malformed_fetched_utc: false,
+            });
+        }
+    };
+    let url = match fields
+        .url
+        .as_deref()
+        .map(|u| u.trim())
+        .filter(|u| !u.is_empty())
+    {
+        Some(url) => url.to_string(),
+        None => {
+            engine_warn!(
+                "[briefing-loader] skipping {}: no url field",
+                path.display()
+            );
+            return Ok(ArticleScanOutcome {
+                index,
+                package: None,
+                missing_fetched_utc: false,
+                malformed_fetched_utc: false,
+            });
+        }
+    };
+
+    let mut missing_fetched_utc = false;
+    let mut malformed_fetched_utc = false;
+    if let Some(since_dt) = since_utc {
+        match &fields.fetched_utc {
+            None => {
+                missing_fetched_utc = true;
+            }
+            Some(raw) => match parse_rfc3339_utc("article", raw) {
+                Err(_) => {
+                    malformed_fetched_utc = true;
+                }
+                Ok(art_ts) => {
+                    if art_ts < since_dt {
+                        return Ok(ArticleScanOutcome {
+                            index,
+                            package: None,
+                            missing_fetched_utc,
+                            malformed_fetched_utc,
+                        });
+                    }
+                }
+            },
+        }
+    }
+
+    let fetched_utc = fields.fetched_utc.clone();
+    let clean_text = derive_clean_text(&markdown, &url, fields.title.as_deref(), config);
+    Ok(ArticleScanOutcome {
+        index,
+        package: Some(ArticlePackage {
+            url,
+            source_title: fields.title,
+            clean_text,
+            fetched_utc,
+        }),
+        missing_fetched_utc,
+        malformed_fetched_utc,
+    })
+}
+
+/// Scan `output_dir` for markdown files, parse frontmatter, and derive clean text.
+/// Packages are ordered by filename so callers can rely on deterministic order.
+/// If `since_utc` is `Some`, articles with a `fetched_utc` older than the threshold are excluded.
+/// Articles missing or with malformed `fetched_utc` are always included (with a summary warning).
+fn scan_and_prepare_articles(
+    output_dir: &Path,
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<Vec<ArticlePackage>, String> {
+    scan_and_prepare_articles_with_progress(output_dir, since_utc, |_| {})
+}
+
+fn scan_and_prepare_articles_with_progress<F>(
+    output_dir: &Path,
+    since_utc: Option<chrono::DateTime<chrono::Utc>>,
+    mut on_progress: F,
+) -> Result<Vec<ArticlePackage>, String>
+where
+    F: FnMut(ArticleScanProgress),
+{
+    let config = build_content_prep_config();
+    let markdown_files = list_markdown_files(output_dir)?;
     let files_total = markdown_files.len();
 
     let mut missing_fetched_utc_count: usize = 0;
     let mut malformed_fetched_utc_count: usize = 0;
 
-    let mut packages = Vec::with_capacity(markdown_files.len());
-    for (index, path) in markdown_files.into_iter().enumerate() {
-        let files_scanned = index + 1;
-        let markdown = fs::read_to_string(&path)
-            .map_err(|err| format!("failed to read {}: {}", path.display(), err))?;
-        let fields = match parse_frontmatter(&markdown) {
-            Some(fields) => fields,
-            None => {
-                // Archive files (multi-doc format) start with "=====" and live in the
-                // same output directory as article files — skip them silently at DEBUG.
-                // Any other .md file without valid frontmatter is unexpected and warrants a WARN.
-                if markdown.starts_with("=====") {
-                    engine_debug!(
-                        "[briefing-loader] skipping {}: archive format (not an article)",
-                        path.display()
-                    );
-                } else {
-                    engine_warn!(
-                        "[briefing-loader] skipping {}: no valid frontmatter",
-                        path.display()
-                    );
-                }
-                on_progress(ArticleScanProgress {
-                    files_scanned,
-                    files_total,
-                });
-                continue;
-            }
-        };
-        let url = match fields
-            .url
-            .as_deref()
-            .map(|u| u.trim())
-            .filter(|u| !u.is_empty())
-        {
-            Some(url) => url.to_string(),
-            None => {
-                engine_warn!(
-                    "[briefing-loader] skipping {}: no url field",
-                    path.display()
-                );
-                on_progress(ArticleScanProgress {
-                    files_scanned,
-                    files_total,
-                });
-                continue;
-            }
-        };
+    if files_total == 0 {
+        return Ok(Vec::new());
+    }
 
-        if let Some(since_dt) = since_utc {
-            match &fields.fetched_utc {
-                None => {
-                    missing_fetched_utc_count += 1;
+    let worker_count = thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .min(files_total);
+    let chunk_size = files_total.div_ceil(worker_count);
+    let indexed_files: Vec<(usize, PathBuf)> = markdown_files.into_iter().enumerate().collect();
+    let (tx, rx) = mpsc::channel();
+    let mut outcomes = Vec::with_capacity(files_total);
+
+    thread::scope(|scope| {
+        for chunk in indexed_files.chunks(chunk_size) {
+            let tx = tx.clone();
+            let config = config.clone();
+            let jobs = chunk.to_vec();
+            scope.spawn(move || {
+                for (index, path) in jobs {
+                    let result = scan_article_path(index, path, since_utc, &config);
+                    let _ = tx.send(result);
                 }
-                Some(raw) => match parse_rfc3339_utc("article", raw) {
-                    Err(_) => {
+            });
+        }
+        drop(tx);
+
+        let mut first_error: Option<String> = None;
+        for (index, result) in rx.into_iter().enumerate() {
+            let scanned_count = index + 1;
+            match result {
+                Ok(outcome) => {
+                    if outcome.missing_fetched_utc {
+                        missing_fetched_utc_count += 1;
+                    }
+                    if outcome.malformed_fetched_utc {
                         malformed_fetched_utc_count += 1;
                     }
-                    Ok(art_ts) => {
-                        if art_ts < since_dt {
-                            on_progress(ArticleScanProgress {
-                                files_scanned,
-                                files_total,
-                            });
-                            continue;
-                        }
-                    }
-                },
+                    outcomes.push(outcome);
+                }
+                Err(err) => {
+                    first_error.get_or_insert(err);
+                }
             }
+            on_progress(ArticleScanProgress {
+                files_scanned: scanned_count,
+                files_total,
+            });
         }
+        if let Some(err) = first_error {
+            return Err(err);
+        }
+        Ok(())
+    })?;
 
-        let fetched_utc = fields.fetched_utc.clone();
-        let clean_text = derive_clean_text(&markdown, &url, fields.title.as_deref(), &config);
-        packages.push(ArticlePackage {
-            url,
-            source_title: fields.title,
-            clean_text,
-            fetched_utc,
-        });
-        on_progress(ArticleScanProgress {
-            files_scanned,
-            files_total,
-        });
-    }
+    outcomes.sort_by_key(|outcome| outcome.index);
+    let packages: Vec<ArticlePackage> = outcomes
+        .into_iter()
+        .filter_map(|outcome| outcome.package)
+        .collect();
 
     if missing_fetched_utc_count > 0 {
         engine_warn!(

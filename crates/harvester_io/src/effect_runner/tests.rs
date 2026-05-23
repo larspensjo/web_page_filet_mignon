@@ -10,13 +10,13 @@ use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmCompletionError, LlmEvent};
 use harvester_engine::llm::{DEFAULT_BRIEFING_MODEL, OPENAI_MODEL_GPT_4O_MINI};
-use harvester_engine::{FetchSettings, UrlPolicy};
+use harvester_engine::{FailureKind, FetchSettings, Stage, UrlPolicy};
 use tempfile::tempdir;
 
 use crate::effect_helpers::{build_local_model_catalog, download_link_page, map_llm_event};
 use crate::RuntimePaths;
 
-use super::{EffectRunner, NoOpPlatformHandler};
+use super::{is_actionable_job_failure, EffectRunner, NoOpPlatformHandler};
 
 fn make_test_runtime_paths(base: &Path) -> RuntimePaths {
     RuntimePaths {
@@ -666,6 +666,25 @@ fn map_llm_event_unsupported_model_has_none_metadata() {
     } else {
         panic!("expected LlmCompleted");
     }
+}
+
+#[test]
+fn job_failure_warning_classification_keeps_expected_fetch_failures_in_info() {
+    assert!(!is_actionable_job_failure(&FailureKind::HttpStatus(403)));
+    assert!(!is_actionable_job_failure(&FailureKind::Timeout));
+    assert!(!is_actionable_job_failure(&FailureKind::BlockedContent {
+        description: "consent interstitial".to_string(),
+    }));
+
+    assert!(is_actionable_job_failure(&FailureKind::InvalidUrl));
+    assert!(is_actionable_job_failure(
+        &FailureKind::UrlPolicyViolation {
+            description: "blocked host".to_string(),
+        }
+    ));
+    assert!(is_actionable_job_failure(&FailureKind::ProcessingTimeout {
+        stage: Stage::Converting,
+    }));
 }
 
 #[test]

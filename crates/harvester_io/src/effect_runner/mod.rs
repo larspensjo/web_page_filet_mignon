@@ -10,7 +10,7 @@ use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmHandle, PromptRegistry};
 use harvester_engine::{
-    is_confined_to, EngineConfig, EngineEvent, EngineHandle, FetchSettings, UrlPolicy,
+    is_confined_to, EngineConfig, EngineEvent, EngineHandle, FailureKind, FetchSettings, UrlPolicy,
 };
 
 mod dispatch;
@@ -30,6 +30,20 @@ fn truncate_url_for_log(url: &str) -> String {
     let mut short: String = url.chars().take(MAX_LOG_URL_LEN).collect();
     short.push_str("...");
     short
+}
+
+fn is_actionable_job_failure(kind: &FailureKind) -> bool {
+    matches!(
+        kind,
+        FailureKind::InvalidUrl
+            | FailureKind::ProcessingError
+            | FailureKind::ProcessingTimeout { .. }
+            | FailureKind::UrlPolicyViolation { .. }
+            | FailureKind::QuotaExceeded { .. }
+            | FailureKind::PathPolicyViolation { .. }
+            | FailureKind::LlmError { .. }
+            | FailureKind::LlmValidationFailed { .. }
+    )
 }
 
 /// Trait for platform-specific effect handling (e.g., opening URLs in browser)
@@ -209,7 +223,11 @@ impl EffectRunner {
                             },
                             Err(failure_kind) => {
                                 let reason = failure_kind.to_string();
-                                engine_warn!("Job {} failed: {}", job_id, reason);
+                                if is_actionable_job_failure(&failure_kind) {
+                                    engine_warn!("Job {} failed: {}", job_id, reason);
+                                } else {
+                                    engine_info!("Job {} failed: {}", job_id, reason);
+                                }
                                 Msg::JobDone {
                                     job_id,
                                     result: JobResultKind::Failed { reason },

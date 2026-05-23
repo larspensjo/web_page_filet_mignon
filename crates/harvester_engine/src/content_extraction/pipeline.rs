@@ -8,7 +8,7 @@ use crate::content_extraction::{
     policy::ExtractionPolicy,
 };
 use crate::links::{ConversionOutput, ExtractedLink, LinkExtractingConverter};
-use engine_logging::{engine_debug, engine_warn};
+use engine_logging::engine_debug;
 
 const DEFAULT_MAX_LINKS: usize = 5_000;
 
@@ -64,8 +64,8 @@ impl ExtractionPipeline {
                 < self.policy.retention.min_retention_ratio;
 
         let final_markdown = if used_fallback {
-            engine_warn!(
-                "[extract-pipeline] retention safeguard triggered: cleaned={} original={}",
+            engine_debug!(
+                "[extract-pipeline] retention fallback used: cleaned={} original={}",
                 cleaned_markdown.len(),
                 markdown.len()
             );

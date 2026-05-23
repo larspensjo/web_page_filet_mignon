@@ -206,13 +206,13 @@ impl ReqwestFetcher {
 
         let response = client.get(parsed.clone()).send().await.map_err(|err| {
             let fetch_err = map_reqwest_error(err);
-            engine_warn!("[fetch] Fetch failed for '{}': {}", url, fetch_err.kind);
+            engine_info!("[fetch] Fetch failed for '{}': {}", url, fetch_err.kind);
             fetch_err
         })?;
 
         let status = response.status();
         if !status.is_success() {
-            engine_warn!("[fetch] HTTP error {} for URL '{}'", status.as_u16(), url);
+            engine_info!("[fetch] HTTP error {} for URL '{}'", status.as_u16(), url);
             let retry_after = parse_retry_after(status, response.headers());
             return Err(FetchError::new_with_retry_after(
                 FailureKind::HttpStatus(status.as_u16()),
@@ -358,7 +358,7 @@ impl Fetcher for ReqwestFetcher {
                 }
                 Err(err) => {
                     if !is_retryable(&err.kind) || attempt == max_attempts {
-                        engine_warn!(
+                        engine_info!(
                             "[fetch] attempt {}/{} failed url={} error={}",
                             attempt,
                             max_attempts,

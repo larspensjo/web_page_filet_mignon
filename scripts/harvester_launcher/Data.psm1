@@ -18,7 +18,7 @@ function Get-LauncherActionItems {
 function Get-LauncherParamDefs {
     # Order matters: determines right-pane cursor index
     @(
-        [pscustomobject]@{ Name='LlmConcurrency';      Label='LLM concurrency';      Type='Int';  Min=1;    Max=10;   Unit='';     Flag='--llm-concurrency';           EnumValues=$null }
+        [pscustomobject]@{ Name='LlmConcurrency';      Label='LLM concurrency';      Type='Int';  Min=1;    Max=12;   Unit='';     Flag='--llm-concurrency';           EnumValues=$null }
         [pscustomobject]@{ Name='PollInterval';        Label='Poll interval';        Type='Int';  Min=1;    Max=1440; Unit=' min'; Flag='--poll-interval';             EnumValues=$null }
         [pscustomobject]@{ Name='ForceUnlock';         Label='Force unlock';         Type='Bool'; Min=$null; Max=$null; Unit='';   Flag='--force-unlock';              EnumValues=$null }
         [pscustomobject]@{ Name='AllowUnsupported';    Label='Allow unsupported';    Type='Bool'; Min=$null; Max=$null; Unit='';   Flag='--allow-unsupported-sources'; EnumValues=$null }
@@ -32,7 +32,7 @@ function Get-LauncherParamDefs {
 
 function New-LauncherDefaults {
     @{
-        LlmConcurrency   = 6
+        LlmConcurrency   = 12
         PollInterval     = 15
         ForceUnlock      = $false
         AllowUnsupported = $false

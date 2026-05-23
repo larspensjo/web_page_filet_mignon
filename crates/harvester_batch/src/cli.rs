@@ -2,7 +2,8 @@ use clap::Parser;
 use std::path::PathBuf;
 
 const DEFAULT_POLL_INTERVAL_MINUTES: u32 = 15;
-const DEFAULT_LLM_CONCURRENCY: usize = 6;
+const DEFAULT_LLM_CONCURRENCY: usize = 12;
+const MAX_LLM_CONCURRENCY: usize = 12;
 
 /// Harvester batch runner - headless mode for scheduled execution
 #[derive(Parser, Debug)]
@@ -24,7 +25,7 @@ pub struct Args {
     #[arg(long, default_value = "prompts")]
     pub prompts_dir: PathBuf,
 
-    /// Maximum concurrent LLM requests (1-10)
+    /// Maximum concurrent LLM requests (1-12)
     #[arg(long, default_value_t = DEFAULT_LLM_CONCURRENCY)]
     pub llm_concurrency: usize,
 
@@ -116,7 +117,7 @@ impl Args {
     /// Clamp configuration values to valid ranges.
     fn clamp_values(&mut self) {
         // Clamp llm_concurrency to valid range
-        self.llm_concurrency = self.llm_concurrency.clamp(1, 10);
+        self.llm_concurrency = self.llm_concurrency.clamp(1, MAX_LLM_CONCURRENCY);
 
         // Clamp poll_interval to valid range (1 minute to 24 hours)
         self.poll_interval = self.poll_interval.clamp(1, 1440);
@@ -275,9 +276,16 @@ mod tests {
     }
 
     #[test]
+    fn llm_concurrency_defaults_to_doubled_summary_parallelism() {
+        let args = Args::parse_from(&["harvester_batch"]);
+        assert_eq!(args.llm_concurrency, DEFAULT_LLM_CONCURRENCY);
+        assert_eq!(args.llm_concurrency, 12);
+    }
+
+    #[test]
     fn llm_concurrency_is_clamped() {
         let args = Args::parse_from(&["harvester_batch", "--llm-concurrency", "999"]);
-        assert_eq!(args.llm_concurrency, 10);
+        assert_eq!(args.llm_concurrency, MAX_LLM_CONCURRENCY);
 
         let args = Args::parse_from(&["harvester_batch", "--llm-concurrency", "0"]);
         assert_eq!(args.llm_concurrency, 1);

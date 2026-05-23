@@ -156,8 +156,9 @@ Describe 'Reducer - navigation' {
         (Reduce $s 'MoveDown').State.Cursor.RightIndex | Should -Be 1
     }
     It 'MoveDown clamps RightIndex at last param' {
-        $s = S; $s.Ui.ActivePane = 'Right'; $s.Cursor.RightIndex = 10   # 11 params, index 10
-        (Reduce $s 'MoveDown').State.Cursor.RightIndex | Should -Be 10
+        $lastParamIndex = (Get-LauncherParamDefs).Count - 1
+        $s = S; $s.Ui.ActivePane = 'Right'; $s.Cursor.RightIndex = $lastParamIndex
+        (Reduce $s 'MoveDown').State.Cursor.RightIndex | Should -Be $lastParamIndex
     }
     It 'MoveHome sets LeftIndex to first non-separator' {
         $s = S; $s.Cursor.LeftIndex = 5
@@ -197,13 +198,14 @@ Describe 'Reducer - value editing' {
 
     It 'ValueIncrease on LlmConcurrency increments by 1' {
         $s = RightState 0
+        $s.Values.LlmConcurrency = 6
         $before = $s.Values.LlmConcurrency
         $r = Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }
         $r.State.Values.LlmConcurrency | Should -Be ($before + 1)
     }
-    It 'ValueIncrease clamps at Max (10)' {
-        $s = RightState 0; $s.Values.LlmConcurrency = 10
-        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.LlmConcurrency | Should -Be 10
+    It 'ValueIncrease clamps at Max (12)' {
+        $s = RightState 0; $s.Values.LlmConcurrency = 12
+        (Invoke-LauncherReducer -State $s -Action @{ Type='ValueIncrease' }).State.Values.LlmConcurrency | Should -Be 12
     }
     It 'ValueDecrease on LlmConcurrency decrements by 1' {
         $s = RightState 0; $s.Values.LlmConcurrency = 5
@@ -689,11 +691,11 @@ Describe 'Effects - Invoke-LoadDefaults' {
         $r.Type                  | Should -Be 'DefaultsLoaded'
         $r.Values.LlmConcurrency | Should -Be 7
     }
-    It 'clamps out-of-range LlmConcurrency to 10' {
+    It 'clamps out-of-range LlmConcurrency to 12' {
         $tmp = [IO.Path]::GetTempFileName()
         @{ SchemaVersion=1; LlmConcurrency=999 } | ConvertTo-Json | Set-Content $tmp
         $r = Invoke-LoadDefaults -FilePath $tmp; Remove-Item $tmp -Force
-        $r.Values.LlmConcurrency | Should -Be 10
+        $r.Values.LlmConcurrency | Should -Be 12
     }
     It 'unknown keys are ignored (no error)' {
         $tmp = [IO.Path]::GetTempFileName()

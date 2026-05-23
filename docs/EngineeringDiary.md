@@ -1719,3 +1719,15 @@ Type: Implementation
 Context: The footer progress bar went idle after source scanning even when poll-spawned article downloads and candidate refresh work were still active, and summary counts were duplicated in the main status label.
 Change: Added reducer-owned poll pipeline job tracking, centralized operation progress selection for view and layout, moved summary/triage counts exclusively to the operation progress area, renamed background candidate refresh labels, and replaced triage-result sorting suppression with an explicit view-model boolean.
 Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_app/src/platform/ui/render_list_box.rs, docs/plans/Plan.PollPipelineAndSummaryProgressUx.md
+
+## 2026-05-23 - Parallel article loading and warning hygiene
+Type: Implementation
+Context: Polling refreshes repeatedly scanned thousands of archived markdown files and logged expected web failures as warnings, making `engine.log` noisy.
+Change: Parallelized article scan/content-prep work while preserving deterministic package ordering and serialized progress callbacks. Downgraded expected fetch failures and extraction retention fallback logs so WARN is reserved for actionable job/source problems.
+Refs: crates/harvester_engine/src/briefing.rs, crates/harvester_engine/src/fetch.rs, crates/harvester_engine/src/content_extraction/pipeline.rs, crates/harvester_io/src/effect_runner/mod.rs
+
+## 2026-05-23 - Batch summary concurrency default
+Type: Implementation
+Context: Summary refresh and batch poll workflows needed more default LLM parallelism for article summaries.
+Change: Doubled the `harvester_batch --llm-concurrency` default from 6 to 12 and raised the launcher/CLI clamp to 12 so the default is effective.
+Refs: crates/harvester_batch/src/cli.rs, scripts/harvester_launcher/Data.psm1, scripts/harvester_launcher/Effects.psm1
