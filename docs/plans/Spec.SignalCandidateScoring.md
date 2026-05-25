@@ -93,7 +93,8 @@ The function operates over the set of articles whose signal scoring has settled 
   - Queue counters: `enqueued`, `completed`, `failed`
   - Phase tag for footer-progress rendering
   - Manual `excluded` override set (`HashSet<(signal_key, prompt_id, prompt_version)>`)
-- No new `Effect` or `Msg` variants. Scoring uses the existing `Effect::RequestLlmCompletion` (with `PromptId::ArticleSignalCandidate` and the input fields above serialized into the prompt input) and completes via the existing `Msg::LlmCompleted` path. A new arm in `update/llm_completed.rs` dispatches `ArticleSignalCandidate` results into `update/signal_candidate.rs`.
+- **No new `Effect`/`Msg` variants for the LLM call itself.** Scoring uses the existing `Effect::RequestLlmCompletion` (with `PromptId::ArticleSignalCandidate` and the input fields above serialized into the prompt input) and completes via the existing `Msg::LlmCompleted` path. A new arm in `update/llm_completed.rs` dispatches `ArticleSignalCandidate` results into `update/signal_candidate.rs`.
+- **Persistence and hydration *may* add `Effect`/`Msg` variants** following the existing summary/triage cache patterns (`Effect::PersistSummaryCache`, `Msg::SummaryCacheLoaded`-equivalents). This stage will introduce `Effect::PersistSignalCandidateCache`, `Effect::PersistSignalCandidateOverrides`, and matching load Msgs.
 - New reducer module: `crates/harvester_core/src/update/signal_candidate.rs`
 
 ### Cache key
@@ -177,7 +178,7 @@ Add a single checkbox: `Use signal-candidate selection`.
 | All eligible articles `Completed` | ON | "N candidates selected (after dedup + cap)" |
 | Some `Completed`, some still `Scoring` | OFF | "Scoring in progress (X/Y). Toggle ON to export only settled candidates (N selected)." |
 | Zero `Completed` | OFF, disabled | "No candidates settled yet — defaulting to full triage set." |
-| Settled but zero pass threshold | OFF | "No candidates above threshold (N scored). Lower threshold or toggle off." |
+| Settled but zero pass threshold | OFF | "No candidates above threshold (N scored). Lower threshold or toggle off to export the full triage set." |
 
 This ensures partial scoring cannot silently produce a surprise-tiny archive.
 
@@ -198,7 +199,7 @@ Token-estimate display reflects the snapshot's `selected_urls`.
 - **LLM parse failure:** log with URL and reason, mark article `Failed`, exclude from selection until retry. Same pattern as triage failures.
 - **Missing summary:** the stage is gated on `summary_state == Completed`. Articles without summaries are not eligible yet; no error is raised.
 - **Prompt/context hash mismatch (version bump):** full recompute on next refresh, identical to triage and summary flows.
-- **Empty selected set after scoring has settled:** the archive dialog still presents the candidate sub-mode but shows a clear notice ("No candidates above threshold — adjust threshold or toggle off to export the full triage set"). The default checkbox state remains ON; the user makes the call.
+- **Empty selected set after scoring has settled:** the archive dialog still presents the candidate sub-mode but shows a clear notice ("No candidates above threshold (N scored). Lower threshold or toggle off to export the full triage set"). The default checkbox state is **OFF** so the user does not accidentally export an empty archive; toggling ON requires an explicit choice.
 - **Scoring still in progress at archive time:** the dialog reflects current settled candidates and a "Scoring in progress (N/M)" indicator. The user can wait, lower the cap, or toggle off.
 
 ## Testing
@@ -274,4 +275,4 @@ Each phase ends in a buildable state with passing tests, per Agents.md ("complex
 ## Open questions
 
 - The `priority_cutoff_exclusive` for "what counts as a triage-survivor worth scoring" defaults to 1 today (admits priority ≥ 2). Should the signal-candidate stage use the same cutoff, or a stricter local cutoff (e.g., only score priority ≥ 3)? **Proposed default: same as today (≥ 2)**, with a CLI/settings override. This avoids coupling.
-- Should the manual `Exclude from archive` override persist across sessions, or only within a single run? **Proposed: persist in `output/.signal_candidate_overrides.ron`, cleared at archive-checkpoint.**
+- Should the manual `Exclude from archive` override persist across sessions, or only within a single run? **Decided: persist in `output/.signal_candidate_overrides.ron`, cleared at archive-checkpoint (i.e. when a successful archive submit sets a new `requested_checkpoint`, the override set is wiped and re-persisted as empty). This keeps "rejected this cluster" decisions sticky across the lifetime of a single archive cycle without leaking exclusions into the next cycle.**
