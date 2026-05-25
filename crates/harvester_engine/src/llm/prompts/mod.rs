@@ -1,3 +1,4 @@
+pub mod article_signal_candidate;
 pub mod briefing;
 pub mod summary;
 pub mod triage;
@@ -30,6 +31,11 @@ pub fn register_defaults(registry: &mut super::PromptRegistry) {
     registry.register(summary::SUMMARY_PROMPT_V5);
     registry.register(summary::SUMMARY_PROMPT_V6);
     registry.set_active(PromptId::ArticleSummary, summary::SUMMARY_PROMPT_V6.version);
+    registry.register(article_signal_candidate::ARTICLE_SIGNAL_CANDIDATE_PROMPT_V1);
+    registry.set_active(
+        PromptId::ArticleSignalCandidate,
+        article_signal_candidate::ARTICLE_SIGNAL_CANDIDATE_PROMPT_V1.version,
+    );
     registry.register(briefing::BRIEFING_PROMPT_V1);
     registry.register(briefing::BRIEFING_PROMPT_V2);
     registry.register(briefing::BRIEFING_PROMPT_V3);
@@ -69,6 +75,13 @@ mod tests {
         );
         assert_eq!(
             registry
+                .active(PromptId::ArticleSignalCandidate)
+                .expect("active ArticleSignalCandidate prompt")
+                .version,
+            article_signal_candidate::ARTICLE_SIGNAL_CANDIDATE_PROMPT_V1.version
+        );
+        assert_eq!(
+            registry
                 .active(PromptId::AggregateBriefing)
                 .expect("active AggregateBriefing prompt")
                 .version,
@@ -86,5 +99,15 @@ mod tests {
                 .expect("older exported template should remain registered");
             assert_eq!(registered.description, template.description);
         }
+    }
+
+    #[test]
+    fn signal_candidate_prompt_registered_and_active() {
+        let mut reg = PromptRegistry::default();
+        register_defaults(&mut reg);
+        let active = reg
+            .active(PromptId::ArticleSignalCandidate)
+            .expect("active version must be set");
+        assert!(active.version >= 1);
     }
 }

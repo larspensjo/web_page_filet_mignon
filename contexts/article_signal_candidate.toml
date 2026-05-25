@@ -1,0 +1,79 @@
+[meta]
+prompt_id = "ArticleSignalCandidate"
+schema_version = 1
+version = 1
+updated = "2026-05-25"
+description = "Score article summaries for SignalLog admission; emit stable dedup slug."
+changelog = "v1: initial release derived from Foundations.md themes and SignalLog patterns."
+
+[variables]
+context = """
+PORTFOLIO THESIS (from docs/Foundations.md):
+- AI as primary global economic driver; two tracks (Generalist AGI race; Specialized AI economy).
+- Two scenario outcomes: Slow Takeoff (space industrialization) vs Fast Takeoff (crisis).
+- Portfolio scope:
+    1. Terrestrial AI infrastructure (compute, power, networking, data-center build-out)
+    2. Attention economy and platform leverage
+    3. Space infrastructure (launch, on-orbit services, manufacturing)
+    4. Foundational AI platforms (model labs, agent runtimes, inference clouds)
+- Out of scope:
+    1. Per-seat SaaS subject to AI deflation
+    2. Commoditized AI integrations without proprietary distribution or compute
+    3. Humanoid robotics absent a credible commercial deployment lane
+
+CORE CONVICTIONS:
+- Structural inference scarcity persists through 2027+
+- "Great bifurcation": frontier model labs vs application layer commoditization
+- Proprietary execution moat (data, compute access, deployment surface) beats algorithmic lead
+
+WHAT A STRONG SIGNAL LOOKS LIKE:
+- A dated event: launch, deal, filing, regulatory ruling, earnings disclosure, named-actor action.
+- Attributable: named outlet plus a primary source (company, agency, person on record).
+- Re-statable as one factual sentence without losing the substance.
+- Anchors to one of the portfolio themes above (or a watchlist actor).
+
+WHAT WEAK SIGNALS LOOK LIKE (down-rank):
+- Roundups, listicles, "10 things to know" pieces.
+- Generic AI hype absent named actor, number, or date.
+- Opinion / commentary repeating prior facts without new disclosure.
+- Forward-looking forecasts ungrounded in current disclosure.
+
+SIGNAL KEY (dedup slug) - CRITICAL:
+- Same underlying event MUST receive the same signal_key across different outlets, headlines,
+  reporting angles, and date variants.
+- Build from the dominant noun phrase of the underlying event, lowercase, hyphen-separated.
+- Example: "Nvidia ships first Blackwell GPUs" and "Nvidia confirms Blackwell volume to hyperscalers"
+  both -> nvda-blackwell-volume-shipping.
+- Do NOT include the outlet, the publication date, or speculative qualifiers in the slug.
+
+SOURCE TIER GUIDANCE:
+- Tier1 (best): wire services (Reuters, Bloomberg, AP), primary filings (SEC, FCC, gov agencies),
+  company press releases, official transcripts, NYT/WSJ/FT business desks.
+- Tier2: trade publications with established business desks (CNBC, The Information, TechCrunch,
+  Stratechery, Semianalysis), reputable sector newsletters.
+- Tier3: opinion blogs, marketing-backed sites, low-staffed aggregators, anything that re-narrates
+  without primary attribution.
+
+CONFIDENCE GUIDANCE:
+- High: Tier1 source AND single concrete event AND the gist is verifiable from the summary alone.
+- Medium: Tier2 source, or Tier1 with light interpretation required.
+- Low: Tier3, ambiguous source, or summary leaves the core event unclear.
+
+THEMES (preferred kebab-case tags; new themes allowed if a real signal demands one):
+- inference-scarcity
+- ai-infrastructure
+- power-and-energy
+- data-center-buildout
+- attention-economy
+- platform-leverage
+- space-infrastructure
+- launch-cadence
+- on-orbit-services
+- foundation-model-lab
+- agent-runtime
+- inference-cloud
+- regulation
+- export-controls
+- enterprise-deployment
+- consumer-ai-product
+"""

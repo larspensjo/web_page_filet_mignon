@@ -93,7 +93,7 @@ impl std::fmt::Display for ContextLoadError {
             Self::Parse { path, source } => write!(f, "failed to parse '{}': {}", path, source),
             Self::UnknownPromptId { path, prompt_id } => write!(
                 f,
-                "unknown prompt_id '{}' in '{}'. Valid values: ArticleTriage, ArticleSummary, AggregateBriefing",
+                "unknown prompt_id '{}' in '{}'. Valid values: ArticleTriage, ArticleSummary, ArticleSignalCandidate, AggregateBriefing",
                 prompt_id, path
             ),
             Self::UnknownSchemaVersion { path, version } => write!(
@@ -187,5 +187,24 @@ mod tests {
             toml::from_str(&serialized).expect("deserialize prompt context");
         assert_eq!(parsed.meta, meta);
         assert_eq!(parsed.variables, variables);
+    }
+
+    #[test]
+    fn signal_candidate_context_loads() {
+        let p = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../contexts/article_signal_candidate.toml"
+        ));
+        let ctx = load_context_file(p).expect("context file must load");
+        assert_eq!(ctx.meta.prompt_id, "ArticleSignalCandidate");
+        assert_eq!(ctx.meta.schema_version, 1);
+        assert!(
+            !ctx.variables.is_empty(),
+            "must define at least one variable"
+        );
+        assert!(
+            ctx.variables.contains_key("context"),
+            "must define a {{{{context}}}} variable used by the system template"
+        );
     }
 }

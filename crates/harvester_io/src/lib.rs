@@ -8,6 +8,8 @@ mod persistence_worker;
 mod prompt_template_store;
 mod runtime_paths;
 mod seen_set_store;
+pub mod signal_candidate_cache_store;
+pub mod signal_candidate_overrides_store;
 mod source_loader;
 mod summary_cache_store;
 mod triage_cache_store;

@@ -97,6 +97,7 @@ pub fn load_summary_cache(path: &Path) -> SummaryCache {
         let prompt_id = match persisted_key.prompt_id.as_str() {
             "ArticleSummary" => PromptId::ArticleSummary,
             "ArticleTriage" => PromptId::ArticleTriage,
+            "ArticleSignalCandidate" => PromptId::ArticleSignalCandidate,
             "AggregateBriefing" => PromptId::AggregateBriefing,
             unknown => {
                 engine_warn!(

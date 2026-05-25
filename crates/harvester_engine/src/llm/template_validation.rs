@@ -25,6 +25,17 @@ fn synthetic_vars(prompt_id: PromptId) -> HashMap<String, String> {
             vars.insert("previous_briefings", "(none)");
             vars.insert("briefing_time_window", "All available articles");
         }
+        PromptId::ArticleSignalCandidate => {
+            vars.set_document("content", "Sample article text");
+            vars.insert("url", "https://example.com/article");
+            vars.insert("outlet", "example.com");
+            vars.insert("title", "Sample article");
+            vars.insert("published_at", "2026-05-25");
+            vars.insert("triage_priority", "3");
+            vars.insert("triage_tags", "ai-infrastructure, inference-scarcity");
+            vars.insert("summary", "Sample summary text.");
+            vars.insert("key_points", "- Point one\n- Point two");
+        }
         _ => {
             vars.set_document("content", "Sample article text");
         }

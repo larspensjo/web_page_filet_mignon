@@ -8,6 +8,7 @@ use std::str::FromStr;
 pub enum PromptId {
     ArticleTriage,
     ArticleSummary,
+    ArticleSignalCandidate,
     AggregateBriefing,
 }
 
@@ -18,6 +19,7 @@ impl FromStr for PromptId {
         match s {
             "ArticleTriage" => Ok(PromptId::ArticleTriage),
             "ArticleSummary" => Ok(PromptId::ArticleSummary),
+            "ArticleSignalCandidate" => Ok(PromptId::ArticleSignalCandidate),
             "AggregateBriefing" => Ok(PromptId::AggregateBriefing),
             _ => Err(ParsePromptIdError::Unknown(s.to_string())),
         }
@@ -29,6 +31,7 @@ impl std::fmt::Display for PromptId {
         match self {
             PromptId::ArticleTriage => write!(f, "ArticleTriage"),
             PromptId::ArticleSummary => write!(f, "ArticleSummary"),
+            PromptId::ArticleSignalCandidate => write!(f, "ArticleSignalCandidate"),
             PromptId::AggregateBriefing => write!(f, "AggregateBriefing"),
         }
     }
@@ -479,5 +482,15 @@ mod tests {
         let mut overlay = PromptTemplateOwned::from(&make_static_template(4));
         overlay.version = PROMPT_VERSION_DRAFT;
         registry.register_overlay(overlay);
+    }
+
+    #[test]
+    fn signal_candidate_round_trips() {
+        let id = PromptId::ArticleSignalCandidate;
+        assert_eq!(id.to_string(), "ArticleSignalCandidate");
+        assert_eq!(
+            PromptId::from_str("ArticleSignalCandidate").unwrap(),
+            PromptId::ArticleSignalCandidate
+        );
     }
 }

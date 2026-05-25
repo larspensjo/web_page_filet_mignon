@@ -10,6 +10,7 @@ Create a `contexts/` directory at the workspace root (next to `Cargo.toml`). One
 contexts/
   article_triage.toml
   article_summary.toml
+  article_signal_candidate.toml
   aggregate_briefing.toml
   archive/
     article_triage.v6.toml
@@ -23,7 +24,7 @@ Each context file uses the following structure:
 
 ```toml
 [meta]
-prompt_id = "ArticleTriage" # One of: ArticleTriage | ArticleSummary | AggregateBriefing
+prompt_id = "ArticleTriage" # One of: ArticleTriage | ArticleSummary | ArticleSignalCandidate | AggregateBriefing
 schema_version = 1
 version = 1
 updated = "2026-02-09"
@@ -50,6 +51,13 @@ Consumer gadget reviews.
 - `prompt_id` must match a known prompt id exactly (case-sensitive).
 - The `context` value is injected into prompt templates via `{{context}}`.
 - Keep values concise to avoid token budget overruns.
+
+Known files:
+
+- `contexts/article_triage.toml` - `ArticleTriage`
+- `contexts/article_summary.toml` - `ArticleSummary`
+- `contexts/article_signal_candidate.toml` - `ArticleSignalCandidate`, scores article summaries for SignalLog admission
+- `contexts/aggregate_briefing.toml` - `AggregateBriefing`
 
 ## Git ignore
 

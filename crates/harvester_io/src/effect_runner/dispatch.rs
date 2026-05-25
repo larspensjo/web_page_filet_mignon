@@ -687,6 +687,7 @@ impl EffectRunner {
                     let prompt_ids = [
                         PromptId::ArticleTriage,
                         PromptId::ArticleSummary,
+                        PromptId::ArticleSignalCandidate,
                         PromptId::AggregateBriefing,
                     ];
 
@@ -784,6 +785,7 @@ impl EffectRunner {
                         let prompt_ids = &[
                             PromptId::ArticleTriage,
                             PromptId::ArticleSummary,
+                            PromptId::ArticleSignalCandidate,
                             PromptId::AggregateBriefing,
                         ];
                         let templates = prompt_ids

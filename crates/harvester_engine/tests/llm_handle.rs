@@ -21,6 +21,7 @@ fn make_config(
         default_model: ModelId::new(ProviderKind::OpenAi, "mock"),
         triage_model: None,
         summary_model: None,
+        signal_candidate_model: None,
         briefing_model: None,
         registry: Arc::clone(&registry),
         quotas: LlmQuotas::default(),

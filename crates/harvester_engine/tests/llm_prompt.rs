@@ -54,6 +54,7 @@ fn prompt_id_from_str_round_trips() {
     let ids = vec![
         (PromptId::ArticleTriage, "ArticleTriage"),
         (PromptId::ArticleSummary, "ArticleSummary"),
+        (PromptId::ArticleSignalCandidate, "ArticleSignalCandidate"),
         (PromptId::AggregateBriefing, "AggregateBriefing"),
     ];
 
@@ -76,6 +77,7 @@ fn registry_with_defaults_exposes_active_latest_template_for_each_prompt() {
     for prompt_id in [
         PromptId::ArticleTriage,
         PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
         PromptId::AggregateBriefing,
     ] {
         let versions = registry.versions(prompt_id);

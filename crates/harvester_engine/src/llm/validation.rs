@@ -4,7 +4,8 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::llm::dto::{
-    AggregateBriefing, ArticleSummary, BriefingStory, SummaryEntities, TriagePriority, TriageResult,
+    AggregateBriefing, ArticleSummary, BriefingStory, Confidence, SignalCandidateResult,
+    SourceTier, SummaryEntities, TriagePriority, TriageResult,
 };
 use crate::text_safety::truncate_to_char_boundary;
 
@@ -20,6 +21,14 @@ const MAX_RESPONSE_EXEC_SUMMARY_CHARS: usize = 3000;
 const MAX_TOP_STORIES: usize = 5;
 const MAX_STORY_HEADLINE_LEN: usize = 160;
 const MAX_STORY_BODY_WORDS: usize = 150;
+const MIN_SIGNAL_KEY_LEN: usize = 8;
+const MAX_SIGNAL_KEY_LEN: usize = 80;
+const MIN_SIGNAL_THEMES: usize = 1;
+const MAX_SIGNAL_THEMES: usize = 6;
+const MAX_SIGNAL_THEME_LEN: usize = 32;
+const MIN_DRAFT_GIST_LEN: usize = 40;
+const MAX_DRAFT_GIST_LEN: usize = 280;
+const MAX_SIGNAL_REASONING_LEN: usize = 400;
 
 const FIELD_CATEGORY: &str = "category";
 const FIELD_PRIORITY: &str = "priority";
@@ -37,6 +46,13 @@ const FIELD_ENTITIES: &str = "entities";
 const FIELD_ENTITIES_COMPANIES: &str = "companies";
 const FIELD_ENTITIES_TECHNOLOGIES: &str = "technologies";
 const FIELD_ENTITIES_PRODUCTS: &str = "products";
+const FIELD_SIGNAL_SCORE: &str = "signal_score";
+const FIELD_SIGNAL_KEY: &str = "signal_key";
+const FIELD_THEMES: &str = "themes";
+const FIELD_DRAFT_GIST: &str = "draft_gist";
+const FIELD_SOURCE_TIER: &str = "source_tier";
+const FIELD_CONFIDENCE: &str = "confidence";
+const FIELD_SIGNAL_REASONING: &str = "reasoning";
 const MAX_ENTITY_ITEMS: usize = 15;
 const MAX_ENTITY_INPUT_ITEMS: usize = 100;
 const MAX_ENTITY_ITEM_LEN: usize = 100;
@@ -208,6 +224,105 @@ pub fn validate_briefing(content: &str) -> Result<AggregateBriefing, ValidationE
     })
 }
 
+pub fn validate_signal_candidate(content: &str) -> Result<SignalCandidateResult, ValidationError> {
+    let document = parse_document(content)?;
+
+    let score_value = require_u64(&document, FIELD_SIGNAL_SCORE)?;
+    if score_value > 100 {
+        return Err(ValidationError::ValueOutOfRange(FIELD_SIGNAL_SCORE));
+    }
+    let signal_score = u8::try_from(score_value)
+        .map_err(|_| ValidationError::ValueOutOfRange(FIELD_SIGNAL_SCORE))?;
+
+    let signal_key = require_string(&document, FIELD_SIGNAL_KEY)?;
+    ensure_len_range(
+        signal_key,
+        MIN_SIGNAL_KEY_LEN,
+        MAX_SIGNAL_KEY_LEN,
+        FIELD_SIGNAL_KEY,
+    )?;
+    ensure_kebab_lower(signal_key, FIELD_SIGNAL_KEY)?;
+
+    let themes_array = require_array(&document, FIELD_THEMES)?;
+    if themes_array.len() < MIN_SIGNAL_THEMES {
+        return Err(ValidationError::ValueOutOfRange(FIELD_THEMES));
+    }
+    ensure_max_items(themes_array.len(), MAX_SIGNAL_THEMES, FIELD_THEMES)?;
+    let themes = themes_array
+        .iter()
+        .map(|value| {
+            let theme = value.as_str().ok_or_else(|| {
+                ValidationError::SchemaViolation("each theme must be a string".into())
+            })?;
+            if theme.is_empty() {
+                return Err(ValidationError::SchemaViolation(
+                    "themes must be non-empty".into(),
+                ));
+            }
+            ensure_max_length(theme, MAX_SIGNAL_THEME_LEN, FIELD_THEMES)?;
+            Ok(theme.to_string())
+        })
+        .collect::<Result<Vec<_>, ValidationError>>()?;
+
+    let draft_gist = require_string(&document, FIELD_DRAFT_GIST)?;
+    ensure_len_range(
+        draft_gist,
+        MIN_DRAFT_GIST_LEN,
+        MAX_DRAFT_GIST_LEN,
+        FIELD_DRAFT_GIST,
+    )?;
+    if draft_gist.trim() != draft_gist {
+        return Err(ValidationError::SchemaViolation(
+            "draft_gist must not have leading or trailing whitespace".into(),
+        ));
+    }
+    if draft_gist
+        .chars()
+        .any(|c| matches!(c, '*' | '_' | '`' | '#' | '[' | ']' | '>' | '~'))
+    {
+        return Err(ValidationError::SchemaViolation(
+            "draft_gist must not contain markdown markers".into(),
+        ));
+    }
+
+    let source_tier = match require_string(&document, FIELD_SOURCE_TIER)? {
+        "Tier1" => SourceTier::Tier1,
+        "Tier2" => SourceTier::Tier2,
+        "Tier3" => SourceTier::Tier3,
+        _ => {
+            return Err(ValidationError::SchemaViolation(
+                "invalid source_tier".into(),
+            ))
+        }
+    };
+
+    let confidence = match require_string(&document, FIELD_CONFIDENCE)? {
+        "High" => Confidence::High,
+        "Medium" => Confidence::Medium,
+        "Low" => Confidence::Low,
+        _ => {
+            return Err(ValidationError::SchemaViolation(
+                "invalid confidence".into(),
+            ))
+        }
+    };
+
+    let reasoning = require_string(&document, FIELD_SIGNAL_REASONING)?;
+    ensure_max_length(reasoning, MAX_SIGNAL_REASONING_LEN, FIELD_SIGNAL_REASONING)?;
+
+    Ok(SignalCandidateResult {
+        signal_score,
+        signal_key: signal_key.to_string(),
+        themes,
+        draft_gist: draft_gist.to_string(),
+        source_tier,
+        confidence,
+        reasoning: reasoning.to_string(),
+        input_tokens: 0,
+        output_tokens: 0,
+    })
+}
+
 fn parse_briefing_stories(
     document: &Map<String, Value>,
 ) -> Result<Vec<BriefingStory>, ValidationError> {
@@ -305,6 +420,38 @@ fn ensure_max_length(value: &str, max: usize, field: &'static str) -> Result<(),
         })
     } else {
         Ok(())
+    }
+}
+
+fn ensure_len_range(
+    value: &str,
+    min: usize,
+    max: usize,
+    field: &'static str,
+) -> Result<(), ValidationError> {
+    let actual_chars = value.chars().count();
+    if actual_chars < min {
+        Err(ValidationError::ValueOutOfRange(field))
+    } else {
+        ensure_max_length(value, max, field)
+    }
+}
+
+fn ensure_kebab_lower(value: &str, field: &'static str) -> Result<(), ValidationError> {
+    if value.starts_with('-') || value.ends_with('-') || value.contains("--") {
+        return Err(ValidationError::SchemaViolation(format!(
+            "{field} must be lowercase kebab-case"
+        )));
+    }
+    let valid = value
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if valid {
+        Ok(())
+    } else {
+        Err(ValidationError::SchemaViolation(format!(
+            "{field} must be lowercase kebab-case"
+        )))
     }
 }
 
@@ -555,5 +702,185 @@ mod tests {
             matches!(err, ValidationError::SchemaViolation(_)),
             "expected SchemaViolation, got {err:?}"
         );
+    }
+
+    fn valid_signal_candidate_json() -> String {
+        r#"{
+            "signal_score": 81,
+            "signal_key": "nvda-blackwell-volume-shipping",
+            "themes": ["inference-scarcity", "ai-infrastructure"],
+            "draft_gist": "Nvidia confirmed Blackwell GPUs are moving into volume shipments for major cloud customers.",
+            "source_tier": "Tier1",
+            "confidence": "High",
+            "reasoning": "Concrete company disclosure from a high-authority source."
+        }"#
+        .to_string()
+    }
+
+    #[test]
+    fn validate_signal_candidate_accepts_valid_output() {
+        let result = validate_signal_candidate(&valid_signal_candidate_json()).unwrap();
+        assert_eq!(result.signal_score, 81);
+        assert_eq!(result.source_tier, SourceTier::Tier1);
+        assert_eq!(result.confidence, Confidence::High);
+        assert_eq!(result.input_tokens, 0);
+        assert_eq!(result.output_tokens, 0);
+    }
+
+    #[test]
+    fn validate_signal_candidate_retains_non_kebab_theme_values() {
+        let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
+        value[FIELD_THEMES] = serde_json::json!([
+            "AI Infrastructure",
+            "ai_infrastructure",
+            "Inference-Scarcity"
+        ]);
+        let result = validate_signal_candidate(&value.to_string()).unwrap();
+        assert_eq!(
+            result.themes,
+            vec![
+                "AI Infrastructure",
+                "ai_infrastructure",
+                "Inference-Scarcity"
+            ]
+        );
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_score_over_100() {
+        let json =
+            valid_signal_candidate_json().replace("\"signal_score\": 81", "\"signal_score\": 101");
+        assert_eq!(
+            validate_signal_candidate(&json).unwrap_err(),
+            ValidationError::ValueOutOfRange(FIELD_SIGNAL_SCORE)
+        );
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_bad_signal_key() {
+        let json = valid_signal_candidate_json()
+            .replace("\"nvda-blackwell-volume-shipping\"", "\"Nvda Blackwell\"");
+        assert!(matches!(
+            validate_signal_candidate(&json).unwrap_err(),
+            ValidationError::SchemaViolation(_)
+        ));
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_signal_key_too_short() {
+        let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
+        value[FIELD_SIGNAL_KEY] = Value::String("short".into());
+        assert_eq!(
+            validate_signal_candidate(&value.to_string()).unwrap_err(),
+            ValidationError::ValueOutOfRange(FIELD_SIGNAL_KEY)
+        );
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_signal_key_too_long() {
+        let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
+        value[FIELD_SIGNAL_KEY] = Value::String("a".repeat(MAX_SIGNAL_KEY_LEN + 1));
+        assert!(matches!(
+            validate_signal_candidate(&value.to_string()).unwrap_err(),
+            ValidationError::FieldTooLong {
+                field: FIELD_SIGNAL_KEY,
+                max_chars: MAX_SIGNAL_KEY_LEN,
+                actual_chars
+            } if actual_chars == MAX_SIGNAL_KEY_LEN + 1
+        ));
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_empty_themes() {
+        let json = valid_signal_candidate_json().replace(
+            "\"themes\": [\"inference-scarcity\", \"ai-infrastructure\"]",
+            "\"themes\": []",
+        );
+        assert_eq!(
+            validate_signal_candidate(&json).unwrap_err(),
+            ValidationError::ValueOutOfRange(FIELD_THEMES)
+        );
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_too_many_themes() {
+        let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
+        value[FIELD_THEMES] = serde_json::json!([
+            "theme-one",
+            "theme-two",
+            "theme-three",
+            "theme-four",
+            "theme-five",
+            "theme-six",
+            "theme-seven"
+        ]);
+        assert_eq!(
+            validate_signal_candidate(&value.to_string()).unwrap_err(),
+            ValidationError::ValueOutOfRange(FIELD_THEMES)
+        );
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_gist_too_short() {
+        let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
+        value[FIELD_DRAFT_GIST] = Value::String("too short".into());
+        assert_eq!(
+            validate_signal_candidate(&value.to_string()).unwrap_err(),
+            ValidationError::ValueOutOfRange(FIELD_DRAFT_GIST)
+        );
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_gist_too_long() {
+        let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
+        value[FIELD_DRAFT_GIST] = Value::String("x".repeat(MAX_DRAFT_GIST_LEN + 1));
+        assert!(matches!(
+            validate_signal_candidate(&value.to_string()).unwrap_err(),
+            ValidationError::FieldTooLong {
+                field: FIELD_DRAFT_GIST,
+                max_chars: MAX_DRAFT_GIST_LEN,
+                actual_chars
+            } if actual_chars == MAX_DRAFT_GIST_LEN + 1
+        ));
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_gist_with_markdown() {
+        for marker in ['*', '_', '`', '#', '[', ']', '>', '~'] {
+            let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
+            value[FIELD_DRAFT_GIST] = Value::String(format!(
+                "Nvidia confirmed Blackwell volume shipments {marker}for major cloud customers."
+            ));
+            assert!(
+                matches!(
+                    validate_signal_candidate(&value.to_string()).unwrap_err(),
+                    ValidationError::SchemaViolation(_)
+                ),
+                "marker {marker:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_wrong_enum_casing() {
+        let json = valid_signal_candidate_json().replace("\"Tier1\"", "\"tier1\"");
+        assert!(matches!(
+            validate_signal_candidate(&json).unwrap_err(),
+            ValidationError::SchemaViolation(_)
+        ));
+    }
+
+    #[test]
+    fn validate_signal_candidate_rejects_reasoning_too_long() {
+        let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
+        value[FIELD_SIGNAL_REASONING] = Value::String("r".repeat(MAX_SIGNAL_REASONING_LEN + 1));
+        assert!(matches!(
+            validate_signal_candidate(&value.to_string()).unwrap_err(),
+            ValidationError::FieldTooLong {
+                field: FIELD_SIGNAL_REASONING,
+                max_chars: MAX_SIGNAL_REASONING_LEN,
+                actual_chars
+            } if actual_chars == MAX_SIGNAL_REASONING_LEN + 1
+        ));
     }
 }

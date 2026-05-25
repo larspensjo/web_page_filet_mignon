@@ -56,6 +56,7 @@ fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSna
     let prompt_ids = [
         PromptId::ArticleTriage,
         PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
         PromptId::AggregateBriefing,
     ];
     prompt_ids

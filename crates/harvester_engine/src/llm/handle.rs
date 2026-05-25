@@ -29,6 +29,7 @@ pub struct LlmConfig {
     pub default_model: ModelId,
     pub triage_model: Option<ModelId>,
     pub summary_model: Option<ModelId>,
+    pub signal_candidate_model: Option<ModelId>,
     pub briefing_model: Option<ModelId>,
     pub registry: Arc<RwLock<PromptRegistry>>,
     pub quotas: LlmQuotas,
@@ -805,7 +806,7 @@ async fn handle_completion_concurrent(
 ///
 /// Precedence (highest to lowest):
 /// 1. `model_override` if `Some` — caller's explicit choice.
-/// 2. Per-prompt-id stage model (`triage_model`, `summary_model`, `briefing_model`) if configured.
+/// 2. Per-prompt-id stage model if configured.
 /// 3. `config.default_model` — unconditional fallback.
 fn resolve_model(
     prompt_id: PromptId,
@@ -826,6 +827,12 @@ fn resolve_model(
             .as_ref()
             .unwrap_or(&config.default_model)
             .clone(),
+        PromptId::ArticleSignalCandidate => config
+            .signal_candidate_model
+            .as_ref()
+            .or(config.summary_model.as_ref())
+            .unwrap_or(&config.default_model)
+            .clone(),
         PromptId::AggregateBriefing => config
             .briefing_model
             .as_ref()
@@ -843,6 +850,9 @@ pub fn local_dispatchable_model_names(config: &LlmConfig) -> Vec<String> {
         names.insert(m.model_name().to_string());
     }
     if let Some(m) = &config.summary_model {
+        names.insert(m.model_name().to_string());
+    }
+    if let Some(m) = &config.signal_candidate_model {
         names.insert(m.model_name().to_string());
     }
     if let Some(m) = &config.briefing_model {
@@ -892,6 +902,9 @@ fn validate_model_override(
         allow_list.insert(m.model_name());
     }
     if let Some(m) = &config.summary_model {
+        allow_list.insert(m.model_name());
+    }
+    if let Some(m) = &config.signal_candidate_model {
         allow_list.insert(m.model_name());
     }
     if let Some(m) = &config.briefing_model {
@@ -974,6 +987,10 @@ fn validate_response(prompt_id: PromptId, content: &str) -> Result<String, Valid
         }
         PromptId::ArticleSummary => {
             let _ = validate_summary(content)?;
+            Ok(content.to_string())
+        }
+        PromptId::ArticleSignalCandidate => {
+            let _ = crate::llm::validation::validate_signal_candidate(content)?;
             Ok(content.to_string())
         }
         PromptId::AggregateBriefing => {
@@ -1125,6 +1142,7 @@ mod tests {
                 default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O_MINI),
                 triage_model: None,
                 summary_model: None,
+                signal_candidate_model: None,
                 briefing_model: None,
                 registry,
                 quotas: LlmQuotas::default(),
@@ -1163,5 +1181,24 @@ mod tests {
         let err = validate_model_override(&override_model, &config, None).unwrap_err();
 
         assert_eq!(err, ModelOverrideValidationError::UnknownModelName);
+    }
+
+    #[test]
+    fn signal_candidate_falls_back_to_summary_model_then_default() {
+        let mut cfg = test_llm_config();
+        cfg.default_model = ModelId::new(ProviderKind::OpenAi, "gpt-default");
+        cfg.summary_model = Some(ModelId::new(ProviderKind::OpenAi, "gpt-summary"));
+        cfg.signal_candidate_model = None;
+
+        let m = resolve_model(PromptId::ArticleSignalCandidate, None, &cfg);
+        assert_eq!(m.model_name(), "gpt-summary");
+
+        cfg.summary_model = None;
+        let m = resolve_model(PromptId::ArticleSignalCandidate, None, &cfg);
+        assert_eq!(m.model_name(), "gpt-default");
+
+        cfg.signal_candidate_model = Some(ModelId::new(ProviderKind::OpenAi, "gpt-signal"));
+        let m = resolve_model(PromptId::ArticleSignalCandidate, None, &cfg);
+        assert_eq!(m.model_name(), "gpt-signal");
     }
 }

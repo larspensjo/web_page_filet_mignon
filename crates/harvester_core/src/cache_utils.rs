@@ -9,6 +9,16 @@ pub fn model_ids_compatible(store_model_id: &str, completion_model_id: &str) -> 
             .is_some_and(|b| *b == b'-')
 }
 
+pub(crate) fn hex_digest(digest: impl AsRef<[u8]>) -> String {
+    let bytes = digest.as_ref();
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        use std::fmt::Write;
+        let _ = write!(&mut hex, "{byte:02x}");
+    }
+    hex
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

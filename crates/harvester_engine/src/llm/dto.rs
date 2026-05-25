@@ -55,3 +55,60 @@ pub struct AggregateBriefing {
     pub top_stories: Vec<BriefingStory>,
     pub article_count: u32,
 }
+
+/// Outlet authority tier. Lower variant = higher authority. `Tier1` is best.
+/// Ord/PartialOrd derive ordering by variant position, so `Tier1 < Tier2 < Tier3`,
+/// which matches the selection tie-breaker rule ("best `source_tier` wins").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SourceTier {
+    Tier1,
+    Tier2,
+    Tier3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Confidence {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalCandidateResult {
+    pub signal_score: u8,
+    pub signal_key: String,
+    pub themes: Vec<String>,
+    pub draft_gist: String,
+    pub source_tier: SourceTier,
+    pub confidence: Confidence,
+    pub reasoning: String,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+#[cfg(test)]
+mod signal_candidate_dto_tests {
+    use super::*;
+
+    #[test]
+    fn source_tier_orders_tier1_best() {
+        assert!(SourceTier::Tier1 < SourceTier::Tier2);
+        assert!(SourceTier::Tier2 < SourceTier::Tier3);
+    }
+
+    #[test]
+    fn signal_candidate_result_constructable() {
+        let r = SignalCandidateResult {
+            signal_score: 75,
+            signal_key: "nvda-q4-earnings".to_string(),
+            themes: vec!["inference-scarcity".to_string()],
+            draft_gist: "Nvidia reports record data-center revenue in Q4 2026.".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "Direct earnings release.".to_string(),
+            input_tokens: 1200,
+            output_tokens: 80,
+        };
+        assert_eq!(r.signal_score, 75);
+    }
+}

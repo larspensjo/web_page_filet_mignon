@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 use crate::briefing::ArticleSummaryResult;
+use crate::cache_utils::hex_digest;
 
 /// Maximum number of entries allowed in the cache before eviction.
 /// Prevents unbounded growth in memory and on disk.
@@ -41,6 +42,16 @@ impl SummaryCacheKey {
             model_id: model_id.to_string(),
             context_hash,
         })
+    }
+
+    pub fn digest(&self) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(self.content_hash.as_bytes());
+        hasher.update(self.prompt_id.to_string().as_bytes());
+        hasher.update(self.prompt_version.to_be_bytes());
+        hasher.update(self.model_id.as_bytes());
+        hasher.update(self.context_hash.as_bytes());
+        hex_digest(hasher.finalize())
     }
 }
 
@@ -201,13 +212,7 @@ pub fn context_hash(context: &[(String, String)]) -> String {
         hasher.update(b"\n");
     }
 
-    let digest = hasher.finalize();
-    let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write;
-        let _ = write!(&mut hex, "{byte:02x}");
-    }
-    hex
+    hex_digest(hasher.finalize())
 }
 
 #[cfg(test)]
@@ -502,6 +507,19 @@ mod tests {
         )
         .unwrap();
         assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn summary_cache_key_digest_is_stable() {
+        let key = SummaryCacheKey {
+            content_hash: "hash".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        };
+        assert_eq!(key.digest(), key.digest());
+        assert_eq!(key.digest().len(), 64);
     }
 
     #[test]

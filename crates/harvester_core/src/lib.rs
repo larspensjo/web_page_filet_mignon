@@ -12,6 +12,8 @@ mod pre_triage_coordinator;
 mod pre_triage_filter;
 mod preview;
 mod prompt_lab;
+pub mod signal_candidate;
+pub mod signal_candidate_cache;
 mod source_state;
 mod state;
 mod summary_cache;
@@ -50,6 +52,14 @@ pub use preview::PreviewContentKind;
 pub use prompt_lab::{
     ModelCatalogSource, PromptLabInputSource, PromptLabRunId, PromptLabRunRecord,
     PromptLabRunStatus, PromptLabStage, PromptLabTemplateSnapshot,
+};
+pub use signal_candidate::{
+    OverrideKey, ScoredCandidate, SelectionPolicy, SignalCandidateSelection,
+    SignalCandidateSession, SignalCandidateState,
+};
+pub use signal_candidate_cache::{
+    SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,
+    SignalCandidateCacheKeyError, SignalCandidateInputBundle,
 };
 pub use source_state::{SourceInstanceState, SourcePollStat, SourceStateIndex};
 pub use state::{

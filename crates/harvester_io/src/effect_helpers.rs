@@ -49,7 +49,26 @@ pub fn prompt_context_filename(prompt_id: PromptId) -> &'static str {
     match prompt_id {
         PromptId::ArticleTriage => "article_triage.toml",
         PromptId::ArticleSummary => "article_summary.toml",
+        PromptId::ArticleSignalCandidate => "article_signal_candidate.toml",
         PromptId::AggregateBriefing => "aggregate_briefing.toml",
+    }
+}
+
+#[cfg(test)]
+mod prompt_context_filename_tests {
+    use super::*;
+
+    #[test]
+    fn every_prompt_id_has_a_context_filename() {
+        for id in [
+            PromptId::ArticleTriage,
+            PromptId::ArticleSummary,
+            PromptId::ArticleSignalCandidate,
+            PromptId::AggregateBriefing,
+        ] {
+            let fname = prompt_context_filename(id);
+            assert!(!fname.is_empty(), "missing filename for {id:?}");
+        }
     }
 }
 

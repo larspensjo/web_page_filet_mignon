@@ -957,7 +957,9 @@ dependencies = [
  "harvester_engine",
  "log",
  "serde",
+ "serde_json",
  "sha2",
+ "thiserror 2.0.18",
  "url",
 ]
 

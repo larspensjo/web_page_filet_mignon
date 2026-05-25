@@ -264,6 +264,15 @@ fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
         .to_string();
     map.insert(PromptId::ArticleSummary, summary_model);
 
+    let signal_candidate_model = config
+        .signal_candidate_model
+        .as_ref()
+        .or(config.summary_model.as_ref())
+        .unwrap_or(&config.default_model)
+        .model_name()
+        .to_string();
+    map.insert(PromptId::ArticleSignalCandidate, signal_candidate_model);
+
     let briefing_model = config
         .briefing_model
         .as_ref()
@@ -297,6 +306,7 @@ fn build_effect_runner(
             default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O_MINI),
             triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
             summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
+            signal_candidate_model: None,
             briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
             registry: Arc::clone(&registry),
             quotas: LlmQuotas::default(),
@@ -414,6 +424,7 @@ fn build_summary_refresh_runtime(
         default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O_MINI),
         triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
         summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
+        signal_candidate_model: None,
         briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
         registry: Arc::clone(&registry),
         quotas: LlmQuotas::default(),

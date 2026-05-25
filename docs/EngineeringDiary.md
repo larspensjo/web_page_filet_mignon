@@ -1731,3 +1731,8 @@ Type: Implementation
 Context: Summary refresh and batch poll workflows needed more default LLM parallelism for article summaries.
 Change: Doubled the `harvester_batch --llm-concurrency` default from 6 to 12 and raised the launcher/CLI clamp to 12 so the default is effective.
 Refs: crates/harvester_batch/src/cli.rs, scripts/harvester_launcher/Data.psm1, scripts/harvester_launcher/Effects.psm1
+## 2026-05-25 - Signal candidate contract foundation
+Type: Implementation
+Context: Phase 1 of `Plan.SignalCandidateScoring.md` needed the type-level and prompt-contract pieces before reducer or UI orchestration can safely call the new stage.
+Change: Added `PromptId::ArticleSignalCandidate`, the v1 prompt/context contract, DTO validation, model fallback to summary/default, chained cache-key primitives, on-disk cache/override boundary DTOs, and pure `SignalCandidateSelection::compute` tests.
+Refs: crates/harvester_engine/src/llm/prompts/article_signal_candidate.rs, crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/signal_candidate_cache.rs, crates/harvester_io/src/signal_candidate_cache_store.rs
