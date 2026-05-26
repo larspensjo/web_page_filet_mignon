@@ -35,8 +35,9 @@ use harvester_engine::llm::{
     OPENAI_MODEL_GPT_5_4_NANO,
 };
 use harvester_io::{
-    load_completed_jobs, load_pre_triage_overrides, load_summary_cache, load_triage_cache,
-    load_window_size, EffectRunner, PersistenceSnapshot, PersistenceWorker, RuntimePaths,
+    load_completed_jobs, load_pre_triage_overrides, load_signal_candidate_cache,
+    load_signal_candidate_overrides, load_summary_cache, load_triage_cache, load_window_size,
+    EffectRunner, PersistenceSnapshot, PersistenceWorker, RuntimePaths,
 };
 
 use super::effects;
@@ -129,6 +130,46 @@ fn prepare_startup_state(
             },
             &mut startup_effects,
         );
+    }
+
+    match load_signal_candidate_cache(&paths.signal_candidate_cache_path) {
+        Ok(signal_candidate_cache) if !signal_candidate_cache.is_empty() => {
+            state = apply_startup_msg(
+                state,
+                Msg::SignalCandidateCacheLoaded {
+                    cache: signal_candidate_cache,
+                },
+                &mut startup_effects,
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            engine_warn!(
+                "[signal-cache] failed to hydrate {}: {}",
+                paths.signal_candidate_cache_path.display(),
+                err
+            );
+        }
+    }
+
+    match load_signal_candidate_overrides(&paths.signal_candidate_overrides_path) {
+        Ok(signal_candidate_overrides) if !signal_candidate_overrides.is_empty() => {
+            state = apply_startup_msg(
+                state,
+                Msg::SignalCandidateOverridesLoaded {
+                    overrides: signal_candidate_overrides,
+                },
+                &mut startup_effects,
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            engine_warn!(
+                "[signal-overrides] failed to hydrate {}: {}",
+                paths.signal_candidate_overrides_path.display(),
+                err
+            );
+        }
     }
 
     let overrides = load_pre_triage_overrides(&paths.state_path);

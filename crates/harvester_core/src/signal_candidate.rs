@@ -27,10 +27,11 @@ pub struct OverrideKey {
     pub prompt_version: PromptVersion,
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SignalCandidateSession {
     states: HashMap<String, SignalCandidateState>,
     pending_request_ids: HashMap<String, u64>,
+    pending_urls_by_request: HashMap<u64, String>,
     enqueued: u32,
     completed: u32,
     failed: u32,
@@ -51,6 +52,8 @@ impl SignalCandidateSession {
         if let Some(slot) = self.states.get_mut(url) {
             *slot = SignalCandidateState::Scoring { request_id };
             self.pending_request_ids.insert(url.to_string(), request_id);
+            self.pending_urls_by_request
+                .insert(request_id, url.to_string());
         }
     }
 
@@ -64,7 +67,9 @@ impl SignalCandidateSession {
             }
             *slot = SignalCandidateState::Completed { result };
             self.completed += 1;
-            self.pending_request_ids.remove(url);
+            if let Some(request_id) = self.pending_request_ids.remove(url) {
+                self.pending_urls_by_request.remove(&request_id);
+            }
         }
     }
 
@@ -80,7 +85,9 @@ impl SignalCandidateSession {
                 reason: reason.into(),
             };
             self.failed += 1;
-            self.pending_request_ids.remove(url);
+            if let Some(request_id) = self.pending_request_ids.remove(url) {
+                self.pending_urls_by_request.remove(&request_id);
+            }
         }
     }
 
@@ -93,9 +100,9 @@ impl SignalCandidateSession {
     }
 
     pub fn url_for_request(&self, request_id: u64) -> Option<&str> {
-        self.pending_request_ids
-            .iter()
-            .find_map(|(url, rid)| (*rid == request_id).then_some(url.as_str()))
+        self.pending_urls_by_request
+            .get(&request_id)
+            .map(String::as_str)
     }
 
     pub fn iter_completed(&self) -> impl Iterator<Item = (&str, &SignalCandidateResult)> {

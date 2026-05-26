@@ -10,6 +10,8 @@ pub struct RuntimePaths {
     pub prompts_dir: PathBuf,
     pub summary_cache_path: PathBuf,
     pub triage_cache_path: PathBuf,
+    pub signal_candidate_cache_path: PathBuf,
+    pub signal_candidate_overrides_path: PathBuf,
     pub seen_set_path: PathBuf,
     pub state_path: PathBuf,
     pub briefing_history_path: PathBuf,
@@ -29,6 +31,8 @@ impl RuntimePaths {
     ) -> Self {
         let summary_cache_path = output_dir.join(".summary_cache.ron");
         let triage_cache_path = output_dir.join(".triage_cache.ron");
+        let signal_candidate_cache_path = output_dir.join(".signal_candidate_cache.ron");
+        let signal_candidate_overrides_path = output_dir.join(".signal_candidate_overrides.ron");
         let seen_set_path = output_dir.join(".seen_set.ron");
         let state_path = output_dir.join(".harvester_state.ron");
         let briefing_history_path = output_dir.join(".briefing_history.ron");
@@ -44,6 +48,8 @@ impl RuntimePaths {
             prompts_dir,
             summary_cache_path,
             triage_cache_path,
+            signal_candidate_cache_path,
+            signal_candidate_overrides_path,
             seen_set_path,
             state_path,
             briefing_history_path,
@@ -83,6 +89,12 @@ mod tests {
 
         assert!(paths.summary_cache_path.ends_with(".summary_cache.ron"));
         assert!(paths.triage_cache_path.ends_with(".triage_cache.ron"));
+        assert!(paths
+            .signal_candidate_cache_path
+            .ends_with(".signal_candidate_cache.ron"));
+        assert!(paths
+            .signal_candidate_overrides_path
+            .ends_with(".signal_candidate_overrides.ron"));
         assert!(paths.seen_set_path.ends_with(".seen_set.ron"));
         assert!(paths.state_path.ends_with(".harvester_state.ron"));
     }

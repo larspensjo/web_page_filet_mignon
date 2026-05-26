@@ -325,6 +325,12 @@ pub struct AppState {
     ai_availability: AiAvailability,
     prompt_lab_templates: HashMap<PromptId, PromptLabTemplateSnapshot>,
     summary_cache: SummaryCache,
+    signal_candidate: crate::signal_candidate::SignalCandidateSession,
+    signal_candidate_cache: crate::signal_candidate_cache::SignalCandidateCache,
+    signal_candidate_inputs:
+        HashMap<String, crate::update::signal_candidate::SignalCandidateInputSnapshot>,
+    signal_candidate_threshold: u8,
+    signal_candidate_cap: usize,
     briefing_metadata_state: MetadataLoadState,
     summary_cache_metadata_snapshot: Option<SummaryCacheMetadataSnapshot>,
     summary_cache_metrics: SummaryCacheMetrics,
@@ -433,6 +439,11 @@ impl Default for AppState {
             effective_models: HashMap::new(),
             ai_availability: AiAvailability::Available,
             summary_cache: SummaryCache::new(),
+            signal_candidate: crate::signal_candidate::SignalCandidateSession::default(),
+            signal_candidate_cache: crate::signal_candidate_cache::SignalCandidateCache::default(),
+            signal_candidate_inputs: HashMap::new(),
+            signal_candidate_threshold: crate::signal_candidate::DEFAULT_SELECTION_THRESHOLD,
+            signal_candidate_cap: crate::signal_candidate::DEFAULT_SELECTION_CAP,
             briefing_metadata_state: MetadataLoadState::Idle,
             summary_cache_metadata_snapshot: None,
             summary_cache_metrics: SummaryCacheMetrics::default(),
@@ -667,6 +678,114 @@ impl AppState {
 
     pub(crate) fn set_llm_quota_usage(&mut self, usage: crate::LlmQuotaUsage) {
         self.llm_quota.usage = usage;
+    }
+
+    pub fn signal_candidate(&self) -> &crate::signal_candidate::SignalCandidateSession {
+        &self.signal_candidate
+    }
+
+    pub fn signal_candidate_mut(&mut self) -> &mut crate::signal_candidate::SignalCandidateSession {
+        &mut self.signal_candidate
+    }
+
+    pub fn signal_candidate_cache(&self) -> &crate::signal_candidate_cache::SignalCandidateCache {
+        &self.signal_candidate_cache
+    }
+
+    pub(crate) fn set_signal_candidate_cache(
+        &mut self,
+        cache: crate::signal_candidate_cache::SignalCandidateCache,
+    ) {
+        self.signal_candidate_cache = cache;
+    }
+
+    pub fn try_reuse_signal_candidate(
+        &self,
+        key: &crate::signal_candidate_cache::SignalCandidateCacheKey,
+    ) -> Option<harvester_engine::llm::dto::SignalCandidateResult> {
+        self.signal_candidate_cache
+            .get(key)
+            .map(|entry| entry.result.clone())
+    }
+
+    pub fn store_signal_candidate_result(
+        &mut self,
+        key: crate::signal_candidate_cache::SignalCandidateCacheKey,
+        result: harvester_engine::llm::dto::SignalCandidateResult,
+        now_utc: String,
+    ) {
+        self.signal_candidate_cache.insert(
+            key,
+            crate::signal_candidate_cache::SignalCandidateCacheEntry {
+                result,
+                created_at_utc: now_utc,
+            },
+        );
+    }
+
+    pub(crate) fn signal_candidate_input_snapshot(
+        &self,
+        url: &str,
+    ) -> Option<&crate::update::signal_candidate::SignalCandidateInputSnapshot> {
+        self.signal_candidate_inputs.get(url)
+    }
+
+    pub(crate) fn set_signal_candidate_input_snapshot(
+        &mut self,
+        url: &str,
+        snapshot: crate::update::signal_candidate::SignalCandidateInputSnapshot,
+    ) {
+        self.signal_candidate_inputs
+            .insert(url.to_string(), snapshot);
+    }
+
+    pub(crate) fn clear_signal_candidate_input_snapshot(&mut self, url: &str) {
+        self.signal_candidate_inputs.remove(url);
+    }
+
+    pub fn signal_candidate_threshold(&self) -> u8 {
+        self.signal_candidate_threshold
+    }
+
+    pub fn signal_candidate_cap(&self) -> usize {
+        self.signal_candidate_cap
+    }
+
+    pub fn set_signal_candidate_threshold(&mut self, threshold: u8) {
+        self.signal_candidate_threshold = threshold.clamp(0, 100);
+    }
+
+    pub fn set_signal_candidate_cap(&mut self, cap: usize) {
+        self.signal_candidate_cap = cap.max(1);
+    }
+
+    pub fn summary_cache_key_for_url(&self, url: &str) -> Option<crate::SummaryCacheKey> {
+        let content_hash = self
+            .briefing()
+            .articles()
+            .iter()
+            .find(|article| article.url == url)
+            .map(|article| article.content_hash.as_str())?;
+
+        self.summary_cache()
+            .iter()
+            .filter(|(key, _)| {
+                key.content_hash == content_hash && key.prompt_id == PromptId::ArticleSummary
+            })
+            .max_by(|(_, a), (_, b)| {
+                let parsed_a = chrono::DateTime::parse_from_rfc3339(&a.created_at_utc)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc));
+                let parsed_b = chrono::DateTime::parse_from_rfc3339(&b.created_at_utc)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc));
+
+                match (parsed_a, parsed_b) {
+                    (Some(a), Some(b)) => a.cmp(&b),
+                    _ => a.created_at_utc.cmp(&b.created_at_utc),
+                }
+            })
+            .map(|(key, _)| key.clone())
     }
 
     pub fn record_pending_llm_request(&mut self, request_id: u64, prompt_id: PromptId) {

@@ -94,7 +94,7 @@ pub struct SignalCandidateCacheEntry {
     pub created_at_utc: String,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SignalCandidateCache {
     pub entries: HashMap<SignalCandidateCacheKey, SignalCandidateCacheEntry>,
 }

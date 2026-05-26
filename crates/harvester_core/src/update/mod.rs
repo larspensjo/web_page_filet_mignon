@@ -12,6 +12,7 @@ mod import;
 mod llm_completed;
 mod polling;
 mod prompt_lab;
+pub(crate) mod signal_candidate;
 mod summary_cache_support;
 mod triage;
 mod url_input;
@@ -421,6 +422,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             let mut effects = Vec::new();
             briefing::try_start_briefing_with_metadata(&mut state, &mut effects);
+            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
             effects
         }
         Msg::AiAvailabilityDetected { availability } => {
@@ -435,6 +437,25 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_summary_cache(cache);
             state.mark_dirty();
+            let mut effects = Vec::new();
+            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
+            effects
+        }
+        Msg::SignalCandidateCacheLoaded { cache } => {
+            engine_info!(
+                "[signal-cache] Hydrated {} entries from persistent store",
+                cache.len()
+            );
+            let mut effects = Vec::new();
+            signal_candidate::handle_cache_loaded(&mut state, cache, &mut effects);
+            effects
+        }
+        Msg::SignalCandidateOverridesLoaded { overrides } => {
+            engine_info!(
+                "[signal-overrides] Hydrated {} override(s) from persistent store",
+                overrides.len()
+            );
+            signal_candidate::handle_overrides_loaded(&mut state, overrides);
             Vec::new()
         }
         Msg::TriageCacheHydrated { cache } => {

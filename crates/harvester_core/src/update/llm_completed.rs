@@ -7,6 +7,7 @@ use crate::briefing::{ArticleSummaryResult, BriefingResult, BriefingStoryResult}
 use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage};
 use crate::tabs::{AppTab, LeftTab};
 use crate::triage::ArticleTriageResult;
+use crate::update::signal_candidate::{handle_signal_candidate_completion, try_enqueue};
 use crate::{AppState, Effect, LlmRequestState, LlmResultKind};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
@@ -24,7 +25,13 @@ pub(super) fn handle(
     }
 
     let mut effects = Vec::new();
-    if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
+    if state
+        .signal_candidate()
+        .url_for_request(request_id)
+        .is_some()
+    {
+        handle_signal_candidate_completion(state, request_id, &result, &mut effects);
+    } else if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
         handle_summary_completion(state, article_idx, &result, &mut effects);
         super::briefing::dispatch_next_briefing_step(state, &mut effects);
     } else if let Some(article_idx) = state.triage().find_article_by_request_id(request_id) {
@@ -166,12 +173,13 @@ fn handle_summary_completion(
                             short_hash(&content_hash),
                         );
                         effects.push(Effect::UpsertEntityIndexEntry {
-                            url: article_url,
+                            url: article_url.clone(),
                             fetched_utc: article_fetched_utc,
                             content_hash: Some(content_hash.clone()),
                             summary_entities: Some(article_entities),
                             themes: None,
                         });
+                        let _ = try_enqueue(state, &article_url, effects);
                     }
                     Err(err) => {
                         engine_warn!(

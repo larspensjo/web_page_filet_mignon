@@ -101,6 +101,12 @@ pub enum Effect {
     PersistSummaryCache {
         cache: crate::SummaryCache,
     },
+    PersistSignalCandidateCache {
+        cache: crate::signal_candidate_cache::SignalCandidateCache,
+    },
+    PersistSignalCandidateOverrides {
+        overrides: std::collections::HashSet<crate::signal_candidate::OverrideKey>,
+    },
     PersistTriageCache {
         cache: crate::TriageCache,
     },

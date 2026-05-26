@@ -27,6 +27,8 @@ fn make_test_runtime_paths(base: &Path) -> RuntimePaths {
         seen_set_path: base.join("seen_set.ron"),
         summary_cache_path: base.join("summary_cache.ron"),
         triage_cache_path: base.join("triage_cache.ron"),
+        signal_candidate_cache_path: base.join(".signal_candidate_cache.ron"),
+        signal_candidate_overrides_path: base.join(".signal_candidate_overrides.ron"),
         state_path: base.join("state.json"),
         briefing_history_path: base.join(".briefing_history.ron"),
         briefing_checkpoint_path: base.join(".briefing_checkpoint.ron"),

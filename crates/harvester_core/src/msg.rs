@@ -278,6 +278,14 @@ pub enum Msg {
     SummaryCacheHydrated {
         cache: crate::SummaryCache,
     },
+    /// Signal-candidate cache hydrated from persisted store at startup.
+    SignalCandidateCacheLoaded {
+        cache: crate::signal_candidate_cache::SignalCandidateCache,
+    },
+    /// Signal-candidate manual overrides hydrated from persisted store at startup.
+    SignalCandidateOverridesLoaded {
+        overrides: std::collections::HashSet<crate::signal_candidate::OverrideKey>,
+    },
     /// Triage cache hydrated from persisted store at startup.
     TriageCacheHydrated {
         cache: crate::TriageCache,

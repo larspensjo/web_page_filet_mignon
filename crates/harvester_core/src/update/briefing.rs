@@ -338,6 +338,9 @@ pub(super) fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Ve
                         summary_entities: Some(article_entities),
                         themes: None,
                     });
+                    let article_url = state.briefing().articles()[next_idx].url.clone();
+                    let _ =
+                        crate::update::signal_candidate::try_enqueue(state, &article_url, effects);
                     // Cache hit: slot not consumed, continue filling.
                     continue;
                 }

@@ -1,0 +1,442 @@
+use std::collections::{HashMap, HashSet};
+
+use crate::briefing::{ArticleSummaryResult, BriefingSession, LoadedArticle};
+use crate::signal_candidate::OverrideKey;
+use crate::signal_candidate_cache::{
+    SignalCandidateCache, SignalCandidateCacheKey, SignalCandidateInputBundle,
+};
+use crate::triage::{ArticleTriageResult, TriageSession};
+use crate::update::update;
+use crate::{AppState, Effect, LlmResultKind, Msg, SummaryCacheKey};
+use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+use harvester_engine::llm::prompt::PromptId;
+
+use super::{
+    loaded_single_article, request_id_for_prompt, start_briefing_after_triage, summary_json,
+    with_signal_candidate_metadata,
+};
+
+fn signal_result_json() -> String {
+    r#"{
+        "signal_score": 84,
+        "signal_key": "example-signal-key",
+        "themes": ["ai-infrastructure"],
+        "draft_gist": "Example outlet reports a concrete AI infrastructure event.",
+        "source_tier": "Tier1",
+        "confidence": "High",
+        "reasoning": "Concrete event."
+    }"#
+    .to_string()
+}
+
+fn sample_summary_result() -> ArticleSummaryResult {
+    ArticleSummaryResult {
+        title: "Example article".to_string(),
+        summary: "Example summary".to_string(),
+        key_points: vec!["Point one".to_string(), "Point two".to_string()],
+        input_tokens: 100,
+        output_tokens: 55,
+        entities: Default::default(),
+    }
+}
+
+fn sample_triage_result(priority: u8) -> ArticleTriageResult {
+    ArticleTriageResult {
+        category: "news".to_string(),
+        priority,
+        tags: vec!["ai".to_string(), "chips".to_string()],
+        rationale: "Relevant".to_string(),
+        input_tokens: 10,
+        output_tokens: 5,
+    }
+}
+
+fn seed_completed_summary_state() -> AppState {
+    let mut state = AppState::new();
+    let article = LoadedArticle {
+        url: "https://example.com/article".to_string(),
+        source_title: Some("Example Outlet".to_string()),
+        prepared_text: "Article text".to_string(),
+        content_hash: "hash-1".to_string(),
+        fetched_utc: Some("2026-05-25T12:00:00Z".to_string()),
+    };
+
+    let mut briefing = BriefingSession::new_loading(None);
+    briefing.set_articles(vec![article.clone()], "collection".to_string());
+    briefing.transition_to_summarizing();
+    briefing.start_article(0, 11);
+    briefing.complete_article(0, sample_summary_result());
+    state.set_briefing(briefing);
+
+    let mut triage = TriageSession::new_loading(None);
+    triage.set_articles(vec![article]);
+    triage.transition_to_triaging();
+    triage.complete_article(0, sample_triage_result(3));
+    state.set_triage(triage);
+
+    let summary_key = SummaryCacheKey::try_new(
+        "hash-1",
+        PromptId::ArticleSummary,
+        Some(1),
+        Some("test-summary-model"),
+        &[],
+    )
+    .expect("summary cache key");
+    state.store_summary_result(
+        summary_key,
+        sample_summary_result(),
+        "2026-05-25T12:00:10Z".into(),
+    );
+
+    state
+}
+
+fn set_signal_candidate_metadata_without_sweep(state: &mut AppState) {
+    let mut active_versions = HashMap::new();
+    active_versions.insert(PromptId::ArticleTriage, 1);
+    active_versions.insert(PromptId::ArticleSummary, 1);
+    active_versions.insert(PromptId::ArticleSignalCandidate, 1);
+    let mut effective_models = HashMap::new();
+    effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
+    effective_models.insert(PromptId::ArticleSummary, "test-summary-model".to_string());
+    effective_models.insert(
+        PromptId::ArticleSignalCandidate,
+        "test-signal-model".to_string(),
+    );
+    state.set_llm_metadata(active_versions, effective_models, HashMap::new());
+}
+
+fn prewarm_signal_candidate_cache(state: &mut AppState, summary_model: &str) {
+    let summary_key = SummaryCacheKey::try_new(
+        "hash-a",
+        PromptId::ArticleSummary,
+        Some(1),
+        Some(summary_model),
+        &[],
+    )
+    .expect("summary cache key");
+    let key_points = vec!["p1".to_string()];
+    let bundle = SignalCandidateInputBundle {
+        url: "https://example.com/a",
+        outlet: "Article A",
+        title: "Article A",
+        published_at: "",
+        triage_priority: 2,
+        triage_tags_sorted: vec!["tag"],
+        summary: "Summary",
+        key_points: &key_points,
+        upstream_summary_cache_digest: summary_key.digest(),
+    };
+    let key = SignalCandidateCacheKey::try_new(&bundle, Some(1), Some("test-signal-model"), &[])
+        .expect("signal cache key");
+    state.store_signal_candidate_result(
+        key,
+        SignalCandidateResult {
+            signal_score: 90,
+            signal_key: "example-signal-key".to_string(),
+            themes: vec!["ai-infrastructure".to_string()],
+            draft_gist: "Concrete event.".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "Concrete event.".to_string(),
+            input_tokens: 10,
+            output_tokens: 5,
+        },
+        "2026-05-25T12:00:20Z".into(),
+    );
+}
+
+fn prewarm_summary_cache_for_single_article(state: &mut AppState, summary_model: &str) {
+    let summary_key = SummaryCacheKey::try_new(
+        "hash-a",
+        PromptId::ArticleSummary,
+        Some(1),
+        Some(summary_model),
+        &[],
+    )
+    .expect("summary cache key");
+    state.store_summary_result(
+        summary_key,
+        ArticleSummaryResult {
+            title: "Article A".to_string(),
+            summary: "Summary".to_string(),
+            key_points: vec!["p1".to_string()],
+            input_tokens: 10,
+            output_tokens: 5,
+            entities: Default::default(),
+        },
+        "2026-05-25T12:00:00Z".to_string(),
+    );
+}
+
+#[test]
+fn signal_candidate_session_starts_empty() {
+    let state = AppState::new();
+    assert_eq!(state.signal_candidate().enqueued_count(), 0);
+    assert!(state.signal_candidate_cache().is_empty());
+}
+
+#[test]
+fn signal_candidate_completion_routes_to_session_and_persists_cache() {
+    let mut state = AppState::new();
+    state
+        .signal_candidate_mut()
+        .enqueue("https://example.com/article".to_string());
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://example.com/article", 9);
+    state.record_pending_llm_request(9, PromptId::ArticleSignalCandidate);
+    state.set_signal_candidate_input_snapshot(
+        "https://example.com/article",
+        crate::update::signal_candidate::SignalCandidateInputSnapshot {
+            outlet: "Example Outlet".to_string(),
+            title: "Example article".to_string(),
+            published_at: "2026-05-25T12:00:00Z".to_string(),
+            triage_priority: 3,
+            triage_tags_sorted: vec!["ai".to_string(), "chips".to_string()],
+            summary: "Example summary".to_string(),
+            key_points: vec!["Point one".to_string(), "Point two".to_string()],
+            upstream_summary_cache_digest: "digest".to_string(),
+            context: Vec::new(),
+        },
+    );
+
+    let (state, effects) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: 9,
+            result: LlmResultKind::Success {
+                output_json: signal_result_json(),
+                input_tokens: 100,
+                output_tokens: 10,
+                prompt_version: 1,
+                model_id: "test-signal-model".to_string(),
+            },
+            metadata: None,
+        },
+    );
+
+    assert_eq!(state.signal_candidate().completed_count(), 1);
+    assert!(state
+        .signal_candidate_input_snapshot("https://example.com/article")
+        .is_none());
+    assert!(!state.signal_candidate_cache().is_empty());
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PersistSignalCandidateCache { .. })));
+}
+
+#[test]
+fn signal_candidate_validation_failure_marks_failed() {
+    let mut state = AppState::new();
+    state
+        .signal_candidate_mut()
+        .enqueue("https://example.com/article".to_string());
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://example.com/article", 8);
+    state.record_pending_llm_request(8, PromptId::ArticleSignalCandidate);
+
+    let (state, _effects) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: 8,
+            result: LlmResultKind::Success {
+                output_json: "{\"signal_score\": 999}".to_string(),
+                input_tokens: 100,
+                output_tokens: 10,
+                prompt_version: 1,
+                model_id: "test-signal-model".to_string(),
+            },
+            metadata: None,
+        },
+    );
+
+    assert_eq!(state.signal_candidate().failed_count(), 1);
+    assert!(state
+        .signal_candidate_input_snapshot("https://example.com/article")
+        .is_none());
+}
+
+#[test]
+fn signal_candidate_cache_loaded_sweeps_eligible_summary() {
+    let mut state = seed_completed_summary_state();
+    set_signal_candidate_metadata_without_sweep(&mut state);
+    let (state, effects) = update(
+        state,
+        Msg::SignalCandidateCacheLoaded {
+            cache: SignalCandidateCache::default(),
+        },
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSignalCandidate,
+            ..
+        }
+    )));
+    assert!(matches!(
+        state
+            .signal_candidate()
+            .state_for("https://example.com/article"),
+        Some(crate::signal_candidate::SignalCandidateState::Scoring { .. })
+    ));
+}
+
+#[test]
+fn summary_completion_enqueues_signal_scoring() {
+    let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
+    let state = with_signal_candidate_metadata(state);
+    let (articles, collection_text) = loaded_single_article();
+
+    let (state, effects) = update(
+        state,
+        Msg::ArticlesLoaded {
+            articles,
+            collection_text,
+        },
+    );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
+
+    let (state, effects) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: summary_request_id,
+            result: LlmResultKind::Success {
+                output_json: summary_json("Article A"),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 1,
+                model_id: "test-summary-model".to_string(),
+            },
+            metadata: None,
+        },
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSignalCandidate,
+            ..
+        }
+    )));
+    assert!(matches!(
+        state.signal_candidate().state_for("https://example.com/a"),
+        Some(crate::signal_candidate::SignalCandidateState::Scoring { .. })
+    ));
+}
+
+#[test]
+fn summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak() {
+    let mut state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
+    state = with_signal_candidate_metadata(state);
+    prewarm_summary_cache_for_single_article(&mut state, "test-model");
+    prewarm_signal_candidate_cache(&mut state, "test-model");
+    let (articles, collection_text) = loaded_single_article();
+
+    let (state, effects) = update(
+        state,
+        Msg::ArticlesLoaded {
+            articles,
+            collection_text,
+        },
+    );
+
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSummary,
+            ..
+        }
+    )));
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSignalCandidate,
+            ..
+        }
+    )));
+    assert!(matches!(
+        state.signal_candidate().state_for("https://example.com/a"),
+        Some(crate::signal_candidate::SignalCandidateState::Completed { .. })
+    ));
+    assert!(state
+        .signal_candidate_input_snapshot("https://example.com/a")
+        .is_none());
+
+    let (_, result) = state
+        .signal_candidate()
+        .iter_completed()
+        .find(|(url, _)| *url == "https://example.com/a")
+        .expect("completed cached signal candidate");
+    assert_eq!(result.input_tokens, 0);
+    assert_eq!(result.output_tokens, 0);
+}
+
+#[test]
+fn summary_cache_key_for_url_uses_parsed_rfc3339_order() {
+    let mut state = AppState::new();
+    let article = LoadedArticle {
+        url: "https://example.com/article".to_string(),
+        source_title: Some("Example".to_string()),
+        prepared_text: "Article text".to_string(),
+        content_hash: "shared-hash".to_string(),
+        fetched_utc: None,
+    };
+    let mut briefing = BriefingSession::new_loading(None);
+    briefing.set_articles(vec![article], "collection".to_string());
+    state.set_briefing(briefing);
+
+    let lexically_later_but_older = SummaryCacheKey::try_new(
+        "shared-hash",
+        PromptId::ArticleSummary,
+        Some(1),
+        Some("model-a"),
+        &[],
+    )
+    .expect("older key");
+    let lexically_earlier_but_newer = SummaryCacheKey::try_new(
+        "shared-hash",
+        PromptId::ArticleSummary,
+        Some(1),
+        Some("model-b"),
+        &[],
+    )
+    .expect("newer key");
+
+    state.store_summary_result(
+        lexically_later_but_older,
+        sample_summary_result(),
+        "2026-05-25T09:00:00Z".to_string(),
+    );
+    state.store_summary_result(
+        lexically_earlier_but_newer.clone(),
+        sample_summary_result(),
+        "2026-05-25T08:00:00-04:00".to_string(),
+    );
+
+    assert_eq!(
+        state.summary_cache_key_for_url("https://example.com/article"),
+        Some(lexically_earlier_but_newer)
+    );
+}
+
+#[test]
+fn signal_candidate_overrides_loaded_sets_exclusions() {
+    let mut overrides = HashSet::new();
+    overrides.insert(OverrideKey {
+        signal_key: "drop-this-cluster".to_string(),
+        prompt_id: "ArticleSignalCandidate".to_string(),
+        prompt_version: 1,
+    });
+
+    let (state, effects) = update(
+        AppState::new(),
+        Msg::SignalCandidateOverridesLoaded { overrides },
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.signal_candidate().excluded().len(), 1);
+}

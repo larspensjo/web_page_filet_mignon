@@ -74,6 +74,29 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
     state
 }
 
+pub(super) fn with_signal_candidate_metadata(state: AppState) -> AppState {
+    let mut active_versions = HashMap::new();
+    active_versions.insert(PromptId::ArticleTriage, 1);
+    active_versions.insert(PromptId::ArticleSummary, 1);
+    active_versions.insert(PromptId::ArticleSignalCandidate, 1);
+    let mut effective_models = HashMap::new();
+    effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
+    effective_models.insert(PromptId::ArticleSummary, "test-summary-model".to_string());
+    effective_models.insert(
+        PromptId::ArticleSignalCandidate,
+        "test-signal-model".to_string(),
+    );
+    let (state, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+            templates: HashMap::new(),
+        },
+    );
+    state
+}
+
 pub(super) fn summary_json(title: &str) -> String {
     format!("{{\"title\":\"{title}\",\"summary\":\"Summary\",\"key_points\":[\"p1\"]}}")
 }

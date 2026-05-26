@@ -1736,3 +1736,9 @@ Type: Implementation
 Context: Phase 1 of `Plan.SignalCandidateScoring.md` needed the type-level and prompt-contract pieces before reducer or UI orchestration can safely call the new stage.
 Change: Added `PromptId::ArticleSignalCandidate`, the v1 prompt/context contract, DTO validation, model fallback to summary/default, chained cache-key primitives, on-disk cache/override boundary DTOs, and pure `SignalCandidateSelection::compute` tests.
 Refs: crates/harvester_engine/src/llm/prompts/article_signal_candidate.rs, crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/signal_candidate_cache.rs, crates/harvester_io/src/signal_candidate_cache_store.rs
+
+## 2026-05-25 - Signal candidate reducer orchestration
+Type: Implementation
+Context: Phase 2 of `Plan.SignalCandidateScoring.md` needed reducer-owned session, startup hydration, persistence wiring, and review cleanup so signal scoring can run without ad hoc UI or batch logic.
+Change: Added signal-candidate session/cache/override state to `AppState`, routed `LlmCompleted` signal-candidate results through a dedicated reducer, re-enqueued eligible articles after summary hydration, persisted cache and override stores through `EffectRunner`, and loaded both stores during app and batch startup. Review fixes keep signal input snapshots only for live LLM requests, zero token counts on signal cache reuse, add O(1) signal request-id lookup, parse RFC3339 timestamps when choosing the latest summary cache key, and cover these paths with regression tests.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/update/signal_candidate.rs, crates/harvester_core/src/update/llm_completed.rs, crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/update/tests/signal_candidate_tests.rs, crates/harvester_io/src/effect_runner/dispatch.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_batch/src/runner.rs

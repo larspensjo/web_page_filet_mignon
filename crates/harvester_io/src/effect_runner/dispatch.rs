@@ -840,6 +840,47 @@ impl EffectRunner {
                     let _ = msg_tx;
                 });
             }
+            Effect::PersistSignalCandidateCache { cache } => {
+                let msg_tx = self.msg_tx.clone();
+                let path = self.paths.output_dir.join(".signal_candidate_cache.ron");
+                thread::spawn(move || {
+                    match crate::signal_candidate_cache_store::save(&path, &cache) {
+                        Ok(_) => {
+                            engine_info!("[signal-cache] Persisted cache to {:?}", path);
+                        }
+                        Err(err) => {
+                            engine_warn!(
+                                "[signal-cache] Failed to persist cache to {:?}: {}",
+                                path,
+                                err
+                            );
+                        }
+                    }
+                    let _ = msg_tx;
+                });
+            }
+            Effect::PersistSignalCandidateOverrides { overrides } => {
+                let msg_tx = self.msg_tx.clone();
+                let path = self
+                    .paths
+                    .output_dir
+                    .join(".signal_candidate_overrides.ron");
+                thread::spawn(move || {
+                    match crate::signal_candidate_overrides_store::save(&path, &overrides) {
+                        Ok(_) => {
+                            engine_info!("[signal-overrides] Persisted overrides to {:?}", path);
+                        }
+                        Err(err) => {
+                            engine_warn!(
+                                "[signal-overrides] Failed to persist overrides to {:?}: {}",
+                                path,
+                                err
+                            );
+                        }
+                    }
+                    let _ = msg_tx;
+                });
+            }
             Effect::PersistTriageCache { cache } => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.triage_cache_path.clone();

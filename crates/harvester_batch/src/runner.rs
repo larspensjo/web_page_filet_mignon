@@ -21,9 +21,10 @@ use harvester_engine::{
 };
 use harvester_io::{
     load_briefing_checkpoint, load_completed_jobs, load_entity_index, load_prompt_templates,
-    load_sources, load_summary_cache, load_triage_cache, persist_completed_jobs,
-    persist_summary_cache, save_briefing_checkpoint, save_entity_index, upsert_entry, EffectRunner,
-    EntityIndexPatch, NoOpPlatformHandler, RuntimePaths,
+    load_signal_candidate_cache, load_signal_candidate_overrides, load_sources, load_summary_cache,
+    load_triage_cache, persist_completed_jobs, persist_summary_cache, save_briefing_checkpoint,
+    save_entity_index, upsert_entry, EffectRunner, EntityIndexPatch, NoOpPlatformHandler,
+    RuntimePaths,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -1211,6 +1212,46 @@ pub fn run(args: Args) -> Result<i32, String> {
             effect_runner.enqueue(effects);
         }
     }
+    match load_signal_candidate_cache(&paths.signal_candidate_cache_path) {
+        Ok(signal_candidate_cache) if !signal_candidate_cache.is_empty() => {
+            let (new_state, effects) = update(
+                state,
+                Msg::SignalCandidateCacheLoaded {
+                    cache: signal_candidate_cache,
+                },
+            );
+            state = new_state;
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+        }
+        Ok(_) => {}
+        Err(err) => engine_warn!(
+            "[signal-cache] failed to hydrate {}: {}",
+            paths.signal_candidate_cache_path.display(),
+            err
+        ),
+    }
+    match load_signal_candidate_overrides(&paths.signal_candidate_overrides_path) {
+        Ok(signal_candidate_overrides) if !signal_candidate_overrides.is_empty() => {
+            let (new_state, effects) = update(
+                state,
+                Msg::SignalCandidateOverridesLoaded {
+                    overrides: signal_candidate_overrides,
+                },
+            );
+            state = new_state;
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+        }
+        Ok(_) => {}
+        Err(err) => engine_warn!(
+            "[signal-overrides] failed to hydrate {}: {}",
+            paths.signal_candidate_overrides_path.display(),
+            err
+        ),
+    }
 
     // Outer cycle loop - poll repeatedly until shutdown
     let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
@@ -1662,6 +1703,46 @@ fn run_import_mode(
         if !effects.is_empty() {
             effect_runner.enqueue(effects);
         }
+    }
+    match load_signal_candidate_cache(&paths.signal_candidate_cache_path) {
+        Ok(signal_candidate_cache) if !signal_candidate_cache.is_empty() => {
+            let (new_state, effects) = update(
+                state,
+                Msg::SignalCandidateCacheLoaded {
+                    cache: signal_candidate_cache,
+                },
+            );
+            state = new_state;
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+        }
+        Ok(_) => {}
+        Err(err) => engine_warn!(
+            "[signal-cache] failed to hydrate {}: {}",
+            paths.signal_candidate_cache_path.display(),
+            err
+        ),
+    }
+    match load_signal_candidate_overrides(&paths.signal_candidate_overrides_path) {
+        Ok(signal_candidate_overrides) if !signal_candidate_overrides.is_empty() => {
+            let (new_state, effects) = update(
+                state,
+                Msg::SignalCandidateOverridesLoaded {
+                    overrides: signal_candidate_overrides,
+                },
+            );
+            state = new_state;
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+        }
+        Ok(_) => {}
+        Err(err) => engine_warn!(
+            "[signal-overrides] failed to hydrate {}: {}",
+            paths.signal_candidate_overrides_path.display(),
+            err
+        ),
     }
 
     // Dispatch the import request.
