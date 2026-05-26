@@ -75,7 +75,7 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         items: vec![
             "Jobs".to_string(),
             "Triage Review".to_string(),
-            "Triage Results".to_string(),
+            "Results".to_string(),
             "Prompt Lab".to_string(),
         ],
     });
@@ -103,6 +103,11 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         window_id,
         parent_control_id: Some(PANEL_LEFT),
         control_id: PANEL_LEFT_JOBS,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_LEFT_JOBS),
+        control_id: PANEL_RESULTS_SUBMODE_ROW,
     });
     commands.push(PlatformCommand::CreatePanel {
         window_id,
@@ -194,6 +199,38 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         initial_text: String::new(),
         class: LabelClass::Default,
     });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_PREVIEW),
+        control_id: PANEL_SIGNAL_CANDIDATE,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_SIGNAL_CANDIDATE),
+        control_id: LABEL_SIGNAL_CANDIDATE_STATE,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_SIGNAL_CANDIDATE),
+        control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_CAPTION,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
+        parent_control_id: Some(PANEL_SIGNAL_CANDIDATE),
+        control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_URLS,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+    commands.push(PlatformCommand::CreateCheckBox {
+        window_id,
+        parent_control_id: Some(PANEL_SIGNAL_CANDIDATE),
+        control_id: CHK_SIGNAL_CANDIDATE_EXCLUDE,
+        text: "Exclude from archive".to_string(),
+    });
 
     // Right-pane tab bar (custom TabBar widget).
     commands.push(PlatformCommand::CreateTabBar {
@@ -211,6 +248,40 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
     commands.push(PlatformCommand::SetTabBarStyle {
         window_id,
         control_id: TAB_BAR_RIGHT,
+        background_color: Color {
+            r: 0x14,
+            g: 0x14,
+            b: 0x13,
+        },
+        text_color: Color {
+            r: 0x87,
+            g: 0x86,
+            b: 0x7F,
+        },
+        accent_color: Color {
+            r: 0x3D,
+            g: 0x3D,
+            b: 0x3A,
+        },
+        font: Some(FontDescription {
+            name: Some("Segoe UI".to_string()),
+            size: Some(9),
+            weight: Some(FontWeight::Normal),
+        }),
+    });
+
+    commands.push(PlatformCommand::CreateTabBar {
+        window_id,
+        control_id: TAB_BAR_RESULTS_SUBMODE,
+        parent_control_id: Some(PANEL_RESULTS_SUBMODE_ROW),
+        items: vec![
+            "Triage scoring".to_string(),
+            "Signal candidates".to_string(),
+        ],
+    });
+    commands.push(PlatformCommand::SetTabBarStyle {
+        window_id,
+        control_id: TAB_BAR_RESULTS_SUBMODE,
         background_color: Color {
             r: 0x14,
             g: 0x14,

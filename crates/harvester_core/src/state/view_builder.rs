@@ -6,14 +6,20 @@ use super::{
 use crate::briefing::BriefingPhase;
 use crate::pre_triage_filter::PreTriagePhase;
 use crate::preview::format_summary_for_preview;
-use crate::tabs::{AppTab, JobListScope, LeftTab};
+use crate::signal_candidate::{
+    ScoredCandidate, SelectionPolicy, SignalCandidateSelection, SignalCandidateState,
+};
+use crate::tabs::{AppTab, JobListScope, LeftTab, ResultsSubMode};
 use crate::triage::{ArticleTriageState, TriagePhase};
 use crate::view_model::{
     AppViewModel, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus, JobRowView,
     LayoutViewModel, LeftPaneHeaderView, OperationProgress, PreviewContextView, PreviewHeaderView,
-    RightPaneView, TriageAnnotationView, TOKEN_LIMIT,
+    RightPaneView, ScoreBand, SignalCandidatePreviewView, SignalCandidateRow,
+    SignalCandidateRowState, TriageAnnotationView, TOKEN_LIMIT,
 };
+use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::normalize_url_for_dedupe;
+use std::collections::HashMap;
 
 impl AppState {
     pub fn view(&self) -> AppViewModel {
@@ -82,6 +88,9 @@ impl AppState {
         let selected_url = selected_job_id
             .and_then(|job_id| self.jobs.get(&job_id))
             .map(|job| job.url.clone());
+        let signal_candidate_rows = self.build_signal_candidate_rows();
+        let signal_candidate_preview =
+            self.signal_candidate_preview_for_selected_job(selected_job_id);
         let briefing_preview = self.briefing.format_preview();
         let preview_text = match self.ui.preview_mode() {
             PreviewMode::SelectedJob => self.ui.preview_content().map(ToOwned::to_owned),
@@ -116,14 +125,16 @@ impl AppState {
         let first_visible_job_id = visible_jobs_after_filter.first().copied();
         let selected_jobs_visible_in_filter =
             selected_job_id.is_some_and(|job_id| visible_jobs_after_filter.contains(&job_id));
-        let left_pane_header = build_left_pane_header_view(
-            self.left_tab,
-            self.job_list_scope,
-            &scoped_jobs,
-            &visible_jobs_after_filter,
-            &jobs_search_query,
-            self.ai_unavailable_message().as_deref(),
-        );
+        let left_pane_header = build_left_pane_header_view(LeftPaneHeaderInputs {
+            left_tab: self.left_tab,
+            results_sub_mode: self.results_sub_mode,
+            job_list_scope: self.job_list_scope,
+            scoped_jobs: &scoped_jobs,
+            visible_jobs_after_filter: &visible_jobs_after_filter,
+            jobs_search_query: &jobs_search_query,
+            ai_unavailable_message: self.ai_unavailable_message().as_deref(),
+            signal_candidate_count: signal_candidate_rows.len(),
+        });
         let preview_context = preview_header.as_ref().map(build_preview_context_view);
         let preview_header_text = match self.active_tab() {
             AppTab::Briefing => Some(self.format_briefing_preview_header()),
@@ -179,6 +190,9 @@ impl AppState {
                 && self.triage.can_start()
                 && self.can_start_triage_from_pre_triage(),
             triage_results_reorder_suppressed: matches!(self.triage.phase(), TriagePhase::Triaging),
+            results_sub_mode: self.results_sub_mode(),
+            signal_candidate_rows,
+            signal_candidate_preview,
             ai_unavailable_message,
             triage_blocked_reason,
             briefing_blocked_reason,
@@ -245,6 +259,19 @@ impl AppState {
             });
         }
 
+        {
+            let session = &self.signal_candidate;
+            let completed = session.completed_count() + session.failed_count();
+            let total = session.enqueued_count();
+            if total > completed {
+                return Some(OperationProgress {
+                    label: "Scoring signals".to_string(),
+                    completed,
+                    total,
+                });
+            }
+        }
+
         if let Some((completed, total)) = self.poll_pipeline_article_progress() {
             return Some(OperationProgress {
                 label: "Downloading articles".to_string(),
@@ -268,6 +295,144 @@ impl AppState {
         }
 
         None
+    }
+
+    pub fn build_signal_candidate_rows(&self) -> Vec<SignalCandidateRow> {
+        let completed_candidates: Vec<ScoredCandidate> = self
+            .signal_candidate
+            .iter_completed()
+            .map(|(url, result)| ScoredCandidate {
+                url: url.to_string(),
+                result: result.clone(),
+            })
+            .collect();
+        let active_prompt_version = self
+            .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
+            .unwrap_or_default();
+        let selection = SignalCandidateSelection::compute(
+            &completed_candidates,
+            SelectionPolicy {
+                threshold: self.signal_candidate_threshold(),
+                cap: usize::MAX,
+                active_prompt_version,
+                excluded: self.signal_candidate.excluded().clone(),
+            },
+        );
+
+        let job_id_by_url: HashMap<&str, crate::JobId> = self
+            .jobs
+            .iter()
+            .map(|(job_id, job)| (job.url.as_str(), *job_id))
+            .collect();
+        let mut rows = Vec::new();
+        for (url, state) in self.signal_candidate.iter_states() {
+            let Some(job_id) = job_id_by_url.get(url).copied() else {
+                continue;
+            };
+            match state {
+                SignalCandidateState::Pending => continue,
+                SignalCandidateState::Scoring { .. } => {
+                    rows.push(SignalCandidateRow {
+                        job_id,
+                        url: url.to_string(),
+                        score: 0,
+                        score_band: ScoreBand::Low,
+                        source_tier: SourceTier::Tier3,
+                        themes: Vec::new(),
+                        gist_truncated: String::new(),
+                        dupes_count: 0,
+                        state_label: SignalCandidateRowState::Scoring,
+                        signal_key: String::new(),
+                    });
+                }
+                SignalCandidateState::Failed { reason } => {
+                    rows.push(SignalCandidateRow {
+                        job_id,
+                        url: url.to_string(),
+                        score: 0,
+                        score_band: ScoreBand::Low,
+                        source_tier: SourceTier::Tier3,
+                        themes: Vec::new(),
+                        gist_truncated: String::new(),
+                        dupes_count: 0,
+                        state_label: SignalCandidateRowState::Failed {
+                            reason: reason.clone(),
+                        },
+                        signal_key: String::new(),
+                    });
+                }
+                SignalCandidateState::Completed { result } => {
+                    let score_band = match result.signal_score {
+                        80..=u8::MAX => ScoreBand::High,
+                        60..=79 => ScoreBand::Mid,
+                        _ => ScoreBand::Low,
+                    };
+                    let dupes_count = selection
+                        .cluster_size_for_signal_key(&result.signal_key)
+                        .saturating_sub(1);
+                    rows.push(SignalCandidateRow {
+                        job_id,
+                        url: url.to_string(),
+                        score: result.signal_score,
+                        score_band,
+                        source_tier: result.source_tier,
+                        themes: result.themes.clone(),
+                        gist_truncated: truncate_signal_candidate_gist(&result.draft_gist),
+                        dupes_count,
+                        state_label: SignalCandidateRowState::Scored,
+                        signal_key: result.signal_key.clone(),
+                    });
+                }
+            }
+        }
+
+        rows.sort_by(|a, b| {
+            signal_candidate_row_rank(&a.state_label)
+                .cmp(&signal_candidate_row_rank(&b.state_label))
+                .then(b.score.cmp(&a.score))
+                .then(a.url.cmp(&b.url))
+        });
+        rows
+    }
+
+    fn signal_candidate_preview_for_selected_job(
+        &self,
+        selected_job_id: Option<crate::JobId>,
+    ) -> Option<SignalCandidatePreviewView> {
+        let job_id = selected_job_id?;
+        let job = self.jobs.get(&job_id)?;
+        let state = self.signal_candidate.state_for(&job.url)?;
+        let SignalCandidateState::Completed { result } = state else {
+            return None;
+        };
+        let signal_key = result.signal_key.clone();
+        let mut duplicate_urls: Vec<String> = self
+            .signal_candidate
+            .iter_completed()
+            .filter(|(url, candidate)| *url != job.url && candidate.signal_key == signal_key)
+            .map(|(url, _)| url.to_string())
+            .collect();
+        duplicate_urls.insert(0, job.url.clone());
+        duplicate_urls[1..].sort();
+        let exclude_checked = self
+            .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
+            .map(|prompt_version| {
+                self.signal_candidate
+                    .excluded()
+                    .contains(&crate::signal_candidate::OverrideKey {
+                        signal_key: signal_key.clone(),
+                        prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate
+                            .to_string(),
+                        prompt_version,
+                    })
+            })
+            .unwrap_or(false);
+        Some(SignalCandidatePreviewView {
+            signal_key,
+            duplicate_urls,
+            exclude_checked,
+            state_label: String::from("Scored"),
+        })
     }
 
     fn format_briefing_preview_header(&self) -> String {
@@ -329,6 +494,9 @@ impl AppState {
                 .map(|quality| quality.nav_heavy())
                 .unwrap_or(false)
                 && !preview_header_override_visible,
+            signal_candidate_preview_visible: selected_job
+                .and_then(|job| self.signal_candidate.state_for(&job.url))
+                .is_some_and(|state| matches!(state, SignalCandidateState::Completed { .. })),
             prompt_lab_advanced_mode: self.prompt_lab.advanced_mode(),
             prompt_lab_compare_section_open: self.prompt_lab.compare_section_open(),
             prompt_lab_context_section_open: self.prompt_lab.context_section_open(),
@@ -472,14 +640,28 @@ impl AppState {
     }
 }
 
-fn build_left_pane_header_view(
+struct LeftPaneHeaderInputs<'a> {
     left_tab: LeftTab,
+    results_sub_mode: ResultsSubMode,
     job_list_scope: JobListScope,
-    scoped_jobs: &[&JobRowView],
-    visible_jobs_after_filter: &[crate::JobId],
-    jobs_search_query: &str,
-    ai_unavailable_message: Option<&str>,
-) -> LeftPaneHeaderView {
+    scoped_jobs: &'a [&'a JobRowView],
+    visible_jobs_after_filter: &'a [crate::JobId],
+    jobs_search_query: &'a str,
+    ai_unavailable_message: Option<&'a str>,
+    signal_candidate_count: usize,
+}
+
+fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHeaderView {
+    let LeftPaneHeaderInputs {
+        left_tab,
+        results_sub_mode,
+        job_list_scope,
+        scoped_jobs,
+        visible_jobs_after_filter,
+        jobs_search_query,
+        ai_unavailable_message,
+        signal_candidate_count,
+    } = inputs;
     let scope_label = if job_list_scope == JobListScope::SinceCheckpoint {
         Some("Since checkpoint".to_string())
     } else {
@@ -528,18 +710,34 @@ fn build_left_pane_header_view(
             }
         }
         LeftTab::TriageResults => {
-            let triage_result_count = scoped_jobs
-                .iter()
-                .filter(|job| job.triage_annotation.is_some())
-                .count();
+            let (title, count_label) = match results_sub_mode {
+                ResultsSubMode::Triage => {
+                    let triage_result_count = scoped_jobs
+                        .iter()
+                        .filter(|job| job.triage_annotation.is_some())
+                        .count();
+                    (
+                        "Results".to_string(),
+                        Some(if triage_result_count == 0 {
+                            "no triage results yet".to_string()
+                        } else {
+                            format!("{triage_result_count} with triage")
+                        }),
+                    )
+                }
+                ResultsSubMode::Signals => (
+                    "Results".to_string(),
+                    Some(if signal_candidate_count == 0 {
+                        "no signal candidates yet".to_string()
+                    } else {
+                        format!("{signal_candidate_count} signal candidates")
+                    }),
+                ),
+            };
             LeftPaneHeaderView {
-                title: "Triage Results".to_string(),
+                title,
                 scope_label,
-                count_label: Some(if triage_result_count == 0 {
-                    "no triage results yet".to_string()
-                } else {
-                    format!("{triage_result_count} with triage")
-                }),
+                count_label,
                 state_label: ai_unavailable_message.map(|_| "AI unavailable".to_string()),
             }
         }
@@ -550,6 +748,25 @@ fn build_left_pane_header_view(
             state_label: None,
         },
     }
+}
+
+fn signal_candidate_row_rank(state: &SignalCandidateRowState) -> u8 {
+    match state {
+        SignalCandidateRowState::Scored => 0,
+        SignalCandidateRowState::Scoring => 1,
+        SignalCandidateRowState::Failed { .. } => 2,
+    }
+}
+
+fn truncate_signal_candidate_gist(text: &str) -> String {
+    const MAX_CHARS: usize = 180;
+    let total_chars = text.chars().count();
+    if total_chars <= MAX_CHARS {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(MAX_CHARS).collect();
+    out.push('…');
+    out
 }
 
 fn scoped_jobs_for_job_list(jobs: &[JobRowView], job_list_scope: JobListScope) -> Vec<&JobRowView> {

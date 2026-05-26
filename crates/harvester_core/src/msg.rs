@@ -15,7 +15,7 @@ use crate::prompt_lab::{
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
-use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
+use crate::tabs::{AppTab, JobListScope, LeftTab, ResultsSubMode, TrendCategory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
@@ -448,6 +448,10 @@ pub enum Msg {
     /// User selected a tab in the left pane.
     LeftTabSelected {
         tab: LeftTab,
+    },
+    /// User selected a sub-mode within the TriageResults tab.
+    SetResultsSubMode {
+        mode: ResultsSubMode,
     },
     /// User changed the job list scope (All vs SinceCheckpoint).
     JobListScopeSet {

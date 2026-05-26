@@ -25,6 +25,7 @@ fn layout_rules_for_prompt_lab(prompt_lab: PromptLabLayoutConfig) -> Vec<LayoutR
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Triage,
             left_tab: LeftTab::PromptLab,
             prompt_lab,
@@ -48,6 +49,7 @@ fn layout_rules_for_left_tab(left_tab: LeftTab) -> Vec<LayoutRule> {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab,
             prompt_lab: PromptLabLayoutConfig {
@@ -101,6 +103,7 @@ fn operation_controls_have_width_when_visible() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -143,6 +146,7 @@ fn operation_controls_collapse_when_hidden() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -306,6 +310,7 @@ fn toolbar_contains_scope_and_token_controls_on_same_row() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -361,6 +366,7 @@ fn jobs_panel_visible_for_all_job_oriented_tabs() {
                 preview_header_override_visible: false,
                 preview_context_visible: false,
                 preview_attention_visible: false,
+                signal_candidate_preview_visible: false,
                 active_tab: AppTab::Summary,
                 left_tab,
                 prompt_lab: PromptLabLayoutConfig {
@@ -553,6 +559,7 @@ fn inactive_tab_panel_is_collapsed() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -609,6 +616,7 @@ fn preview_tab_panels_use_single_fill_rule() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -661,6 +669,7 @@ fn preview_context_row_is_tall_enough_for_metadata_label() {
             preview_header_override_visible: false,
             preview_context_visible: true,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -726,6 +735,7 @@ fn ai_warning_row_sits_immediately_below_right_tab_bar() {
             preview_header_override_visible: true,
             preview_context_visible: true,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -778,6 +788,7 @@ fn ai_warning_row_collapses_when_hidden() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -808,6 +819,7 @@ fn ai_warning_row_collapses_when_hidden() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -844,6 +856,7 @@ fn expanded_layout_includes_all_controls() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Triage,
             left_tab: LeftTab::PromptLab,
             prompt_lab: PromptLabLayoutConfig {
@@ -897,6 +910,7 @@ fn template_editor_rows_are_collapsed_when_editor_is_closed() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Triage,
             left_tab: LeftTab::PromptLab,
             prompt_lab: PromptLabLayoutConfig {
@@ -940,6 +954,7 @@ fn template_toggle_button_width_fits_state_text() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Triage,
             left_tab: LeftTab::PromptLab,
             prompt_lab: PromptLabLayoutConfig {
@@ -1283,6 +1298,7 @@ fn preview_viewers_use_editorial_inner_margins() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -1333,6 +1349,7 @@ fn footer_buttons_share_a_common_vertical_alignment() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -1385,6 +1402,7 @@ fn footer_buttons_follow_workflow_order() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -1435,6 +1453,7 @@ fn preview_context_row_uses_caption_then_fill_link_layout() {
             preview_header_override_visible: false,
             preview_context_visible: true,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -1481,6 +1500,7 @@ fn stop_button_width_matches_standard_footer_buttons() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -1524,6 +1544,7 @@ fn footer_button_row_is_tall_enough_for_primary_action_presence() {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {

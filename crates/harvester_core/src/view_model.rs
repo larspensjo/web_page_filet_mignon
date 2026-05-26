@@ -7,9 +7,10 @@ use crate::prompt_lab::{
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::{JobOrigin, LinkDownloadState};
-use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
+use crate::tabs::{AppTab, JobListScope, LeftTab, ResultsSubMode, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
+use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
 use harvester_engine::llm::types::ModelId;
 use harvester_engine::LinkKind;
@@ -43,6 +44,42 @@ pub struct OperationProgress {
     pub label: String,
     pub completed: u32,
     pub total: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScoreBand {
+    High,
+    Mid,
+    Low,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignalCandidateRowState {
+    Scoring,
+    Scored,
+    Failed { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalCandidateRow {
+    pub job_id: JobId,
+    pub url: String,
+    pub score: u8,
+    pub score_band: ScoreBand,
+    pub source_tier: SourceTier,
+    pub themes: Vec<String>,
+    pub gist_truncated: String,
+    pub dupes_count: usize,
+    pub state_label: SignalCandidateRowState,
+    pub signal_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalCandidatePreviewView {
+    pub signal_key: String,
+    pub duplicate_urls: Vec<String>,
+    pub exclude_checked: bool,
+    pub state_label: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -248,6 +285,7 @@ pub struct LayoutViewModel {
     pub preview_header_override_visible: bool,
     pub preview_context_visible: bool,
     pub preview_attention_visible: bool,
+    pub signal_candidate_preview_visible: bool,
     pub prompt_lab_advanced_mode: bool,
     pub prompt_lab_compare_section_open: bool,
     pub prompt_lab_context_section_open: bool,
@@ -279,6 +317,9 @@ pub struct AppViewModel {
     pub stop_finish_button: StopFinishButtonState,
     pub triage_can_start: bool,
     pub triage_results_reorder_suppressed: bool,
+    pub results_sub_mode: ResultsSubMode,
+    pub signal_candidate_rows: Vec<SignalCandidateRow>,
+    pub signal_candidate_preview: Option<SignalCandidatePreviewView>,
     pub ai_unavailable_message: Option<String>,
     pub triage_blocked_reason: Option<String>,
     pub briefing_blocked_reason: Option<String>,
@@ -335,6 +376,9 @@ impl Default for AppViewModel {
             stop_finish_button: StopFinishButtonState::Disabled,
             triage_can_start: false,
             triage_results_reorder_suppressed: false,
+            results_sub_mode: ResultsSubMode::default(),
+            signal_candidate_rows: Vec::new(),
+            signal_candidate_preview: None,
             ai_unavailable_message: None,
             triage_blocked_reason: None,
             briefing_blocked_reason: None,

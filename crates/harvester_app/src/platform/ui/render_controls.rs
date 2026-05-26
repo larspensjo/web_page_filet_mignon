@@ -62,6 +62,14 @@ pub(super) fn render_left_tab_bar_section(
         control_id: TAB_BAR_LEFT,
         selected_index: active.to_index(),
     });
+    cmds.push(PlatformCommand::SetTabBarSelection {
+        window_id,
+        control_id: TAB_BAR_RESULTS_SUBMODE,
+        selected_index: match view.results_sub_mode {
+            harvester_core::ResultsSubMode::Triage => 0,
+            harvester_core::ResultsSubMode::Signals => 1,
+        },
+    });
 }
 
 pub(super) fn render_status_section(
@@ -315,6 +323,16 @@ pub(super) fn render_main_controls_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
+    emit_if_changed(
+        &mut tree_state.controls.prev_jobs_header_title_text,
+        view.left_pane_header.title.clone(),
+        cmds,
+        |text| PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_JOBS_HEADER_TITLE,
+            text,
+        },
+    );
     emit_if_changed(
         &mut tree_state.controls.prev_jobs_header_meta_text,
         format_left_pane_header_meta(&view.left_pane_header),

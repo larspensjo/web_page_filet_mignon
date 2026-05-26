@@ -2017,7 +2017,7 @@ mod app_state_tests {
 
         let view = state.view();
 
-        assert_eq!(view.left_pane_header.title, "Triage Results");
+        assert_eq!(view.left_pane_header.title, "Results");
         assert_eq!(
             view.left_pane_header.scope_label.as_deref(),
             Some("Since checkpoint")
@@ -2036,12 +2036,31 @@ mod app_state_tests {
 
         let view = state.view();
 
-        assert_eq!(view.left_pane_header.title, "Triage Results");
+        assert_eq!(view.left_pane_header.title, "Results");
         assert_eq!(
             view.left_pane_header.count_label.as_deref(),
             Some("no triage results yet")
         );
         assert_eq!(view.left_pane_header.state_label.as_deref(), None);
+    }
+
+    #[test]
+    fn signal_candidate_rows_leave_gists_empty_for_scoring_and_failed_states() {
+        let mut state = AppState::new();
+        let scoring_url = "https://example.com/signal/scoring/".to_string() + &"a".repeat(96);
+        let failed_url = "https://example.com/signal/failed/".to_string() + &"b".repeat(96);
+
+        insert_done_job(&mut state, 1, &scoring_url);
+        insert_done_job(&mut state, 2, &failed_url);
+        state.signal_candidate_mut().enqueue(scoring_url.clone());
+        state.signal_candidate_mut().mark_scoring(&scoring_url, 7);
+        state.signal_candidate_mut().enqueue(failed_url.clone());
+        state.signal_candidate_mut().fail(&failed_url, "boom");
+
+        let rows = state.build_signal_candidate_rows();
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.gist_truncated.is_empty()));
     }
 
     fn insert_done_job(state: &mut AppState, job_id: JobId, url: &str) {

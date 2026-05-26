@@ -847,6 +847,21 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
+        control_id: LABEL_SIGNAL_CANDIDATE_STATE,
+        style_id: StyleId::MetadataText,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_CAPTION,
+        style_id: StyleId::MetadataText,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_URLS,
+        style_id: StyleId::MetadataText,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
         control_id: LABEL_TOKEN_PROGRESS,
         style_id: StyleId::StatusMeter,
     });
@@ -931,6 +946,11 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
         });
     }
     prompt_lab_sections::apply_theme(window_id, commands);
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
+        control_id: CHK_SIGNAL_CANDIDATE_EXCLUDE,
+        style_id: StyleId::CheckBox,
+    });
 
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,

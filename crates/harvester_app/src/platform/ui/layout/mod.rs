@@ -26,6 +26,7 @@ pub(crate) struct LayoutConfig {
     pub preview_header_override_visible: bool,
     pub preview_context_visible: bool,
     pub preview_attention_visible: bool,
+    pub signal_candidate_preview_visible: bool,
     pub prompt_lab: PromptLabLayoutConfig,
     pub active_tab: AppTab,
     pub left_tab: LeftTab,
@@ -46,6 +47,7 @@ pub fn initial_commands(window_id: WindowId) -> Vec<PlatformCommand> {
             preview_header_override_visible: false,
             preview_context_visible: false,
             preview_attention_visible: false,
+            signal_candidate_preview_visible: false,
             active_tab: AppTab::Summary,
             left_tab: LeftTab::Jobs,
             prompt_lab: PromptLabLayoutConfig {
@@ -73,6 +75,7 @@ pub(crate) fn build_layout_command(window_id: WindowId, config: LayoutConfig) ->
             config.preview_header_override_visible,
             config.preview_context_visible,
             config.preview_attention_visible,
+            config.signal_candidate_preview_visible,
             config.prompt_lab,
             config.active_tab,
             config.left_tab,

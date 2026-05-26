@@ -23,7 +23,7 @@ use harvester_core::{
     update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel,
     ArchiveTokenEstimates, Effect, JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel,
     LeftTab, LinkDownloadState, LlmQuotaLimits, ManualDecision, Msg, PromptLabStage,
-    SignalCandidateDialogDefault, TrendCategory,
+    ResultsSubMode, SignalCandidateDialogDefault, SignalCandidateState, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -1094,6 +1094,18 @@ impl PlatformEventHandler for AppEventHandler {
                 control_id,
                 selected_index,
                 ..
+            } if control_id == ui::constants::TAB_BAR_RESULTS_SUBMODE => {
+                let mode = match selected_index {
+                    0 => ResultsSubMode::Triage,
+                    1 => ResultsSubMode::Signals,
+                    _ => ResultsSubMode::Triage,
+                };
+                let _ = self.msg_tx.send(Msg::SetResultsSubMode { mode });
+            }
+            AppEvent::TabBarSelectionChanged {
+                control_id,
+                selected_index,
+                ..
             } if control_id == ui::constants::TAB_BAR_TRENDS => {
                 if let Some(category) = TrendCategory::from_index(selected_index) {
                     let _ = self.msg_tx.send(Msg::TrendCategorySelected { category });
@@ -1399,8 +1411,21 @@ impl UiStateProvider for AppUiStateProvider {
                 if guard.state.left_tab() != LeftTab::TriageResults {
                     return TreeItemMarkerKind::None;
                 }
-                if let Some(result) = guard.state.triage_result_for_job(job_id) {
-                    return triage_marker_for_priority(result.priority);
+                match guard.state.results_sub_mode() {
+                    ResultsSubMode::Triage => {
+                        if let Some(result) = guard.state.triage_result_for_job(job_id) {
+                            return triage_marker_for_priority(result.priority);
+                        }
+                    }
+                    ResultsSubMode::Signals => {
+                        if let Some(url) = guard.state.job_url_for(job_id) {
+                            if let Some(SignalCandidateState::Completed { result }) =
+                                guard.state.signal_candidate().state_for(url)
+                            {
+                                return signal_candidate_marker_for_score(result.signal_score);
+                            }
+                        }
+                    }
                 }
                 TreeItemMarkerKind::None
             }
@@ -1423,6 +1448,14 @@ impl UiStateProvider for AppUiStateProvider {
             }
             _ => TreeItemMarkerKind::None,
         }
+    }
+}
+
+fn signal_candidate_marker_for_score(score: u8) -> TreeItemMarkerKind {
+    match score {
+        80..=u8::MAX => TreeItemMarkerKind::Green,
+        60..=79 => TreeItemMarkerKind::Yellow,
+        0..=59 => TreeItemMarkerKind::Red,
     }
 }
 

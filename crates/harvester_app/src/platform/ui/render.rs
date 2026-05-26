@@ -33,6 +33,7 @@ pub(super) struct LayoutRenderState {
     pub(super) prev_prompt_lab_template_section_open: bool,
     pub(super) prev_prompt_lab_run_details_section_open: bool,
     pub(super) prev_prompt_lab_template_editor_open: bool,
+    pub(super) prev_signal_candidate_preview_visible: bool,
 }
 
 impl Default for LayoutRenderState {
@@ -52,12 +53,14 @@ impl Default for LayoutRenderState {
             prev_prompt_lab_template_section_open: false,
             prev_prompt_lab_run_details_section_open: false,
             prev_prompt_lab_template_editor_open: false,
+            prev_signal_candidate_preview_visible: false,
         }
     }
 }
 
 #[derive(Debug)]
 pub(super) struct ControlsRenderState {
+    pub(super) prev_jobs_header_title_text: Option<String>,
     pub(super) prev_status_label: Option<(String, MessageSeverity)>,
     pub(super) prev_progress_text: Option<String>,
     pub(super) prev_progress_range: Option<(u32, u32)>,
@@ -79,6 +82,7 @@ pub(super) struct ControlsRenderState {
 impl Default for ControlsRenderState {
     fn default() -> Self {
         Self {
+            prev_jobs_header_title_text: None,
             prev_status_label: None,
             prev_progress_text: None,
             prev_progress_range: None,
@@ -134,6 +138,10 @@ pub(super) struct PreviewRenderState {
     pub(super) prev_preview_source_link_enabled: Option<bool>,
     pub(super) prev_preview_status_text: Option<String>,
     pub(super) prev_preview_attention_text: Option<String>,
+    pub(super) prev_signal_candidate_state_text: Option<String>,
+    pub(super) prev_signal_candidate_cluster_caption_text: Option<String>,
+    pub(super) prev_signal_candidate_cluster_urls_text: Option<String>,
+    pub(super) prev_signal_candidate_exclude_checked: Option<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -245,6 +253,7 @@ fn layout_view_from_app_view(view: &AppViewModel) -> LayoutViewModel {
             .and_then(|context| context.attention_label.as_ref())
             .is_some()
             && view.preview_header_text.is_none(),
+        signal_candidate_preview_visible: view.signal_candidate_preview.is_some(),
         prompt_lab_advanced_mode: view.left_pane.prompt_lab.advanced_mode,
         prompt_lab_compare_section_open: view.left_pane.prompt_lab.compare_section_open,
         prompt_lab_context_section_open: view.left_pane.prompt_lab.context_section_open,
@@ -279,7 +288,9 @@ fn render_layout_section(
         || layout.prompt_lab_run_details_section_open
             != tree_state.layout.prev_prompt_lab_run_details_section_open
         || layout.prompt_lab_template_editor_open
-            != tree_state.layout.prev_prompt_lab_template_editor_open;
+            != tree_state.layout.prev_prompt_lab_template_editor_open
+        || layout.signal_candidate_preview_visible
+            != tree_state.layout.prev_signal_candidate_preview_visible;
     if !layout_changed {
         return;
     }
@@ -303,6 +314,7 @@ fn render_layout_section(
             preview_header_override_visible: layout.preview_header_override_visible,
             preview_context_visible: layout.preview_context_visible,
             preview_attention_visible: layout.preview_attention_visible,
+            signal_candidate_preview_visible: layout.signal_candidate_preview_visible,
             active_tab: layout.active_tab,
             left_tab: layout.left_tab,
             prompt_lab: PromptLabLayoutConfig {
@@ -335,6 +347,8 @@ fn render_layout_section(
     tree_state.layout.prev_prompt_lab_run_details_section_open =
         layout.prompt_lab_run_details_section_open;
     tree_state.layout.prev_prompt_lab_template_editor_open = layout.prompt_lab_template_editor_open;
+    tree_state.layout.prev_signal_candidate_preview_visible =
+        layout.signal_candidate_preview_visible;
     tree_state.layout.layout_initialized = true;
 }
 

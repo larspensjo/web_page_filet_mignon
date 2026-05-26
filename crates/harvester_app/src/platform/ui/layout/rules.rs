@@ -73,6 +73,7 @@ pub(super) fn build_layout_rules(
     preview_header_override_visible: bool,
     preview_context_visible: bool,
     _preview_attention_visible: bool,
+    signal_candidate_preview_visible: bool,
     prompt_lab: PromptLabLayoutConfig,
     active_tab: AppTab,
     left_tab: LeftTab,
@@ -103,6 +104,7 @@ pub(super) fn build_layout_rules(
             Some(0)
         }
     };
+    let show_results_submode = left_tab == LeftTab::TriageResults;
     // Right-pane tab helpers: only the active tab fills; the rest collapse to zero.
     let tab_dock = |tab: AppTab| -> DockStyle {
         if active_tab == tab {
@@ -278,10 +280,26 @@ pub(super) fn build_layout_rules(
             },
         },
         LayoutRule {
+            control_id: PANEL_RESULTS_SUBMODE_ROW,
+            parent_control_id: Some(PANEL_JOBS),
+            dock_style: DockStyle::Top,
+            order: 3,
+            fixed_size: if show_results_submode {
+                Some(28)
+            } else {
+                Some(0)
+            },
+            margin: if show_results_submode {
+                (0, 2, 6, 0)
+            } else {
+                (0, 0, 0, 0)
+            },
+        },
+        LayoutRule {
             control_id: TREE_JOBS,
             parent_control_id: Some(PANEL_JOBS),
             dock_style: DockStyle::Fill,
-            order: 3,
+            order: 4,
             fixed_size: None,
             margin: (0, 0, 0, 0),
         },
@@ -403,6 +421,54 @@ pub(super) fn build_layout_rules(
             fixed_size: Some(0),
             margin: (0, 0, 8, 0),
         },
+        LayoutRule {
+            control_id: PANEL_SIGNAL_CANDIDATE,
+            parent_control_id: Some(PANEL_PREVIEW),
+            dock_style: DockStyle::Top,
+            order: 4,
+            fixed_size: if signal_candidate_preview_visible {
+                Some(72)
+            } else {
+                Some(0)
+            },
+            margin: if signal_candidate_preview_visible {
+                (0, 2, 0, 6)
+            } else {
+                (0, 0, 0, 0)
+            },
+        },
+        LayoutRule {
+            control_id: LABEL_SIGNAL_CANDIDATE_STATE,
+            parent_control_id: Some(PANEL_SIGNAL_CANDIDATE),
+            dock_style: DockStyle::Top,
+            order: 0,
+            fixed_size: Some(18),
+            margin: (18, 2, 8, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_CAPTION,
+            parent_control_id: Some(PANEL_SIGNAL_CANDIDATE),
+            dock_style: DockStyle::Top,
+            order: 1,
+            fixed_size: Some(18),
+            margin: (18, 0, 8, 0),
+        },
+        LayoutRule {
+            control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_URLS,
+            parent_control_id: Some(PANEL_SIGNAL_CANDIDATE),
+            dock_style: DockStyle::Top,
+            order: 2,
+            fixed_size: Some(24),
+            margin: (18, 0, 8, 0),
+        },
+        LayoutRule {
+            control_id: CHK_SIGNAL_CANDIDATE_EXCLUDE,
+            parent_control_id: Some(PANEL_SIGNAL_CANDIDATE),
+            dock_style: DockStyle::Top,
+            order: 3,
+            fixed_size: Some(24),
+            margin: (16, 0, 8, 0),
+        },
         // Right-pane tab bar (custom TabBar widget).
         LayoutRule {
             control_id: TAB_BAR_RIGHT,
@@ -417,7 +483,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_TRIAGE,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::Triage),
-            order: 4,
+            order: 5,
             fixed_size: tab_size(AppTab::Triage),
             margin: (0, 0, 0, 0),
         },
@@ -433,7 +499,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_SUMMARY,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::Summary),
-            order: 5,
+            order: 6,
             fixed_size: tab_size(AppTab::Summary),
             margin: (0, 0, 0, 0),
         },
@@ -449,7 +515,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_BRIEFING,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::Briefing),
-            order: 6,
+            order: 7,
             fixed_size: tab_size(AppTab::Briefing),
             margin: (0, 0, 0, 0),
         },
@@ -465,7 +531,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_TRENDS,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::Trends),
-            order: 7,
+            order: 8,
             fixed_size: tab_size(AppTab::Trends),
             margin: (0, 0, 0, 0),
         },
@@ -499,7 +565,7 @@ pub(super) fn build_layout_rules(
             control_id: PANEL_TAB_POLL_STATS,
             parent_control_id: Some(PANEL_PREVIEW),
             dock_style: tab_dock(AppTab::PollStats),
-            order: 8,
+            order: 9,
             fixed_size: tab_size(AppTab::PollStats),
             margin: (0, 0, 0, 0),
         },

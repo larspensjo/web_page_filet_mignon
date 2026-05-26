@@ -120,6 +120,10 @@ impl SignalCandidateSession {
         })
     }
 
+    pub fn iter_states(&self) -> impl Iterator<Item = (&str, &SignalCandidateState)> {
+        self.states.iter().map(|(url, state)| (url.as_str(), state))
+    }
+
     pub fn enqueued_count(&self) -> u32 {
         self.enqueued
     }
@@ -311,6 +315,10 @@ impl SignalCandidateSelection {
             .get(url)
             .and_then(|key| self.cluster_sizes.get(key).copied())
             .unwrap_or(0)
+    }
+
+    pub fn cluster_size_for_signal_key(&self, signal_key: &str) -> usize {
+        self.cluster_sizes.get(signal_key).copied().unwrap_or(0)
     }
 
     pub fn signal_key_for(&self, url: &str) -> Option<&str> {

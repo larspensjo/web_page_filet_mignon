@@ -14,7 +14,8 @@ use harvester_core::{
 };
 use harvester_core::{
     JobOrigin, PreviewContextView, PreviewHeaderView, PromptLabRunId, PromptLabRunSummaryView,
-    PromptLabStage, PromptLabView,
+    PromptLabStage, PromptLabView, ResultsSubMode, ScoreBand, SignalCandidateRow,
+    SignalCandidateRowState,
 };
 use std::sync::Once;
 
@@ -699,6 +700,35 @@ fn list_box_items_for_non_jobs_tabs_ignore_visible_jobs_after_filter() {
         );
         assert_eq!(populated[0].id, ListBoxItemId::new(1));
     }
+}
+
+#[test]
+fn signal_candidate_rows_compact_long_urls_in_list_box_titles() {
+    init_logging();
+
+    let long_url = format!("https://example.com/signal/{}", "a".repeat(120));
+    let job = make_job(1, &long_url, Stage::Done, Some(JobResultKind::Success), None, None);
+    let mut view = make_view(vec![job]);
+    view.left_pane.left_tab = LeftTab::TriageResults;
+    view.results_sub_mode = ResultsSubMode::Signals;
+    view.signal_candidate_rows = vec![SignalCandidateRow {
+        job_id: 1,
+        url: long_url.clone(),
+        score: 0,
+        score_band: ScoreBand::Low,
+        source_tier: harvester_engine::llm::dto::SourceTier::Tier3,
+        themes: vec![],
+        gist_truncated: String::new(),
+        dupes_count: 0,
+        state_label: SignalCandidateRowState::Scoring,
+        signal_key: String::new(),
+    }];
+
+    let populated = build_list_box_items(&view);
+
+    assert_eq!(populated.len(), 1);
+    assert_ne!(populated[0].title, long_url);
+    assert!(populated[0].title.len() < long_url.len());
 }
 
 #[test]
@@ -1587,7 +1617,7 @@ fn left_header_only_renders_meta_row() {
     let mut empty_view = empty_view;
     empty_view.left_pane.left_tab = LeftTab::TriageResults;
     empty_view.left_pane_header = LeftPaneHeaderView {
-        title: "Triage Results".to_string(),
+        title: "Results".to_string(),
         scope_label: None,
         count_label: Some("no triage results yet".to_string()),
         state_label: None,
@@ -1596,7 +1626,7 @@ fn left_header_only_renders_meta_row() {
     let empty_meta =
         control_text(&empty_cmds, LABEL_JOBS_HEADER_META).expect("empty triage meta rendered");
     assert_eq!(empty_meta, "no triage results yet");
-    assert!(control_text(&empty_cmds, LABEL_JOBS_HEADER_TITLE).is_none());
+    assert_eq!(control_text(&empty_cmds, LABEL_JOBS_HEADER_TITLE), Some("Results"));
 
     let mut populated_view = empty_view.clone();
     populated_view.jobs[0].triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -1605,7 +1635,7 @@ fn left_header_only_renders_meta_row() {
         tags: vec![],
     });
     populated_view.left_pane_header = LeftPaneHeaderView {
-        title: "Triage Results".to_string(),
+        title: "Results".to_string(),
         scope_label: None,
         count_label: Some("1 with triage".to_string()),
         state_label: None,
@@ -1614,7 +1644,7 @@ fn left_header_only_renders_meta_row() {
     let populated_meta = control_text(&populated_cmds, LABEL_JOBS_HEADER_META)
         .expect("populated triage meta rendered");
     assert_eq!(populated_meta, "1 with triage");
-    assert!(control_text(&populated_cmds, LABEL_JOBS_HEADER_TITLE).is_none());
+    assert_eq!(control_text(&populated_cmds, LABEL_JOBS_HEADER_TITLE), None);
 }
 
 #[test]
@@ -1751,7 +1781,7 @@ fn triage_results_meta_uses_ai_unavailable_copy_when_blocked() {
     view.ai_unavailable_message =
         Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
     view.left_pane_header = LeftPaneHeaderView {
-        title: "Triage Results".to_string(),
+        title: "Results".to_string(),
         scope_label: None,
         count_label: Some("no triage results yet".to_string()),
         state_label: Some("AI unavailable".to_string()),
@@ -1760,7 +1790,7 @@ fn triage_results_meta_uses_ai_unavailable_copy_when_blocked() {
     let cmds = render(window_id, &view, &mut tree_state);
     let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
     assert_eq!(meta, "no triage results yet · AI unavailable");
-    assert!(control_text(&cmds, LABEL_JOBS_HEADER_TITLE).is_none());
+    assert_eq!(control_text(&cmds, LABEL_JOBS_HEADER_TITLE), Some("Results"));
 }
 
 #[test]
@@ -1794,7 +1824,7 @@ fn triage_results_meta_preserves_count_when_ai_unavailable() {
     view.ai_unavailable_message =
         Some("AI features unavailable: OPENAI_API_KEY is not set".to_string());
     view.left_pane_header = LeftPaneHeaderView {
-        title: "Triage Results".to_string(),
+        title: "Results".to_string(),
         scope_label: None,
         count_label: Some("1 with triage".to_string()),
         state_label: Some("AI unavailable".to_string()),
@@ -1803,7 +1833,7 @@ fn triage_results_meta_preserves_count_when_ai_unavailable() {
     let cmds = render(window_id, &view, &mut tree_state);
     let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
     assert_eq!(meta, "1 with triage · AI unavailable");
-    assert!(control_text(&cmds, LABEL_JOBS_HEADER_TITLE).is_none());
+    assert_eq!(control_text(&cmds, LABEL_JOBS_HEADER_TITLE), Some("Results"));
 }
 
 #[test]
@@ -2333,3 +2363,5 @@ fn trends_show_end_labels_is_true() {
             panic!("SetChartData not emitted");
         }
 }
+
+

@@ -392,4 +392,92 @@ pub(super) fn render_preview_section(
             },
         );
     }
+
+    if let Some(signal_preview) = view.signal_candidate_preview.as_ref() {
+        emit_if_changed(
+            &mut tree_state.preview.prev_signal_candidate_state_text,
+            signal_preview.state_label.clone(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_SIGNAL_CANDIDATE_STATE,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state
+                .preview
+                .prev_signal_candidate_cluster_caption_text,
+            "Duplicate cluster".to_string(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_CAPTION,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_signal_candidate_cluster_urls_text,
+            signal_preview.duplicate_urls.join("\n"),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_URLS,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_signal_candidate_exclude_checked,
+            signal_preview.exclude_checked,
+            cmds,
+            |checked| PlatformCommand::SetCheckBoxChecked {
+                window_id,
+                control_id: CHK_SIGNAL_CANDIDATE_EXCLUDE,
+                checked,
+            },
+        );
+    } else {
+        emit_if_changed(
+            &mut tree_state.preview.prev_signal_candidate_state_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_SIGNAL_CANDIDATE_STATE,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state
+                .preview
+                .prev_signal_candidate_cluster_caption_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_CAPTION,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_signal_candidate_cluster_urls_text,
+            String::new(),
+            cmds,
+            |text| PlatformCommand::SetControlText {
+                window_id,
+                control_id: LABEL_SIGNAL_CANDIDATE_CLUSTER_URLS,
+                text,
+            },
+        );
+        emit_if_changed(
+            &mut tree_state.preview.prev_signal_candidate_exclude_checked,
+            false,
+            cmds,
+            |checked| PlatformCommand::SetCheckBoxChecked {
+                window_id,
+                control_id: CHK_SIGNAL_CANDIDATE_EXCLUDE,
+                checked,
+            },
+        );
+    }
 }

@@ -6,7 +6,7 @@ use commanductui::{
 };
 use harvester_core::{
     AppViewModel, JobFilterStatus, JobListScope, JobOrigin, JobResultKind, JobRowView, LeftTab,
-    Stage,
+    ResultsSubMode, ScoreBand, SignalCandidateRow, SignalCandidateRowState, Stage,
 };
 
 use super::constants::*;
@@ -117,34 +117,46 @@ pub(super) fn build_list_box_items(view: &AppViewModel) -> Vec<ListBoxItemDescri
         }
         _ => view.jobs.iter().collect(),
     };
+    let scope_filtered_job_ids: std::collections::HashSet<_> =
+        scope_filtered.iter().map(|job| job.job_id).collect();
 
     let mut sorted_buf: Vec<&JobRowView>;
-    let jobs_iter: &[&JobRowView] =
-        if matches!(tab, LeftTab::TriageResults) && !view.triage_results_reorder_suppressed {
-            sorted_buf = scope_filtered;
-            sorted_buf.sort_by(|a, b| {
-                let p_a = a
-                    .triage_annotation
-                    .as_ref()
-                    .map(|t| t.priority)
-                    .unwrap_or(0);
-                let p_b = b
-                    .triage_annotation
-                    .as_ref()
-                    .map(|t| t.priority)
-                    .unwrap_or(0);
-                p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
-            });
-            &sorted_buf
-        } else {
-            sorted_buf = scope_filtered;
-            &sorted_buf
-        };
+    let jobs_iter: &[&JobRowView] = if matches!(tab, LeftTab::TriageResults)
+        && view.results_sub_mode == ResultsSubMode::Triage
+        && !view.triage_results_reorder_suppressed
+    {
+        sorted_buf = scope_filtered;
+        sorted_buf.sort_by(|a, b| {
+            let p_a = a
+                .triage_annotation
+                .as_ref()
+                .map(|t| t.priority)
+                .unwrap_or(0);
+            let p_b = b
+                .triage_annotation
+                .as_ref()
+                .map(|t| t.priority)
+                .unwrap_or(0);
+            p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
+        });
+        &sorted_buf
+    } else {
+        sorted_buf = scope_filtered;
+        &sorted_buf
+    };
 
-    jobs_iter
-        .iter()
-        .map(|job| build_list_box_item(tab, job))
-        .collect()
+    match (tab, view.results_sub_mode) {
+        (LeftTab::TriageResults, ResultsSubMode::Signals) => view
+            .signal_candidate_rows
+            .iter()
+            .filter(|row| scope_filtered_job_ids.contains(&row.job_id))
+            .map(build_signal_candidate_item)
+            .collect(),
+        _ => jobs_iter
+            .iter()
+            .map(|job| build_list_box_item(tab, job))
+            .collect(),
+    }
 }
 
 pub(super) fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItemDescriptor {
@@ -222,6 +234,46 @@ pub(super) fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItem
         title,
         metadata,
         enabled,
+    }
+}
+
+fn build_signal_candidate_item(row: &SignalCandidateRow) -> ListBoxItemDescriptor {
+    let badges = vec![
+        BadgeDescriptor {
+            text: row.score.to_string(),
+            style: signal_candidate_score_style(row.score_band),
+        },
+        BadgeDescriptor {
+            text: format!("{:?}", row.source_tier),
+            style: StyleId::BadgeCategory,
+        },
+        BadgeDescriptor {
+            text: format!("{} dupes", row.dupes_count),
+            style: StyleId::BadgeStatusMuted,
+        },
+        BadgeDescriptor {
+            text: signal_candidate_state_label(&row.state_label).to_string(),
+            style: signal_candidate_state_style(&row.state_label),
+        },
+    ];
+
+    let title = if row.gist_truncated.is_empty() {
+        compact_url_label(&row.url, 80)
+    } else {
+        row.gist_truncated.clone()
+    };
+    let metadata = if row.themes.is_empty() {
+        String::new()
+    } else {
+        row.themes.join(" · ")
+    };
+
+    ListBoxItemDescriptor {
+        id: ListBoxItemId::new(row.job_id),
+        badges,
+        title,
+        metadata,
+        enabled: true,
     }
 }
 
@@ -307,5 +359,29 @@ pub(super) fn job_status_label(job: &JobRowView) -> &'static str {
             Stage::Writing => "Write",
             Stage::Done => "Done",
         },
+    }
+}
+
+fn signal_candidate_score_style(score_band: ScoreBand) -> StyleId {
+    match score_band {
+        ScoreBand::High => StyleId::BadgeStatusDone,
+        ScoreBand::Mid => StyleId::BadgeStatusActive,
+        ScoreBand::Low => StyleId::BadgeStatusMuted,
+    }
+}
+
+fn signal_candidate_state_label(state: &SignalCandidateRowState) -> &'static str {
+    match state {
+        SignalCandidateRowState::Scoring => "Scoring",
+        SignalCandidateRowState::Scored => "Scored",
+        SignalCandidateRowState::Failed { .. } => "Failed",
+    }
+}
+
+fn signal_candidate_state_style(state: &SignalCandidateRowState) -> StyleId {
+    match state {
+        SignalCandidateRowState::Scoring => StyleId::BadgeStatusActive,
+        SignalCandidateRowState::Scored => StyleId::BadgeStatusDone,
+        SignalCandidateRowState::Failed { .. } => StyleId::BadgeStatusError,
     }
 }

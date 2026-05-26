@@ -36,6 +36,7 @@ pub const PANEL_PREVIEW: ControlId = ControlId::new(2005);
 pub const PANEL_JOBS: ControlId = ControlId::new(2006);
 pub const PANEL_PREVIEW_CONTEXT: ControlId = ControlId::new(2007);
 pub const PANEL_AI_WARNING: ControlId = ControlId::new(2008);
+pub const PANEL_SIGNAL_CANDIDATE: ControlId = ControlId::new(2009);
 pub const PANEL_TOOLBAR: ControlId = ControlId::new(2015);
 
 pub const PANEL_PROMPT_LAB: ControlId = ControlId::new(2100);
@@ -134,8 +135,15 @@ pub const CHART_TRENDS: ControlId = ControlId::new(2230);
 pub const PANEL_LEFT: ControlId = ControlId::new(2300);
 pub const PANEL_LEFT_JOBS: ControlId = ControlId::new(2304);
 pub const PANEL_LEFT_PROMPT_LAB: ControlId = ControlId::new(2305);
+pub const PANEL_RESULTS_SUBMODE_ROW: ControlId = ControlId::new(2306);
 
 // New custom TabBar controls replacing the radio-button tab bars (6000 range).
 pub const TAB_BAR_RIGHT: ControlId = ControlId::new(6100);
 pub const TAB_BAR_LEFT: ControlId = ControlId::new(6101);
 pub const TAB_BAR_TRENDS: ControlId = ControlId::new(6102);
+pub const TAB_BAR_RESULTS_SUBMODE: ControlId = ControlId::new(6103);
+
+pub const LABEL_SIGNAL_CANDIDATE_STATE: ControlId = ControlId::new(3019);
+pub const LABEL_SIGNAL_CANDIDATE_CLUSTER_CAPTION: ControlId = ControlId::new(3021);
+pub const LABEL_SIGNAL_CANDIDATE_CLUSTER_URLS: ControlId = ControlId::new(3022);
+pub const CHK_SIGNAL_CANDIDATE_EXCLUDE: ControlId = ControlId::new(3114);

@@ -73,7 +73,7 @@ pub use state::{
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
 };
-pub use tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
+pub use tabs::{AppTab, JobListScope, LeftTab, ResultsSubMode, TrendCategory};
 pub use trends::{
     choose_display_label, compute_trends, normalize_entity_key, CategoryTrend, EntityLine,
     EntityTrendData, IsoWeek,
@@ -91,7 +91,8 @@ pub use view_model::{
     LeftPaneView, LinkRowView, LlmModelUsageView, OperationProgress, PreviewContextView,
     PreviewHeaderView, PromptLabCompareBatchView, PromptLabCompareCandidateView,
     PromptLabComparePolicyView, PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView,
-    RightPaneView, StopFinishButtonState, TrendsTabView, TriageAnnotationView,
+    RightPaneView, ScoreBand, SignalCandidatePreviewView, SignalCandidateRow,
+    SignalCandidateRowState, StopFinishButtonState, TrendsTabView, TriageAnnotationView,
     DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
     INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };
