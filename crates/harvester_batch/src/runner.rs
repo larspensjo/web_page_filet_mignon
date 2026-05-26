@@ -3,6 +3,7 @@ use crate::lock;
 use crate::progress::ProgressReporter;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
+use harvester_core::signal_candidate::{DEFAULT_SELECTION_CAP, DEFAULT_SELECTION_THRESHOLD};
 use harvester_core::{
     update, AppState, ArticleSummaryResult, BatchObservation, CompletedJobSnapshot, ImportPhase,
     LlmModelUsageView, Msg, SummaryCache, SummaryCacheEntry, SummaryCacheKey,
@@ -283,6 +284,14 @@ fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
     map.insert(PromptId::AggregateBriefing, briefing_model);
 
     map
+}
+
+fn apply_signal_candidate_selection_settings(state: &mut AppState, args: &Args) {
+    state.set_signal_candidate_threshold(
+        args.signal_candidate_threshold
+            .unwrap_or(DEFAULT_SELECTION_THRESHOLD),
+    );
+    state.set_signal_candidate_cap(args.signal_candidate_cap.unwrap_or(DEFAULT_SELECTION_CAP));
 }
 
 fn build_effect_runner(
@@ -1148,6 +1157,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     let mut state = AppState::new();
     state.set_triage_max_in_flight(args.llm_concurrency);
     state.set_summary_max_in_flight(args.llm_concurrency);
+    apply_signal_candidate_selection_settings(&mut state, &args);
 
     // Restore completed jobs
     let completed_jobs = load_completed_jobs(&paths.state_path);
@@ -1669,6 +1679,7 @@ fn run_import_mode(
     let mut state = AppState::new();
     state.set_triage_max_in_flight(args.llm_concurrency);
     state.set_summary_max_in_flight(args.llm_concurrency);
+    apply_signal_candidate_selection_settings(&mut state, args);
 
     let enable_ai_orchestration = is_ai_orchestration_enabled();
     let platform_handler = Box::new(NoOpPlatformHandler);
@@ -1898,6 +1909,7 @@ fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
     let mut state = AppState::new();
     state.set_triage_max_in_flight(args.llm_concurrency);
     state.set_summary_max_in_flight(args.llm_concurrency);
+    apply_signal_candidate_selection_settings(&mut state, args);
 
     // Restore completed jobs
     if !completed_jobs.is_empty() {
@@ -1975,6 +1987,8 @@ mod tests {
             show_briefing_since: false,
             import_saved_web_dir: None,
             refresh_stale_summaries_limit: None,
+            signal_candidate_threshold: None,
+            signal_candidate_cap: None,
         }
     }
 
@@ -2889,5 +2903,25 @@ mod tests {
             classify_import_cycle_outcome(&obs),
             CycleOutcome::TotalFailure
         );
+    }
+
+    #[test]
+    fn apply_signal_candidate_selection_settings_uses_defaults_and_overrides() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut state = AppState::new();
+        let mut args = create_test_args(false, &temp_dir);
+
+        apply_signal_candidate_selection_settings(&mut state, &args);
+        assert_eq!(
+            state.signal_candidate_threshold(),
+            DEFAULT_SELECTION_THRESHOLD
+        );
+        assert_eq!(state.signal_candidate_cap(), DEFAULT_SELECTION_CAP);
+
+        args.signal_candidate_threshold = Some(75);
+        args.signal_candidate_cap = Some(15);
+        apply_signal_candidate_selection_settings(&mut state, &args);
+        assert_eq!(state.signal_candidate_threshold(), 75);
+        assert_eq!(state.signal_candidate_cap(), 15);
     }
 }

@@ -28,6 +28,14 @@ fn main() {
         "[batch] refresh_stale_summaries_limit: {:?}",
         args.refresh_stale_summaries_limit
     );
+    engine_info!(
+        "[batch] signal_candidate_threshold: {:?}",
+        args.signal_candidate_threshold
+    );
+    engine_info!(
+        "[batch] signal_candidate_cap: {:?}",
+        args.signal_candidate_cap
+    );
 
     let exit_code = match runner::run(args) {
         Ok(code) => code,
