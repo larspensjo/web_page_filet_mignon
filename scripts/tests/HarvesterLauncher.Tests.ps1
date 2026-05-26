@@ -812,8 +812,6 @@ Describe 'Effects - Invoke-LauncherEffects' {
 
 Describe 'Input - ConvertFrom-KeyInfoToLauncherAction' {
     BeforeAll {
-        $sub = Resolve-Path "$PSScriptRoot\..\..\ministry-of-future-plans\browser\Input.psm1"
-        Import-Module $sub -Force
         Import-Module "$PSScriptRoot\..\harvester_launcher\Input.psm1" -Force
         function script:Key($k, $c = [char]0) { [System.ConsoleKeyInfo]::new($c, $k, $false, $false, $false) }
     }
@@ -845,22 +843,22 @@ Describe 'Input - ConvertFrom-KeyInfoToLauncherAction' {
     It 'Minus char returns ValueDecrease' {
         (ConvertFrom-KeyInfoToLauncherAction (Key 'OemMinus' '-')).Type | Should -Be 'ValueDecrease'
     }
-    It 'UpArrow returns MoveUp (from submodule)' {
+    It 'UpArrow returns MoveUp' {
         (ConvertFrom-KeyInfoToLauncherAction (Key 'UpArrow')).Type | Should -Be 'MoveUp'
     }
-    It 'DownArrow returns MoveDown (from submodule)' {
+    It 'DownArrow returns MoveDown' {
         (ConvertFrom-KeyInfoToLauncherAction (Key 'DownArrow')).Type | Should -Be 'MoveDown'
     }
-    It 'Q returns Quit (from submodule)' {
+    It 'Q returns Quit' {
         (ConvertFrom-KeyInfoToLauncherAction (Key 'Q' 'Q')).Type | Should -Be 'Quit'
     }
-    It 'Tab returns SwitchPane (from submodule)' {
+    It 'Tab returns SwitchPane' {
         (ConvertFrom-KeyInfoToLauncherAction (Key 'Tab')).Type | Should -Be 'SwitchPane'
     }
-    It 'PageUp returns PageUp (from submodule)' {
+    It 'PageUp returns PageUp' {
         (ConvertFrom-KeyInfoToLauncherAction (Key 'PageUp')).Type | Should -Be 'PageUp'
     }
-    It 'Home returns MoveHome (from submodule)' {
+    It 'Home returns MoveHome' {
         (ConvertFrom-KeyInfoToLauncherAction (Key 'Home')).Type | Should -Be 'MoveHome'
     }
     It 'F12 returns null' {

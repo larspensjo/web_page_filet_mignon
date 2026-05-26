@@ -31,13 +31,6 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catc
 
 # ── Module imports ────────────────────────────────────────────────────────────
 $launcherDir = Join-Path $PSScriptRoot 'harvester_launcher'
-$subInput    = Join-Path $ProjectRoot  'ministry-of-future-plans\browser\Input.psm1'
-
-if (-not (Test-Path -LiteralPath $subInput)) {
-    Write-Error "Submodule not initialised. Run: git submodule update --init ministry-of-future-plans"
-}
-
-Import-Module $subInput                                  -Force
 Import-Module (Join-Path $launcherDir 'Data.psm1')      -Force
 Import-Module (Join-Path $launcherDir 'Input.psm1')     -Force
 Import-Module (Join-Path $launcherDir 'Reducer.psm1')   -Force

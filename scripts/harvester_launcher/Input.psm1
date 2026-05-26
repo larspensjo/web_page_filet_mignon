@@ -1,12 +1,23 @@
 ﻿#Requires -Version 5.1
 Set-StrictMode -Version Latest
 
-# Import base key mappings from submodule (read-only dependency)
-$_subInput = Join-Path $PSScriptRoot '..\..\ministry-of-future-plans\browser\Input.psm1'
-if (Test-Path -LiteralPath $_subInput) {
-    Import-Module $_subInput -Force
-} else {
-    Write-Warning "[launcher/Input] Submodule Input.psm1 not found at: $_subInput — run: git submodule update --init"
+function ConvertFrom-KeyInfoToAction {
+    param(
+        [Parameter(Mandatory = $true)][System.ConsoleKeyInfo]$KeyInfo
+    )
+
+    switch ($KeyInfo.Key) {
+        'Q' { return [pscustomobject]@{ Type = 'Quit' } }
+        'Tab' { return [pscustomobject]@{ Type = 'SwitchPane' } }
+        'UpArrow' { return [pscustomobject]@{ Type = 'MoveUp' } }
+        'DownArrow' { return [pscustomobject]@{ Type = 'MoveDown' } }
+        'PageUp' { return [pscustomobject]@{ Type = 'PageUp' } }
+        'PageDown' { return [pscustomobject]@{ Type = 'PageDown' } }
+        'Home' { return [pscustomobject]@{ Type = 'MoveHome' } }
+        'End' { return [pscustomobject]@{ Type = 'MoveEnd' } }
+        'Spacebar' { return [pscustomobject]@{ Type = 'ToggleTag' } }
+        default { return $null }
+    }
 }
 
 function ConvertFrom-KeyInfoToLauncherAction {
@@ -31,11 +42,8 @@ function ConvertFrom-KeyInfoToLauncherAction {
         '-'  { return [pscustomobject]@{ Type = 'ValueDecrease' } }
     }
 
-    # Fall through to submodule (Q->Quit, Tab->SwitchPane, arrows, Page*, Home, End)
-    if (Get-Command 'ConvertFrom-KeyInfoToAction' -ErrorAction SilentlyContinue) {
-        return ConvertFrom-KeyInfoToAction -KeyInfo $KeyInfo
-    }
-    $null
+    # Fall through to the shared navigation mappings.
+    ConvertFrom-KeyInfoToAction -KeyInfo $KeyInfo
 }
 
 Export-ModuleMember -Function ConvertFrom-KeyInfoToLauncherAction

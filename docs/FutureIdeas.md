@@ -1,7 +1,7 @@
 # Future Ideas Backlog
 
 Canonical backlog of deferred work, enhancements, and speculative features.
-Maintained via the procedure in [Instruction.HarvestFutureIdeas.md](../ministry-of-future-plans/Instruction.HarvestFutureIdeas.md).
+Maintained manually in this repository.
 
 ## Taxonomy
 
