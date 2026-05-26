@@ -50,6 +50,11 @@ impl EffectRunner {
                 default_basename,
                 pending_pre_triage_count,
                 token_estimates,
+                signal_candidate_default,
+                signal_candidate_count,
+                signal_candidate_scoring_done,
+                signal_candidate_scoring_total,
+                signal_candidate_token_estimates,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
@@ -71,6 +76,11 @@ impl EffectRunner {
                         export_dir: output_dir,
                         pending_pre_triage_count,
                         token_estimates,
+                        signal_candidate_default,
+                        signal_candidate_count,
+                        signal_candidate_scoring_done,
+                        signal_candidate_scoring_total,
+                        signal_candidate_token_estimates,
                     });
                 });
             }

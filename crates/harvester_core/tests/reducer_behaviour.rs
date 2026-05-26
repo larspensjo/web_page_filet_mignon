@@ -212,6 +212,7 @@ fn archive_click_emits_effect_without_state_change() {
         default_basename,
         pending_pre_triage_count,
         token_estimates,
+        ..
     } = &effects[0]
     else {
         panic!("expected OpenArchiveDialog effect, got {:?}", effects[0]);

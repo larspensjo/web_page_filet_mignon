@@ -77,6 +77,11 @@ pub enum Effect {
         default_basename: String,
         pending_pre_triage_count: usize,
         token_estimates: crate::ArchiveTokenEstimates,
+        signal_candidate_default: crate::signal_candidate::SignalCandidateDialogDefault,
+        signal_candidate_count: usize,
+        signal_candidate_scoring_done: u32,
+        signal_candidate_scoring_total: u32,
+        signal_candidate_token_estimates: crate::ArchiveTokenEstimates,
     },
     ShowArchiveDialog {
         request_id: u64,
@@ -87,6 +92,11 @@ pub enum Effect {
         export_dir: PathBuf,
         pending_pre_triage_count: usize,
         token_estimates: crate::ArchiveTokenEstimates,
+        signal_candidate_default: crate::signal_candidate::SignalCandidateDialogDefault,
+        signal_candidate_count: usize,
+        signal_candidate_scoring_done: u32,
+        signal_candidate_scoring_total: u32,
+        signal_candidate_token_estimates: crate::ArchiveTokenEstimates,
     },
     DownloadLinkedPage {
         job_id: crate::JobId,

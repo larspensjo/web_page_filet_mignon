@@ -247,6 +247,32 @@ pub fn handle_overrides_loaded(
     state.mark_dirty();
 }
 
+pub fn handle_toggle_exclusion(
+    state: &mut AppState,
+    signal_key: String,
+    effects: &mut Vec<Effect>,
+) {
+    let prompt_version = state
+        .active_version_for(PromptId::ArticleSignalCandidate)
+        .unwrap_or_default();
+    let key = OverrideKey {
+        signal_key,
+        prompt_id: PromptId::ArticleSignalCandidate.to_string(),
+        prompt_version,
+    };
+
+    if state.signal_candidate().excluded().contains(&key) {
+        state.signal_candidate_mut().remove_exclusion(&key);
+    } else {
+        state.signal_candidate_mut().add_exclusion(key);
+    }
+
+    effects.push(Effect::PersistSignalCandidateOverrides {
+        overrides: state.signal_candidate().excluded().clone(),
+    });
+    state.mark_dirty();
+}
+
 fn build_input_snapshot(state: &AppState, url: &str) -> Option<SignalCandidateInputSnapshot> {
     let article = state
         .briefing()

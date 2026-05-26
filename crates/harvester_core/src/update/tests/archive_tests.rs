@@ -746,6 +746,12 @@ fn archive_dialog_ready_ignores_stale_request() {
             export_dir: std::path::PathBuf::from("/tmp"),
             pending_pre_triage_count: 0,
             token_estimates: crate::ArchiveTokenEstimates::default(),
+            signal_candidate_default:
+                crate::signal_candidate::SignalCandidateDialogDefault::OffDisabled,
+            signal_candidate_count: 0,
+            signal_candidate_scoring_done: 0,
+            signal_candidate_scoring_total: 0,
+            signal_candidate_token_estimates: crate::ArchiveTokenEstimates::default(),
         },
     );
     assert!(effects.is_empty());
@@ -769,6 +775,12 @@ fn archive_dialog_ready_emits_show_dialog_for_current_request() {
             export_dir: std::path::PathBuf::from("/tmp"),
             pending_pre_triage_count: 0,
             token_estimates: crate::ArchiveTokenEstimates::default(),
+            signal_candidate_default:
+                crate::signal_candidate::SignalCandidateDialogDefault::OffDisabled,
+            signal_candidate_count: 0,
+            signal_candidate_scoring_done: 0,
+            signal_candidate_scoring_total: 0,
+            signal_candidate_token_estimates: crate::ArchiveTokenEstimates::default(),
         },
     );
     assert_eq!(state.archive_request_id(), 1);
@@ -815,6 +827,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             set_checkpoint: true,
             submitted_at: since,
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     let effect = effects
@@ -861,6 +874,7 @@ fn archive_dialog_submitted_with_only_pre_triage_ready_exports_zero_urls() {
             set_checkpoint: false,
             submitted_at: since,
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     let effect = effects
@@ -925,6 +939,7 @@ fn archive_submitted_with_use_summaries_true_and_cached_summary_populates_map() 
             set_checkpoint: false,
             submitted_at: since,
             use_summaries: true,
+            use_signal_candidates: false,
         },
     );
     let effect = effects
@@ -966,6 +981,7 @@ fn archive_submitted_with_use_summaries_false_emits_empty_summary_map() {
             set_checkpoint: false,
             submitted_at: since,
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     let effect = effects
@@ -998,6 +1014,7 @@ fn archive_dialog_submitted_rejects_invalid_basename() {
             set_checkpoint: true,
             submitted_at: chrono::Utc::now(),
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     assert!(effects.is_empty());
@@ -1204,6 +1221,7 @@ fn archive_open_and_submit_use_identical_pinned_corpus() {
             set_checkpoint: false,
             submitted_at: since,
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     let submit_effect = submit_effects
@@ -1270,6 +1288,7 @@ fn refresh_between_open_and_submit_uses_pinned_snapshot() {
             set_checkpoint: false,
             submitted_at: since,
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     let submit_effect = submit_effects
@@ -1375,6 +1394,7 @@ fn parity_a_pre_triage_ready_archive_count_is_zero_pending_count_is_nonzero() {
             set_checkpoint: false,
             submitted_at: since,
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     let submit_urls = submit_effects
@@ -1434,6 +1454,7 @@ fn parity_b_triage_complete_corpus_count_dialog_count_urls_match() {
             set_checkpoint: false,
             submitted_at: since,
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     let submit_urls = submit_effects
@@ -1524,6 +1545,7 @@ fn checkpoint_set_does_not_reduce_corpus_count_to_zero() {
             set_checkpoint: false,
             submitted_at: submit_since,
             use_summaries: false,
+            use_signal_candidates: false,
         },
     );
     let submit_urls = submit_effects
@@ -1541,5 +1563,246 @@ fn checkpoint_set_does_not_reduce_corpus_count_to_zero() {
     assert_eq!(
         submit_urls, expected_urls,
         "submit URLs must match corpus URLs even with checkpoint set"
+    );
+}
+
+#[test]
+fn archive_clicked_reports_signal_candidate_snapshot() {
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    init_logging();
+    let mut state = AppState::new();
+    state
+        .signal_candidate_mut()
+        .enqueue("https://signal.example/a".to_string());
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://signal.example/a", 7);
+    state.signal_candidate_mut().complete(
+        "https://signal.example/a",
+        SignalCandidateResult {
+            signal_score: 80,
+            signal_key: "cluster-a".to_string(),
+            themes: vec!["theme".to_string()],
+            draft_gist: "gist".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "reason".to_string(),
+            input_tokens: 10,
+            output_tokens: 2,
+        },
+    );
+
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    let effect = effects
+        .into_iter()
+        .find(|e| matches!(e, Effect::OpenArchiveDialog { .. }))
+        .expect("OpenArchiveDialog effect expected");
+    match effect {
+        Effect::OpenArchiveDialog {
+            signal_candidate_default,
+            signal_candidate_count,
+            signal_candidate_scoring_done,
+            signal_candidate_scoring_total,
+            signal_candidate_token_estimates,
+            ..
+        } => {
+            assert!(matches!(
+                signal_candidate_default,
+                crate::signal_candidate::SignalCandidateDialogDefault::OnAllSettled
+            ));
+            assert_eq!(signal_candidate_count, 1);
+            assert_eq!(signal_candidate_scoring_done, 1);
+            assert_eq!(signal_candidate_scoring_total, 1);
+            assert_eq!(
+                signal_candidate_token_estimates,
+                crate::ArchiveTokenEstimates::default()
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    let pinned = state
+        .pinned_signal_candidate_selection()
+        .expect("signal candidate snapshot should be pinned at archive open");
+    assert_eq!(
+        pinned.selected_urls,
+        vec!["https://signal.example/a".to_string()]
+    );
+}
+
+#[test]
+fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overrides() {
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    init_logging();
+    let mut state = AppState::new();
+    state
+        .signal_candidate_mut()
+        .enqueue("https://signal.example/a".to_string());
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://signal.example/a", 7);
+    state.signal_candidate_mut().complete(
+        "https://signal.example/a",
+        SignalCandidateResult {
+            signal_score: 80,
+            signal_key: "cluster-a".to_string(),
+            themes: vec!["theme".to_string()],
+            draft_gist: "gist".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "reason".to_string(),
+            input_tokens: 10,
+            output_tokens: 2,
+        },
+    );
+
+    let (state, _) = update(
+        state,
+        Msg::ToggleSignalCandidateExclusion {
+            signal_key: "cluster-x".to_string(),
+        },
+    );
+    let (mut state, _) = update(state, Msg::ArchiveClicked);
+
+    state
+        .signal_candidate_mut()
+        .enqueue("https://signal.example/b".to_string());
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://signal.example/b", 8);
+    state.signal_candidate_mut().complete(
+        "https://signal.example/b",
+        SignalCandidateResult {
+            signal_score: 90,
+            signal_key: "cluster-b".to_string(),
+            themes: vec!["theme".to_string()],
+            draft_gist: "gist".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "reason".to_string(),
+            input_tokens: 10,
+            output_tokens: 2,
+        },
+    );
+
+    let request_id = state.archive_request_id();
+    let (state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: true,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: true,
+        },
+    );
+
+    let effect = effects
+        .iter()
+        .find(|e| matches!(e, Effect::ArchiveRequested { .. }))
+        .expect("ArchiveRequested effect expected");
+    match effect {
+        Effect::ArchiveRequested { ordered_urls, .. } => {
+            assert_eq!(
+                *ordered_urls,
+                vec!["https://signal.example/a".to_string()],
+                "submit must use the pinned signal-candidate snapshot from archive-open time"
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    assert!(effects.iter().any(|e| matches!(
+        e,
+        Effect::PersistSignalCandidateOverrides { overrides } if overrides.is_empty()
+    )));
+    assert!(
+        state.signal_candidate().excluded().is_empty(),
+        "checkpoint submit must clear signal-candidate overrides"
+    );
+}
+
+#[test]
+fn archive_dialog_submit_with_empty_candidate_snapshot_exports_empty_selection_when_explicitly_enabled(
+) {
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(1);
+    state
+        .signal_candidate_mut()
+        .enqueue("https://triage-complete.com/0".to_string());
+    state
+        .signal_candidate_mut()
+        .mark_scoring("https://triage-complete.com/0", 7);
+    state.signal_candidate_mut().complete(
+        "https://triage-complete.com/0",
+        SignalCandidateResult {
+            signal_score: 20,
+            signal_key: "below-threshold".to_string(),
+            themes: vec!["theme".to_string()],
+            draft_gist: "gist".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "reason".to_string(),
+            input_tokens: 10,
+            output_tokens: 2,
+        },
+    );
+
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: true,
+        },
+    );
+
+    let archived = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested { ordered_urls, .. } => Some(ordered_urls),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert!(
+        archived.is_empty(),
+        "explicit candidate export should honor the empty pinned candidate selection"
+    );
+}
+
+#[test]
+fn archive_dialog_checkpoint_submit_skips_override_persist_when_overrides_already_empty() {
+    init_logging();
+    let state = complete_triage_state_for_test(1);
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: true,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+
+    assert!(
+        effects
+            .iter()
+            .all(|effect| !matches!(effect, Effect::PersistSignalCandidateOverrides { .. })),
+        "checkpoint submit should not write an already-empty override set"
     );
 }

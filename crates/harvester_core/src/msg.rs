@@ -53,6 +53,11 @@ pub enum Msg {
         export_dir: PathBuf,
         pending_pre_triage_count: usize,
         token_estimates: ArchiveTokenEstimates,
+        signal_candidate_default: crate::signal_candidate::SignalCandidateDialogDefault,
+        signal_candidate_count: usize,
+        signal_candidate_scoring_done: u32,
+        signal_candidate_scoring_total: u32,
+        signal_candidate_token_estimates: ArchiveTokenEstimates,
     },
     /// Archive dialog was confirmed by the user.
     ArchiveDialogSubmitted {
@@ -61,6 +66,7 @@ pub enum Msg {
         set_checkpoint: bool,
         submitted_at: DateTime<Utc>,
         use_summaries: bool,
+        use_signal_candidates: bool,
     },
     /// Archive export completed successfully.
     ArchiveExportCompleted {
@@ -74,6 +80,10 @@ pub enum Msg {
         request_id: u64,
         basename: String,
         reason: String,
+    },
+    /// Toggle manual exclusion for a signal-candidate cluster.
+    ToggleSignalCandidateExclusion {
+        signal_key: String,
     },
     /// User toggled visibility of the URL input/dropbox panel.
     ToggleInputPanel,

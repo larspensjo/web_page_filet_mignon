@@ -304,6 +304,8 @@ pub struct AppState {
     archive_request_id: u64,
     next_briefing_checkpoint_save_id: u64,
     pinned_archive_corpus: Option<crate::working_corpus::CurrentWorkingCorpus>,
+    pinned_signal_candidate_selection:
+        Option<crate::signal_candidate::SignalCandidateArchiveSelection>,
     llm_requests: LlmResultIndex,
     briefing: BriefingSession,
     briefing_history: Vec<crate::briefing::BriefingHistoryEntry>,
@@ -419,6 +421,7 @@ impl Default for AppState {
             archive_request_id: 0,
             next_briefing_checkpoint_save_id: 1,
             pinned_archive_corpus: None,
+            pinned_signal_candidate_selection: None,
             llm_requests: LlmResultIndex::new(),
             briefing: BriefingSession::default(),
             briefing_history: vec![],
@@ -632,6 +635,26 @@ impl AppState {
     /// A subsequent `ArchiveClicked` will naturally overwrite the pin.
     pub fn clear_pinned_archive_corpus(&mut self) {
         self.pinned_archive_corpus = None;
+    }
+
+    /// Pin the signal-candidate archive selection snapshot for the current dialog session.
+    pub fn pin_signal_candidate_selection(
+        &mut self,
+        selection: crate::signal_candidate::SignalCandidateArchiveSelection,
+    ) {
+        self.pinned_signal_candidate_selection = Some(selection);
+    }
+
+    /// Returns the signal-candidate snapshot pinned at archive-open time, if any.
+    pub fn pinned_signal_candidate_selection(
+        &self,
+    ) -> Option<&crate::signal_candidate::SignalCandidateArchiveSelection> {
+        self.pinned_signal_candidate_selection.as_ref()
+    }
+
+    /// Clears the pinned signal-candidate snapshot after the archive dialog session ends.
+    pub fn clear_pinned_signal_candidate_selection(&mut self) {
+        self.pinned_signal_candidate_selection = None;
     }
 
     /// Records LLM token usage from a completed run.

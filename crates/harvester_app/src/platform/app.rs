@@ -22,7 +22,8 @@ const VK_ESCAPE_CODE: u16 = VK_ESCAPE.0;
 use harvester_core::{
     update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel,
     ArchiveTokenEstimates, Effect, JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel,
-    LeftTab, LinkDownloadState, LlmQuotaLimits, ManualDecision, Msg, PromptLabStage, TrendCategory,
+    LeftTab, LinkDownloadState, LlmQuotaLimits, ManualDecision, Msg, PromptLabStage,
+    SignalCandidateDialogDefault, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -49,6 +50,7 @@ use super::Win32PlatformHandler;
 const ARCHIVE_DIALOG_CONTEXT_PREFIX: &str = "archive:";
 const ARCHIVE_DIALOG_FILENAME_FIELD_ID: &str = "archive.basename";
 const ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID: &str = "archive.use_summaries";
+const ARCHIVE_DIALOG_USE_SIGNAL_CANDIDATES_FIELD_ID: &str = "archive.use_signal_candidates";
 const ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID: &str = "archive.set_checkpoint";
 const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
 const LLM_MAX_CONCURRENT_REQUESTS_ENV: &str = "LLM_MAX_CONCURRENT_REQUESTS";
@@ -590,6 +592,11 @@ fn build_archive_form_descriptor(
     export_dir: PathBuf,
     pending_pre_triage_count: usize,
     token_estimates: ArchiveTokenEstimates,
+    signal_candidate_default: SignalCandidateDialogDefault,
+    signal_candidate_count: usize,
+    signal_candidate_scoring_done: u32,
+    signal_candidate_scoring_total: u32,
+    signal_candidate_token_estimates: ArchiveTokenEstimates,
 ) -> FormDialogDescriptor {
     let mut rows = Vec::new();
     let articles_label = if since_utc.is_some() {
@@ -626,6 +633,48 @@ fn build_archive_form_descriptor(
             format_tokens(token_estimates.summary_tokens),
             token_estimates.summary_coverage,
             article_count,
+        ),
+    });
+    let (signal_candidate_notice, signal_candidate_notice_severity) = match signal_candidate_default {
+        SignalCandidateDialogDefault::OnAllSettled => (
+            format!("{signal_candidate_count} candidates selected (after dedup + cap)"),
+            MessageSeverity::Information,
+        ),
+        SignalCandidateDialogDefault::OffPartial => (
+            format!(
+                "Scoring in progress ({signal_candidate_scoring_done}/{signal_candidate_scoring_total}). Toggle ON to export only settled candidates ({signal_candidate_count} selected)."
+            ),
+            MessageSeverity::Warning,
+        ),
+        SignalCandidateDialogDefault::OffEmpty => (
+            format!(
+                "No candidates above threshold ({signal_candidate_scoring_total} scored). Lower threshold or toggle off to export the full triage set."
+            ),
+            MessageSeverity::Warning,
+        ),
+        SignalCandidateDialogDefault::OffDisabled => (
+            "No candidates settled yet - defaulting to full triage set.".to_string(),
+            MessageSeverity::Warning,
+        ),
+    };
+    rows.push(FormRow::Note {
+        text: signal_candidate_notice,
+        severity: signal_candidate_notice_severity,
+    });
+    rows.push(FormRow::ReadOnlyText {
+        label: "Signal candidate full archive".to_string(),
+        value: format!(
+            "~{} tokens ({} articles)",
+            format_tokens(signal_candidate_token_estimates.full_tokens),
+            signal_candidate_count,
+        ),
+    });
+    rows.push(FormRow::ReadOnlyText {
+        label: "Signal candidate summary archive".to_string(),
+        value: format!(
+            "~{} tokens ({} articles with summaries)",
+            format_tokens(signal_candidate_token_estimates.summary_tokens),
+            signal_candidate_token_estimates.summary_coverage,
         ),
     });
     if article_count == 0 {
@@ -668,6 +717,14 @@ fn build_archive_form_descriptor(
                 field_id: ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID.to_string(),
                 label: "Use summaries (recommended)".to_string(),
                 checked: true,
+            },
+            FormField::CheckBox {
+                field_id: ARCHIVE_DIALOG_USE_SIGNAL_CANDIDATES_FIELD_ID.to_string(),
+                label: "Use signal-candidate selection".to_string(),
+                checked: matches!(
+                    signal_candidate_default,
+                    SignalCandidateDialogDefault::OnAllSettled
+                ),
             },
             FormField::CheckBox {
                 field_id: ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID.to_string(),
@@ -837,6 +894,11 @@ impl AppEventHandler {
                     export_dir,
                     pending_pre_triage_count,
                     token_estimates,
+                    signal_candidate_default,
+                    signal_candidate_count,
+                    signal_candidate_scoring_done,
+                    signal_candidate_scoring_total,
+                    signal_candidate_token_estimates,
                 } => {
                     let form = build_archive_form_descriptor(
                         request_id,
@@ -847,6 +909,11 @@ impl AppEventHandler {
                         export_dir,
                         pending_pre_triage_count,
                         token_estimates,
+                        signal_candidate_default,
+                        signal_candidate_count,
+                        signal_candidate_scoring_done,
+                        signal_candidate_scoring_total,
+                        signal_candidate_token_estimates,
                     );
                     self.commands.push_back(PlatformCommand::ShowFormDialog {
                         window_id: self.window_id,
@@ -1127,12 +1194,18 @@ impl PlatformEventHandler for AppEventHandler {
                 let use_summaries =
                     archive_field_checked(&field_values, ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID)
                         .unwrap_or(true);
+                let use_signal_candidates = archive_field_checked(
+                    &field_values,
+                    ARCHIVE_DIALOG_USE_SIGNAL_CANDIDATES_FIELD_ID,
+                )
+                .unwrap_or(false);
                 engine_info!(
-                    "[archive-dialog] submitted request_id={} basename={} set_checkpoint={} use_summaries={}",
+                    "[archive-dialog] submitted request_id={} basename={} set_checkpoint={} use_summaries={} use_signal_candidates={}",
                     request_id,
                     basename,
                     set_checkpoint,
-                    use_summaries
+                    use_summaries,
+                    use_signal_candidates
                 );
                 let _ = self.msg_tx.send(Msg::ArchiveDialogSubmitted {
                     request_id,
@@ -1140,6 +1213,7 @@ impl PlatformEventHandler for AppEventHandler {
                     set_checkpoint,
                     submitted_at: Utc::now(),
                     use_summaries,
+                    use_signal_candidates,
                 });
             }
             AppEvent::InputTextChanged {

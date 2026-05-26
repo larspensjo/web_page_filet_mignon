@@ -326,6 +326,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             export_dir,
             pending_pre_triage_count,
             token_estimates,
+            signal_candidate_default,
+            signal_candidate_count,
+            signal_candidate_scoring_done,
+            signal_candidate_scoring_total,
+            signal_candidate_token_estimates,
         } => archive::handle_dialog_ready(
             &mut state,
             request_id,
@@ -336,6 +341,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             export_dir,
             pending_pre_triage_count,
             token_estimates,
+            signal_candidate_default,
+            signal_candidate_count,
+            signal_candidate_scoring_done,
+            signal_candidate_scoring_total,
+            signal_candidate_token_estimates,
         ),
         Msg::ArchiveDialogSubmitted {
             request_id,
@@ -343,6 +353,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             set_checkpoint,
             submitted_at,
             use_summaries,
+            use_signal_candidates,
         } => archive::handle_dialog_submitted(
             &mut state,
             request_id,
@@ -350,6 +361,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             set_checkpoint,
             submitted_at,
             use_summaries,
+            use_signal_candidates,
         ),
         Msg::ArchiveExportCompleted {
             request_id,
@@ -361,6 +373,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             basename,
             reason,
         } => archive::handle_export_failed(&mut state, request_id, basename, reason),
+        Msg::ToggleSignalCandidateExclusion { signal_key } => {
+            let mut effects = Vec::new();
+            signal_candidate::handle_toggle_exclusion(&mut state, signal_key, &mut effects);
+            effects
+        }
         Msg::ArticlesLoaded {
             articles,
             collection_text,

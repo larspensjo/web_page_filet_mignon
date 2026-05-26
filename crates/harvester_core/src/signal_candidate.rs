@@ -18,6 +18,14 @@ pub enum SignalCandidateState {
     Failed { reason: String },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalCandidateDialogDefault {
+    OnAllSettled,
+    OffPartial,
+    OffDisabled,
+    OffEmpty,
+}
+
 /// Manual exclusion key. Versioned so a stale exclusion never silently drops a
 /// future unrelated cluster that reused the same slug.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -193,6 +201,39 @@ impl Default for SelectionPolicy {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignalCandidateArchiveSelection {
+    pub selected_urls: Vec<String>,
+    pub threshold: u8,
+    pub cap: usize,
+    pub override_fingerprint: String,
+    pub cache_fingerprint: String,
+    pub token_estimates: crate::ArchiveTokenEstimates,
+    pub scoring_in_progress: bool,
+}
+
+impl SignalCandidateArchiveSelection {
+    pub fn new(
+        selected_urls: Vec<String>,
+        threshold: u8,
+        cap: usize,
+        override_fingerprint: String,
+        cache_fingerprint: String,
+        token_estimates: crate::ArchiveTokenEstimates,
+        scoring_in_progress: bool,
+    ) -> Self {
+        Self {
+            selected_urls,
+            threshold,
+            cap,
+            override_fingerprint,
+            cache_fingerprint,
+            token_estimates,
+            scoring_in_progress,
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SignalCandidateSelection {
     pub selected_urls: Vec<String>,
@@ -275,6 +316,24 @@ impl SignalCandidateSelection {
     pub fn signal_key_for(&self, url: &str) -> Option<&str> {
         self.selected_signal_key_for.get(url).map(String::as_str)
     }
+}
+
+pub fn compute_dialog_default(
+    settled: u32,
+    in_progress: u32,
+    failed: u32,
+    selection_size: usize,
+) -> SignalCandidateDialogDefault {
+    if settled == 0 && failed == 0 {
+        return SignalCandidateDialogDefault::OffDisabled;
+    }
+    if in_progress > 0 {
+        return SignalCandidateDialogDefault::OffPartial;
+    }
+    if selection_size == 0 {
+        return SignalCandidateDialogDefault::OffEmpty;
+    }
+    SignalCandidateDialogDefault::OnAllSettled
 }
 
 #[cfg(test)]
@@ -491,5 +550,37 @@ mod tests {
         let sel = SignalCandidateSelection::compute(&input, policy(60, 100, Default::default()));
         assert_eq!(sel.cluster_size_for("a"), 3);
         assert_eq!(sel.cluster_size_for("d"), 1);
+    }
+
+    #[test]
+    fn dialog_default_zero_settled_zero_failed_is_off_disabled() {
+        assert_eq!(
+            compute_dialog_default(0, 0, 0, 0),
+            SignalCandidateDialogDefault::OffDisabled
+        );
+    }
+
+    #[test]
+    fn dialog_default_scoring_in_progress_is_off_partial() {
+        assert_eq!(
+            compute_dialog_default(2, 1, 0, 2),
+            SignalCandidateDialogDefault::OffPartial
+        );
+    }
+
+    #[test]
+    fn dialog_default_settled_but_empty_selection_is_off_empty() {
+        assert_eq!(
+            compute_dialog_default(5, 0, 0, 0),
+            SignalCandidateDialogDefault::OffEmpty
+        );
+    }
+
+    #[test]
+    fn dialog_default_all_settled_with_selection_is_on_all_settled() {
+        assert_eq!(
+            compute_dialog_default(5, 0, 0, 3),
+            SignalCandidateDialogDefault::OnAllSettled
+        );
     }
 }
