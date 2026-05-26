@@ -106,11 +106,6 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
     });
     commands.push(PlatformCommand::CreatePanel {
         window_id,
-        parent_control_id: Some(PANEL_LEFT_JOBS),
-        control_id: PANEL_RESULTS_SUBMODE_ROW,
-    });
-    commands.push(PlatformCommand::CreatePanel {
-        window_id,
         parent_control_id: Some(PANEL_LEFT),
         control_id: PANEL_LEFT_PROMPT_LAB,
     });
@@ -125,6 +120,11 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         window_id,
         parent_control_id: Some(PANEL_LEFT_JOBS),
         control_id: PANEL_JOBS,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_JOBS),
+        control_id: PANEL_RESULTS_SUBMODE_ROW,
     });
 
     commands.push(PlatformCommand::CreatePanel {

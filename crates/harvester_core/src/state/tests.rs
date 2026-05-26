@@ -2134,6 +2134,37 @@ mod app_state_tests {
     }
 
     #[test]
+    fn restored_jobs_after_checkpoint_remain_visible_in_jobs_tab() {
+        let (mut state, _) = update(
+            AppState::new(),
+            Msg::RestoreCompletedJobs(vec![
+                CompletedJobSnapshot {
+                    url: "https://example.com/new".to_string(),
+                    tokens: Some(10),
+                    bytes: Some(100),
+                    links: Vec::new(),
+                    fetched_utc: Some("2026-05-25T03:54:45.911305400+00:00".to_string()),
+                },
+                CompletedJobSnapshot {
+                    url: "https://example.com/old".to_string(),
+                    tokens: Some(20),
+                    bytes: Some(200),
+                    links: Vec::new(),
+                    fetched_utc: Some("2026-05-23T03:54:45.911305400+00:00".to_string()),
+                },
+            ]),
+        );
+        state.job_list_scope = JobListScope::SinceCheckpoint;
+        state.briefing_since_utc = Some(utc("2026-05-24T13:07:21.788858700+00:00"));
+
+        let view = state.view();
+
+        assert_eq!(view.job_count, 2);
+        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![1]);
+        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 jobs"));
+    }
+
+    #[test]
     fn visible_jobs_substring_case_insensitive() {
         let mut state = AppState::new();
         insert_done_job(&mut state, 1, "https://example.com/a");

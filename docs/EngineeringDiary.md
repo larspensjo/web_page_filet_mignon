@@ -1760,3 +1760,11 @@ Type: Implementation
 Context: Added batch-side overrides for signal-candidate selection so the CLI can tune the archive export set without changing reducer defaults.
 Change: Added `--signal-candidate-threshold` and `--signal-candidate-cap` to `harvester_batch`, threaded both through batch startup defaults, and surfaced them in `Start-HarvesterBatch.ps1` for the direct refresh path.
 Refs: crates/harvester_batch/src/cli.rs, crates/harvester_batch/src/runner.rs, crates/harvester_batch/src/main.rs, scripts/Start-HarvesterBatch.ps1, cli::tests::signal_candidate_threshold_parses, runner::tests::apply_signal_candidate_selection_settings_uses_defaults_and_overrides
+
+## 2026-05-26 - Owner-drawn listbox startup repaint
+Type: Bug Fix
+Context: Harvester startup could show an empty Jobs list even though the status bar reported restored jobs and the selected scope was active.
+Change: Fixed the Results sub-mode row creation parent so it matches the layout parent under `PANEL_JOBS`; the previous mismatch caused the Win32 deferred-position batch for Jobs children to leave the header, search input, and owner-drawn listbox at their create-time `10x10` rectangles. Applied the dark `PanelBackground` style to the Results sub-mode row so the now-visible container does not paint white. Added regressions for restored checkpoint-visible jobs, creation/layout parent consistency, and dark panel styling.
+Lessons Learned: A correct state/view model can still present as empty when a control is created under a different parent than its layout rule, because one mismatched HWND can prevent a deferred layout batch from moving sibling controls.
+Prevention: When adding nested controls, test that creation parent and layout parent match for controls participating in the same docked region.
+Refs: crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/theme.rs, crates/harvester_app/src/platform/ui/layout/tests.rs, crates/harvester_core/src/state/tests.rs, results_submode_row_creation_parent_matches_layout_parent, all_tab_panels_receive_panel_background_dark_theme_style, restored_jobs_after_checkpoint_remain_visible_in_jobs_tab
