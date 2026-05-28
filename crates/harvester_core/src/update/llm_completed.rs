@@ -91,7 +91,7 @@ fn handle_summary_completion(
             input_tokens,
             output_tokens,
             prompt_version,
-            model_id,
+            resolved_model,
         } => match validate_summary(output_json) {
             Ok(summary) => {
                 let summary_result = ArticleSummaryResult {
@@ -138,7 +138,7 @@ fn handle_summary_completion(
                             &content_hash,
                             PromptId::ArticleSummary,
                             Some(*prompt_version),
-                            Some(model_id.as_str()),
+                            Some(resolved_model.as_str()),
                             &context,
                         );
                         if let Ok(completion_key) = completion_key {

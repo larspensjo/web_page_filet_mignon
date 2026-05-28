@@ -198,6 +198,8 @@ fn signal_candidate_completion_routes_to_session_and_persists_cache() {
             key_points: vec!["Point one".to_string(), "Point two".to_string()],
             upstream_summary_cache_digest: "digest".to_string(),
             context: Vec::new(),
+            prompt_version: 1,
+            model_id: "test-signal-model".to_string(),
         },
     );
 
@@ -210,7 +212,7 @@ fn signal_candidate_completion_routes_to_session_and_persists_cache() {
                 input_tokens: 100,
                 output_tokens: 10,
                 prompt_version: 1,
-                model_id: "test-signal-model".to_string(),
+                resolved_model: "test-signal-model".to_string(),
             },
             metadata: None,
         },
@@ -246,7 +248,7 @@ fn signal_candidate_validation_failure_marks_failed() {
                 input_tokens: 100,
                 output_tokens: 10,
                 prompt_version: 1,
-                model_id: "test-signal-model".to_string(),
+                resolved_model: "test-signal-model".to_string(),
             },
             metadata: None,
         },
@@ -309,7 +311,7 @@ fn summary_completion_enqueues_signal_scoring() {
                 input_tokens: 10,
                 output_tokens: 5,
                 prompt_version: 1,
-                model_id: "test-summary-model".to_string(),
+                resolved_model: "test-summary-model".to_string(),
             },
             metadata: None,
         },
@@ -421,6 +423,76 @@ fn summary_cache_key_for_url_uses_parsed_rfc3339_order() {
         state.summary_cache_key_for_url("https://example.com/article"),
         Some(lexically_earlier_but_newer)
     );
+}
+
+#[test]
+fn signal_candidate_persisted_with_dated_model_variant_is_cache_hit_after_reload() {
+    // Session 1: an eligible article gets enqueued, then completes with a dated
+    // model variant ("test-signal-model-2026-03-17") even though the canonical
+    // configured model is "test-signal-model". The persisted cache entry must
+    // be keyed by the canonical model so the next session's lookup hits.
+    let mut state = seed_completed_summary_state();
+    set_signal_candidate_metadata_without_sweep(&mut state);
+
+    let (state, effects) = update(
+        state,
+        Msg::SignalCandidateCacheLoaded {
+            cache: SignalCandidateCache::default(),
+        },
+    );
+    let signal_request_id = request_id_for_prompt(&effects, PromptId::ArticleSignalCandidate)
+        .expect("signal request emitted by initial sweep");
+
+    let (state, _effects) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: signal_request_id,
+            result: LlmResultKind::Success {
+                output_json: signal_result_json(),
+                input_tokens: 100,
+                output_tokens: 10,
+                prompt_version: 1,
+                resolved_model: "test-signal-model-2026-03-17".to_string(),
+            },
+            metadata: None,
+        },
+    );
+
+    let persisted_cache = state.signal_candidate_cache().clone();
+    assert!(
+        !persisted_cache.is_empty(),
+        "session 1 must persist a signal-candidate cache entry"
+    );
+
+    // Session 2: simulate process restart by building a fresh state with the
+    // same article + metadata and hydrating the persisted cache. The sweep
+    // must hit the cache and emit zero new signal-candidate LLM requests.
+    let mut next_state = seed_completed_summary_state();
+    set_signal_candidate_metadata_without_sweep(&mut next_state);
+
+    let (next_state, effects) = update(
+        next_state,
+        Msg::SignalCandidateCacheLoaded {
+            cache: persisted_cache,
+        },
+    );
+
+    assert!(
+        effects.iter().all(|effect| !matches!(
+            effect,
+            Effect::RequestLlmCompletion {
+                prompt_id: PromptId::ArticleSignalCandidate,
+                ..
+            }
+        )),
+        "cache hit on restart must not issue a new signal-candidate LLM request"
+    );
+    assert!(matches!(
+        next_state
+            .signal_candidate()
+            .state_for("https://example.com/article"),
+        Some(crate::signal_candidate::SignalCandidateState::Completed { .. })
+    ));
 }
 
 #[test]

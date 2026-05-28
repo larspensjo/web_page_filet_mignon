@@ -279,7 +279,7 @@ fn llm_completed_success_updates_state() {
                 input_tokens: 5,
                 output_tokens: 10,
                 prompt_version: 1,
-                model_id: "test-model".to_string(),
+                resolved_model: "test-model".to_string(),
             },
             metadata: None,
         },

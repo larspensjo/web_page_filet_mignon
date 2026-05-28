@@ -17,6 +17,12 @@ use crate::{AppState, Effect};
 const PRIORITY_CUTOFF_INCLUSIVE: u8 = 2;
 
 /// Inputs required to compute the signal-candidate cache key for a URL.
+///
+/// The snapshot is built at enqueue time and is the single source of truth for
+/// the cache key — including the prompt version and canonical model id — so
+/// completion-time persistence cannot drift from lookup-time keys (e.g. when
+/// the provider returns a dated model variant like `gpt-5.4-mini-2026-03-17`
+/// while the configured canonical model is `gpt-5.4-mini`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalCandidateInputSnapshot {
     pub outlet: String,
@@ -28,6 +34,8 @@ pub struct SignalCandidateInputSnapshot {
     pub key_points: Vec<String>,
     pub upstream_summary_cache_digest: String,
     pub context: Vec<(String, String)>,
+    pub prompt_version: PromptVersion,
+    pub model_id: String,
 }
 
 pub(crate) fn handle_signal_candidate_completion(
@@ -53,19 +61,18 @@ pub(crate) fn handle_signal_candidate_completion(
             input_tokens,
             output_tokens,
             prompt_version,
-            model_id,
+            resolved_model,
         } => match validate_signal_candidate(output_json) {
             Ok(mut parsed) => {
                 parsed.input_tokens = *input_tokens;
                 parsed.output_tokens = *output_tokens;
 
                 if let Some(snapshot) = state.signal_candidate_input_snapshot(&url).cloned() {
+                    log_completion_metadata_drift(&url, &snapshot, *prompt_version, resolved_model);
                     persist_signal_candidate_result(
                         state,
                         &url,
                         &snapshot,
-                        *prompt_version,
-                        model_id,
                         parsed.clone(),
                         effects,
                     );
@@ -135,21 +142,11 @@ pub fn try_enqueue(state: &mut AppState, url: &str, effects: &mut Vec<Effect>) -
         return false;
     }
 
-    let Some(active_version) = state.active_version_for(PromptId::ArticleSignalCandidate) else {
-        return false;
-    };
-    let Some(model_id) = state
-        .effective_model_for(PromptId::ArticleSignalCandidate)
-        .map(str::to_string)
-    else {
-        return false;
-    };
-
     let bundle = build_input_bundle(url, &snapshot);
     let key = match SignalCandidateCacheKey::try_new(
         &bundle,
-        Some(active_version),
-        Some(model_id.as_str()),
+        Some(snapshot.prompt_version),
+        Some(snapshot.model_id.as_str()),
         &snapshot.context,
     ) {
         Ok(key) => key,
@@ -184,7 +181,6 @@ pub fn try_enqueue(state: &mut AppState, url: &str, effects: &mut Vec<Effect>) -
     if !state.signal_candidate_mut().enqueue(url.to_string()) {
         return false;
     }
-    state.set_signal_candidate_input_snapshot(url, snapshot.clone());
     let request_id = state.allocate_next_llm_request_id();
     state.record_pending_llm_request(request_id, PromptId::ArticleSignalCandidate);
     state.signal_candidate_mut().mark_scoring(url, request_id);
@@ -192,7 +188,7 @@ pub fn try_enqueue(state: &mut AppState, url: &str, effects: &mut Vec<Effect>) -
     effects.push(Effect::RequestLlmCompletion {
         request_id,
         prompt_id: PromptId::ArticleSignalCandidate,
-        prompt_version: Some(active_version),
+        prompt_version: Some(snapshot.prompt_version),
         model_override: None,
         input_content: render_input_content(url, &snapshot),
         context: snapshot.context.clone(),
@@ -203,9 +199,10 @@ pub fn try_enqueue(state: &mut AppState, url: &str, effects: &mut Vec<Effect>) -
         "[signal-dispatch] url={} request_id={} decision=enqueued prompt_version={} model_id={}",
         url,
         request_id,
-        active_version,
-        model_id
+        snapshot.prompt_version,
+        snapshot.model_id
     );
+    state.set_signal_candidate_input_snapshot(url, snapshot);
     state.mark_dirty();
     true
 }
@@ -281,6 +278,10 @@ fn build_input_snapshot(state: &AppState, url: &str) -> Option<SignalCandidateIn
         .find(|article| article.url == url)?;
     let summary: &ArticleSummaryResult = state.briefing().summary_for_url(url)?;
     let triage = state.triage().result_for_url(url)?;
+    let prompt_version = state.active_version_for(PromptId::ArticleSignalCandidate)?;
+    let model_id = state
+        .effective_model_for(PromptId::ArticleSignalCandidate)?
+        .to_string();
     let published_at = article.fetched_utc.clone().unwrap_or_default();
     let title = crate::preview::best_effort_article_title(article.source_title.as_deref(), url)
         .unwrap_or_else(|| {
@@ -304,6 +305,8 @@ fn build_input_snapshot(state: &AppState, url: &str) -> Option<SignalCandidateIn
         key_points: summary.key_points.clone(),
         upstream_summary_cache_digest,
         context: state.context_for(PromptId::ArticleSignalCandidate).to_vec(),
+        prompt_version,
+        model_id,
     })
 }
 
@@ -369,16 +372,14 @@ fn persist_signal_candidate_result(
     state: &mut AppState,
     url: &str,
     snapshot: &SignalCandidateInputSnapshot,
-    prompt_version: PromptVersion,
-    model_id: &str,
     result: SignalCandidateResult,
     effects: &mut Vec<Effect>,
 ) {
     let bundle = build_input_bundle(url, snapshot);
     match SignalCandidateCacheKey::try_new(
         &bundle,
-        Some(prompt_version),
-        Some(model_id),
+        Some(snapshot.prompt_version),
+        Some(snapshot.model_id.as_str()),
         &snapshot.context,
     ) {
         Ok(key) => {
@@ -390,8 +391,8 @@ fn persist_signal_candidate_result(
             engine_info!(
                 "[signal-cache] url={} decision=store prompt_version={} model_id={} key_digest={}",
                 url,
-                prompt_version,
-                model_id,
+                snapshot.prompt_version,
+                snapshot.model_id,
                 key.digest()
             );
         }
@@ -402,6 +403,43 @@ fn persist_signal_candidate_result(
                 err
             );
         }
+    }
+}
+
+/// Logs when the provider-returned metadata differs from the run-frozen snapshot
+/// metadata that owns the cache key. Mirrors the summary-cache diagnostic so
+/// dated model variants (e.g. `gpt-5.4-mini-2026-03-17` vs canonical
+/// `gpt-5.4-mini`) are visible without breaking cache reuse.
+fn log_completion_metadata_drift(
+    url: &str,
+    snapshot: &SignalCandidateInputSnapshot,
+    completion_prompt_version: PromptVersion,
+    completion_model_id: &str,
+) {
+    if snapshot.model_id != completion_model_id {
+        if crate::cache_utils::model_ids_compatible(&snapshot.model_id, completion_model_id) {
+            engine_info!(
+                "[signal-cache] completion metadata differs by model variant url={} cache_model={} completion_model={}",
+                url,
+                snapshot.model_id,
+                completion_model_id,
+            );
+        } else {
+            engine_warn!(
+                "[signal-cache] completion model_id mismatch url={} cache_model={} completion_model={}",
+                url,
+                snapshot.model_id,
+                completion_model_id,
+            );
+        }
+    }
+    if snapshot.prompt_version != completion_prompt_version {
+        engine_warn!(
+            "[signal-cache] completion prompt_version mismatch url={} cache_version={} completion_version={}",
+            url,
+            snapshot.prompt_version,
+            completion_prompt_version,
+        );
     }
 }
 

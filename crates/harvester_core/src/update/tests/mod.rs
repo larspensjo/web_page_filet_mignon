@@ -144,7 +144,7 @@ fn summary_completion_advances_and_generates_briefing() {
                 input_tokens: 10,
                 output_tokens: 5,
                 prompt_version: 1,
-                model_id: "test-model".to_string(),
+                resolved_model: "test-model".to_string(),
             },
             metadata: None,
         },
@@ -178,7 +178,7 @@ fn summary_completion_advances_and_generates_briefing() {
                 input_tokens: 10,
                 output_tokens: 5,
                 prompt_version: 1,
-                model_id: "test-model".to_string(),
+                resolved_model: "test-model".to_string(),
             },
             metadata: None,
         },
@@ -229,7 +229,7 @@ fn summary_completion_advances_and_generates_briefing() {
                 input_tokens: 20,
                 output_tokens: 8,
                 prompt_version: 1,
-                model_id: "test-model".to_string(),
+                resolved_model: "test-model".to_string(),
             },
             metadata: None,
         },
@@ -268,7 +268,7 @@ fn summary_store_uses_run_frozen_metadata_when_completion_model_differs() {
                 input_tokens: 10,
                 output_tokens: 5,
                 prompt_version: 77,
-                model_id: "test-model-2024-07-18".to_string(),
+                resolved_model: "test-model-2024-07-18".to_string(),
             },
             metadata: None,
         },
@@ -282,6 +282,71 @@ fn summary_store_uses_run_frozen_metadata_when_completion_model_differs() {
     assert_eq!(keys.len(), 1);
     assert_eq!(keys[0].prompt_version, 1);
     assert_eq!(keys[0].model_id, "test-model");
+}
+
+#[test]
+fn summary_persisted_with_dated_model_variant_is_cache_hit_after_reload() {
+    // Session 1: provider returns a dated model variant; cache must store with canonical alias.
+    init_logging();
+    let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
+    let (articles, collection_text) = loaded_single_article();
+    let (state, effects) = update(
+        state,
+        Msg::ArticlesLoaded {
+            articles: articles.clone(),
+            collection_text: collection_text.clone(),
+        },
+    );
+    let summary_request_id = request_id_for_prompt(&effects, PromptId::ArticleSummary)
+        .expect("summary request in session 1");
+
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: summary_request_id,
+            result: LlmResultKind::Success {
+                output_json: summary_json("Article A"),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 99,
+                resolved_model: "test-model-2024-07-18".to_string(),
+            },
+            metadata: None,
+        },
+    );
+    let persisted_cache = state.summary_cache().clone();
+    assert!(
+        !persisted_cache.is_empty(),
+        "session 1 must persist a summary cache entry"
+    );
+
+    // Session 2: restart with same config. Hydrate cache. ArticlesLoaded must reuse
+    // the entry and emit no summary LLM request.
+    let state = start_briefing_after_triage(AppState::new(), articles.clone());
+    let (state, _) = update(
+        state,
+        Msg::SummaryCacheHydrated {
+            cache: persisted_cache,
+        },
+    );
+    let (_state, effects) = update(
+        state,
+        Msg::ArticlesLoaded {
+            articles,
+            collection_text,
+        },
+    );
+
+    assert!(
+        effects.iter().all(|e| !matches!(
+            e,
+            Effect::RequestLlmCompletion {
+                prompt_id: PromptId::ArticleSummary,
+                ..
+            }
+        )),
+        "session 2 must get a cache hit; no summary LLM request should be emitted"
+    );
 }
 
 #[test]
@@ -307,7 +372,7 @@ fn aggregate_briefing_failure_surfaces_reason_in_briefing_ui() {
                 input_tokens: 10,
                 output_tokens: 5,
                 prompt_version: 1,
-                model_id: "test-model".to_string(),
+                resolved_model: "test-model".to_string(),
             },
             metadata: None,
         },
@@ -364,7 +429,7 @@ fn aggregate_briefing_success_records_usage_for_status_bar() {
                 input_tokens: 10,
                 output_tokens: 5,
                 prompt_version: 1,
-                model_id: "test-model".to_string(),
+                resolved_model: "test-model".to_string(),
             },
             metadata: None,
         },
@@ -381,7 +446,7 @@ fn aggregate_briefing_success_records_usage_for_status_bar() {
                 input_tokens: 123,
                 output_tokens: 45,
                 prompt_version: 1,
-                model_id: DEFAULT_BRIEFING_MODEL.to_string(),
+                resolved_model: DEFAULT_BRIEFING_MODEL.to_string(),
             },
             metadata: Some(aggregate_briefing_metadata(DEFAULT_BRIEFING_MODEL, 123, 45)),
         },
@@ -416,7 +481,7 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
                 input_tokens: 10,
                 output_tokens: 5,
                 prompt_version: 88,
-                model_id: "test-model-2024-07-18".to_string(),
+                resolved_model: "test-model-2024-07-18".to_string(),
             },
             metadata: None,
         },
@@ -460,7 +525,7 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
                 input_tokens: 10,
                 output_tokens: 4,
                 prompt_version: 1,
-                model_id: "test-model".to_string(),
+                resolved_model: "test-model".to_string(),
             },
             metadata: None,
         },

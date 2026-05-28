@@ -1510,7 +1510,7 @@ mod tests {
             input_tokens: 42,
             output_tokens: 7,
             prompt_version,
-            model_id: "test-model".to_string(),
+            resolved_model: "test-model".to_string(),
         }
     }
 

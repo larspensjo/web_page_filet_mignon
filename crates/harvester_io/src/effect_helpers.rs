@@ -390,7 +390,7 @@ pub fn map_llm_event(event: LlmEvent) -> Msg {
                         input_tokens: outcome.metadata.input_tokens,
                         output_tokens: outcome.metadata.output_tokens,
                         prompt_version: outcome.metadata.prompt_version,
-                        model_id: outcome.metadata.resolved_model.clone(),
+                        resolved_model: outcome.metadata.resolved_model.clone(),
                     };
                     (kind, Some(outcome.metadata))
                 }

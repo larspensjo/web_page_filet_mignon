@@ -169,7 +169,7 @@ pub(super) fn start_briefing_after_triage(
                     input_tokens: 10,
                     output_tokens: 5,
                     prompt_version: 1,
-                    model_id: "test-model".to_string(),
+                    resolved_model: "test-model".to_string(),
                 },
                 metadata: None,
             },
@@ -257,7 +257,7 @@ pub(super) fn triage_success(request_id: u64) -> Msg {
             input_tokens: 10,
             output_tokens: 5,
             prompt_version: 1,
-            model_id: "test-model".to_string(),
+            resolved_model: "test-model".to_string(),
         },
         metadata: None,
     }

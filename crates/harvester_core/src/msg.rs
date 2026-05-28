@@ -505,7 +505,9 @@ pub enum LlmResultKind {
         input_tokens: u32,
         output_tokens: u32,
         prompt_version: PromptVersion,
-        model_id: String,
+        /// Provider-resolved model string (may be a dated variant like `gpt-5.4-mini-2026-03-17`).
+        /// Do NOT use for cache key construction; use the canonical alias captured at enqueue time.
+        resolved_model: String,
     },
     ValidationFailed {
         reason: String,
