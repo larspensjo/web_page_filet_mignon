@@ -71,7 +71,7 @@ pub(crate) struct SmartQueryConfig {
     pub(crate) agent_provider: Option<Arc<dyn LlmProvider>>,
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for HarvesterMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(

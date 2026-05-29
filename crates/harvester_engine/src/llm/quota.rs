@@ -12,7 +12,7 @@ pub struct LlmQuotas {
 impl Default for LlmQuotas {
     fn default() -> Self {
         Self {
-            max_calls_per_session: Some(150),
+            max_calls_per_session: Some(250),
             max_input_tokens_per_session: Some(2_000_000),
             max_output_tokens_per_session: Some(500_000),
             max_cost_microdollars_per_session: Some(5_000_000),
