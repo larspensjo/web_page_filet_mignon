@@ -1857,7 +1857,8 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
         "2026-04-01T00:00:00Z".to_string(),
     );
 
-    // (2) A successful, downloaded, UNSUMMARIZED job -> the ONLY "raw" one.
+    // (2) A successful downloaded job that is NOT in the archive corpus.
+    //     With the correct implementation this must NOT count as raw.
     let state = add_completed_job_with_tokens_for_test(state, "https://fresh.example.com/new", 300);
 
     // (3) A FAILED job that still carries tokens (apply_done does not clear them).
@@ -1907,7 +1908,116 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
     assert_eq!(view.archive_token_estimate, 42);
     // Filtered corpus has exactly the one triaged article.
     assert_eq!(view.archive_filtered_count, 1);
-    // Only job (2) is successful + downloaded + unsummarized. Jobs (1) summarized,
-    // (3) failed, (4) in-flight, (5) queued must all be excluded.
+    // The single archive article (1) is fully summarized. Job (2) has no summary
+    // but is outside the archive corpus — it must not be counted as raw.
+    assert_eq!(view.raw_unprocessed_count, 0);
+}
+
+#[test]
+fn raw_unprocessed_count_is_archive_corpus_articles_without_summary() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+
+    // Two archive-corpus articles: one summarized, one not.
+    let url_summarized = "https://triage-complete.com/0".to_string();
+    let url_raw = "https://triage-complete.com/1".to_string();
+    let state = complete_triage_state_for_test(2);
+    let state = add_completed_job_with_tokens_for_test(state, &url_summarized, 400);
+    let mut state = add_completed_job_with_tokens_for_test(state, &url_raw, 600);
+
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: "hash-tc-0".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 4,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "Summarized".to_string(),
+            summary: "s".to_string(),
+            key_points: vec![],
+            input_tokens: 100,
+            output_tokens: 30,
+            entities: SummaryEntities::default(),
+        },
+        "2026-04-01T00:00:00Z".to_string(),
+    );
+
+    let view = state.view();
+
+    assert_eq!(view.archive_filtered_count, 2);
+    // url_raw is in the archive corpus but has no summary → counts as 1 raw.
     assert_eq!(view.raw_unprocessed_count, 1);
+}
+
+#[test]
+fn signal_candidate_mode_keeps_raw_count_over_full_archive_corpus() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::{
+        Confidence, SignalCandidateResult, SourceTier, SummaryEntities,
+    };
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+
+    // Three triaged articles in the archive corpus. Only article /0 is summarized
+    // and promoted to a settled signal candidate; /1 and /2 remain unsummarized.
+    let url_candidate = "https://triage-complete.com/0".to_string();
+    let state = complete_triage_state_for_test(3);
+    let state = add_completed_job_with_tokens_for_test(state, &url_candidate, 400);
+    let state = add_completed_job_with_tokens_for_test(state, "https://triage-complete.com/1", 500);
+    let mut state =
+        add_completed_job_with_tokens_for_test(state, "https://triage-complete.com/2", 600);
+
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: "hash-tc-0".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 4,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "Candidate".to_string(),
+            summary: "s".to_string(),
+            key_points: vec![],
+            input_tokens: 100,
+            output_tokens: 30,
+            entities: SummaryEntities::default(),
+        },
+        "2026-04-01T00:00:00Z".to_string(),
+    );
+
+    // Settle a single signal candidate (article /0). All scoring done, none in flight,
+    // so the meter switches to the signal-candidate export subset.
+    state.signal_candidate_mut().enqueue(url_candidate.clone());
+    state.signal_candidate_mut().mark_scoring(&url_candidate, 1);
+    state.signal_candidate_mut().complete(
+        &url_candidate,
+        SignalCandidateResult {
+            signal_score: 90,
+            signal_key: "cluster-a".to_string(),
+            themes: vec!["theme".to_string()],
+            draft_gist: "gist".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "reason".to_string(),
+            input_tokens: 10,
+            output_tokens: 2,
+        },
+    );
+
+    let view = state.view();
+
+    // Bar/filtered reflect the export subset: the single selected candidate.
+    assert_eq!(view.archive_filtered_count, 1);
+    assert_eq!(view.archive_token_estimate, 30);
+    // Raw stays the full-corpus backlog: /1 and /2 have no summary → 2 raw.
+    assert_eq!(view.raw_unprocessed_count, 2);
 }

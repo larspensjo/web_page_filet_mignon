@@ -166,20 +166,51 @@ impl AppState {
         let briefing_blocked_reason = self.briefing_blocked_reason();
         let stop_finish_button = self.stop_finish_button_state();
         let archive_corpus = self.archive_corpus();
-        let archive_filtered_count = archive_corpus.count();
-        let archive_token_estimate = self
-            .archive_token_estimates(archive_corpus.ordered_urls())
-            .summary_tokens;
-        let raw_unprocessed_count = self
-            .jobs
-            .values()
-            .filter(|job| {
-                job.stage == Stage::Done
-                    && matches!(job.outcome, Some(JobResultKind::Success))
-                    && job.tokens.is_some()
-                    && self.summary_output_tokens_for_url(&job.url).is_none()
-            })
-            .count();
+        let full_filtered_count = archive_corpus.count();
+        let archive_estimates = self.archive_token_estimates(archive_corpus.ordered_urls());
+
+        // "raw" is a backlog indicator over the whole archive corpus: triaged articles
+        // that do not yet have a cached summary. It is independent of which subset the
+        // token meter is currently estimating.
+        let raw_unprocessed_count = full_filtered_count - archive_estimates.summary_coverage;
+
+        // The token meter bar and its "filtered" count reflect the archive export target.
+        // When all signal candidates are settled and the selection is non-empty, the export
+        // defaults to that subset — show those numbers on the bar instead of the full corpus.
+        let sc = self.signal_candidate();
+        let settled = sc.completed_count();
+        let in_progress = sc
+            .enqueued_count()
+            .saturating_sub(settled)
+            .saturating_sub(sc.failed_count());
+        let (archive_token_estimate, archive_filtered_count) = if settled > 0 && in_progress == 0 {
+            let scored: Vec<ScoredCandidate> = sc
+                .iter_completed()
+                .map(|(url, result)| ScoredCandidate {
+                    url: url.to_string(),
+                    result: result.clone(),
+                })
+                .collect();
+            let policy = SelectionPolicy {
+                threshold: self.signal_candidate_threshold(),
+                cap: self.signal_candidate_cap(),
+                active_prompt_version: self
+                    .active_version_for(
+                        harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate,
+                    )
+                    .unwrap_or_default(),
+                excluded: sc.excluded().clone(),
+            };
+            let selection = SignalCandidateSelection::compute(&scored, policy);
+            if selection.selected_urls.is_empty() {
+                (archive_estimates.summary_tokens, full_filtered_count)
+            } else {
+                let sc_estimates = self.archive_token_estimates(&selection.selected_urls);
+                (sc_estimates.summary_tokens, selection.selected_urls.len())
+            }
+        } else {
+            (archive_estimates.summary_tokens, full_filtered_count)
+        };
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
