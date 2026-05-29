@@ -449,6 +449,14 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
 
     commands.push(PlatformCommand::CreateLabel {
         window_id,
+        parent_control_id: Some(PANEL_PROGRESS),
+        control_id: LABEL_TOKEN_COUNTS,
+        initial_text: String::new(),
+        class: LabelClass::Default,
+    });
+
+    commands.push(PlatformCommand::CreateLabel {
+        window_id,
         parent_control_id: Some(PANEL_INPUT),
         control_id: LABEL_INPUT_HINT,
         initial_text: "Paste URL(s) here. Jobs are created immediately.".to_string(),

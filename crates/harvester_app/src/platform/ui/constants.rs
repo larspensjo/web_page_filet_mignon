@@ -85,6 +85,7 @@ pub const LABEL_JOBS_HEADER_META: ControlId = ControlId::new(3007);
 pub const LABEL_PREVIEW_SOURCE_CAPTION: ControlId = ControlId::new(3008);
 pub const LABEL_PREVIEW_STATUS: ControlId = ControlId::new(3009);
 pub const LABEL_LLM_QUOTA: ControlId = ControlId::new(3018);
+pub const LABEL_TOKEN_COUNTS: ControlId = ControlId::new(3023);
 
 pub const LABEL_TRENDS_DESCRIPTION: ControlId = ControlId::new(3014);
 pub const LABEL_PROMPT_LAB_STATUS: ControlId = ControlId::new(3010);

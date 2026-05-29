@@ -9,7 +9,8 @@ use super::rules::{
     PROMPT_LAB_ROW_HEIGHT_ACTION, PROMPT_LAB_ROW_HEIGHT_CONTEXT_INPUT,
     PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY, PROMPT_LAB_ROW_HEIGHT_STANDARD,
     PROMPT_LAB_ROW_HEIGHT_STATUS, PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT,
-    PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH, TOKEN_METER_BAR_WIDTH, TOKEN_METER_LABEL_WIDTH,
+    PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH, TOKEN_COUNTS_LABEL_WIDTH, TOKEN_METER_BAR_WIDTH,
+    TOKEN_METER_LABEL_WIDTH,
 };
 use super::{build_layout_command, initial_commands, LayoutConfig, PromptLabLayoutConfig};
 
@@ -371,6 +372,16 @@ fn toolbar_contains_scope_and_token_controls_on_same_row() {
     assert_eq!(token_bar.parent_control_id, Some(PANEL_PROGRESS));
     assert_eq!(token_bar.dock_style, DockStyle::Right);
     assert_eq!(token_bar.fixed_size, Some(TOKEN_METER_BAR_WIDTH));
+
+    let token_counts = rules
+        .iter()
+        .find(|r| r.control_id == LABEL_TOKEN_COUNTS)
+        .expect("token counts label rule");
+    assert_eq!(token_counts.parent_control_id, Some(PANEL_PROGRESS));
+    assert_eq!(token_counts.dock_style, DockStyle::Right);
+    assert_eq!(token_counts.fixed_size, Some(TOKEN_COUNTS_LABEL_WIDTH));
+    // Order 2 docks further left than the bar (order 1) and label (order 0).
+    assert_eq!(token_counts.order, 2);
 }
 
 #[test]

@@ -16,6 +16,7 @@ pub(super) const AI_WARNING_ROW_HEIGHT: i32 = 42;
 pub(super) const PREVIEW_CONTEXT_ROW_HEIGHT: i32 = 32;
 pub(super) const TOKEN_METER_BAR_WIDTH: i32 = 190;
 pub(super) const TOKEN_METER_LABEL_WIDTH: i32 = 120;
+pub(super) const TOKEN_COUNTS_LABEL_WIDTH: i32 = 160;
 pub(super) const LLM_QUOTA_BAR_WIDTH: i32 = 88;
 pub(super) const LLM_QUOTA_LABEL_WIDTH: i32 = 150;
 
@@ -163,6 +164,14 @@ pub(super) fn build_layout_rules(
             order: 1,
             fixed_size: Some(TOKEN_METER_BAR_WIDTH),
             margin: (0, 14, 18, 14),
+        },
+        LayoutRule {
+            control_id: LABEL_TOKEN_COUNTS,
+            parent_control_id: Some(PANEL_PROGRESS),
+            dock_style: DockStyle::Right,
+            order: 2,
+            fixed_size: Some(TOKEN_COUNTS_LABEL_WIDTH),
+            margin: (10, 11, 8, 9),
         },
         LayoutRule {
             control_id: PANEL_BOTTOM,

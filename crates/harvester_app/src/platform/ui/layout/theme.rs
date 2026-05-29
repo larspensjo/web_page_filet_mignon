@@ -868,6 +868,11 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
     });
     commands.push(PlatformCommand::ApplyStyleToControl {
         window_id,
+        control_id: LABEL_TOKEN_COUNTS,
+        style_id: StyleId::MetadataText,
+    });
+    commands.push(PlatformCommand::ApplyStyleToControl {
+        window_id,
         control_id: LABEL_INPUT_HINT,
         style_id: StyleId::HeaderLabel,
     });
