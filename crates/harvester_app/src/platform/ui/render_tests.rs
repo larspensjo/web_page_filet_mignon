@@ -1386,28 +1386,11 @@ fn jobs_scope_toggle_reflects_scope_state() {
 }
 
 #[test]
-fn token_progress_uses_since_checkpoint_scope_total_when_enabled() {
+fn token_progress_uses_archive_estimate_regardless_of_scope() {
     let window_id = WindowId::new(41);
     let mut tree_state = TreeRenderState::new();
-    let mut since_job = make_job(
-        1,
-        "https://since.example",
-        Stage::Done,
-        Some(JobResultKind::Success),
-        Some(50),
-        None,
-    );
-    since_job.is_since_checkpoint = true;
-    let all_time_job = make_job(
-        2,
-        "https://all.example",
-        Stage::Done,
-        Some(JobResultKind::Success),
-        Some(150),
-        None,
-    );
-    let mut view = make_view(vec![since_job, all_time_job]);
-    view.total_tokens = 200;
+    let mut view = make_view(vec![]);
+    view.archive_token_estimate = 50;
     view.token_limit = 200_000;
     view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
 
@@ -1417,8 +1400,7 @@ fn token_progress_uses_since_checkpoint_scope_total_when_enabled() {
         matches!(
             cmd,
             PlatformCommand::SetControlText { control_id, text, .. }
-            if *control_id == LABEL_TOKEN_PROGRESS
-                && text == "50 / 200K"
+            if *control_id == LABEL_TOKEN_PROGRESS && text == "50 / 200K"
         )
     }));
     assert!(cmds.iter().any(|cmd| {
@@ -1426,51 +1408,6 @@ fn token_progress_uses_since_checkpoint_scope_total_when_enabled() {
             cmd,
             PlatformCommand::SetProgressBarPosition { control_id, position, .. }
             if *control_id == PROGRESS_TOKENS && *position == 50
-        )
-    }));
-    assert!(cmds.iter().any(|cmd| {
-        matches!(
-            cmd,
-            PlatformCommand::ApplyStyleToControl { control_id, style_id, .. }
-            if *control_id == PROGRESS_TOKENS && *style_id == StyleId::StatusMeter
-        )
-    }));
-}
-
-#[test]
-fn token_progress_prefers_summary_tokens_when_available() {
-    let window_id = WindowId::new(44);
-    let mut tree_state = TreeRenderState::new();
-    let mut summarized_job = make_job(
-        1,
-        "https://since.example",
-        Stage::Done,
-        Some(JobResultKind::Success),
-        Some(50_000),
-        None,
-    );
-    summarized_job.is_since_checkpoint = true;
-    summarized_job.summary_tokens = Some(16_000);
-    let mut view = make_view(vec![summarized_job]);
-    view.total_tokens = 50_000;
-    view.token_limit = 100_000;
-    view.left_pane.job_list_scope = JobListScope::SinceCheckpoint;
-
-    let cmds = render(window_id, &view, &mut tree_state);
-
-    assert!(cmds.iter().any(|cmd| {
-        matches!(
-            cmd,
-            PlatformCommand::SetControlText { control_id, text, .. }
-            if *control_id == LABEL_TOKEN_PROGRESS
-                && text == "16K / 100K"
-        )
-    }));
-    assert!(cmds.iter().any(|cmd| {
-        matches!(
-            cmd,
-            PlatformCommand::SetProgressBarPosition { control_id, position, .. }
-            if *control_id == PROGRESS_TOKENS && *position == 16_000
         )
     }));
 }
@@ -1542,7 +1479,7 @@ fn token_progress_stays_muted_below_limit_even_when_high() {
     let window_id = WindowId::new(42);
     let mut tree_state = TreeRenderState::new();
     let mut view = make_view(Vec::new());
-    view.total_tokens = 97_002;
+    view.archive_token_estimate = 97_002;
     view.token_limit = 100_000;
 
     let cmds = render(window_id, &view, &mut tree_state);
@@ -1569,7 +1506,7 @@ fn token_progress_escalates_to_accent_at_limit() {
     let window_id = WindowId::new(43);
     let mut tree_state = TreeRenderState::new();
     let mut view = make_view(Vec::new());
-    view.total_tokens = 100_000;
+    view.archive_token_estimate = 100_000;
     view.token_limit = 100_000;
 
     let cmds = render(window_id, &view, &mut tree_state);
@@ -1587,6 +1524,25 @@ fn token_progress_escalates_to_accent_at_limit() {
             PlatformCommand::SetControlText { control_id, text, .. }
             if *control_id == LABEL_TOKEN_PROGRESS
                 && text == "100K / 100K"
+        )
+    }));
+}
+
+#[test]
+fn token_counts_label_shows_filtered_and_raw_counts() {
+    let window_id = WindowId::new(47);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![]);
+    view.archive_filtered_count = 12;
+    view.raw_unprocessed_count = 3;
+
+    let cmds = render(window_id, &view, &mut tree_state);
+
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlText { control_id, text, .. }
+            if *control_id == LABEL_TOKEN_COUNTS && text == "12 filtered · 3 raw"
         )
     }));
 }

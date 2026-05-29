@@ -1,6 +1,6 @@
 use commanductui::{MessageSeverity, PlatformCommand, StyleId, WindowId};
 use harvester_core::{
-    AppViewModel, JobListScope, JobRowView, LeftPaneHeaderView, LlmModelUsageView,
+    AppViewModel, JobListScope, LeftPaneHeaderView, LlmModelUsageView,
     LlmQuotaSeverity, SessionState,
 };
 
@@ -240,29 +240,24 @@ pub(super) fn render_token_progress_section(
     tree_state: &mut TreeRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
-    let scoped_total_tokens = match view.left_pane.job_list_scope {
-        JobListScope::All if view.jobs.is_empty() => view.total_tokens,
-        JobListScope::All => view.jobs.iter().map(token_meter_tokens_for_job).sum(),
-        JobListScope::SinceCheckpoint => view
-            .jobs
-            .iter()
-            .filter(|job| job.is_since_checkpoint)
-            .map(token_meter_tokens_for_job)
-            .sum(),
-    };
+    let estimate = view.archive_token_estimate;
     let raw_limit = view.token_limit;
     let effective_limit = raw_limit.max(1);
     let bar_max = effective_limit.min(u32::MAX as u64);
-    let clamped_tokens = scoped_total_tokens.min(bar_max);
+    let clamped_tokens = estimate.min(bar_max);
     let percent = if raw_limit > 0 {
-        (scoped_total_tokens.min(raw_limit) as f64 / raw_limit as f64) * 100.0
+        (estimate.min(raw_limit) as f64 / raw_limit as f64) * 100.0
     } else {
         0.0
     };
     let progress_text = format!(
         "{} / {}",
-        format_compact_tokens(scoped_total_tokens),
+        format_compact_tokens(estimate),
         format_compact_tokens(view.token_limit)
+    );
+    let counts_text = format!(
+        "{} filtered · {} raw",
+        view.archive_filtered_count, view.raw_unprocessed_count
     );
     let progress_style = if percent >= 100.0 {
         StyleId::ProgressBar
@@ -311,10 +306,16 @@ pub(super) fn render_token_progress_section(
             text,
         },
     );
-}
-
-fn token_meter_tokens_for_job(job: &JobRowView) -> u64 {
-    job.summary_tokens.or(job.tokens).map_or(0, u64::from)
+    emit_if_changed(
+        &mut tree_state.controls.prev_token_counts_text,
+        counts_text,
+        cmds,
+        |text| PlatformCommand::SetControlText {
+            window_id,
+            control_id: LABEL_TOKEN_COUNTS,
+            text,
+        },
+    );
 }
 
 pub(super) fn render_main_controls_section(
