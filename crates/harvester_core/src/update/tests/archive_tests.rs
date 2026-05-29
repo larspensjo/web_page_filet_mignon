@@ -1858,8 +1858,7 @@ fn view_exposes_archive_token_estimate_and_article_counts() {
     );
 
     // (2) A successful, downloaded, UNSUMMARIZED job -> the ONLY "raw" one.
-    let state =
-        add_completed_job_with_tokens_for_test(state, "https://fresh.example.com/new", 300);
+    let state = add_completed_job_with_tokens_for_test(state, "https://fresh.example.com/new", 300);
 
     // (3) A FAILED job that still carries tokens (apply_done does not clear them).
     let (state, failed_id) = enqueue(state, "https://fail.example.com/x");

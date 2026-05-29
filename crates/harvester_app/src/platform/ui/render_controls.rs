@@ -1,7 +1,7 @@
 use commanductui::{MessageSeverity, PlatformCommand, StyleId, WindowId};
 use harvester_core::{
-    AppViewModel, JobListScope, LeftPaneHeaderView, LlmModelUsageView,
-    LlmQuotaSeverity, SessionState,
+    AppViewModel, JobListScope, LeftPaneHeaderView, LlmModelUsageView, LlmQuotaSeverity,
+    SessionState,
 };
 
 use super::constants::*;

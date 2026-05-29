@@ -1066,6 +1066,23 @@ impl PlatformEventHandler for AppEventHandler {
                 let _ = self.msg_tx.send(msg);
                 return;
             }
+            if *control_id == ui::constants::CHK_SIGNAL_CANDIDATE_EXCLUDE {
+                let guard = self.shared.lock().unwrap();
+                if let Some(job_id) = guard.state.selected_job_id() {
+                    if let Some(url) = guard.state.job_url_for(job_id) {
+                        if let Some(SignalCandidateState::Completed { result }) =
+                            guard.state.signal_candidate().state_for(url)
+                        {
+                            let signal_key = result.signal_key.clone();
+                            drop(guard);
+                            let _ = self
+                                .msg_tx
+                                .send(Msg::ToggleSignalCandidateExclusion { signal_key });
+                        }
+                    }
+                }
+                return;
+            }
         }
 
         match event {
