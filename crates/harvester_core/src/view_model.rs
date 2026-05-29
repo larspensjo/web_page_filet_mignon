@@ -304,6 +304,14 @@ pub struct AppViewModel {
     pub dirty: bool,
     pub total_tokens: u64,
     pub token_limit: u64,
+    /// Summary-mode archive size over the filtered corpus: cached summary tokens
+    /// where available, raw article tokens otherwise. Drives the token meter bar.
+    pub archive_token_estimate: u64,
+    /// Number of articles in the filtered archive corpus.
+    pub archive_filtered_count: usize,
+    /// Successfully downloaded jobs (`Stage::Done` + `Success` + `tokens.is_some()`)
+    /// that have no cached summary.
+    pub raw_unprocessed_count: usize,
     pub preview_text: Option<String>,
     pub selected_job_id: Option<crate::JobId>,
     pub left_pane_header: LeftPaneHeaderView,
@@ -358,6 +366,9 @@ impl Default for AppViewModel {
             dirty: false,
             total_tokens: 0,
             token_limit: TOKEN_LIMIT,
+            archive_token_estimate: 0,
+            archive_filtered_count: 0,
+            raw_unprocessed_count: 0,
             preview_text: None,
             selected_job_id: None,
             left_pane_header: LeftPaneHeaderView {

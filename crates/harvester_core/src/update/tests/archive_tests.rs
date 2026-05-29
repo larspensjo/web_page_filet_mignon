@@ -1806,3 +1806,109 @@ fn archive_dialog_checkpoint_submit_skips_override_persist_when_overrides_alread
         "checkpoint submit should not write an already-empty override set"
     );
 }
+
+#[test]
+fn view_exposes_archive_token_estimate_and_article_counts() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::summary_cache::SummaryCacheKey;
+    use crate::{JobResultKind, Stage};
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+
+    // Local helper: enqueue a URL and return its job id (so we can drive it into
+    // queued / in-flight / failed states the completed-job helper can't produce).
+    fn enqueue(state: AppState, url: &str) -> (AppState, crate::JobId) {
+        let (state, e1) = update(state, Msg::InputChanged(format!("{url}\n")));
+        let (state, e2) = update(state, Msg::UrlsSubmitted);
+        let job_id = e1
+            .into_iter()
+            .chain(e2)
+            .find_map(|e| match e {
+                Effect::EnqueueUrl { job_id, .. } => Some(job_id),
+                _ => None,
+            })
+            .expect("EnqueueUrl effect");
+        (state, job_id)
+    }
+
+    // (1) One article in the completed triage corpus, downloaded (500 raw tokens)
+    //     and summarized (42 output tokens). In the archive corpus; NOT raw.
+    let triaged_url = "https://triage-complete.com/0".to_string();
+    let state = complete_triage_state_for_test(1);
+    let mut state = add_completed_job_with_tokens_for_test(state, &triaged_url, 500);
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: "hash-tc-0".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 4,
+            model_id: "model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "Art".to_string(),
+            summary: "summary text".to_string(),
+            key_points: vec![],
+            input_tokens: 100,
+            output_tokens: 42,
+            entities: SummaryEntities::default(),
+        },
+        "2026-04-01T00:00:00Z".to_string(),
+    );
+
+    // (2) A successful, downloaded, UNSUMMARIZED job -> the ONLY "raw" one.
+    let state =
+        add_completed_job_with_tokens_for_test(state, "https://fresh.example.com/new", 300);
+
+    // (3) A FAILED job that still carries tokens (apply_done does not clear them).
+    let (state, failed_id) = enqueue(state, "https://fail.example.com/x");
+    let (state, _) = update(
+        state,
+        Msg::JobProgress {
+            job_id: failed_id,
+            stage: Stage::Tokenizing,
+            tokens: Some(700),
+            bytes: None,
+            content_preview: None,
+        },
+    );
+    let (state, _) = update(
+        state,
+        Msg::JobDone {
+            job_id: failed_id,
+            result: JobResultKind::Failed {
+                reason: "boom".to_string(),
+            },
+            content_preview: None,
+            extracted_links: Vec::new(),
+            fetched_utc: None,
+        },
+    );
+
+    // (4) An IN-FLIGHT job: tokens set via progress, never completed.
+    let (state, inflight_id) = enqueue(state, "https://inflight.example.com/x");
+    let (state, _) = update(
+        state,
+        Msg::JobProgress {
+            job_id: inflight_id,
+            stage: Stage::Tokenizing,
+            tokens: Some(800),
+            bytes: None,
+            content_preview: None,
+        },
+    );
+
+    // (5) A QUEUED job: enqueued only, no tokens, not done.
+    let (state, _queued_id) = enqueue(state, "https://queued.example.com/x");
+
+    let view = state.view();
+
+    // Estimate = summary-mode archive size over the filtered corpus only.
+    assert_eq!(view.archive_token_estimate, 42);
+    // Filtered corpus has exactly the one triaged article.
+    assert_eq!(view.archive_filtered_count, 1);
+    // Only job (2) is successful + downloaded + unsummarized. Jobs (1) summarized,
+    // (3) failed, (4) in-flight, (5) queued must all be excluded.
+    assert_eq!(view.raw_unprocessed_count, 1);
+}

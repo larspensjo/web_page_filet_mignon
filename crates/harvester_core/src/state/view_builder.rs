@@ -165,6 +165,21 @@ impl AppState {
         let triage_blocked_reason = self.triage_blocked_reason();
         let briefing_blocked_reason = self.briefing_blocked_reason();
         let stop_finish_button = self.stop_finish_button_state();
+        let archive_corpus = self.archive_corpus();
+        let archive_filtered_count = archive_corpus.count();
+        let archive_token_estimate = self
+            .archive_token_estimates(archive_corpus.ordered_urls())
+            .summary_tokens;
+        let raw_unprocessed_count = self
+            .jobs
+            .values()
+            .filter(|job| {
+                job.stage == Stage::Done
+                    && matches!(job.outcome, Some(JobResultKind::Success))
+                    && job.tokens.is_some()
+                    && self.summary_output_tokens_for_url(&job.url).is_none()
+            })
+            .count();
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -174,6 +189,9 @@ impl AppState {
             dirty: self.dirty,
             total_tokens: self.metrics.total_tokens,
             token_limit: TOKEN_LIMIT,
+            archive_token_estimate,
+            archive_filtered_count,
+            raw_unprocessed_count,
             preview_text,
             selected_job_id,
             left_pane_header,
