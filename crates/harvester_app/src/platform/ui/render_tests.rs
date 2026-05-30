@@ -14,8 +14,8 @@ use harvester_core::{
 };
 use harvester_core::{
     JobOrigin, PreviewContextView, PreviewHeaderView, PromptLabRunId, PromptLabRunSummaryView,
-    PromptLabStage, PromptLabView, ResultsSubMode, ScoreBand, SignalCandidateRow,
-    SignalCandidateRowState,
+    PromptLabStage, PromptLabView, ResultsSubMode, ScoreBand, SignalCandidateOutcome,
+    SignalCandidateRow, SignalCandidateRowState,
 };
 use std::sync::Once;
 
@@ -703,33 +703,89 @@ fn list_box_items_for_non_jobs_tabs_ignore_visible_jobs_after_filter() {
 }
 
 #[test]
-fn signal_candidate_rows_compact_long_urls_in_list_box_titles() {
+fn results_tab_keeps_triage_rows_and_prepends_signal_outcome_badges() {
     init_logging();
 
-    let long_url = format!("https://example.com/signal/{}", "a".repeat(120));
-    let job = make_job(1, &long_url, Stage::Done, Some(JobResultKind::Success), None, None);
+    let mut job = make_job(
+        1,
+        "https://example.com/article",
+        Stage::Done,
+        Some(JobResultKind::Success),
+        None,
+        None,
+    );
+    job.summary_title = Some("Visible triage headline".to_string());
+    job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+        priority: 5,
+        category: "business".to_string(),
+        tags: vec![],
+    });
     let mut view = make_view(vec![job]);
     view.left_pane.left_tab = LeftTab::TriageResults;
-    view.results_sub_mode = ResultsSubMode::Signals;
     view.signal_candidate_rows = vec![SignalCandidateRow {
         job_id: 1,
-        url: long_url.clone(),
-        score: 0,
-        score_band: ScoreBand::Low,
-        source_tier: harvester_engine::llm::dto::SourceTier::Tier3,
+        url: "https://example.com/article".to_string(),
+        score: 80,
+        score_band: ScoreBand::High,
+        source_tier: harvester_engine::llm::dto::SourceTier::Tier1,
         themes: vec![],
-        gist_truncated: String::new(),
+        gist_truncated: "Signal gist".to_string(),
         dupes_count: 0,
-        state_label: SignalCandidateRowState::Scoring,
-        signal_key: String::new(),
-        outcome: None,
+        state_label: SignalCandidateRowState::Scored,
+        signal_key: "k".to_string(),
+        outcome: Some(SignalCandidateOutcome::Selected),
     }];
 
     let populated = build_list_box_items(&view);
 
     assert_eq!(populated.len(), 1);
-    assert_ne!(populated[0].title, long_url);
-    assert!(populated[0].title.len() < long_url.len());
+    assert_eq!(populated[0].title, "Visible triage headline");
+    assert_eq!(populated[0].badges[0].text, "ARCH");
+    assert_eq!(populated[0].badges[1].text, "P5");
+    assert_eq!(populated[0].badges[2].text, "Business");
+}
+
+#[test]
+fn hidden_signals_submode_still_renders_the_same_results_rows() {
+    init_logging();
+
+    let mut job = make_job(
+        1,
+        "https://example.com/article",
+        Stage::Done,
+        Some(JobResultKind::Success),
+        None,
+        None,
+    );
+    job.summary_title = Some("Visible triage headline".to_string());
+    job.triage_annotation = Some(harvester_core::TriageAnnotationView {
+        priority: 4,
+        category: "policy".to_string(),
+        tags: vec![],
+    });
+    let mut view = make_view(vec![job]);
+    view.left_pane.left_tab = LeftTab::TriageResults;
+    view.results_sub_mode = ResultsSubMode::Signals;
+    view.signal_candidate_rows = vec![SignalCandidateRow {
+        job_id: 1,
+        url: "https://example.com/article".to_string(),
+        score: 40,
+        score_band: ScoreBand::Low,
+        source_tier: harvester_engine::llm::dto::SourceTier::Tier3,
+        themes: vec![],
+        gist_truncated: "Different signal row title".to_string(),
+        dupes_count: 0,
+        state_label: SignalCandidateRowState::Scored,
+        signal_key: "k".to_string(),
+        outcome: Some(SignalCandidateOutcome::BelowThreshold),
+    }];
+
+    let populated = build_list_box_items(&view);
+
+    assert_eq!(populated.len(), 1);
+    assert_eq!(populated[0].title, "Visible triage headline");
+    assert_eq!(populated[0].badges[0].text, "LOW");
+    assert_eq!(populated[0].badges[1].text, "P4");
 }
 
 #[test]
