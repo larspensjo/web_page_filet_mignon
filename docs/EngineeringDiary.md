@@ -1794,3 +1794,9 @@ Type: Implementation
 Context: The Results -> Signals header still summarized the list as a raw candidate count, which did not explain the selection split or prove that the label ignored `JobListScope`.
 Change: Added a private `SignalOutcomeCounts` tally in `state/view_builder.rs`, threaded the corpus-wide outcome counts into the left-pane header builder, and changed the Signals label to report `Selected`, `Dup`, `Low`, and optional `Excl` totals from the whole corpus. Added a regression test that compares `JobListScope::All` with `SinceCheckpoint` and asserts the header label stays identical.
 Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs, signals_header_reports_whole_corpus_outcome_counts
+
+## 2026-05-30 - Locked disabled listbox row selection
+Type: Implementation
+Context: CommanDuctUI's owner-drawn list box needed an explicit contract that muted rows remain reachable by click and keyboard navigation, so hosts can de-emphasize rows without making them uninspectable.
+Change: Extracted the pure `next_navigation_index` helper from `listbox_handler.rs` and added contract tests that cover click-hit disabled rows and keyboard navigation landing on disabled rows. Documented `ListBoxItemDescriptor::enabled` as selectable-when-disabled behavior rather than a hard interaction gate.
+Refs: src/CommanDuctUI/src/controls/listbox_handler.rs, src/CommanDuctUI/src/types.rs, disabled_rows_remain_hit_testable_for_selection, keyboard_navigation_lands_on_disabled_rows
