@@ -6,7 +6,7 @@ use commanductui::{
 };
 use harvester_core::{
     AppViewModel, JobFilterStatus, JobListScope, JobOrigin, JobResultKind, JobRowView, LeftTab,
-    ResultsSubMode, SignalCandidateOutcome, Stage,
+    SignalCandidateOutcome, Stage,
 };
 
 use super::constants::*;
@@ -123,29 +123,27 @@ pub(super) fn build_list_box_items(view: &AppViewModel) -> Vec<ListBoxItemDescri
         _ => view.jobs.iter().collect(),
     };
     let mut sorted_buf: Vec<&JobRowView>;
-    let jobs_iter: &[&JobRowView] = if matches!(tab, LeftTab::TriageResults)
-        && view.results_sub_mode == ResultsSubMode::Triage
-        && !view.triage_results_reorder_suppressed
-    {
-        sorted_buf = scope_filtered;
-        sorted_buf.sort_by(|a, b| {
-            let p_a = a
-                .triage_annotation
-                .as_ref()
-                .map(|t| t.priority)
-                .unwrap_or(0);
-            let p_b = b
-                .triage_annotation
-                .as_ref()
-                .map(|t| t.priority)
-                .unwrap_or(0);
-            p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
-        });
-        &sorted_buf
-    } else {
-        sorted_buf = scope_filtered;
-        &sorted_buf
-    };
+    let jobs_iter: &[&JobRowView] =
+        if matches!(tab, LeftTab::TriageResults) && !view.triage_results_reorder_suppressed {
+            sorted_buf = scope_filtered;
+            sorted_buf.sort_by(|a, b| {
+                let p_a = a
+                    .triage_annotation
+                    .as_ref()
+                    .map(|t| t.priority)
+                    .unwrap_or(0);
+                let p_b = b
+                    .triage_annotation
+                    .as_ref()
+                    .map(|t| t.priority)
+                    .unwrap_or(0);
+                p_b.cmp(&p_a).then(a.job_id.cmp(&b.job_id))
+            });
+            &sorted_buf
+        } else {
+            sorted_buf = scope_filtered;
+            &sorted_buf
+        };
 
     let signal_outcome_by_job_id: HashMap<_, _> = view
         .signal_candidate_rows

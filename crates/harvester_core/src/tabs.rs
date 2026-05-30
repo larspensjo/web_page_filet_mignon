@@ -49,14 +49,6 @@ pub enum LeftTab {
     PromptLab,
 }
 
-/// Sub-mode for the `TriageResults` left tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ResultsSubMode {
-    #[default]
-    Triage,
-    Signals,
-}
-
 impl LeftTab {
     /// Returns the zero-based index of this tab in the canonical order.
     pub fn to_index(self) -> usize {
@@ -172,11 +164,6 @@ mod tests {
     #[test]
     fn left_tab_default_is_jobs() {
         assert_eq!(LeftTab::default(), LeftTab::Jobs);
-    }
-
-    #[test]
-    fn results_sub_mode_defaults_to_triage() {
-        assert_eq!(ResultsSubMode::default(), ResultsSubMode::Triage);
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::preview::format_summary_for_preview;
 use crate::signal_candidate::{
     ScoredCandidate, SelectionPolicy, SignalCandidateSelection, SignalCandidateState,
 };
-use crate::tabs::{AppTab, JobListScope, LeftTab, ResultsSubMode};
+use crate::tabs::{AppTab, JobListScope, LeftTab};
 use crate::triage::{ArticleTriageState, TriagePhase};
 use crate::view_model::{
     AppViewModel, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus, JobRowView,
@@ -125,17 +125,13 @@ impl AppState {
         let first_visible_job_id = visible_jobs_after_filter.first().copied();
         let selected_jobs_visible_in_filter =
             selected_job_id.is_some_and(|job_id| visible_jobs_after_filter.contains(&job_id));
-        let signal_outcome_counts = SignalOutcomeCounts::from_rows(&signal_candidate_rows);
         let left_pane_header = build_left_pane_header_view(LeftPaneHeaderInputs {
             left_tab: self.left_tab,
-            results_sub_mode: self.results_sub_mode,
             job_list_scope: self.job_list_scope,
             scoped_jobs: &scoped_jobs,
             visible_jobs_after_filter: &visible_jobs_after_filter,
             jobs_search_query: &jobs_search_query,
             ai_unavailable_message: self.ai_unavailable_message().as_deref(),
-            signal_candidate_count: signal_candidate_rows.len(),
-            signal_outcome_counts,
         });
         let preview_context = preview_header.as_ref().map(build_preview_context_view);
         let preview_header_text = match self.active_tab() {
@@ -240,7 +236,6 @@ impl AppState {
                 && self.triage.can_start()
                 && self.can_start_triage_from_pre_triage(),
             triage_results_reorder_suppressed: matches!(self.triage.phase(), TriagePhase::Triaging),
-            results_sub_mode: self.results_sub_mode(),
             signal_candidate_rows,
             signal_candidate_preview,
             ai_unavailable_message,
@@ -731,51 +726,21 @@ impl AppState {
 
 struct LeftPaneHeaderInputs<'a> {
     left_tab: LeftTab,
-    results_sub_mode: ResultsSubMode,
     job_list_scope: JobListScope,
     scoped_jobs: &'a [&'a JobRowView],
     visible_jobs_after_filter: &'a [crate::JobId],
     jobs_search_query: &'a str,
     ai_unavailable_message: Option<&'a str>,
-    signal_candidate_count: usize,
-    signal_outcome_counts: SignalOutcomeCounts,
-}
-
-#[derive(Debug, Clone, Copy, Default)]
-struct SignalOutcomeCounts {
-    selected: usize,
-    deduped: usize,
-    below: usize,
-    excluded: usize,
-}
-
-impl SignalOutcomeCounts {
-    fn from_rows(rows: &[SignalCandidateRow]) -> Self {
-        let mut counts = Self::default();
-        for row in rows {
-            match &row.outcome {
-                Some(SignalCandidateOutcome::Selected) => counts.selected += 1,
-                Some(SignalCandidateOutcome::Deduplicated { .. }) => counts.deduped += 1,
-                Some(SignalCandidateOutcome::BelowThreshold) => counts.below += 1,
-                Some(SignalCandidateOutcome::Excluded) => counts.excluded += 1,
-                None => {}
-            }
-        }
-        counts
-    }
 }
 
 fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHeaderView {
     let LeftPaneHeaderInputs {
         left_tab,
-        results_sub_mode,
         job_list_scope,
         scoped_jobs,
         visible_jobs_after_filter,
         jobs_search_query,
         ai_unavailable_message,
-        signal_candidate_count,
-        signal_outcome_counts,
     } = inputs;
     let scope_label = if job_list_scope == JobListScope::SinceCheckpoint {
         Some("Since checkpoint".to_string())
@@ -825,43 +790,18 @@ fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHead
             }
         }
         LeftTab::TriageResults => {
-            let (title, count_label) = match results_sub_mode {
-                ResultsSubMode::Triage => {
-                    let triage_result_count = scoped_jobs
-                        .iter()
-                        .filter(|job| job.triage_annotation.is_some())
-                        .count();
-                    (
-                        "Results".to_string(),
-                        Some(if triage_result_count == 0 {
-                            "no triage results yet".to_string()
-                        } else {
-                            format!("{triage_result_count} with triage")
-                        }),
-                    )
-                }
-                ResultsSubMode::Signals => (
-                    "Results".to_string(),
-                    Some(if signal_candidate_count == 0 {
-                        "no signal candidates yet".to_string()
-                    } else {
-                        let mut label = format!(
-                            "Corpus: Selected {} · Dup {} · Low {}",
-                            signal_outcome_counts.selected,
-                            signal_outcome_counts.deduped,
-                            signal_outcome_counts.below
-                        );
-                        if signal_outcome_counts.excluded > 0 {
-                            label.push_str(&format!(" · Excl {}", signal_outcome_counts.excluded));
-                        }
-                        label
-                    }),
-                ),
-            };
+            let triage_result_count = scoped_jobs
+                .iter()
+                .filter(|job| job.triage_annotation.is_some())
+                .count();
             LeftPaneHeaderView {
-                title,
+                title: "Results".to_string(),
                 scope_label,
-                count_label,
+                count_label: Some(if triage_result_count == 0 {
+                    "no triage results yet".to_string()
+                } else {
+                    format!("{triage_result_count} with triage")
+                }),
                 state_label: ai_unavailable_message.map(|_| "AI unavailable".to_string()),
             }
         }

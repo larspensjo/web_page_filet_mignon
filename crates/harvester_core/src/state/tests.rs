@@ -2408,39 +2408,6 @@ mod app_state_tests {
     }
 
     #[test]
-    fn signals_header_reports_whole_corpus_outcome_counts() {
-        use harvester_engine::llm::dto::SourceTier;
-
-        let mut state = AppState::new();
-        state.left_tab = LeftTab::TriageResults;
-        state.results_sub_mode = ResultsSubMode::Signals;
-        state.briefing_since_utc = Some(utc("2026-05-01T00:00:00Z"));
-
-        let recent = "https://example.com/s-recent/".to_string() + &"a".repeat(96);
-        let old = "https://example.com/s-old/".to_string() + &"b".repeat(96);
-        insert_done_job(&mut state, 1, &recent);
-        insert_done_job(&mut state, 2, &old);
-        state.jobs.get_mut(&1).unwrap().fetched_utc = Some(utc("2026-05-02T00:00:00Z"));
-        state.jobs.get_mut(&2).unwrap().fetched_utc = Some(utc("2026-04-30T00:00:00Z"));
-        complete_candidate(&mut state, &recent, 90, "k1", SourceTier::Tier1, "r");
-        complete_candidate(&mut state, &old, 90, "k2", SourceTier::Tier1, "o");
-
-        state.job_list_scope = JobListScope::All;
-        let all_label = state.view().left_pane_header.count_label.clone();
-        state.job_list_scope = JobListScope::SinceCheckpoint;
-        let scoped_label = state.view().left_pane_header.count_label.clone();
-
-        assert_eq!(
-            all_label.as_deref(),
-            Some("Corpus: Selected 2 · Dup 0 · Low 0")
-        );
-        assert_eq!(
-            scoped_label, all_label,
-            "outcome counts are whole-corpus, independent of JobListScope"
-        );
-    }
-
-    #[test]
     fn preview_metadata_for_selected_done_job_exposes_source_and_status() {
         let mut state = AppState::new();
         state.jobs.insert(

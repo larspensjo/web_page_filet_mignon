@@ -23,7 +23,7 @@ use harvester_core::{
     update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel,
     ArchiveTokenEstimates, Effect, JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel,
     LeftTab, LinkDownloadState, LlmQuotaLimits, ManualDecision, Msg, PromptLabStage,
-    ResultsSubMode, SignalCandidateDialogDefault, SignalCandidateState, TrendCategory,
+    SignalCandidateDialogDefault, SignalCandidateState, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -1416,21 +1416,8 @@ impl UiStateProvider for AppUiStateProvider {
                 if guard.state.left_tab() != LeftTab::TriageResults {
                     return TreeItemMarkerKind::None;
                 }
-                match guard.state.results_sub_mode() {
-                    ResultsSubMode::Triage => {
-                        if let Some(result) = guard.state.triage_result_for_job(job_id) {
-                            return triage_marker_for_priority(result.priority);
-                        }
-                    }
-                    ResultsSubMode::Signals => {
-                        if let Some(url) = guard.state.job_url_for(job_id) {
-                            if let Some(SignalCandidateState::Completed { result }) =
-                                guard.state.signal_candidate().state_for(url)
-                            {
-                                return signal_candidate_marker_for_score(result.signal_score);
-                            }
-                        }
-                    }
+                if let Some(result) = guard.state.triage_result_for_job(job_id) {
+                    return triage_marker_for_priority(result.priority);
                 }
                 TreeItemMarkerKind::None
             }
@@ -1453,14 +1440,6 @@ impl UiStateProvider for AppUiStateProvider {
             }
             _ => TreeItemMarkerKind::None,
         }
-    }
-}
-
-fn signal_candidate_marker_for_score(score: u8) -> TreeItemMarkerKind {
-    match score {
-        80..=u8::MAX => TreeItemMarkerKind::Green,
-        60..=79 => TreeItemMarkerKind::Yellow,
-        0..=59 => TreeItemMarkerKind::Red,
     }
 }
 

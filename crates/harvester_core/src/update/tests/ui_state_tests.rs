@@ -1,6 +1,5 @@
 use super::support::*;
 use super::*;
-use crate::tabs::ResultsSubMode;
 use harvester_engine::llm::prompt::PromptId;
 
 #[test]
@@ -29,19 +28,6 @@ fn left_tab_selected_triage_results_updates_tab() {
         },
     );
     assert_eq!(state.left_tab(), LeftTab::TriageResults);
-}
-
-#[test]
-fn set_results_sub_mode_updates_state() {
-    init_logging();
-    let (state, effects) = update(
-        AppState::new(),
-        Msg::SetResultsSubMode {
-            mode: ResultsSubMode::Signals,
-        },
-    );
-    assert!(effects.is_empty());
-    assert_eq!(state.results_sub_mode(), ResultsSubMode::Signals);
 }
 
 #[test]

@@ -1807,3 +1807,10 @@ Context: The Results tab showed a blank, misrendered strip under the header beca
 Change: Removed the `PANEL_RESULTS_SUBMODE_ROW` container and `TAB_BAR_RESULTS_SUBMODE` control from startup creation, layout rules, render-time tab selection, and dark-theme registration. The Results list now renders directly under the header without a dead intermediate row.
 Lessons Learned: A visually empty docked region is often a missing layout rule rather than a paint bug. If a control is not functionally needed, remove the whole creation/layout/render path instead of leaving an orphaned container behind.
 Refs: crates/harvester_app/src/platform/ui/constants.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/rules.rs, crates/harvester_app/src/platform/ui/layout/theme.rs, crates/harvester_app/src/platform/ui/layout/tests.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_app/src/platform/app.rs
+
+## 2026-05-30 - Removed results sub-mode state
+Type: Cleanup
+Context: After removing the Results sub-mode selector from the UI, the core still carried a hidden `ResultsSubMode` state path that could no longer be reached by normal app interaction.
+Change: Removed `ResultsSubMode`, `Msg::SetResultsSubMode`, the `results_sub_mode` state/view-model field, and the reducer/render/list-box branches that switched between triage and signal Results modes. Results now always uses the triage-results header, ordering, and row marker behavior. Deleted tests that only covered the removed hidden mode.
+Lessons Learned: UI removal should be followed by a state/API sweep; otherwise unreachable modes remain as maintenance debt and can mislead future feature work.
+Refs: crates/harvester_core/src/tabs.rs, crates/harvester_core/src/msg.rs, crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/view_model.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/mod.rs, crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/ui/render_list_box.rs

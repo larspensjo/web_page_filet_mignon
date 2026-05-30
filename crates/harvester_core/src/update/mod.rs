@@ -535,10 +535,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             Vec::new()
         }
-        Msg::SetResultsSubMode { mode } => {
-            state.set_results_sub_mode(mode);
-            Vec::new()
-        }
         Msg::TrendCategorySelected { category } => {
             state.set_active_trend_category(category);
             Vec::new()

@@ -7,7 +7,7 @@ use crate::prompt_lab::{
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::{JobOrigin, LinkDownloadState};
-use crate::tabs::{AppTab, JobListScope, LeftTab, ResultsSubMode, TrendCategory};
+use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
 use harvester_engine::llm::dto::SourceTier;
@@ -339,7 +339,6 @@ pub struct AppViewModel {
     pub stop_finish_button: StopFinishButtonState,
     pub triage_can_start: bool,
     pub triage_results_reorder_suppressed: bool,
-    pub results_sub_mode: ResultsSubMode,
     pub signal_candidate_rows: Vec<SignalCandidateRow>,
     pub signal_candidate_preview: Option<SignalCandidatePreviewView>,
     pub ai_unavailable_message: Option<String>,
@@ -401,7 +400,6 @@ impl Default for AppViewModel {
             stop_finish_button: StopFinishButtonState::Disabled,
             triage_can_start: false,
             triage_results_reorder_suppressed: false,
-            results_sub_mode: ResultsSubMode::default(),
             signal_candidate_rows: Vec::new(),
             signal_candidate_preview: None,
             ai_unavailable_message: None,

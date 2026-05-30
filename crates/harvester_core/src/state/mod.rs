@@ -9,7 +9,7 @@ use crate::prompt_lab::{
 };
 use crate::source_state::{SourceInstanceState, SourceStateIndex};
 use crate::summary_cache::SummaryCache;
-use crate::tabs::{AppTab, JobListScope, LeftTab, ResultsSubMode, TrendCategory};
+use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::triage::{ArticleTriageResult, TriagePhase, TriageSession};
 use crate::triage_cache::TriageCache;
 use crate::url_age::AgeEstimate;
@@ -357,8 +357,6 @@ pub struct AppState {
     active_tab: AppTab,
     /// Currently active left-pane tab.
     left_tab: LeftTab,
-    /// Current sub-mode within the TriageResults left tab.
-    results_sub_mode: ResultsSubMode,
     /// Scope filter for job-oriented tabs (All vs SinceCheckpoint).
     job_list_scope: JobListScope,
     /// Currently active trend category in the Trends tab.
@@ -467,7 +465,6 @@ impl Default for AppState {
             llm_quota: crate::LlmQuotaState::default(),
             active_tab: AppTab::default(),
             left_tab: LeftTab::default(),
-            results_sub_mode: ResultsSubMode::default(),
             job_list_scope: JobListScope::default(),
             active_trend_category: TrendCategory::default(),
             entity_index: None,
@@ -2374,17 +2371,6 @@ impl AppState {
 
     pub fn left_tab(&self) -> LeftTab {
         self.left_tab
-    }
-
-    pub fn results_sub_mode(&self) -> ResultsSubMode {
-        self.results_sub_mode
-    }
-
-    pub(crate) fn set_results_sub_mode(&mut self, mode: ResultsSubMode) {
-        if self.results_sub_mode != mode {
-            self.results_sub_mode = mode;
-            self.dirty = true;
-        }
     }
 
     pub fn job_list_scope(&self) -> JobListScope {
