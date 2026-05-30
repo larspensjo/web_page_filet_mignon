@@ -722,6 +722,7 @@ fn signal_candidate_rows_compact_long_urls_in_list_box_titles() {
         dupes_count: 0,
         state_label: SignalCandidateRowState::Scoring,
         signal_key: String::new(),
+        outcome: None,
     }];
 
     let populated = build_list_box_items(&view);

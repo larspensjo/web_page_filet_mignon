@@ -91,9 +91,9 @@ pub use view_model::{
     LeftPaneView, LinkRowView, LlmModelUsageView, OperationProgress, PreviewContextView,
     PreviewHeaderView, PromptLabCompareBatchView, PromptLabCompareCandidateView,
     PromptLabComparePolicyView, PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView,
-    RightPaneView, ScoreBand, SignalCandidatePreviewView, SignalCandidateRow,
-    SignalCandidateRowState, StopFinishButtonState, TrendsTabView, TriageAnnotationView,
-    DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
+    RightPaneView, ScoreBand, SignalCandidateOutcome, SignalCandidatePreviewView,
+    SignalCandidateRow, SignalCandidateRowState, StopFinishButtonState, TrendsTabView,
+    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH, DEFAULT_WINDOW_WIDTH,
     INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};

@@ -14,12 +14,12 @@ use crate::triage::{ArticleTriageState, TriagePhase};
 use crate::view_model::{
     AppViewModel, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus, JobRowView,
     LayoutViewModel, LeftPaneHeaderView, OperationProgress, PreviewContextView, PreviewHeaderView,
-    RightPaneView, ScoreBand, SignalCandidatePreviewView, SignalCandidateRow,
-    SignalCandidateRowState, TriageAnnotationView, TOKEN_LIMIT,
+    RightPaneView, ScoreBand, SignalCandidateOutcome, SignalCandidatePreviewView,
+    SignalCandidateRow, SignalCandidateRowState, TriageAnnotationView, TOKEN_LIMIT,
 };
 use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::normalize_url_for_dedupe;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 impl AppState {
     pub fn view(&self) -> AppViewModel {
@@ -357,15 +357,29 @@ impl AppState {
         let active_prompt_version = self
             .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
             .unwrap_or_default();
+        let threshold = self.signal_candidate_threshold();
         let selection = SignalCandidateSelection::compute(
             &completed_candidates,
             SelectionPolicy {
-                threshold: self.signal_candidate_threshold(),
+                threshold,
                 active_prompt_version,
                 excluded: self.signal_candidate.excluded().clone(),
             },
         );
 
+        let selected_urls: HashSet<&str> =
+            selection.selected_urls.iter().map(String::as_str).collect();
+        // signal_key -> representative gist (the kept article shown on deduped rows).
+        let mut kept_gist_by_key: HashMap<String, String> = HashMap::new();
+        for url in &selection.selected_urls {
+            if let Some(SignalCandidateState::Completed { result }) =
+                self.signal_candidate.state_for(url)
+            {
+                kept_gist_by_key
+                    .entry(result.signal_key.clone())
+                    .or_insert_with(|| truncate_signal_candidate_gist(&result.draft_gist));
+            }
+        }
         let job_id_by_url: HashMap<&str, crate::JobId> = self
             .jobs
             .iter()
@@ -390,6 +404,7 @@ impl AppState {
                         dupes_count: 0,
                         state_label: SignalCandidateRowState::Scoring,
                         signal_key: String::new(),
+                        outcome: None,
                     });
                 }
                 SignalCandidateState::Failed { reason } => {
@@ -406,6 +421,7 @@ impl AppState {
                             reason: reason.clone(),
                         },
                         signal_key: String::new(),
+                        outcome: None,
                     });
                 }
                 SignalCandidateState::Completed { result } => {
@@ -417,6 +433,29 @@ impl AppState {
                     let dupes_count = selection
                         .cluster_size_for_signal_key(&result.signal_key)
                         .saturating_sub(1);
+                    let is_excluded = self.signal_candidate.excluded().contains(
+                        &crate::signal_candidate::OverrideKey {
+                            signal_key: result.signal_key.clone(),
+                            prompt_id:
+                                harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate
+                                    .to_string(),
+                            prompt_version: active_prompt_version,
+                        },
+                    );
+                    let outcome = if is_excluded {
+                        SignalCandidateOutcome::Excluded
+                    } else if result.signal_score < threshold {
+                        SignalCandidateOutcome::BelowThreshold
+                    } else if selected_urls.contains(url) {
+                        SignalCandidateOutcome::Selected
+                    } else {
+                        SignalCandidateOutcome::Deduplicated {
+                            kept_gist: kept_gist_by_key
+                                .get(&result.signal_key)
+                                .cloned()
+                                .unwrap_or_default(),
+                        }
+                    };
                     rows.push(SignalCandidateRow {
                         job_id,
                         url: url.to_string(),
@@ -428,14 +467,15 @@ impl AppState {
                         dupes_count,
                         state_label: SignalCandidateRowState::Scored,
                         signal_key: result.signal_key.clone(),
+                        outcome: Some(outcome),
                     });
                 }
             }
         }
 
         rows.sort_by(|a, b| {
-            signal_candidate_row_rank(&a.state_label)
-                .cmp(&signal_candidate_row_rank(&b.state_label))
+            signal_candidate_sort_rank(a)
+                .cmp(&signal_candidate_sort_rank(b))
                 .then(b.score.cmp(&a.score))
                 .then(a.url.cmp(&b.url))
         });
@@ -797,11 +837,17 @@ fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHead
     }
 }
 
-fn signal_candidate_row_rank(state: &SignalCandidateRowState) -> u8 {
-    match state {
-        SignalCandidateRowState::Scored => 0,
-        SignalCandidateRowState::Scoring => 1,
-        SignalCandidateRowState::Failed { .. } => 2,
+fn signal_candidate_sort_rank(row: &SignalCandidateRow) -> u8 {
+    match &row.outcome {
+        Some(SignalCandidateOutcome::Selected) => 0,
+        Some(SignalCandidateOutcome::Deduplicated { .. }) => 1,
+        Some(SignalCandidateOutcome::BelowThreshold) => 2,
+        Some(SignalCandidateOutcome::Excluded) => 3,
+        None => match row.state_label {
+            SignalCandidateRowState::Failed { .. } => 5,
+            // Scoring (and the unreachable Scored-without-outcome) sort just above Failed.
+            _ => 4,
+        },
     }
 }
 

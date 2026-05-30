@@ -61,6 +61,18 @@ pub enum SignalCandidateRowState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignalCandidateOutcome {
+    /// >= threshold AND the cluster representative -> goes to the archive.
+    Selected,
+    /// >= threshold but lost to another representative of the same signal_key.
+    Deduplicated { kept_gist: String },
+    /// score < threshold.
+    BelowThreshold,
+    /// signal_key manually excluded at the active prompt version.
+    Excluded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignalCandidateRow {
     pub job_id: JobId,
     pub url: String,
@@ -72,6 +84,8 @@ pub struct SignalCandidateRow {
     pub dupes_count: usize,
     pub state_label: SignalCandidateRowState,
     pub signal_key: String,
+    /// Selection outcome for `Scored` rows; `None` for `Scoring`/`Failed`.
+    pub outcome: Option<SignalCandidateOutcome>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
