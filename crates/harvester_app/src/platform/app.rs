@@ -1111,18 +1111,6 @@ impl PlatformEventHandler for AppEventHandler {
                 control_id,
                 selected_index,
                 ..
-            } if control_id == ui::constants::TAB_BAR_RESULTS_SUBMODE => {
-                let mode = match selected_index {
-                    0 => ResultsSubMode::Triage,
-                    1 => ResultsSubMode::Signals,
-                    _ => ResultsSubMode::Triage,
-                };
-                let _ = self.msg_tx.send(Msg::SetResultsSubMode { mode });
-            }
-            AppEvent::TabBarSelectionChanged {
-                control_id,
-                selected_index,
-                ..
             } if control_id == ui::constants::TAB_BAR_TRENDS => {
                 if let Some(category) = TrendCategory::from_index(selected_index) {
                     let _ = self.msg_tx.send(Msg::TrendCategorySelected { category });

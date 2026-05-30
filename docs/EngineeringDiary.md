@@ -1800,3 +1800,10 @@ Type: Implementation
 Context: CommanDuctUI's owner-drawn list box needed an explicit contract that muted rows remain reachable by click and keyboard navigation, so hosts can de-emphasize rows without making them uninspectable.
 Change: Extracted the pure `next_navigation_index` helper from `listbox_handler.rs` and added contract tests that cover click-hit disabled rows and keyboard navigation landing on disabled rows. Documented `ListBoxItemDescriptor::enabled` as selectable-when-disabled behavior rather than a hard interaction gate.
 Refs: src/CommanDuctUI/src/controls/listbox_handler.rs, src/CommanDuctUI/src/types.rs, disabled_rows_remain_hit_testable_for_selection, keyboard_navigation_lands_on_disabled_rows
+
+## 2026-05-30 - Removed obsolete results sub-mode row
+Type: Bug Fix
+Context: The Results tab showed a blank, misrendered strip under the header because the triage/signal sub-mode tab bar had a container row but no matching layout rule. The control was no longer needed for the current UI flow.
+Change: Removed the `PANEL_RESULTS_SUBMODE_ROW` container and `TAB_BAR_RESULTS_SUBMODE` control from startup creation, layout rules, render-time tab selection, and dark-theme registration. The Results list now renders directly under the header without a dead intermediate row.
+Lessons Learned: A visually empty docked region is often a missing layout rule rather than a paint bug. If a control is not functionally needed, remove the whole creation/layout/render path instead of leaving an orphaned container behind.
+Refs: crates/harvester_app/src/platform/ui/constants.rs, crates/harvester_app/src/platform/ui/layout/init.rs, crates/harvester_app/src/platform/ui/layout/rules.rs, crates/harvester_app/src/platform/ui/layout/theme.rs, crates/harvester_app/src/platform/ui/layout/tests.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_app/src/platform/app.rs

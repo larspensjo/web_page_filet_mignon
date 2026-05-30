@@ -275,27 +275,6 @@ fn jobs_search_input_has_layout_rule_on_jobs_tab() {
 }
 
 #[test]
-fn results_submode_row_creation_parent_matches_layout_parent() {
-    let commands = initial_commands(WindowId::new(2));
-    let created_parent = commands.iter().find_map(|cmd| match cmd {
-        PlatformCommand::CreatePanel {
-            control_id,
-            parent_control_id,
-            ..
-        } if *control_id == PANEL_RESULTS_SUBMODE_ROW => *parent_control_id,
-        _ => None,
-    });
-    let rules = layout_rules_for_left_tab(LeftTab::Jobs);
-    let layout_parent = rules
-        .iter()
-        .find(|rule| rule.control_id == PANEL_RESULTS_SUBMODE_ROW)
-        .and_then(|rule| rule.parent_control_id);
-
-    assert_eq!(created_parent, Some(PANEL_JOBS));
-    assert_eq!(layout_parent, created_parent);
-}
-
-#[test]
 fn jobs_search_input_receives_default_input_style() {
     let commands = initial_commands(WindowId::new(2));
     assert!(commands.iter().any(|cmd| matches!(
@@ -1225,7 +1204,6 @@ fn all_tab_panels_receive_panel_background_dark_theme_style() {
         PANEL_TAB_BRIEFING,
         PANEL_TAB_TRENDS,
         PANEL_TAB_POLL_STATS,
-        PANEL_RESULTS_SUBMODE_ROW,
     ] {
         let has_style = cmds.iter().any(|cmd| {
             matches!(

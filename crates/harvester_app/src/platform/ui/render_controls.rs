@@ -62,14 +62,6 @@ pub(super) fn render_left_tab_bar_section(
         control_id: TAB_BAR_LEFT,
         selected_index: active.to_index(),
     });
-    cmds.push(PlatformCommand::SetTabBarSelection {
-        window_id,
-        control_id: TAB_BAR_RESULTS_SUBMODE,
-        selected_index: match view.results_sub_mode {
-            harvester_core::ResultsSubMode::Triage => 0,
-            harvester_core::ResultsSubMode::Signals => 1,
-        },
-    });
 }
 
 pub(super) fn render_status_section(

@@ -105,7 +105,6 @@ pub(super) fn build_layout_rules(
             Some(0)
         }
     };
-    let show_results_submode = left_tab == LeftTab::TriageResults;
     // Right-pane tab helpers: only the active tab fills; the rest collapse to zero.
     let tab_dock = |tab: AppTab| -> DockStyle {
         if active_tab == tab {
@@ -289,26 +288,10 @@ pub(super) fn build_layout_rules(
             },
         },
         LayoutRule {
-            control_id: PANEL_RESULTS_SUBMODE_ROW,
-            parent_control_id: Some(PANEL_JOBS),
-            dock_style: DockStyle::Top,
-            order: 3,
-            fixed_size: if show_results_submode {
-                Some(28)
-            } else {
-                Some(0)
-            },
-            margin: if show_results_submode {
-                (0, 2, 6, 0)
-            } else {
-                (0, 0, 0, 0)
-            },
-        },
-        LayoutRule {
             control_id: TREE_JOBS,
             parent_control_id: Some(PANEL_JOBS),
             dock_style: DockStyle::Fill,
-            order: 4,
+            order: 3,
             fixed_size: None,
             margin: (0, 0, 0, 0),
         },
