@@ -482,7 +482,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_triage_cache(cache);
             state.mark_dirty();
-            Vec::new()
+            let mut effects = Vec::new();
+            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
+            effects
         }
         Msg::PreTriageOverridesHydrated { overrides } => {
             state.set_pre_triage_manual_overrides(overrides);

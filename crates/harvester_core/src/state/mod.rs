@@ -774,11 +774,9 @@ impl AppState {
 
     pub fn summary_cache_key_for_url(&self, url: &str) -> Option<crate::SummaryCacheKey> {
         let content_hash = self
-            .briefing()
-            .articles()
-            .iter()
-            .find(|article| article.url == url)
-            .map(|article| article.content_hash.as_str())?;
+            .triage()
+            .article_content_hash(url)
+            .or_else(|| self.pre_triage.article_content_hash(url))?;
 
         self.summary_cache()
             .iter()
@@ -799,6 +797,24 @@ impl AppState {
                 }
             })
             .map(|(key, _)| key.clone())
+    }
+
+    pub(crate) fn summary_result_for_url(
+        &self,
+        url: &str,
+    ) -> Option<&crate::briefing::ArticleSummaryResult> {
+        if let Some(summary) = self.briefing.summary_for_url(url) {
+            return Some(summary);
+        }
+
+        let content_hash = self
+            .triage()
+            .article_content_hash(url)
+            .or_else(|| self.pre_triage.article_content_hash(url))?;
+
+        self.summary_cache()
+            .lookup_any_by_content_hash(content_hash)
+            .map(|entry| &entry.result)
     }
 
     pub fn record_pending_llm_request(&mut self, request_id: u64, prompt_id: PromptId) {
@@ -1729,7 +1745,7 @@ impl AppState {
     /// Returns (PreviewContentKind, formatted content).
     fn resolve_best_preview(&self, url: &str) -> (PreviewContentKind, String) {
         // Priority 1: Summary
-        if let Some(summary) = self.briefing.summary_for_url(url) {
+        if let Some(summary) = self.summary_result_for_url(url) {
             return (
                 PreviewContentKind::Summary,
                 preview::format_summary_for_preview(summary),
@@ -1817,7 +1833,7 @@ impl AppState {
     pub fn selected_article_url(&self) -> Option<String> {
         let job_id = self.ui.selected_job_id()?;
         let job = self.jobs.get(&job_id)?;
-        self.briefing.summary_for_url(&job.url)?;
+        self.summary_result_for_url(&job.url)?;
         Some(job.url.clone())
     }
 
@@ -1829,7 +1845,7 @@ impl AppState {
         self.ui
             .selected_job_id()
             .and_then(|job_id| self.jobs.get(&job_id))
-            .and_then(|job| self.briefing.summary_for_url(&job.url))
+            .and_then(|job| self.summary_result_for_url(&job.url))
             .is_some()
     }
 

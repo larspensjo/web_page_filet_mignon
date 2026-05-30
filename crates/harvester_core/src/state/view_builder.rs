@@ -47,7 +47,7 @@ impl AppState {
         }
         for job_view in &mut jobs {
             let cached_summary_tokens = self.summary_output_tokens_for_url(&job_view.url);
-            if let Some(summary) = self.briefing.summary_for_url(&job_view.url) {
+            if let Some(summary) = self.summary_result_for_url(&job_view.url) {
                 job_view.has_summary = true;
                 job_view.summary_title = Some(summary.title.clone());
                 job_view.summary_tokens = Some(summary.output_tokens);

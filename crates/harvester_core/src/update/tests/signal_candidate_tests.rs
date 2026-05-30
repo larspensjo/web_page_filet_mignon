@@ -12,8 +12,8 @@ use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 use harvester_engine::llm::prompt::PromptId;
 
 use super::{
-    loaded_single_article, request_id_for_prompt, start_briefing_after_triage, summary_json,
-    with_signal_candidate_metadata,
+    loaded_single_article, loaded_triage_articles, request_id_for_prompt,
+    start_briefing_after_triage, summary_json, with_signal_candidate_metadata,
 };
 
 fn signal_result_json() -> String {
@@ -84,6 +84,46 @@ fn seed_completed_summary_state() -> AppState {
     .expect("summary cache key");
     state.store_summary_result(
         summary_key,
+        sample_summary_result(),
+        "2026-05-25T12:00:10Z".into(),
+    );
+
+    state
+}
+
+fn seed_cached_summary_only_state_for_signal_candidate() -> AppState {
+    let mut state = AppState::new();
+    let article = LoadedArticle {
+        url: "https://example.com/a".to_string(),
+        source_title: Some("Article A".to_string()),
+        prepared_text: "Article text".to_string(),
+        content_hash: "hash-a".to_string(),
+        fetched_utc: Some("2026-05-25T12:00:00Z".to_string()),
+    };
+
+    state.restore_completed_jobs(vec![crate::CompletedJobSnapshot {
+        url: article.url.clone(),
+        tokens: None,
+        bytes: None,
+        links: vec![],
+        fetched_utc: article.fetched_utc.clone(),
+    }]);
+
+    let mut triage = TriageSession::new_loading(None);
+    triage.set_articles(vec![article]);
+    triage.transition_to_triaging();
+    triage.complete_article(0, sample_triage_result(2));
+    state.set_triage(triage);
+
+    state.store_summary_result(
+        SummaryCacheKey::try_new(
+            "hash-a",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("test-summary-model"),
+            &[],
+        )
+        .expect("summary cache key"),
         sample_summary_result(),
         "2026-05-25T12:00:10Z".into(),
     );
@@ -287,6 +327,147 @@ fn signal_candidate_cache_loaded_sweeps_eligible_summary() {
 }
 
 #[test]
+fn signal_candidate_cache_loaded_reconstructs_from_cached_summary_without_briefing() {
+    let mut state = seed_cached_summary_only_state_for_signal_candidate();
+    set_signal_candidate_metadata_without_sweep(&mut state);
+
+    let summary_key = SummaryCacheKey::try_new(
+        "hash-a",
+        PromptId::ArticleSummary,
+        Some(1),
+        Some("test-summary-model"),
+        &[],
+    )
+    .expect("summary cache key");
+    let key_points = vec!["Point one".to_string(), "Point two".to_string()];
+    let bundle = SignalCandidateInputBundle {
+        url: "https://example.com/a",
+        outlet: "Article A",
+        title: "Article A",
+        published_at: "2026-05-25T12:00:00Z",
+        triage_priority: 2,
+        triage_tags_sorted: vec!["ai", "chips"],
+        summary: "Example summary",
+        key_points: &key_points,
+        upstream_summary_cache_digest: summary_key.digest(),
+    };
+    let key = SignalCandidateCacheKey::try_new(&bundle, Some(1), Some("test-signal-model"), &[])
+        .expect("signal cache key");
+    state.store_signal_candidate_result(
+        key,
+        SignalCandidateResult {
+            signal_score: 90,
+            signal_key: "example-signal-key".to_string(),
+            themes: vec!["ai-infrastructure".to_string()],
+            draft_gist: "Concrete event.".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "Concrete event.".to_string(),
+            input_tokens: 10,
+            output_tokens: 5,
+        },
+        "2026-05-25T12:00:20Z".into(),
+    );
+    let persisted_cache = state.signal_candidate_cache().clone();
+
+    let (state, effects) = update(
+        state,
+        Msg::SignalCandidateCacheLoaded {
+            cache: persisted_cache,
+        },
+    );
+
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSignalCandidate,
+            ..
+        }
+    )));
+    assert!(matches!(
+        state.signal_candidate().state_for("https://example.com/a"),
+        Some(crate::signal_candidate::SignalCandidateState::Completed { .. })
+    ));
+    assert!(!state.selected_job_has_summary());
+}
+
+#[test]
+fn triage_cache_hydration_sweeps_signal_candidates_after_metadata_and_summary_restore() {
+    let mut state = seed_cached_summary_only_state_for_signal_candidate();
+    set_signal_candidate_metadata_without_sweep(&mut state);
+
+    let (state, effects) = update(
+        state,
+        Msg::TriageCacheHydrated {
+            cache: crate::triage_cache::TriageCache::default(),
+        },
+    );
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSignalCandidate,
+            ..
+        }
+    )));
+    assert!(matches!(
+        state.signal_candidate().state_for("https://example.com/a"),
+        Some(crate::signal_candidate::SignalCandidateState::Scoring { .. })
+    ));
+}
+
+#[test]
+fn triage_cache_hit_enqueues_signal_candidate_scoring() {
+    let mut state = with_signal_candidate_metadata(AppState::new());
+    let articles = loaded_triage_articles(1);
+    let article = articles[0].clone();
+
+    state.store_summary_result(
+        SummaryCacheKey::try_new(
+            "hash-0",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("test-summary-model"),
+            &[],
+        )
+        .expect("summary cache key"),
+        ArticleSummaryResult {
+            title: "Article 0".to_string(),
+            summary: "Summary".to_string(),
+            key_points: vec!["p1".to_string()],
+            input_tokens: 10,
+            output_tokens: 5,
+            entities: Default::default(),
+        },
+        "2026-05-25T12:00:10Z".into(),
+    );
+    state.store_triage_result(&article.content_hash, sample_triage_result(3));
+
+    let triage_request_id = state.alloc_triage_request_id();
+    state.set_triage_in_flight(triage_request_id);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: triage_request_id,
+            articles,
+        },
+    );
+    let (state, effects) = update(state, Msg::TriageClicked);
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSignalCandidate,
+            ..
+        }
+    )));
+    assert!(matches!(
+        state.signal_candidate().state_for(&article.url),
+        Some(crate::signal_candidate::SignalCandidateState::Scoring { .. })
+    ));
+}
+
+#[test]
 fn summary_completion_enqueues_signal_scoring() {
     let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
     let state = with_signal_candidate_metadata(state);
@@ -387,9 +568,11 @@ fn summary_cache_key_for_url_uses_parsed_rfc3339_order() {
         content_hash: "shared-hash".to_string(),
         fetched_utc: None,
     };
-    let mut briefing = BriefingSession::new_loading(None);
-    briefing.set_articles(vec![article], "collection".to_string());
-    state.set_briefing(briefing);
+    let mut triage = TriageSession::new_loading(None);
+    triage.set_articles(vec![article]);
+    triage.transition_to_triaging();
+    triage.complete_article(0, sample_triage_result(3));
+    state.set_triage(triage);
 
     let lexically_later_but_older = SummaryCacheKey::try_new(
         "shared-hash",

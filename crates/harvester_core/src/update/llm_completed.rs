@@ -239,6 +239,7 @@ fn handle_triage_completion(
                     input_tokens: *input_tokens,
                     output_tokens: *output_tokens,
                 };
+                let triage_priority = result.priority;
                 let themes = result.tags.clone();
                 state
                     .triage_mut()
@@ -251,6 +252,19 @@ fn handle_triage_completion(
                     summary_entities: None,
                     themes: Some(themes),
                 });
+                let article_url = state.triage().articles()[article_idx].url.clone();
+                let summary_ready = state.summary_result_for_url(&article_url).is_some();
+                engine_info!(
+                    "[signal-dispatch] triage completed url={} summary_ready={} triage_priority={} signal_state_present_before_enqueue={}",
+                    article_url,
+                    summary_ready,
+                    triage_priority,
+                    state
+                        .signal_candidate()
+                        .state_for(&state.triage().articles()[article_idx].url)
+                        .is_some(),
+                );
+                let _ = try_enqueue(state, &article_url, effects);
                 state.refresh_selected_preview();
             }
             Err(err) => {

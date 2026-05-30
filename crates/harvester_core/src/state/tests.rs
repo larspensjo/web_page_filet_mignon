@@ -827,6 +827,69 @@ mod app_state_tests {
         state
     }
 
+    fn make_state_with_cached_summary_job() -> AppState {
+        use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+        use crate::summary_cache::SummaryCacheKey;
+        use crate::triage::{ArticleTriageResult, TriageSession};
+        use harvester_engine::llm::prompt::PromptId;
+
+        let mut state = AppState::new();
+        state.jobs.insert(
+            11,
+            JobState {
+                url: "https://cached-summary.example/article".to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                ..Default::default()
+            },
+        );
+
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: "https://cached-summary.example/article".to_string(),
+            source_title: Some("Cached Outlet".to_string()),
+            prepared_text: "text".to_string(),
+            content_hash: "cached-hash".to_string(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "Business".to_string(),
+                priority: 5,
+                tags: vec!["ai".to_string()],
+                rationale: "Relevant".to_string(),
+                input_tokens: 10,
+                output_tokens: 5,
+            },
+        );
+        state.set_triage(triage);
+
+        let summary_key = SummaryCacheKey::try_new(
+            "cached-hash",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("cached-summary-model"),
+            &[],
+        )
+        .expect("summary cache key");
+        state.store_summary_result(
+            summary_key,
+            ArticleSummaryResult {
+                title: "Cached Title".to_string(),
+                summary: "Cached summary".to_string(),
+                key_points: vec!["Cached point".to_string()],
+                input_tokens: 11,
+                output_tokens: 7,
+                entities: Default::default(),
+            },
+            "2026-05-25T12:01:00Z".to_string(),
+        );
+
+        state
+    }
+
     #[test]
     fn selecting_job_with_summary_shows_formatted_summary() {
         let mut state = make_state_with_summarized_job();
@@ -985,6 +1048,19 @@ mod app_state_tests {
     }
 
     #[test]
+    fn view_uses_cached_summary_without_briefing_session() {
+        let state = make_state_with_cached_summary_job();
+        let view = state.view();
+        let job = view
+            .jobs
+            .iter()
+            .find(|j| j.job_id == 11)
+            .expect("job 11 exists");
+        assert!(job.has_summary);
+        assert_eq!(job.summary_title.as_deref(), Some("Cached Title"));
+    }
+
+    #[test]
     fn view_selected_url_populated_when_summarized_job_selected() {
         let mut state = make_state_with_summarized_job();
         state.select_job(10);
@@ -993,6 +1069,17 @@ mod app_state_tests {
             view.selected_url,
             Some("https://summarized.example/article".to_string())
         );
+    }
+
+    #[test]
+    fn selected_article_url_uses_cached_summary_without_briefing_session() {
+        let mut state = make_state_with_cached_summary_job();
+        state.select_job(11);
+        assert_eq!(
+            state.selected_article_url(),
+            Some("https://cached-summary.example/article".to_string())
+        );
+        assert!(state.selected_job_has_summary());
     }
 
     #[test]

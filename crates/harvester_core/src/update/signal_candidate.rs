@@ -208,18 +208,23 @@ pub fn try_enqueue(state: &mut AppState, url: &str, effects: &mut Vec<Effect>) -
 }
 
 pub fn sweep_eligible_after_hydration(state: &mut AppState, effects: &mut Vec<Effect>) {
-    let urls: Vec<String> = state
-        .briefing()
-        .articles()
-        .iter()
-        .filter(|article| {
-            matches!(
-                article.summary_state,
-                crate::briefing::ArticleSummaryState::Completed { .. }
-            )
-        })
-        .map(|article| article.url.clone())
+    let mut urls: std::collections::HashSet<String> = state
+        .ordered_completed_job_urls_snapshot()
+        .into_iter()
         .collect();
+    urls.extend(
+        state
+            .briefing()
+            .articles()
+            .iter()
+            .filter(|article| {
+                matches!(
+                    article.summary_state,
+                    crate::briefing::ArticleSummaryState::Completed { .. }
+                )
+            })
+            .map(|article| article.url.clone()),
+    );
 
     for url in urls {
         let _ = try_enqueue(state, &url, effects);
@@ -272,11 +277,11 @@ pub fn handle_toggle_exclusion(
 
 fn build_input_snapshot(state: &AppState, url: &str) -> Option<SignalCandidateInputSnapshot> {
     let article = state
-        .briefing()
+        .triage()
         .articles()
         .iter()
         .find(|article| article.url == url)?;
-    let summary: &ArticleSummaryResult = state.briefing().summary_for_url(url)?;
+    let summary: &ArticleSummaryResult = state.summary_result_for_url(url)?;
     let triage = state.triage().result_for_url(url)?;
     let prompt_version = state.active_version_for(PromptId::ArticleSignalCandidate)?;
     let model_id = state

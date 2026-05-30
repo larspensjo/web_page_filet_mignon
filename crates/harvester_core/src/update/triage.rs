@@ -5,6 +5,7 @@ use crate::pre_triage_filter::{
 use crate::state::TriageCacheLookupResult;
 use crate::tabs::LeftTab;
 use crate::triage::TriageSession;
+use crate::update::signal_candidate::try_enqueue;
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
@@ -288,10 +289,27 @@ pub(super) fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<
                 let themes = cached.tags.clone();
                 let url = state.triage().articles()[next_idx].url.clone();
                 let fetched_utc = state.triage().articles()[next_idx].fetched_utc.clone();
+                let triage_priority = cached.priority;
                 let result = cached.clone();
+                let summary_ready = state.summary_result_for_url(&url).is_some();
+                let signal_state_present_before_enqueue =
+                    state.signal_candidate().state_for(&url).is_some();
                 state.record_triage_cache_hit();
                 engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
                 state.triage_mut().complete_article(next_idx, result);
+                engine_info!(
+                    "[signal-dispatch] triage cache-hit url={} summary_ready={} triage_priority={} signal_state_present_before_enqueue={}",
+                    url,
+                    summary_ready,
+                    triage_priority,
+                    signal_state_present_before_enqueue
+                );
+                let enqueued = try_enqueue(state, &url, effects);
+                engine_info!(
+                    "[signal-dispatch] triage cache-hit enqueue url={} enqueued={}",
+                    url,
+                    enqueued
+                );
                 state.refresh_selected_preview();
                 state.mark_dirty();
                 effects.push(Effect::UpsertEntityIndexEntry {
