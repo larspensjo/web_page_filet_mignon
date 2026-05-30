@@ -129,10 +129,9 @@ pub(super) fn handle_dialog_submitted(
         match state.pinned_signal_candidate_selection().cloned() {
             Some(snapshot) => {
                 engine_info!(
-                    "[signal-archive] submit decision=use_candidates count={} threshold={} cap={} override_fp={} cache_fp={} scoring_in_progress={}",
+                    "[signal-archive] submit decision=use_candidates count={} threshold={} override_fp={} cache_fp={} scoring_in_progress={}",
                     snapshot.selected_urls.len(),
                     snapshot.threshold,
-                    snapshot.cap,
                     snapshot.override_fingerprint,
                     snapshot.cache_fingerprint,
                     snapshot.scoring_in_progress
@@ -284,7 +283,6 @@ fn build_signal_candidate_snapshot(
         .collect();
     let policy = SelectionPolicy {
         threshold: state.signal_candidate_threshold(),
-        cap: state.signal_candidate_cap(),
         active_prompt_version: state
             .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
             .unwrap_or_default(),
@@ -297,7 +295,6 @@ fn build_signal_candidate_snapshot(
     crate::signal_candidate::SignalCandidateArchiveSelection::new(
         selection.selected_urls,
         state.signal_candidate_threshold(),
-        state.signal_candidate_cap(),
         state.signal_candidate().override_fingerprint(),
         cache_fingerprint,
         token_estimates,

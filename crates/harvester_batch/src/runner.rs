@@ -3,7 +3,7 @@ use crate::lock;
 use crate::progress::ProgressReporter;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
-use harvester_core::signal_candidate::{DEFAULT_SELECTION_CAP, DEFAULT_SELECTION_THRESHOLD};
+use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
 use harvester_core::{
     update, AppState, ArticleSummaryResult, BatchObservation, CompletedJobSnapshot, ImportPhase,
     LlmModelUsageView, Msg, SummaryCache, SummaryCacheEntry, SummaryCacheKey,
@@ -291,7 +291,6 @@ fn apply_signal_candidate_selection_settings(state: &mut AppState, args: &Args) 
         args.signal_candidate_threshold
             .unwrap_or(DEFAULT_SELECTION_THRESHOLD),
     );
-    state.set_signal_candidate_cap(args.signal_candidate_cap.unwrap_or(DEFAULT_SELECTION_CAP));
 }
 
 fn build_effect_runner(
@@ -1988,7 +1987,6 @@ mod tests {
             import_saved_web_dir: None,
             refresh_stale_summaries_limit: None,
             signal_candidate_threshold: None,
-            signal_candidate_cap: None,
         }
     }
 
@@ -2916,12 +2914,9 @@ mod tests {
             state.signal_candidate_threshold(),
             DEFAULT_SELECTION_THRESHOLD
         );
-        assert_eq!(state.signal_candidate_cap(), DEFAULT_SELECTION_CAP);
 
         args.signal_candidate_threshold = Some(75);
-        args.signal_candidate_cap = Some(15);
         apply_signal_candidate_selection_settings(&mut state, &args);
         assert_eq!(state.signal_candidate_threshold(), 75);
-        assert_eq!(state.signal_candidate_cap(), 15);
     }
 }

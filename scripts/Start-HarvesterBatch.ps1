@@ -6,8 +6,7 @@ param(
     [string]$HarvesterBatchCmd = '',
     [string]$ProjectRoot       = (Split-Path -Parent $PSScriptRoot),
     [int]$RefreshStaleSummariesLimit = 0,
-    [int]$SignalCandidateThreshold = 0,
-    [int]$SignalCandidateCap = 0
+    [int]$SignalCandidateThreshold = 0
 )
 
 # Resolve invocation style: cargo run (default) vs direct binary
@@ -21,9 +20,6 @@ if ($RefreshStaleSummariesLimit -gt 0) {
     $extra = @()
     if ($SignalCandidateThreshold -gt 0) {
         $extra += @('--signal-candidate-threshold', "$SignalCandidateThreshold")
-    }
-    if ($SignalCandidateCap -gt 0) {
-        $extra += @('--signal-candidate-cap', "$SignalCandidateCap")
     }
     if ($script:useCargoRun) {
         Write-Host "Running: cargo run -p harvester_batch -- --refresh-stale-summaries-limit $RefreshStaleSummariesLimit $($extra -join ' ')"

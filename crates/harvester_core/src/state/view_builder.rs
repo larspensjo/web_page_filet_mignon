@@ -193,7 +193,6 @@ impl AppState {
                 .collect();
             let policy = SelectionPolicy {
                 threshold: self.signal_candidate_threshold(),
-                cap: self.signal_candidate_cap(),
                 active_prompt_version: self
                     .active_version_for(
                         harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate,
@@ -362,7 +361,6 @@ impl AppState {
             &completed_candidates,
             SelectionPolicy {
                 threshold: self.signal_candidate_threshold(),
-                cap: usize::MAX,
                 active_prompt_version,
                 excluded: self.signal_candidate.excluded().clone(),
             },

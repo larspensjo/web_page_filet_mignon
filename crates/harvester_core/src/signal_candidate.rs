@@ -7,8 +7,6 @@ use crate::cache_utils::hex_digest;
 
 const ACTIVE_PROMPT_ID: &str = "ArticleSignalCandidate";
 pub const DEFAULT_SELECTION_THRESHOLD: u8 = 60;
-/// Spec default: keep archives in the target 10-30 signal range unless overridden.
-pub const DEFAULT_SELECTION_CAP: usize = 25;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SignalCandidateState {
@@ -189,7 +187,6 @@ pub struct ScoredCandidate {
 #[derive(Debug, Clone)]
 pub struct SelectionPolicy {
     pub threshold: u8,
-    pub cap: usize,
     pub active_prompt_version: PromptVersion,
     pub excluded: HashSet<OverrideKey>,
 }
@@ -198,7 +195,6 @@ impl Default for SelectionPolicy {
     fn default() -> Self {
         Self {
             threshold: DEFAULT_SELECTION_THRESHOLD,
-            cap: DEFAULT_SELECTION_CAP,
             active_prompt_version: 1,
             excluded: HashSet::new(),
         }
@@ -209,7 +205,6 @@ impl Default for SelectionPolicy {
 pub struct SignalCandidateArchiveSelection {
     pub selected_urls: Vec<String>,
     pub threshold: u8,
-    pub cap: usize,
     pub override_fingerprint: String,
     pub cache_fingerprint: String,
     pub token_estimates: crate::ArchiveTokenEstimates,
@@ -220,7 +215,6 @@ impl SignalCandidateArchiveSelection {
     pub fn new(
         selected_urls: Vec<String>,
         threshold: u8,
-        cap: usize,
         override_fingerprint: String,
         cache_fingerprint: String,
         token_estimates: crate::ArchiveTokenEstimates,
@@ -229,7 +223,6 @@ impl SignalCandidateArchiveSelection {
         Self {
             selected_urls,
             threshold,
-            cap,
             override_fingerprint,
             cache_fingerprint,
             token_estimates,
@@ -290,8 +283,6 @@ impl SignalCandidateSelection {
                 .then(a.result.source_tier.cmp(&b.result.source_tier))
                 .then(a.url.cmp(&b.url))
         });
-
-        reps.truncate(policy.cap);
 
         let mut selected_signal_key_for = HashMap::with_capacity(reps.len());
         let selected_urls = reps
@@ -370,10 +361,9 @@ mod tests {
         }
     }
 
-    fn policy(threshold: u8, cap: usize, excluded: HashSet<OverrideKey>) -> SelectionPolicy {
+    fn policy(threshold: u8, excluded: HashSet<OverrideKey>) -> SelectionPolicy {
         SelectionPolicy {
             threshold,
-            cap,
             active_prompt_version: 1,
             excluded,
         }
@@ -458,7 +448,7 @@ mod tests {
             cand("a", 80, "k1", SourceTier::Tier1),
             cand("b", 40, "k2", SourceTier::Tier1),
         ];
-        let sel = SignalCandidateSelection::compute(&input, policy(60, 100, Default::default()));
+        let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
         assert_eq!(sel.selected_urls, vec!["a"]);
     }
 
@@ -469,7 +459,7 @@ mod tests {
             cand("b", 70, "same-key", SourceTier::Tier1),
             cand("c", 90, "same-key", SourceTier::Tier3),
         ];
-        let sel = SignalCandidateSelection::compute(&input, policy(60, 100, Default::default()));
+        let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
         assert_eq!(
             sel.selected_urls,
             vec!["b"],
@@ -484,19 +474,8 @@ mod tests {
             cand("a", 80, "same-key", SourceTier::Tier1),
             cand("m", 70, "same-key", SourceTier::Tier1),
         ];
-        let sel = SignalCandidateSelection::compute(&input, policy(60, 100, Default::default()));
+        let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
         assert_eq!(sel.selected_urls, vec!["a"]);
-    }
-
-    #[test]
-    fn cap_applied_after_dedup_and_sort() {
-        let input = vec![
-            cand("a", 90, "k1", SourceTier::Tier1),
-            cand("b", 80, "k2", SourceTier::Tier2),
-            cand("c", 70, "k3", SourceTier::Tier3),
-        ];
-        let sel = SignalCandidateSelection::compute(&input, policy(60, 2, Default::default()));
-        assert_eq!(sel.selected_urls, vec!["a", "b"]);
     }
 
     #[test]
@@ -511,7 +490,7 @@ mod tests {
             prompt_id: "ArticleSignalCandidate".into(),
             prompt_version: 1,
         });
-        let sel = SignalCandidateSelection::compute(&input, policy(60, 100, excluded));
+        let sel = SignalCandidateSelection::compute(&input, policy(60, excluded));
         assert_eq!(sel.selected_urls, vec!["b"]);
     }
 
@@ -528,7 +507,6 @@ mod tests {
             &input,
             SelectionPolicy {
                 threshold: 60,
-                cap: 100,
                 active_prompt_version: 2,
                 excluded,
             },
@@ -543,7 +521,7 @@ mod tests {
             cand("a", 80, "k2", SourceTier::Tier1),
             cand("m", 90, "k3", SourceTier::Tier3),
         ];
-        let sel = SignalCandidateSelection::compute(&input, policy(60, 100, Default::default()));
+        let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
         assert_eq!(sel.selected_urls, vec!["m", "a", "z"]);
     }
 
@@ -555,7 +533,7 @@ mod tests {
             cand("c", 70, "shared", SourceTier::Tier3),
             cand("d", 60, "solo", SourceTier::Tier1),
         ];
-        let sel = SignalCandidateSelection::compute(&input, policy(60, 100, Default::default()));
+        let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
         assert_eq!(sel.cluster_size_for("a"), 3);
         assert_eq!(sel.cluster_size_for("d"), 1);
     }
@@ -589,6 +567,27 @@ mod tests {
         assert_eq!(
             compute_dialog_default(5, 0, 0, 3),
             SignalCandidateDialogDefault::OnAllSettled
+        );
+    }
+
+    #[test]
+    fn selection_keeps_all_clusters_without_cap() {
+        // 30 distinct above-threshold clusters — more than the old cap of 25.
+        let input: Vec<ScoredCandidate> = (0..30)
+            .map(|i| {
+                cand(
+                    &format!("https://example.com/{i}"),
+                    90,
+                    &format!("key-{i}"),
+                    SourceTier::Tier1,
+                )
+            })
+            .collect();
+        let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+        assert_eq!(
+            sel.selected_urls.len(),
+            30,
+            "no cap: every distinct above-threshold cluster is selected"
         );
     }
 }

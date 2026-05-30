@@ -5,16 +5,6 @@ const DEFAULT_POLL_INTERVAL_MINUTES: u32 = 15;
 const DEFAULT_LLM_CONCURRENCY: usize = 12;
 const MAX_LLM_CONCURRENCY: usize = 12;
 
-fn parse_signal_candidate_cap(value: &str) -> Result<usize, String> {
-    let cap = value
-        .parse::<usize>()
-        .map_err(|_| format!("invalid usize value: {value}"))?;
-    if cap == 0 {
-        return Err("value must be greater than or equal to 1".to_string());
-    }
-    Ok(cap)
-}
-
 /// Harvester batch runner - headless mode for scheduled execution
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -101,10 +91,6 @@ pub struct Args {
     /// Minimum signal_score (0..=100) for inclusion. Default 60.
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=100), value_name = "0..=100")]
     pub signal_candidate_threshold: Option<u8>,
-
-    /// Hard cap on selected candidate count. Default 25.
-    #[arg(long, value_parser = parse_signal_candidate_cap, value_name = "N")]
-    pub signal_candidate_cap: Option<usize>,
 }
 
 /// A resolved checkpoint management command.
@@ -340,19 +326,6 @@ mod tests {
         let args = Args::try_parse_from(["harvester_batch", "--signal-candidate-threshold", "75"])
             .unwrap();
         assert_eq!(args.signal_candidate_threshold, Some(75));
-    }
-
-    #[test]
-    fn signal_candidate_cap_parses() {
-        let args =
-            Args::try_parse_from(["harvester_batch", "--signal-candidate-cap", "15"]).unwrap();
-        assert_eq!(args.signal_candidate_cap, Some(15));
-    }
-
-    #[test]
-    fn signal_candidate_cap_rejects_zero() {
-        let result = Args::try_parse_from(["harvester_batch", "--signal-candidate-cap", "0"]);
-        assert!(result.is_err());
     }
 
     #[test]

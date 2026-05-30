@@ -332,7 +332,6 @@ pub struct AppState {
     signal_candidate_inputs:
         HashMap<String, crate::update::signal_candidate::SignalCandidateInputSnapshot>,
     signal_candidate_threshold: u8,
-    signal_candidate_cap: usize,
     briefing_metadata_state: MetadataLoadState,
     summary_cache_metadata_snapshot: Option<SummaryCacheMetadataSnapshot>,
     summary_cache_metrics: SummaryCacheMetrics,
@@ -448,7 +447,6 @@ impl Default for AppState {
             signal_candidate_cache: crate::signal_candidate_cache::SignalCandidateCache::default(),
             signal_candidate_inputs: HashMap::new(),
             signal_candidate_threshold: crate::signal_candidate::DEFAULT_SELECTION_THRESHOLD,
-            signal_candidate_cap: crate::signal_candidate::DEFAULT_SELECTION_CAP,
             briefing_metadata_state: MetadataLoadState::Idle,
             summary_cache_metadata_snapshot: None,
             summary_cache_metrics: SummaryCacheMetrics::default(),
@@ -773,16 +771,8 @@ impl AppState {
         self.signal_candidate_threshold
     }
 
-    pub fn signal_candidate_cap(&self) -> usize {
-        self.signal_candidate_cap
-    }
-
     pub fn set_signal_candidate_threshold(&mut self, threshold: u8) {
         self.signal_candidate_threshold = threshold.clamp(0, 100);
-    }
-
-    pub fn set_signal_candidate_cap(&mut self, cap: usize) {
-        self.signal_candidate_cap = cap.max(1);
     }
 
     pub fn summary_cache_key_for_url(&self, url: &str) -> Option<crate::SummaryCacheKey> {

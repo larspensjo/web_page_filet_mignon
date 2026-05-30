@@ -637,7 +637,7 @@ fn build_archive_form_descriptor(
     });
     let (signal_candidate_notice, signal_candidate_notice_severity) = match signal_candidate_default {
         SignalCandidateDialogDefault::OnAllSettled => (
-            format!("{signal_candidate_count} candidates selected (after dedup + cap)"),
+            format!("{signal_candidate_count} candidates selected (threshold + dedup)"),
             MessageSeverity::Information,
         ),
         SignalCandidateDialogDefault::OffPartial => (

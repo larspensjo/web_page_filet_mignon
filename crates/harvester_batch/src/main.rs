@@ -32,11 +32,6 @@ fn main() {
         "[batch] signal_candidate_threshold: {:?}",
         args.signal_candidate_threshold
     );
-    engine_info!(
-        "[batch] signal_candidate_cap: {:?}",
-        args.signal_candidate_cap
-    );
-
     let exit_code = match runner::run(args) {
         Ok(code) => code,
         Err(err) => {
