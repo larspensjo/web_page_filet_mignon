@@ -125,6 +125,7 @@ impl AppState {
         let first_visible_job_id = visible_jobs_after_filter.first().copied();
         let selected_jobs_visible_in_filter =
             selected_job_id.is_some_and(|job_id| visible_jobs_after_filter.contains(&job_id));
+        let signal_outcome_counts = SignalOutcomeCounts::from_rows(&signal_candidate_rows);
         let left_pane_header = build_left_pane_header_view(LeftPaneHeaderInputs {
             left_tab: self.left_tab,
             results_sub_mode: self.results_sub_mode,
@@ -134,6 +135,7 @@ impl AppState {
             jobs_search_query: &jobs_search_query,
             ai_unavailable_message: self.ai_unavailable_message().as_deref(),
             signal_candidate_count: signal_candidate_rows.len(),
+            signal_outcome_counts,
         });
         let preview_context = preview_header.as_ref().map(build_preview_context_view);
         let preview_header_text = match self.active_tab() {
@@ -736,6 +738,31 @@ struct LeftPaneHeaderInputs<'a> {
     jobs_search_query: &'a str,
     ai_unavailable_message: Option<&'a str>,
     signal_candidate_count: usize,
+    signal_outcome_counts: SignalOutcomeCounts,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SignalOutcomeCounts {
+    selected: usize,
+    deduped: usize,
+    below: usize,
+    excluded: usize,
+}
+
+impl SignalOutcomeCounts {
+    fn from_rows(rows: &[SignalCandidateRow]) -> Self {
+        let mut counts = Self::default();
+        for row in rows {
+            match &row.outcome {
+                Some(SignalCandidateOutcome::Selected) => counts.selected += 1,
+                Some(SignalCandidateOutcome::Deduplicated { .. }) => counts.deduped += 1,
+                Some(SignalCandidateOutcome::BelowThreshold) => counts.below += 1,
+                Some(SignalCandidateOutcome::Excluded) => counts.excluded += 1,
+                None => {}
+            }
+        }
+        counts
+    }
 }
 
 fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHeaderView {
@@ -748,6 +775,7 @@ fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHead
         jobs_search_query,
         ai_unavailable_message,
         signal_candidate_count,
+        signal_outcome_counts,
     } = inputs;
     let scope_label = if job_list_scope == JobListScope::SinceCheckpoint {
         Some("Since checkpoint".to_string())
@@ -817,7 +845,16 @@ fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHead
                     Some(if signal_candidate_count == 0 {
                         "no signal candidates yet".to_string()
                     } else {
-                        format!("{signal_candidate_count} signal candidates")
+                        let mut label = format!(
+                            "Corpus: Selected {} · Dup {} · Low {}",
+                            signal_outcome_counts.selected,
+                            signal_outcome_counts.deduped,
+                            signal_outcome_counts.below
+                        );
+                        if signal_outcome_counts.excluded > 0 {
+                            label.push_str(&format!(" · Excl {}", signal_outcome_counts.excluded));
+                        }
+                        label
                     }),
                 ),
             };
