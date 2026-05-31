@@ -1843,3 +1843,9 @@ Context: `crates/harvester_core/src/state/mod.rs` still carried several accessor
 Change: Split phases 6 through 10 into `state/pre_triage_access.rs`, `state/source_poll.rs`, `state/batch.rs`, `state/job_access.rs`, and `state/ingest.rs`. Kept the parent module as the namespace hub for helpers still needed by sibling modules and tests, including `preview`, `PreviewContentKind`, `JobFilterStatus`, `IndirectLink`, `OperationProgress`, `PreviewQuality`, and the shared link-formatting helpers.
 Lessons Learned: When sibling modules consume items through `super::*`, the parent import list becomes part of the test contract. If a helper is still needed by tests or a sibling `impl`, keep it in the parent namespace even if `mod.rs` no longer uses it directly.
 Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/batch.rs, crates/harvester_core/src/state/ingest.rs, crates/harvester_core/src/state/job_access.rs, crates/harvester_core/src/state/pre_triage_access.rs, crates/harvester_core/src/state/source_poll.rs
+
+## 2026-05-31 - Folded state UI accessors into `ui_state.rs`
+Type: Implementation
+Context: The final accessor cluster in `state/mod.rs` still mixed UI/session/input behavior into the module root after the earlier state split phases.
+Change: Moved `AppState`'s dirty/session/input/layout/tab/trend accessors into the existing `crates/harvester_core/src/state/ui_state.rs` sibling module and removed the duplicate block from `mod.rs`.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/ui_state.rs, cargo test -p harvester_core
