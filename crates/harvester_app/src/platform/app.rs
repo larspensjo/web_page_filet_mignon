@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
@@ -28,7 +28,6 @@ use harvester_core::{
 
 use engine_logging::{engine_info, engine_warn};
 
-use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
     LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
@@ -47,14 +46,16 @@ use super::ui;
 use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::Win32PlatformHandler;
 
+mod config;
+use config::{
+    effective_model_map, llm_max_concurrency_requests_from_env, llm_quota_limits_from_engine,
+};
+
 const ARCHIVE_DIALOG_CONTEXT_PREFIX: &str = "archive:";
 const ARCHIVE_DIALOG_FILENAME_FIELD_ID: &str = "archive.basename";
 const ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID: &str = "archive.use_summaries";
 const ARCHIVE_DIALOG_USE_SIGNAL_CANDIDATES_FIELD_ID: &str = "archive.use_signal_candidates";
 const ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID: &str = "archive.set_checkpoint";
-const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
-const LLM_MAX_CONCURRENT_REQUESTS_ENV: &str = "LLM_MAX_CONCURRENT_REQUESTS";
-const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
 
 fn apply_startup_msg(state: AppState, msg: Msg, startup_effects: &mut Vec<Effect>) -> AppState {
     let (next_state, effects) = update(state, msg);
@@ -348,78 +349,6 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     });
 
     platform.main_event_loop(event_handler, ui_state_provider, initial_commands)
-}
-
-fn parse_llm_max_concurrency_requests(raw: Option<&str>) -> usize {
-    match raw {
-        None => DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
-        Some(value) => match value.trim().parse::<usize>() {
-            Ok(parsed) => parsed.clamp(1, MAX_LLM_CONCURRENT_REQUESTS),
-            Err(_) => DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
-        },
-    }
-}
-
-fn llm_max_concurrency_requests_from_env() -> usize {
-    let raw = std::env::var(LLM_MAX_CONCURRENT_REQUESTS_ENV).ok();
-    let parsed = parse_llm_max_concurrency_requests(raw.as_deref());
-    if let Some(value) = raw {
-        engine_info!(
-            "[llm-concurrency] {}='{}' -> {}",
-            LLM_MAX_CONCURRENT_REQUESTS_ENV,
-            value,
-            parsed
-        );
-    }
-    parsed
-}
-
-fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, String> {
-    let mut map = HashMap::new();
-
-    let triage_model = config
-        .triage_model
-        .as_ref()
-        .unwrap_or(&config.default_model)
-        .model_name()
-        .to_string();
-    map.insert(PromptId::ArticleTriage, triage_model);
-
-    let summary_model = config
-        .summary_model
-        .as_ref()
-        .unwrap_or(&config.default_model)
-        .model_name()
-        .to_string();
-    map.insert(PromptId::ArticleSummary, summary_model);
-
-    let signal_candidate_model = config
-        .signal_candidate_model
-        .as_ref()
-        .or(config.summary_model.as_ref())
-        .unwrap_or(&config.default_model)
-        .model_name()
-        .to_string();
-    map.insert(PromptId::ArticleSignalCandidate, signal_candidate_model);
-
-    let briefing_model = config
-        .briefing_model
-        .as_ref()
-        .unwrap_or(&config.default_model)
-        .model_name()
-        .to_string();
-    map.insert(PromptId::AggregateBriefing, briefing_model);
-
-    map
-}
-
-fn llm_quota_limits_from_engine(quotas: &LlmQuotas) -> LlmQuotaLimits {
-    LlmQuotaLimits {
-        max_calls_per_session: quotas.max_calls_per_session.map(u64::from),
-        max_input_tokens_per_session: quotas.max_input_tokens_per_session,
-        max_output_tokens_per_session: quotas.max_output_tokens_per_session,
-        max_cost_microdollars_per_session: quotas.max_cost_microdollars_per_session,
-    }
 }
 
 #[derive(Default)]

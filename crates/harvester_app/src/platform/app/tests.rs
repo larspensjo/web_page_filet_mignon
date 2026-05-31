@@ -1,3 +1,7 @@
+use super::config::{
+    parse_llm_max_concurrency_requests, DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
+    MAX_LLM_CONCURRENT_REQUESTS,
+};
 use super::ui::tree_item_ids::{job_tree_item_id, link_tree_item_id};
 use super::*;
 use commanductui::types::{TreeItemMarkerKind, WindowId};
@@ -6,7 +10,7 @@ use harvester_core::{
     AppState, CompletedJobSnapshot, Effect, JobResultKind, LeftTab, LlmResultKind, LoadedArticle,
     Msg,
 };
-use harvester_engine::llm::prompt::PromptVersion;
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::{ExtractedLink, LinkKind};
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
