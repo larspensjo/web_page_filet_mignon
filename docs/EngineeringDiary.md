@@ -1789,6 +1789,13 @@ Context: The Results -> Signals list previously showed scored signal candidates 
 Change: Added `SignalCandidateOutcome` to the public core view model and classified completed rows as `Selected`, `Deduplicated`, `BelowThreshold`, or `Excluded` using the same threshold, dedup, active prompt-version override policy as archive selection. Deduplicated rows carry the kept representative gist, in-progress and failed rows keep `outcome: None`, and signal rows now sort by outcome before score and URL. Regression tests cover selected/dedup/below-threshold classification, exclusion classification, kept-gist propagation, and selected -> dedup -> below-threshold ordering.
 Refs: crates/harvester_core/src/view_model.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs, crates/harvester_core/src/lib.rs, outcome_classifies_selected_dedup_and_below_threshold, outcome_marks_excluded_clusters, rows_order_selected_then_dedup_then_below_threshold
 
+## 2026-05-31 - Split core `AppState` accessors into sibling state modules
+Type: Implementation
+Context: `crates/harvester_core/src/state/mod.rs` had accumulated large accessor clusters for LLM bookkeeping, prompt context and prompt-lab state, AI availability, and signal-candidate cache/session access.
+Change: Moved those clusters into `state/llm.rs`, `state/prompt.rs`, `state/ai_availability.rs`, and `state/signal_candidate_access.rs` as separate inherent `impl AppState` blocks. Kept `mod.rs` focused on definitions and left the later source-poll/UI folds for their own phases.
+Lessons Learned: When a module split crosses child-module boundaries, the first build usually exposes duplicate method definitions before it exposes visibility issues. Move the methods and delete the original copies in the same change, then rerun the full build/test/lint gate before continuing.
+Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/llm.rs, crates/harvester_core/src/state/prompt.rs, crates/harvester_core/src/state/ai_availability.rs, crates/harvester_core/src/state/signal_candidate_access.rs
+
 ## 2026-05-30 - Signal-candidate header outcome totals
 Type: Implementation
 Context: The Results -> Signals header still summarized the list as a raw candidate count, which did not explain the selection split or prove that the label ignored `JobListScope`.

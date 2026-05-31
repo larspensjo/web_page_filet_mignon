@@ -18,16 +18,19 @@ use crate::view_model::OperationProgress;
 use crate::view_model::{JobFilterStatus, LastPasteStats};
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
-use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::{ExtractedLink, ImportedArchiveRef, LinkKind, SourceId};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
+mod ai_availability;
 mod briefing_orchestration;
 mod cache_state;
 mod indirect_links;
 mod job_state;
 mod link_helpers;
+mod llm;
+mod prompt;
+mod signal_candidate_access;
 mod ui_state;
 mod view_builder;
 
@@ -488,24 +491,6 @@ impl AppState {
         Self::default()
     }
 
-    /// Set the maximum concurrent triage LLM requests. Clamped to MAX_IN_FLIGHT_LIMIT.
-    pub fn set_triage_max_in_flight(&mut self, limit: usize) {
-        self.triage_max_in_flight = limit.clamp(1, MAX_IN_FLIGHT_LIMIT);
-    }
-
-    /// Set the maximum concurrent summary LLM requests. Clamped to MAX_IN_FLIGHT_LIMIT.
-    pub fn set_summary_max_in_flight(&mut self, limit: usize) {
-        self.summary_max_in_flight = limit.clamp(1, MAX_IN_FLIGHT_LIMIT);
-    }
-
-    pub fn triage_max_in_flight(&self) -> usize {
-        self.triage_max_in_flight
-    }
-
-    pub fn summary_max_in_flight(&self) -> usize {
-        self.summary_max_in_flight
-    }
-
     /// Returns a snapshot of batch processing state for headless monitoring.
     /// Provides metrics without UI dependencies.
     pub fn batch_observation(&self) -> BatchObservation {
@@ -586,16 +571,6 @@ impl AppState {
         }
     }
 
-    pub fn llm_request_state(&self, request_id: u64) -> Option<&LlmRequestState> {
-        self.llm_requests.get(&request_id)
-    }
-
-    pub fn allocate_next_llm_request_id(&mut self) -> u64 {
-        let id = self.next_llm_request_id;
-        self.next_llm_request_id = self.next_llm_request_id.saturating_add(1);
-        id
-    }
-
     pub fn allocate_next_archive_request_id(&mut self) -> u64 {
         self.archive_request_id = self.archive_request_id.saturating_add(1);
         self.archive_request_id
@@ -633,202 +608,6 @@ impl AppState {
     /// A subsequent `ArchiveClicked` will naturally overwrite the pin.
     pub fn clear_pinned_archive_corpus(&mut self) {
         self.pinned_archive_corpus = None;
-    }
-
-    /// Pin the signal-candidate archive selection snapshot for the current dialog session.
-    pub fn pin_signal_candidate_selection(
-        &mut self,
-        selection: crate::signal_candidate::SignalCandidateArchiveSelection,
-    ) {
-        self.pinned_signal_candidate_selection = Some(selection);
-    }
-
-    /// Returns the signal-candidate snapshot pinned at archive-open time, if any.
-    pub fn pinned_signal_candidate_selection(
-        &self,
-    ) -> Option<&crate::signal_candidate::SignalCandidateArchiveSelection> {
-        self.pinned_signal_candidate_selection.as_ref()
-    }
-
-    /// Clears the pinned signal-candidate snapshot after the archive dialog session ends.
-    pub fn clear_pinned_signal_candidate_selection(&mut self) {
-        self.pinned_signal_candidate_selection = None;
-    }
-
-    /// Records LLM token usage from a completed run.
-    /// Only CacheStatus::Miss runs are counted; empty or whitespace-only model names are ignored.
-    pub fn record_llm_usage_from_metadata(&mut self, metadata: &LlmRunMetadata) {
-        use harvester_engine::llm::run_metadata::CacheStatus;
-        if metadata.cache_status != CacheStatus::Miss {
-            return;
-        }
-        let model = metadata.resolved_model.trim();
-        if model.is_empty() {
-            return;
-        }
-        let entry = self
-            .llm_usage_by_model
-            .entry(model.to_string())
-            .or_default();
-        entry.0 = entry.0.saturating_add(u64::from(metadata.input_tokens));
-        entry.1 = entry.1.saturating_add(u64::from(metadata.output_tokens));
-    }
-
-    /// Returns a sorted (alphabetical) snapshot of per-model token usage for rendering.
-    pub fn llm_usage_rows(&self) -> Vec<crate::view_model::LlmModelUsageView> {
-        self.llm_usage_by_model
-            .iter()
-            .map(
-                |(model, &(input_tokens, output_tokens))| crate::view_model::LlmModelUsageView {
-                    model: model.clone(),
-                    input_tokens,
-                    output_tokens,
-                },
-            )
-            .collect()
-    }
-
-    pub fn llm_quota(&self) -> &crate::LlmQuotaState {
-        &self.llm_quota
-    }
-
-    pub(crate) fn set_llm_quota_limits(&mut self, limits: crate::LlmQuotaLimits) {
-        self.llm_quota.limits = Some(limits);
-        self.llm_quota.ai_available = true;
-    }
-
-    pub(crate) fn set_llm_quota_usage(&mut self, usage: crate::LlmQuotaUsage) {
-        self.llm_quota.usage = usage;
-    }
-
-    pub fn signal_candidate(&self) -> &crate::signal_candidate::SignalCandidateSession {
-        &self.signal_candidate
-    }
-
-    pub fn signal_candidate_mut(&mut self) -> &mut crate::signal_candidate::SignalCandidateSession {
-        &mut self.signal_candidate
-    }
-
-    pub fn signal_candidate_cache(&self) -> &crate::signal_candidate_cache::SignalCandidateCache {
-        &self.signal_candidate_cache
-    }
-
-    pub(crate) fn set_signal_candidate_cache(
-        &mut self,
-        cache: crate::signal_candidate_cache::SignalCandidateCache,
-    ) {
-        self.signal_candidate_cache = cache;
-    }
-
-    pub fn try_reuse_signal_candidate(
-        &self,
-        key: &crate::signal_candidate_cache::SignalCandidateCacheKey,
-    ) -> Option<harvester_engine::llm::dto::SignalCandidateResult> {
-        self.signal_candidate_cache
-            .get(key)
-            .map(|entry| entry.result.clone())
-    }
-
-    pub fn store_signal_candidate_result(
-        &mut self,
-        key: crate::signal_candidate_cache::SignalCandidateCacheKey,
-        result: harvester_engine::llm::dto::SignalCandidateResult,
-        now_utc: String,
-    ) {
-        self.signal_candidate_cache.insert(
-            key,
-            crate::signal_candidate_cache::SignalCandidateCacheEntry {
-                result,
-                created_at_utc: now_utc,
-            },
-        );
-    }
-
-    pub(crate) fn signal_candidate_input_snapshot(
-        &self,
-        url: &str,
-    ) -> Option<&crate::update::signal_candidate::SignalCandidateInputSnapshot> {
-        self.signal_candidate_inputs.get(url)
-    }
-
-    pub(crate) fn set_signal_candidate_input_snapshot(
-        &mut self,
-        url: &str,
-        snapshot: crate::update::signal_candidate::SignalCandidateInputSnapshot,
-    ) {
-        self.signal_candidate_inputs
-            .insert(url.to_string(), snapshot);
-    }
-
-    pub(crate) fn clear_signal_candidate_input_snapshot(&mut self, url: &str) {
-        self.signal_candidate_inputs.remove(url);
-    }
-
-    pub fn signal_candidate_threshold(&self) -> u8 {
-        self.signal_candidate_threshold
-    }
-
-    pub fn set_signal_candidate_threshold(&mut self, threshold: u8) {
-        self.signal_candidate_threshold = threshold.clamp(0, 100);
-    }
-
-    pub fn summary_cache_key_for_url(&self, url: &str) -> Option<crate::SummaryCacheKey> {
-        let content_hash = self
-            .triage()
-            .article_content_hash(url)
-            .or_else(|| self.pre_triage.article_content_hash(url))?;
-
-        self.summary_cache()
-            .iter()
-            .filter(|(key, _)| {
-                key.content_hash == content_hash && key.prompt_id == PromptId::ArticleSummary
-            })
-            .max_by(|(_, a), (_, b)| {
-                let parsed_a = chrono::DateTime::parse_from_rfc3339(&a.created_at_utc)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc));
-                let parsed_b = chrono::DateTime::parse_from_rfc3339(&b.created_at_utc)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc));
-
-                match (parsed_a, parsed_b) {
-                    (Some(a), Some(b)) => a.cmp(&b),
-                    _ => a.created_at_utc.cmp(&b.created_at_utc),
-                }
-            })
-            .map(|(key, _)| key.clone())
-    }
-
-    pub(crate) fn summary_result_for_url(
-        &self,
-        url: &str,
-    ) -> Option<&crate::briefing::ArticleSummaryResult> {
-        if let Some(summary) = self.briefing.summary_for_url(url) {
-            return Some(summary);
-        }
-
-        let content_hash = self
-            .triage()
-            .article_content_hash(url)
-            .or_else(|| self.pre_triage.article_content_hash(url))?;
-
-        self.summary_cache()
-            .lookup_any_by_content_hash(content_hash)
-            .map(|entry| &entry.result)
-    }
-
-    pub fn record_pending_llm_request(&mut self, request_id: u64, prompt_id: PromptId) {
-        self.llm_requests
-            .insert(request_id, LlmRequestState::Pending { prompt_id });
-    }
-
-    pub fn record_llm_result(&mut self, request_id: u64, state: LlmRequestState) {
-        self.llm_requests.insert(request_id, state);
-    }
-
-    pub fn reset_llm_requests(&mut self) {
-        self.llm_requests.clear();
-        self.next_llm_request_id = 1;
     }
 
     pub(crate) fn briefing(&self) -> &BriefingSession {
@@ -1416,58 +1195,6 @@ impl AppState {
             .and_then(|job| self.triage.result_for_url(&job.url))
     }
 
-    /// Get the context variables for a specific prompt, if loaded.
-    /// Returns an empty slice if no context has been loaded for this prompt.
-    pub fn context_for(&self, prompt_id: PromptId) -> &[(String, String)] {
-        self.prompt_contexts
-            .get(&prompt_id)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
-    pub(crate) fn set_prompt_contexts(
-        &mut self,
-        contexts: HashMap<PromptId, Vec<(String, String)>>,
-    ) {
-        self.prompt_contexts = contexts;
-        self.prompt_contexts_load_failed = false;
-    }
-
-    pub(crate) fn mark_prompt_contexts_load_failed(&mut self) {
-        self.prompt_contexts_load_failed = true;
-    }
-
-    pub(crate) fn prompt_contexts_load_failed(&self) -> bool {
-        self.prompt_contexts_load_failed
-    }
-
-    /// Get the active prompt version for a specific prompt.
-    pub fn active_version_for(&self, prompt_id: PromptId) -> Option<PromptVersion> {
-        self.active_prompt_versions.get(&prompt_id).copied()
-    }
-
-    /// Get the effective model for a specific prompt.
-    pub fn effective_model_for(&self, prompt_id: PromptId) -> Option<&str> {
-        self.effective_models.get(&prompt_id).map(|s| s.as_str())
-    }
-
-    pub fn ai_availability(&self) -> &AiAvailability {
-        &self.ai_availability
-    }
-
-    pub fn triage_ai_available(&self) -> bool {
-        matches!(self.ai_availability, AiAvailability::Available)
-    }
-
-    pub fn briefing_ai_available(&self) -> bool {
-        matches!(self.ai_availability, AiAvailability::Available)
-    }
-
-    pub(crate) fn set_ai_availability(&mut self, availability: AiAvailability) {
-        self.llm_quota.ai_available = matches!(availability, AiAvailability::Available);
-        self.ai_availability = availability;
-    }
-
     fn poll_pipeline_article_progress(&self) -> Option<(usize, usize)> {
         let tracker = self.poll_pipeline.as_ref()?;
         if !tracker.source_scan_done || tracker.job_ids.is_empty() {
@@ -1506,92 +1233,6 @@ impl AppState {
         }
     }
 
-    pub(crate) fn reconcile_ai_availability_from_metadata(&mut self) {
-        let triage_model_available = self.effective_models.contains_key(&PromptId::ArticleTriage);
-        match (&self.ai_availability, triage_model_available) {
-            (
-                AiAvailability::Unavailable {
-                    reason: AiUnavailableReason::MissingApiKey,
-                },
-                _,
-            ) => {}
-            (_, true) => {
-                self.ai_availability = AiAvailability::Available;
-                self.llm_quota.ai_available = true;
-            }
-            (_, false) => {
-                self.ai_availability = AiAvailability::Unavailable {
-                    reason: AiUnavailableReason::NoTriageModel,
-                };
-                self.llm_quota.ai_available = false;
-            }
-        }
-    }
-
-    fn ai_unavailable_reason(&self) -> Option<AiUnavailableReason> {
-        match self.ai_availability {
-            AiAvailability::Available => None,
-            AiAvailability::Unavailable { reason } => Some(reason),
-        }
-    }
-
-    fn ai_unavailable_reason_text(&self) -> Option<&'static str> {
-        match self.ai_unavailable_reason() {
-            Some(AiUnavailableReason::MissingApiKey) => Some("OPENAI_API_KEY is not set"),
-            Some(AiUnavailableReason::NoTriageModel) => Some("no triage model is available"),
-            None => None,
-        }
-    }
-
-    fn ai_unavailable_message(&self) -> Option<String> {
-        self.ai_unavailable_reason_text()
-            .map(|reason| format!("AI features unavailable: {reason}"))
-    }
-
-    fn ai_warning_banner(&self) -> Option<crate::InlineWarningView> {
-        matches!(
-            self.ai_unavailable_reason(),
-            Some(AiUnavailableReason::MissingApiKey)
-        )
-        .then(|| crate::InlineWarningView {
-            title: "AI features are disabled".to_string(),
-            body: "Set OPENAI_API_KEY in the launch environment and restart to enable triage and briefing.".to_string(),
-        })
-    }
-
-    fn triage_blocked_reason(&self) -> Option<String> {
-        if let Some(reason) = self.ai_unavailable_reason() {
-            return Some(match reason {
-                AiUnavailableReason::MissingApiKey => {
-                    "AI setup is incomplete because OPENAI_API_KEY is not set".to_string()
-                }
-                AiUnavailableReason::NoTriageModel => "no triage model is available".to_string(),
-            });
-        }
-
-        if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
-            return Some(match self.pre_triage_load_context {
-                Some(PreTriageLoadContext {
-                    reason:
-                        crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
-                    ..
-                }) => "Triage is unavailable while startup prepares the article set".to_string(),
-                _ => "Triage is unavailable while the article set is being prepared".to_string(),
-            });
-        }
-
-        None
-    }
-
-    fn briefing_blocked_reason(&self) -> Option<String> {
-        self.ai_unavailable_reason().map(|reason| match reason {
-            AiUnavailableReason::MissingApiKey => {
-                "AI setup is incomplete because OPENAI_API_KEY is not set".to_string()
-            }
-            AiUnavailableReason::NoTriageModel => "no triage model is available".to_string(),
-        })
-    }
-
     fn pre_triage_loading_operation_label(&self) -> String {
         match self.pre_triage_load_context.map(|context| context.reason) {
             Some(crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs) => {
@@ -1602,24 +1243,6 @@ impl AppState {
             }
             None => "Preparing triage list".to_string(),
         }
-    }
-
-    pub(crate) fn set_llm_metadata(
-        &mut self,
-        active_versions: HashMap<PromptId, PromptVersion>,
-        effective_models: HashMap<PromptId, String>,
-        templates: HashMap<PromptId, PromptLabTemplateSnapshot>,
-    ) {
-        self.active_prompt_versions = active_versions;
-        self.effective_models = effective_models;
-        self.prompt_lab_templates = templates;
-    }
-
-    pub fn prompt_lab_template_snapshot(
-        &self,
-        prompt_id: PromptId,
-    ) -> Option<&PromptLabTemplateSnapshot> {
-        self.prompt_lab_templates.get(&prompt_id)
     }
 
     pub(crate) fn restore_completed_jobs(&mut self, entries: Vec<CompletedJobSnapshot>) {
@@ -2357,16 +1980,6 @@ impl AppState {
     // Prompt Lab command API
     // ------------------------------------------------------------------
 
-    pub(crate) fn prompt_lab(&self) -> &PromptLabState {
-        &self.prompt_lab
-    }
-
-    // Used in tests; will be used by the reducer when UI override messages are added.
-    #[allow(dead_code)]
-    pub(crate) fn prompt_lab_mut(&mut self) -> &mut PromptLabState {
-        &mut self.prompt_lab
-    }
-
     pub(crate) fn select_tab(&mut self, tab: AppTab) {
         if self.active_tab != tab {
             self.active_tab = tab;
@@ -2383,6 +1996,11 @@ impl AppState {
             self.left_tab = tab;
             self.dirty = true;
         }
+    }
+
+    /// Set the active left tab unconditionally.
+    pub(crate) fn set_left_tab(&mut self, tab: LeftTab) {
+        self.select_left_tab(tab);
     }
 
     pub fn left_tab(&self) -> LeftTab {
@@ -2423,87 +2041,6 @@ impl AppState {
 
     pub fn entity_trend_data(&self) -> Option<&crate::trends::EntityTrendData> {
         self.entity_trend_data.as_ref()
-    }
-
-    /// Set the active left tab unconditionally.
-    pub(crate) fn set_left_tab(&mut self, tab: LeftTab) {
-        self.select_left_tab(tab);
-    }
-
-    pub(crate) fn open_prompt_lab(&mut self) {
-        self.select_left_tab(LeftTab::PromptLab);
-        self.prompt_lab.open();
-    }
-
-    /// Close Prompt Lab internal state (panel state, etc.) without changing `left_tab`.
-    pub(crate) fn close_prompt_lab_internals(&mut self) {
-        self.prompt_lab.close();
-    }
-
-    pub(crate) fn select_prompt_lab_stage(&mut self, stage: PromptLabStage) {
-        self.prompt_lab.select_stage(stage);
-        self.dirty = true;
-    }
-
-    pub(crate) fn set_prompt_lab_input(&mut self, text: String) {
-        self.prompt_lab.set_input(text);
-    }
-
-    pub(crate) fn allocate_next_prompt_lab_run_id(&mut self) -> PromptLabRunId {
-        let id = PromptLabRunId(self.next_prompt_lab_run_id);
-        self.next_prompt_lab_run_id = self.next_prompt_lab_run_id.saturating_add(1);
-        id
-    }
-
-    pub(crate) fn allocate_next_prompt_lab_resolve_id(&mut self) -> u64 {
-        let id = self.prompt_lab_next_resolve_id;
-        self.prompt_lab_next_resolve_id = self.prompt_lab_next_resolve_id.saturating_add(1);
-        id
-    }
-
-    pub(crate) fn add_prompt_lab_pending_run(
-        &mut self,
-        registration: PromptLabPendingRunRegistration,
-    ) {
-        self.prompt_lab.add_pending_run(
-            registration.run_id,
-            registration.stage,
-            registration.prompt_id,
-            registration.input_snapshot,
-            registration.request_id,
-            registration.overrides,
-        );
-        if let Some(record) = self.prompt_lab.run_by_id_mut(registration.run_id) {
-            record.compare_batch_id = registration.compare_batch_id;
-            record.compare_candidate_id = registration.compare_candidate_id;
-        }
-    }
-
-    pub(crate) fn complete_prompt_lab_run(
-        &mut self,
-        run_id: PromptLabRunId,
-        output_json: String,
-        metadata: LlmRunMetadata,
-    ) {
-        self.prompt_lab.complete_run(run_id, output_json, metadata);
-    }
-
-    pub(crate) fn fail_prompt_lab_run(
-        &mut self,
-        run_id: PromptLabRunId,
-        reason: String,
-        metadata: Option<LlmRunMetadata>,
-    ) {
-        self.prompt_lab.fail_run(run_id, reason, metadata);
-    }
-
-    pub(crate) fn consume_prompt_lab_ownership(&mut self, request_id: u64) {
-        self.prompt_lab.consume_ownership(request_id);
-    }
-
-    pub(crate) fn clear_prompt_lab_history(&mut self) {
-        self.prompt_lab.clear_history();
-        self.dirty = true;
     }
 }
 
