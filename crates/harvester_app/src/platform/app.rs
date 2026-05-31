@@ -1,15 +1,11 @@
 use std::collections::VecDeque;
-use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
 
-use commanductui::types::{
-    FormButtons, FormDialogDescriptor, FormField, FormFieldValue, FormFileExistsWarning, FormRow,
-    FormTextValidation, MessageSeverity, TreeItemMarkerKind,
-};
+use commanductui::types::{MessageSeverity, TreeItemMarkerKind};
 use commanductui::{
     AppEvent, ControlId, PlatformCommand, PlatformEventHandler, PlatformInterface, UiStateProvider,
     WindowConfig, WindowId,
@@ -20,10 +16,9 @@ const VK_RETURN_CODE: u16 = VK_RETURN.0;
 const VK_ESCAPE_CODE: u16 = VK_ESCAPE.0;
 
 use harvester_core::{
-    update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel,
-    ArchiveTokenEstimates, Effect, JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel,
-    LeftTab, LinkDownloadState, LlmQuotaLimits, ManualDecision, Msg, PromptLabStage,
-    SignalCandidateDialogDefault, SignalCandidateState, TrendCategory,
+    update, AiAvailability, AiUnavailableReason, AppState, AppTab, AppViewModel, Effect,
+    JobFilterStatus, JobListScope, JobResultKind, LayoutViewModel, LeftTab, ManualDecision, Msg,
+    PromptLabStage, SignalCandidateState, TrendCategory,
 };
 
 use engine_logging::{engine_info, engine_warn};
@@ -35,180 +30,33 @@ use harvester_engine::llm::{
     OPENAI_MODEL_GPT_5_4_NANO,
 };
 use harvester_io::{
-    load_completed_jobs, load_pre_triage_overrides, load_signal_candidate_cache,
-    load_signal_candidate_overrides, load_summary_cache, load_triage_cache, load_window_size,
-    EffectRunner, PersistenceSnapshot, PersistenceWorker, RuntimePaths,
+    load_window_size, EffectRunner, PersistenceSnapshot, PersistenceWorker, RuntimePaths,
 };
 
 use super::effects;
 use super::logging::{self, LogDestination};
 use super::ui;
-use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::Win32PlatformHandler;
 
+mod archive_dialog;
 mod config;
 mod render_batch;
+mod startup;
+mod ui_state;
+use archive_dialog::{
+    archive_field_checked, archive_field_text, build_archive_form_descriptor,
+    parse_archive_dialog_request_id, ARCHIVE_DIALOG_FILENAME_FIELD_ID,
+    ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID, ARCHIVE_DIALOG_USE_SIGNAL_CANDIDATES_FIELD_ID,
+    ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID,
+};
 use config::{
     effective_model_map, llm_max_concurrency_requests_from_env, llm_quota_limits_from_engine,
 };
 use render_batch::{
     is_geometry_only_message, select_render_mode, GeometryBatchStats, PendingRender, RenderMode,
 };
-
-const ARCHIVE_DIALOG_CONTEXT_PREFIX: &str = "archive:";
-const ARCHIVE_DIALOG_FILENAME_FIELD_ID: &str = "archive.basename";
-const ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID: &str = "archive.use_summaries";
-const ARCHIVE_DIALOG_USE_SIGNAL_CANDIDATES_FIELD_ID: &str = "archive.use_signal_candidates";
-const ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID: &str = "archive.set_checkpoint";
-
-fn apply_startup_msg(state: AppState, msg: Msg, startup_effects: &mut Vec<Effect>) -> AppState {
-    let (next_state, effects) = update(state, msg);
-    startup_effects.extend(effects);
-    next_state
-}
-
-fn prepare_startup_state(
-    mut state: AppState,
-    paths: &RuntimePaths,
-    initial_width: i32,
-    llm_max_concurrent_requests: usize,
-    startup_ai_availability: Option<AiAvailability>,
-    llm_quota_limits: Option<LlmQuotaLimits>,
-) -> (AppState, Vec<Effect>) {
-    let mut startup_effects = Vec::new();
-
-    // Synchronous startup preparation: seed all cheap, local facts before the
-    // first view snapshot so the first visible frame is already correct.
-    let (mut next_state, _) = update(
-        state,
-        Msg::WindowResized {
-            window_width: initial_width,
-        },
-    );
-    next_state.set_triage_max_in_flight(llm_max_concurrent_requests);
-    next_state.set_summary_max_in_flight(llm_max_concurrent_requests);
-    state = next_state;
-
-    if let Some(availability) = startup_ai_availability {
-        state = apply_startup_msg(
-            state,
-            Msg::AiAvailabilityDetected { availability },
-            &mut startup_effects,
-        );
-    }
-    if let Some(limits) = llm_quota_limits {
-        state = apply_startup_msg(
-            state,
-            Msg::LlmQuotaConfigured { limits },
-            &mut startup_effects,
-        );
-    }
-
-    // Asynchronous startup hydration begins here. Reducer-owned startup
-    // scheduling stays adjacent to the state transition that emits those effects.
-    state = apply_startup_msg(state, Msg::StartupHydrationRequested, &mut startup_effects);
-
-    let completed = load_completed_jobs(&paths.state_path);
-    if !completed.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::RestoreCompletedJobs(completed),
-            &mut startup_effects,
-        );
-    }
-
-    let summary_cache = load_summary_cache(&paths.summary_cache_path);
-    if !summary_cache.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::SummaryCacheHydrated {
-                cache: summary_cache,
-            },
-            &mut startup_effects,
-        );
-    }
-
-    let triage_cache = load_triage_cache(&paths.triage_cache_path);
-    if !triage_cache.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::TriageCacheHydrated {
-                cache: triage_cache,
-            },
-            &mut startup_effects,
-        );
-    }
-
-    match load_signal_candidate_cache(&paths.signal_candidate_cache_path) {
-        Ok(signal_candidate_cache) if !signal_candidate_cache.is_empty() => {
-            state = apply_startup_msg(
-                state,
-                Msg::SignalCandidateCacheLoaded {
-                    cache: signal_candidate_cache,
-                },
-                &mut startup_effects,
-            );
-        }
-        Ok(_) => {}
-        Err(err) => {
-            engine_warn!(
-                "[signal-cache] failed to hydrate {}: {}",
-                paths.signal_candidate_cache_path.display(),
-                err
-            );
-        }
-    }
-
-    match load_signal_candidate_overrides(&paths.signal_candidate_overrides_path) {
-        Ok(signal_candidate_overrides) if !signal_candidate_overrides.is_empty() => {
-            state = apply_startup_msg(
-                state,
-                Msg::SignalCandidateOverridesLoaded {
-                    overrides: signal_candidate_overrides,
-                },
-                &mut startup_effects,
-            );
-        }
-        Ok(_) => {}
-        Err(err) => {
-            engine_warn!(
-                "[signal-overrides] failed to hydrate {}: {}",
-                paths.signal_candidate_overrides_path.display(),
-                err
-            );
-        }
-    }
-
-    let overrides = load_pre_triage_overrides(&paths.state_path);
-    if !overrides.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::PreTriageOverridesHydrated { overrides },
-            &mut startup_effects,
-        );
-    }
-
-    (state, startup_effects)
-}
-
-fn assemble_startup_commands(
-    window_id: WindowId,
-    initial_view: &AppViewModel,
-    tree_render_state: &mut ui::render::TreeRenderState,
-) -> Vec<PlatformCommand> {
-    let mut initial_commands = ui::layout::initial_commands(window_id);
-    initial_commands.extend(ui::render::render(
-        window_id,
-        initial_view,
-        tree_render_state,
-    ));
-
-    // Reveal ownership stays at the app layer so first render and first reveal
-    // remain one explicit, testable contract.
-    initial_commands.push(PlatformCommand::SignalMainWindowUISetupComplete { window_id });
-    initial_commands.push(PlatformCommand::ShowWindow { window_id });
-    initial_commands
-}
+use startup::{assemble_startup_commands, prepare_startup_state};
+use ui_state::AppUiStateProvider;
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
     logging::initialize(LogDestination::Both);
@@ -356,8 +204,8 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
 }
 
 #[derive(Default)]
-struct SharedState {
-    state: AppState,
+pub(super) struct SharedState {
+    pub(super) state: AppState,
 }
 
 struct PendingFocus {
@@ -397,212 +245,6 @@ fn pre_triage_toggle_message(state: &AppState) -> Option<Msg> {
         _ => ManualDecision::Exclude,
     };
     Some(Msg::PreTriageDecisionSet { key, decision })
-}
-
-fn archive_dialog_context_tag(request_id: u64) -> String {
-    format!("{ARCHIVE_DIALOG_CONTEXT_PREFIX}{request_id}")
-}
-
-fn parse_archive_dialog_request_id(context_tag: &str) -> Option<u64> {
-    context_tag
-        .strip_prefix(ARCHIVE_DIALOG_CONTEXT_PREFIX)
-        .and_then(|raw| raw.parse::<u64>().ok())
-}
-
-fn archive_field_text(field_values: &[FormFieldValue], field_id: &str) -> Option<String> {
-    field_values.iter().find_map(|value| match value {
-        FormFieldValue::Text {
-            field_id: value_field_id,
-            value,
-        } if value_field_id == field_id => Some(value.clone()),
-        _ => None,
-    })
-}
-
-fn archive_field_checked(field_values: &[FormFieldValue], field_id: &str) -> Option<bool> {
-    field_values.iter().find_map(|value| match value {
-        FormFieldValue::CheckBox {
-            field_id: value_field_id,
-            checked,
-        } if value_field_id == field_id => Some(*checked),
-        _ => None,
-    })
-}
-
-fn format_archive_since_label(since_utc: Option<chrono::DateTime<Utc>>) -> Option<String> {
-    since_utc.map(|since| {
-        let now = Utc::now();
-        let days = (now - since).num_days().max(0);
-        format!("{} ({} days ago)", since.format("%Y-%m-%d"), days)
-    })
-}
-
-fn format_tokens(tokens: u64) -> String {
-    if tokens >= 1_000_000 {
-        format!("{:.1}M", tokens as f64 / 1_000_000.0)
-    } else if tokens >= 1_000 {
-        format!("{:.0}k", tokens as f64 / 1_000.0)
-    } else {
-        tokens.to_string()
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_archive_form_descriptor(
-    request_id: u64,
-    article_count: usize,
-    since_utc: Option<chrono::DateTime<Utc>>,
-    default_basename: String,
-    _default_file_exists: bool,
-    export_dir: PathBuf,
-    pending_pre_triage_count: usize,
-    token_estimates: ArchiveTokenEstimates,
-    signal_candidate_default: SignalCandidateDialogDefault,
-    signal_candidate_count: usize,
-    signal_candidate_scoring_done: u32,
-    signal_candidate_scoring_total: u32,
-    signal_candidate_token_estimates: ArchiveTokenEstimates,
-) -> FormDialogDescriptor {
-    let mut rows = Vec::new();
-    let articles_label = if since_utc.is_some() {
-        format!("{article_count} URLs (since checkpoint)")
-    } else {
-        format!("{article_count} URLs (all)")
-    };
-    rows.push(FormRow::ReadOnlyText {
-        label: "Articles".to_string(),
-        value: articles_label,
-    });
-    if let Some(checkpoint) = format_archive_since_label(since_utc) {
-        rows.push(FormRow::ReadOnlyText {
-            label: "Checkpoint".to_string(),
-            value: checkpoint,
-        });
-    }
-    rows.push(FormRow::ReadOnlyText {
-        label: "Up to".to_string(),
-        value: Utc::now().format("%Y-%m-%d %H:%M UTC").to_string(),
-    });
-    rows.push(FormRow::ReadOnlyText {
-        label: "Full archive".to_string(),
-        value: format!(
-            "~{} tokens ({} articles)",
-            format_tokens(token_estimates.full_tokens),
-            article_count,
-        ),
-    });
-    rows.push(FormRow::ReadOnlyText {
-        label: "Summary archive".to_string(),
-        value: format!(
-            "~{} tokens ({}/{} with summaries)",
-            format_tokens(token_estimates.summary_tokens),
-            token_estimates.summary_coverage,
-            article_count,
-        ),
-    });
-    let (signal_candidate_notice, signal_candidate_notice_severity) = match signal_candidate_default {
-        SignalCandidateDialogDefault::OnAllSettled => (
-            format!("{signal_candidate_count} candidates selected (threshold + dedup)"),
-            MessageSeverity::Information,
-        ),
-        SignalCandidateDialogDefault::OffPartial => (
-            format!(
-                "Scoring in progress ({signal_candidate_scoring_done}/{signal_candidate_scoring_total}). Toggle ON to export only settled candidates ({signal_candidate_count} selected)."
-            ),
-            MessageSeverity::Warning,
-        ),
-        SignalCandidateDialogDefault::OffEmpty => (
-            format!(
-                "No candidates above threshold ({signal_candidate_scoring_total} scored). Lower threshold or toggle off to export the full triage set."
-            ),
-            MessageSeverity::Warning,
-        ),
-        SignalCandidateDialogDefault::OffDisabled => (
-            "No candidates settled yet - defaulting to full triage set.".to_string(),
-            MessageSeverity::Warning,
-        ),
-    };
-    rows.push(FormRow::Note {
-        text: signal_candidate_notice,
-        severity: signal_candidate_notice_severity,
-    });
-    rows.push(FormRow::ReadOnlyText {
-        label: "Signal candidate full archive".to_string(),
-        value: format!(
-            "~{} tokens ({} articles)",
-            format_tokens(signal_candidate_token_estimates.full_tokens),
-            signal_candidate_count,
-        ),
-    });
-    rows.push(FormRow::ReadOnlyText {
-        label: "Signal candidate summary archive".to_string(),
-        value: format!(
-            "~{} tokens ({} articles with summaries)",
-            format_tokens(signal_candidate_token_estimates.summary_tokens),
-            signal_candidate_token_estimates.summary_coverage,
-        ),
-    });
-    if article_count == 0 {
-        rows.push(FormRow::Note {
-            text: "No articles match the current filter.".to_string(),
-            severity: MessageSeverity::Warning,
-        });
-    }
-    if pending_pre_triage_count > 0 {
-        rows.push(FormRow::Note {
-            text: format!(
-                "{} article{} await triage and are not included in this export.",
-                pending_pre_triage_count,
-                if pending_pre_triage_count == 1 {
-                    ""
-                } else {
-                    "s"
-                }
-            ),
-            severity: MessageSeverity::Warning,
-        });
-    }
-
-    FormDialogDescriptor {
-        title: "Archive Export".to_string(),
-        context_tag: archive_dialog_context_tag(request_id),
-        rows,
-        fields: vec![
-            FormField::TextInput {
-                field_id: ARCHIVE_DIALOG_FILENAME_FIELD_ID.to_string(),
-                label: "Output file".to_string(),
-                value: default_basename,
-                validation: FormTextValidation::PathSegment,
-                live_warning: Some(FormFileExistsWarning {
-                    base_dir: export_dir,
-                    message: "file already exists - will be overwritten".to_string(),
-                }),
-            },
-            FormField::CheckBox {
-                field_id: ARCHIVE_DIALOG_USE_SUMMARIES_FIELD_ID.to_string(),
-                label: "Use summaries (recommended)".to_string(),
-                checked: true,
-            },
-            FormField::CheckBox {
-                field_id: ARCHIVE_DIALOG_USE_SIGNAL_CANDIDATES_FIELD_ID.to_string(),
-                label: "Use signal-candidate selection".to_string(),
-                checked: matches!(
-                    signal_candidate_default,
-                    SignalCandidateDialogDefault::OnAllSettled
-                ),
-            },
-            FormField::CheckBox {
-                field_id: ARCHIVE_DIALOG_SET_CHECKPOINT_FIELD_ID.to_string(),
-                label: "Set checkpoint to now after export".to_string(),
-                checked: true,
-            },
-        ],
-        buttons: FormButtons {
-            confirm_label: "Export".to_string(),
-            cancel_label: "Cancel".to_string(),
-            confirm_enabled: article_count > 0,
-        },
-    }
 }
 
 impl AppEventHandler {
@@ -1252,59 +894,6 @@ impl PlatformEventHandler for AppEventHandler {
     fn try_dequeue_command(&mut self) -> Option<PlatformCommand> {
         self.process_pending_messages();
         self.commands.pop_front()
-    }
-}
-
-struct AppUiStateProvider {
-    shared: Arc<Mutex<SharedState>>,
-}
-
-impl AppUiStateProvider {
-    fn new(shared: Arc<Mutex<SharedState>>) -> Self {
-        Self { shared }
-    }
-}
-
-impl UiStateProvider for AppUiStateProvider {
-    fn is_tree_item_new(&self, _window_id: WindowId, _item_id: commanductui::TreeItemId) -> bool {
-        false
-    }
-
-    fn tree_item_marker(
-        &self,
-        _window_id: WindowId,
-        item_id: commanductui::TreeItemId,
-    ) -> TreeItemMarkerKind {
-        match decode_tree_item_id(item_id) {
-            TreeItemKind::Job { job_id } => {
-                let guard = self.shared.lock().unwrap();
-                if guard.state.left_tab() != LeftTab::TriageResults {
-                    return TreeItemMarkerKind::None;
-                }
-                if let Some(result) = guard.state.triage_result_for_job(job_id) {
-                    return triage_marker_for_priority(result.priority);
-                }
-                TreeItemMarkerKind::None
-            }
-            TreeItemKind::Link { job_id, link_index } => {
-                let guard = self.shared.lock().unwrap();
-                if let Some((download_state, age_suspect)) =
-                    guard.state.link_state(job_id, link_index)
-                {
-                    return match download_state {
-                        LinkDownloadState::Downloaded { .. } => TreeItemMarkerKind::Green,
-                        LinkDownloadState::Downloading => TreeItemMarkerKind::Purple,
-                        LinkDownloadState::Failed { .. } => TreeItemMarkerKind::Red,
-                        LinkDownloadState::NotDownloaded if age_suspect => {
-                            TreeItemMarkerKind::Yellow
-                        }
-                        _ => TreeItemMarkerKind::None,
-                    };
-                }
-                TreeItemMarkerKind::None
-            }
-            _ => TreeItemMarkerKind::None,
-        }
     }
 }
 

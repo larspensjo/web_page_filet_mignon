@@ -1822,3 +1822,10 @@ Change: Added cache-backed summary lookup to the core view path, then wired `try
 Lessons Learned: Downstream stages that depend on a completed upstream session must be re-evaluated at the completion transition, not only during cache hydration. Otherwise cache order can hide the real cause of missing UI state.
 Prevention: Keep logs at the upstream completion boundary and the downstream enqueue boundary, and assert the cache-only startup path in tests.
 Refs: crates/harvester_core/src/update/llm_completed.rs, crates/harvester_core/src/update/triage.rs, crates/harvester_core/src/update/mod.rs, crates/harvester_core/src/update/signal_candidate.rs, crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/tests/signal_candidate_tests.rs
+
+## 2026-05-31 - Split `platform/app.rs` into sibling modules
+Type: Implementation
+Context: `crates/harvester_app/src/platform/app.rs` had grown into a large platform-entry file that mixed startup orchestration, archive-dialog construction, and UI-state provisioning with the entrypoint and event handling code.
+Change: Moved the startup cluster into `crates/harvester_app/src/platform/app/startup.rs`, the archive-dialog helpers into `crates/harvester_app/src/platform/app/archive_dialog.rs`, and the UI state provider into `crates/harvester_app/src/platform/app/ui_state.rs`. Updated `app.rs` to import those helpers explicitly, widened `SharedState.state` to `pub(super)` for the sibling UI-state module, and added the extracted startup/UI-state imports to `app/tests.rs`.
+Lessons Learned: When a child test module depends on helpers that move to sibling modules, `use super::*;` is no longer enough. The imported tests need explicit sibling-module `use` lines, and the parent needs to own only the shared data and entrypoint glue.
+Refs: crates/harvester_app/src/platform/app.rs, crates/harvester_app/src/platform/app/startup.rs, crates/harvester_app/src/platform/app/archive_dialog.rs, crates/harvester_app/src/platform/app/ui_state.rs, crates/harvester_app/src/platform/app/tests.rs
