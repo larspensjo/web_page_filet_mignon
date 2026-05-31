@@ -2,6 +2,7 @@ use super::config::{
     parse_llm_max_concurrency_requests, DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
     MAX_LLM_CONCURRENT_REQUESTS,
 };
+use super::event_handler::{VK_ESCAPE_CODE, VK_RETURN_CODE};
 use super::render_batch::{select_render_mode, RenderMode};
 use super::startup::{assemble_startup_commands, prepare_startup_state};
 use super::ui::tree_item_ids::{job_tree_item_id, link_tree_item_id};
@@ -10,8 +11,8 @@ use super::*;
 use commanductui::types::{TreeItemMarkerKind, WindowId};
 use commanductui::AppEvent;
 use harvester_core::{
-    AppState, CompletedJobSnapshot, Effect, JobResultKind, LeftTab, LlmResultKind, LoadedArticle,
-    Msg,
+    update, AppState, CompletedJobSnapshot, Effect, JobListScope, JobResultKind, LeftTab,
+    LlmResultKind, LoadedArticle, Msg, PromptLabStage,
 };
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::{ExtractedLink, LinkKind};
