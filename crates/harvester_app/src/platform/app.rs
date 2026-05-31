@@ -47,8 +47,12 @@ use super::ui::tree_item_ids::{decode_tree_item_id, TreeItemKind};
 use super::Win32PlatformHandler;
 
 mod config;
+mod render_batch;
 use config::{
     effective_model_map, llm_max_concurrency_requests_from_env, llm_quota_limits_from_engine,
+};
+use render_batch::{
+    is_geometry_only_message, select_render_mode, GeometryBatchStats, PendingRender, RenderMode,
 };
 
 const ARCHIVE_DIALOG_CONTEXT_PREFIX: &str = "archive:";
@@ -393,74 +397,6 @@ fn pre_triage_toggle_message(state: &AppState) -> Option<Msg> {
         _ => ManualDecision::Exclude,
     };
     Some(Msg::PreTriageDecisionSet { key, decision })
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RenderMode {
-    Full,
-    LayoutOnly,
-}
-
-enum PendingRender {
-    Full(Box<AppViewModel>),
-    LayoutOnly(LayoutViewModel),
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct GeometryBatchStats {
-    splitter_moves: usize,
-    window_resizes: usize,
-    last_splitter_width: Option<i32>,
-    last_window_width: Option<i32>,
-}
-
-impl GeometryBatchStats {
-    fn observe(&mut self, msg: &Msg) {
-        match msg {
-            Msg::SplitterMoved {
-                desired_left_width_px,
-            } => {
-                self.splitter_moves += 1;
-                self.last_splitter_width = Some(*desired_left_width_px);
-            }
-            Msg::WindowResized { window_width } => {
-                self.window_resizes += 1;
-                self.last_window_width = Some(*window_width);
-            }
-            _ => {}
-        }
-    }
-
-    fn is_empty(self) -> bool {
-        self.splitter_moves == 0 && self.window_resizes == 0
-    }
-}
-
-fn is_geometry_only_message(msg: &Msg) -> bool {
-    matches!(
-        msg,
-        Msg::SplitterMoved { .. } | Msg::WindowResized { .. } | Msg::WindowResizeCompleted { .. }
-    )
-}
-
-fn select_render_mode(
-    any_dirty: bool,
-    geometry_only_batch: bool,
-    refresh_evaluation_dispatched: bool,
-    clear_input_needed: bool,
-    effect_count: usize,
-) -> Option<RenderMode> {
-    if !any_dirty {
-        return None;
-    }
-    if geometry_only_batch
-        && !refresh_evaluation_dispatched
-        && !clear_input_needed
-        && effect_count == 0
-    {
-        return Some(RenderMode::LayoutOnly);
-    }
-    Some(RenderMode::Full)
 }
 
 fn archive_dialog_context_tag(request_id: u64) -> String {

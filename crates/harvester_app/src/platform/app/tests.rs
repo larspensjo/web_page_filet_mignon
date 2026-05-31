@@ -2,6 +2,7 @@ use super::config::{
     parse_llm_max_concurrency_requests, DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
     MAX_LLM_CONCURRENT_REQUESTS,
 };
+use super::render_batch::{select_render_mode, RenderMode};
 use super::ui::tree_item_ids::{job_tree_item_id, link_tree_item_id};
 use super::*;
 use commanductui::types::{TreeItemMarkerKind, WindowId};
