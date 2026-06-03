@@ -317,6 +317,28 @@ impl SignalCandidateSelection {
     }
 }
 
+/// Why `archive_final_selection` chose the list it did.
+///
+/// Mirrors the settled outcomes of [`compute_dialog_default`]:
+/// `OnAllSettled` -> `SignalFiltered`, `OffEmpty` -> `FullCorpusNoCandidates`,
+/// `OffDisabled` -> `FullCorpusSignalUnavailable`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveSelectionSource {
+    /// The settled signal-candidate selection narrowed the base corpus.
+    SignalFiltered,
+    /// Scoring produced results but none met the threshold/exclusions; the full base corpus is used.
+    FullCorpusNoCandidates,
+    /// No candidates were scored at all; the full base corpus is used.
+    FullCorpusSignalUnavailable,
+}
+
+/// The exact ordered URL list the Archive would export right now, plus the reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArchiveFinalSelection {
+    pub ordered_urls: Vec<String>,
+    pub source: ArchiveSelectionSource,
+}
+
 pub fn compute_dialog_default(
     settled: u32,
     in_progress: u32,

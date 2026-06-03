@@ -1808,6 +1808,148 @@ fn archive_dialog_checkpoint_submit_skips_override_persist_when_overrides_alread
 }
 
 #[test]
+fn signal_candidate_selection_applies_threshold_and_order() {
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    state = with_signal_candidate_metadata(state);
+
+    for (i, score, key) in [(0usize, 80u8, "cluster-a"), (1usize, 30u8, "cluster-b")] {
+        let url = format!("https://triage-complete.com/{i}");
+        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .mark_scoring(&url, i as u64 + 1);
+        state.signal_candidate_mut().complete(
+            &url,
+            SignalCandidateResult {
+                signal_score: score,
+                signal_key: key.to_string(),
+                themes: vec!["t".to_string()],
+                draft_gist: "g".to_string(),
+                source_tier: SourceTier::Tier1,
+                confidence: Confidence::High,
+                reasoning: "r".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+    }
+
+    let selection = state.signal_candidate_selection();
+    assert_eq!(
+        selection.selected_urls,
+        vec!["https://triage-complete.com/0".to_string()],
+        "only the above-threshold article is selected"
+    );
+}
+
+#[test]
+fn archive_final_selection_signal_filtered_matches_shared_selection() {
+    use crate::signal_candidate::ArchiveSelectionSource;
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    state = with_signal_candidate_metadata(state);
+    for (i, score, key) in [(0usize, 80u8, "cluster-a"), (1usize, 30u8, "cluster-b")] {
+        let url = format!("https://triage-complete.com/{i}");
+        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .mark_scoring(&url, i as u64 + 1);
+        state.signal_candidate_mut().complete(
+            &url,
+            SignalCandidateResult {
+                signal_score: score,
+                signal_key: key.to_string(),
+                themes: vec!["t".to_string()],
+                draft_gist: "g".to_string(),
+                source_tier: SourceTier::Tier1,
+                confidence: Confidence::High,
+                reasoning: "r".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+    }
+
+    let final_selection = state.archive_final_selection();
+    assert_eq!(
+        final_selection.source,
+        ArchiveSelectionSource::SignalFiltered
+    );
+    assert_eq!(
+        final_selection.ordered_urls,
+        state.signal_candidate_selection().selected_urls,
+        "archive_final_selection must use the shared selection compute"
+    );
+    assert_eq!(
+        final_selection.ordered_urls,
+        vec!["https://triage-complete.com/0".to_string()]
+    );
+}
+
+#[test]
+fn archive_final_selection_settled_empty_falls_back_to_full_corpus() {
+    use crate::signal_candidate::ArchiveSelectionSource;
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    state = with_signal_candidate_metadata(state);
+    for i in 0..2usize {
+        let url = format!("https://triage-complete.com/{i}");
+        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .mark_scoring(&url, i as u64 + 1);
+        state.signal_candidate_mut().complete(
+            &url,
+            SignalCandidateResult {
+                signal_score: 10,
+                signal_key: format!("k{i}"),
+                themes: vec!["t".to_string()],
+                draft_gist: "g".to_string(),
+                source_tier: SourceTier::Tier1,
+                confidence: Confidence::High,
+                reasoning: "r".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+    }
+
+    let final_selection = state.archive_final_selection();
+    assert_eq!(
+        final_selection.source,
+        ArchiveSelectionSource::FullCorpusNoCandidates
+    );
+    assert_eq!(
+        final_selection.ordered_urls,
+        state.archive_corpus().ordered_urls().to_vec()
+    );
+}
+
+#[test]
+fn archive_final_selection_no_candidates_falls_back_to_full_corpus() {
+    use crate::signal_candidate::ArchiveSelectionSource;
+
+    init_logging();
+    let state = complete_triage_state_for_test(2);
+    let final_selection = state.archive_final_selection();
+    assert_eq!(
+        final_selection.source,
+        ArchiveSelectionSource::FullCorpusSignalUnavailable
+    );
+    assert_eq!(
+        final_selection.ordered_urls,
+        state.archive_corpus().ordered_urls().to_vec()
+    );
+}
+
+#[test]
 fn view_exposes_archive_token_estimate_and_article_counts() {
     use crate::briefing::ArticleSummaryResult;
     use crate::summary_cache::SummaryCacheKey;

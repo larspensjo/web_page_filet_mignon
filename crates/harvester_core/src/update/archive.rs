@@ -271,24 +271,7 @@ fn format_summary_body(result: &crate::briefing::ArticleSummaryResult) -> String
 fn build_signal_candidate_snapshot(
     state: &AppState,
 ) -> crate::signal_candidate::SignalCandidateArchiveSelection {
-    use crate::signal_candidate::{ScoredCandidate, SelectionPolicy, SignalCandidateSelection};
-
-    let scored: Vec<ScoredCandidate> = state
-        .signal_candidate()
-        .iter_completed()
-        .map(|(url, result)| ScoredCandidate {
-            url: url.to_string(),
-            result: result.clone(),
-        })
-        .collect();
-    let policy = SelectionPolicy {
-        threshold: state.signal_candidate_threshold(),
-        active_prompt_version: state
-            .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
-            .unwrap_or_default(),
-        excluded: state.signal_candidate().excluded().clone(),
-    };
-    let selection = SignalCandidateSelection::compute(&scored, policy);
+    let selection = state.signal_candidate_selection();
     let token_estimates = state.archive_token_estimates(&selection.selected_urls);
     let cache_fingerprint = signal_candidate_selection_fingerprint(state, &selection.selected_urls);
 

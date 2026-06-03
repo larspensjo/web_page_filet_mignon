@@ -1849,3 +1849,9 @@ Type: Implementation
 Context: The final accessor cluster in `state/mod.rs` still mixed UI/session/input behavior into the module root after the earlier state split phases.
 Change: Moved `AppState`'s dirty/session/input/layout/tab/trend accessors into the existing `crates/harvester_core/src/state/ui_state.rs` sibling module and removed the duplicate block from `mod.rs`.
 Refs: crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/ui_state.rs, cargo test -p harvester_core
+
+## 2026-06-02 - Added shared archive selection accessors
+Type: Implementation
+Context: The archive dialog snapshot builder was re-deriving the signal-candidate selection inline, which made the archive export list and future briefing consumer easy to drift apart.
+Change: Added `ArchiveSelectionSource` and `ArchiveFinalSelection`, extracted `AppState::signal_candidate_selection()` and `AppState::archive_final_selection()` in `state/signal_candidate_access.rs`, and routed the archive snapshot builder through the shared selection compute. Added archive tests covering threshold/order and the three archive-final-selection outcomes.
+Refs: crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/state/signal_candidate_access.rs, crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/update/tests/archive_tests.rs, crates/harvester_core/src/lib.rs

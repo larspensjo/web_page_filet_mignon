@@ -54,9 +54,10 @@ pub use prompt_lab::{
     PromptLabRunStatus, PromptLabStage, PromptLabTemplateSnapshot,
 };
 pub use signal_candidate::{
-    compute_dialog_default, OverrideKey, ScoredCandidate, SelectionPolicy,
-    SignalCandidateArchiveSelection, SignalCandidateDialogDefault, SignalCandidateSelection,
-    SignalCandidateSession, SignalCandidateState,
+    compute_dialog_default, ArchiveFinalSelection, ArchiveSelectionSource, OverrideKey,
+    ScoredCandidate, SelectionPolicy, SignalCandidateArchiveSelection,
+    SignalCandidateDialogDefault, SignalCandidateSelection, SignalCandidateSession,
+    SignalCandidateState,
 };
 pub use signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,

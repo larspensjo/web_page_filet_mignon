@@ -1,6 +1,9 @@
 use super::AppState;
 use crate::briefing::ArticleSummaryResult;
-use crate::signal_candidate::{SignalCandidateArchiveSelection, SignalCandidateSession};
+use crate::signal_candidate::{
+    ArchiveFinalSelection, ArchiveSelectionSource, ScoredCandidate, SelectionPolicy,
+    SignalCandidateArchiveSelection, SignalCandidateSelection, SignalCandidateSession,
+};
 use crate::signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,
 };
@@ -133,5 +136,60 @@ impl AppState {
         self.summary_cache()
             .lookup_any_by_content_hash(content_hash)
             .map(|entry| &entry.result)
+    }
+
+    /// The live signal-candidate selection computed from the current session:
+    /// the same threshold + exclusion logic the Archive dialog uses. Single
+    /// source of truth shared by the dialog snapshot and the briefing selector.
+    pub(crate) fn signal_candidate_selection(&self) -> SignalCandidateSelection {
+        let scored: Vec<ScoredCandidate> = self
+            .signal_candidate()
+            .iter_completed()
+            .map(|(url, result)| ScoredCandidate {
+                url: url.to_string(),
+                result: result.clone(),
+            })
+            .collect();
+        let policy = SelectionPolicy {
+            threshold: self.signal_candidate_threshold(),
+            active_prompt_version: self
+                .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
+                .unwrap_or_default(),
+            excluded: self.signal_candidate().excluded().clone(),
+        };
+        SignalCandidateSelection::compute(&scored, policy)
+    }
+
+    /// The exact ordered URL list the Archive would export right now: the triage
+    /// base corpus narrowed by the settled signal-candidate selection, falling
+    /// back to the full base corpus when the selection is empty or no candidates
+    /// were scored.
+    ///
+    /// Note: in-flight scoring is intentionally not consulted here. Callers that
+    /// must not act mid-scoring should gate before calling this accessor.
+    pub fn archive_final_selection(&self) -> ArchiveFinalSelection {
+        let base = self.archive_corpus();
+        let completed = self.signal_candidate().completed_count();
+        let failed = self.signal_candidate().failed_count();
+
+        if completed == 0 && failed == 0 {
+            return ArchiveFinalSelection {
+                ordered_urls: base.ordered_urls().to_vec(),
+                source: ArchiveSelectionSource::FullCorpusSignalUnavailable,
+            };
+        }
+
+        let selection = self.signal_candidate_selection();
+        if selection.selected_urls.is_empty() {
+            return ArchiveFinalSelection {
+                ordered_urls: base.ordered_urls().to_vec(),
+                source: ArchiveSelectionSource::FullCorpusNoCandidates,
+            };
+        }
+
+        ArchiveFinalSelection {
+            ordered_urls: selection.selected_urls,
+            source: ArchiveSelectionSource::SignalFiltered,
+        }
     }
 }
