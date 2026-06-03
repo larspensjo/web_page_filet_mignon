@@ -494,6 +494,15 @@ impl BriefingSession {
             })
     }
 
+    /// Returns true when the briefing session has recorded a terminal failure
+    /// for the given article URL.
+    pub fn summary_failed_for_url(&self, url: &str) -> bool {
+        self.articles.iter().any(|article| {
+            article.url == url
+                && matches!(article.summary_state, ArticleSummaryState::Failed { .. })
+        })
+    }
+
     pub fn briefing_result(&self) -> Option<&BriefingResult> {
         self.briefing_result.as_ref()
     }

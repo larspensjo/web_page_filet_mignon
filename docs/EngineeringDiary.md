@@ -1855,3 +1855,9 @@ Type: Implementation
 Context: The archive dialog snapshot builder was re-deriving the signal-candidate selection inline, which made the archive export list and future briefing consumer easy to drift apart.
 Change: Added `ArchiveSelectionSource` and `ArchiveFinalSelection`, extracted `AppState::signal_candidate_selection()` and `AppState::archive_final_selection()` in `state/signal_candidate_access.rs`, and routed the archive snapshot builder through the shared selection compute. Added archive tests covering threshold/order and the three archive-final-selection outcomes.
 Refs: crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/state/signal_candidate_access.rs, crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/update/tests/archive_tests.rs, crates/harvester_core/src/lib.rs
+
+## 2026-06-03 - Added briefing readiness accessors and summary-failure lookup
+Type: Implementation
+Context: Phase 2 of the briefing/archive alignment needed pure readiness predicates so later briefing entry points can gate on settled corpus state instead of recomputing ad hoc checks.
+Change: Added `BriefingSession::summary_failed_for_url()`, `AppState::summaries_can_start()`, and `AppState::briefing_generate_readiness()` with a shared `BriefingGenerateReadiness` return type re-exported from `state/mod.rs`. Added regression tests for the empty, summary-not-settled, signal-scoring-in-progress, and failed-summary-ready branches, plus the briefing-session failure lookup itself.
+Refs: crates/harvester_core/src/briefing.rs, crates/harvester_core/src/state/mod.rs, crates/harvester_core/src/state/signal_candidate_access.rs, crates/harvester_core/src/update/tests/archive_tests.rs

@@ -12,6 +12,18 @@ use crate::SummaryCacheKey;
 use harvester_engine::llm::dto::SignalCandidateResult;
 use harvester_engine::llm::prompt::PromptId;
 
+/// Whether the briefing may generate now, and on what list.
+///
+/// The `Ready` variant carries the resolved selection so the entry point does
+/// not recompute it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BriefingGenerateReadiness {
+    Ready { selection: ArchiveFinalSelection },
+    TriageOrCorpusNotReady,
+    SummariesNotSettled,
+    SignalScoringInProgress,
+}
+
 impl AppState {
     /// Pin the signal-candidate archive selection snapshot for the current dialog session.
     pub fn pin_signal_candidate_selection(&mut self, selection: SignalCandidateArchiveSelection) {
@@ -190,6 +202,45 @@ impl AppState {
         ArchiveFinalSelection {
             ordered_urls: selection.selected_urls,
             source: ArchiveSelectionSource::SignalFiltered,
+        }
+    }
+
+    /// The base corpus is ready to summarize when triage is complete, at least
+    /// one eligible article exists, and no briefing run is already in flight.
+    /// `BriefingSession::can_start()` also blocks `WaitingForTriage`, which is
+    /// intentionally treated as an outstanding briefing request.
+    pub fn summaries_can_start(&self) -> bool {
+        matches!(self.triage().phase(), crate::triage::TriagePhase::Complete)
+            && !self.archive_corpus().is_empty()
+            && self.briefing.can_start()
+    }
+
+    /// The corpus-relative readiness verdict for Generate Briefing.
+    ///
+    /// This deliberately does not include session/AI gates. The view and
+    /// entry-point guards compose those with this verdict when they need the
+    /// full "can generate now" answer.
+    pub fn briefing_generate_readiness(&self) -> BriefingGenerateReadiness {
+        let corpus = self.archive_corpus();
+        if corpus.is_empty()
+            || !matches!(self.triage().phase(), crate::triage::TriagePhase::Complete)
+        {
+            return BriefingGenerateReadiness::TriageOrCorpusNotReady;
+        }
+
+        let all_settled = corpus.ordered_urls().iter().all(|url| {
+            self.summary_result_for_url(url).is_some() || self.briefing.summary_failed_for_url(url)
+        });
+        if !all_settled {
+            return BriefingGenerateReadiness::SummariesNotSettled;
+        }
+
+        if self.signal_candidate().in_flight_count() > 0 {
+            return BriefingGenerateReadiness::SignalScoringInProgress;
+        }
+
+        BriefingGenerateReadiness::Ready {
+            selection: self.archive_final_selection(),
         }
     }
 }

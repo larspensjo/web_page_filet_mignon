@@ -1950,6 +1950,175 @@ fn archive_final_selection_no_candidates_falls_back_to_full_corpus() {
 }
 
 #[test]
+fn summary_failed_for_url_returns_true_for_failed_summary() {
+    use crate::briefing::{BriefingSession, LoadedArticle};
+
+    init_logging();
+    let url = "https://triage-complete.com/0";
+    let mut briefing = BriefingSession::new_loading(None);
+    briefing.set_articles(
+        vec![LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: "text".to_string(),
+            content_hash: "hash-tc-0".to_string(),
+            fetched_utc: None,
+        }],
+        "collection".to_string(),
+    );
+    briefing.transition_to_summarizing();
+    briefing.start_article(0, 1);
+    briefing.fail_article(0, "network".to_string());
+
+    assert!(briefing.summary_failed_for_url(url));
+    assert!(!briefing.summary_failed_for_url("https://triage-complete.com/1"));
+}
+
+#[test]
+fn summaries_can_start_true_when_triage_complete_and_briefing_idle() {
+    init_logging();
+    let state = complete_triage_state_for_test(2);
+    assert!(state.summaries_can_start());
+}
+
+#[test]
+fn summaries_can_start_false_when_triage_not_complete() {
+    init_logging();
+    let state = AppState::new();
+    assert!(!state.summaries_can_start());
+}
+
+#[test]
+fn summaries_can_start_false_when_briefing_active() {
+    use crate::briefing::BriefingSession;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    state.set_briefing(BriefingSession::new_loading(None));
+    assert!(!state.briefing().can_start());
+    assert!(!state.summaries_can_start());
+}
+
+#[test]
+fn briefing_generate_readiness_triage_or_corpus_not_ready_when_empty() {
+    use crate::state::BriefingGenerateReadiness;
+
+    init_logging();
+    let state = AppState::new();
+    assert!(matches!(
+        state.briefing_generate_readiness(),
+        BriefingGenerateReadiness::TriageOrCorpusNotReady
+    ));
+}
+
+#[test]
+fn briefing_generate_readiness_summaries_not_settled() {
+    use crate::state::BriefingGenerateReadiness;
+
+    init_logging();
+    let state = complete_triage_state_for_test(2);
+    assert!(matches!(
+        state.briefing_generate_readiness(),
+        BriefingGenerateReadiness::SummariesNotSettled
+    ));
+}
+
+#[test]
+fn briefing_generate_readiness_ready_when_failed_summary_does_not_block() {
+    use crate::briefing::{ArticleSummaryResult, BriefingSession, LoadedArticle};
+    use crate::state::BriefingGenerateReadiness;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: "hash-tc-0".to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "test-summary-model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "A".to_string(),
+            summary: "s".to_string(),
+            key_points: vec![],
+            input_tokens: 1,
+            output_tokens: 1,
+            entities: SummaryEntities::default(),
+        },
+        "2026-05-01T00:00:00Z".to_string(),
+    );
+
+    let mut briefing = BriefingSession::new_loading(None);
+    briefing.set_articles(
+        vec![LoadedArticle {
+            url: "https://triage-complete.com/1".to_string(),
+            source_title: None,
+            prepared_text: "t".to_string(),
+            content_hash: "hash-tc-1".to_string(),
+            fetched_utc: None,
+        }],
+        "c".to_string(),
+    );
+    briefing.transition_to_summarizing();
+    briefing.start_article(0, 1);
+    briefing.fail_article(0, "network".to_string());
+    briefing.complete_without_briefing();
+    state.set_briefing(briefing);
+
+    assert!(matches!(
+        state.briefing_generate_readiness(),
+        BriefingGenerateReadiness::Ready { .. }
+    ));
+}
+
+#[test]
+fn briefing_generate_readiness_signal_scoring_in_progress() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::state::BriefingGenerateReadiness;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+
+    for i in 0..2usize {
+        state.store_summary_result(
+            SummaryCacheKey {
+                content_hash: format!("hash-tc-{i}"),
+                prompt_id: PromptId::ArticleSummary,
+                prompt_version: 1,
+                model_id: "test-summary-model".to_string(),
+                context_hash: "ctx".to_string(),
+            },
+            ArticleSummaryResult {
+                title: "A".to_string(),
+                summary: "s".to_string(),
+                key_points: vec![],
+                input_tokens: 1,
+                output_tokens: 1,
+                entities: SummaryEntities::default(),
+            },
+            "2026-05-01T00:00:00Z".to_string(),
+        );
+    }
+
+    let url = "https://triage-complete.com/0".to_string();
+    state.signal_candidate_mut().enqueue(url);
+    assert!(state.signal_candidate().in_flight_count() > 0);
+
+    assert!(matches!(
+        state.briefing_generate_readiness(),
+        BriefingGenerateReadiness::SignalScoringInProgress
+    ));
+}
+
+#[test]
 fn view_exposes_archive_token_estimate_and_article_counts() {
     use crate::briefing::ArticleSummaryResult;
     use crate::summary_cache::SummaryCacheKey;
