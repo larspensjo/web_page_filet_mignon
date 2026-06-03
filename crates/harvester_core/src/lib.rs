@@ -30,7 +30,7 @@ pub mod working_corpus;
 pub use briefing::{
     format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
     BriefingHistoryEntry, BriefingHistoryStory, BriefingPhase, BriefingResult, BriefingSession,
-    BriefingStoryResult, CorpusFingerprint, LoadedArticle, TriageSelectionPolicy,
+    BriefingStoryResult, LoadedArticle, TriageSelectionPolicy,
 };
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};

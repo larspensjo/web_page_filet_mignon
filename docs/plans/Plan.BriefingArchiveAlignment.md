@@ -16,7 +16,7 @@
 - **Phase 2 — Readiness predicates** — ✅ COMPLETE (committed `d5077b2`).
 - **Phase 3 — Rewire entry points + alignment guarantee** — ✅ COMPLETE (committed `994243c`). User-visible behavior flipped: both briefing entry points now load directly from `archive_final_selection()` / `archive_corpus()` and defensive-fail instead of self-triaging.
 - **Phase 4 — View model / button enablement** — ✅ COMPLETE (committed `675b6e9`). The GUI now gates Generate and Summarize independently by workflow stage; `briefing_can_start` is fully removed.
-- **Phase 5 — Remove the dead self-triage pipeline** — detailed into Tasks 5.1–5.7 (2026-06-03). Pure subtraction; not yet started.
+- **Phase 5 — Remove the dead self-triage pipeline** — ✅ COMPLETE (implemented 2026-06-03). Pure subtraction; the prereq/self-triage path has been removed and the orchestration struct is reduced to the surviving skip-aggregate/policy state.
 
 **Review note (per `Agents.md`):** When implementing Phase 4, **do not commit** — leave changes unstaged for review.
 
@@ -83,7 +83,7 @@
 - The loading phase variant is **`BriefingPhase::LoadingArticles`**, not `Loading` — the plan drafts said `Loading`. Phase 4 view/render code and tests must use `LoadingArticles`.
 - Despite the plan's "do not commit" note, Phase 3 **was committed** as `994243c`. Working tree is clean.
 
-**Outcome:** `GenerateBriefingClicked` emits `LoadArticlesForBriefing` whose `ordered_urls` equals `archive_final_selection().ordered_urls` (exact, order-preserving); `PrepareSummariesClicked` summarizes the base corpus with `skip_aggregate`; both defensive-fail / disable correctly. The old `handle_prereq_*` / `on_triage_settled_for_briefing` handlers and the `LoadArticlesForBriefingPrereq` / `Msg::BriefingPrereq*` variants **still exist and still compile** (reached only from `update/triage.rs`'s settlement hook + their own unit tests) — removal is Phase 5.
+**Outcome:** `GenerateBriefingClicked` emits `LoadArticlesForBriefing` whose `ordered_urls` equals `archive_final_selection().ordered_urls` (exact, order-preserving); `PrepareSummariesClicked` summarizes the base corpus with `skip_aggregate`; both defensive-fail / disable correctly. The old `handle_prereq_*` / `on_triage_settled_for_briefing` handlers and the `LoadArticlesForBriefingPrereq` / `Msg::BriefingPrereq*` variants were removed in Phase 5 after the direct-load rewrite orphaned them.
 
 ---
 
@@ -153,9 +153,9 @@ Removing the `Effect` variant in 5.2 would break these references first, so neut
 **Files:**
 - Modify: `crates/harvester_core/src/update/tests/mod.rs`
 
-- [ ] **Step 1:** At `mod.rs:119`, `:303`, `:788` delete the standalone negative assertion (each is `assert!(!effects.iter().any(|effect| matches!(effect, Effect::LoadArticlesForBriefingPrereq { .. })));`). The surrounding test already asserts the positive `LoadArticlesForBriefing` load, so no replacement is needed.
-- [ ] **Step 2:** At `mod.rs:198` and `:223`, the assertion is a combined `matches!(effect, Effect::LoadArticlesForBriefing { .. } | Effect::LoadArticlesForBriefingPrereq { .. })`. Drop the ` | Effect::LoadArticlesForBriefingPrereq { .. }` arm, leaving the `LoadArticlesForBriefing` check intact.
-- [ ] **Step 3: Checkpoint (do not commit).** Run: `cargo test -p harvester_core`. Expected: PASS (no compile change yet — the variant still exists). Leave the change unstaged.
+- [x] **Step 1:** At `mod.rs:119`, `:303`, `:788` delete the standalone negative assertion (each is `assert!(!effects.iter().any(|effect| matches!(effect, Effect::LoadArticlesForBriefingPrereq { .. })));`). The surrounding test already asserts the positive `LoadArticlesForBriefing` load, so no replacement is needed.
+- [x] **Step 2:** At `mod.rs:198` and `:223`, the assertion is a combined `matches!(effect, Effect::LoadArticlesForBriefing { .. } | Effect::LoadArticlesForBriefingPrereq { .. })`. Drop the ` | Effect::LoadArticlesForBriefingPrereq { .. }` arm, leaving the `LoadArticlesForBriefing` check intact.
+- [x] **Step 3: Checkpoint (do not commit).** Run: `cargo test -p harvester_core`. Expected: PASS (no compile change yet — the variant still exists). Leave the change unstaged.
 
 ### Task 5.2: Remove `Effect::LoadArticlesForBriefingPrereq` + its IO dispatch + IO test
 
@@ -164,10 +164,10 @@ Removing the `Effect` variant in 5.2 would break these references first, so neut
 - Modify: `crates/harvester_io/src/effect_runner/dispatch.rs`
 - Modify: `crates/harvester_io/src/effect_runner/tests.rs`
 
-- [ ] **Step 1:** Delete the `LoadArticlesForBriefingPrereq { … }` variant at `effect.rs:18` (the whole variant + its doc comment).
-- [ ] **Step 2:** Delete the `Effect::LoadArticlesForBriefingPrereq { … } => { … }` dispatch arm in `dispatch.rs` (starts `:606`, through the block that sends `Msg::BriefingPrereqArticlesLoaded` `:646` / `Msg::BriefingPrereqLoadFailed` `:655`). If a now-unused `use`/helper is left in `dispatch.rs`, remove it.
-- [ ] **Step 3:** Delete the IO test `load_articles_for_briefing_prereq_dispatches_loaded_message` (`tests.rs:459`, the whole `#[test] fn …`).
-- [ ] **Step 4: Checkpoint (do not commit).** Run: `cargo build && cargo test -p harvester_core && cargo test -p harvester_io`. Expected: PASS, no `unused`/`non_exhaustive` warnings. Leave changes unstaged.
+- [x] **Step 1:** Delete the `LoadArticlesForBriefingPrereq { … }` variant at `effect.rs:18` (the whole variant + its doc comment).
+- [x] **Step 2:** Delete the `Effect::LoadArticlesForBriefingPrereq { … } => { … }` dispatch arm in `dispatch.rs` (starts `:606`, through the block that sends `Msg::BriefingPrereqArticlesLoaded` `:646` / `Msg::BriefingPrereqLoadFailed` `:655`). If a now-unused `use`/helper is left in `dispatch.rs`, remove it.
+- [x] **Step 3:** Delete the IO test `load_articles_for_briefing_prereq_dispatches_loaded_message` (`tests.rs:459`, the whole `#[test] fn …`).
+- [x] **Step 4: Checkpoint (do not commit).** Run: `cargo build && cargo test -p harvester_core && cargo test -p harvester_io`. Expected: PASS, no `unused`/`non_exhaustive` warnings. Leave changes unstaged.
 
 ### Task 5.3: Remove the prereq Msgs, reducer arms, handlers, and the settlement hook
 
@@ -180,17 +180,17 @@ These go together: the two handlers and `on_triage_settled_for_briefing` form on
 - Modify: `crates/harvester_core/src/update/triage.rs`
 - Modify: `crates/harvester_batch/src/runner.rs`
 
-- [ ] **Step 1:** Delete the `Msg::BriefingPrereqArticlesLoaded { articles }` (`msg.rs:239`) and `Msg::BriefingPrereqLoadFailed { reason }` (`msg.rs:266`) variants with their doc comments. If `LoadedArticle` is now unused in `msg.rs`, drop it from the imports (let clippy confirm).
-- [ ] **Step 2:** Delete the two match arms in `update/mod.rs:301-305` (`Msg::BriefingPrereqArticlesLoaded …` and `Msg::BriefingPrereqLoadFailed …`).
-- [ ] **Step 3:** Delete the batch-runner log arm `Msg::BriefingPrereqArticlesLoaded { articles } => { … }` at `runner.rs:1010`.
-- [ ] **Step 4:** In `update/triage.rs`, delete the settlement call block at `:380-382`:
+- [x] **Step 1:** Delete the `Msg::BriefingPrereqArticlesLoaded { articles }` (`msg.rs:239`) and `Msg::BriefingPrereqLoadFailed { reason }` (`msg.rs:266`) variants with their doc comments. If `LoadedArticle` is now unused in `msg.rs`, drop it from the imports (let clippy confirm).
+- [x] **Step 2:** Delete the two match arms in `update/mod.rs:301-305` (`Msg::BriefingPrereqArticlesLoaded …` and `Msg::BriefingPrereqLoadFailed …`).
+- [x] **Step 3:** Delete the batch-runner log arm `Msg::BriefingPrereqArticlesLoaded { articles } => { … }` at `runner.rs:1010`.
+- [x] **Step 4:** In `update/triage.rs`, delete the settlement call block at `:380-382`:
   ```rust
   if state.briefing_orchestration_requested() {
       super::briefing::on_triage_settled_for_briefing(state, effects);
   }
   ```
-- [ ] **Step 5:** In `update/briefing.rs`, delete `handle_prereq_articles_loaded` (`:102-142`), `handle_prereq_load_failed` (`:144-150`), and `on_triage_settled_for_briefing` (`:259-296`). Then remove `CorpusFingerprint` from the import at `:5` and any now-unused imports (`PreTriagePolicy`, `PreTriageSession`, `TriagePhase` — verify each is unused before dropping; let clippy guide you).
-- [ ] **Step 6: Checkpoint (do not commit).** Run: `cargo build && cargo test -p harvester_core && cargo test -p harvester_batch`. Expected: PASS. (`on_triage_settled_for_briefing` and the handlers are gone; `briefing_orchestration_requested` still exists, used by `triage.rs:33` and `batch.rs:102` until Task 5.4.) Leave changes unstaged.
+- [x] **Step 5:** In `update/briefing.rs`, delete `handle_prereq_articles_loaded` (`:102-142`), `handle_prereq_load_failed` (`:144-150`), and `on_triage_settled_for_briefing` (`:259-296`). Then remove `CorpusFingerprint` from the import at `:5` and any now-unused imports (`PreTriagePolicy`, `PreTriageSession`, `TriagePhase` — verify each is unused before dropping; let clippy guide you).
+- [x] **Step 6: Checkpoint (do not commit).** Run: `cargo build && cargo test -p harvester_core && cargo test -p harvester_batch`. Expected: PASS. (`on_triage_settled_for_briefing` and the handlers are gone; `briefing_orchestration_requested` still exists, used by `triage.rs:33` and `batch.rs:102` until Task 5.4.) Leave changes unstaged.
 
 ### Task 5.4: Simplify `BriefingOrchestration` — drop the vestigial `requested` + prereq machinery
 
@@ -203,24 +203,24 @@ With the settlement hook gone, `requested` is set and immediately cleared inside
 - Modify: `crates/harvester_core/src/state/briefing_orchestration.rs`
 - Modify: `crates/harvester_core/src/update/tests/support.rs`
 
-- [ ] **Step 1:** In `update/briefing.rs`, `begin_briefing_article_load` — remove the `state.clear_briefing_orchestration_request();` call at `:30` and update the comment at `:28-29` to read e.g. *"Arm the skip-aggregate flag for the load that follows."*
-- [ ] **Step 2:** In `update/tests/support.rs`, remove the `state.clear_briefing_orchestration_request();` call at `:235` (the preceding `request_briefing_orchestration()` at `:234` stays — it sets `skip_aggregate = false` for the Generate-style helper).
-- [ ] **Step 3:** In `update/triage.rs`, delete the interleave guard at `:33-36`:
+- [x] **Step 1:** In `update/briefing.rs`, `begin_briefing_article_load` — remove the `state.clear_briefing_orchestration_request();` call at `:30` and update the comment at `:28-29` to read e.g. *"Arm the skip-aggregate flag for the load that follows."*
+- [x] **Step 2:** In `update/tests/support.rs`, remove the `state.clear_briefing_orchestration_request();` call at `:235` (the preceding `request_briefing_orchestration()` at `:234` stays — it sets `skip_aggregate = false` for the Generate-style helper).
+- [x] **Step 3:** In `update/triage.rs`, delete the interleave guard at `:33-36`:
   ```rust
   if state.briefing_orchestration_requested() {
       engine_info!("[briefing-triage] interleave blocked: briefing owns triage");
       return Vec::new();
   }
   ```
-- [ ] **Step 4:** In `state/batch.rs:102`, remove the `&& !self.briefing_orchestration_requested()` conjunct from the `batch_next_action` `DispatchTriage` condition.
-- [ ] **Step 5:** In `state/briefing_orchestration.rs`, simplify the struct:
+- [x] **Step 4:** In `state/batch.rs:102`, remove the `&& !self.briefing_orchestration_requested()` conjunct from the `batch_next_action` `DispatchTriage` condition.
+- [x] **Step 5:** In `state/briefing_orchestration.rs`, simplify the struct:
   - Remove the `requested: bool` and `prereq_articles: …` fields (and their `Default` initializers).
   - In `request()`, drop `self.requested = true;` — keep `self.skip_aggregate_briefing = skip_aggregate_briefing;`.
   - In `clear()`, drop the `requested` and `prereq_articles` resets — keep `self.skip_aggregate_briefing = false;`.
   - Delete `is_requested`, `clear_request`, `store_prereq`, `take_prereq`.
   - Delete the `AppState` wrappers `briefing_orchestration_requested`, `clear_briefing_orchestration_request`, `store_briefing_prereq_articles`, `take_briefing_prereq_articles`.
   - Keep `request_briefing_orchestration`, `request_summary_preparation`, `clear_briefing_orchestration`, `briefing_triage_policy`, `briefing_orchestration_skip_aggregate`, `policy`, `skip_aggregate_briefing`, and `priority_cutoff_exclusive`.
-- [ ] **Step 6: Checkpoint (do not commit).** Run: `cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core`. Expected: PASS, clippy clean. Then `rg "briefing_orchestration_requested|prereq_articles|clear_briefing_orchestration_request"` over `crates/` should return nothing. Leave changes unstaged.
+- [x] **Step 6: Checkpoint (do not commit).** Run: `cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core`. Expected: PASS, clippy clean. Then `rg "briefing_orchestration_requested|prereq_articles|clear_briefing_orchestration_request"` over `crates/` should return nothing. Leave changes unstaged.
 
 ### Task 5.5: Remove `CorpusFingerprint`
 
@@ -230,10 +230,10 @@ Only the removed prereq handler used it (and its own self-tests). Re-verify, the
 - Modify: `crates/harvester_core/src/briefing.rs`
 - Modify: `crates/harvester_core/src/lib.rs`
 
-- [ ] **Step 1: Re-verify no live users.** Run: `rg "CorpusFingerprint" crates/`. Expected: matches only in `briefing.rs` (definition + its self-tests) and the `lib.rs:33` re-export. If anything else appears, stop and reassess.
-- [ ] **Step 2:** Delete the `CorpusFingerprint` struct + `impl` block (`briefing.rs:194-225`, the `from_articles` / `from_triage_results` methods) and the unit tests that exercise it (around `briefing.rs:880-895` — the `from_articles` equality test; grep `CorpusFingerprint` within the test module to catch all). Remove any now-unused imports (`DefaultHasher`, `Hash`) if no longer referenced in `briefing.rs`.
-- [ ] **Step 3:** Remove `CorpusFingerprint` from the `pub use` re-export list at `lib.rs:33`.
-- [ ] **Step 4: Checkpoint (do not commit).** Run: `cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core`. Expected: PASS, clippy clean. Leave changes unstaged.
+- [x] **Step 1: Re-verify no live users.** Run: `rg "CorpusFingerprint" crates/`. Expected: matches only in `briefing.rs` (definition + its self-tests) and the `lib.rs:33` re-export. If anything else appears, stop and reassess.
+- [x] **Step 2:** Delete the `CorpusFingerprint` struct + `impl` block (`briefing.rs:194-225`, the `from_articles` / `from_triage_results` methods) and the unit tests that exercise it (around `briefing.rs:880-895` — the `from_articles` equality test; grep `CorpusFingerprint` within the test module to catch all). Remove any now-unused imports (`DefaultHasher`, `Hash`) if no longer referenced in `briefing.rs`.
+- [x] **Step 3:** Remove `CorpusFingerprint` from the `pub use` re-export list at `lib.rs:33`.
+- [x] **Step 4: Checkpoint (do not commit).** Run: `cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core`. Expected: PASS, clippy clean. Leave changes unstaged.
 
 ### Task 5.6: Remove the `WaitingForTriage` phase + `new_waiting_for_triage`
 
@@ -244,19 +244,19 @@ The entry points create `new_loading` now; nothing constructs `WaitingForTriage`
 - Modify: `crates/harvester_core/src/state/view_builder.rs`
 - Modify: `crates/harvester_core/src/state/signal_candidate_access.rs`
 
-- [ ] **Step 1: Re-verify no producer.** Run: `rg "WaitingForTriage|new_waiting_for_triage" crates/`. Expected: only the enum variant (`briefing.rs:15`), the unused constructor (`briefing.rs:268`), the two display match arms (`briefing.rs:513`, `view_builder.rs:536`), and the doc comment (`signal_candidate_access.rs:210`). No constructor caller.
-- [ ] **Step 2:** Delete the `WaitingForTriage` variant at `briefing.rs:15` and the `new_waiting_for_triage` constructor (`briefing.rs:268-278`).
-- [ ] **Step 3:** Delete the `BriefingPhase::WaitingForTriage => …` display arms at `briefing.rs:513` and `view_builder.rs:536`. (Both `match` expressions are otherwise exhaustive over the remaining phases — confirm the compiler agrees.)
-- [ ] **Step 4:** Update the comment at `signal_candidate_access.rs:210` that references `WaitingForTriage` so it no longer names the removed phase (it explains why `can_start()` blocks; reword to drop the stale reference).
-- [ ] **Step 5: Checkpoint (do not commit).** Run: `cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core`. Expected: PASS, clippy clean. Leave changes unstaged.
+- [x] **Step 1: Re-verify no producer.** Run: `rg "WaitingForTriage|new_waiting_for_triage" crates/`. Expected: only the enum variant (`briefing.rs:15`), the unused constructor (`briefing.rs:268`), the two display match arms (`briefing.rs:513`, `view_builder.rs:536`), and the doc comment (`signal_candidate_access.rs:210`). No constructor caller.
+- [x] **Step 2:** Delete the `WaitingForTriage` variant at `briefing.rs:15` and the `new_waiting_for_triage` constructor (`briefing.rs:268-278`).
+- [x] **Step 3:** Delete the `BriefingPhase::WaitingForTriage => …` display arms at `briefing.rs:513` and `view_builder.rs:536`. (Both `match` expressions are otherwise exhaustive over the remaining phases — confirm the compiler agrees.)
+- [x] **Step 4:** Update the comment at `signal_candidate_access.rs:210` that references `WaitingForTriage` so it no longer names the removed phase (it explains why `can_start()` blocks; reword to drop the stale reference).
+- [x] **Step 5: Checkpoint (do not commit).** Run: `cargo build && cargo clippy --all-targets -- -D warnings && cargo test -p harvester_core`. Expected: PASS, clippy clean. Leave changes unstaged.
 
 ### Task 5.7: Phase 5 verification gate
 
-- [ ] **Step 1: Full workspace build + lint + format.** Run: `cargo build && cargo clippy --all-targets -- -D warnings && cargo fmt`. Expected: clean, no `dead_code`/`unused` warnings.
-- [ ] **Step 2: Full workspace tests.** Run: `cargo test`. Expected: PASS across the workspace.
-- [ ] **Step 3: Final dead-symbol sweep.** Run: `rg "LoadArticlesForBriefingPrereq|BriefingPrereq|handle_prereq|on_triage_settled_for_briefing|CorpusFingerprint|WaitingForTriage|new_waiting_for_triage" crates/`. Expected: no matches.
-- [ ] **Step 4: Diary entry** — record that the briefing self-triage/prereq pipeline is fully removed and `BriefingOrchestration` is reduced to the skip-aggregate flag + triage policy; note the lesson that the prereq path was already orphaned by the Phase-3 rewire.
-- [ ] **Step 5: Hand off for review (do not commit).** Leave the entire Phase-5 diff **unstaged** — the reviewer stages it after review. Summarize the diff (files touched, symbols removed) for the hand-off.
+- [x] **Step 1: Full workspace build + lint + format.** Run: `cargo build && cargo clippy --all-targets -- -D warnings && cargo fmt`. Expected: clean, no `dead_code`/`unused` warnings.
+- [x] **Step 2: Full workspace tests.** Run: `cargo test`. Expected: PASS across the workspace.
+- [x] **Step 3: Final dead-symbol sweep.** Run: `rg "LoadArticlesForBriefingPrereq|BriefingPrereq|handle_prereq|on_triage_settled_for_briefing|CorpusFingerprint|WaitingForTriage|new_waiting_for_triage" crates/`. Expected: no matches.
+- [x] **Step 4: Diary entry** — record that the briefing self-triage/prereq pipeline is fully removed and `BriefingOrchestration` is reduced to the skip-aggregate flag + triage policy; note the lesson that the prereq path was already orphaned by the Phase-3 rewire.
+- [x] **Step 5: Hand off for review (do not commit).** Leave the entire Phase-5 diff **unstaged** — the reviewer stages it after review. Summarize the diff (files touched, symbols removed) for the hand-off.
 
 **Untouched (guard against scope creep):** `BriefingSession` summary/aggregate machinery, the summary cache, aggregate-briefing + `previous_briefings` history, the `briefing_since_utc` checkpoint/time window, `TriageSelectionPolicy` / `eligible_urls`, and the surviving `BriefingOrchestration` policy/skip-aggregate state. Batch flow (spec §F) needs no change beyond the `batch.rs:102` guard removal.
 

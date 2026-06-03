@@ -603,60 +603,6 @@ impl EffectRunner {
                     }
                 });
             }
-            Effect::LoadArticlesForBriefingPrereq {
-                ordered_urls,
-                since_utc,
-            } => {
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
-                let registry = self.prompt_registry.clone();
-                thread::spawn(move || {
-                    let load_started = Instant::now();
-                    engine_info!(
-                        "[articles-load] briefing-prereq start urls={} since_filter={}",
-                        ordered_urls.len(),
-                        since_utc.is_some()
-                    );
-                    let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(
-                        &output_dir,
-                        max_input_bytes,
-                        &guard,
-                        &ordered_urls,
-                        since_utc,
-                    ) {
-                        Ok((engine_articles, _)) => {
-                            let articles: Vec<LoadedArticle> = engine_articles
-                                .into_iter()
-                                .map(|article| LoadedArticle {
-                                    url: article.url,
-                                    source_title: article.source_title,
-                                    prepared_text: article.prepared_text,
-                                    content_hash: article.content_hash,
-                                    fetched_utc: article.fetched_utc,
-                                })
-                                .collect();
-                            engine_info!(
-                                "[articles-load] briefing-prereq done urls={} prepared={} elapsed_ms={}",
-                                ordered_urls.len(),
-                                articles.len(),
-                                load_started.elapsed().as_millis()
-                            );
-                            let _ = msg_tx.send(Msg::BriefingPrereqArticlesLoaded { articles });
-                        }
-                        Err(reason) => {
-                            engine_warn!(
-                                "[articles-load] briefing-prereq failed urls={} elapsed_ms={} reason={}",
-                                ordered_urls.len(),
-                                load_started.elapsed().as_millis(),
-                                reason
-                            );
-                            let _ = msg_tx.send(Msg::BriefingPrereqLoadFailed { reason });
-                        }
-                    }
-                });
-            }
             Effect::LoadArticlesForTriage {
                 request_id,
                 ordered_urls,

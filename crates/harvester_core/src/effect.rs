@@ -15,10 +15,6 @@ pub enum Effect {
         ordered_urls: Vec<String>,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
-    LoadArticlesForBriefingPrereq {
-        ordered_urls: Vec<String>,
-        since_utc: Option<chrono::DateTime<chrono::Utc>>,
-    },
     LoadArticlesForTriage {
         request_id: u64,
         ordered_urls: Vec<String>,

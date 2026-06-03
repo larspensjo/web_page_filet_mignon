@@ -30,10 +30,6 @@ pub(super) fn handle_evaluate_pre_triage_refresh(
 }
 
 pub(super) fn handle_triage_clicked(state: &mut AppState) -> Vec<Effect> {
-    if state.briefing_orchestration_requested() {
-        engine_info!("[briefing-triage] interleave blocked: briefing owns triage");
-        return Vec::new();
-    }
     if !state.triage_ai_available() {
         state.set_left_tab(LeftTab::TriageResults);
         state.mark_dirty();
@@ -377,9 +373,6 @@ pub(super) fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<
                 .fail("all triage attempts failed".to_string());
         } else {
             state.triage_mut().complete();
-            if state.briefing_orchestration_requested() {
-                super::briefing::on_triage_settled_for_briefing(state, effects);
-            }
         }
         log_triage_cache_run_summary(state);
         effects.push(Effect::PersistTriageCache {

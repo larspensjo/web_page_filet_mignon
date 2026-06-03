@@ -207,8 +207,8 @@ impl AppState {
 
     /// The base corpus is ready to summarize when triage is complete, at least
     /// one eligible article exists, and no briefing run is already in flight.
-    /// `BriefingSession::can_start()` also blocks `WaitingForTriage`, which is
-    /// intentionally treated as an outstanding briefing request.
+    /// `BriefingSession::can_start()` blocks any active briefing run so the
+    /// summarize entry point only arms a fresh load when the session is idle.
     pub fn summaries_can_start(&self) -> bool {
         matches!(self.triage().phase(), crate::triage::TriagePhase::Complete)
             && !self.archive_corpus().is_empty()

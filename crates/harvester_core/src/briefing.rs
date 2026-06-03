@@ -1,9 +1,7 @@
 use crate::summary_cache::SummaryCacheKey;
 use crate::triage::{ArticleTriageState, TriageSession};
 use harvester_engine::llm::SummaryEntities;
-use std::collections::hash_map::DefaultHasher;
 use std::fmt::Write;
-use std::hash::{Hash, Hasher};
 
 pub type BriefingArticleId = usize;
 const MAX_BRIEFING_PREVIEW_CHARS: usize = 32_768;
@@ -12,7 +10,6 @@ const PREVIEW_TRUNCATE_MARKER: &str = "[...truncated]";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BriefingPhase {
     Idle,
-    WaitingForTriage,
     LoadingArticles,
     Summarizing,
     GeneratingBriefing,
@@ -192,39 +189,6 @@ pub struct LoadedArticle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CorpusFingerprint(u64);
-
-impl CorpusFingerprint {
-    pub fn from_articles(articles: &[LoadedArticle]) -> Self {
-        let mut pairs: Vec<_> = articles
-            .iter()
-            .map(|article| (article.url.as_str(), article.content_hash.as_str()))
-            .collect();
-        pairs.sort_unstable_by(|a, b| a.0.cmp(b.0).then(a.1.cmp(b.1)));
-        let mut hasher = DefaultHasher::new();
-        pairs.hash(&mut hasher);
-        Self(hasher.finish())
-    }
-
-    pub fn from_triage_results(triage: &TriageSession) -> Self {
-        let mut pairs: Vec<_> = triage
-            .articles()
-            .iter()
-            .filter_map(|article| match article.triage_state {
-                ArticleTriageState::Completed { .. } => {
-                    Some((article.url.as_str(), article.content_hash.as_str()))
-                }
-                _ => None,
-            })
-            .collect();
-        pairs.sort_unstable_by(|a, b| a.0.cmp(b.0).then(a.1.cmp(b.1)));
-        let mut hasher = DefaultHasher::new();
-        pairs.hash(&mut hasher);
-        Self(hasher.finish())
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TriageSelectionPolicy {
     pub cutoff_exclusive: u8,
     pub exclude_untriaged: bool,
@@ -265,18 +229,6 @@ impl Default for BriefingSession {
 }
 
 impl BriefingSession {
-    pub fn new_waiting_for_triage(started_at: Option<String>) -> Self {
-        Self {
-            phase: BriefingPhase::WaitingForTriage,
-            articles: Vec::new(),
-            collection_text: None,
-            briefing_request_id: None,
-            briefing_result: None,
-            started_at,
-            coverage_window_label: None,
-        }
-    }
-
     pub fn new_loading(started_at: Option<String>) -> Self {
         Self {
             phase: BriefingPhase::LoadingArticles,
@@ -510,7 +462,6 @@ impl BriefingSession {
     pub fn progress_text(&self) -> Option<String> {
         let text = match self.phase {
             BriefingPhase::LoadingArticles => "Loading articles...".to_string(),
-            BriefingPhase::WaitingForTriage => "Waiting for triage...".to_string(),
             BriefingPhase::Summarizing => {
                 let completed = self.completed_summary_count() + self.failed_summary_count();
                 let total = self.total();
@@ -874,22 +825,6 @@ mod tests {
             content_hash: hash.to_string(),
             fetched_utc: None,
         }
-    }
-
-    #[test]
-    fn corpus_fingerprint_same_articles_different_order_are_equal() {
-        let a = vec![
-            make_loaded("https://a", "h1"),
-            make_loaded("https://b", "h2"),
-        ];
-        let b = vec![
-            make_loaded("https://b", "h2"),
-            make_loaded("https://a", "h1"),
-        ];
-        assert_eq!(
-            CorpusFingerprint::from_articles(&a),
-            CorpusFingerprint::from_articles(&b)
-        );
     }
 
     #[test]

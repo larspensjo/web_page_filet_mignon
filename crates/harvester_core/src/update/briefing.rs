@@ -2,11 +2,9 @@ use super::summary_cache_support::{
     build_summary_cache_key, context_hash_for_log, log_summary_cache_run_summary,
     log_summary_cache_warmup_if_needed, short_hash, summary_cache_key_error_reason,
 };
-use crate::briefing::{BriefingPhase, BriefingSession, CorpusFingerprint};
-use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
+use crate::briefing::{BriefingPhase, BriefingSession};
 use crate::state::BriefingGenerateReadiness;
 use crate::tabs::AppTab;
-use crate::triage::TriagePhase;
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
@@ -25,9 +23,6 @@ fn begin_briefing_article_load(
     } else {
         state.request_briefing_orchestration();
     }
-    // Keep the skip flag but clear the request so triage settlement does not
-    // re-enter the briefing path after this direct load has been armed.
-    state.clear_briefing_orchestration_request();
     state.start_summary_cache_run();
     state.set_briefing(BriefingSession::new_loading(None));
     snapshot_briefing_coverage_window(state);
@@ -97,56 +92,6 @@ pub(super) fn handle_prepare_summaries_clicked(state: &mut AppState) -> Vec<Effe
         ordered_urls.len()
     );
     begin_briefing_article_load(state, ordered_urls, true)
-}
-
-pub(super) fn handle_prereq_articles_loaded(
-    state: &mut AppState,
-    articles: Vec<crate::briefing::LoadedArticle>,
-) -> Vec<Effect> {
-    engine_info!("[briefing-triage] prereq loaded count={}", articles.len());
-    // INTENTIONAL EXCEPTION: briefing builds its own ephemeral pre-triage pass
-    // from the freshly loaded prerequisite articles (all completed jobs). This
-    // is not the shared working-corpus pre-triage session — it is a transient
-    // filter step that feeds the briefing-owned triage run (with
-    // TriageSelectionPolicy cutoff semantics applied afterwards). The shared
-    // selector's ReadyToTriage session is irrelevant here because briefing
-    // needs to score articles for priority, not just include ready ones.
-    let policy = PreTriagePolicy::default();
-    let pre_triage = PreTriageSession::load_articles(articles, &policy);
-    let filtered_articles = pre_triage.resolved_included_articles();
-    if filtered_articles.is_empty() {
-        state
-            .briefing_mut()
-            .fail("No articles available after pre-triage filters".to_string());
-        state.clear_briefing_orchestration();
-        state.mark_dirty();
-        return Vec::new();
-    }
-    let prereq_fingerprint = CorpusFingerprint::from_articles(&filtered_articles);
-    state.store_briefing_prereq_articles(filtered_articles.clone());
-    let triage_reusable = matches!(state.triage().phase(), TriagePhase::Complete)
-        && CorpusFingerprint::from_triage_results(state.triage()) == prereq_fingerprint;
-    let mut effects = Vec::new();
-    if triage_reusable {
-        engine_info!("[briefing-triage] triage reused");
-        on_triage_settled_for_briefing(state, &mut effects);
-    } else {
-        engine_info!("[briefing-triage] triage rerun");
-        state.triage_mut().reset_with_articles(filtered_articles);
-        state.triage_mut().transition_to_triaging();
-        state.start_triage_cache_run();
-        state.mark_triage_metadata_ready();
-        super::triage::dispatch_next_triage_step(state, &mut effects);
-    }
-    effects
-}
-
-pub(super) fn handle_prereq_load_failed(state: &mut AppState, reason: String) -> Vec<Effect> {
-    engine_warn!("[briefing-triage] prereq load failed reason={}", reason);
-    state.briefing_mut().fail(reason);
-    state.clear_briefing_orchestration();
-    state.mark_dirty();
-    Vec::new()
 }
 
 pub(super) fn handle_history_loaded(
@@ -254,45 +199,6 @@ pub(super) fn handle_articles_load_failed(state: &mut AppState, reason: String) 
     state.mark_dirty();
     let cache = state.summary_cache().clone();
     vec![Effect::PersistSummaryCache { cache }]
-}
-
-pub(super) fn on_triage_settled_for_briefing(state: &mut AppState, effects: &mut Vec<Effect>) {
-    if !state.briefing_orchestration_requested() {
-        return;
-    }
-    // INTENTIONAL EXCEPTION: briefing article selection applies TriageSelectionPolicy
-    // cutoff semantics on top of the briefing-owned triage results — only articles with
-    // sufficient priority are included. This is distinct from the shared working-corpus
-    // selector: the selector picks what is "ready to act on now", while this step picks
-    // what is "worth summarizing in this briefing run". Using the shared selector here
-    // would ignore the priority cutoff and could include low-signal articles.
-    let policy = state.briefing_triage_policy();
-    let ordered_urls = policy.eligible_urls(state.triage());
-    engine_info!(
-        "[briefing-triage] eligible count={} cutoff={}",
-        ordered_urls.len(),
-        policy.cutoff_exclusive
-    );
-    if ordered_urls.is_empty() {
-        state
-            .briefing_mut()
-            .fail("No articles with sufficient priority".to_string());
-        state.clear_briefing_orchestration();
-        state.mark_dirty();
-        return;
-    }
-
-    let _ = state.take_briefing_prereq_articles();
-    state.start_summary_cache_run();
-    state.mark_briefing_metadata_ready();
-    state.set_briefing(BriefingSession::new_loading(None));
-    snapshot_briefing_coverage_window(state);
-    state.clear_briefing_orchestration_request();
-    let since_utc = state.briefing_since_utc();
-    effects.push(Effect::LoadArticlesForBriefing {
-        ordered_urls,
-        since_utc,
-    });
 }
 
 pub(super) fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {

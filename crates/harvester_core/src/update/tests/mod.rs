@@ -114,9 +114,6 @@ fn generate_briefing_loads_archive_final_selection() {
     let load = briefing_load_urls(&effects);
 
     assert_eq!(load, expected);
-    assert!(!effects
-        .iter()
-        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefingPrereq { .. })));
     assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
     assert_eq!(state.active_tab(), AppTab::Briefing);
     assert!(!state.briefing_orchestration_skip_aggregate());
@@ -193,10 +190,9 @@ fn generate_briefing_defensive_fail_when_summaries_not_settled() {
 
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
 
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        Effect::LoadArticlesForBriefing { .. } | Effect::LoadArticlesForBriefingPrereq { .. }
-    )));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::LoadArticlesForBriefing { .. })));
     assert!(matches!(
         state.briefing().phase(),
         BriefingPhase::Failed { reason }
@@ -218,10 +214,9 @@ fn generate_briefing_defensive_fail_when_signal_scoring_in_progress() {
 
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
 
-    assert!(effects.iter().all(|effect| !matches!(
-        effect,
-        Effect::LoadArticlesForBriefing { .. } | Effect::LoadArticlesForBriefingPrereq { .. }
-    )));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::LoadArticlesForBriefing { .. })));
     assert!(matches!(
         state.briefing().phase(),
         BriefingPhase::Failed { reason }
@@ -298,9 +293,6 @@ fn prepare_summaries_loads_base_corpus_skip_aggregate() {
         state.briefing().phase(),
         BriefingPhase::LoadingArticles
     ));
-    assert!(!effects
-        .iter()
-        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefingPrereq { .. })));
 }
 
 #[test]
@@ -783,9 +775,6 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
                 if ordered_urls == &expected_urls
         )
     }));
-    assert!(!effects
-        .iter()
-        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefingPrereq { .. })));
     let state = with_summary_metadata(state);
     let (articles, collection_text) = loaded_single_article();
     let (_state, effects) = update(

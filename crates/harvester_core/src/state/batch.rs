@@ -99,7 +99,6 @@ impl AppState {
         let pre_triage_included = self.pre_triage.resolved_included_articles().len();
 
         if self.can_start_triage_from_pre_triage()
-            && !self.briefing_orchestration_requested()
             && self.triage.can_start()
             && self.triage.total() < pre_triage_included
         {

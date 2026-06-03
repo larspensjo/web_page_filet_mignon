@@ -235,10 +235,6 @@ pub enum Msg {
         request_id: u64,
         reason: String,
     },
-    /// Briefing prerequisite articles prepared by the loader.
-    BriefingPrereqArticlesLoaded {
-        articles: Vec<LoadedArticle>,
-    },
     /// Briefing history loaded from disk at startup.
     /// On IO or parse failure, the effect runner sends this with an empty Vec
     /// rather than a separate failure message — keeps the reducer simple and avoids dead variants.
@@ -262,10 +258,6 @@ pub enum Msg {
     /// Request to update the in-memory briefing checkpoint (and persist it).
     /// Raw wire type; the reducer validates the string before storing.
     BriefingCheckpointSet(Option<String>),
-    /// Loader failed for briefing prerequisites.
-    BriefingPrereqLoadFailed {
-        reason: String,
-    },
     /// Prompt contexts loaded from disk.
     PromptContextsLoaded {
         contexts: HashMap<PromptId, Vec<(String, String)>>,

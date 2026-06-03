@@ -298,12 +298,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::GenerateBriefingClicked => briefing::handle_generate_clicked(&mut state),
         Msg::PrepareSummariesClicked => briefing::handle_prepare_summaries_clicked(&mut state),
-        Msg::BriefingPrereqArticlesLoaded { articles } => {
-            briefing::handle_prereq_articles_loaded(&mut state, articles)
-        }
-        Msg::BriefingPrereqLoadFailed { reason } => {
-            briefing::handle_prereq_load_failed(&mut state, reason)
-        }
         Msg::BriefingHistoryLoaded { entries } => {
             briefing::handle_history_loaded(&mut state, entries)
         }

@@ -1007,12 +1007,6 @@ fn summarize_batch_msg(msg: &Msg) -> String {
         Msg::ArticlesLoaded { articles, .. } => {
             format!("ArticlesLoaded {{ articles: {} }}", articles.len())
         }
-        Msg::BriefingPrereqArticlesLoaded { articles } => {
-            format!(
-                "BriefingPrereqArticlesLoaded {{ articles: {} }}",
-                articles.len()
-            )
-        }
         Msg::PromptContextsLoaded { contexts } => {
             format!("PromptContextsLoaded {{ prompts: {} }}", contexts.len())
         }

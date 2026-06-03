@@ -232,7 +232,6 @@ pub(super) fn start_briefing_after_triage(
     state.set_triage(triage);
     state.select_tab(AppTab::Briefing);
     state.request_briefing_orchestration();
-    state.clear_briefing_orchestration_request();
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
     state.set_briefing(BriefingSession::new_loading(None));

@@ -237,7 +237,6 @@ impl AppState {
             briefing_preview,
             stop_finish_button,
             triage_can_start: self.triage_ai_available()
-                && (!self.briefing_orchestration.is_requested())
                 && self.triage.can_start()
                 && self.can_start_triage_from_pre_triage(),
             triage_results_reorder_suppressed: matches!(self.triage.phase(), TriagePhase::Triaging),
@@ -533,7 +532,6 @@ impl AppState {
         };
         let status = match self.briefing.phase() {
             BriefingPhase::Idle => "Idle".to_string(),
-            BriefingPhase::WaitingForTriage => "Waiting for triage".to_string(),
             BriefingPhase::LoadingArticles => "Loading articles".to_string(),
             BriefingPhase::Summarizing => {
                 let settled =

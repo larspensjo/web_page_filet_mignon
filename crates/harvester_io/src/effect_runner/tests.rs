@@ -456,28 +456,6 @@ fn save_prompt_template_file_writes_file_and_dispatches_saved_msg() {
 }
 
 #[test]
-fn load_articles_for_briefing_prereq_dispatches_loaded_message() {
-    let temp = tempdir().expect("tempdir");
-    write_markdown(temp.path(), "a.md", "https://example.com/a");
-    let (runner, rx) = runner_with_receiver(temp.path());
-    runner.enqueue(vec![Effect::LoadArticlesForBriefingPrereq {
-        ordered_urls: vec!["https://example.com/a".to_string()],
-        since_utc: None,
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected prereq loaded message");
-    match msg {
-        Msg::BriefingPrereqArticlesLoaded { articles } => {
-            assert_eq!(articles.len(), 1);
-            assert_eq!(articles[0].url, "https://example.com/a");
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
-}
-
-#[test]
 fn load_articles_for_triage_respects_since_utc_filter() {
     let temp = tempdir().expect("tempdir");
     write_markdown_with_fetched_utc(
