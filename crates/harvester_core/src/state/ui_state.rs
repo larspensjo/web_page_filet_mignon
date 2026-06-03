@@ -193,6 +193,10 @@ impl AppState {
         was_dirty
     }
 
+    pub fn briefing_session_can_start(&self) -> bool {
+        self.briefing.can_start()
+    }
+
     pub(crate) fn mark_dirty(&mut self) {
         self.dirty = true;
     }

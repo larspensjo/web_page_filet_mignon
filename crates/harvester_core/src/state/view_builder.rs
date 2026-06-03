@@ -228,7 +228,12 @@ impl AppState {
             ai_warning_banner,
             preview_header_text,
             preview_source,
-            briefing_can_start: self.briefing.can_start() && self.briefing_ai_available(),
+            briefing_generate_enabled: matches!(
+                self.briefing_generate_readiness(),
+                crate::state::BriefingGenerateReadiness::Ready { .. }
+            ) && self.briefing.can_start()
+                && self.briefing_ai_available(),
+            summaries_can_start: self.summaries_can_start() && self.briefing_ai_available(),
             briefing_preview,
             stop_finish_button,
             triage_can_start: self.triage_ai_available()

@@ -167,7 +167,7 @@ pub(in crate::platform) fn render(
     );
     emit_if_changed(
         &mut state.prev_briefing_enabled,
-        view.briefing_can_start,
+        view.briefing_generate_enabled,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
@@ -177,7 +177,7 @@ pub(in crate::platform) fn render(
     );
     emit_if_changed(
         &mut state.prev_summarize_enabled,
-        view.briefing_can_start,
+        view.summaries_can_start,
         cmds,
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,

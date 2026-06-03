@@ -1085,10 +1085,10 @@ fn render_disables_preview_source_link_when_selected_url_is_none() {
 }
 
 #[test]
-fn render_enables_summarize_when_briefing_can_start() {
+fn render_enables_summarize_when_summaries_can_start() {
     init_logging();
     let mut view = make_view(vec![]);
-    view.briefing_can_start = true;
+    view.summaries_can_start = true;
     let mut tree_state = TreeRenderState::new();
     let window_id = WindowId::new(1);
     let cmds = render(window_id, &view, &mut tree_state);
@@ -1103,7 +1103,7 @@ fn render_enables_summarize_when_briefing_can_start() {
 }
 
 #[test]
-fn render_disables_summarize_when_briefing_cannot_start() {
+fn render_disables_summarize_when_summaries_cannot_start() {
     init_logging();
     let view = make_view(vec![]);
     let mut tree_state = TreeRenderState::new();
@@ -1117,6 +1117,41 @@ fn render_disables_summarize_when_briefing_cannot_start() {
         )
     });
     assert!(disabled, "BUTTON_SUMMARIZE should be disabled");
+}
+
+#[test]
+fn render_enables_briefing_when_generate_enabled() {
+    init_logging();
+    let mut view = make_view(vec![]);
+    view.briefing_generate_enabled = true;
+    let mut tree_state = TreeRenderState::new();
+    let window_id = WindowId::new(1);
+    let cmds = render(window_id, &view, &mut tree_state);
+    let enabled = cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+            if *control_id == BUTTON_BRIEFING
+        )
+    });
+    assert!(enabled, "BUTTON_BRIEFING should be enabled");
+}
+
+#[test]
+fn render_disables_briefing_when_generate_disabled() {
+    init_logging();
+    let view = make_view(vec![]);
+    let mut tree_state = TreeRenderState::new();
+    let window_id = WindowId::new(1);
+    let cmds = render(window_id, &view, &mut tree_state);
+    let disabled = cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+            if *control_id == BUTTON_BRIEFING
+        )
+    });
+    assert!(disabled, "BUTTON_BRIEFING should be disabled");
 }
 
 #[test]

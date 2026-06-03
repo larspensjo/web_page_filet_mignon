@@ -207,6 +207,115 @@ fn ai_availability_defaults_to_available_before_startup_evidence_arrives() {
     assert!(state.view().ai_warning_banner.is_none());
 }
 
+fn complete_triage_with_settled_summaries(count: usize) -> AppState {
+    let mut state = complete_triage_state_for_test(count);
+    state = with_summary_metadata(state);
+    seed_summaries_for_triage_hashes(&mut state, count);
+    state
+}
+
+#[test]
+fn briefing_generate_enabled_false_when_triage_incomplete_or_corpus_empty() {
+    init_logging();
+    let view = AppState::new().view();
+
+    assert!(!view.briefing_generate_enabled);
+    assert!(!view.summaries_can_start);
+}
+
+#[test]
+fn briefing_generate_enabled_false_when_summaries_not_settled() {
+    init_logging();
+    let state = with_summary_metadata(complete_triage_state_for_test(2));
+
+    let view = state.view();
+    assert!(!view.briefing_generate_enabled);
+    assert!(view.summaries_can_start);
+}
+
+#[test]
+fn briefing_generate_enabled_false_when_signal_scoring_in_progress() {
+    init_logging();
+    let mut state = complete_triage_with_settled_summaries(2);
+    state = with_signal_candidate_metadata(state);
+    let url = "https://triage-complete.com/0".to_string();
+    state.signal_candidate_mut().enqueue(url.clone());
+    state.signal_candidate_mut().mark_scoring(&url, 99);
+
+    let view = state.view();
+    assert!(!view.briefing_generate_enabled);
+    assert!(view.summaries_can_start);
+}
+
+#[test]
+fn briefing_generate_enabled_true_when_summaries_settled_and_signal_idle() {
+    init_logging();
+    let state = complete_triage_with_settled_summaries(2);
+
+    let view = state.view();
+    assert!(view.briefing_generate_enabled);
+    assert!(view.summaries_can_start);
+}
+
+#[test]
+fn briefing_generate_enabled_false_while_briefing_is_running() {
+    init_logging();
+    let state = complete_triage_with_settled_summaries(1);
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefing { .. })));
+
+    let (state, _) = update(
+        state,
+        Msg::ArticlesLoaded {
+            articles: vec![LoadedArticle {
+                url: "https://triage-complete.com/0".to_string(),
+                source_title: None,
+                prepared_text: format!(
+                    "Article text {}",
+                    std::iter::repeat_n("content", 220)
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                ),
+                content_hash: "hash-tc-0".to_string(),
+                fetched_utc: None,
+            }],
+            collection_text: "Collection text".to_string(),
+        },
+    );
+
+    let view = state.view();
+    assert!(!view.briefing_generate_enabled);
+    assert!(!state.briefing().can_start());
+}
+
+#[test]
+fn summaries_can_start_false_when_triage_incomplete() {
+    init_logging();
+    let view = AppState::new().view();
+
+    assert!(!view.summaries_can_start);
+}
+
+#[test]
+fn summaries_can_start_false_when_ai_unavailable() {
+    init_logging();
+    let state = with_summary_metadata(complete_triage_state_for_test(1));
+    let (state, _) = update(
+        state,
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
+
+    let view = state.view();
+    assert!(!view.briefing_generate_enabled);
+    assert!(!view.summaries_can_start);
+}
+
 #[test]
 fn missing_api_key_blocks_triage_and_briefing_actions() {
     init_logging();
@@ -222,7 +331,8 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
 
     let view = state.view();
     assert!(!view.triage_can_start);
-    assert!(!view.briefing_can_start);
+    assert!(!view.briefing_generate_enabled);
+    assert!(!view.summaries_can_start);
     assert_eq!(
         view.ai_unavailable_message.as_deref(),
         Some("AI features unavailable: OPENAI_API_KEY is not set")

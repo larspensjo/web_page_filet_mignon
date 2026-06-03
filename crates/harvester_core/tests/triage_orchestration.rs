@@ -585,7 +585,7 @@ fn restore_completed_jobs_resets_briefing() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let snapshot = state.completed_jobs_snapshot();
     let (state, _) = update(state, Msg::RestoreCompletedJobs(snapshot));
-    assert!(state.view().briefing_can_start);
+    assert!(state.briefing_session_can_start());
 }
 
 #[test]
