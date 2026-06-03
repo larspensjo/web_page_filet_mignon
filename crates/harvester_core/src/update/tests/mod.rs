@@ -1,6 +1,8 @@
 use super::*;
 use crate::briefing::{ArticleSummaryState, BriefingPhase, LoadedArticle};
+use crate::signal_candidate::{ArchiveSelectionSource, OverrideKey};
 use crate::LlmResultKind;
+use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{run_metadata::LlmRunMetadata, DEFAULT_BRIEFING_MODEL};
 
@@ -54,26 +56,251 @@ fn prompt_context_load_failure_keeps_triage_metadata_unready() {
     assert!(!state.triage_metadata_ready());
 }
 
+fn signal_result(score: u8, key: &str) -> SignalCandidateResult {
+    SignalCandidateResult {
+        signal_score: score,
+        signal_key: key.to_string(),
+        themes: vec!["theme".to_string()],
+        draft_gist: "gist".to_string(),
+        source_tier: SourceTier::Tier1,
+        confidence: Confidence::High,
+        reasoning: "reason".to_string(),
+        input_tokens: 1,
+        output_tokens: 1,
+    }
+}
+
+fn seed_summaries_for_triage_hashes(state: &mut AppState, count: usize) {
+    for i in 0..count {
+        seed_summary_for_content_hash(state, &format!("hash-tc-{i}"));
+    }
+}
+
+fn complete_signal_candidate(state: &mut AppState, index: usize, score: u8, key: &str) {
+    let url = format!("https://triage-complete.com/{index}");
+    state.signal_candidate_mut().enqueue(url.clone());
+    state
+        .signal_candidate_mut()
+        .mark_scoring(&url, index as u64 + 1);
+    state
+        .signal_candidate_mut()
+        .complete(&url, signal_result(score, key));
+}
+
+fn briefing_load_urls(effects: &[Effect]) -> Vec<String> {
+    effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadArticlesForBriefing { ordered_urls, .. } => Some(ordered_urls.clone()),
+            _ => None,
+        })
+        .expect("expected LoadArticlesForBriefing effect")
+}
+
 #[test]
-fn generate_briefing_emits_load_effect() {
+fn generate_briefing_loads_archive_final_selection() {
     init_logging();
-    let state = AppState::new();
+    let mut state = complete_triage_state_for_test(2);
+    state = with_summary_metadata(state);
+    seed_summaries_for_triage_hashes(&mut state, 2);
+
+    let selection = state.archive_final_selection();
+    assert_eq!(
+        selection.source,
+        ArchiveSelectionSource::FullCorpusSignalUnavailable
+    );
+    let expected = selection.ordered_urls;
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+    let load = briefing_load_urls(&effects);
+
+    assert_eq!(load, expected);
+    assert!(!effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefingPrereq { .. })));
+    assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
+    assert_eq!(state.active_tab(), AppTab::Briefing);
+    assert!(!state.briefing_orchestration_skip_aggregate());
+}
+
+#[test]
+fn generate_briefing_loads_signal_filtered_archive_final_selection() {
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    state = with_summary_metadata(state);
+    state = with_signal_candidate_metadata(state);
+    seed_summaries_for_triage_hashes(&mut state, 2);
+    complete_signal_candidate(&mut state, 0, 80, "cluster-a");
+    complete_signal_candidate(&mut state, 1, 30, "cluster-b");
+
+    let selection = state.archive_final_selection();
+    assert_eq!(selection.source, ArchiveSelectionSource::SignalFiltered);
+    assert_eq!(
+        state.archive_corpus().ordered_urls().to_vec(),
+        vec![
+            "https://triage-complete.com/0".to_string(),
+            "https://triage-complete.com/1".to_string()
+        ],
+        "fixture must distinguish base corpus from signal-narrowed selection"
+    );
+
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
 
+    assert_eq!(briefing_load_urls(&effects), selection.ordered_urls);
     assert_eq!(
-        effects,
-        vec![
-            Effect::LoadPromptContexts,
-            Effect::LoadPromptTemplateFiles,
-            Effect::LoadLlmMetadata,
-            Effect::LoadArticlesForBriefingPrereq {
-                ordered_urls: Vec::new(),
-                since_utc: None,
-            }
-        ]
+        briefing_load_urls(&effects),
+        vec!["https://triage-complete.com/0".to_string()]
     );
-    assert_eq!(state.briefing().phase(), &BriefingPhase::WaitingForTriage);
+    assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
+}
+
+#[test]
+fn generate_briefing_preserves_signal_order_and_honors_exclusions() {
+    init_logging();
+    let mut state = complete_triage_state_for_test(3);
+    state = with_summary_metadata(state);
+    state = with_signal_candidate_metadata(state);
+    seed_summaries_for_triage_hashes(&mut state, 3);
+    complete_signal_candidate(&mut state, 0, 70, "cluster-a");
+    complete_signal_candidate(&mut state, 1, 95, "cluster-b");
+    complete_signal_candidate(&mut state, 2, 85, "cluster-c");
+    state.signal_candidate_mut().add_exclusion(OverrideKey {
+        signal_key: "cluster-b".to_string(),
+        prompt_id: "ArticleSignalCandidate".to_string(),
+        prompt_version: 1,
+    });
+
+    let expected = state.archive_final_selection();
+    assert_eq!(expected.source, ArchiveSelectionSource::SignalFiltered);
+    assert_eq!(
+        expected.ordered_urls,
+        vec![
+            "https://triage-complete.com/2".to_string(),
+            "https://triage-complete.com/0".to_string()
+        ],
+        "selection should keep score order after removing the excluded cluster"
+    );
+
+    let (_state, effects) = update(state, Msg::GenerateBriefingClicked);
+
+    assert_eq!(briefing_load_urls(&effects), expected.ordered_urls);
+}
+
+#[test]
+fn generate_briefing_defensive_fail_when_summaries_not_settled() {
+    init_logging();
+    let state = complete_triage_state_for_test(2);
+    let state = with_summary_metadata(state);
+
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::LoadArticlesForBriefing { .. } | Effect::LoadArticlesForBriefingPrereq { .. }
+    )));
+    assert!(matches!(
+        state.briefing().phase(),
+        BriefingPhase::Failed { reason }
+            if reason == "Summarize articles before generating a briefing."
+    ));
     assert_eq!(state.active_tab(), AppTab::Briefing);
+}
+
+#[test]
+fn generate_briefing_defensive_fail_when_signal_scoring_in_progress() {
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    state = with_summary_metadata(state);
+    state = with_signal_candidate_metadata(state);
+    seed_summaries_for_triage_hashes(&mut state, 2);
+    let url = "https://triage-complete.com/0".to_string();
+    state.signal_candidate_mut().enqueue(url.clone());
+    state.signal_candidate_mut().mark_scoring(&url, 99);
+
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::LoadArticlesForBriefing { .. } | Effect::LoadArticlesForBriefingPrereq { .. }
+    )));
+    assert!(matches!(
+        state.briefing().phase(),
+        BriefingPhase::Failed { reason }
+            if reason == "Signal scoring still in progress. Wait for it to finish."
+    ));
+}
+
+#[test]
+fn generate_briefing_cache_hit_reuses_summary_for_aligned_selection() {
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    state = with_summary_metadata(state);
+    state = with_signal_candidate_metadata(state);
+    seed_summaries_for_triage_hashes(&mut state, 2);
+    complete_signal_candidate(&mut state, 0, 80, "cluster-a");
+    complete_signal_candidate(&mut state, 1, 30, "cluster-b");
+
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+    assert_eq!(
+        briefing_load_urls(&effects),
+        vec!["https://triage-complete.com/0".to_string()]
+    );
+    let state = with_summary_metadata(state);
+    let (state, effects) = update(
+        state,
+        Msg::ArticlesLoaded {
+            articles: vec![LoadedArticle {
+                url: "https://triage-complete.com/0".to_string(),
+                source_title: None,
+                prepared_text: "Article text".to_string(),
+                content_hash: "hash-tc-0".to_string(),
+                fetched_utc: None,
+            }],
+            collection_text: "Collection text".to_string(),
+        },
+    );
+
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSummary,
+            ..
+        }
+    )));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::AggregateBriefing,
+            ..
+        }
+    )));
+    assert_eq!(state.briefing().completed_summary_count(), 1);
+}
+
+#[test]
+fn prepare_summaries_loads_base_corpus_skip_aggregate() {
+    init_logging();
+    let state = complete_triage_state_for_test(2);
+    let state = with_summary_metadata(state);
+
+    let (state, effects) = update(state, Msg::PrepareSummariesClicked);
+
+    let load = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadArticlesForBriefing { ordered_urls, .. } => Some(ordered_urls.clone()),
+            _ => None,
+        })
+        .expect("expected LoadArticlesForBriefing effect");
+
+    assert_eq!(load, state.archive_corpus().ordered_urls().to_vec());
+    assert!(state.briefing_orchestration_skip_aggregate());
+    assert!(matches!(
+        state.briefing().phase(),
+        BriefingPhase::LoadingArticles
+    ));
+    assert!(!effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefingPrereq { .. })));
 }
 
 #[test]
@@ -251,18 +478,20 @@ fn summary_store_uses_run_frozen_metadata_when_completion_model_differs() {
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
     let (articles, collection_text) = loaded_single_article();
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::ArticlesLoaded {
             articles,
             collection_text,
         },
     );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
 
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 2,
+            request_id: summary_request_id,
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
                 input_tokens: 10,
@@ -355,18 +584,20 @@ fn aggregate_briefing_failure_surfaces_reason_in_briefing_ui() {
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
     let (articles, collection_text) = loaded_single_article();
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::ArticlesLoaded {
             articles,
             collection_text,
         },
     );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
 
     let (state, effects) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 2,
+            request_id: summary_request_id,
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
                 input_tokens: 10,
@@ -412,18 +643,20 @@ fn aggregate_briefing_success_records_usage_for_status_bar() {
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
     let (articles, collection_text) = loaded_single_article();
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::ArticlesLoaded {
             articles,
             collection_text,
         },
     );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
 
     let (state, effects) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 2,
+            request_id: summary_request_id,
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
                 input_tokens: 10,
@@ -465,17 +698,19 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
     let (articles, collection_text) = loaded_single_article();
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::ArticlesLoaded {
             articles,
             collection_text,
         },
     );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
     let (state, effects) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 2,
+            request_id: summary_request_id,
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
                 input_tokens: 10,
@@ -489,6 +724,8 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
     // effects[0] = UpsertEntityIndexEntry for Article A
     // effects[1] = RequestLlmCompletion for AggregateBriefing
     assert_eq!(effects.len(), 2);
+    let aggregate_request_id =
+        request_id_for_prompt(&effects, PromptId::AggregateBriefing).expect("aggregate request");
     match &effects[1] {
         Effect::RequestLlmCompletion {
             request_id,
@@ -500,7 +737,7 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
             template_override,
             extra_template_vars,
         } => {
-            assert_eq!(*request_id, 3);
+            assert_eq!(*request_id, aggregate_request_id);
             assert_eq!(*prompt_id, PromptId::AggregateBriefing);
             assert_eq!(*prompt_version, None);
             assert_eq!(*model_override, None);
@@ -516,10 +753,12 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
         }
         other => panic!("expected aggregate briefing request, got {other:?}"),
     }
+    let aggregate_request_id =
+        request_id_for_prompt(&effects, PromptId::AggregateBriefing).expect("aggregate request");
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 3,
+            request_id: aggregate_request_id,
             result: LlmResultKind::Success {
                 output_json: briefing_json(1),
                 input_tokens: 10,
@@ -531,29 +770,23 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
         },
     );
 
-    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    assert_eq!(
-        effects,
-        vec![
-            Effect::LoadPromptContexts,
-            Effect::LoadPromptTemplateFiles,
-            Effect::LoadLlmMetadata,
-            Effect::LoadArticlesForBriefingPrereq {
-                ordered_urls: Vec::new(),
-                since_utc: None,
-            }
-        ]
-    );
-    let state = with_summary_metadata(state);
-    let (state, effects) = update(
-        state,
-        Msg::BriefingPrereqArticlesLoaded {
-            articles: loaded_single_article().0,
-        },
-    );
-    assert!(effects
+    let expected_urls = loaded_single_article()
+        .0
         .iter()
-        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefing { .. })));
+        .map(|article| article.url.clone())
+        .collect::<Vec<_>>();
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+    assert!(effects.iter().any(|effect| {
+        matches!(
+            effect,
+            Effect::LoadArticlesForBriefing { ordered_urls, .. }
+                if ordered_urls == &expected_urls
+        )
+    }));
+    assert!(!effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefingPrereq { .. })));
+    let state = with_summary_metadata(state);
     let (articles, collection_text) = loaded_single_article();
     let (_state, effects) = update(
         state,
@@ -566,15 +799,18 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
     // effects[0] = UpsertEntityIndexEntry (summary cache hit for Article A)
     // effects[1] = RequestLlmCompletion for AggregateBriefing
     assert_eq!(effects.len(), 2);
+    let aggregate_request_id =
+        request_id_for_prompt(&effects, PromptId::AggregateBriefing).expect("aggregate request");
     assert!(matches!(
         &effects[1],
         Effect::RequestLlmCompletion {
-            request_id: 4,
+            request_id,
             prompt_id: PromptId::AggregateBriefing,
             input_content,
             extra_template_vars,
             ..
-        } if input_content == "Collection text"
+        } if *request_id == aggregate_request_id
+            && input_content == "Collection text"
             // History was set on the first run — previous_briefings must now be non-empty
             && extra_template_vars.iter().any(|(k, v)| k == "previous_briefings" && v != "(none)")
     ));

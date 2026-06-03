@@ -1307,46 +1307,6 @@ fn refresh_between_open_and_submit_uses_pinned_snapshot() {
     }
 }
 
-fn complete_triage_state_for_test(n: usize) -> AppState {
-    assert!(n > 0, "n must be > 0 for a useful complete triage state");
-    let mut session = crate::triage::TriageSession::new_loading(None);
-    let articles: Vec<_> = (0..n)
-        .map(|i| LoadedArticle {
-            url: format!("https://triage-complete.com/{i}"),
-            source_title: None,
-            prepared_text: std::iter::repeat_n("triage-content", 220)
-                .collect::<Vec<_>>()
-                .join(" "),
-            content_hash: format!("hash-tc-{i}"),
-            fetched_utc: None,
-        })
-        .collect();
-    session.set_articles(articles);
-    session.transition_to_triaging();
-    for i in 0..n {
-        session.complete_article(
-            i,
-            crate::triage::ArticleTriageResult {
-                category: "tech".to_string(),
-                priority: 3,
-                tags: vec![],
-                rationale: "r".to_string(),
-                input_tokens: 0,
-                output_tokens: 0,
-            },
-        );
-    }
-    session.complete();
-    assert!(
-        matches!(session.phase(), crate::triage::TriagePhase::Complete),
-        "triage must be Complete after completing all {n} articles"
-    );
-
-    let mut state = AppState::new();
-    state.set_triage(session);
-    state
-}
-
 #[test]
 fn parity_a_pre_triage_ready_archive_count_is_zero_pending_count_is_nonzero() {
     init_logging();

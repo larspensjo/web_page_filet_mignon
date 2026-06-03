@@ -4,6 +4,7 @@ use super::summary_cache_support::{
 };
 use crate::briefing::{BriefingPhase, BriefingSession, CorpusFingerprint};
 use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
+use crate::state::BriefingGenerateReadiness;
 use crate::tabs::AppTab;
 use crate::triage::TriagePhase;
 use crate::{AppState, Effect};
@@ -14,67 +15,88 @@ fn briefing_ready_to_start(state: &AppState) -> bool {
     state.briefing_ai_available() && state.briefing().can_start()
 }
 
-pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
-    if !briefing_ready_to_start(state) {
-        return Vec::new();
+fn begin_briefing_article_load(
+    state: &mut AppState,
+    ordered_urls: Vec<String>,
+    skip_aggregate: bool,
+) -> Vec<Effect> {
+    if skip_aggregate {
+        state.request_summary_preparation();
+    } else {
+        state.request_briefing_orchestration();
     }
-    if state.triage().is_active() {
-        engine_info!("[briefing-triage] interleave blocked: triage in progress");
-        return Vec::new();
-    }
-    state.select_tab(AppTab::Briefing);
-    state.request_briefing_orchestration();
-    state.set_briefing(BriefingSession::new_waiting_for_triage(None));
+    // Keep the skip flag but clear the request so triage settlement does not
+    // re-enter the briefing path after this direct load has been armed.
+    state.clear_briefing_orchestration_request();
+    state.start_summary_cache_run();
+    state.set_briefing(BriefingSession::new_loading(None));
     snapshot_briefing_coverage_window(state);
     state.revert_preview_to_briefing();
-    engine_info!("[briefing-triage] generate requested");
-    // INTENTIONAL EXCEPTION: briefing article loading does NOT use the shared
-    // working-corpus selector. Briefing starts from all completed jobs, then
-    // runs a fresh triage pass with TriageSelectionPolicy cutoff semantics to
-    // select which articles are worth summarizing. The shared selector's
-    // pre-triage results (which use a different filter set) are not appropriate
-    // here — briefing wants priority-ranked triage results, not just "ready to
-    // triage" candidates.
-    let ordered_urls = state.ordered_completed_job_urls_snapshot();
     let since_utc = state.briefing_since_utc();
     vec![
         Effect::LoadPromptContexts,
         Effect::LoadPromptTemplateFiles,
         Effect::LoadLlmMetadata,
-        Effect::LoadArticlesForBriefingPrereq {
+        Effect::LoadArticlesForBriefing {
             ordered_urls,
             since_utc,
         },
     ]
 }
 
+fn fail_generate(state: &mut AppState, reason: &str) -> Vec<Effect> {
+    engine_warn!("[briefing-triage] generate blocked: {}", reason);
+    state.briefing_mut().fail(reason.to_string());
+    state.clear_briefing_orchestration();
+    state.mark_dirty();
+    Vec::new()
+}
+
+pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
+    if !briefing_ready_to_start(state) {
+        return Vec::new();
+    }
+    state.select_tab(AppTab::Briefing);
+    match state.briefing_generate_readiness() {
+        BriefingGenerateReadiness::Ready { selection } => {
+            if selection.ordered_urls.is_empty() {
+                return fail_generate(state, "No articles with sufficient priority");
+            }
+            engine_info!(
+                "[briefing-triage] generate ready source={:?} count={}",
+                selection.source,
+                selection.ordered_urls.len()
+            );
+            begin_briefing_article_load(state, selection.ordered_urls, false)
+        }
+        BriefingGenerateReadiness::TriageOrCorpusNotReady => fail_generate(
+            state,
+            "No completed triage. Run triage before generating a briefing.",
+        ),
+        BriefingGenerateReadiness::SummariesNotSettled => {
+            fail_generate(state, "Summarize articles before generating a briefing.")
+        }
+        BriefingGenerateReadiness::SignalScoringInProgress => fail_generate(
+            state,
+            "Signal scoring still in progress. Wait for it to finish.",
+        ),
+    }
+}
+
 pub(super) fn handle_prepare_summaries_clicked(state: &mut AppState) -> Vec<Effect> {
     if !briefing_ready_to_start(state) {
         return Vec::new();
     }
-    if state.triage().is_active() {
-        engine_info!("[briefing-triage] summary-prep blocked: triage in progress");
+    if !state.summaries_can_start() {
+        engine_info!("[briefing-triage] summary-prep blocked: base corpus not ready");
         return Vec::new();
     }
-    state.request_summary_preparation();
-    state.set_briefing(BriefingSession::new_waiting_for_triage(None));
-    snapshot_briefing_coverage_window(state);
-    state.revert_preview_to_briefing();
-    engine_info!("[briefing-triage] summary-prep requested");
-    // INTENTIONAL EXCEPTION: same rationale as GenerateBriefingClicked —
-    // briefing uses all completed jobs as its starting feed, then applies
-    // TriageSelectionPolicy cutoff semantics, bypassing the shared selector.
-    let ordered_urls = state.ordered_completed_job_urls_snapshot();
-    let since_utc = state.briefing_since_utc();
-    vec![
-        Effect::LoadPromptContexts,
-        Effect::LoadPromptTemplateFiles,
-        Effect::LoadLlmMetadata,
-        Effect::LoadArticlesForBriefingPrereq {
-            ordered_urls,
-            since_utc,
-        },
-    ]
+    let ordered_urls = state.archive_corpus().ordered_urls().to_vec();
+    engine_info!(
+        "[briefing-triage] summary-prep base-corpus count={}",
+        ordered_urls.len()
+    );
+    begin_briefing_article_load(state, ordered_urls, true)
 }
 
 pub(super) fn handle_prereq_articles_loaded(

@@ -12,20 +12,32 @@ fn briefing_aggregate_not_dispatched_until_all_articles_settled() {
     let state = start_briefing_after_triage(state, loaded_articles().0.clone());
     let (articles, collection_text) = loaded_articles();
 
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::ArticlesLoaded {
             articles,
             collection_text,
         },
     );
+    let summary_request_ids: Vec<_> = effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: PromptId::ArticleSummary,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(summary_request_ids.len(), 2);
     assert_eq!(state.briefing().in_progress_count(), 2);
     assert_eq!(state.briefing().pending_count(), 0);
 
     let (state, effects) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 3,
+            request_id: summary_request_ids[0],
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
                 input_tokens: 10,
@@ -54,7 +66,7 @@ fn briefing_aggregate_not_dispatched_until_all_articles_settled() {
     let (_state, effects) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 4,
+            request_id: summary_request_ids[1],
             result: LlmResultKind::Success {
                 output_json: summary_json("Article B"),
                 input_tokens: 10,
@@ -115,17 +127,19 @@ fn briefing_history_loaded_sets_state() {
 fn run_single_article_briefing_to_completion(state: AppState) -> (AppState, Vec<Effect>) {
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
     let (articles, collection_text) = loaded_single_article();
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::ArticlesLoaded {
             articles,
             collection_text,
         },
     );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
     let (state, effects) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 2,
+            request_id: summary_request_id,
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
                 input_tokens: 10,
@@ -317,17 +331,19 @@ fn aggregate_briefing_effect_includes_previous_briefings_extra_var() {
     });
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
     let (articles, collection_text) = loaded_single_article();
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::ArticlesLoaded {
             articles,
             collection_text,
         },
     );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
     let (_state, effects) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 2,
+            request_id: summary_request_id,
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
                 input_tokens: 10,
@@ -391,17 +407,19 @@ fn aggregate_briefing_effect_includes_checkpoint_time_window_extra_var() {
     state.set_briefing_since_utc(Some(since));
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
     let (articles, collection_text) = loaded_single_article();
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::ArticlesLoaded {
             articles,
             collection_text,
         },
     );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
     let (_state, effects) = update(
         state,
         Msg::LlmCompleted {
-            request_id: 2,
+            request_id: summary_request_id,
             result: LlmResultKind::Success {
                 output_json: summary_json("Article A"),
                 input_tokens: 10,

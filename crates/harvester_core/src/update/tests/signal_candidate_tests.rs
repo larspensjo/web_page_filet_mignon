@@ -146,29 +146,47 @@ fn set_signal_candidate_metadata_without_sweep(state: &mut AppState) {
     state.set_llm_metadata(active_versions, effective_models, HashMap::new());
 }
 
-fn prewarm_signal_candidate_cache(state: &mut AppState, summary_model: &str) {
-    let summary_key = SummaryCacheKey::try_new(
-        "hash-a",
-        PromptId::ArticleSummary,
-        Some(1),
-        Some(summary_model),
-        &[],
-    )
-    .expect("summary cache key");
-    let key_points = vec!["p1".to_string()];
+fn prewarm_signal_candidate_cache(
+    state: &mut AppState,
+    article: &LoadedArticle,
+    triage_priority: u8,
+) {
+    let url = article.url.as_str();
+    let summary = state
+        .summary_result_for_url(url)
+        .expect("summary result for signal prewarm");
+    let triage = state
+        .triage()
+        .result_for_url(url)
+        .expect("triage result for signal prewarm");
+    let key_points = summary.key_points.clone();
+    let published_at = article.fetched_utc.clone().unwrap_or_default();
+    let outlet = article.source_title.as_deref().unwrap_or(url);
+    let title = article.source_title.as_deref().unwrap_or(url);
+    let mut triage_tags_sorted = triage.tags.clone();
+    triage_tags_sorted.sort();
+    let triage_tags_sorted: Vec<_> = triage_tags_sorted.iter().map(String::as_str).collect();
     let bundle = SignalCandidateInputBundle {
-        url: "https://example.com/a",
-        outlet: "Article A",
-        title: "Article A",
-        published_at: "",
-        triage_priority: 2,
-        triage_tags_sorted: vec!["tag"],
-        summary: "Summary",
+        url,
+        outlet,
+        title,
+        published_at: published_at.as_str(),
+        triage_priority,
+        triage_tags_sorted,
+        summary: summary.summary.as_str(),
         key_points: &key_points,
-        upstream_summary_cache_digest: summary_key.digest(),
+        upstream_summary_cache_digest: state
+            .summary_cache_key_for_url(url)
+            .expect("summary cache key")
+            .digest(),
     };
-    let key = SignalCandidateCacheKey::try_new(&bundle, Some(1), Some("test-signal-model"), &[])
-        .expect("signal cache key");
+    let key = SignalCandidateCacheKey::try_new(
+        &bundle,
+        state.active_version_for(PromptId::ArticleSignalCandidate),
+        state.effective_model_for(PromptId::ArticleSignalCandidate),
+        state.context_for(PromptId::ArticleSignalCandidate),
+    )
+    .expect("signal cache key");
     state.store_signal_candidate_result(
         key,
         SignalCandidateResult {
@@ -513,10 +531,19 @@ fn summary_completion_enqueues_signal_scoring() {
 
 #[test]
 fn summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak() {
+    super::init_logging();
     let mut state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
     state = with_signal_candidate_metadata(state);
-    prewarm_summary_cache_for_single_article(&mut state, "test-model");
-    prewarm_signal_candidate_cache(&mut state, "test-model");
+    state.start_summary_cache_run();
+    state.mark_briefing_metadata_ready();
+    let summary_model = state
+        .summary_cache_metadata()
+        .expect("summary metadata ready")
+        .1
+        .to_string();
+    prewarm_summary_cache_for_single_article(&mut state, &summary_model);
+    let (articles, _) = loaded_single_article();
+    prewarm_signal_candidate_cache(&mut state, &articles[0], 3);
     let (articles, collection_text) = loaded_single_article();
 
     let (state, effects) = update(

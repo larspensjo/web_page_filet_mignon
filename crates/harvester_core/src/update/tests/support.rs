@@ -3,7 +3,11 @@ use std::sync::Once;
 
 use super::*;
 use crate::briefing::LoadedArticle;
+use crate::briefing::{ArticleSummaryResult, BriefingSession};
+use crate::summary_cache::SummaryCacheKey;
+use crate::tabs::AppTab;
 use crate::LlmResultKind;
+use harvester_engine::llm::dto::SummaryEntities;
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::run_metadata::{CacheStatus, LlmRunMetadata, LlmRunMetadataInit};
 
@@ -140,53 +144,98 @@ pub(super) fn request_id_for_prompt(effects: &[Effect], prompt_id: PromptId) -> 
     })
 }
 
+pub(super) fn seed_summary_for_content_hash(state: &mut AppState, content_hash: &str) {
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: content_hash.to_string(),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "test-model".to_string(),
+            context_hash: crate::summary_cache::context_hash(
+                state.context_for(PromptId::ArticleSummary),
+            ),
+        },
+        ArticleSummaryResult {
+            title: "Article".to_string(),
+            summary: "Summary".to_string(),
+            key_points: vec!["p1".to_string()],
+            input_tokens: 10,
+            output_tokens: 5,
+            entities: SummaryEntities::default(),
+        },
+        "2026-04-01T00:00:00Z".to_string(),
+    );
+}
+
+pub(super) fn complete_triage_state_for_test(n: usize) -> AppState {
+    assert!(n > 0, "n must be > 0 for a useful complete triage state");
+    let mut session = crate::triage::TriageSession::new_loading(None);
+    let articles: Vec<_> = (0..n)
+        .map(|i| LoadedArticle {
+            url: format!("https://triage-complete.com/{i}"),
+            source_title: None,
+            prepared_text: std::iter::repeat_n("triage-content", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: format!("hash-tc-{i}"),
+            fetched_utc: None,
+        })
+        .collect();
+    session.set_articles(articles);
+    session.transition_to_triaging();
+    for i in 0..n {
+        session.complete_article(
+            i,
+            crate::triage::ArticleTriageResult {
+                category: "tech".to_string(),
+                priority: 3,
+                tags: vec![],
+                rationale: "r".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+    }
+    session.complete();
+    assert!(
+        matches!(session.phase(), crate::triage::TriagePhase::Complete),
+        "triage must be Complete after completing all {n} articles"
+    );
+
+    let mut state = AppState::new();
+    state.set_triage(session);
+    state
+}
+
 pub(super) fn start_briefing_after_triage(
     state: AppState,
     articles: Vec<LoadedArticle>,
 ) -> AppState {
-    let (state, _) = update(state, Msg::GenerateBriefingClicked);
-    let state = with_summary_metadata(state);
-    let (mut state, effects) = update(
-        state,
-        Msg::BriefingPrereqArticlesLoaded {
-            articles: articles.clone(),
-        },
-    );
-    let mut triage_request_id =
-        request_id_for_prompt(&effects, PromptId::ArticleTriage).expect("triage request");
-
-    for idx in 0..articles.len() {
-        let priority = (articles.len() - idx + 1) as u8;
-        let (next_state, next_effects) = update(
-            state,
-            Msg::LlmCompleted {
-                request_id: triage_request_id,
-                result: LlmResultKind::Success {
-                    output_json: format!(
-                        "{{\"category\":\"security\",\"priority\":{},\"tags\":[\"tag\"],\"rationale\":\"reason\"}}",
-                        priority
-                    ),
-                    input_tokens: 10,
-                    output_tokens: 5,
-                    prompt_version: 1,
-                    resolved_model: "test-model".to_string(),
-                },
-                metadata: None,
+    let mut state = with_summary_metadata(state);
+    let mut triage = crate::triage::TriageSession::new_loading(None);
+    triage.set_articles(articles);
+    triage.transition_to_triaging();
+    for idx in 0..triage.articles().len() {
+        triage.complete_article(
+            idx,
+            crate::triage::ArticleTriageResult {
+                category: "tech".to_string(),
+                priority: 3,
+                tags: vec![],
+                rationale: "r".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
             },
         );
-        state = next_state;
-        if idx + 1 < articles.len() {
-            triage_request_id = request_id_for_prompt(&next_effects, PromptId::ArticleTriage)
-                .expect("next triage request");
-        } else {
-            assert!(
-                next_effects
-                    .iter()
-                    .any(|effect| matches!(effect, Effect::LoadArticlesForBriefing { .. })),
-                "final triage completion should trigger filtered briefing load"
-            );
-        }
     }
+    triage.complete();
+    state.set_triage(triage);
+    state.select_tab(AppTab::Briefing);
+    state.request_briefing_orchestration();
+    state.clear_briefing_orchestration_request();
+    state.start_summary_cache_run();
+    state.mark_briefing_metadata_ready();
+    state.set_briefing(BriefingSession::new_loading(None));
     state
 }
 

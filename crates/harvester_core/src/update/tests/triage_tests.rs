@@ -31,7 +31,12 @@ fn briefing_blocked_when_triage_in_progress() {
     state.set_triage(crate::triage::TriageSession::new_loading(None));
     let (next_state, effects) = update(state.clone(), Msg::GenerateBriefingClicked);
     assert!(effects.is_empty());
-    assert_eq!(next_state.briefing().phase(), state.briefing().phase());
+    assert!(matches!(
+        next_state.briefing().phase(),
+        crate::briefing::BriefingPhase::Failed { reason }
+            if reason == "No completed triage. Run triage before generating a briefing."
+    ));
+    assert_eq!(next_state.active_tab(), AppTab::Briefing);
 }
 
 #[test]

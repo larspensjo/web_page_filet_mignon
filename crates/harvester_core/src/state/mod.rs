@@ -59,7 +59,6 @@ use link_helpers::{
 };
 use ui_state::{MetricsState, PreviewMode, PreviewState, UiState};
 
-#[cfg(test)]
 pub(crate) use signal_candidate_access::BriefingGenerateReadiness;
 
 pub type JobId = u64;
