@@ -814,7 +814,7 @@ function Write-Step {
         [Parameter(Mandatory)][string]$LogPath
     )
 
-    $line = "[$Number/7] $Message"
+    $line = "[$Number/6] $Message"
     Write-Host ''
     Write-Host $line
     Add-LogLine -LogPath $LogPath -Line $line

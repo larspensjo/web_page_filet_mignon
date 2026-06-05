@@ -1925,3 +1925,11 @@ Change: Moved prior-phase compaction into the Step 1 preparation prompt, removed
 Lessons Learned: Plan compaction timing is part of traceability; the implementation commit should include the reviewed detailed plan that the agent implemented from.
 Prevention: Keep compaction in the next-cycle preparation step, and keep same-cycle completion limited to staging the detailed plan plus implementation.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1, scripts/prompts/phase-cycle-elaborate-plan.md, scripts/prompts/phase-cycle-apply-staged-review.md, scripts/prompts/phase-cycle-step-result.schema.json
+
+## 2026-06-05 - Require phase-cycle commit message field
+Type: Bug Fix
+Context: `Invoke-PlanPhaseCycle.ps1` failed before phase implementation because Codex rejected the step-result output schema. The schema had `additionalProperties: false` and a `suggested_commit_message` property, but the top-level `required` array did not include that property.
+Change: Added `suggested_commit_message` to the required fields in `scripts/prompts/phase-cycle-step-result.schema.json` and clarified that phase-implementation prompts should emit an empty string when no commit message applies.
+Lessons Learned: Structured-output schemas used with Codex must keep `properties` and `required` synchronized when additional properties are disabled; otherwise the API rejects the request before any agent work starts.
+Prevention: When adding an optional-looking field to a strict output schema, make it required and encode absence as an empty string or nullable value according to the provider's supported schema contract.
+Refs: scripts/prompts/phase-cycle-step-result.schema.json, scripts/prompts/phase-cycle-implement-phase.md

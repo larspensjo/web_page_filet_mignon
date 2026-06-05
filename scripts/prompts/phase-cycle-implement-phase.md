@@ -21,6 +21,7 @@ Structured completion:
 - Use `"status": "partial"` or `"failed"` if implementation could not be completed.
 - Use `"status": "manual_feedback_required"` and set `"manual_feedback_required": true` if a human decision is needed.
 - Include verification you actually performed. If none was appropriate, include a `not_applicable` or `not_run` item with a brief reason.
+- Include `"suggested_commit_message"`; use an empty string if no commit message is applicable.
 
 Step result JSON schema:
 {{STEP_RESULT_SCHEMA}}

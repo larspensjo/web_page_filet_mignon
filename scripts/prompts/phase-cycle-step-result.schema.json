@@ -11,7 +11,8 @@
     "changed_files",
     "verification",
     "staged_changes_expected",
-    "follow_up_notes"
+    "follow_up_notes",
+    "suggested_commit_message"
   ],
   "properties": {
     "step": {
