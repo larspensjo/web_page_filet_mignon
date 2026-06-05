@@ -2,12 +2,11 @@
 
 ## Workflow
 - Build with `cargo build`.
-- When a task is complete, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
-- For plan-driven work, write commit messages about the code change, not the plan. Follow recommended practices for teh design of the comment.
+- When a task is completed with Rust changes, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
 - When adding a CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change.
 - When creating complex plans, they should be divided into incremental phases that can be tested.
 - If harvester_mcp processes block building and testing, kill these processes.
-- When implementing a plan, don't commit the changes. They shall first be review.
+- When implementing a plan, don't commit the changes; they shall first be reviewed.
 
 ## Planning & Documentation
 - When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.
@@ -37,4 +36,4 @@
 
 ## Diary
 - Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations, and bug fixes with reusable lessons.
-- See the How to use section in the beginning.
+- See the "How to use" section in the beginning.
