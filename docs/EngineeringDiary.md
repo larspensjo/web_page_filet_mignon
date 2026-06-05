@@ -1909,3 +1909,11 @@ Change: Default prompt resources now resolve relative to the script directory wh
 Lessons Learned: Tooling scripts that operate on external repositories need separate concepts for target workspace paths and script-owned resource paths.
 Prevention: Keep bundled templates and schemas anchored to `$PSScriptRoot`; only target artifacts such as plans and logs should default under `-RepoRoot`.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1
+
+## 2026-06-05 - Phase cycle Codex write sandbox
+Type: Bug Fix
+Context: A Codex implementation step could edit files but failed every shell command with `windows sandbox: spawn setup refresh`, preventing cargo verification and git staging.
+Change: Switched the Codex implementation and staged-review-fix phases from `workspace-write` to `danger-full-access`; plan review remains read-only.
+Lessons Learned: On Windows, Codex filesystem writes and spawned shell commands can fail independently under `workspace-write`, so automation that requires `cargo` and `git add` needs a sandbox mode that can actually spawn commands.
+Prevention: Keep write-phase sandboxing aligned with the script contract: if a step must verify and stage before reporting success, the selected sandbox must support shell command execution.
+Refs: scripts/Invoke-PlanPhaseCycle.ps1

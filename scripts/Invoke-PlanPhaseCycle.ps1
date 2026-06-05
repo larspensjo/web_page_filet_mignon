@@ -958,7 +958,7 @@ $implementationPrompt = Expand-PromptTemplate -Name 'phase-cycle-implement-phase
 }
 $implementationRawPath = [System.IO.Path]::ChangeExtension($implementationResultPath, '.raw.txt')
 $implementationOutput = Invoke-Cli -Tool 'codex' -Prompt $implementationPrompt -WorkingDir $script:RepoRoot -Model $CodexImplementationModel `
-    -PermissionMode $null -Sandbox 'workspace-write' -Reasoning $CodexImplementationReasoning `
+    -PermissionMode $null -Sandbox 'danger-full-access' -Reasoning $CodexImplementationReasoning `
     -OutputLastMessagePath $implementationRawPath -OutputSchemaPath $stepResultSchemaPath
 $implementationResult = Write-StepResultArtifact -Output $implementationOutput -ArtifactPath $implementationResultPath -LogPath $logPath
 Assert-StepResultSuccess -StepResult $implementationResult -ArtifactPath $implementationResultPath
@@ -992,7 +992,7 @@ $fixPrompt = Expand-PromptTemplate -Name 'phase-cycle-apply-staged-review.md' -V
 }
 $stagedReviewFixRawPath = [System.IO.Path]::ChangeExtension($stagedReviewFixResultPath, '.raw.txt')
 $stagedReviewFixOutput = Invoke-Cli -Tool 'codex' -Prompt $fixPrompt -WorkingDir $script:RepoRoot -Model $CodexStagedReviewFixModel `
-    -PermissionMode $null -Sandbox 'workspace-write' -Reasoning $CodexStagedReviewFixReasoning `
+    -PermissionMode $null -Sandbox 'danger-full-access' -Reasoning $CodexStagedReviewFixReasoning `
     -OutputLastMessagePath $stagedReviewFixRawPath -OutputSchemaPath $stepResultSchemaPath
 $stagedReviewFixResult = Write-StepResultArtifact -Output $stagedReviewFixOutput -ArtifactPath $stagedReviewFixResultPath -LogPath $logPath
 Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
