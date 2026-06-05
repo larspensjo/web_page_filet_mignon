@@ -11,6 +11,8 @@ use simplelog::{
     WriteLogger,
 };
 
+const IGNORED_LOG_TARGETS: &[&str] = &["rustls_platform_verifier"];
+
 /// Destination for log output.
 #[allow(dead_code)]
 pub enum LogDestination {
@@ -65,10 +67,14 @@ pub fn initialize(destination: LogDestination) {
 }
 
 fn build_config() -> Config {
-    ConfigBuilder::new()
+    let mut builder = ConfigBuilder::new();
+    builder
         .set_time_format_rfc3339()
-        .set_target_level(LevelFilter::Error)
-        .build()
+        .set_target_level(LevelFilter::Error);
+    for target in IGNORED_LOG_TARGETS {
+        builder.add_filter_ignore_str(target);
+    }
+    builder.build()
 }
 
 fn create_file_logger(level: LevelFilter, config: Config) -> Option<Box<WriteLogger<File>>> {

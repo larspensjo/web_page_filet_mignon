@@ -1893,3 +1893,11 @@ Type: Implementation
 Context: Code review of the phase-cycle script identified CLI integration assumptions, git diff robustness risks, and the need for structured status from non-review AI steps.
 Change: Added CLI help preflight checks, separated git stdout from stderr for data-producing commands, forced `core.quotepath=false` in git calls, improved dirty-worktree recovery guidance, removed redundant artifact unstaging, and added structured step-result JSON artifacts for implementation, staged-review fix, and plan-completion steps.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1, scripts/prompts/phase-cycle-step-result.schema.json, scripts/prompts/phase-cycle-implement-phase.md, scripts/prompts/phase-cycle-apply-staged-review.md, scripts/prompts/phase-cycle-complete-plan.md
+
+## 2026-06-05 - Suppressed verifier noise in poll logs
+Type: Bug Fix
+Context: A Poll sources run showed `ERROR` records from `rustls_platform_verifier` for a Brave-discovered article whose certificate was not valid for the requested host, even though the fetcher correctly mapped the article fetch to a non-actionable network failure.
+Change: Added a narrow logger target ignore for `rustls_platform_verifier` in the app logger and shared `engine_logging` initializers so fetch failures remain visible through Harvester's own mapped URL/context logs without raw verifier errors dominating `engine.log`.
+Lessons Learned: Third-party crate log targets can bypass internal severity policy; logger filters should preserve Harvester-owned context while suppressing duplicate low-actionability detail.
+Prevention: Keep external noisy targets filtered at logger initialization and rely on fetch/reducer failure mapping for user-facing diagnostics.
+Refs: crates/harvester_app/src/platform/logging.rs, crates/engine_logging/src/lib.rs, engine.log

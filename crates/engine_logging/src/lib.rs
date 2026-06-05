@@ -11,6 +11,16 @@ thread_local! {
     static SIM_TICK: Cell<u64> = const { Cell::new(0) };
 }
 
+const IGNORED_LOG_TARGETS: &[&str] = &["rustls_platform_verifier"];
+
+fn logger_config() -> simplelog::Config {
+    let mut builder = simplelog::ConfigBuilder::new();
+    for target in IGNORED_LOG_TARGETS {
+        builder.add_filter_ignore_str(target);
+    }
+    builder.build()
+}
+
 /// Sets the simulation tick count for the current thread.
 /// This should be called by the main application loop once per tick.
 pub fn set_sim_tick(tick: u64) {
@@ -69,7 +79,7 @@ macro_rules! engine_error {
 ///
 /// This safely no-ops if another logger has already been initialized.
 pub fn initialize_for_tests() {
-    use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode};
+    use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode};
 
     // Use debug level in debug builds, info in release builds.
     let level = if cfg!(debug_assertions) {
@@ -81,7 +91,7 @@ pub fn initialize_for_tests() {
     // Ignore the error if a logger was already set by another test.
     let _ = CombinedLogger::init(vec![TermLogger::new(
         level,
-        Config::default(),
+        logger_config(),
         TerminalMode::Mixed,
         ColorChoice::Auto,
     )]);
@@ -92,7 +102,7 @@ pub fn initialize_for_tests() {
 /// Logs to both stderr and `./engine.log` in the current working directory.
 /// This safely no-ops if another logger has already been initialized.
 pub fn initialize() {
-    use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
+    use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger};
     use std::fs::OpenOptions;
 
     let level = log::LevelFilter::Info;
@@ -107,11 +117,11 @@ pub fn initialize() {
     let _ = CombinedLogger::init(vec![
         TermLogger::new(
             level,
-            Config::default(),
+            logger_config(),
             TerminalMode::Stderr,
             ColorChoice::Auto,
         ),
-        WriteLogger::new(level, Config::default(), log_file),
+        WriteLogger::new(level, logger_config(), log_file),
     ]);
 }
 
@@ -120,7 +130,7 @@ pub fn initialize() {
 /// Logs only to `./engine.log` in the current working directory.
 /// This safely no-ops if another logger has already been initialized.
 pub fn initialize_file_only() {
-    use simplelog::{CombinedLogger, Config, WriteLogger};
+    use simplelog::{CombinedLogger, WriteLogger};
     use std::fs::OpenOptions;
 
     let level = log::LevelFilter::Info;
@@ -132,7 +142,7 @@ pub fn initialize_file_only() {
         .expect("Failed to open engine.log");
 
     // Ignore the error if a logger was already set.
-    let _ = CombinedLogger::init(vec![WriteLogger::new(level, Config::default(), log_file)]);
+    let _ = CombinedLogger::init(vec![WriteLogger::new(level, logger_config(), log_file)]);
 }
 
 /// Initializes file-only logging to a specified path (no console output).
@@ -142,7 +152,7 @@ pub fn initialize_file_only() {
 /// Creates parent directories if they do not exist.
 /// This safely no-ops if another logger has already been initialized.
 pub fn initialize_to_path(log_path: &std::path::Path) {
-    use simplelog::{CombinedLogger, Config, WriteLogger};
+    use simplelog::{CombinedLogger, WriteLogger};
     use std::fs::OpenOptions;
 
     if let Some(parent) = log_path.parent() {
@@ -159,5 +169,5 @@ pub fn initialize_to_path(log_path: &std::path::Path) {
         .unwrap_or_else(|e| panic!("Failed to open log file {:?}: {}", log_path, e));
 
     // Ignore the error if a logger was already set.
-    let _ = CombinedLogger::init(vec![WriteLogger::new(level, Config::default(), log_file)]);
+    let _ = CombinedLogger::init(vec![WriteLogger::new(level, logger_config(), log_file)]);
 }
