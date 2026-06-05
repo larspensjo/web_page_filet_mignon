@@ -1901,3 +1901,11 @@ Change: Added a narrow logger target ignore for `rustls_platform_verifier` in th
 Lessons Learned: Third-party crate log targets can bypass internal severity policy; logger filters should preserve Harvester-owned context while suppressing duplicate low-actionability detail.
 Prevention: Keep external noisy targets filtered at logger initialization and rely on fetch/reducer failure mapping for user-facing diagnostics.
 Refs: crates/harvester_app/src/platform/logging.rs, crates/engine_logging/src/lib.rs, engine.log
+
+## 2026-06-05 - Phase cycle script prompt roots
+Type: Bug Fix
+Context: Running `scripts/Invoke-PlanPhaseCycle.ps1` from another Git repository made the script look for bundled prompt schemas under the target repository's `scripts/prompts` folder.
+Change: Default prompt resources now resolve relative to the script directory while `-RepoRoot` still defaults to the caller's current repository.
+Lessons Learned: Tooling scripts that operate on external repositories need separate concepts for target workspace paths and script-owned resource paths.
+Prevention: Keep bundled templates and schemas anchored to `$PSScriptRoot`; only target artifacts such as plans and logs should default under `-RepoRoot`.
+Refs: scripts/Invoke-PlanPhaseCycle.ps1

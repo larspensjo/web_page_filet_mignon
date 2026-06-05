@@ -823,6 +823,12 @@ function Write-Step {
 
 Set-Utf8ProcessEncoding
 
+$scriptDir = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    $PSScriptRoot
+}
+
 $initialRoot = Resolve-FullPath -Path $RepoRoot -BasePath (Get-Location).Path -MustExist
 $PlanPath = Resolve-FullPath -Path $PlanPath -BasePath $initialRoot -MustExist
 
@@ -848,7 +854,7 @@ if ([string]::IsNullOrWhiteSpace($PlansDir)) {
 $script:PlansDir = $PlansDir
 
 if ([string]::IsNullOrWhiteSpace($PromptsDir)) {
-    $PromptsDir = Join-Path $script:RepoRoot 'scripts\prompts'
+    $PromptsDir = Join-Path $scriptDir 'prompts'
 } else {
     $PromptsDir = Resolve-FullPath -Path $PromptsDir -BasePath $script:RepoRoot
 }
