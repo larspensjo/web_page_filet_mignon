@@ -78,6 +78,9 @@
       "items": {
         "type": "string"
       }
+    },
+    "suggested_commit_message": {
+      "type": "string"
     }
   }
 }

@@ -1917,3 +1917,11 @@ Change: Switched the Codex implementation and staged-review-fix phases from `wor
 Lessons Learned: On Windows, Codex filesystem writes and spawned shell commands can fail independently under `workspace-write`, so automation that requires `cargo` and `git add` needs a sandbox mode that can actually spawn commands.
 Prevention: Keep write-phase sandboxing aligned with the script contract: if a step must verify and stage before reporting success, the selected sandbox must support shell command execution.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1
+
+## 2026-06-05 - Preserve detailed phase plans in the six-step cycle
+Type: Bug Fix
+Context: The phase-cycle completion step compacted the selected phase before staging the final plan, so the committed implementation could lose the detailed reviewed plan that guided the code change. Keeping a separate completion step also added latency and model cost.
+Change: Moved prior-phase compaction into the Step 1 preparation prompt, removed Step 7, moved commit-message generation into the Step 6 staged-review-fix JSON result, and staged the current detailed plan directly after Step 6.
+Lessons Learned: Plan compaction timing is part of traceability; the implementation commit should include the reviewed detailed plan that the agent implemented from.
+Prevention: Keep compaction in the next-cycle preparation step, and keep same-cycle completion limited to staging the detailed plan plus implementation.
+Refs: scripts/Invoke-PlanPhaseCycle.ps1, scripts/prompts/phase-cycle-elaborate-plan.md, scripts/prompts/phase-cycle-apply-staged-review.md, scripts/prompts/phase-cycle-step-result.schema.json

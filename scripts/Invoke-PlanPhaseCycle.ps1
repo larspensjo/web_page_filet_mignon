@@ -9,13 +9,12 @@ Usage:
     -Phase "Phase 1"
 
 Cycle:
-  1. Claude elaborates the selected phase in the plan.
+  1. Claude compacts prior phases and elaborates the selected phase in the plan.
   2. Codex reviews the selected phase plan as structured JSON.
   3. Claude applies relevant plan-review findings to the plan.
   4. Codex implements the phase and stages implementation changes.
   5. Claude reviews staged changes as structured JSON.
-  6. Codex applies relevant staged-review findings and stages fixes.
-  7. Claude replaces the phase with a completion summary and proposes a commit message.
+  6. Codex applies relevant staged-review findings, stages fixes, and proposes a commit message.
 
 The script requires a clean worktree at the start, never commits, does not run a
 fixed test command itself, stages the final plan with the implementation, and
@@ -891,14 +890,12 @@ $planReviewPath = Join-Path $script:PlansDir ("Review.$script:PlanId.$script:Pha
 $stagedReviewPath = Join-Path $script:PlansDir ("Review.$script:PlanId.$script:PhaseSlug.Staged.claude.json")
 $implementationResultPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.Step4.Implementation.codex.json")
 $stagedReviewFixResultPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.Step6.StagedReviewFix.codex.json")
-$completionResultPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.Step7.Completion.claude.json")
 $generatedArtifacts = @(
     $logPath,
     $planReviewPath,
     $stagedReviewPath,
     $implementationResultPath,
-    $stagedReviewFixResultPath,
-    $completionResultPath
+    $stagedReviewFixResultPath
 )
 
 Write-AtomicUtf8 -Path $logPath -Content @"
@@ -918,13 +915,13 @@ Write-Host "  Plan:  $script:PlanPath"
 Write-Host "  Phase: $Phase"
 Write-Host "  Log:   $logPath"
 
-Write-Step -Number 1 -Message 'Claude elaborates the selected phase in the plan.' -LogPath $logPath
+Write-Step -Number 1 -Message 'Claude compacts prior phases and elaborates the selected phase in the plan.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
 Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-elaborate-plan.md' -Variables @{
     PLAN_PATH = Get-GitPath $script:PlanPath
     PLAN_TEXT = $planText
     PHASE = $Phase
-} -LogPath $logPath -StepName 'Step1.ElaboratePlan' | Out-Null
+} -LogPath $logPath -StepName 'Step1.PreparePlan' | Out-Null
 
 Write-Step -Number 2 -Message 'Codex reviews the selected phase plan.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
@@ -978,7 +975,7 @@ Invoke-ReviewJsonStep -Tool 'claude' -PromptName 'phase-cycle-review-staged.md' 
 } -ArtifactPath $stagedReviewPath -LogPath $logPath -Model $ClaudeModel -Reasoning $null `
     -Sandbox $null -OutputSchemaPath $null | Out-Null
 
-Write-Step -Number 6 -Message 'Codex applies relevant staged-review findings.' -LogPath $logPath
+Write-Step -Number 6 -Message 'Codex applies relevant staged-review findings and proposes a commit message.' -LogPath $logPath
 $stagedReviewJson = Read-TextFile $stagedReviewPath
 $stagedDiffContext = Get-StagedDiffContext
 $fixPrompt = Expand-PromptTemplate -Name 'phase-cycle-apply-staged-review.md' -Variables @{
@@ -998,37 +995,14 @@ $stagedReviewFixResult = Write-StepResultArtifact -Output $stagedReviewFixOutput
 Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
 Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
 Assert-StagedChangesExist -Context 'staged-review fix'
-Add-LogLine -LogPath $logPath -Line 'Staged-review fix step completed.'
-
-Write-Step -Number 7 -Message 'Claude marks the phase complete in the plan and proposes a commit message.' -LogPath $logPath
-$stagedDiffContext = Get-StagedDiffContext
-$completionPrompt = Expand-PromptTemplate -Name 'phase-cycle-complete-plan.md' -Variables @{
-    PLAN_PATH = Get-GitPath $script:PlanPath
-    PLAN_TEXT = Read-TextFile $script:PlanPath
-    PHASE = $Phase
-    STAGED_DIFF_CONTEXT = $stagedDiffContext
-    STEP_RESULT_SCHEMA = $stepResultSchemaText
+$commitMessage = [string](Get-ObjectProperty -Object $stagedReviewFixResult -Name 'suggested_commit_message' -Default '')
+if ([string]::IsNullOrWhiteSpace($commitMessage)) {
+    throw "Staged-review fix step did not report suggested_commit_message. See $stagedReviewFixResultPath"
 }
-$completionOutput = Invoke-Cli -Tool 'claude' -Prompt $completionPrompt -WorkingDir $script:RepoRoot -Model $ClaudeModel -PermissionMode 'plan' `
-    -Sandbox $null -Reasoning $null -OutputLastMessagePath $null -OutputSchemaPath $null
-try {
-    $completedPlan = Extract-MarkedSection -Text $completionOutput -SectionName 'UPDATED PLAN'
-    $commitMessage = Extract-MarkedSection -Text $completionOutput -SectionName 'SUGGESTED COMMIT MESSAGE'
-    $completionResultJson = Extract-MarkedSection -Text $completionOutput -SectionName 'STEP RESULT JSON'
-} catch {
-    $rawPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.Step7.CompletePlan.raw.txt")
-    Write-AtomicUtf8 -Path $rawPath -Content $completionOutput
-    Add-LogLine -LogPath $logPath -Line "Saved unparsable completion output: $rawPath"
-    throw
-}
-
-$completionResult = Write-StepResultArtifact -Output $completionResultJson -ArtifactPath $completionResultPath -LogPath $logPath
-Assert-StepResultSuccess -StepResult $completionResult -ArtifactPath $completionResultPath
-Assert-PhaseExists -PlanText $completedPlan -PhaseText $Phase
-Write-AtomicUtf8 -Path $script:PlanPath -Content $completedPlan
 Stage-Plan
 Unstage-PathsIfNeeded -Paths $generatedArtifacts
-Add-LogLine -LogPath $logPath -Line 'Final plan update staged.'
+Add-LogLine -LogPath $logPath -Line 'Staged-review fix step completed.'
+Add-LogLine -LogPath $logPath -Line 'Final detailed plan staged.'
 Add-LogLine -LogPath $logPath -Line "Suggested commit message: $commitMessage"
 Add-LogLine -LogPath $logPath -Line "Completed: $(Get-Date)"
 
@@ -1041,7 +1015,6 @@ Write-Host "Plan review:       $planReviewPath"
 Write-Host "Implementation:    $implementationResultPath"
 Write-Host "Staged review:     $stagedReviewPath"
 Write-Host "Review fix:        $stagedReviewFixResultPath"
-Write-Host "Plan completion:   $completionResultPath"
 Write-Host "Log:               $logPath"
 Write-Host ''
 Write-Host 'Staged changes:'

@@ -2,8 +2,10 @@ You are Claude Opus working as a senior engineer on one phase of an implementati
 
 Task:
 - Locate the phase identified by "{{PHASE}}" in the plan.
-- Expand only that phase into an actionable implementation plan with concrete steps.
-- Preserve the rest of the plan except for minimal cross-reference fixes required by this phase.
+- Compact every phase that appears before "{{PHASE}}" in document order into a concise completed summary.
+- Preserve useful lessons, acceptance outcome notes, and follow-up constraints from compacted prior phases when they matter to later work.
+- Expand only "{{PHASE}}" into an actionable implementation plan with concrete steps.
+- Preserve future phases and unrelated plan content except for minimal cross-reference fixes required by this phase.
 - Do not mark the phase complete.
 - Do not include the literal marker lines `--- BEGIN UPDATED PLAN ---` or `--- END UPDATED PLAN ---` inside the plan body.
 - Keep entry-point files thin, preserve reducer purity, and respect the project instructions in AGENTS.md.

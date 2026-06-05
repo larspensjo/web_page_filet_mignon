@@ -9,7 +9,7 @@ Task:
 
 Repo and git rules:
 - Do not commit.
-- Do not edit the plan. The plan-completion step runs after this.
+- Do not edit the plan. The script stages the current detailed plan after this step.
 - Do not stage generated review/log artifacts.
 - Keep implementation changes staged when finished, including any fixes you make.
 - Respect AGENTS.md and the repository architecture rules.
@@ -20,6 +20,7 @@ Structured completion:
 - Use `"status": "partial"` or `"failed"` if relevant findings remain unresolved.
 - Use `"status": "manual_feedback_required"` and set `"manual_feedback_required": true` if a human decision is needed.
 - Include verification you actually performed. If none was appropriate, include a `not_applicable` or `not_run` item with a brief reason.
+- Include `"suggested_commit_message"` with one concise git commit subject line about the code change, not about the plan or automation cycle.
 
 Step result JSON schema:
 {{STEP_RESULT_SCHEMA}}
