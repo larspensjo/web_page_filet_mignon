@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "step",
+    "status",
+    "summary",
+    "manual_feedback_required",
+    "manual_feedback_reason",
+    "changed_files",
+    "verification",
+    "staged_changes_expected",
+    "follow_up_notes"
+  ],
+  "properties": {
+    "step": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "success",
+        "partial",
+        "failed",
+        "manual_feedback_required"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "manual_feedback_required": {
+      "type": "boolean"
+    },
+    "manual_feedback_reason": {
+      "type": "string"
+    },
+    "changed_files": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command_or_check",
+          "result",
+          "notes"
+        ],
+        "properties": {
+          "command_or_check": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "passed",
+              "failed",
+              "not_run",
+              "not_applicable"
+            ]
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "staged_changes_expected": {
+      "type": "boolean"
+    },
+    "follow_up_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

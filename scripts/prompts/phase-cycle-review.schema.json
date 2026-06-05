@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "decision",
+    "manual_feedback_required",
+    "manual_feedback_reason",
+    "findings_by_severity",
+    "questions",
+    "confidence"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "continue",
+        "stop_for_manual_feedback"
+      ]
+    },
+    "manual_feedback_required": {
+      "type": "boolean"
+    },
+    "manual_feedback_reason": {
+      "type": "string"
+    },
+    "findings_by_severity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "blocker",
+        "high",
+        "medium",
+        "low",
+        "nit"
+      ],
+      "properties": {
+        "blocker": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "high": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "medium": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "low": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        },
+        "nit": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/finding"
+          }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "question",
+          "blocking"
+        ],
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "blocking": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "details",
+        "recommendation",
+        "requires_manual_feedback"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "details": {
+          "type": "string"
+        },
+        "recommendation": {
+          "type": "string"
+        },
+        "requires_manual_feedback": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
