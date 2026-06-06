@@ -11,10 +11,12 @@ Usage:
 Cycle:
   1. Claude compacts prior phases and elaborates the selected phase in the plan.
   2. Codex reviews the selected phase plan as structured JSON.
-  3. Claude applies relevant plan-review findings to the plan.
+  3. Claude applies relevant plan-review findings to the plan, skipped when the
+     plan review has no blocker/high/medium findings.
   4. Codex implements the phase and stages implementation changes.
   5. Claude reviews staged changes as structured JSON.
-  6. Codex applies relevant staged-review findings, stages fixes, and proposes a commit message.
+  6. Codex applies relevant staged-review findings, stages fixes, and proposes
+     a commit message, skipped when the staged review has no non-nit findings.
 
 The script requires a clean worktree at the start, never commits, does not run a
 fixed test command itself, stages the final plan with the implementation, and
@@ -431,12 +433,23 @@ function Write-StepResultArtifact {
         throw "Step result output was not valid JSON. Raw output saved to $rawPath"
     }
 
-    Write-AtomicUtf8 -Path $ArtifactPath -Content (ConvertTo-PrettyJson -Value $stepResult)
+    return Write-StepResultObject -StepResult $stepResult -ArtifactPath $ArtifactPath -LogPath $LogPath
+}
+
+function Write-StepResultObject {
+    param(
+        [Parameter(Mandatory)][object]$StepResult,
+        [Parameter(Mandatory)][string]$ArtifactPath,
+        [Parameter(Mandatory)][string]$LogPath
+    )
+
+    $rawPath = [System.IO.Path]::ChangeExtension($ArtifactPath, '.raw.txt')
+    Write-AtomicUtf8 -Path $ArtifactPath -Content (ConvertTo-PrettyJson -Value $StepResult)
     Remove-Item -LiteralPath $rawPath -ErrorAction SilentlyContinue
     Add-LogLine -LogPath $LogPath -Line "Saved step result JSON: $ArtifactPath"
-    Write-StepResultSummary -StepResult $stepResult -ArtifactPath $ArtifactPath
+    Write-StepResultSummary -StepResult $StepResult -ArtifactPath $ArtifactPath
 
-    return $stepResult
+    return $StepResult
 }
 
 function Assert-StepResultSuccess {
@@ -490,6 +503,55 @@ function Get-AllReviewFindings {
     }
 
     return @(Get-ObjectProperty -Object $Review -Name 'findings' -Default @())
+}
+
+function Test-PlanReviewNeedsApplyStep {
+    param([Parameter(Mandatory)][object]$Review)
+
+    foreach ($severity in @('blocker', 'high', 'medium')) {
+        if (@(Get-FindingsForSeverity -Review $Review -Severity $severity).Count -gt 0) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-StagedReviewNeedsApplyStep {
+    param([Parameter(Mandatory)][object]$Review)
+
+    foreach ($severity in @('blocker', 'high', 'medium', 'low')) {
+        if (@(Get-FindingsForSeverity -Review $Review -Severity $severity).Count -gt 0) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function New-SkippedStagedReviewFixResult {
+    param(
+        [Parameter(Mandatory)][string]$SuggestedCommitMessage
+    )
+
+    [pscustomobject]@{
+        step                     = 'Step6.StagedReviewFix'
+        status                   = 'success'
+        summary                  = 'Skipped staged-review fix step because the staged review reported no non-nit findings.'
+        manual_feedback_required = $false
+        manual_feedback_reason   = ''
+        changed_files            = @()
+        verification             = @(
+            [pscustomobject]@{
+                command_or_check = 'staged review findings'
+                result           = 'not_applicable'
+                notes            = 'Step 6 was skipped because the staged review contained no blocker, high, medium, or low findings. Nit findings, if any, were intentionally ignored.'
+            }
+        )
+        staged_changes_expected  = $true
+        follow_up_notes          = @()
+        suggested_commit_message = $SuggestedCommitMessage
+    }
 }
 
 function Test-ManualFeedbackRequired {
@@ -925,23 +987,29 @@ Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-elaborate-plan.md' -Variables 
 
 Write-Step -Number 2 -Message 'Codex reviews the selected phase plan.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
-Invoke-ReviewJsonStep -Tool 'codex' -PromptName 'phase-cycle-review-plan.md' -Variables @{
+$planReview = Invoke-ReviewJsonStep -Tool 'codex' -PromptName 'phase-cycle-review-plan.md' -Variables @{
     PLAN_PATH = Get-GitPath $script:PlanPath
     PLAN_TEXT = $planText
     PHASE = $Phase
     REVIEW_SCHEMA = $reviewSchemaText
 } -ArtifactPath $planReviewPath -LogPath $logPath -Model $CodexPlanReviewModel -Reasoning $CodexPlanReviewReasoning `
-    -Sandbox 'read-only' -OutputSchemaPath $reviewSchemaPath | Out-Null
+    -Sandbox 'read-only' -OutputSchemaPath $reviewSchemaPath
 
 Write-Step -Number 3 -Message 'Claude applies relevant plan-review findings.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
 $planReviewJson = Read-TextFile $planReviewPath
-Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-apply-plan-review.md' -Variables @{
-    PLAN_PATH = Get-GitPath $script:PlanPath
-    PLAN_TEXT = $planText
-    PHASE = $Phase
-    REVIEW_JSON = $planReviewJson
-} -LogPath $logPath -StepName 'Step3.ApplyPlanReview' | Out-Null
+if (Test-PlanReviewNeedsApplyStep -Review $planReview) {
+    Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-apply-plan-review.md' -Variables @{
+        PLAN_PATH = Get-GitPath $script:PlanPath
+        PLAN_TEXT = $planText
+        PHASE = $Phase
+        REVIEW_JSON = $planReviewJson
+    } -LogPath $logPath -StepName 'Step3.ApplyPlanReview' | Out-Null
+} else {
+    $skipReason = 'Skipped Step 3 because the plan review had no blocker, high, or medium findings.'
+    Write-Host "  $skipReason"
+    Add-LogLine -LogPath $logPath -Line $skipReason
+}
 
 Write-Step -Number 4 -Message 'Codex implements the selected phase and stages implementation changes.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
@@ -966,42 +1034,60 @@ Add-LogLine -LogPath $logPath -Line 'Implementation step completed with staged c
 Write-Step -Number 5 -Message 'Claude reviews the staged changes.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
 $stagedDiffContext = Get-StagedDiffContext
-Invoke-ReviewJsonStep -Tool 'claude' -PromptName 'phase-cycle-review-staged.md' -Variables @{
+$stagedReview = Invoke-ReviewJsonStep -Tool 'claude' -PromptName 'phase-cycle-review-staged.md' -Variables @{
     PLAN_PATH = Get-GitPath $script:PlanPath
     PLAN_TEXT = $planText
     PHASE = $Phase
     STAGED_DIFF_CONTEXT = $stagedDiffContext
     REVIEW_SCHEMA = $reviewSchemaText
 } -ArtifactPath $stagedReviewPath -LogPath $logPath -Model $ClaudeModel -Reasoning $null `
-    -Sandbox $null -OutputSchemaPath $null | Out-Null
+    -Sandbox $null -OutputSchemaPath $null
 
 Write-Step -Number 6 -Message 'Codex applies relevant staged-review findings and proposes a commit message.' -LogPath $logPath
 $stagedReviewJson = Read-TextFile $stagedReviewPath
-$stagedDiffContext = Get-StagedDiffContext
-$fixPrompt = Expand-PromptTemplate -Name 'phase-cycle-apply-staged-review.md' -Variables @{
-    PLAN_PATH = Get-GitPath $script:PlanPath
-    PLAN_TEXT = Read-TextFile $script:PlanPath
-    PHASE = $Phase
-    STAGED_REVIEW_PATH = Get-GitPath $stagedReviewPath
-    STAGED_REVIEW_JSON = $stagedReviewJson
-    STAGED_DIFF_CONTEXT = $stagedDiffContext
-    STEP_RESULT_SCHEMA = $stepResultSchemaText
-}
-$stagedReviewFixRawPath = [System.IO.Path]::ChangeExtension($stagedReviewFixResultPath, '.raw.txt')
-$stagedReviewFixOutput = Invoke-Cli -Tool 'codex' -Prompt $fixPrompt -WorkingDir $script:RepoRoot -Model $CodexStagedReviewFixModel `
-    -PermissionMode $null -Sandbox 'danger-full-access' -Reasoning $CodexStagedReviewFixReasoning `
-    -OutputLastMessagePath $stagedReviewFixRawPath -OutputSchemaPath $stepResultSchemaPath
-$stagedReviewFixResult = Write-StepResultArtifact -Output $stagedReviewFixOutput -ArtifactPath $stagedReviewFixResultPath -LogPath $logPath
-Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
-Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
-Assert-StagedChangesExist -Context 'staged-review fix'
-$commitMessage = [string](Get-ObjectProperty -Object $stagedReviewFixResult -Name 'suggested_commit_message' -Default '')
-if ([string]::IsNullOrWhiteSpace($commitMessage)) {
-    throw "Staged-review fix step did not report suggested_commit_message. See $stagedReviewFixResultPath"
+$step6LogLine = 'Staged-review fix step completed.'
+if (Test-StagedReviewNeedsApplyStep -Review $stagedReview) {
+    $stagedDiffContext = Get-StagedDiffContext
+    $fixPrompt = Expand-PromptTemplate -Name 'phase-cycle-apply-staged-review.md' -Variables @{
+        PLAN_PATH = Get-GitPath $script:PlanPath
+        PLAN_TEXT = Read-TextFile $script:PlanPath
+        PHASE = $Phase
+        STAGED_REVIEW_PATH = Get-GitPath $stagedReviewPath
+        STAGED_REVIEW_JSON = $stagedReviewJson
+        STAGED_DIFF_CONTEXT = $stagedDiffContext
+        STEP_RESULT_SCHEMA = $stepResultSchemaText
+    }
+    $stagedReviewFixRawPath = [System.IO.Path]::ChangeExtension($stagedReviewFixResultPath, '.raw.txt')
+    $stagedReviewFixOutput = Invoke-Cli -Tool 'codex' -Prompt $fixPrompt -WorkingDir $script:RepoRoot -Model $CodexStagedReviewFixModel `
+        -PermissionMode $null -Sandbox 'danger-full-access' -Reasoning $CodexStagedReviewFixReasoning `
+        -OutputLastMessagePath $stagedReviewFixRawPath -OutputSchemaPath $stepResultSchemaPath
+    $stagedReviewFixResult = Write-StepResultArtifact -Output $stagedReviewFixOutput -ArtifactPath $stagedReviewFixResultPath -LogPath $logPath
+    Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
+    Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
+    Assert-StagedChangesExist -Context 'staged-review fix'
+    $commitMessage = [string](Get-ObjectProperty -Object $stagedReviewFixResult -Name 'suggested_commit_message' -Default '')
+    if ([string]::IsNullOrWhiteSpace($commitMessage)) {
+        throw "Staged-review fix step did not report suggested_commit_message. See $stagedReviewFixResultPath"
+    }
+} else {
+    $commitMessage = [string](Get-ObjectProperty -Object $implementationResult -Name 'suggested_commit_message' -Default '')
+    if ([string]::IsNullOrWhiteSpace($commitMessage)) {
+        throw "Implementation step did not report suggested_commit_message; needed because staged-review fix step was skipped. See $implementationResultPath"
+    }
+
+    $skipReason = 'Skipped Step 6 because the staged review had no non-nit findings.'
+    Write-Host "  $skipReason"
+    Add-LogLine -LogPath $logPath -Line $skipReason
+    $stagedReviewFixResult = New-SkippedStagedReviewFixResult -SuggestedCommitMessage $commitMessage
+    Write-StepResultObject -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath -LogPath $logPath | Out-Null
+    Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
+    Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
+    Assert-StagedChangesExist -Context 'staged-review skip'
+    $step6LogLine = 'Staged-review fix step skipped because staged review had no non-nit findings.'
 }
 Stage-Plan
 Unstage-PathsIfNeeded -Paths $generatedArtifacts
-Add-LogLine -LogPath $logPath -Line 'Staged-review fix step completed.'
+Add-LogLine -LogPath $logPath -Line $step6LogLine
 Add-LogLine -LogPath $logPath -Line 'Final detailed plan staged.'
 Add-LogLine -LogPath $logPath -Line "Suggested commit message: $commitMessage"
 Add-LogLine -LogPath $logPath -Line "Completed: $(Get-Date)"

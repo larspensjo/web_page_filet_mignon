@@ -1933,3 +1933,9 @@ Change: Added `suggested_commit_message` to the required fields in `scripts/prom
 Lessons Learned: Structured-output schemas used with Codex must keep `properties` and `required` synchronized when additional properties are disabled; otherwise the API rejects the request before any agent work starts.
 Prevention: When adding an optional-looking field to a strict output schema, make it required and encode absence as an empty string or nullable value according to the provider's supported schema contract.
 Refs: scripts/prompts/phase-cycle-step-result.schema.json, scripts/prompts/phase-cycle-implement-phase.md
+
+## 2026-06-06 - Phase cycle skips low-value AI handoffs
+Type: Implementation
+Context: Some phase-cycle handoffs were spending model calls on low-value no-op work: applying plan-review feedback when only low/nit notes existed, and running staged-review fixes when the review had no actionable findings beyond nits.
+Change: Added structured review skip gates to `Invoke-PlanPhaseCycle.ps1`: Step 3 now skips when the plan review has no blocker/high/medium findings, while Step 6 skips when the staged review has no blocker/high/medium/low findings and writes a synthetic step-result artifact using the implementation commit message. The staged-review prompt now tells the reviewer not to run or request tests/formatting, assuming Step 4 handled verification.
+Refs: scripts/Invoke-PlanPhaseCycle.ps1, scripts/prompts/phase-cycle-review-staged.md
