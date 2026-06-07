@@ -1939,3 +1939,11 @@ Type: Implementation
 Context: Some phase-cycle handoffs were spending model calls on low-value no-op work: applying plan-review feedback when only low/nit notes existed, and running staged-review fixes when the review had no actionable findings beyond nits.
 Change: Added structured review skip gates to `Invoke-PlanPhaseCycle.ps1`: Step 3 now skips when the plan review has no blocker/high/medium findings, while Step 6 skips when the staged review has no blocker/high/medium/low findings and writes a synthetic step-result artifact using the implementation commit message. The staged-review prompt now tells the reviewer not to run or request tests/formatting, assuming Step 4 handled verification.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1, scripts/prompts/phase-cycle-review-staged.md
+
+## 2026-06-07 - Phase cycle Codex plan review sandbox
+Type: Bug Fix
+Context: A Codex plan-review step in an external repository failed every shell command during read-only sandbox startup, so the review had to rely on supplied prompt text instead of repository inspection.
+Change: Made the Codex plan-review sandbox configurable and defaulted it to `danger-full-access`; added a worktree-status guard that ignores only the generated review artifact and fails if plan review mutates any other tracked or untracked repository file.
+Lessons Learned: On Windows, even read-only Codex sandboxing can fail before commands start; review-only behavior should be enforced by post-step invariants when the sandbox backend is unreliable.
+Prevention: Keep review steps mutation-guarded when they use a sandbox mode broad enough to support shell command execution.
+Refs: scripts/Invoke-PlanPhaseCycle.ps1

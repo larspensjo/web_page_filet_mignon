@@ -56,6 +56,9 @@ param(
     [string]$CodexImplementationReasoning = 'medium',
     [string]$CodexStagedReviewFixReasoning = 'high',
 
+    [ValidateSet('read-only', 'workspace-write', 'danger-full-access')]
+    [string]$CodexPlanReviewSandbox = 'danger-full-access',
+
     [ValidateRange(10000, 2000000)]
     [int]$MaxInlineDiffChars = 250000
 )
@@ -184,6 +187,69 @@ function Assert-CleanWorktree {
     $status = (Invoke-Git -Arguments @('status', '--porcelain=v1')).Text
     if (-not [string]::IsNullOrWhiteSpace($status)) {
         throw "Workspace must be clean before starting a phase cycle. If this follows an interrupted cycle, inspect the dirty files and either keep, stage, or restore them before rerunning.`n$status"
+    }
+}
+
+function Get-StatusPaths {
+    param([Parameter(Mandatory)][string]$StatusLine)
+
+    if ($StatusLine.Length -le 3) {
+        return @()
+    }
+
+    $pathText = $StatusLine.Substring(3)
+    if ($pathText.Contains(' -> ')) {
+        return @($pathText -split ' -> ')
+    }
+
+    return @($pathText)
+}
+
+function Get-WorktreeStatusText {
+    param([string[]]$ExcludedPaths = @())
+
+    $excludedSet = @{}
+    foreach ($path in $ExcludedPaths) {
+        if ([string]::IsNullOrWhiteSpace($path)) {
+            continue
+        }
+
+        $excludedSet[(Get-GitPath $path)] = $true
+    }
+
+    $statusLines = @((Invoke-Git -Arguments @('status', '--porcelain=v1')).Text -split "`r?`n" | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_)
+    })
+
+    $keptLines = @()
+    foreach ($line in $statusLines) {
+        $paths = @(Get-StatusPaths -StatusLine $line)
+        $isExcluded = $paths.Count -gt 0
+        foreach ($path in $paths) {
+            if (-not $excludedSet.ContainsKey($path.Replace('\', '/'))) {
+                $isExcluded = $false
+                break
+            }
+        }
+
+        if (-not $isExcluded) {
+            $keptLines += $line
+        }
+    }
+
+    return ($keptLines -join "`n")
+}
+
+function Assert-WorktreeStatusUnchanged {
+    param(
+        [AllowNull()][string]$BeforeStatus,
+        [Parameter(Mandatory)][string]$Context,
+        [string[]]$ExcludedPaths = @()
+    )
+
+    $afterStatus = Get-WorktreeStatusText -ExcludedPaths $ExcludedPaths
+    if ($BeforeStatus -ne $afterStatus) {
+        throw "$Context changed the worktree outside expected generated artifacts.`nBefore:`n$BeforeStatus`nAfter:`n$afterStatus"
     }
 }
 
@@ -969,6 +1035,7 @@ ClaudeModel: $ClaudeModel
 CodexPlanReviewModel: $CodexPlanReviewModel
 CodexImplementationModel: $CodexImplementationModel
 CodexStagedReviewFixModel: $CodexStagedReviewFixModel
+CodexPlanReviewSandbox: $CodexPlanReviewSandbox
 
 "@
 
@@ -987,13 +1054,17 @@ Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-elaborate-plan.md' -Variables 
 
 Write-Step -Number 2 -Message 'Codex reviews the selected phase plan.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
+$planReviewRawPath = [System.IO.Path]::ChangeExtension($planReviewPath, '.raw.txt')
+$planReviewGeneratedPaths = @($planReviewPath, $planReviewRawPath)
+$prePlanReviewStatus = Get-WorktreeStatusText -ExcludedPaths $planReviewGeneratedPaths
 $planReview = Invoke-ReviewJsonStep -Tool 'codex' -PromptName 'phase-cycle-review-plan.md' -Variables @{
     PLAN_PATH = Get-GitPath $script:PlanPath
     PLAN_TEXT = $planText
     PHASE = $Phase
     REVIEW_SCHEMA = $reviewSchemaText
 } -ArtifactPath $planReviewPath -LogPath $logPath -Model $CodexPlanReviewModel -Reasoning $CodexPlanReviewReasoning `
-    -Sandbox 'read-only' -OutputSchemaPath $reviewSchemaPath
+    -Sandbox $CodexPlanReviewSandbox -OutputSchemaPath $reviewSchemaPath
+Assert-WorktreeStatusUnchanged -BeforeStatus $prePlanReviewStatus -Context 'Codex plan review' -ExcludedPaths $planReviewGeneratedPaths
 
 Write-Step -Number 3 -Message 'Claude applies relevant plan-review findings.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
