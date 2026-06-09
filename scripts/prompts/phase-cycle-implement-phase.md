@@ -21,7 +21,9 @@ Structured completion:
 - Use `"status": "partial"` or `"failed"` if implementation could not be completed.
 - Use `"status": "manual_feedback_required"` and set `"manual_feedback_required": true` if a human decision is needed.
 - Include verification you actually performed. If none was appropriate, include a `not_applicable` or `not_run` item with a brief reason.
-- Include `"suggested_commit_message"`; use an empty string if no commit message is applicable.
+- Include `"suggested_commit_message"` as a single git commit subject line in imperative mood that describes the overall staged change for "{{PHASE}}", not just one detail. Keep it about the code change, not the plan or automation cycle.
+- Include `"commit_body"` as a short multi-line commit body (a few bullet lines or a brief paragraph) that summarizes the phase work and names the phase ("{{PHASE}}"). Use `\n` newlines and do not repeat the subject line.
+- If the phase could not be implemented, you may use empty strings for both fields.
 
 Step result JSON schema:
 {{STEP_RESULT_SCHEMA}}

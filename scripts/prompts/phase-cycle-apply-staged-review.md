@@ -20,7 +20,8 @@ Structured completion:
 - Use `"status": "partial"` or `"failed"` if relevant findings remain unresolved.
 - Use `"status": "manual_feedback_required"` and set `"manual_feedback_required": true` if a human decision is needed.
 - Include verification you actually performed. If none was appropriate, include a `not_applicable` or `not_run` item with a brief reason.
-- Include `"suggested_commit_message"` with one concise git commit subject line about the code change, not about the plan or automation cycle.
+- Include `"suggested_commit_message"` as a single git commit subject line in imperative mood describing the entire staged change for "{{PHASE}}" — the implementation plus the fixes you applied — not only the review fixes, and not the plan or automation cycle.
+- Include `"commit_body"` as a short multi-line commit body (a few bullet lines or a brief paragraph) that summarizes the phase work and the fixes you applied, and names the phase ("{{PHASE}}"). Use `\n` newlines and do not repeat the subject line.
 
 Step result JSON schema:
 {{STEP_RESULT_SCHEMA}}

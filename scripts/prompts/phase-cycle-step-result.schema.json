@@ -12,7 +12,8 @@
     "verification",
     "staged_changes_expected",
     "follow_up_notes",
-    "suggested_commit_message"
+    "suggested_commit_message",
+    "commit_body"
   ],
   "properties": {
     "step": {
@@ -81,6 +82,9 @@
       }
     },
     "suggested_commit_message": {
+      "type": "string"
+    },
+    "commit_body": {
       "type": "string"
     }
   }

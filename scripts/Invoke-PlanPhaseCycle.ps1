@@ -22,7 +22,8 @@ Cycle:
   4. Codex implements the phase and stages implementation changes.
   5. Claude reviews staged changes as structured JSON.
   6. Codex applies relevant staged-review findings, stages fixes, and proposes
-     a commit message, skipped when the staged review has no non-nit findings.
+     a commit message (subject line plus a multi-line body that names the
+     phase), skipped when the staged review has no non-nit findings.
 
 With -SkipPlanning, the script skips steps 1-3 and starts at step 4 using the
 current plan as-is. The skipped mode is intended for resuming after manual plan
@@ -684,7 +685,8 @@ function Test-StagedReviewNeedsApplyStep {
 
 function New-SkippedStagedReviewFixResult {
     param(
-        [Parameter(Mandatory)][string]$SuggestedCommitMessage
+        [Parameter(Mandatory)][string]$SuggestedCommitMessage,
+        [AllowNull()][string]$CommitBody
     )
 
     [pscustomobject]@{
@@ -704,6 +706,7 @@ function New-SkippedStagedReviewFixResult {
         staged_changes_expected  = $true
         follow_up_notes          = @()
         suggested_commit_message = $SuggestedCommitMessage
+        commit_body              = if ($null -eq $CommitBody) { '' } else { $CommitBody }
     }
 }
 
@@ -1040,6 +1043,21 @@ function Stage-Plan {
     Invoke-Git -Arguments @('add', '--', $planGitPath) | Out-Null
 }
 
+function Join-CommitMessage {
+    param(
+        [Parameter(Mandatory)][string]$Subject,
+        [AllowNull()][string]$Body
+    )
+
+    $subjectText = $Subject.Trim()
+    $bodyText = if ($null -eq $Body) { '' } else { $Body.Trim() }
+    if ([string]::IsNullOrWhiteSpace($bodyText)) {
+        return $subjectText
+    }
+
+    return ($subjectText + "`n`n" + $bodyText)
+}
+
 function Write-Step {
     param(
         [Parameter(Mandatory)][int]$Number,
@@ -1288,20 +1306,24 @@ if (Test-StagedReviewNeedsApplyStep -Review $stagedReview) {
     Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
     Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
     Assert-StagedChangesExist -Context 'staged-review fix'
-    $commitMessage = [string](Get-ObjectProperty -Object $stagedReviewFixResult -Name 'suggested_commit_message' -Default '')
-    if ([string]::IsNullOrWhiteSpace($commitMessage)) {
+    $commitSubject = [string](Get-ObjectProperty -Object $stagedReviewFixResult -Name 'suggested_commit_message' -Default '')
+    if ([string]::IsNullOrWhiteSpace($commitSubject)) {
         throw "Staged-review fix step did not report suggested_commit_message. See $stagedReviewFixResultPath"
     }
+    $commitBody = [string](Get-ObjectProperty -Object $stagedReviewFixResult -Name 'commit_body' -Default '')
+    $commitMessage = Join-CommitMessage -Subject $commitSubject -Body $commitBody
 } else {
-    $commitMessage = [string](Get-ObjectProperty -Object $implementationResult -Name 'suggested_commit_message' -Default '')
-    if ([string]::IsNullOrWhiteSpace($commitMessage)) {
+    $commitSubject = [string](Get-ObjectProperty -Object $implementationResult -Name 'suggested_commit_message' -Default '')
+    if ([string]::IsNullOrWhiteSpace($commitSubject)) {
         throw "Implementation step did not report suggested_commit_message; needed because staged-review fix step was skipped. See $implementationResultPath"
     }
+    $commitBody = [string](Get-ObjectProperty -Object $implementationResult -Name 'commit_body' -Default '')
+    $commitMessage = Join-CommitMessage -Subject $commitSubject -Body $commitBody
 
     $skipReason = 'Skipped Step 6 because the staged review had no non-nit findings.'
     Write-Host "  $skipReason"
     Add-LogLine -LogPath $logPath -Line $skipReason
-    $stagedReviewFixResult = New-SkippedStagedReviewFixResult -SuggestedCommitMessage $commitMessage
+    $stagedReviewFixResult = New-SkippedStagedReviewFixResult -SuggestedCommitMessage $commitSubject -CommitBody $commitBody
     Write-StepResultObject -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath -LogPath $logPath | Out-Null
     Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
     Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
@@ -1312,7 +1334,7 @@ Stage-Plan
 Unstage-PathsIfNeeded -Paths $generatedArtifacts
 Add-LogLine -LogPath $logPath -Line $step6LogLine
 Add-LogLine -LogPath $logPath -Line 'Final detailed plan staged.'
-Add-LogLine -LogPath $logPath -Line "Suggested commit message: $commitMessage"
+Add-LogLine -LogPath $logPath -Line "Suggested commit subject: $commitSubject"
 Add-LogLine -LogPath $logPath -Line "Completed: $(Get-Date)"
 
 $stagedStatus = (Invoke-Git -Arguments @('diff', '--cached', '--name-status', '--')).Text
