@@ -8,6 +8,12 @@ Usage:
     -PlanPath docs\plans\Plan.Example.md `
     -Phase "Phase 1"
 
+  pwsh .\scripts\Invoke-PlanPhaseCycle.ps1 `
+    -PlanPath docs\plans\Plan.Example.md `
+    -Phase "Phase 1" `
+    -SkipPlanning `
+    -PreflightOnly
+
 Cycle:
   1. Claude compacts prior phases and elaborates the selected phase in the plan.
   2. Codex reviews the selected phase plan as structured JSON.
@@ -18,14 +24,21 @@ Cycle:
   6. Codex applies relevant staged-review findings, stages fixes, and proposes
      a commit message, skipped when the staged review has no non-nit findings.
 
-The script requires a clean worktree at the start, never commits, does not run a
-fixed test command itself, stages the final plan with the implementation, and
-keeps generated review/log artifacts unstaged.
+With -SkipPlanning, the script skips steps 1-3 and starts at step 4 using the
+current plan as-is. The skipped mode is intended for resuming after manual plan
+review feedback; it allows only the target plan and generated cycle artifacts to
+be dirty at startup. Normal runs require a clean worktree at the start. The
+script never commits, does not run a fixed test command itself, stages the final
+plan with the implementation, and keeps generated review/log artifacts unstaged.
+
+Use -PreflightOnly to validate path resolution, CLI flags, phase lookup, and
+worktree start conditions without creating artifacts or invoking AI steps.
 
 Recovery:
   If a cycle is interrupted after a plan rewrite, inspect the dirty worktree and
   either keep, stage, or restore the generated plan/review/log changes before
-  rerunning. The script intentionally refuses to start from a dirty worktree.
+  rerunning. Use -SkipPlanning after resolving plan-review feedback when the
+  current plan is ready for implementation.
 
 CLI assumptions:
   The script preflights the required advertised flags in `claude --help` and
@@ -46,6 +59,8 @@ param(
     [string]$RepoRoot = (Get-Location).Path,
     [string]$PlansDir,
     [string]$PromptsDir,
+    [switch]$SkipPlanning,
+    [switch]$PreflightOnly,
 
     [string]$ClaudeModel = 'opus',
     [string]$CodexPlanReviewModel = 'gpt-5.5',
@@ -133,7 +148,7 @@ function Normalize-Text {
         return ''
     }
 
-    return (($Output | Out-String).Trim())
+    return (($Output | Out-String).TrimEnd())
 }
 
 function Invoke-Git {
@@ -190,6 +205,37 @@ function Assert-CleanWorktree {
     }
 }
 
+function Assert-SkipPlanningStartWorktree {
+    param([Parameter(Mandatory)][string[]]$AllowedPaths)
+
+    Write-Verbose "-SkipPlanning guard for repo: $script:RepoRoot"
+    Write-Verbose "-SkipPlanning plan path: $script:PlanPath"
+    Write-Verbose "-SkipPlanning plans dir: $script:PlansDir"
+    $unexpectedStatus = Get-WorktreeStatusText -ExcludedPaths $AllowedPaths
+    if (-not [string]::IsNullOrWhiteSpace($unexpectedStatus)) {
+        throw "-SkipPlanning can only start with the target plan and generated cycle artifacts dirty. Resolve or stage unrelated changes before jumping to implementation.`n$unexpectedStatus"
+    }
+
+    Unstage-PathsIfNeeded -Paths $AllowedPaths
+}
+
+function ConvertTo-GitStatusPathKey {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $gitPath = if ([System.IO.Path]::IsPathRooted($Path)) {
+        Get-GitPath $Path
+    } else {
+        $Path
+    }
+
+    $gitPath = $gitPath.Trim().Replace('\', '/')
+    while ($gitPath.StartsWith('./', [System.StringComparison]::Ordinal)) {
+        $gitPath = $gitPath.Substring(2)
+    }
+
+    return $gitPath
+}
+
 function Get-StatusPaths {
     param([Parameter(Mandatory)][string]$StatusLine)
 
@@ -208,13 +254,17 @@ function Get-StatusPaths {
 function Get-WorktreeStatusText {
     param([string[]]$ExcludedPaths = @())
 
-    $excludedSet = @{}
+    $excludedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($path in $ExcludedPaths) {
         if ([string]::IsNullOrWhiteSpace($path)) {
             continue
         }
 
-        $excludedSet[(Get-GitPath $path)] = $true
+        [void]$excludedSet.Add((ConvertTo-GitStatusPathKey $path))
+    }
+    Write-Verbose "Allowed dirty path keys:"
+    foreach ($key in @($excludedSet | Sort-Object)) {
+        Write-Verbose "  allow: $key"
     }
 
     $statusLines = @((Invoke-Git -Arguments @('status', '--porcelain=v1')).Text -split "`r?`n" | Where-Object {
@@ -226,7 +276,10 @@ function Get-WorktreeStatusText {
         $paths = @(Get-StatusPaths -StatusLine $line)
         $isExcluded = $paths.Count -gt 0
         foreach ($path in $paths) {
-            if (-not $excludedSet.ContainsKey($path.Replace('\', '/'))) {
+            $key = ConvertTo-GitStatusPathKey $path
+            $pathIsExcluded = $excludedSet.Contains($key)
+            Write-Verbose ("  status: {0}; path: {1}; key: {2}; allowed: {3}" -f $line, $path, $key, $pathIsExcluded)
+            if (-not $pathIsExcluded) {
                 $isExcluded = $false
                 break
             }
@@ -654,6 +707,24 @@ function New-SkippedStagedReviewFixResult {
     }
 }
 
+function New-SkippedPlanReview {
+    [pscustomobject]@{
+        summary                  = 'Skipped steps 1-3 because -SkipPlanning was specified; implementation should use the current plan as the source of truth.'
+        decision                 = 'continue'
+        manual_feedback_required = $false
+        manual_feedback_reason   = ''
+        findings_by_severity     = [pscustomobject]@{
+            blocker = @()
+            high    = @()
+            medium  = @()
+            low     = @()
+            nit     = @()
+        }
+        questions                = @()
+        confidence               = 'medium'
+    }
+}
+
 function Test-ManualFeedbackRequired {
     param([Parameter(Mandatory)][object]$Review)
 
@@ -930,9 +1001,9 @@ function Unstage-PathsIfNeeded {
         return
     }
 
-    $stagedSet = @{}
+    $stagedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($path in $staged) {
-        $stagedSet[$path.Replace('\', '/')] = $true
+        [void]$stagedSet.Add((ConvertTo-GitStatusPathKey $path))
     }
 
     $toUnstage = @()
@@ -942,7 +1013,7 @@ function Unstage-PathsIfNeeded {
         }
 
         $gitPath = Get-GitPath $path
-        if ($stagedSet.ContainsKey($gitPath)) {
+        if ($stagedSet.Contains((ConvertTo-GitStatusPathKey $gitPath))) {
             $toUnstage += $gitPath
         }
     }
@@ -989,6 +1060,8 @@ $scriptDir = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
 } else {
     $PSScriptRoot
 }
+Write-Verbose "Script path: $($MyInvocation.MyCommand.Path)"
+Write-Verbose "Script dir: $scriptDir"
 
 $initialRoot = Resolve-FullPath -Path $RepoRoot -BasePath (Get-Location).Path -MustExist
 $PlanPath = Resolve-FullPath -Path $PlanPath -BasePath $initialRoot -MustExist
@@ -1044,27 +1117,60 @@ Assert-CliFlagSupport
 
 $initialPlanText = Read-TextFile $script:PlanPath
 Assert-PhaseExists -PlanText $initialPlanText -PhaseText $Phase
-Assert-CleanWorktree
 
-Ensure-Dir $script:PlansDir
 $logPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.log")
 $planReviewPath = Join-Path $script:PlansDir ("Review.$script:PlanId.$script:PhaseSlug.Plan.codex.json")
 $stagedReviewPath = Join-Path $script:PlansDir ("Review.$script:PlanId.$script:PhaseSlug.Staged.claude.json")
 $implementationResultPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.Step4.Implementation.codex.json")
 $stagedReviewFixResultPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.Step6.StagedReviewFix.codex.json")
+$planReviewRawPath = [System.IO.Path]::ChangeExtension($planReviewPath, '.raw.txt')
+$stagedReviewRawPath = [System.IO.Path]::ChangeExtension($stagedReviewPath, '.raw.txt')
+$implementationRawPath = [System.IO.Path]::ChangeExtension($implementationResultPath, '.raw.txt')
+$stagedReviewFixRawPath = [System.IO.Path]::ChangeExtension($stagedReviewFixResultPath, '.raw.txt')
+$preparePlanRawPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.Step1.PreparePlan.raw.txt")
+$applyPlanReviewRawPath = Join-Path $script:PlansDir ("Cycle.$script:PlanId.$script:PhaseSlug.Step3.ApplyPlanReview.raw.txt")
 $generatedArtifacts = @(
     $logPath,
     $planReviewPath,
+    $planReviewRawPath,
     $stagedReviewPath,
+    $stagedReviewRawPath,
     $implementationResultPath,
-    $stagedReviewFixResultPath
+    $implementationRawPath,
+    $stagedReviewFixResultPath,
+    $stagedReviewFixRawPath,
+    $preparePlanRawPath,
+    $applyPlanReviewRawPath
 )
 
+if ($SkipPlanning) {
+    Assert-SkipPlanningStartWorktree -AllowedPaths (@($script:PlanPath) + $generatedArtifacts)
+} else {
+    Assert-CleanWorktree
+}
+
+if ($PreflightOnly) {
+    Write-Host 'Preflight OK. No artifacts were written and no AI steps were invoked.'
+    Write-Host "  Script: $($MyInvocation.MyCommand.Path)"
+    Write-Host "  Repo:   $script:RepoRoot"
+    Write-Host "  Plan:   $script:PlanPath"
+    Write-Host "  Phase:  $Phase"
+    if ($SkipPlanning) {
+        Write-Host '  Mode:   Skip planning; next real run would start at Step 4.'
+    } else {
+        Write-Host '  Mode:   Full cycle; next real run would start at Step 1.'
+    }
+    return
+}
+
+Ensure-Dir $script:PlansDir
 Write-AtomicUtf8 -Path $logPath -Content @"
 Started: $(Get-Date)
 RepoRoot: $script:RepoRoot
 PlanPath: $script:PlanPath
 Phase: $Phase
+SkipPlanning: $($SkipPlanning.IsPresent)
+PreflightOnly: $($PreflightOnly.IsPresent)
 ClaudeModel: $ClaudeModel
 CodexPlanReviewModel: $CodexPlanReviewModel
 CodexImplementationModel: $CodexImplementationModel
@@ -1078,42 +1184,54 @@ Write-Host "  Plan:  $script:PlanPath"
 Write-Host "  Phase: $Phase"
 Write-Host "  Log:   $logPath"
 
-Write-Step -Number 1 -Message 'Claude compacts prior phases and elaborates the selected phase in the plan.' -LogPath $logPath
-$planText = Read-TextFile $script:PlanPath
-Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-elaborate-plan.md' -Variables @{
-    PLAN_PATH = Get-GitPath $script:PlanPath
-    PLAN_TEXT = $planText
-    PHASE = $Phase
-} -LogPath $logPath -StepName 'Step1.PreparePlan' | Out-Null
-
-Write-Step -Number 2 -Message 'Codex reviews the selected phase plan.' -LogPath $logPath
-$planText = Read-TextFile $script:PlanPath
-$planReviewRawPath = [System.IO.Path]::ChangeExtension($planReviewPath, '.raw.txt')
-$planReviewGeneratedPaths = @($planReviewPath, $planReviewRawPath)
-$prePlanReviewStatus = Get-WorktreeStatusText -ExcludedPaths $planReviewGeneratedPaths
-$planReview = Invoke-ReviewJsonStep -Tool 'codex' -PromptName 'phase-cycle-review-plan.md' -Variables @{
-    PLAN_PATH = Get-GitPath $script:PlanPath
-    PLAN_TEXT = $planText
-    PHASE = $Phase
-    REVIEW_SCHEMA = $reviewSchemaText
-} -ArtifactPath $planReviewPath -LogPath $logPath -Model $CodexPlanReviewModel -Reasoning $CodexPlanReviewReasoning `
-    -Sandbox $CodexPlanReviewSandbox -OutputSchemaPath $reviewSchemaPath
-Assert-WorktreeStatusUnchanged -BeforeStatus $prePlanReviewStatus -Context 'Codex plan review' -ExcludedPaths $planReviewGeneratedPaths
-
-Write-Step -Number 3 -Message 'Claude applies relevant plan-review findings.' -LogPath $logPath
-$planText = Read-TextFile $script:PlanPath
-$planReviewJson = Read-TextFile $planReviewPath
-if (Test-PlanReviewNeedsApplyStep -Review $planReview) {
-    Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-apply-plan-review.md' -Variables @{
+if ($SkipPlanning) {
+    $skipReason = 'Skipped Steps 1-3 because -SkipPlanning was specified; using the current plan as the source of truth.'
+    Write-Host ''
+    Write-Host $skipReason
+    Add-LogLine -LogPath $logPath -Line $skipReason
+    $planReview = New-SkippedPlanReview
+    Write-AtomicUtf8 -Path $planReviewPath -Content (ConvertTo-PrettyJson -Value $planReview)
+    Remove-Item -LiteralPath $planReviewRawPath -ErrorAction SilentlyContinue
+    Add-LogLine -LogPath $logPath -Line "Saved skipped plan review JSON: $planReviewPath"
+    Write-ReviewSummary -Review $planReview -ArtifactPath $planReviewPath
+    $planReviewJson = Read-TextFile $planReviewPath
+} else {
+    Write-Step -Number 1 -Message 'Claude compacts prior phases and elaborates the selected phase in the plan.' -LogPath $logPath
+    $planText = Read-TextFile $script:PlanPath
+    Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-elaborate-plan.md' -Variables @{
         PLAN_PATH = Get-GitPath $script:PlanPath
         PLAN_TEXT = $planText
         PHASE = $Phase
-        REVIEW_JSON = $planReviewJson
-    } -LogPath $logPath -StepName 'Step3.ApplyPlanReview' | Out-Null
-} else {
-    $skipReason = 'Skipped Step 3 because the plan review had no blocker, high, or medium findings.'
-    Write-Host "  $skipReason"
-    Add-LogLine -LogPath $logPath -Line $skipReason
+    } -LogPath $logPath -StepName 'Step1.PreparePlan' | Out-Null
+
+    Write-Step -Number 2 -Message 'Codex reviews the selected phase plan.' -LogPath $logPath
+    $planText = Read-TextFile $script:PlanPath
+    $planReviewGeneratedPaths = @($planReviewPath, $planReviewRawPath)
+    $prePlanReviewStatus = Get-WorktreeStatusText -ExcludedPaths $planReviewGeneratedPaths
+    $planReview = Invoke-ReviewJsonStep -Tool 'codex' -PromptName 'phase-cycle-review-plan.md' -Variables @{
+        PLAN_PATH = Get-GitPath $script:PlanPath
+        PLAN_TEXT = $planText
+        PHASE = $Phase
+        REVIEW_SCHEMA = $reviewSchemaText
+    } -ArtifactPath $planReviewPath -LogPath $logPath -Model $CodexPlanReviewModel -Reasoning $CodexPlanReviewReasoning `
+        -Sandbox $CodexPlanReviewSandbox -OutputSchemaPath $reviewSchemaPath
+    Assert-WorktreeStatusUnchanged -BeforeStatus $prePlanReviewStatus -Context 'Codex plan review' -ExcludedPaths $planReviewGeneratedPaths
+
+    Write-Step -Number 3 -Message 'Claude applies relevant plan-review findings.' -LogPath $logPath
+    $planText = Read-TextFile $script:PlanPath
+    $planReviewJson = Read-TextFile $planReviewPath
+    if (Test-PlanReviewNeedsApplyStep -Review $planReview) {
+        Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-apply-plan-review.md' -Variables @{
+            PLAN_PATH = Get-GitPath $script:PlanPath
+            PLAN_TEXT = $planText
+            PHASE = $Phase
+            REVIEW_JSON = $planReviewJson
+        } -LogPath $logPath -StepName 'Step3.ApplyPlanReview' | Out-Null
+    } else {
+        $skipReason = 'Skipped Step 3 because the plan review had no blocker, high, or medium findings.'
+        Write-Host "  $skipReason"
+        Add-LogLine -LogPath $logPath -Line $skipReason
+    }
 }
 
 Write-Step -Number 4 -Message 'Codex implements the selected phase and stages implementation changes.' -LogPath $logPath

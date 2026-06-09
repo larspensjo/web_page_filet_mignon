@@ -1963,3 +1963,9 @@ Change: In `build_list_box_item_with_signal_outcome`, when there is no signal ou
 Lessons Learned: When rendering table columns via index-positioned badges, every row must occupy every column slot regardless of whether a value exists — otherwise variable-length badge vectors cause horizontal drift.
 Prevention: Always insert a placeholder (even empty) at fixed column positions when a value may be absent; lean on the rendering layer to skip invisible slots.
 Refs: crates/harvester_app/src/platform/ui/render_list_box.rs, src/CommanDuctUI/src/controls/listbox_handler.rs
+
+## 2026-06-09 - Phase cycle skip-planning resume path
+Type: Implementation + Bug Fix
+Context: `Invoke-PlanPhaseCycle.ps1` could stop before implementation when plan review required manual feedback, but rerunning always repeated the planning and plan-review steps. Early skip-mode testing also exposed brittle dirty-path matching across repositories and a git porcelain parsing bug caused by trimming leading status-column spaces.
+Change: Added `-SkipPlanning` to jump directly to Step 4 using the current plan as-is, allowing only the target plan and generated cycle artifacts to be dirty and writing a synthetic skipped plan-review artifact for the Step 4 prompt. Normalized allowed paths and git status paths through one case-insensitive git-path key, reused that matching for unstaging allowed startup files, preserved leading whitespace in command output so `git status --porcelain=v1` remains parseable, and added `-Verbose` diagnostics plus `-PreflightOnly` for non-mutating start-condition checks.
+Refs: scripts/Invoke-PlanPhaseCycle.ps1
