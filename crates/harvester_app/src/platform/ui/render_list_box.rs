@@ -176,6 +176,15 @@ fn build_list_box_item_with_signal_outcome(
                 style,
             },
         );
+    } else if matches!(tab, LeftTab::TriageResults) {
+        // Keep the signal-outcome column slot so priority stays in column 1.
+        item.badges.insert(
+            0,
+            BadgeDescriptor {
+                text: String::new(),
+                style: StyleId::BadgeStatusMuted,
+            },
+        );
     }
     item
 }

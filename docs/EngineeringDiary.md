@@ -1955,3 +1955,11 @@ Change: Replaced the first-brace/last-brace fallback in `ConvertFrom-AgentJson` 
 Lessons Learned: Agent-output recovery code must treat arbitrary prose and code snippets as hostile to delimiter-based extraction; braces outside JSON are common in review explanations.
 Prevention: Parse direct/fenced JSON first, then recover by scanning balanced object candidates instead of assuming the first brace belongs to the structured payload.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1
+
+## 2026-06-09 - Triage badge column alignment with empty placeholder
+Type: Bug Fix
+Context: After running Triage, the colored signal-outcome badges (ARCH/DUP/LOW/EXCL) appeared only on resolved rows, causing the priority (P1-P5) column to shift left on unresolved rows. The user wanted a consistent empty column instead.
+Change: In `build_list_box_item_with_signal_outcome`, when there is no signal outcome for a `TriageResults` row, an empty-text badge placeholder is now inserted at position 0 so the priority badge stays in column 1. In CommanDuctUI's `draw_badges`, empty-text badges skip pill rendering and act purely as column spacers.
+Lessons Learned: When rendering table columns via index-positioned badges, every row must occupy every column slot regardless of whether a value exists — otherwise variable-length badge vectors cause horizontal drift.
+Prevention: Always insert a placeholder (even empty) at fixed column positions when a value may be absent; lean on the rendering layer to skip invisible slots.
+Refs: crates/harvester_app/src/platform/ui/render_list_box.rs, src/CommanDuctUI/src/controls/listbox_handler.rs
