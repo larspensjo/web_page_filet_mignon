@@ -1947,3 +1947,11 @@ Change: Made the Codex plan-review sandbox configurable and defaulted it to `dan
 Lessons Learned: On Windows, even read-only Codex sandboxing can fail before commands start; review-only behavior should be enforced by post-step invariants when the sandbox backend is unreliable.
 Prevention: Keep review steps mutation-guarded when they use a sandbox mode broad enough to support shell command execution.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1
+
+## 2026-06-07 - Phase cycle JSON extraction skips prose braces
+Type: Bug Fix
+Context: A Claude staged-review response started with prose that mentioned a Rust type snippet, `Turn { index: usize, assistant_response: String }`, before emitting valid review JSON. The phase-cycle parser's fallback sliced from the first `{` in the whole response to the last `}`, producing invalid JSON and aborting Step 5.
+Change: Replaced the first-brace/last-brace fallback in `ConvertFrom-AgentJson` with a balanced-object scanner that tests each complete object candidate and returns the first valid JSON object.
+Lessons Learned: Agent-output recovery code must treat arbitrary prose and code snippets as hostile to delimiter-based extraction; braces outside JSON are common in review explanations.
+Prevention: Parse direct/fenced JSON first, then recover by scanning balanced object candidates instead of assuming the first brace belongs to the structured payload.
+Refs: scripts/Invoke-PlanPhaseCycle.ps1

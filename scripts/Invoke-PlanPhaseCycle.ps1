@@ -441,14 +441,48 @@ function ConvertFrom-AgentJson {
     try {
         return ($jsonText | ConvertFrom-Json -Depth 50)
     } catch {
-        $start = $jsonText.IndexOf('{')
-        $end = $jsonText.LastIndexOf('}')
-        if ($start -ge 0 -and $end -gt $start) {
-            $candidate = $jsonText.Substring($start, $end - $start + 1)
-            return ($candidate | ConvertFrom-Json -Depth 50)
+        $parseError = $_
+        for ($start = 0; $start -lt $jsonText.Length; $start++) {
+            if ($jsonText[$start] -ne '{') {
+                continue
+            }
+
+            $depth = 0
+            $inString = $false
+            $escaped = $false
+            for ($end = $start; $end -lt $jsonText.Length; $end++) {
+                $char = $jsonText[$end]
+
+                if ($inString) {
+                    if ($escaped) {
+                        $escaped = $false
+                    } elseif ($char -eq '\') {
+                        $escaped = $true
+                    } elseif ($char -eq '"') {
+                        $inString = $false
+                    }
+                    continue
+                }
+
+                if ($char -eq '"') {
+                    $inString = $true
+                } elseif ($char -eq '{') {
+                    $depth++
+                } elseif ($char -eq '}') {
+                    $depth--
+                    if ($depth -eq 0) {
+                        $candidate = $jsonText.Substring($start, $end - $start + 1)
+                        try {
+                            return ($candidate | ConvertFrom-Json -Depth 50)
+                        } catch {
+                            break
+                        }
+                    }
+                }
+            }
         }
 
-        throw
+        throw $parseError
     }
 }
 
