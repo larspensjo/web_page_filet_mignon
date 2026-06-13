@@ -121,7 +121,7 @@ pub fn validate_summary(content: &str) -> Result<ArticleSummary, ValidationError
     ensure_max_length(title, MAX_TITLE_LEN, FIELD_TITLE)?;
 
     let summary = require_string(&document, FIELD_SUMMARY)?;
-    ensure_max_length(summary, MAX_RESPONSE_SUMMARY_CHARS, FIELD_SUMMARY)?;
+    let summary = truncate_prose_field(summary, MAX_RESPONSE_SUMMARY_CHARS);
 
     let key_points_array = require_array(&document, FIELD_KEY_POINTS)?;
     ensure_max_items(key_points_array.len(), MAX_KEY_POINTS, FIELD_KEY_POINTS)?;
@@ -152,7 +152,7 @@ pub fn validate_summary(content: &str) -> Result<ArticleSummary, ValidationError
 
     Ok(ArticleSummary {
         title: title.to_string(),
-        summary: summary.to_string(),
+        summary,
         key_points,
         entities,
     })
@@ -265,12 +265,10 @@ pub fn validate_signal_candidate(content: &str) -> Result<SignalCandidateResult,
         .collect::<Result<Vec<_>, ValidationError>>()?;
 
     let draft_gist = require_string(&document, FIELD_DRAFT_GIST)?;
-    ensure_len_range(
-        draft_gist,
-        MIN_DRAFT_GIST_LEN,
-        MAX_DRAFT_GIST_LEN,
-        FIELD_DRAFT_GIST,
-    )?;
+    if draft_gist.chars().count() < MIN_DRAFT_GIST_LEN {
+        return Err(ValidationError::ValueOutOfRange(FIELD_DRAFT_GIST));
+    }
+    let draft_gist = truncate_prose_field(draft_gist, MAX_DRAFT_GIST_LEN);
     if draft_gist.trim() != draft_gist {
         return Err(ValidationError::SchemaViolation(
             "draft_gist must not have leading or trailing whitespace".into(),
@@ -314,7 +312,7 @@ pub fn validate_signal_candidate(content: &str) -> Result<SignalCandidateResult,
         signal_score,
         signal_key: signal_key.to_string(),
         themes,
-        draft_gist: draft_gist.to_string(),
+        draft_gist,
         source_tier,
         confidence,
         reasoning: reasoning.to_string(),
@@ -478,6 +476,23 @@ fn truncate_executive_summary(value: &str) -> String {
         }
         removed_chars = recalculated_removed;
     }
+}
+
+fn truncate_prose_field(value: &str, max_chars: usize) -> String {
+    const SUFFIX: &str = "...";
+
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+
+    let suffix_chars = SUFFIX.chars().count();
+    if max_chars <= suffix_chars {
+        return truncate_to_char_boundary(value, max_chars).to_string();
+    }
+
+    let preserved_chars = max_chars - suffix_chars;
+    let prefix = truncate_to_char_boundary(value, preserved_chars).trim_end();
+    format!("{prefix}{SUFFIX}")
 }
 
 fn truncate_to_word_limit(value: &str, max_words: usize) -> String {
@@ -831,17 +846,13 @@ mod tests {
     }
 
     #[test]
-    fn validate_signal_candidate_rejects_gist_too_long() {
+    fn validate_signal_candidate_truncates_gist_too_long() {
         let mut value: Value = serde_json::from_str(&valid_signal_candidate_json()).unwrap();
-        value[FIELD_DRAFT_GIST] = Value::String("x".repeat(MAX_DRAFT_GIST_LEN + 1));
-        assert!(matches!(
-            validate_signal_candidate(&value.to_string()).unwrap_err(),
-            ValidationError::FieldTooLong {
-                field: FIELD_DRAFT_GIST,
-                max_chars: MAX_DRAFT_GIST_LEN,
-                actual_chars
-            } if actual_chars == MAX_DRAFT_GIST_LEN + 1
-        ));
+        value[FIELD_DRAFT_GIST] = Value::String("x".repeat(MAX_DRAFT_GIST_LEN + 20));
+
+        let result = validate_signal_candidate(&value.to_string()).unwrap();
+        assert_eq!(result.draft_gist.chars().count(), MAX_DRAFT_GIST_LEN);
+        assert!(result.draft_gist.ends_with("..."));
     }
 
     #[test]

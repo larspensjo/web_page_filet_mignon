@@ -88,20 +88,16 @@ fn triage_priority_range_is_enforced() {
 }
 
 #[test]
-fn summary_limit_error_reports_actual_and_max() {
+fn summary_over_limit_is_truncated() {
     let summary = "s".repeat(1201);
     let json = format!(
         r#"{{"title":"T","summary":"{}","key_points":["k1"]}}"#,
         summary
     );
-    assert_eq!(
-        validate_summary(&json).unwrap_err(),
-        ValidationError::FieldTooLong {
-            field: "summary",
-            max_chars: 1200,
-            actual_chars: 1201,
-        }
-    );
+
+    let validated = validate_summary(&json).unwrap();
+    assert_eq!(validated.summary.chars().count(), 1200);
+    assert!(validated.summary.ends_with("..."));
 }
 
 #[test]

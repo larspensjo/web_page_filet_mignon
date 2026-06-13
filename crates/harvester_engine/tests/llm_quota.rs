@@ -2,6 +2,11 @@ use harvester_engine::llm::{LlmQuotaTracker, LlmQuotas};
 use harvester_engine::FailureKind;
 
 #[test]
+fn default_call_limit_supports_large_summary_runs() {
+    assert_eq!(LlmQuotas::default().max_calls_per_session, Some(1_000));
+}
+
+#[test]
 fn call_limit_blocks() {
     let quotas = LlmQuotas {
         max_calls_per_session: Some(2),

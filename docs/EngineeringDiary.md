@@ -1976,3 +1976,11 @@ Context: The cycle's final "Suggested git commit message" was a single subject l
 Change: Added a required `commit_body` field to the step-result schema. The implement-phase and apply-staged-review prompts now ask for a `suggested_commit_message` subject that summarizes the whole staged change for the phase plus a short multi-line `commit_body` that names the phase. The script composes the two via a pure `Join-CommitMessage` helper (subject + blank line + body, falling back to subject-only when the body is empty), carries the body through `New-SkippedStagedReviewFixResult` on the Step-6-skipped path, and logs only the clean subject line while the full message is printed and stored in the step-result artifact.
 Lessons Learned: A commit message authored by the last fix-focused agent inherits that agent's narrow framing; the deterministic context (phase name) is better supplied to the prompt and reused than inferred. The cycle script self-executes on load, so there is no clean dot-source seam for a Pester unit test yet.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1, scripts/prompts/phase-cycle-step-result.schema.json, scripts/prompts/phase-cycle-implement-phase.md, scripts/prompts/phase-cycle-apply-staged-review.md
+
+## 2026-06-13 - Large summary warning reduction
+Type: Bug Fix
+Context: A large summary run produced avoidable warnings when model outputs exceeded local prose-field limits by a small amount, and the default 250-call session quota could be exhausted before large runs completed.
+Change: Truncated over-limit article summaries and signal draft gists at validation time, and raised the default per-session LLM call cap to 1,000 while retaining token and cost caps.
+Lessons Learned: Hard-failing slightly oversized generated prose loses useful results and creates noisy warnings; quotas should align with the fan-out behavior of summary plus signal scoring.
+Prevention: Keep regression tests for prose-field truncation and the default call cap so future validation/quota changes preserve large-run behavior.
+Refs: crates/harvester_engine/src/llm/validation.rs, crates/harvester_engine/src/llm/quota.rs, crates/harvester_engine/tests/llm_validation.rs, crates/harvester_engine/tests/llm_quota.rs
