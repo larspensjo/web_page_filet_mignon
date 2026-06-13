@@ -64,6 +64,7 @@ param(
     [switch]$PreflightOnly,
 
     [string]$ClaudeModel = 'opus',
+    [string]$ClaudePlanElaborationModel = 'fable',
     [string]$CodexPlanReviewModel = 'gpt-5.5',
     [string]$CodexImplementationModel = 'gpt-5.4-mini',
     [string]$CodexStagedReviewFixModel = 'gpt-5.5',
@@ -889,11 +890,12 @@ function Invoke-ClaudePlanRewrite {
         [Parameter(Mandatory)][string]$PromptName,
         [Parameter(Mandatory)][hashtable]$Variables,
         [Parameter(Mandatory)][string]$LogPath,
-        [Parameter(Mandatory)][string]$StepName
+        [Parameter(Mandatory)][string]$StepName,
+        [Parameter(Mandatory)][string]$Model
     )
 
     $prompt = Expand-PromptTemplate -Name $PromptName -Variables $Variables
-    $output = Invoke-Cli -Tool 'claude' -Prompt $prompt -WorkingDir $script:RepoRoot -Model $script:ClaudeModel -PermissionMode 'plan' `
+    $output = Invoke-Cli -Tool 'claude' -Prompt $prompt -WorkingDir $script:RepoRoot -Model $Model -PermissionMode 'plan' `
         -Sandbox $null -Reasoning $null -OutputLastMessagePath $null -OutputSchemaPath $null
 
     try {
@@ -1113,6 +1115,7 @@ if ([string]::IsNullOrWhiteSpace($PromptsDir)) {
 $script:PromptsDir = $PromptsDir
 
 $script:ClaudeModel = $ClaudeModel
+$script:ClaudePlanElaborationModel = $ClaudePlanElaborationModel
 $script:Phase = $Phase
 $script:MaxInlineDiffChars = $MaxInlineDiffChars
 $script:PlanId = Get-PlanIdFromPath $script:PlanPath
@@ -1190,6 +1193,7 @@ Phase: $Phase
 SkipPlanning: $($SkipPlanning.IsPresent)
 PreflightOnly: $($PreflightOnly.IsPresent)
 ClaudeModel: $ClaudeModel
+ClaudePlanElaborationModel: $ClaudePlanElaborationModel
 CodexPlanReviewModel: $CodexPlanReviewModel
 CodexImplementationModel: $CodexImplementationModel
 CodexStagedReviewFixModel: $CodexStagedReviewFixModel
@@ -1220,7 +1224,7 @@ if ($SkipPlanning) {
         PLAN_PATH = Get-GitPath $script:PlanPath
         PLAN_TEXT = $planText
         PHASE = $Phase
-    } -LogPath $logPath -StepName 'Step1.PreparePlan' | Out-Null
+    } -LogPath $logPath -StepName 'Step1.PreparePlan' -Model $script:ClaudePlanElaborationModel | Out-Null
 
     Write-Step -Number 2 -Message 'Codex reviews the selected phase plan.' -LogPath $logPath
     $planText = Read-TextFile $script:PlanPath
@@ -1244,7 +1248,7 @@ if ($SkipPlanning) {
             PLAN_TEXT = $planText
             PHASE = $Phase
             REVIEW_JSON = $planReviewJson
-        } -LogPath $logPath -StepName 'Step3.ApplyPlanReview' | Out-Null
+        } -LogPath $logPath -StepName 'Step3.ApplyPlanReview' -Model $script:ClaudeModel | Out-Null
     } else {
         $skipReason = 'Skipped Step 3 because the plan review had no blocker, high, or medium findings.'
         Write-Host "  $skipReason"
