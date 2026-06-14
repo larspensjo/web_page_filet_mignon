@@ -245,11 +245,18 @@ impl SignalCandidateSelection {
             .iter()
             .filter(|c| c.result.signal_score >= policy.threshold)
         {
-            clusters
-                .entry(candidate.result.signal_key.clone())
-                .or_default()
-                .push(candidate);
+            let cluster_key = canonical_signal_key(&candidate.result.signal_key);
+            clusters.entry(cluster_key).or_default().push(candidate);
         }
+        let excluded_cluster_keys: HashSet<String> = policy
+            .excluded
+            .iter()
+            .filter(|override_key| {
+                override_key.prompt_id == ACTIVE_PROMPT_ID
+                    && override_key.prompt_version == policy.active_prompt_version
+            })
+            .map(|override_key| canonical_signal_key(&override_key.signal_key))
+            .collect();
 
         let mut reps: Vec<&ScoredCandidate> = Vec::with_capacity(clusters.len());
         let mut cluster_sizes: HashMap<String, usize> = HashMap::with_capacity(clusters.len());
@@ -269,11 +276,7 @@ impl SignalCandidateSelection {
         }
 
         reps.retain(|candidate| {
-            !policy.excluded.iter().any(|override_key| {
-                override_key.signal_key == candidate.result.signal_key
-                    && override_key.prompt_id == ACTIVE_PROMPT_ID
-                    && override_key.prompt_version == policy.active_prompt_version
-            })
+            !excluded_cluster_keys.contains(&canonical_signal_key(&candidate.result.signal_key))
         });
 
         reps.sort_by(|a, b| {
@@ -288,8 +291,10 @@ impl SignalCandidateSelection {
         let selected_urls = reps
             .iter()
             .map(|candidate| {
-                selected_signal_key_for
-                    .insert(candidate.url.clone(), candidate.result.signal_key.clone());
+                selected_signal_key_for.insert(
+                    candidate.url.clone(),
+                    canonical_signal_key(&candidate.result.signal_key),
+                );
                 candidate.url.clone()
             })
             .collect();
@@ -309,12 +314,166 @@ impl SignalCandidateSelection {
     }
 
     pub fn cluster_size_for_signal_key(&self, signal_key: &str) -> usize {
-        self.cluster_sizes.get(signal_key).copied().unwrap_or(0)
+        self.cluster_sizes
+            .get(&canonical_signal_key(signal_key))
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn signal_key_for(&self, url: &str) -> Option<&str> {
         self.selected_signal_key_for.get(url).map(String::as_str)
     }
+}
+
+pub fn canonical_signal_key(signal_key: &str) -> String {
+    let tokens: Vec<&str> = signal_key
+        .split('-')
+        .filter(|token| !token.is_empty())
+        .collect();
+
+    if let Some(actor) = primary_actor_token(&tokens) {
+        if is_model_access_restriction_event(&tokens) {
+            return format!("{actor}-frontier-model-access-restriction");
+        }
+    }
+
+    signal_key.to_string()
+}
+
+pub fn is_signal_key_excluded(
+    excluded: &HashSet<OverrideKey>,
+    signal_key: &str,
+    active_prompt_version: PromptVersion,
+) -> bool {
+    let cluster_key = canonical_signal_key(signal_key);
+    excluded.iter().any(|override_key| {
+        override_key.prompt_id == ACTIVE_PROMPT_ID
+            && override_key.prompt_version == active_prompt_version
+            && canonical_signal_key(&override_key.signal_key) == cluster_key
+    })
+}
+
+fn primary_actor_token<'a>(tokens: &'a [&str]) -> Option<&'a str> {
+    tokens
+        .iter()
+        .copied()
+        .find(|token| !is_actor_noise_token(token))
+}
+
+fn is_actor_noise_token(token: &str) -> bool {
+    matches!(
+        token,
+        "after"
+            | "all"
+            | "bar"
+            | "barred"
+            | "bars"
+            | "block"
+            | "blocked"
+            | "blocks"
+            | "commerce"
+            | "department"
+            | "directive"
+            | "foreign"
+            | "foreigners"
+            | "government"
+            | "national"
+            | "nationals"
+            | "order"
+            | "ordered"
+            | "orders"
+            | "s"
+            | "security"
+            | "trump"
+            | "u"
+            | "us"
+            | "users"
+    )
+}
+
+fn is_model_access_restriction_event(tokens: &[&str]) -> bool {
+    let has_model_scope = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "claude" | "fable" | "frontier" | "model" | "models" | "mythos" | "opus"
+        )
+    });
+    let has_access_restriction = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "access"
+                | "bar"
+                | "barred"
+                | "bars"
+                | "block"
+                | "blocked"
+                | "blocks"
+                | "disable"
+                | "disabled"
+                | "disables"
+                | "restrict"
+                | "restricted"
+                | "restriction"
+                | "shutdown"
+                | "suspend"
+                | "suspended"
+                | "suspends"
+                | "suspension"
+        )
+    });
+    let has_strong_access_action = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "bar"
+                | "barred"
+                | "bars"
+                | "block"
+                | "blocked"
+                | "blocks"
+                | "disable"
+                | "disabled"
+                | "disables"
+                | "restrict"
+                | "restricted"
+                | "restriction"
+                | "shutdown"
+                | "suspend"
+                | "suspended"
+                | "suspends"
+                | "suspension"
+        )
+    });
+    let has_policy_scope = tokens.iter().any(|token| {
+        matches!(
+            *token,
+            "control"
+                | "controls"
+                | "directive"
+                | "export"
+                | "foreign"
+                | "foreigners"
+                | "government"
+                | "license"
+                | "licensing"
+                | "national"
+                | "nationals"
+                | "order"
+                | "ordered"
+                | "orders"
+                | "regulation"
+                | "regulatory"
+                | "security"
+                | "users"
+        )
+    });
+    let has_export_controls = tokens.iter().any(|token| matches!(*token, "export"))
+        && tokens
+            .iter()
+            .any(|token| matches!(*token, "control" | "controls"));
+
+    has_model_scope
+        && (has_policy_scope || has_strong_access_action)
+        && (has_access_restriction || has_export_controls)
 }
 
 /// Why `archive_final_selection` chose the list it did.
@@ -487,6 +646,94 @@ mod tests {
             vec!["b"],
             "Tier1 representative wins over Tier2/Tier3"
         );
+    }
+
+    #[test]
+    fn dedup_by_canonical_model_access_restriction_key() {
+        let input = vec![
+            cand(
+                "a",
+                92,
+                "anthropic-model-access-suspension-foreign-national-order",
+                SourceTier::Tier2,
+            ),
+            cand(
+                "b",
+                86,
+                "anthropic-disables-fable-mythos-export-controls",
+                SourceTier::Tier2,
+            ),
+            cand(
+                "c",
+                84,
+                "anthropic-disable-advanced-models-foreign-access",
+                SourceTier::Tier1,
+            ),
+            cand(
+                "d",
+                73,
+                "anthropic-blocks-claude-fable-mythos-access",
+                SourceTier::Tier3,
+            ),
+        ];
+
+        let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+
+        assert_eq!(sel.selected_urls, vec!["c"]);
+        assert_eq!(
+            sel.cluster_size_for_signal_key("anthropic-export-controls-mythos-fable"),
+            4
+        );
+    }
+
+    #[test]
+    fn canonical_model_access_restriction_exclusion_removes_cluster() {
+        let input = vec![
+            cand(
+                "a",
+                92,
+                "anthropic-model-access-suspension-foreign-national-order",
+                SourceTier::Tier2,
+            ),
+            cand(
+                "b",
+                86,
+                "anthropic-disables-fable-mythos-export-controls",
+                SourceTier::Tier2,
+            ),
+        ];
+        let mut excluded = HashSet::new();
+        excluded.insert(OverrideKey {
+            signal_key: "anthropic-export-controls-mythos-fable".into(),
+            prompt_id: "ArticleSignalCandidate".into(),
+            prompt_version: 1,
+        });
+
+        let sel = SignalCandidateSelection::compute(&input, policy(60, excluded));
+
+        assert!(sel.selected_urls.is_empty());
+    }
+
+    #[test]
+    fn model_release_key_does_not_cluster_with_access_restriction() {
+        let input = vec![
+            cand(
+                "a",
+                86,
+                "anthropic-disables-fable-mythos-export-controls",
+                SourceTier::Tier2,
+            ),
+            cand(
+                "b",
+                85,
+                "anthropic-claude-fable-5-launch-pricing",
+                SourceTier::Tier2,
+            ),
+        ];
+
+        let sel = SignalCandidateSelection::compute(&input, policy(60, Default::default()));
+
+        assert_eq!(sel.selected_urls.len(), 2);
     }
 
     #[test]

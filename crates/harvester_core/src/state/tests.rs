@@ -2246,6 +2246,49 @@ mod app_state_tests {
     }
 
     #[test]
+    fn outcome_deduplicates_canonical_model_access_restriction_keys() {
+        use harvester_engine::llm::dto::SourceTier;
+        let mut state = AppState::new();
+        state.set_signal_candidate_threshold(60);
+
+        let rep = "https://example.com/anthropic-rep/".to_string() + &"a".repeat(96);
+        let dupe = "https://example.com/anthropic-dupe/".to_string() + &"b".repeat(96);
+        insert_done_job(&mut state, 1, &rep);
+        insert_done_job(&mut state, 2, &dupe);
+        complete_candidate(
+            &mut state,
+            &rep,
+            92,
+            "anthropic-model-access-suspension-foreign-national-order",
+            SourceTier::Tier2,
+            "kept Anthropic access restriction gist",
+        );
+        complete_candidate(
+            &mut state,
+            &dupe,
+            86,
+            "anthropic-disables-fable-mythos-export-controls",
+            SourceTier::Tier2,
+            "duplicate Anthropic access restriction gist",
+        );
+
+        let rows = state.build_signal_candidate_rows();
+        let dupe_row = rows.iter().find(|row| row.url == dupe).expect("dupe row");
+
+        assert_eq!(
+            outcome_for(&rows, &rep),
+            &Some(SignalCandidateOutcome::Selected)
+        );
+        assert_eq!(
+            &dupe_row.outcome,
+            &Some(SignalCandidateOutcome::Deduplicated {
+                kept_gist: "kept Anthropic access restriction gist".to_string()
+            })
+        );
+        assert_eq!(dupe_row.dupes_count, 1);
+    }
+
+    #[test]
     fn outcome_marks_excluded_clusters() {
         use harvester_engine::llm::dto::SourceTier;
         let mut state = AppState::new();

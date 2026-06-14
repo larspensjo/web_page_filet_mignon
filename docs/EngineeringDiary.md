@@ -1984,3 +1984,11 @@ Change: Truncated over-limit article summaries and signal draft gists at validat
 Lessons Learned: Hard-failing slightly oversized generated prose loses useful results and creates noisy warnings; quotas should align with the fan-out behavior of summary plus signal scoring.
 Prevention: Keep regression tests for prose-field truncation and the default call cap so future validation/quota changes preserve large-run behavior.
 Refs: crates/harvester_engine/src/llm/validation.rs, crates/harvester_engine/src/llm/quota.rs, crates/harvester_engine/tests/llm_validation.rs, crates/harvester_engine/tests/llm_quota.rs
+
+## 2026-06-14 - Canonical signal duplicate clusters
+Type: Bug Fix
+Context: A full article cycle surfaced multiple P5 rows about the same Anthropic Fable/Mythos access restriction because signal-candidate dedupe grouped only by exact LLM-emitted `signal_key`.
+Change: Added deterministic canonicalization for model access restriction/export-control signal keys before signal-candidate selection, duplicate counts, preview duplicate lists, and manual exclusions. Existing cached results now collapse when their slugs describe the same actor-level model access restriction event.
+Lessons Learned: LLM-generated slugs are useful labels but not stable enough to be the sole duplicate key for high-impact story clusters; reducer-side normalization should guard known wording variance.
+Prevention: Keep regression tests using the observed Anthropic slug variants and a release/pricing guard case so access-restriction dedupe does not sweep unrelated product-launch stories into the same cluster.
+Refs: crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs

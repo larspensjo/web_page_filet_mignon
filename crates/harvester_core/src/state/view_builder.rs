@@ -7,7 +7,8 @@ use crate::briefing::BriefingPhase;
 use crate::pre_triage_filter::PreTriagePhase;
 use crate::preview::format_summary_for_preview;
 use crate::signal_candidate::{
-    ScoredCandidate, SelectionPolicy, SignalCandidateSelection, SignalCandidateState,
+    canonical_signal_key, is_signal_key_excluded, ScoredCandidate, SelectionPolicy,
+    SignalCandidateSelection, SignalCandidateState,
 };
 use crate::tabs::{AppTab, JobListScope, LeftTab};
 use crate::triage::{ArticleTriageState, TriagePhase};
@@ -376,8 +377,9 @@ impl AppState {
             if let Some(SignalCandidateState::Completed { result }) =
                 self.signal_candidate.state_for(url)
             {
+                let cluster_key = canonical_signal_key(&result.signal_key);
                 kept_gist_by_key
-                    .entry(result.signal_key.clone())
+                    .entry(cluster_key)
                     .or_insert_with(|| truncate_signal_candidate_gist(&result.draft_gist));
             }
         }
@@ -434,14 +436,10 @@ impl AppState {
                     let dupes_count = selection
                         .cluster_size_for_signal_key(&result.signal_key)
                         .saturating_sub(1);
-                    let is_excluded = self.signal_candidate.excluded().contains(
-                        &crate::signal_candidate::OverrideKey {
-                            signal_key: result.signal_key.clone(),
-                            prompt_id:
-                                harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate
-                                    .to_string(),
-                            prompt_version: active_prompt_version,
-                        },
+                    let is_excluded = is_signal_key_excluded(
+                        self.signal_candidate.excluded(),
+                        &result.signal_key,
+                        active_prompt_version,
                     );
                     let outcome = if is_excluded {
                         SignalCandidateOutcome::Excluded
@@ -452,7 +450,7 @@ impl AppState {
                     } else {
                         SignalCandidateOutcome::Deduplicated {
                             kept_gist: kept_gist_by_key
-                                .get(&result.signal_key)
+                                .get(&canonical_signal_key(&result.signal_key))
                                 .cloned()
                                 .unwrap_or_default(),
                         }
@@ -494,10 +492,13 @@ impl AppState {
             return None;
         };
         let signal_key = result.signal_key.clone();
+        let cluster_key = canonical_signal_key(&signal_key);
         let mut duplicate_urls: Vec<String> = self
             .signal_candidate
             .iter_completed()
-            .filter(|(url, candidate)| *url != job.url && candidate.signal_key == signal_key)
+            .filter(|(url, candidate)| {
+                *url != job.url && canonical_signal_key(&candidate.signal_key) == cluster_key
+            })
             .map(|(url, _)| url.to_string())
             .collect();
         duplicate_urls.insert(0, job.url.clone());
@@ -505,14 +506,11 @@ impl AppState {
         let exclude_checked = self
             .active_version_for(harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate)
             .map(|prompt_version| {
-                self.signal_candidate
-                    .excluded()
-                    .contains(&crate::signal_candidate::OverrideKey {
-                        signal_key: signal_key.clone(),
-                        prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate
-                            .to_string(),
-                        prompt_version,
-                    })
+                is_signal_key_excluded(
+                    self.signal_candidate.excluded(),
+                    &signal_key,
+                    prompt_version,
+                )
             })
             .unwrap_or(false);
         Some(SignalCandidatePreviewView {
