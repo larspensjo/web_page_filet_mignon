@@ -56,6 +56,19 @@ pub struct AggregateBriefing {
     pub article_count: u32,
 }
 
+/// Executive-summary-only result for the first step of the briefing stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefingExecutiveSummaryResult {
+    pub executive_summary: String,
+}
+
+/// One step of the briefing stream: either a new item, or the exhaustion sentinel.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BriefingNextItem {
+    Item { headline: String, body: String },
+    Exhausted,
+}
+
 /// Outlet authority tier. Lower variant = higher authority. `Tier1` is best.
 /// Ord/PartialOrd derive ordering by variant position, so `Tier1 < Tier2 < Tier3`,
 /// which matches the selection tie-breaker rule ("best `source_tier` wins").
@@ -110,5 +123,25 @@ mod signal_candidate_dto_tests {
             output_tokens: 80,
         };
         assert_eq!(r.signal_score, 75);
+    }
+}
+
+#[cfg(test)]
+mod briefing_stream_dto_tests {
+    use super::*;
+
+    #[test]
+    fn next_item_variants_constructable() {
+        let item = BriefingNextItem::Item {
+            headline: "H".to_string(),
+            body: "B".to_string(),
+        };
+        assert!(matches!(item, BriefingNextItem::Item { .. }));
+        assert_eq!(BriefingNextItem::Exhausted, BriefingNextItem::Exhausted);
+
+        let exec = BriefingExecutiveSummaryResult {
+            executive_summary: "S".to_string(),
+        };
+        assert_eq!(exec.executive_summary, "S");
     }
 }

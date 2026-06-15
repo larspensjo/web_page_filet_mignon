@@ -93,7 +93,7 @@ impl std::fmt::Display for ContextLoadError {
             Self::Parse { path, source } => write!(f, "failed to parse '{}': {}", path, source),
             Self::UnknownPromptId { path, prompt_id } => write!(
                 f,
-                "unknown prompt_id '{}' in '{}'. Valid values: ArticleTriage, ArticleSummary, ArticleSignalCandidate, AggregateBriefing",
+                "unknown prompt_id '{}' in '{}'. Valid values: ArticleTriage, ArticleSummary, ArticleSignalCandidate, AggregateBriefing, BriefingExecutiveSummary, BriefingNextItem",
                 prompt_id, path
             ),
             Self::UnknownSchemaVersion { path, version } => write!(

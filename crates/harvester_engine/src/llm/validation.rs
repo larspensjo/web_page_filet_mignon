@@ -4,8 +4,9 @@ use serde_json::{Map, Value};
 use thiserror::Error;
 
 use crate::llm::dto::{
-    AggregateBriefing, ArticleSummary, BriefingStory, Confidence, SignalCandidateResult,
-    SourceTier, SummaryEntities, TriagePriority, TriageResult,
+    AggregateBriefing, ArticleSummary, BriefingExecutiveSummaryResult, BriefingNextItem,
+    BriefingStory, Confidence, SignalCandidateResult, SourceTier, SummaryEntities, TriagePriority,
+    TriageResult,
 };
 use crate::text_safety::truncate_to_char_boundary;
 
@@ -41,6 +42,7 @@ const FIELD_EXEC_SUMMARY: &str = "executive_summary";
 const FIELD_TOP_STORIES: &str = "top_stories";
 const FIELD_STORY_HEADLINE: &str = "headline";
 const FIELD_STORY_BODY: &str = "body";
+const FIELD_STATUS: &str = "status";
 const FIELD_ARTICLE_COUNT: &str = "article_count";
 const FIELD_ENTITIES: &str = "entities";
 const FIELD_ENTITIES_COMPANIES: &str = "companies";
@@ -222,6 +224,52 @@ pub fn validate_briefing(content: &str) -> Result<AggregateBriefing, ValidationE
         top_stories,
         article_count,
     })
+}
+
+/// Validate the executive-summary-only response for the briefing stream.
+pub fn validate_briefing_executive_summary(
+    content: &str,
+) -> Result<BriefingExecutiveSummaryResult, ValidationError> {
+    let document = parse_document(content)?;
+    let executive_summary = require_string(&document, FIELD_EXEC_SUMMARY)?;
+    if executive_summary.trim().is_empty() {
+        return Err(ValidationError::SchemaViolation(
+            "executive_summary must not be blank".into(),
+        ));
+    }
+    let executive_summary = truncate_executive_summary(executive_summary);
+    Ok(BriefingExecutiveSummaryResult { executive_summary })
+}
+
+/// Validate one briefing-stream item. Unknown or missing status fails closed.
+pub fn validate_briefing_next_item(content: &str) -> Result<BriefingNextItem, ValidationError> {
+    let document = parse_document(content)?;
+    let status = require_string(&document, FIELD_STATUS)?;
+    match status {
+        "exhausted" => Ok(BriefingNextItem::Exhausted),
+        "item" => {
+            let headline = require_string(&document, FIELD_STORY_HEADLINE)?;
+            if headline.trim().is_empty() {
+                return Err(ValidationError::SchemaViolation(
+                    "headline must not be blank".into(),
+                ));
+            }
+            ensure_max_length(headline, MAX_STORY_HEADLINE_LEN, FIELD_STORY_HEADLINE)?;
+            let body = require_string(&document, FIELD_STORY_BODY)?;
+            if body.trim().is_empty() {
+                return Err(ValidationError::SchemaViolation(
+                    "body must not be blank".into(),
+                ));
+            }
+            Ok(BriefingNextItem::Item {
+                headline: headline.to_string(),
+                body: truncate_to_word_limit(body, MAX_STORY_BODY_WORDS),
+            })
+        }
+        _ => Err(ValidationError::SchemaViolation(
+            "status must be \"item\" or \"exhausted\"".into(),
+        )),
+    }
 }
 
 pub fn validate_signal_candidate(content: &str) -> Result<SignalCandidateResult, ValidationError> {
@@ -522,6 +570,90 @@ fn ensure_in_range(value: u64, field: &'static str) -> Result<(), ValidationErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_executive_summary_accepts_valid() {
+        let json = r#"{"executive_summary":"Markets shifted on new capex guidance."}"#;
+        let result = validate_briefing_executive_summary(json).expect("valid");
+        assert_eq!(
+            result.executive_summary,
+            "Markets shifted on new capex guidance."
+        );
+    }
+
+    #[test]
+    fn validate_executive_summary_rejects_blank() {
+        let json = r#"{"executive_summary":"   "}"#;
+        assert!(matches!(
+            validate_briefing_executive_summary(json).unwrap_err(),
+            ValidationError::SchemaViolation(_)
+        ));
+    }
+
+    #[test]
+    fn validate_next_item_accepts_item() {
+        let json = r#"{"status":"item","headline":"Nvidia ships Blackwell","body":"Volume shipments began this week."}"#;
+        let parsed = validate_briefing_next_item(json).expect("valid item");
+        assert_eq!(
+            parsed,
+            BriefingNextItem::Item {
+                headline: "Nvidia ships Blackwell".to_string(),
+                body: "Volume shipments began this week.".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn validate_next_item_accepts_exhausted_and_ignores_extra_fields() {
+        let json = r#"{"status":"exhausted","headline":"ignored","body":"ignored"}"#;
+        assert_eq!(
+            validate_briefing_next_item(json).expect("valid exhausted"),
+            BriefingNextItem::Exhausted
+        );
+    }
+
+    #[test]
+    fn validate_next_item_rejects_blank_headline_or_body() {
+        let blank_headline = r#"{"status":"item","headline":"  ","body":"text"}"#;
+        let blank_body = r#"{"status":"item","headline":"text","body":""}"#;
+        assert!(matches!(
+            validate_briefing_next_item(blank_headline).unwrap_err(),
+            ValidationError::SchemaViolation(_)
+        ));
+        assert!(matches!(
+            validate_briefing_next_item(blank_body).unwrap_err(),
+            ValidationError::SchemaViolation(_) | ValidationError::MissingField(_)
+        ));
+    }
+
+    #[test]
+    fn validate_next_item_fails_closed_on_unknown_status() {
+        let unknown = r#"{"status":"maybe","headline":"h","body":"b"}"#;
+        let missing = r#"{"headline":"h","body":"b"}"#;
+        assert!(matches!(
+            validate_briefing_next_item(unknown).unwrap_err(),
+            ValidationError::SchemaViolation(_)
+        ));
+        assert!(matches!(
+            validate_briefing_next_item(missing).unwrap_err(),
+            ValidationError::MissingField(_)
+        ));
+    }
+
+    #[test]
+    fn validate_next_item_truncates_long_body_to_word_limit() {
+        let body = (0..200)
+            .map(|i| format!("w{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let json = format!(r#"{{"status":"item","headline":"h","body":"{body}"}}"#);
+        if let BriefingNextItem::Item { body, .. } = validate_briefing_next_item(&json).unwrap() {
+            assert!(body.ends_with("..."));
+            assert!(body.split_whitespace().count() <= MAX_STORY_BODY_WORDS + 1);
+        } else {
+            panic!("expected item");
+        }
+    }
 
     // ── validate_summary entity tests ────────────────────────────────────────
 

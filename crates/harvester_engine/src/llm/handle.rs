@@ -20,7 +20,10 @@ use crate::llm::{
     replay::{content_hash, persist_replay_record, ReplayProvider, ReplayRecord},
     run_metadata::{CacheStatus, LlmFailureMetadata, LlmRunMetadata, LlmRunMetadataInit},
     types::{ChatMessage, ChatRole, LlmError, LlmRequest, ModelId, ProviderKind},
-    validation::{validate_briefing, validate_summary, validate_triage, ValidationError},
+    validation::{
+        validate_briefing, validate_briefing_executive_summary, validate_briefing_next_item,
+        validate_summary, validate_triage, ValidationError,
+    },
 };
 
 /// Configuration for the LLM worker + handle.
@@ -833,7 +836,9 @@ fn resolve_model(
             .or(config.summary_model.as_ref())
             .unwrap_or(&config.default_model)
             .clone(),
-        PromptId::AggregateBriefing => config
+        PromptId::AggregateBriefing
+        | PromptId::BriefingExecutiveSummary
+        | PromptId::BriefingNextItem => config
             .briefing_model
             .as_ref()
             .unwrap_or(&config.default_model)
@@ -1005,6 +1010,21 @@ fn validate_response(prompt_id: PromptId, content: &str) -> Result<String, Valid
                 }).collect::<Vec<_>>(),
                 "article_count": validated.article_count,
             });
+            Ok(normalized.to_string())
+        }
+        PromptId::BriefingExecutiveSummary => {
+            let validated = validate_briefing_executive_summary(content)?;
+            let normalized = json!({ "executive_summary": validated.executive_summary });
+            Ok(normalized.to_string())
+        }
+        PromptId::BriefingNextItem => {
+            let validated = validate_briefing_next_item(content)?;
+            let normalized = match validated {
+                crate::llm::dto::BriefingNextItem::Item { headline, body } => {
+                    json!({ "status": "item", "headline": headline, "body": body })
+                }
+                crate::llm::dto::BriefingNextItem::Exhausted => json!({ "status": "exhausted" }),
+            };
             Ok(normalized.to_string())
         }
     }
@@ -1200,5 +1220,20 @@ mod tests {
         cfg.signal_candidate_model = Some(ModelId::new(ProviderKind::OpenAi, "gpt-signal"));
         let m = resolve_model(PromptId::ArticleSignalCandidate, None, &cfg);
         assert_eq!(m.model_name(), "gpt-signal");
+    }
+
+    #[test]
+    fn briefing_stream_ids_resolve_to_briefing_model() {
+        let mut cfg = test_llm_config();
+        cfg.default_model = ModelId::new(ProviderKind::OpenAi, "gpt-default");
+        cfg.briefing_model = Some(ModelId::new(ProviderKind::OpenAi, "gpt-briefing"));
+
+        for id in [
+            PromptId::BriefingExecutiveSummary,
+            PromptId::BriefingNextItem,
+        ] {
+            let model = resolve_model(id, None, &cfg);
+            assert_eq!(model.model_name(), "gpt-briefing");
+        }
     }
 }

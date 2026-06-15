@@ -1,5 +1,6 @@
 pub mod article_signal_candidate;
 pub mod briefing;
+pub mod briefing_stream;
 pub mod summary;
 pub mod triage;
 
@@ -10,6 +11,7 @@ pub use briefing::{
     BRIEFING_PROMPT_V1, BRIEFING_PROMPT_V2, BRIEFING_PROMPT_V3, BRIEFING_PROMPT_V4,
     BRIEFING_PROMPT_V5, BRIEFING_PROMPT_V6, BRIEFING_PROMPT_V7, BRIEFING_PROMPT_V8,
 };
+pub use briefing_stream::{BRIEFING_EXECUTIVE_SUMMARY_PROMPT, BRIEFING_NEXT_ITEM_PROMPT};
 pub use summary::SUMMARY_PROMPT_V6 as SUMMARY_PROMPT;
 pub use summary::{
     SUMMARY_PROMPT_V1, SUMMARY_PROMPT_V2, SUMMARY_PROMPT_V3, SUMMARY_PROMPT_V4, SUMMARY_PROMPT_V5,
@@ -47,6 +49,16 @@ pub fn register_defaults(registry: &mut super::PromptRegistry) {
     registry.set_active(
         PromptId::AggregateBriefing,
         briefing::BRIEFING_PROMPT_V8.version,
+    );
+    registry.register(briefing_stream::BRIEFING_EXECUTIVE_SUMMARY_PROMPT);
+    registry.set_active(
+        PromptId::BriefingExecutiveSummary,
+        briefing_stream::BRIEFING_EXECUTIVE_SUMMARY_PROMPT.version,
+    );
+    registry.register(briefing_stream::BRIEFING_NEXT_ITEM_PROMPT);
+    registry.set_active(
+        PromptId::BriefingNextItem,
+        briefing_stream::BRIEFING_NEXT_ITEM_PROMPT.version,
     );
 }
 
@@ -86,6 +98,20 @@ mod tests {
                 .expect("active AggregateBriefing prompt")
                 .version,
             BRIEFING_PROMPT.version
+        );
+        assert_eq!(
+            registry
+                .active(PromptId::BriefingExecutiveSummary)
+                .expect("active BriefingExecutiveSummary prompt")
+                .version,
+            BRIEFING_EXECUTIVE_SUMMARY_PROMPT.version
+        );
+        assert_eq!(
+            registry
+                .active(PromptId::BriefingNextItem)
+                .expect("active BriefingNextItem prompt")
+                .version,
+            BRIEFING_NEXT_ITEM_PROMPT.version
         );
     }
 

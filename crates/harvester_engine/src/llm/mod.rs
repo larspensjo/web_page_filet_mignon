@@ -26,8 +26,9 @@ pub const DEFAULT_SUMMARY_MODEL: &str = OPENAI_MODEL_GPT_5_4_MINI;
 pub const DEFAULT_BRIEFING_MODEL: &str = OPENAI_MODEL_GPT_5_4_MINI;
 
 pub use dto::{
-    AggregateBriefing, ArticleSummary, BriefingStory, Confidence, SignalCandidateResult,
-    SourceTier, SummaryEntities, TriagePriority, TriageResult,
+    AggregateBriefing, ArticleSummary, BriefingExecutiveSummaryResult, BriefingNextItem,
+    BriefingStory, Confidence, SignalCandidateResult, SourceTier, SummaryEntities, TriagePriority,
+    TriageResult,
 };
 pub use handle::{
     LlmCommand, LlmCompletionCommand, LlmCompletionError, LlmCompletionResult, LlmConfig, LlmEvent,
@@ -56,6 +57,6 @@ pub use types::{
     ResponseFormat, TokenUsage,
 };
 pub use validation::{
-    validate_briefing, validate_signal_candidate, validate_summary, validate_triage,
-    ValidationError,
+    validate_briefing, validate_briefing_executive_summary, validate_briefing_next_item,
+    validate_signal_candidate, validate_summary, validate_triage, ValidationError,
 };

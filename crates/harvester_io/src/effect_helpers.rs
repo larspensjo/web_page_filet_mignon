@@ -51,6 +51,8 @@ pub fn prompt_context_filename(prompt_id: PromptId) -> &'static str {
         PromptId::ArticleSummary => "article_summary.toml",
         PromptId::ArticleSignalCandidate => "article_signal_candidate.toml",
         PromptId::AggregateBriefing => "aggregate_briefing.toml",
+        PromptId::BriefingExecutiveSummary => "aggregate_briefing.toml",
+        PromptId::BriefingNextItem => "aggregate_briefing.toml",
     }
 }
 
@@ -65,10 +67,24 @@ mod prompt_context_filename_tests {
             PromptId::ArticleSummary,
             PromptId::ArticleSignalCandidate,
             PromptId::AggregateBriefing,
+            PromptId::BriefingExecutiveSummary,
+            PromptId::BriefingNextItem,
         ] {
             let fname = prompt_context_filename(id);
             assert!(!fname.is_empty(), "missing filename for {id:?}");
         }
+    }
+
+    #[test]
+    fn briefing_stream_ids_reuse_aggregate_context_file() {
+        assert_eq!(
+            prompt_context_filename(PromptId::BriefingExecutiveSummary),
+            "aggregate_briefing.toml"
+        );
+        assert_eq!(
+            prompt_context_filename(PromptId::BriefingNextItem),
+            "aggregate_briefing.toml"
+        );
     }
 }
 
