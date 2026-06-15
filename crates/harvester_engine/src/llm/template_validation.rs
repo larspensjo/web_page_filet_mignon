@@ -25,6 +25,15 @@ fn synthetic_vars(prompt_id: PromptId) -> HashMap<String, String> {
             vars.insert("previous_briefings", "(none)");
             vars.insert("briefing_time_window", "All available articles");
         }
+        PromptId::BriefingExecutiveSummary => {
+            vars.set_document("content", "[A1] Sample Title\nSample summary.");
+            vars.insert("briefing_time_window", "All available articles");
+        }
+        PromptId::BriefingNextItem => {
+            vars.set_document("content", "[A1] Sample Title\nSample summary.");
+            vars.insert("briefing_time_window", "All available articles");
+            vars.insert("already_shown", "(none)");
+        }
         PromptId::ArticleSignalCandidate => {
             vars.set_document("content", "Sample article text");
             vars.insert("url", "https://example.com/article");
@@ -158,5 +167,14 @@ mod tests {
             "User {{collection}}",
         );
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn briefing_stream_templates_validate_with_synthetic_vars() {
+        use crate::llm::prompts::{BRIEFING_EXECUTIVE_SUMMARY_PROMPT, BRIEFING_NEXT_ITEM_PROMPT};
+        for tpl in [BRIEFING_EXECUTIVE_SUMMARY_PROMPT, BRIEFING_NEXT_ITEM_PROMPT] {
+            let errors = validate_template(tpl.id, tpl.system_template, tpl.user_template);
+            assert!(errors.is_empty(), "{:?}: {:?}", tpl.id, errors);
+        }
     }
 }

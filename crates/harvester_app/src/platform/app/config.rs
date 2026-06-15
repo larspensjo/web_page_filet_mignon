@@ -67,7 +67,9 @@ pub(super) fn effective_model_map(config: &LlmConfig) -> HashMap<PromptId, Strin
         .unwrap_or(&config.default_model)
         .model_name()
         .to_string();
-    map.insert(PromptId::AggregateBriefing, briefing_model);
+    map.insert(PromptId::AggregateBriefing, briefing_model.clone());
+    map.insert(PromptId::BriefingExecutiveSummary, briefing_model.clone());
+    map.insert(PromptId::BriefingNextItem, briefing_model);
 
     map
 }

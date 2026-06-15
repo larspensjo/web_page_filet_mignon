@@ -17,12 +17,21 @@ use harvester_engine::{
     ImportOptions,
 };
 
+use super::worker::{run_triage_refresh_load, EntityIndexWorkerMsg};
+use super::{truncate_url_for_log, EffectRunner};
 use crate::effect_helpers::{
     build_local_model_catalog, download_link_page, prompt_context_filename,
 };
 
-use super::worker::{run_triage_refresh_load, EntityIndexWorkerMsg};
-use super::{truncate_url_for_log, EffectRunner};
+pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String, String)> {
+    let mut pairs: Vec<(String, String)> = ctx_file
+        .variables
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    pairs.sort_by(|(left, _), (right, _)| left.cmp(right));
+    pairs
+}
 
 impl EffectRunner {
     pub(super) fn execute_effect(&self, effect: Effect) {
@@ -645,6 +654,8 @@ impl EffectRunner {
                         PromptId::ArticleSummary,
                         PromptId::ArticleSignalCandidate,
                         PromptId::AggregateBriefing,
+                        PromptId::BriefingExecutiveSummary,
+                        PromptId::BriefingNextItem,
                     ];
 
                     for prompt_id in prompt_ids {
@@ -663,9 +674,7 @@ impl EffectRunner {
 
                         match load_context_file(&path) {
                             Ok(ctx_file) => {
-                                let vec: Vec<(String, String)> =
-                                    ctx_file.variables.into_iter().collect();
-                                contexts.insert(prompt_id, vec);
+                                contexts.insert(prompt_id, ordered_context_pairs(&ctx_file));
                             }
                             Err(e) => {
                                 if prompt_id == PromptId::ArticleTriage {
@@ -743,6 +752,8 @@ impl EffectRunner {
                             PromptId::ArticleSummary,
                             PromptId::ArticleSignalCandidate,
                             PromptId::AggregateBriefing,
+                            PromptId::BriefingExecutiveSummary,
+                            PromptId::BriefingNextItem,
                         ];
                         let templates = prompt_ids
                             .iter()
@@ -1062,5 +1073,31 @@ impl EffectRunner {
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod context_order_tests {
+    use super::*;
+
+    #[test]
+    fn loaded_context_pairs_are_sorted_by_key() {
+        let mut variables = HashMap::new();
+        variables.insert("zeta".to_string(), "z".to_string());
+        variables.insert("alpha".to_string(), "a".to_string());
+        variables.insert("mid".to_string(), "m".to_string());
+        let pairs = ordered_context_pairs(&PromptContextFile {
+            meta: ContextMeta {
+                prompt_id: PromptId::AggregateBriefing.to_string(),
+                schema_version: 1,
+                version: 1,
+                updated: "2026-06-15".to_string(),
+                description: None,
+                changelog: None,
+            },
+            variables,
+        });
+        let keys: Vec<&str> = pairs.iter().map(|(key, _)| key.as_str()).collect();
+        assert_eq!(keys, ["alpha", "mid", "zeta"]);
     }
 }
