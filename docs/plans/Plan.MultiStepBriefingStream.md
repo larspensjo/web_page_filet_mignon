@@ -31,8 +31,8 @@ The whole design hinges on one invariant the tests must protect:
 We guarantee this structurally by pointing both templates' `system_template` field at **one shared `&'static str` constant** (`BRIEFING_STREAM_SYSTEM_PREFIX`). Two facts make the runtime render identical too:
 
 1. Both prompt ids resolve to the **briefing model** (`resolve_model`, `effective_model_map` in app + batch).
-2. Both prompt ids reuse the **same prompt-context file** (`aggregate_briefing.toml`), which currently defines **exactly one** `[variables]` key (`briefing_instructions`). With a single key, the `Vec<(String,String)>` built from `HashMap::into_iter()` has deterministic order, so `{{context}}` renders identically for both ids.
-   - **Guard note (write as a code comment):** if `aggregate_briefing.toml` ever gains a second variable, the per-id context `Vec` ordering becomes non-deterministic and could break the byte-identical prefix. If that happens, sort context pairs before rendering or share a single resolved context across both calls.
+2. Both prompt ids reuse the **same prompt-context file** (`aggregate_briefing.toml`). The rendered `{{context}}` block must be **byte-identical** for both ids regardless of how many `[variables]` keys the file has.
+   - **Determinism guarantee (Task 1.0):** the context loader parses TOML into a `HashMap`, so two loads of the same file into separate maps can iterate in different orders once there is more than one variable. `aggregate_briefing.toml` happens to define a single key today, but the cache-prefix invariant must NOT rely on that. Task 1.0 makes context rendering deterministic by **sorting the context `Vec<(String, String)>` by key** after loading (or before rendering), applied to **all** prompt ids. This removes the fragile single-key dependency and guards against Prompt Lab saving additional variables.
 
 The document variable (`{{content}}` = the frozen snapshot) is wrapped by `TemplateVars::set_document`, whose nonce is derived from the content; identical snapshot ⇒ identical wrapper ⇒ identical bytes.
 
@@ -41,6 +41,7 @@ The document variable (`{{content}}` = the frozen snapshot) is wrapped by `Templ
 ## File Structure
 
 **Phase 1 — Prompt & engine plumbing**
+- Modify `crates/harvester_io/src/effect_runner/dispatch.rs` — **sort loaded context variable pairs by key** (Task 1.0, cache-prefix determinism) and add the two new ids to the `prompt_ids` arrays (Task 1.9).
 - Modify `crates/harvester_engine/src/llm/prompt.rs` — add two `PromptId` variants + `FromStr`/`Display`.
 - Create `crates/harvester_engine/src/llm/prompts/briefing_stream.rs` — shared system prefix const + the two templates.
 - Modify `crates/harvester_engine/src/llm/prompts/mod.rs` — declare module, register + activate both prompts.
@@ -49,9 +50,10 @@ The document variable (`{{content}}` = the frozen snapshot) is wrapped by `Templ
 - Modify `crates/harvester_engine/src/llm/mod.rs` — re-export new DTOs + validators.
 - Modify `crates/harvester_engine/src/llm/handle.rs` — `resolve_model` + `validate_response` arms (document-key already covered by `_`).
 - Modify `crates/harvester_engine/src/llm/template_validation.rs` — `synthetic_vars` arms.
+- Modify `crates/harvester_engine/src/llm/prompt_context.rs` — extend the "valid prompt IDs" error text (Task 1.12).
 - Modify `crates/harvester_io/src/effect_helpers.rs` — `prompt_context_filename` arms (reuse aggregate file).
-- Modify `crates/harvester_io/src/effect_runner/dispatch.rs` — add ids to the two `prompt_ids` arrays.
 - Modify `crates/harvester_app/src/platform/app/config.rs` and `crates/harvester_batch/src/runner.rs` — `effective_model_map` arms.
+- Modify `docs/PromptContextFiles.md` and `crates/harvester_engine/tests/llm_prompt.rs` — prompt-id contract docs + round-trip/registry tests (Task 1.12).
 
 **Phase 2 — Snapshot builder (pure)**
 - Create `crates/harvester_core/src/briefing_snapshot.rs` — `BriefingSnapshot`, `SnapshotArticle`, pure `build_briefing_snapshot`.
@@ -60,16 +62,18 @@ The document variable (`{{content}}` = the frozen snapshot) is wrapped by `Templ
 - Modify `crates/harvester_core/src/state/signal_candidate_access.rs` (or a new `state/briefing_snapshot_access.rs`) — `AppState::build_briefing_snapshot_now()` assembling pure-builder inputs from the base corpus + summary cache.
 
 **Phase 3 — Core streaming reducer**
-- Modify `crates/harvester_core/src/briefing.rs` — `BriefingPhase::Streaming`, `BriefingItem`, new `BriefingSession` fields + methods (`can_generate`, `stream_epoch`, exec/item/exhausted accessors), rewritten `format_preview`, updated `progress_text`.
+- Modify `crates/harvester_core/src/briefing.rs` — `BriefingPhase::Streaming`, `BriefingItem`, new `BriefingSession` fields + methods (`can_generate`, `stream_epoch`, `next_item_in_flight`, snapshot counts incl. `dropped`/`truncated`, exec/item/exhausted accessors), rewritten `format_preview`, updated `progress_text`.
 - Modify `crates/harvester_core/src/msg.rs` — `NextBriefingItemClicked`.
 - Modify `crates/harvester_core/src/update/mod.rs` — route the new message.
-- Modify `crates/harvester_core/src/update/briefing.rs` — rewrite `handle_generate_clicked`; add `handle_next_item_clicked`.
+- Modify `crates/harvester_core/src/update/briefing.rs` — rewrite `handle_generate_clicked` (snapshot + **pre-dispatch hydration / deferred-resume** of prompt contexts, templates, metadata); add `handle_next_item_clicked`.
 - Modify `crates/harvester_core/src/update/llm_completed.rs` — replace `handle_briefing_completion` with exec-summary + next-item routing keyed by request id + epoch.
+- Modify `crates/harvester_core/src/update/` metadata-loaded path (`PromptContextsLoaded`/`LlmMetadataLoaded`/`PromptTemplateFilesLoaded`) — resume a deferred stream generation once all required hydration has arrived.
+- Modify `crates/harvester_core/src/state/ui_state.rs` — treat a streaming session with an in-flight item as active work (`stop_finish_button_state`).
 - Update existing tests that assume the old single-shot flow (`crates/harvester_core/tests/triage_orchestration.rs`, `crates/harvester_core/src/update/tests/*`, briefing.rs unit tests).
 
 **Phase 4 — UI wiring**
 - Modify `crates/harvester_core/src/view_model.rs` — `next_item_enabled` field.
-- Modify `crates/harvester_core/src/state/view_builder.rs` — populate `next_item_enabled`, use `can_generate()` for `briefing_generate_enabled`, item-in-flight progress line.
+- Modify `crates/harvester_core/src/state/view_builder.rs` — populate `next_item_enabled`, use `can_generate()` for `briefing_generate_enabled`, item-in-flight progress line, `Streaming` arm in `format_briefing_preview_header`.
 - Modify `crates/harvester_app/src/platform/ui/constants.rs` — `BUTTON_NEXT_ITEM` control id.
 - Modify `crates/harvester_app/src/platform/ui/groups/bottom_buttons.rs` — new button descriptor + render enablement.
 
@@ -78,6 +82,55 @@ The document variable (`{{content}}` = the frozen snapshot) is wrapped by `Templ
 # Phase 1 — Prompt & engine plumbing
 
 No UI or flow changes. At the end of this phase the two prompts exist, resolve to the briefing model, validate their schemas, and render a byte-identical system prefix. Existing `AggregateBriefing` is untouched and still active.
+
+### Task 1.0: Make loaded prompt-context ordering deterministic (cache-prefix guard)
+
+Closes Review finding #2. The cache-prefix invariant requires `{{context}}` to render byte-identically across `BriefingExecutiveSummary` and `BriefingNextItem`. Context files are parsed into a `HashMap`, so two loads of the same file can iterate in different orders once there is more than one variable. Sort the context pairs by key at load time so rendering is deterministic for **all** prompt ids, independent of TOML parse order or map seeding.
+
+**Files:**
+- Modify: `crates/harvester_io/src/effect_runner/dispatch.rs` (the `LoadPromptContexts` handler that does `ctx_file.variables.into_iter().collect()`)
+
+- [ ] **Step 1: Write the failing test**
+
+Add a test next to the existing effect-runner/dispatch tests (e.g. `crates/harvester_io/src/effect_runner/tests.rs`) that loads a context file with **two or more** variables and asserts the produced `Vec<(String, String)>` is sorted by key. If a multi-variable fixture is awkward to stage through the dispatcher, add the assertion at the helper level instead: extract the “parse + order” logic into a small pure function `ordered_context_pairs(ctx_file) -> Vec<(String, String)>` and unit-test that it returns keys in sorted order for a `HashMap` seeded in a non-sorted insertion order.
+
+```rust
+    #[test]
+    fn loaded_context_pairs_are_sorted_by_key() {
+        let mut vars = std::collections::HashMap::new();
+        vars.insert("zeta".to_string(), "z".to_string());
+        vars.insert("alpha".to_string(), "a".to_string());
+        vars.insert("mid".to_string(), "m".to_string());
+        let pairs = ordered_context_pairs(&PromptContextFile { variables: vars });
+        let keys: Vec<&str> = pairs.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, ["alpha", "mid", "zeta"]);
+    }
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cargo test -p harvester_io loaded_context_pairs_are_sorted_by_key`
+Expected: FAIL — either `ordered_context_pairs` does not exist, or the collected vec is in `HashMap` order.
+
+- [ ] **Step 3: Sort the pairs at load time**
+
+In `crates/harvester_io/src/effect_runner/dispatch.rs`, replace the unordered collection:
+
+```rust
+let mut pairs: Vec<(String, String)> = ctx_file.variables.into_iter().collect();
+pairs.sort_by(|(a, _), (b, _)| a.cmp(b));
+```
+
+(or have the new `ordered_context_pairs` helper do the sort and call it here). Apply this uniformly to every prompt id the loader handles, not just the briefing ids — determinism must hold globally.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cargo test -p harvester_io loaded_context_pairs_are_sorted_by_key`
+Expected: PASS.
+
+> Note: `SavePromptContextFile` already sorts variables before serializing; this change makes the **load** path symmetric so round-tripped and freshly-parsed contexts render identically.
+
+---
 
 ### Task 1.1: Add the two `PromptId` variants
 
@@ -851,6 +904,45 @@ Expected: PASS.
 
 ---
 
+### Task 1.12: Prompt-id contract, error text, and docs
+
+Closes Review finding #7. Adding `BriefingExecutiveSummary` and `BriefingNextItem` affects explicit prompt-id lists beyond the enum and registry. Update them so the new ids are first-class.
+
+**Files:**
+- Modify: `crates/harvester_engine/src/llm/prompt_context.rs` — the error message that enumerates valid prompt IDs.
+- Modify: `crates/harvester_engine/tests/llm_prompt.rs` — prompt-id round-trip + default-registry contract tests.
+- Modify: `docs/PromptContextFiles.md` — list of known prompt context files / valid IDs.
+
+- [ ] **Step 1: Extend the contract tests**
+
+In `crates/harvester_engine/tests/llm_prompt.rs`, add the two new ids to any round-trip set and to the assertion that the default registry has an **active** version for every `PromptId`. If the test iterates a hard-coded list of ids, append both; if it derives the set, confirm the new ids are covered and assert `registry.active_version(PromptId::BriefingExecutiveSummary).is_some()` and the same for `BriefingNextItem`.
+
+```rust
+    #[test]
+    fn briefing_stream_ids_have_active_default_prompts() {
+        let registry = PromptRegistry::with_defaults();
+        assert!(registry.active_version(PromptId::BriefingExecutiveSummary).is_some());
+        assert!(registry.active_version(PromptId::BriefingNextItem).is_some());
+    }
+```
+
+- [ ] **Step 2: Run test to verify it fails, then passes**
+
+Run: `cargo test -p harvester_engine briefing_stream_ids_have_active_default_prompts`
+Expected: first FAIL if registration is incomplete; PASS after Task 1.6 registers + activates both prompts.
+
+- [ ] **Step 3: Update the valid-ids error text**
+
+In `crates/harvester_engine/src/llm/prompt_context.rs`, add `BriefingExecutiveSummary` and `BriefingNextItem` to the human-readable list of valid prompt IDs in the parse/lookup error message, matching the existing format. If a test asserts the exact error string, update it in the same change.
+
+- [ ] **Step 4: Update the docs**
+
+In `docs/PromptContextFiles.md`, document that `BriefingExecutiveSummary` and `BriefingNextItem` **reuse** `aggregate_briefing.toml` (no new context file), and note the cache-prefix invariant (shared system prefix; Task 1.0 deterministic context ordering). Keep this consistent with `docs/EngineeringDiary.md` (updated at Phase 4 Verify).
+
+- [ ] **Step 5: No additional run** — covered by the Phase 1 Verify build + test suite.
+
+---
+
 ### Task 1.11: Phase 1 Verify (build + clippy + fmt + tests; DO NOT commit)
 
 - [ ] **Step 1: Build the workspace**
@@ -948,7 +1040,9 @@ pub fn build_briefing_snapshot(
             continue;
         }
         let entry = format_entry(included_count + 1, summary);
-        if !text.is_empty() && text.len() + entry.len() > budget_bytes {
+        // Account for the "\n\n" separator that will join this entry to the prior text.
+        let separator_len = if text.is_empty() { 0 } else { 2 };
+        if !text.is_empty() && text.len() + separator_len + entry.len() > budget_bytes {
             budget_reached = true;
             dropped_count += 1;
             continue;
@@ -1089,6 +1183,27 @@ mod tests {
     }
 
     #[test]
+    fn exact_fit_budget_includes_separator_bytes() {
+        // Two entries whose combined size EQUALS budget only if the 2-byte separator is ignored.
+        let a = summary("A", &"x".repeat(20));
+        let b = summary("B", &"y".repeat(20));
+        let arts = vec![
+            SnapshotArticle { url: "u1", fetched_utc: None, summary: Some(&a) },
+            SnapshotArticle { url: "u2", fetched_utc: None, summary: Some(&b) },
+        ];
+        let entry_a = format!("[A1] A\n{}", "x".repeat(20));
+        let entry_b = format!("[A2] B\n{}", "y".repeat(20));
+        // Budget = exactly both entries with NO room for the "\n\n" separator.
+        let budget = entry_a.len() + entry_b.len();
+        let snap = build_briefing_snapshot(&arts, None, budget, "all".to_string());
+        // Second entry must be dropped because separator would push it over budget.
+        assert_eq!(snap.included_count, 1);
+        assert_eq!(snap.dropped_count, 1);
+        assert!(snap.truncated);
+        assert!(snap.text.len() <= budget, "snapshot must never exceed the byte budget");
+    }
+
+    #[test]
     fn utf8_multibyte_entries_are_never_split() {
         let a = summary("Café", &"é".repeat(40));
         let b = summary("Naïve", &"ü".repeat(40));
@@ -1141,7 +1256,7 @@ pub use briefing_snapshot::{
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `cargo test -p harvester_core build_briefing_snapshot`
-Expected: PASS — all eight builder tests.
+Expected: PASS — all nine builder tests.
 
 ---
 
@@ -1206,7 +1321,13 @@ Expected: PASS.
 
 - [ ] **Step 1: Write the failing test**
 
-Create `crates/harvester_core/src/state/briefing_snapshot_access.rs` with the impl + a test. Test first verifies the assembly walks the **base corpus including duplicates** (not the signal-filtered selection):
+Create `crates/harvester_core/src/state/briefing_snapshot_access.rs` with the impl + a test. Test first verifies the assembly walks the **base corpus including duplicates** (not the signal-filtered selection).
+
+> **Test location (Review finding #6):** the existing core update-test helpers live in `crates/harvester_core/src/update/tests/support.rs` and are `pub(super)`, so they are **not** reachable from an inline test in `state/briefing_snapshot_access.rs`. There is no `crate::state::tests_support` module. Use **one** of these concrete approaches:
+> 1. **Preferred:** put the `AppState` assembly test in the update-test area (e.g. add it to `crates/harvester_core/src/update/tests/briefing_stream_tests.rs` created in Phase 3, or a sibling) where `support::settled_summaries_state()` is already in scope, and call `state.build_briefing_snapshot_now()` there.
+> 2. Or build a minimal fixture **inline** inside `state/briefing_snapshot_access.rs`'s own `#[cfg(test)] mod tests` (construct the `AppState` directly without the `update` helpers).
+>
+> Do **not** reference a `crate::state::tests_support` path — it does not exist.
 
 ```rust
 use super::AppState;
@@ -1247,28 +1368,26 @@ impl AppState {
         )
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn snapshot_uses_full_base_corpus_including_duplicates() {
-        // Build an AppState whose base corpus has duplicate articles, each with a
-        // completed summary, and assert both appear in the snapshot.
-        //
-        // Reuse the existing core test fixtures (see crates/harvester_core/src/update/tests/support.rs
-        // and triage_orchestration.rs) for constructing a triaged+summarized state. The assertion:
-        let state = crate::state::tests_support::briefed_state_with_duplicate_corpus();
-        let snap = state.build_briefing_snapshot_now();
-        assert!(snap.included_count >= 2, "duplicates must be present in the base-corpus snapshot");
-    }
-}
 ```
 
-> The fixture `briefed_state_with_duplicate_corpus()` may not exist. Two acceptable options:
-> 1. Add a small fixture to the existing core test support module that loads two articles with the **same** content into the triage/briefing state and completes both summaries.
-> 2. If wiring a full fixture is heavy, replace this `AppState`-level test with a thinner one that only asserts `build_briefing_snapshot_now()` delegates to the base corpus by checking `included_count == archive_corpus().ordered_urls().len()` for a state where all summaries are settled. The pure builder (Task 2.1) already has full coverage; this test only needs to prove the assembly reads `archive_corpus()` (duplicates) rather than `archive_final_selection()` (deduped).
+The assembly test (placed per the location note above) asserts the snapshot reads the base corpus:
+
+```rust
+    #[test]
+    fn snapshot_uses_full_base_corpus_including_duplicates() {
+        // Reuse the Phase 3 update-test helper, which is in scope here.
+        let state = crate::update::tests::support::settled_summaries_state();
+        let snap = state.build_briefing_snapshot_now();
+        // The stream uses archive_corpus() (duplicates), NOT archive_final_selection() (deduped).
+        assert_eq!(
+            snap.included_count,
+            state.archive_corpus().ordered_urls().len(),
+            "snapshot must walk the full base corpus when all summaries are settled"
+        );
+    }
+```
+
+> If `settled_summaries_state()` does not yet stage duplicate articles, either extend it (Phase 3 needs it anyway) or add a dedicated `briefed_state_with_duplicate_corpus()` helper to `support.rs` that loads two articles with the **same** content and completes both summaries. The pure builder (Task 2.1) already covers the duplicate/budget/coverage logic; this test only needs to prove the assembly reads `archive_corpus()` rather than `archive_final_selection()`.
 
 - [ ] **Step 2: Declare the submodule**
 
@@ -1311,7 +1430,7 @@ Add to the `tests` module in `crates/harvester_core/src/briefing.rs`:
     #[test]
     fn can_generate_allows_streaming_but_can_start_does_not() {
         let mut session = BriefingSession::default();
-        session.start_stream("snap".to_string(), "win".to_string(), 0, 0, "win".to_string());
+        session.start_stream("snap".to_string(), "win".to_string(), 0, 0, 0, false);
         session.enter_streaming("exec summary".to_string());
         assert!(matches!(session.phase(), BriefingPhase::Streaming));
         assert!(session.can_generate(), "Generate must be allowed mid-stream");
@@ -1321,12 +1440,12 @@ Add to the `tests` module in `crates/harvester_core/src/briefing.rs`:
     #[test]
     fn restart_bumps_epoch_and_clears_stream() {
         let mut session = BriefingSession::default();
-        session.start_stream("snap1".to_string(), "win".to_string(), 0, 0, "win".to_string());
+        session.start_stream("snap1".to_string(), "win".to_string(), 0, 0, 0, false);
         session.enter_streaming("exec1".to_string());
         session.append_stream_item(BriefingItem { headline: "H".into(), body: "B".into() });
         let epoch1 = session.stream_epoch();
 
-        session.start_stream("snap2".to_string(), "win2".to_string(), 0, 0, "win2".to_string());
+        session.start_stream("snap2".to_string(), "win2".to_string(), 0, 0, 0, false);
         assert!(session.stream_epoch() > epoch1, "epoch must bump on restart");
         assert!(session.executive_summary().is_none());
         assert!(session.stream_items().is_empty());
@@ -1337,7 +1456,7 @@ Add to the `tests` module in `crates/harvester_core/src/briefing.rs`:
     #[test]
     fn append_and_exhaust_stream_items() {
         let mut session = BriefingSession::default();
-        session.start_stream("snap".to_string(), "win".to_string(), 0, 0, "win".to_string());
+        session.start_stream("snap".to_string(), "win".to_string(), 0, 0, 0, false);
         session.enter_streaming("exec".to_string());
         session.append_stream_item(BriefingItem { headline: "H1".into(), body: "B1".into() });
         assert_eq!(session.stream_items().len(), 1);
@@ -1399,6 +1518,11 @@ pub struct BriefingSession {
     stream_epoch: u64,
     snapshot_included_count: usize,
     snapshot_skipped_count: usize,
+    snapshot_dropped_count: usize,
+    snapshot_truncated: bool,
+    // Set when a Generate froze a snapshot but the exec-summary call is waiting on
+    // prompt-context / template / model-metadata hydration (Review finding #1).
+    exec_dispatch_deferred: bool,
 }
 ```
 
@@ -1413,6 +1537,9 @@ Update **both** constructors (`Default::default` at line ~217 and `new_loading` 
             stream_epoch: 0,
             snapshot_included_count: 0,
             snapshot_skipped_count: 0,
+            snapshot_dropped_count: 0,
+            snapshot_truncated: false,
+            exec_dispatch_deferred: false,
 ```
 
 Add methods inside `impl BriefingSession` (after `can_start`, line ~253):
@@ -1439,17 +1566,21 @@ Add methods inside `impl BriefingSession` (after `can_start`, line ~253):
         coverage_window_label: String,
         included_count: usize,
         skipped_count: usize,
-        _reserved: String,
+        dropped_count: usize,
+        truncated: bool,
     ) {
         self.summaries_snapshot = Some(snapshot);
         self.coverage_window_label = Some(coverage_window_label);
         self.snapshot_included_count = included_count;
         self.snapshot_skipped_count = skipped_count;
+        self.snapshot_dropped_count = dropped_count;
+        self.snapshot_truncated = truncated;
         self.executive_summary = None;
         self.stream_items.clear();
         self.next_item_request_id = None;
         self.exhausted = false;
         self.briefing_request_id = None;
+        self.exec_dispatch_deferred = false;
         self.stream_epoch = self.stream_epoch.wrapping_add(1);
     }
 
@@ -1504,6 +1635,43 @@ Add methods inside `impl BriefingSession` (after `can_start`, line ~253):
         (self.snapshot_included_count, self.snapshot_skipped_count)
     }
 
+    /// Full snapshot accounting surfaced in Session Info: included, skipped, dropped, truncated.
+    pub fn snapshot_dropped_count(&self) -> usize {
+        self.snapshot_dropped_count
+    }
+
+    pub fn snapshot_truncated(&self) -> bool {
+        self.snapshot_truncated
+    }
+
+    /// True while a Next-item LLM call is outstanding. Used by active-work paths
+    /// (stop/finish button, visible status) so a streaming session with work in flight
+    /// is not treated as idle (Review finding #3).
+    pub fn next_item_in_flight(&self) -> bool {
+        matches!(self.phase, BriefingPhase::Streaming) && self.next_item_request_id.is_some()
+    }
+
+    /// True whenever the briefing has any outstanding LLM request (exec summary OR next item).
+    pub fn has_active_llm_request(&self) -> bool {
+        self.briefing_request_id.is_some() || self.next_item_request_id.is_some()
+    }
+
+    /// Mark that a frozen snapshot is waiting for prompt-context/template/metadata hydration
+    /// before the exec-summary call can be dispatched (Review finding #1). Phase stays
+    /// `GeneratingBriefing` (busy) so Generate/Summarize gates treat it as in-flight.
+    pub fn defer_exec_dispatch(&mut self) {
+        self.exec_dispatch_deferred = true;
+    }
+
+    pub fn exec_dispatch_deferred(&self) -> bool {
+        self.exec_dispatch_deferred
+    }
+
+    /// Consume the deferred-dispatch flag when the resume path actually emits the exec call.
+    pub fn take_exec_dispatch_deferred(&mut self) -> bool {
+        std::mem::take(&mut self.exec_dispatch_deferred)
+    }
+
     /// `Next item` is offered only once the exec summary exists, no item call is in flight,
     /// and the stream is not exhausted.
     pub fn next_item_enabled(&self) -> bool {
@@ -1527,7 +1695,7 @@ Add methods inside `impl BriefingSession` (after `can_start`, line ~253):
     }
 ```
 
-> The `_reserved: String` parameter keeps the test call shape stable; if you prefer, drop it and update the test calls to pass 4 args. Keep the signature and tests in sync.
+> `start_stream` now carries the full snapshot accounting (`included_count`, `skipped_count`, `dropped_count`, `truncated`) so Session Info can surface truncation (Review finding #5). Keep every call site and test in sync with this 6-argument signature.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -1553,7 +1721,8 @@ Replace the obsolete single-shot preview tests and add stream tests. Add:
             "All available articles (no briefing checkpoint filter).".to_string(),
             3,
             1,
-            "ignored".to_string(),
+            0,
+            false,
         );
         s.enter_streaming("Concise executive synthesis.".to_string());
         s
@@ -1579,6 +1748,23 @@ Replace the obsolete single-shot preview tests and add stream tests. Add:
     }
 
     #[test]
+    fn stream_preview_session_info_reports_truncation_and_dropped() {
+        let mut s = BriefingSession::default();
+        s.start_stream(
+            "[A1] T\nbody".to_string(),
+            "All available articles (no briefing checkpoint filter).".to_string(),
+            2,
+            0,
+            5,
+            true,
+        );
+        s.enter_streaming("Synthesis.".to_string());
+        let preview = s.format_preview().expect("preview");
+        assert!(preview.contains("5 dropped"), "dropped count must be surfaced");
+        assert!(preview.contains("truncated"), "truncation must be surfaced");
+    }
+
+    #[test]
     fn stream_preview_shows_exhausted_note() {
         let mut s = streaming_session();
         s.set_exhausted();
@@ -1589,7 +1775,7 @@ Replace the obsolete single-shot preview tests and add stream tests. Add:
     #[test]
     fn stream_preview_none_before_exec_summary() {
         let mut s = BriefingSession::default();
-        s.start_stream("snap".into(), "win".into(), 1, 0, "x".into());
+        s.start_stream("snap".into(), "win".into(), 1, 0, 0, false);
         // phase is still Idle until exec completes; no preview yet.
         assert!(s.format_preview().is_none());
     }
@@ -1652,6 +1838,13 @@ Replace the body of `format_preview` (`briefing.rs:477-533`). Keep the `Failed` 
             "## Session Info\n\n{coverage}Sources: {} article summaries ({} skipped: no summary)",
             self.snapshot_included_count, self.snapshot_skipped_count
         );
+        if self.snapshot_truncated || self.snapshot_dropped_count > 0 {
+            let _ = write!(
+                session_info,
+                " — {} dropped (snapshot truncated to fit the byte budget)",
+                self.snapshot_dropped_count
+            );
+        }
         if self.exhausted {
             session_info.push_str("\n\nNo further notable items.");
         }
@@ -1660,6 +1853,8 @@ Replace the body of `format_preview` (`briefing.rs:477-533`). Keep the `Failed` 
         Some(truncate_preview(&sections.join("\n\n")))
     }
 ```
+
+> The truncated/dropped clause renders `Sources: N article summaries (S skipped: no summary) — D dropped (snapshot truncated to fit the byte budget)`. The test asserts `"5 dropped"` and `"truncated"`; keep both substrings if you reword the line.
 
 > The test asserts `"3 article summaries"` and `"1 skipped"`; the format string above produces `Sources: 3 article summaries (1 skipped: no summary)` — both substrings present. Adjust the test substrings if you reword the line; keep them in sync.
 
@@ -1728,7 +1923,8 @@ use harvester_engine::llm::prompt::PromptId;
 
 #[test]
 fn generate_freezes_snapshot_and_emits_executive_summary_call() {
-    // A state where triage is complete and all in-window summaries are settled.
+    // A HYDRATED state: triage complete, all in-window summaries settled, and prompt
+    // contexts/templates/model metadata already loaded so dispatch is immediate.
     let state = crate::update::tests::support::settled_summaries_state();
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
 
@@ -1753,6 +1949,24 @@ fn generate_freezes_snapshot_and_emits_executive_summary_call() {
 }
 
 #[test]
+fn generate_without_hydration_defers_exec_and_emits_load_effects() {
+    // Triage + summaries settled, but prompt contexts/templates/metadata NOT yet loaded.
+    let state = crate::update::tests::support::settled_summaries_state_without_hydration();
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+
+    // No LLM request yet — the exec call is deferred until hydration arrives.
+    assert!(!effects.iter().any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
+    // Hydration loads are emitted.
+    assert!(effects.iter().any(|e| matches!(e, Effect::LoadPromptContexts)));
+    assert!(effects.iter().any(|e| matches!(e, Effect::LoadPromptTemplateFiles)));
+    assert!(effects.iter().any(|e| matches!(e, Effect::LoadLlmMetadata)));
+    // Snapshot frozen, dispatch deferred, phase busy.
+    assert!(state.briefing().summaries_snapshot().is_some());
+    assert!(state.briefing().exec_dispatch_deferred());
+    assert!(matches!(state.briefing().phase(), BriefingPhase::GeneratingBriefing));
+}
+
+#[test]
 fn generate_with_zero_completed_summaries_fails_without_llm_call() {
     let state = crate::update::tests::support::triaged_state_without_summaries();
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
@@ -1761,7 +1975,7 @@ fn generate_with_zero_completed_summaries_fails_without_llm_call() {
 }
 ```
 
-> `settled_summaries_state()` / `triaged_state_without_summaries()` — add to `support.rs` if not present, reusing the construction in `triage_orchestration.rs`. `settled_summaries_state` must have triage complete and at least one completed summary so `briefing_generate_readiness()` returns `Ready`.
+> `settled_summaries_state()` / `settled_summaries_state_without_hydration()` / `triaged_state_without_summaries()` — add to `support.rs` if not present, reusing the construction in `triage_orchestration.rs`. `settled_summaries_state` must have triage complete, at least one completed summary so `briefing_generate_readiness()` returns `Ready`, **and** prompt contexts/templates/metadata loaded so Generate dispatches immediately. `settled_summaries_state_without_hydration` is the same corpus but with the hydration flags cleared so Generate takes the deferred path.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1770,11 +1984,29 @@ Expected: FAIL — still emits `LoadArticlesForBriefing` / no exec call.
 
 - [ ] **Step 3: Rewrite the handler**
 
-Replace `handle_generate_clicked` (`briefing.rs:50-79`). Keep `briefing_ready_to_start` but gate on `can_generate()` instead of `can_start()`; build the snapshot and dispatch the exec call directly:
+Replace `handle_generate_clicked` (`briefing.rs:50-79`). Keep `briefing_ready_to_start` but gate on `can_generate()` instead of `can_start()`; build and **freeze** the snapshot, then either dispatch the exec call immediately (when prompt contexts / templates / model metadata are already hydrated) or **defer** it and emit the hydration load effects (Review finding #1):
 
 ```rust
 fn briefing_ready_to_generate(state: &AppState) -> bool {
     state.briefing_ai_available() && state.briefing().can_generate()
+}
+
+/// True once prompt contexts, saved prompt templates, and model metadata are loaded for
+/// BOTH briefing-stream prompt ids. Until then the exec-summary call is deferred so it
+/// cannot miss saved overlays or model/version metadata (Review finding #1).
+fn briefing_stream_hydrated(state: &AppState) -> bool {
+    state.prompt_contexts_loaded()
+        && state.prompt_templates_loaded()
+        && state.llm_metadata_loaded()
+}
+
+/// Emit the hydration loads the stream needs before its first dispatch.
+fn briefing_stream_hydration_effects() -> Vec<Effect> {
+    vec![
+        Effect::LoadPromptContexts,
+        Effect::LoadPromptTemplateFiles,
+        Effect::LoadLlmMetadata,
+    ]
 }
 
 pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
@@ -1814,42 +2046,153 @@ pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
         coverage.clone(),
         snapshot.included_count,
         snapshot.skipped_count,
-        coverage.clone(),
+        snapshot.dropped_count,
+        snapshot.truncated,
     );
+    // GeneratingBriefing == busy; gates treat the deferred snapshot as in-flight.
+    state.briefing_mut().set_phase(BriefingPhase::GeneratingBriefing);
     state.revert_preview_to_briefing();
+    engine_info!(
+        "[briefing-stream] generate frozen snapshot included={} skipped={} dropped={} truncated={}",
+        snapshot.included_count,
+        snapshot.skipped_count,
+        snapshot.dropped_count,
+        snapshot.truncated
+    );
+    state.mark_dirty();
+
+    if !briefing_stream_hydrated(state) {
+        // Defer the exec call until LoadPromptContexts/Templates/Metadata complete.
+        // Task 3.4a resumes dispatch from the corresponding *Loaded handlers.
+        state.briefing_mut().defer_exec_dispatch();
+        return briefing_stream_hydration_effects();
+    }
+
+    vec![dispatch_executive_summary_call(state)]
+}
+
+/// Allocate a request id, mark the exec call in flight, and build the RequestLlmCompletion
+/// effect for the frozen snapshot. Shared by the immediate and deferred-resume paths.
+fn dispatch_executive_summary_call(state: &mut AppState) -> Effect {
+    let snapshot = state
+        .briefing()
+        .summaries_snapshot()
+        .map(str::to_owned)
+        .unwrap_or_default();
+    let coverage = state
+        .briefing()
+        .coverage_window_label()
+        .map(str::to_owned)
+        .unwrap_or_default();
 
     let request_id = state.allocate_next_llm_request_id();
     state.record_pending_llm_request(request_id, PromptId::BriefingExecutiveSummary);
     state.briefing_mut().set_briefing_request_id(request_id); // -> GeneratingBriefing
 
     let context = state.context_for(PromptId::BriefingExecutiveSummary).to_vec();
-    engine_info!(
-        "[briefing-stream] generate frozen snapshot included={} skipped={} dropped={}",
-        snapshot.included_count,
-        snapshot.skipped_count,
-        snapshot.dropped_count
-    );
     state.mark_dirty();
-    vec![Effect::RequestLlmCompletion {
+    Effect::RequestLlmCompletion {
         request_id,
         prompt_id: PromptId::BriefingExecutiveSummary,
         prompt_version: None,
         model_override: None,
-        input_content: snapshot.text,
+        input_content: snapshot,
         context,
         template_override: None,
         extra_template_vars: vec![("briefing_time_window".to_string(), coverage)],
-    }]
+    }
 }
 ```
 
 > Keep `fail_generate` (`briefing.rs:42-48`) as-is. `set_briefing_request_id` already sets `phase = GeneratingBriefing` (see `briefing.rs:400-403`); reuse it so the exec call is tracked via the existing `briefing_request_id`. `handle_prepare_summaries_clicked` (Summarize) stays on `briefing_ready_to_start` / `can_start()` — do NOT change it, so Summarize stays blocked during `Streaming`.
+>
+> **Hydration accessors:** `prompt_contexts_loaded()`, `prompt_templates_loaded()`, `llm_metadata_loaded()` and `set_phase(...)` may not exist verbatim. Mirror the existing readiness flags the summarize/`try_start_briefing_with_metadata` path already consults (search `AppState` for the booleans set by `PromptContextsLoaded`/`LlmMetadataLoaded`/`PromptTemplateFilesLoaded`). If `set_phase` is absent, add a small `pub(crate) fn set_phase(&mut self, phase: BriefingPhase)` to `BriefingSession`.
 
 > **Update `begin_briefing_article_load` callers / imports:** `handle_generate_clicked` no longer calls `begin_briefing_article_load`. Leave that function in place (still used by `handle_prepare_summaries_clicked`). Remove now-unused imports if clippy flags them.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `cargo test -p harvester_core -- generate_freezes_snapshot generate_with_zero_completed`
+Run: `cargo test -p harvester_core -- generate_freezes_snapshot generate_without_hydration generate_with_zero_completed`
+Expected: PASS.
+
+---
+
+### Task 3.4a: Resume deferred exec dispatch after hydration
+
+Closes Review finding #1. When Generate freezes a snapshot before prompt contexts / templates / model metadata are loaded, the exec-summary call is deferred (Task 3.4). This task resumes it once the required data arrives, so a first-Generate click never dispatches against missing saved overlays or model/version metadata.
+
+**Files:**
+- Modify: the handlers for `PromptContextsLoaded`, `PromptTemplateFilesLoaded`, and `LlmMetadataLoaded` (in `crates/harvester_core/src/update/` — find them next to the existing `try_start_briefing_with_metadata` summarize-resume logic).
+- Modify: `crates/harvester_core/src/update/briefing.rs` — add `resume_deferred_exec_dispatch`.
+
+- [ ] **Step 1: Write the failing test**
+
+Add to `briefing_stream_tests.rs`:
+
+```rust
+#[test]
+fn deferred_exec_dispatches_after_hydration_completes() {
+    let state = crate::update::tests::support::settled_summaries_state_without_hydration();
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+    assert!(state.briefing().exec_dispatch_deferred());
+    assert!(!effects.iter().any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
+
+    // Feed the hydration acks in arbitrary order; only the LAST one should dispatch.
+    let (state, e1) = update(state, crate::update::tests::support::prompt_contexts_loaded_msg());
+    assert!(!e1.iter().any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
+    let (state, e2) = update(state, crate::update::tests::support::prompt_templates_loaded_msg());
+    assert!(!e2.iter().any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
+    let (state, e3) = update(state, crate::update::tests::support::llm_metadata_loaded_msg());
+
+    // Final ack completes hydration -> exec call dispatched, deferral cleared.
+    let exec = e3.iter().find_map(|e| match e {
+        Effect::RequestLlmCompletion { prompt_id, context, .. }
+            if *prompt_id == PromptId::BriefingExecutiveSummary => Some(context.clone()),
+        _ => None,
+    });
+    let context = exec.expect("deferred exec must dispatch once hydration completes");
+    // Uses the aggregate briefing context (reused for both stream ids).
+    assert!(!context.is_empty(), "exec dispatch must carry the hydrated context");
+    assert!(!state.briefing().exec_dispatch_deferred());
+    assert!(state.briefing().is_briefing_request_in_flight() || state.briefing().has_active_llm_request());
+}
+```
+
+> The exact `*Loaded` message constructors and any test helpers (`prompt_contexts_loaded_msg()`, etc.) must mirror the real `Msg` variants — confirm names in `msg.rs`. If the existing summarize-resume path already runs through a single shared "metadata loaded" handler, hook the resume there instead of three separate sites.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cargo test -p harvester_core deferred_exec_dispatches_after_hydration_completes`
+Expected: FAIL — the `*Loaded` handlers do not resume a deferred briefing stream.
+
+- [ ] **Step 3: Implement the resume hook**
+
+Add to `crates/harvester_core/src/update/briefing.rs`:
+
+```rust
+/// Called from the prompt-context / template / metadata loaded handlers. If a Generate
+/// deferred its exec-summary dispatch (Review finding #1) and hydration is now complete,
+/// emit the exec call and clear the deferral. No-op otherwise.
+pub(super) fn resume_deferred_exec_dispatch(state: &mut AppState) -> Vec<Effect> {
+    if !state.briefing().exec_dispatch_deferred() {
+        return Vec::new();
+    }
+    if !briefing_stream_hydrated(state) {
+        return Vec::new(); // still waiting on another load
+    }
+    // Snapshot is still valid (frozen at Generate); dispatch now.
+    state.briefing_mut().take_exec_dispatch_deferred();
+    vec![dispatch_executive_summary_call(state)]
+}
+```
+
+Call `resume_deferred_exec_dispatch(&mut state)` at the end of each of the `PromptContextsLoaded`, `PromptTemplateFilesLoaded`, and `LlmMetadataLoaded` handlers, appending its effects to whatever they already return. Because `briefing_stream_hydrated` requires all three flags, only the final ack actually dispatches.
+
+> Make `briefing_stream_hydrated` and `dispatch_executive_summary_call` visible to the resume hook (same module). Keep `dispatch_executive_summary_call` the single source of truth for building the exec call so the immediate and resumed paths stay identical.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cargo test -p harvester_core deferred_exec_dispatches_after_hydration_completes`
 Expected: PASS.
 
 ---
@@ -2078,17 +2421,19 @@ Expected: FAIL — old `handle_briefing_completion` produces a `BriefingResult`/
 
 - [ ] **Step 3: Update routing and replace the completion handler**
 
-In `crates/harvester_core/src/update/llm_completed.rs`, the routing chain (`handle`, lines ~28-44) already dispatches `state.briefing().is_briefing_request(request_id)` to `handle_briefing_completion`. Add next-item routing **before** that branch and replace the exec branch. New routing block:
+In `crates/harvester_core/src/update/llm_completed.rs`, the routing chain (`handle`, lines ~28-44) currently dispatches `state.briefing().is_briefing_request(request_id)` to the single `handle_briefing_completion`. Replace that with **two explicitly-named branches** — executive-summary completion and next-item completion — keyed by their distinct request ids. Their relative order does not matter because `briefing_request_id` (exec) and `next_item_request_id` are never equal; the snippet lists exec first, next-item second:
 
 ```rust
     } else if state.briefing().is_briefing_request(request_id) {
+        // Executive-summary completion (step 1 of the stream).
         handle_executive_summary_completion(state, &result, &mut effects);
     } else if state.briefing().next_item_request_id() == Some(request_id) {
+        // Next-item completion (step 2..N of the stream).
         handle_next_item_completion(state, &result, &mut effects);
     } else if let Some(run_id) = state.prompt_lab().ownership_for(request_id) {
 ```
 
-> Note: a restart bumps the epoch and assigns new request ids, and `next_item_request_id` is cleared/reassigned on `start_stream`. So a stale next-item ack no longer equals the current `next_item_request_id()` ⇒ it falls through all branches and is dropped. That satisfies the stale-completion test without an explicit epoch compare here. (Keep `stream_epoch` for diagnostics/logging and for the `format_preview`/UI invariants; the request-id mismatch is the operative guard.)
+> Note: a restart bumps the epoch and assigns new request ids, and `next_item_request_id` is cleared/reassigned on `start_stream`. So a stale next-item ack no longer equals the current `next_item_request_id()` ⇒ it falls through both briefing branches and is dropped. That satisfies the stale-completion test without an explicit epoch compare here. (Keep `stream_epoch` for diagnostics/logging and for the `format_preview`/UI invariants; the request-id mismatch is the operative guard.)
 
 Replace `handle_briefing_completion` (lines ~286-360) with two functions:
 
@@ -2203,6 +2548,75 @@ Expected: PASS (all updated tests green).
 - [ ] **Step 4: Add the "no history writes" guard test** (design §9)
 
 Already covered by `exec_completion_enters_streaming_and_writes_no_history` (asserts no `SaveBriefingHistory`). Confirm it is present and passing.
+
+---
+
+### Task 3.7a: Treat in-flight stream work as active (status + Stop/Finish + preview header)
+
+Closes Review finding #3. Adding `BriefingPhase::Streaming` (Task 3.1) and the in-flight `next_item_request_id` means several active-work paths must learn about the new phase, or a streaming session with a Next-item call outstanding will wrongly look idle.
+
+**Files:**
+- Modify: `crates/harvester_core/src/state/ui_state.rs` — `stop_finish_button_state` (active-work set).
+- Modify: `crates/harvester_core/src/state/view_builder.rs` — `format_briefing_preview_header` (exhaustive `BriefingPhase` match gains a `Streaming` arm).
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to the core update tests (e.g. `ui_state_tests.rs`):
+
+```rust
+#[test]
+fn streaming_with_item_in_flight_counts_as_active_work() {
+    let mut state = crate::update::tests::support::settled_summaries_state();
+    let (mut state, effects) = crate::update(state, crate::Msg::GenerateBriefingClicked);
+    let exec_id = first_exec_id(&effects);
+    let (mut state, _) = crate::update(state, crate::Msg::LlmCompleted {
+        request_id: exec_id,
+        result: success(r#"{"executive_summary":"S."}"#),
+        metadata: None });
+    // Idle stream: not active work.
+    assert!(!state.briefing().next_item_in_flight());
+    // Kick a next-item call: now in flight -> active work.
+    let (state, _) = crate::update(state, crate::Msg::NextBriefingItemClicked);
+    assert!(state.briefing().next_item_in_flight());
+    let view = state.view();
+    // Stop/Finish must reflect active work while the item call is outstanding.
+    assert!(view.stop_enabled, "Stop/Finish active while a next-item call is in flight");
+}
+```
+
+> Use whatever the view model actually exposes for the Stop/Finish control (`stop_enabled`/`stop_finish_*`); mirror the existing summarize/triage active-work assertions in `ui_state_tests.rs`.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cargo test -p harvester_core streaming_with_item_in_flight_counts_as_active_work`
+Expected: FAIL — `stop_finish_button_state` does not treat `Streaming` + in-flight item as active.
+
+- [ ] **Step 3: Wire the helpers in**
+
+In `crates/harvester_core/src/state/ui_state.rs::stop_finish_button_state`, extend the active-work condition (currently `LoadingArticles | Summarizing | GeneratingBriefing`) to also count a streaming session with an outstanding item call:
+
+```rust
+        || self.briefing.next_item_in_flight()
+```
+
+In `crates/harvester_core/src/state/view_builder.rs::format_briefing_preview_header`, add an explicit `BriefingPhase::Streaming` arm (the match is exhaustive and will otherwise fail to compile after Task 3.1):
+
+```rust
+            BriefingPhase::Streaming => {
+                if self.briefing.next_item_in_flight() {
+                    "Briefing — fetching next item…"
+                } else {
+                    "Briefing — streaming"
+                }
+            }
+```
+
+> Match the surrounding return type (likely `&str` or `String`) and existing header wording. The visible operation/status line (`build_operation_progress`) is driven by `BriefingSession::progress_text` (Task 3.2), which already returns `Fetching next item…` while `next_item_request_id` is set — no separate change needed there beyond confirming `Streaming` is reachable.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cargo test -p harvester_core streaming_with_item_in_flight_counts_as_active_work`
+Expected: PASS.
 
 ---
 
@@ -2413,7 +2827,7 @@ Expected: PASS.
 - [ ] **Step 1:** `cargo build` → SUCCESS.
 - [ ] **Step 2:** `cargo test` (whole workspace) → PASS.
 - [ ] **Step 3:** `cargo clippy --all-targets -- -D warnings` then `cargo fmt` → clean.
-- [ ] **Step 4:** Update `docs/EngineeringDiary.md` with a short entry (per `Agents.md`): the multi-step briefing stream, the cache-prefix invariant and where it's enforced (shared `BRIEFING_STREAM_SYSTEM_PREFIX` + byte-equality test), and the deliberate source-pool change (full base corpus incl. duplicates vs. `archive_final_selection`).
+- [ ] **Step 4:** Update `docs/EngineeringDiary.md` with a short entry (per `Agents.md`): the multi-step briefing stream, the cache-prefix invariant and where it's enforced (shared `BRIEFING_STREAM_SYSTEM_PREFIX` + byte-equality test + Task 1.0 deterministic context ordering), the deferred-dispatch hydration/resume for first-Generate (Task 3.4a), and the deliberate source-pool change (full base corpus incl. duplicates vs. `archive_final_selection`).
 - [ ] **Step 5:** Leave all changes for review — do NOT commit (repo policy: changes are reviewed before commit).
 
 ---
@@ -2424,13 +2838,15 @@ Per design §10: per-item source links; `briefing_history` writes / cross-briefi
 
 ## Spec coverage self-check (design → task)
 
-- §3 caching invariant → Task 1.6 (`rendered_system_prefix_is_byte_identical`), shared `BRIEFING_STREAM_SYSTEM_PREFIX`.
+- §3 caching invariant → Task 1.6 (`rendered_system_prefix_is_byte_identical`), shared `BRIEFING_STREAM_SYSTEM_PREFIX`, plus Task 1.0 (deterministic context ordering at load) so the invariant holds even with multi-variable contexts.
 - §5 prompts/schemas/validators → Tasks 1.2, 1.3, 1.6; strict next-item validation incl. fail-closed → Task 1.3.
 - §5/§5a plumbing (enum, register, resolve_model, validate_response, doc-key, synthetic vars, context filenames, dispatch lists, effective model maps app+batch) → Tasks 1.1, 1.5, 1.6, 1.7, 1.8, 1.9, 1.10. (Document-key needs no change: the `_ => "content"` arm already covers both new ids; Task 1.6's prefix test plus the snapshot input prove `content` is used.)
-- §6 / §6a source pool + dedicated builder (duplicates, coverage window, partial-failure skip, whole-entry budget, UTF-8 safety, counts) → Tasks 2.1, 2.2, 2.3.
-- §7 state model & data flow (fields, `Streaming`, epoch, messages, routing) → Tasks 3.1, 3.3, 3.4, 3.5, 3.6.
+- §5 prompt-id contract (valid-ids error text, docs, registry/round-trip tests) → Task 1.12.
+- §6 / §6a source pool + dedicated builder (duplicates, coverage window, partial-failure skip, whole-entry budget incl. separator bytes, UTF-8 safety, counts) → Tasks 2.1, 2.2, 2.3.
+- §7 state model & data flow (fields, `Streaming`, epoch, messages, routing) → Tasks 3.1, 3.3, 3.4, 3.6.
+- §7 stream-generation hydration/resume (deferred exec until contexts/templates/metadata load) → Tasks 3.4, 3.4a.
 - §7a restart gate & stale completions → `can_generate` (3.1), Generate restart via `start_stream` (3.4), request-id-mismatch drop (3.6), Summarize stays on `can_start` (3.4), view gate (4.2).
 - §8 termination/errors (exhaustion, empty corpus, item-call failure retry, exec failure, restart, no within-session dedup, ephemeral persistence) → Tasks 3.4, 3.6; ephemeral persistence is inherent (no `PersistedState` change).
 - §9 testing → spread across all phases; "no history writes" guard → Task 3.6.
-- §4 / view & UI (Generate via `can_generate`, `next_item_enabled`, footer button, progress line "Fetching next item…") → Tasks 3.2 (progress text), 4.1, 4.2, 4.3.
+- §4 / view & UI (Generate via `can_generate`, `next_item_enabled`, footer button, progress line "Fetching next item…", in-flight active-work) → Tasks 3.2 (progress text), 3.7a (Stop/Finish + preview header), 4.1, 4.2, 4.3.
 - §11 phasing → Phases 1–4 here, one-to-one.
