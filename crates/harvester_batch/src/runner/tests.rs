@@ -176,6 +176,42 @@ fn test_orchestration_dispatch_skips_settlement_in_same_iteration() {
 }
 
 #[test]
+fn import_cycle_does_not_settle_while_triage_in_flight() {
+    let mut obs = observation_with_import(0, 0, 0, 0, 0, 0, 0, 1, 0);
+    obs.import_phase = harvester_core::ImportPhase::Idle;
+    obs.import_in_flight = false;
+    obs.triage_in_flight = 2;
+    obs.triage_pending = 0;
+    obs.summary_in_flight = 0;
+    obs.summary_pending = 0;
+    assert!(!should_settle_import_cycle(&obs));
+}
+
+#[test]
+fn import_cycle_does_not_settle_while_triage_pending() {
+    let mut obs = observation_with_import(0, 0, 0, 0, 0, 0, 0, 1, 0);
+    obs.import_phase = harvester_core::ImportPhase::Idle;
+    obs.import_in_flight = false;
+    obs.triage_in_flight = 0;
+    obs.triage_pending = 3;
+    obs.summary_in_flight = 0;
+    obs.summary_pending = 0;
+    assert!(!should_settle_import_cycle(&obs));
+}
+
+#[test]
+fn import_cycle_settles_when_all_phases_drained() {
+    let mut obs = observation_with_import(0, 0, 0, 0, 0, 0, 0, 1, 0);
+    obs.import_phase = harvester_core::ImportPhase::Idle;
+    obs.import_in_flight = false;
+    obs.triage_in_flight = 0;
+    obs.triage_pending = 0;
+    obs.summary_in_flight = 0;
+    obs.summary_pending = 0;
+    assert!(should_settle_import_cycle(&obs));
+}
+
+#[test]
 fn test_should_stop_after_cycle_for_single_shot() {
     assert!(should_stop_after_cycle(true, false));
 }
@@ -372,6 +408,7 @@ fn test_dispatch_loop_ticks_drive_pretriage_from_restore_signal() {
             require_new_jobs_since: None,
             tick_interval: Duration::ZERO,
         },
+        None,
     )
     .expect("dispatch loop should complete");
     assert_eq!(outcome, CycleOutcome::Success);
@@ -913,6 +950,33 @@ fn should_settle_import_cycle_when_complete_and_no_pending() {
     obs.import_phase = harvester_core::ImportPhase::Complete;
     obs.imports_completed = 2;
     assert!(should_settle_import_cycle(&obs));
+}
+
+#[test]
+fn should_not_settle_import_cycle_when_pre_triage_loading() {
+    let mut obs = idle_import_obs();
+    obs.import_phase = harvester_core::ImportPhase::Complete;
+    obs.imports_completed = 2;
+    obs.pre_triage_phase = harvester_core::PreTriagePhase::LoadingArticles;
+    assert!(!should_settle_import_cycle(&obs));
+}
+
+#[test]
+fn should_not_settle_import_cycle_when_pre_triage_reviewing() {
+    let mut obs = idle_import_obs();
+    obs.import_phase = harvester_core::ImportPhase::Complete;
+    obs.imports_completed = 2;
+    obs.pre_triage_phase = harvester_core::PreTriagePhase::Reviewing;
+    assert!(!should_settle_import_cycle(&obs));
+}
+
+#[test]
+fn should_not_settle_import_cycle_when_pre_triage_ready_to_triage() {
+    let mut obs = idle_import_obs();
+    obs.import_phase = harvester_core::ImportPhase::Complete;
+    obs.imports_completed = 2;
+    obs.pre_triage_phase = harvester_core::PreTriagePhase::ReadyToTriage;
+    assert!(!should_settle_import_cycle(&obs));
 }
 
 #[test]

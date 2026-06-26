@@ -173,10 +173,16 @@ fn should_settle_cycle(status: harvester_core::BatchStatus) -> bool {
 /// Import mode ignores poll/triage/job state; only waits for the import and its
 /// downstream work (summaries or briefing) to complete.
 fn should_settle_import_cycle(obs: &BatchObservation) -> bool {
-    // In import mode we don't poll sources, so poll_in_progress is always false.
-    // We settle when the import phase is no longer Importing and all summary work is done.
     !obs.import_in_flight
         && !matches!(obs.import_phase, ImportPhase::Importing)
+        && !matches!(
+            obs.pre_triage_phase,
+            harvester_core::PreTriagePhase::LoadingArticles
+                | harvester_core::PreTriagePhase::Reviewing
+                | harvester_core::PreTriagePhase::ReadyToTriage
+        )
+        && obs.triage_in_flight == 0
+        && obs.triage_pending == 0
         && obs.summary_in_flight == 0
         && obs.summary_pending == 0
 }
@@ -1256,6 +1262,9 @@ pub fn run(args: Args) -> Result<i32, String> {
         ),
     }
 
+    let progress_enabled = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
+    let mut progress = crate::progress::BatchProgressReporter::new(progress_enabled);
+
     // Outer cycle loop - poll repeatedly until shutdown
     let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
     let mut cycle_count = 0;
@@ -1279,7 +1288,7 @@ pub fn run(args: Args) -> Result<i32, String> {
             .map_err(|e| format!("Failed to dispatch poll: {}", e))?;
 
         // Run dispatch loop until settled
-        let outcome = run_dispatch_loop(
+        let outcome = run_dispatch_loop_with_tick_interval(
             &mut state,
             &msg_tx,
             &msg_rx,
@@ -1294,6 +1303,7 @@ pub fn run(args: Args) -> Result<i32, String> {
                 },
                 tick_interval: Duration::from_millis(75),
             },
+            Some(&mut progress),
         )?;
 
         // Track outcome statistics
@@ -1302,6 +1312,9 @@ pub fn run(args: Args) -> Result<i32, String> {
             CycleOutcome::PartialFailure => {}
             CycleOutcome::TotalFailure => total_failure_cycles += 1,
         }
+
+        // Clear progress line before printing the cycle table.
+        progress.finish_cycle(&mut std::io::stdout());
 
         // Print cycle summary
         let obs = state.batch_observation();
@@ -1408,6 +1421,7 @@ fn run_dispatch_loop(
         effect_runner,
         shutdown_flag,
         options,
+        None,
     )
 }
 
@@ -1418,6 +1432,7 @@ fn run_dispatch_loop_with_tick_interval(
     effect_runner: &EffectRunner,
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
+    mut progress: Option<&mut crate::progress::BatchProgressReporter>,
 ) -> Result<CycleOutcome, String> {
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
@@ -1498,6 +1513,9 @@ fn run_dispatch_loop_with_tick_interval(
         // Check for settlement after processing available work.
         let mut orchestrated = false;
         let obs = state.batch_observation();
+        if let Some(p) = progress.as_deref_mut() {
+            p.update_from_obs(&obs, &mut std::io::stdout());
+        }
         if should_run_ai_orchestration(
             options.enable_ai_orchestration,
             options.require_new_jobs_since,
@@ -1755,6 +1773,10 @@ fn run_import_mode(
     state = new_state;
     effect_runner.enqueue(import_effects);
 
+    let progress_enabled = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
+    let mut progress = crate::progress::ImportProgressReporter::new(progress_enabled);
+    progress.startup_line(&mut std::io::stdout());
+
     // Run the import dispatch loop until settled.
     let outcome = run_import_dispatch_loop(
         &mut state,
@@ -1767,6 +1789,7 @@ fn run_import_mode(
             require_new_jobs_since: None,
             tick_interval: Duration::from_millis(75),
         },
+        Some(&mut progress),
     )?;
 
     let obs = state.batch_observation();
@@ -1777,10 +1800,10 @@ fn run_import_mode(
         obs.imports_failed,
     );
 
-    println!(
-        "\n-- Import complete: {} imported, {} failed --\n",
-        obs.imports_completed, obs.imports_failed
-    );
+    // LlmHandle is owned by effect_runner; usage totals are not accessible here.
+    // Printing "$0.00" would be incorrect when triage/summaries actually ran.
+    let cost_display = "unavailable".to_string();
+    progress.finish(&cost_display, &mut std::io::stdout());
 
     drop(effect_runner);
     let imported_completed_jobs = state.completed_jobs_snapshot();
@@ -1816,11 +1839,12 @@ fn merge_completed_jobs_for_import(
 /// `should_settle_cycle`, and `classify_import_cycle_outcome` for the final result.
 fn run_import_dispatch_loop(
     state: &mut AppState,
-    _msg_tx: &mpsc::Sender<Msg>,
+    msg_tx: &mpsc::Sender<Msg>,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_runner: &EffectRunner,
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
+    mut progress: Option<&mut crate::progress::ImportProgressReporter>,
 ) -> Result<CycleOutcome, String> {
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
@@ -1859,6 +1883,21 @@ fn run_import_dispatch_loop(
                     queued_effects.extend(effects);
                 }
 
+                if let Some(triggered_by_job_done) =
+                    state.take_pre_triage_refresh_evaluation_request()
+                {
+                    let ordered_urls = state.ordered_completed_job_urls_snapshot();
+                    let (new_state, effects) = update(
+                        state.clone(),
+                        Msg::EvaluatePreTriageRefresh {
+                            ordered_urls,
+                            triggered_by_job_done,
+                        },
+                    );
+                    *state = new_state;
+                    queued_effects.extend(effects);
+                }
+
                 if !queued_effects.is_empty() {
                     effect_runner.enqueue(queued_effects);
                 }
@@ -1878,8 +1917,22 @@ fn run_import_dispatch_loop(
             last_tick = Instant::now();
         }
 
+        let mut orchestrated = false;
+        if options.enable_ai_orchestration {
+            if let Some(next_msg) = maybe_dispatch_batch_ai_orchestration(state) {
+                msg_tx.send(next_msg).map_err(|e| {
+                    format!("Failed to dispatch import orchestration message: {}", e)
+                })?;
+                orchestrated = true;
+            }
+        }
+
         let obs = state.batch_observation();
-        if should_settle_import_cycle(&obs) {
+        if let Some(p) = progress.as_deref_mut() {
+            p.update_from_obs(&obs, &mut std::io::stdout(), &mut std::io::stderr());
+        }
+
+        if !orchestrated && should_settle_import_cycle(&obs) {
             engine_info!("[import] Cycle settled after {} iterations", iterations);
             return Ok(classify_import_cycle_outcome(&obs));
         }
