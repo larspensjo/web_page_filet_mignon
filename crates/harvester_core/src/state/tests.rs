@@ -171,6 +171,14 @@ mod app_state_tests {
     }
 
     #[test]
+    fn batch_status_is_running_when_summary_article_load_is_in_flight() {
+        let mut state = AppState::new();
+        state.set_briefing(crate::briefing::BriefingSession::new_loading(None));
+
+        assert_eq!(state.batch_status(), BatchStatus::Running);
+    }
+
+    #[test]
     fn job_done_failure_clears_preview() {
         let mut state = AppState::new();
         state.jobs.insert(

@@ -129,6 +129,7 @@ impl AppState {
             || batch.triage_in_flight > 0
             || batch.summary_in_flight > 0
             || batch.summary_pending > 0
+            || self.briefing.is_active()
             || batch.import_in_flight;
 
         if has_active_work {

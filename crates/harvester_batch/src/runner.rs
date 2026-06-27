@@ -77,6 +77,8 @@ struct DispatchLoopOptions {
     tick_interval: Duration,
 }
 
+const MAX_DISPATCH_INBOX_BATCH: usize = 32;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SummaryRefreshTarget {
     primary_url: String,
@@ -1437,6 +1439,7 @@ fn run_dispatch_loop_with_tick_interval(
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
     let mut last_tick = Instant::now();
+    let mut last_progress_render = Instant::now();
     const MAX_ITERATIONS: usize = 10_000; // Safety limit
 
     loop {
@@ -1455,11 +1458,16 @@ fn run_dispatch_loop_with_tick_interval(
             return Ok(classify_cycle_outcome(&obs));
         }
 
-        // Receive at least one message with timeout, then drain a batch.
+        // Receive at least one message with timeout, then drain a bounded batch.
+        // Large restored states make reducer clones expensive; bounding the batch
+        // keeps progress and tick-driven orchestration responsive under bursts.
         match msg_rx.recv_timeout(timeout) {
             Ok(first_msg) => {
                 let mut inbox = vec![first_msg];
-                while let Ok(next_msg) = msg_rx.try_recv() {
+                while inbox.len() < MAX_DISPATCH_INBOX_BATCH {
+                    let Ok(next_msg) = msg_rx.try_recv() else {
+                        break;
+                    };
                     inbox.push(next_msg);
                 }
 
@@ -1471,6 +1479,13 @@ fn run_dispatch_loop_with_tick_interval(
                     let (new_state, effects) = update(state.clone(), msg);
                     *state = new_state;
                     queued_effects.extend(effects);
+                    if last_progress_render.elapsed() >= Duration::from_millis(250) {
+                        if let Some(p) = progress.as_deref_mut() {
+                            let obs = state.batch_observation();
+                            p.update_from_obs(&obs, &mut std::io::stdout());
+                        }
+                        last_progress_render = Instant::now();
+                    }
                 }
 
                 if let Some(triggered_by_job_done) =
@@ -1515,6 +1530,7 @@ fn run_dispatch_loop_with_tick_interval(
         let obs = state.batch_observation();
         if let Some(p) = progress.as_deref_mut() {
             p.update_from_obs(&obs, &mut std::io::stdout());
+            last_progress_render = Instant::now();
         }
         if should_run_ai_orchestration(
             options.enable_ai_orchestration,
@@ -1849,6 +1865,7 @@ fn run_import_dispatch_loop(
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
     let mut last_tick = Instant::now();
+    let mut last_progress_render = Instant::now();
     const MAX_ITERATIONS: usize = 10_000;
 
     loop {
@@ -1869,7 +1886,10 @@ fn run_import_dispatch_loop(
         match msg_rx.recv_timeout(timeout) {
             Ok(first_msg) => {
                 let mut inbox = vec![first_msg];
-                while let Ok(next_msg) = msg_rx.try_recv() {
+                while inbox.len() < MAX_DISPATCH_INBOX_BATCH {
+                    let Ok(next_msg) = msg_rx.try_recv() else {
+                        break;
+                    };
                     inbox.push(next_msg);
                 }
 
@@ -1881,6 +1901,13 @@ fn run_import_dispatch_loop(
                     let (new_state, effects) = update(state.clone(), msg);
                     *state = new_state;
                     queued_effects.extend(effects);
+                    if last_progress_render.elapsed() >= Duration::from_millis(250) {
+                        if let Some(p) = progress.as_deref_mut() {
+                            let obs = state.batch_observation();
+                            p.update_from_obs(&obs, &mut std::io::stdout(), &mut std::io::stderr());
+                        }
+                        last_progress_render = Instant::now();
+                    }
                 }
 
                 if let Some(triggered_by_job_done) =
@@ -1930,6 +1957,7 @@ fn run_import_dispatch_loop(
         let obs = state.batch_observation();
         if let Some(p) = progress.as_deref_mut() {
             p.update_from_obs(&obs, &mut std::io::stdout(), &mut std::io::stderr());
+            last_progress_render = Instant::now();
         }
 
         if !orchestrated && should_settle_import_cycle(&obs) {
