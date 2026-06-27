@@ -293,6 +293,7 @@ pub struct BatchProgressReporter {
     last_line_width: usize,
     painted_status: bool,
     start: Instant,
+    frame_index: usize,
 }
 
 impl BatchProgressReporter {
@@ -302,6 +303,7 @@ impl BatchProgressReporter {
             last_line_width: 0,
             painted_status: false,
             start: Instant::now(),
+            frame_index: 0,
         }
     }
 
@@ -315,12 +317,16 @@ impl BatchProgressReporter {
         }
         let elapsed = format_elapsed(self.start.elapsed());
         let phase = batch_phase_label(obs);
+        let frame = ["|", "/", "-", "\\"][self.frame_index % 4];
+        self.frame_index = self.frame_index.wrapping_add(1);
         let body = format!(
-            "[batch] {}  jobs={}/{} fail={}  triage={}/{} fail={}  summary={}/{} fail={}  t={}",
+            "[batch] {} {}  jobs={}/{} fail={} active={}  triage={}/{} fail={}  summary={}/{} fail={}  t={}",
             phase,
+            frame,
             obs.jobs_done,
             obs.jobs_total,
             obs.jobs_failed,
+            obs.jobs_in_flight,
             obs.triage_completed,
             obs.triage_total,
             obs.triage_failed,
@@ -882,6 +888,7 @@ mod tests {
         obs.jobs_total = 10;
         obs.jobs_done = 7;
         obs.jobs_failed = 1;
+        obs.jobs_in_flight = 2;
         obs.triage_completed = 5;
         obs.triage_total = 8;
         obs.triage_failed = 2;
@@ -894,7 +901,7 @@ mod tests {
         assert!(s.starts_with('\r'), "must start with CR: {s:?}");
         assert!(s.contains("[batch]"), "must show prefix: {s:?}");
         assert!(
-            s.contains("jobs=7/10 fail=1"),
+            s.contains("jobs=7/10 fail=1 active=2"),
             "must show job counts: {s:?}"
         );
         assert!(
@@ -904,6 +911,20 @@ mod tests {
         assert!(
             s.contains("summary=1/3 fail=1"),
             "must show summary counts: {s:?}"
+        );
+    }
+
+    #[test]
+    fn batch_progress_heartbeat_changes_between_updates() {
+        let mut reporter = BatchProgressReporter::new(true);
+        let obs = import_obs_idle();
+        let mut out = Vec::<u8>::new();
+        reporter.update_from_obs(&obs, &mut out);
+        reporter.update_from_obs(&obs, &mut out);
+        let s = std::str::from_utf8(&out).unwrap();
+        assert!(
+            s.contains("SETTLING  |") && s.contains("SETTLING  /"),
+            "must show a changing heartbeat: {s:?}"
         );
     }
 

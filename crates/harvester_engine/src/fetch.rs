@@ -64,7 +64,7 @@ impl Default for FetchSettings {
     fn default() -> Self {
         Self {
             connect_timeout: Duration::from_secs(10),
-            request_timeout: Duration::from_secs(30),
+            request_timeout: Duration::from_secs(15),
             redirect_limit: 5,
             max_bytes: 5 * 1024 * 1024,
             allowed_content_types: vec![

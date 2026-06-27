@@ -58,6 +58,13 @@ fn settings_with_retry(retry_settings: RetrySettings) -> FetchSettings {
     }
 }
 
+#[test]
+fn default_fetch_request_timeout_is_bounded_for_batch_tail_latency() {
+    let settings = FetchSettings::default();
+    assert_eq!(settings.connect_timeout, Duration::from_secs(10));
+    assert_eq!(settings.request_timeout, Duration::from_secs(15));
+}
+
 #[tokio::test]
 async fn fetcher_returns_html_and_emits_progress() {
     let server = MockServer::start().await;
