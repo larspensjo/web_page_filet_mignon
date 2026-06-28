@@ -7,6 +7,7 @@ use super::groups::bottom_buttons::BottomButtonsRenderState;
 use super::groups::prompt_lab_actions::PromptLabActionsRenderState;
 use super::groups::prompt_lab_sections::PromptLabSectionsRenderState;
 use super::layout::{build_layout_command, LayoutConfig, PromptLabLayoutConfig};
+use super::render_blacklist::{render_blacklist_section, BlacklistRenderState};
 use super::render_controls::{
     render_left_tab_bar_section, render_llm_quota_progress_section, render_main_controls_section,
     render_operation_progress_section, render_status_section, render_tab_bar_section,
@@ -155,6 +156,7 @@ pub struct TreeRenderState {
     pub(super) prompt_lab_sections: PromptLabSectionsRenderState,
     pub(super) prompt_lab: PromptLabRenderState,
     pub(super) preview: PreviewRenderState,
+    pub(super) blacklist: BlacklistRenderState,
 }
 
 impl TreeRenderState {
@@ -199,6 +201,7 @@ pub fn render(
         &mut cmds,
     );
     render_prompt_lab_section(window_id, view, tree_state, &mut cmds);
+    render_blacklist_section(window_id, view, &mut tree_state.blacklist, &mut cmds);
 
     let list_box = ListBoxRenderModel::from_view(view);
     append_list_box_commands(window_id, list_box, &mut cmds);

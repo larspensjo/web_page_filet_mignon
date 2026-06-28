@@ -313,6 +313,23 @@ pub(super) fn build_layout_rules(
             fixed_size: None,
             margin: (0, 6, 0, 6),
         },
+        // Left content: Blacklist (shown when left_tab == Blacklist).
+        LayoutRule {
+            control_id: PANEL_LEFT_BLACKLIST,
+            parent_control_id: Some(PANEL_LEFT),
+            dock_style: left_tab_dock(LeftTab::Blacklist),
+            order: 3,
+            fixed_size: left_tab_size(LeftTab::Blacklist),
+            margin: (0, 0, 0, 0),
+        },
+        LayoutRule {
+            control_id: VIEWER_BLACKLIST,
+            parent_control_id: Some(PANEL_LEFT_BLACKLIST),
+            dock_style: DockStyle::Fill,
+            order: 0,
+            fixed_size: None,
+            margin: (4, 6, 4, 6),
+        },
         LayoutRule {
             control_id: SPLITTER_MAIN,
             parent_control_id: None,

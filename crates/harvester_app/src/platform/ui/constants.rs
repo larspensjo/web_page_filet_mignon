@@ -130,12 +130,14 @@ pub const PANEL_TAB_POLL_STATS: ControlId = ControlId::new(2214);
 pub const VIEWER_TRIAGE: ControlId = ControlId::new(5002);
 pub const VIEWER_BRIEFING: ControlId = ControlId::new(5003);
 pub const VIEWER_POLL_STATS: ControlId = ControlId::new(5004);
+pub const VIEWER_BLACKLIST: ControlId = ControlId::new(5005);
 // GDI chart control for the Trends tab
 pub const CHART_TRENDS: ControlId = ControlId::new(2230);
 // Left panel: two tab content areas (2300 range)
 pub const PANEL_LEFT: ControlId = ControlId::new(2300);
 pub const PANEL_LEFT_JOBS: ControlId = ControlId::new(2304);
 pub const PANEL_LEFT_PROMPT_LAB: ControlId = ControlId::new(2305);
+pub const PANEL_LEFT_BLACKLIST: ControlId = ControlId::new(2306);
 
 // New custom TabBar controls replacing the radio-button tab bars (6000 range).
 pub const TAB_BAR_RIGHT: ControlId = ControlId::new(6100);

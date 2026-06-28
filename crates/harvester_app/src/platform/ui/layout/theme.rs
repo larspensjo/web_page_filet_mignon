@@ -724,6 +724,7 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
         PANEL_LEFT,
         PANEL_LEFT_JOBS,
         PANEL_LEFT_PROMPT_LAB,
+        PANEL_LEFT_BLACKLIST,
         PANEL_PROMPT_LAB,
         PANEL_PROMPT_LAB_MODE_ROW,
         PANEL_PROMPT_LAB_MODEL_ROW,
@@ -926,6 +927,7 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
         VIEWER_TRIAGE,
         VIEWER_BRIEFING,
         VIEWER_POLL_STATS,
+        VIEWER_BLACKLIST,
     ] {
         commands.push(PlatformCommand::ApplyStyleToControl {
             window_id,

@@ -77,6 +77,7 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
             "Triage Review".to_string(),
             "Results".to_string(),
             "Prompt Lab".to_string(),
+            "Blacklist".to_string(),
         ],
     });
     commands.push(PlatformCommand::SetTabBarStyle {
@@ -108,6 +109,16 @@ pub(super) fn create_controls(window_id: WindowId, commands: &mut Vec<PlatformCo
         window_id,
         parent_control_id: Some(PANEL_LEFT),
         control_id: PANEL_LEFT_PROMPT_LAB,
+    });
+    commands.push(PlatformCommand::CreatePanel {
+        window_id,
+        parent_control_id: Some(PANEL_LEFT),
+        control_id: PANEL_LEFT_BLACKLIST,
+    });
+    commands.push(PlatformCommand::CreateRichEdit {
+        window_id,
+        parent_control_id: Some(PANEL_LEFT_BLACKLIST),
+        control_id: VIEWER_BLACKLIST,
     });
 
     commands.push(PlatformCommand::CreatePanel {

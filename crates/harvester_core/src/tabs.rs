@@ -47,6 +47,7 @@ pub enum LeftTab {
     TriageReview,
     TriageResults,
     PromptLab,
+    Blacklist,
 }
 
 impl LeftTab {
@@ -57,6 +58,7 @@ impl LeftTab {
             LeftTab::TriageReview => 1,
             LeftTab::TriageResults => 2,
             LeftTab::PromptLab => 3,
+            LeftTab::Blacklist => 4,
         }
     }
 
@@ -67,6 +69,7 @@ impl LeftTab {
             1 => Some(LeftTab::TriageReview),
             2 => Some(LeftTab::TriageResults),
             3 => Some(LeftTab::PromptLab),
+            4 => Some(LeftTab::Blacklist),
             _ => {
                 engine_warn!("[tabs] LeftTab::from_index: out-of-range index {index}");
                 None
@@ -150,6 +153,7 @@ mod tests {
             LeftTab::TriageReview,
             LeftTab::TriageResults,
             LeftTab::PromptLab,
+            LeftTab::Blacklist,
         ];
         for tab in variants {
             assert_eq!(LeftTab::from_index(tab.to_index()), Some(tab));
@@ -158,7 +162,7 @@ mod tests {
 
     #[test]
     fn left_tab_from_index_out_of_range_returns_none() {
-        assert_eq!(LeftTab::from_index(4), None);
+        assert_eq!(LeftTab::from_index(5), None);
     }
 
     #[test]

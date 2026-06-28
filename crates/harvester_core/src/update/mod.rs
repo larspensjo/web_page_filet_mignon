@@ -723,9 +723,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             recorded_at,
         } => {
             if let Some(url) = state.job_url_for(job_id).map(|s| s.to_string()) {
-                let changed = state
-                    .blacklist
-                    .record_for_url(&url, class, failure_label.as_deref(), recorded_at);
+                let changed = state.blacklist.record_for_url(
+                    &url,
+                    class,
+                    failure_label.as_deref(),
+                    recorded_at,
+                );
                 if changed {
                     state.mark_dirty();
                 }

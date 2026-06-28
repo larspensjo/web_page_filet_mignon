@@ -367,6 +367,8 @@ pub struct AppViewModel {
     pub llm_quota: LlmQuotaView,
     /// Right-pane tab content area view.
     pub right_pane: RightPaneView,
+    /// Blacklist tab content.
+    pub blacklist: BlacklistTabView,
 }
 
 impl Default for AppViewModel {
@@ -422,6 +424,68 @@ impl Default for AppViewModel {
             llm_usage_by_model: Vec::new(),
             llm_quota: crate::build_llm_quota_view(&crate::LlmQuotaState::default()),
             right_pane: RightPaneView::default(),
+            blacklist: BlacklistTabView::default(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Blacklist tab view types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlacklistRowView {
+    pub domain: String,
+    pub strikes: u32,
+    pub status: String,
+    pub last_failure: String,
+    pub next_retry: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BlacklistTabView {
+    pub rows: Vec<BlacklistRowView>,
+    pub blacklisted_count: usize,
+}
+
+impl BlacklistTabView {
+    pub fn from_state(
+        state: &crate::blacklist::BlacklistState,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        let mut blacklisted_count = 0;
+        let rows = state
+            .rows()
+            .into_iter()
+            .map(|(domain, rec)| {
+                let blocked = state.is_blocked(domain, now);
+                if blocked {
+                    blacklisted_count += 1;
+                }
+                let status = match rec.cooldown_until {
+                    Some(until) if now < until => format!("Cooling down ({} strikes)", rec.strikes),
+                    Some(_) => "Probe pending".to_string(),
+                    None => "Tracking".to_string(),
+                };
+                let next_retry = match rec.cooldown_until {
+                    Some(until) if now < until => until.format("%Y-%m-%d %H:%M UTC").to_string(),
+                    _ => "—".to_string(),
+                };
+                BlacklistRowView {
+                    domain: domain.clone(),
+                    strikes: rec.strikes,
+                    status,
+                    last_failure: rec
+                        .last_failure_kind
+                        .clone()
+                        .unwrap_or_else(|| "—".to_string()),
+                    next_retry,
+                }
+            })
+            .collect();
+        BlacklistTabView {
+            rows,
+            blacklisted_count,
         }
     }
 }
@@ -1126,6 +1190,32 @@ mod tests {
         let contexts = HashMap::new();
         let view = PromptLabView::from_state(&state, &contexts, &HashMap::new(), true);
         assert!(view.latest_validation_error.is_some());
+    }
+
+    #[test]
+    fn blacklist_view_marks_active_and_cooldown() {
+        use crate::blacklist::BlacklistState;
+        use harvester_engine::FetchOutcomeClass;
+        let now = chrono::Utc::now();
+        let mut bl = BlacklistState::default();
+        for _ in 0..3 {
+            bl.record_outcome(
+                "bloomberg.com",
+                FetchOutcomeClass::PermanentBlock,
+                Some("http status 403"),
+                now,
+            );
+        }
+        let view = BlacklistTabView::from_state(&bl, now);
+        assert_eq!(view.blacklisted_count, 1);
+        let row = &view.rows[0];
+        assert_eq!(row.domain, "bloomberg.com");
+        assert_eq!(row.strikes, 3);
+        assert!(
+            row.status.to_lowercase().contains("cool")
+                || row.status.to_lowercase().contains("blacklist")
+        );
+        assert_eq!(row.last_failure, "http status 403");
     }
 }
 

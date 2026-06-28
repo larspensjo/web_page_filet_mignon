@@ -216,6 +216,7 @@ pub(super) fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItem
             text: job_status_label(job).to_string(),
             style: job_status_style(job),
         }],
+        LeftTab::Blacklist => vec![],
     };
     if matches!(tab, LeftTab::TriageReview) && matches!(job.origin, JobOrigin::Indirect { .. }) {
         badges.push(BadgeDescriptor {
@@ -247,6 +248,7 @@ pub(super) fn build_list_box_item(tab: LeftTab, job: &JobRowView) -> ListBoxItem
             .unwrap_or_else(|| "Untriaged".to_string()),
         LeftTab::TriageResults => String::new(),
         LeftTab::PromptLab => format!("{} · {}", job_source_label(job), job_status_label(job)),
+        LeftTab::Blacklist => String::new(),
     };
     let enabled = !matches!(
         tab,

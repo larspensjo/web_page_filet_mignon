@@ -268,6 +268,7 @@ fn jobs_search_input_has_layout_rule_on_jobs_tab() {
         LeftTab::TriageReview,
         LeftTab::TriageResults,
         LeftTab::PromptLab,
+        LeftTab::Blacklist,
     ] {
         let rules = layout_rules_for_left_tab(tab);
         assert_eq!(fixed_size_for(&rules, INPUT_JOBS_SEARCH), 0);
@@ -1248,6 +1249,33 @@ fn all_right_pane_viewers_receive_viewer_readable_style() {
             viewer_id
         );
     }
+}
+
+#[test]
+fn blacklist_controls_receive_dark_theme_styles() {
+    let cmds = initial_commands(WindowId::new(99));
+    assert!(
+        cmds.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::ApplyStyleToControl {
+                control_id,
+                style_id: StyleId::PanelBackground,
+                ..
+            } if *control_id == PANEL_LEFT_BLACKLIST
+        )),
+        "PANEL_LEFT_BLACKLIST must receive PanelBackground style"
+    );
+    assert!(
+        cmds.iter().any(|cmd| matches!(
+            cmd,
+            PlatformCommand::ApplyStyleToControl {
+                control_id,
+                style_id: StyleId::ViewerReadable,
+                ..
+            } if *control_id == VIEWER_BLACKLIST
+        )),
+        "VIEWER_BLACKLIST must receive ViewerReadable style"
+    );
 }
 
 #[test]

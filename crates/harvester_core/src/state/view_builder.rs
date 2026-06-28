@@ -278,6 +278,10 @@ impl AppState {
             llm_usage_by_model: self.llm_usage_rows(),
             llm_quota: crate::build_llm_quota_view(self.llm_quota()),
             right_pane: self.build_right_pane_view(selected_triage_article_available),
+            blacklist: crate::view_model::BlacklistTabView::from_state(
+                self.blacklist(),
+                chrono::Utc::now(),
+            ),
         }
     }
 
@@ -808,6 +812,12 @@ fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHead
         }
         LeftTab::PromptLab => LeftPaneHeaderView {
             title: "Job List".to_string(),
+            scope_label: None,
+            count_label: None,
+            state_label: None,
+        },
+        LeftTab::Blacklist => LeftPaneHeaderView {
+            title: "Blacklist".to_string(),
             scope_label: None,
             count_label: None,
             state_label: None,
