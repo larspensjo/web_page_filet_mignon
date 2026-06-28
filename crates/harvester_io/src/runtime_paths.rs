@@ -19,6 +19,7 @@ pub struct RuntimePaths {
     pub entity_index_path: PathBuf,
     pub brave_seen_set_path: PathBuf,
     pub brave_metadata_path: PathBuf,
+    pub blacklist_path: PathBuf,
 }
 
 impl RuntimePaths {
@@ -40,6 +41,7 @@ impl RuntimePaths {
         let entity_index_path = output_dir.join(".entity_index.ron");
         let brave_seen_set_path = output_dir.join(".brave_seen_set.ron");
         let brave_metadata_path = output_dir.join(".brave_metadata.ron");
+        let blacklist_path = crate::blacklist_store::default_blacklist_path(&output_dir);
 
         Self {
             output_dir,
@@ -57,6 +59,7 @@ impl RuntimePaths {
             entity_index_path,
             brave_seen_set_path,
             brave_metadata_path,
+            blacklist_path,
         }
     }
 

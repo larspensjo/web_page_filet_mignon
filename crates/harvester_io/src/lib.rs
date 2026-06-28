@@ -1,5 +1,6 @@
 //! Harvester IO: shared runtime paths, effect execution, and persistence.
 
+mod blacklist_store;
 mod effect_helpers;
 mod effect_runner;
 mod entity_index_store;
@@ -14,6 +15,7 @@ mod source_loader;
 mod summary_cache_store;
 mod triage_cache_store;
 
+pub use blacklist_store::{default_blacklist_path, load_blacklist, save_blacklist};
 pub use effect_runner::{EffectRunner, NoOpPlatformHandler, PlatformEffectHandler};
 pub use entity_index_store::{
     load_entity_index, save_entity_index, upsert_entry, EntityIndexPatch,

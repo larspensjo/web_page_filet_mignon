@@ -72,6 +72,7 @@ impl AppEventHandler {
         let mut clear_input_needed = false;
         let mut persist_completed_needed = false;
         let mut persist_overrides_needed = false;
+        let mut persist_blacklist_needed = false;
         let mut archive_failure_notice: Option<(String, String)> = None;
         let mut refresh_evaluation_dispatched = false;
         let mut persistence_enqueued = false;
@@ -95,6 +96,14 @@ impl AppEventHandler {
                 persist_overrides_needed |= matches!(
                     msg_for_flags,
                     Msg::PreTriageDecisionSet { .. } | Msg::PreTriageResetClicked
+                );
+                persist_blacklist_needed |= matches!(
+                    msg_for_flags,
+                    Msg::FetchOutcomeClassified {
+                        class: harvester_engine::FetchOutcomeClass::PermanentBlock
+                            | harvester_engine::FetchOutcomeClass::Success,
+                        ..
+                    }
                 );
                 if let Msg::ArchiveExportFailed {
                     basename, reason, ..
@@ -126,11 +135,13 @@ impl AppEventHandler {
                 any_dirty |= state.consume_dirty();
             }
 
-            let persistence_snapshot = if persist_completed_needed || persist_overrides_needed {
-                Some(PersistenceSnapshot::capture(&state))
-            } else {
-                None
-            };
+            let persistence_snapshot =
+                if persist_completed_needed || persist_overrides_needed || persist_blacklist_needed
+                {
+                    Some(PersistenceSnapshot::capture(&state))
+                } else {
+                    None
+                };
             let render_mode = select_render_mode(
                 any_dirty,
                 geometry_only_batch,

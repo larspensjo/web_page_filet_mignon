@@ -3,7 +3,7 @@ use commanductui::{PlatformCommand, WindowId};
 use engine_logging::engine_warn;
 use harvester_core::{update, AiAvailability, AppState, AppViewModel, Effect, LlmQuotaLimits, Msg};
 use harvester_io::{
-    load_completed_jobs, load_pre_triage_overrides, load_signal_candidate_cache,
+    load_blacklist, load_completed_jobs, load_pre_triage_overrides, load_signal_candidate_cache,
     load_signal_candidate_overrides, load_summary_cache, load_triage_cache, RuntimePaths,
 };
 
@@ -130,6 +130,15 @@ pub(super) fn prepare_startup_state(
         state = apply_startup_msg(
             state,
             Msg::PreTriageOverridesHydrated { overrides },
+            &mut startup_effects,
+        );
+    }
+
+    let blacklist = load_blacklist(&paths.blacklist_path);
+    if !blacklist.is_empty() {
+        state = apply_startup_msg(
+            state,
+            Msg::BlacklistHydrated { state: blacklist },
             &mut startup_effects,
         );
     }

@@ -21,11 +21,11 @@ use harvester_engine::{
     AtomicFileWriter,
 };
 use harvester_io::{
-    load_briefing_checkpoint, load_completed_jobs, load_entity_index, load_prompt_templates,
-    load_signal_candidate_cache, load_signal_candidate_overrides, load_sources, load_summary_cache,
-    load_triage_cache, persist_completed_jobs, persist_summary_cache, save_briefing_checkpoint,
-    save_entity_index, upsert_entry, EffectRunner, EntityIndexPatch, NoOpPlatformHandler,
-    RuntimePaths,
+    load_blacklist, load_briefing_checkpoint, load_completed_jobs, load_entity_index,
+    load_prompt_templates, load_signal_candidate_cache, load_signal_candidate_overrides,
+    load_sources, load_summary_cache, load_triage_cache, persist_completed_jobs,
+    persist_summary_cache, save_blacklist, save_briefing_checkpoint, save_entity_index,
+    upsert_entry, EffectRunner, EntityIndexPatch, NoOpPlatformHandler, RuntimePaths,
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -1174,6 +1174,13 @@ pub fn run(args: Args) -> Result<i32, String> {
         engine_info!("[batch] No previous state found, starting fresh");
     }
 
+    // Hydrate domain blacklist.
+    let blacklist = load_blacklist(&paths.blacklist_path);
+    if !blacklist.is_empty() {
+        let (new_state, _) = update(state, Msg::BlacklistHydrated { state: blacklist });
+        state = new_state;
+    }
+
     // Build EffectRunner (with optional LLM support based on OPENAI_API_KEY)
     engine_info!("[batch] Building EffectRunner");
     let enable_ai_orchestration = is_ai_orchestration_enabled();
@@ -1337,6 +1344,9 @@ pub fn run(args: Args) -> Result<i32, String> {
         engine_info!("[batch] Persisting state");
         let completed_jobs = state.completed_jobs_snapshot();
         persist_completed_jobs(&paths.state_path, &completed_jobs);
+        if let Err(err) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
+            engine_warn!("[batch] failed to save blacklist: {}", err);
+        }
 
         let shutdown_requested = shutdown_flag.load(Ordering::Relaxed);
 
@@ -1369,6 +1379,9 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     let completed_jobs = state.completed_jobs_snapshot();
     persist_completed_jobs(&paths.state_path, &completed_jobs);
+    if let Err(err) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
+        engine_warn!("[batch] failed to save blacklist on shutdown: {}", err);
+    }
 
     // Print final summary
     print_final_summary(

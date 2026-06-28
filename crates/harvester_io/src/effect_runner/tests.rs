@@ -35,6 +35,7 @@ fn make_test_runtime_paths(base: &Path) -> RuntimePaths {
         entity_index_path: base.join(".entity_index.ron"),
         brave_seen_set_path: base.join(".brave_seen_set.ron"),
         brave_metadata_path: base.join(".brave_metadata.ron"),
+        blacklist_path: base.join(".domain_blacklist.ron"),
     }
 }
 

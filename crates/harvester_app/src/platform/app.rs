@@ -170,7 +170,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             msg_rx,
             msg_tx.clone(),
             effect_runner,
-            PersistenceWorker::new(paths.state_path.clone()),
+            PersistenceWorker::new(paths.state_path.clone(), paths.blacklist_path.clone()),
             tree_render_state,
         )));
     let ui_state_provider: Arc<Mutex<dyn UiStateProvider>> =

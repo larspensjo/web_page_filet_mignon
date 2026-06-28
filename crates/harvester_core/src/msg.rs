@@ -115,6 +115,10 @@ pub enum Msg {
         failure_label: Option<String>,
         recorded_at: chrono::DateTime<chrono::Utc>,
     },
+    /// Replaces the in-memory blacklist with persisted state at startup.
+    BlacklistHydrated {
+        state: crate::blacklist::BlacklistState,
+    },
     LinkToggleRequested {
         job_id: crate::JobId,
         link_index: u32,

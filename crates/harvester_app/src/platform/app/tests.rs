@@ -261,7 +261,7 @@ fn test_handler_with_shared(
         in_rx,
         out_tx,
         effect_runner,
-        PersistenceWorker::new(paths.state_path.clone()),
+        PersistenceWorker::new(paths.state_path.clone(), paths.blacklist_path.clone()),
         ui::render::TreeRenderState::new(),
     );
     (handler, out_rx)
@@ -293,7 +293,7 @@ fn test_handler_with_shared_and_temp_state(
         in_rx,
         out_tx,
         effect_runner,
-        PersistenceWorker::new(paths.state_path.clone()),
+        PersistenceWorker::new(paths.state_path.clone(), paths.blacklist_path.clone()),
         ui::render::TreeRenderState::new(),
     );
     (handler, in_tx, temp, paths.state_path)
@@ -320,7 +320,7 @@ fn test_handler_with_loopback(shared: Arc<Mutex<SharedState>>) -> AppEventHandle
         rx,
         tx,
         effect_runner,
-        PersistenceWorker::new(paths.state_path.clone()),
+        PersistenceWorker::new(paths.state_path.clone(), paths.blacklist_path.clone()),
         ui::render::TreeRenderState::new(),
     )
 }
@@ -1225,4 +1225,34 @@ fn enter_in_jobs_search_focuses_tree_when_selection_already_visible() {
         .pending_focus_after_render
         .iter()
         .any(|pf| pf.control_id == ui::constants::TREE_JOBS && !pf.select_all));
+}
+
+#[test]
+fn prepare_startup_state_hydrates_blacklist_from_disk() {
+    use harvester_core::blacklist::BlacklistState;
+    use harvester_engine::FetchOutcomeClass;
+    use harvester_io::save_blacklist;
+
+    let (temp, paths) = startup_test_paths();
+
+    let mut bl = BlacklistState::default();
+    let now = chrono::DateTime::from_timestamp(0, 0).unwrap();
+    for _ in 0..3 {
+        bl.record_outcome(
+            "bloomberg.com",
+            FetchOutcomeClass::PermanentBlock,
+            Some("http status 403"),
+            now,
+        );
+    }
+    save_blacklist(&paths.blacklist_path, &bl).expect("save blacklist");
+
+    let (state, _effects) = prepare_startup_state(AppState::new(), &paths, 1200, 4, None, None);
+
+    assert!(
+        state.blacklist().is_blocked("bloomberg.com", now),
+        "bloomberg.com should be blocked after startup hydration"
+    );
+
+    drop(temp);
 }

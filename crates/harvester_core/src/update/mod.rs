@@ -723,10 +723,18 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             recorded_at,
         } => {
             if let Some(url) = state.job_url_for(job_id).map(|s| s.to_string()) {
-                state
+                let changed = state
                     .blacklist
                     .record_for_url(&url, class, failure_label.as_deref(), recorded_at);
+                if changed {
+                    state.mark_dirty();
+                }
             }
+            Vec::new()
+        }
+
+        Msg::BlacklistHydrated { state: blacklist } => {
+            state.set_blacklist(blacklist);
             Vec::new()
         }
 

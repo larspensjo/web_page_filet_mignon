@@ -4,10 +4,11 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use engine_logging::engine_info;
+use engine_logging::{engine_info, engine_warn};
+use harvester_core::blacklist::BlacklistState;
 use harvester_core::{AppState, ArticleFilterKey, CompletedJobSnapshot, ManualDecision};
 
-use crate::persist_runtime_state;
+use crate::{persist_runtime_state, save_blacklist};
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(350);
 const MAX_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
@@ -16,6 +17,7 @@ const MAX_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 pub struct PersistenceSnapshot {
     pub completed: Vec<CompletedJobSnapshot>,
     pub pre_triage_overrides: HashMap<ArticleFilterKey, ManualDecision>,
+    pub blacklist: BlacklistState,
 }
 
 impl PersistenceSnapshot {
@@ -23,6 +25,7 @@ impl PersistenceSnapshot {
         Self {
             completed: state.completed_jobs_snapshot(),
             pre_triage_overrides: state.pre_triage_manual_overrides().clone(),
+            blacklist: state.blacklist().clone(),
         }
     }
 }
@@ -49,10 +52,11 @@ pub struct PersistenceWorker {
 }
 
 impl PersistenceWorker {
-    pub fn new(state_path: PathBuf) -> Self {
+    pub fn new(state_path: PathBuf, blacklist_path: PathBuf) -> Self {
         let shared = Arc::new((Mutex::new(WorkerState::default()), Condvar::new()));
         let worker_shared = Arc::clone(&shared);
-        let join_handle = thread::spawn(move || run_worker(worker_shared, state_path));
+        let join_handle =
+            thread::spawn(move || run_worker(worker_shared, state_path, blacklist_path));
         Self {
             shared,
             join_handle: Some(join_handle),
@@ -112,7 +116,11 @@ impl Drop for PersistenceWorker {
     }
 }
 
-fn run_worker(shared: Arc<(Mutex<WorkerState>, Condvar)>, state_path: PathBuf) {
+fn run_worker(
+    shared: Arc<(Mutex<WorkerState>, Condvar)>,
+    state_path: PathBuf,
+    blacklist_path: PathBuf,
+) {
     let mut last_flush_at = Instant::now();
     loop {
         let pending = {
@@ -157,6 +165,9 @@ fn run_worker(shared: Arc<(Mutex<WorkerState>, Condvar)>, state_path: PathBuf) {
             &pending.snapshot.completed,
             &pending.snapshot.pre_triage_overrides,
         );
+        if let Err(err) = save_blacklist(&blacklist_path, &pending.snapshot.blacklist) {
+            engine_warn!("[persist] failed to save blacklist: {}", err);
+        }
         let flush_latency_ms = flush_started.elapsed().as_millis();
         engine_info!(
             "[persist] flushed seq={} queue_delay_ms={} flush_latency_ms={} overwritten_count={}",
@@ -185,9 +196,10 @@ mod tests {
     use std::time::Duration;
 
     use harvester_core::{update, ArticleFilterKey, ManualDecision, Msg};
+    use harvester_engine::FetchOutcomeClass;
 
     use super::*;
-    use crate::{load_completed_jobs, load_pre_triage_overrides};
+    use crate::{load_blacklist, load_completed_jobs, load_pre_triage_overrides};
 
     fn state_path(dir: &Path) -> PathBuf {
         dir.join(".harvester_state.ron")
@@ -197,7 +209,8 @@ mod tests {
     fn latest_wins_and_shutdown_flushes_latest_snapshot() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = state_path(temp.path());
-        let mut worker = PersistenceWorker::new(path.clone());
+        let mut worker =
+            PersistenceWorker::new(path.clone(), temp.path().join(".domain_blacklist.ron"));
 
         let first = PersistenceSnapshot::capture(&harvester_core::AppState::new());
         let (state_with_overrides, _) = update(
@@ -226,7 +239,8 @@ mod tests {
     fn worker_persists_even_without_explicit_shutdown_once_debounce_elapsed() {
         let temp = tempfile::tempdir().expect("tempdir");
         let path = state_path(temp.path());
-        let worker = PersistenceWorker::new(path.clone());
+        let worker =
+            PersistenceWorker::new(path.clone(), temp.path().join(".domain_blacklist.ron"));
 
         let (state_with_completed, _) = update(
             harvester_core::AppState::new(),
@@ -274,5 +288,37 @@ mod tests {
         let snapshot = PersistenceSnapshot::capture(&state);
         assert_eq!(snapshot.completed.len(), 1);
         assert_eq!(snapshot.pre_triage_overrides.len(), 1);
+    }
+
+    #[test]
+    fn blacklist_entry_survives_worker_shutdown() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let s_path = state_path(temp.path());
+        let bl_path = temp.path().join(".domain_blacklist.ron");
+        let mut worker = PersistenceWorker::new(s_path.clone(), bl_path.clone());
+
+        let t0 = chrono::DateTime::from_timestamp(0, 0).unwrap();
+        let mut blacklist = BlacklistState::default();
+        for _ in 0..3 {
+            blacklist.record_outcome(
+                "example.com",
+                FetchOutcomeClass::PermanentBlock,
+                Some("http status 403"),
+                t0,
+            );
+        }
+        let snapshot = PersistenceSnapshot {
+            completed: vec![],
+            pre_triage_overrides: HashMap::new(),
+            blacklist,
+        };
+        worker.enqueue(snapshot);
+        worker.shutdown();
+
+        let loaded = load_blacklist(&bl_path);
+        assert!(
+            loaded.is_blocked("example.com", t0),
+            "3-strike entry must survive shutdown and reload"
+        );
     }
 }
