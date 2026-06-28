@@ -862,6 +862,7 @@ fn open_in_browser_with_no_selection_emits_nothing() {
 }
 
 mod archive_tests;
+mod blacklist_tests;
 mod briefing_history_tests;
 mod entity_index_tests;
 mod import_tests;

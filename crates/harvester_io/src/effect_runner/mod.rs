@@ -175,6 +175,45 @@ impl EffectRunner {
         runner
     }
 
+    /// Test-only constructor that accepts a pre-built [`EngineConfig`] so tests
+    /// can override URL policy (e.g. `block_private_ips: false`) to reach a
+    /// local mock server without going through the full public constructors.
+    #[cfg(test)]
+    fn with_engine_config(
+        paths: RuntimePaths,
+        msg_tx: mpsc::Sender<Msg>,
+        engine_config: EngineConfig,
+        platform_handler: Box<dyn PlatformEffectHandler>,
+    ) -> Self {
+        let url_policy = engine_config.url_policy.clone();
+        let fetch_settings = engine_config.fetch_settings.clone();
+        let engine = EngineHandle::new(engine_config);
+
+        let entity_index_path = paths.entity_index_path.clone();
+        let (worker_tx, worker_rx) = mpsc::sync_channel::<EntityIndexWorkerMsg>(256);
+        thread::spawn(move || {
+            run_entity_index_worker(worker_rx, entity_index_path);
+        });
+
+        let runner = Self {
+            engine,
+            msg_tx: msg_tx.clone(),
+            paths,
+            url_policy,
+            fetch_settings,
+            llm_handle: None,
+            llm_max_input_bytes: None,
+            prompt_registry: Arc::new(RwLock::new(PromptRegistry::with_defaults())),
+            llm_metadata_models: HashMap::new(),
+            llm_provider: None,
+            llm_default_provider: None,
+            platform_handler,
+            entity_index_worker_tx: worker_tx,
+        };
+        runner.spawn_event_loop(msg_tx);
+        runner
+    }
+
     /// Block until all pending entity-index upserts have been written to disk.
     /// Only available in test builds for deterministic verification.
     #[cfg(test)]
@@ -213,6 +252,19 @@ impl EffectRunner {
                         });
                     }
                     EngineEvent::JobCompleted { job_id, result } => {
+                        let class = harvester_engine::classify_fetch_outcome(&result);
+                        let failure_label = result.as_ref().err().map(|k| k.to_string());
+                        // Stamp the time here, at the side-effect→action boundary,
+                        // so the reducer that records it stays pure/deterministic.
+                        let recorded_at = Utc::now();
+                        // Emit the blacklist classification first so the job's URL
+                        // is still resolvable when the reducer handles it.
+                        let _ = engine_tx.send(Msg::FetchOutcomeClassified {
+                            job_id,
+                            class,
+                            failure_label,
+                            recorded_at,
+                        });
                         let msg = match result {
                             Ok(outcome) => Msg::JobDone {
                                 job_id,

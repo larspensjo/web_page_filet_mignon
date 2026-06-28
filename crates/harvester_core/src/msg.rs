@@ -105,6 +105,16 @@ pub enum Msg {
         extracted_links: Vec<ExtractedLink>,
         fetched_utc: Option<String>,
     },
+    /// Classification of a completed fetch for the domain blacklist. Emitted
+    /// alongside `JobDone` from the engine→message translation, before `JobDone`
+    /// so the job's URL is still resolvable when reduced. `recorded_at` is the
+    /// time captured at that translation site, so the reducer stays pure.
+    FetchOutcomeClassified {
+        job_id: crate::JobId,
+        class: harvester_engine::FetchOutcomeClass,
+        failure_label: Option<String>,
+        recorded_at: chrono::DateTime<chrono::Utc>,
+    },
     LinkToggleRequested {
         job_id: crate::JobId,
         link_index: u32,

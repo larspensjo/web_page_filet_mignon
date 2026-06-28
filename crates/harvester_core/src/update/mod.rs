@@ -716,6 +716,20 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::ImportedCorpusCleared => import::handle_corpus_cleared(&mut state),
 
+        Msg::FetchOutcomeClassified {
+            job_id,
+            class,
+            failure_label,
+            recorded_at,
+        } => {
+            if let Some(url) = state.job_url_for(job_id).map(|s| s.to_string()) {
+                state
+                    .blacklist
+                    .record_for_url(&url, class, failure_label.as_deref(), recorded_at);
+            }
+            Vec::new()
+        }
+
         Msg::Tick => {
             state.advance_tick();
             let tick = state.current_tick();

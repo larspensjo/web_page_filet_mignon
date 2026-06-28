@@ -648,6 +648,79 @@ fn map_llm_event_unsupported_model_has_none_metadata() {
     }
 }
 
+/// Verifies the boundary contract: the effect runner always emits
+/// `FetchOutcomeClassified` before `JobDone` for the same `job_id`.
+#[tokio::test]
+async fn job_completed_emits_fetch_outcome_classified_before_job_done() {
+    use std::time::Instant;
+
+    use harvester_engine::{EngineConfig, UrlPolicy};
+    use wiremock::matchers::method as http_method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(http_method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            b"<html><body>test</body></html>",
+            "text/html; charset=utf-8",
+        ))
+        .mount(&server)
+        .await;
+    let url = format!("{}/test", server.uri());
+
+    tokio::task::spawn_blocking(move || {
+        let temp = tempdir().expect("tempdir");
+        let (tx, rx) = mpsc::channel();
+        let paths = make_test_runtime_paths(temp.path());
+
+        let mut config = EngineConfig::default_with_output(temp.path().to_path_buf());
+        config.url_policy = UrlPolicy {
+            block_private_ips: false,
+            ..Default::default()
+        };
+
+        let runner =
+            EffectRunner::with_engine_config(paths, tx, config, Box::new(NoOpPlatformHandler));
+        runner.enqueue(vec![Effect::EnqueueUrl { job_id: 1, url }]);
+
+        let mut msgs = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(msg) => {
+                    let done = matches!(msg, Msg::JobDone { .. });
+                    msgs.push(msg);
+                    if done {
+                        break;
+                    }
+                }
+                Err(_) if Instant::now() >= deadline => {
+                    panic!("timed out waiting for JobDone");
+                }
+                Err(_) => {}
+            }
+        }
+
+        let classified_idx = msgs
+            .iter()
+            .position(|m| matches!(m, Msg::FetchOutcomeClassified { job_id: 1, .. }));
+        let done_idx = msgs
+            .iter()
+            .position(|m| matches!(m, Msg::JobDone { job_id: 1, .. }));
+        assert!(
+            classified_idx.is_some(),
+            "FetchOutcomeClassified not received"
+        );
+        assert!(done_idx.is_some(), "JobDone not received");
+        assert!(
+            classified_idx.unwrap() < done_idx.unwrap(),
+            "FetchOutcomeClassified must precede JobDone in the message stream"
+        );
+    })
+    .await
+    .expect("spawn_blocking panicked");
+}
+
 #[test]
 fn job_failure_warning_classification_keeps_expected_fetch_failures_in_info() {
     assert!(!is_actionable_job_failure(&FailureKind::HttpStatus(403)));

@@ -400,6 +400,7 @@ pub struct AppState {
     pre_triage_refresh_eval_job_done: bool,
     /// Reducer-owned state for the imported-corpus workflow.
     pub(crate) import_session: crate::import_session::ImportSessionState,
+    pub(crate) blacklist: crate::blacklist::BlacklistState,
 }
 
 pub(crate) struct PromptLabPendingRunRegistration {
@@ -494,6 +495,7 @@ impl Default for AppState {
             pre_triage_refresh_eval_pending: false,
             pre_triage_refresh_eval_job_done: false,
             import_session: crate::import_session::ImportSessionState::default(),
+            blacklist: crate::blacklist::BlacklistState::default(),
         }
     }
 }
@@ -501,6 +503,14 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn blacklist(&self) -> &crate::blacklist::BlacklistState {
+        &self.blacklist
+    }
+
+    pub fn set_blacklist(&mut self, blacklist: crate::blacklist::BlacklistState) {
+        self.blacklist = blacklist;
     }
 }
 
