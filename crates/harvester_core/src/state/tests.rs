@@ -1703,10 +1703,13 @@ mod app_state_tests {
     fn indirect_ingestion_does_not_add_jobs_to_poll_pipeline_tracker() {
         let mut state = AppState::new();
         assert!(state.start_poll());
-        let ingest = state.ingest_indirect_links(vec![IndirectLink {
-            url: "https://example.com/indirect".to_string(),
-            source_job_id: 99,
-        }]);
+        let ingest = state.ingest_indirect_links(
+            vec![IndirectLink {
+                url: "https://example.com/indirect".to_string(),
+                source_job_id: 99,
+            }],
+            chrono::Utc::now(),
+        );
         assert_eq!(ingest.enqueued, 1);
         state.end_poll();
 
@@ -1717,10 +1720,13 @@ mod app_state_tests {
     fn ingest_urls_reports_enqueued_job_ids() {
         let mut state = AppState::new();
 
-        let ingest = state.ingest_urls(vec![
-            "https://example.com/one".to_string(),
-            "https://example.com/two".to_string(),
-        ]);
+        let ingest = state.ingest_urls(
+            vec![
+                "https://example.com/one".to_string(),
+                "https://example.com/two".to_string(),
+            ],
+            chrono::Utc::now(),
+        );
 
         assert_eq!(ingest.enqueued, 2);
         assert_eq!(ingest.enqueued_job_ids, vec![1, 2]);
@@ -2680,6 +2686,94 @@ mod poll_stats_view_tests {
         state.select_tab(AppTab::Triage);
         let view = state.view();
         assert_eq!(view.preview_header_text, None);
+    }
+
+    #[test]
+    fn ingest_skips_blacklisted_domain() {
+        use harvester_engine::FetchOutcomeClass;
+        let mut state = AppState::new();
+        let now = chrono::DateTime::from_timestamp(0, 0).unwrap();
+        for _ in 0..3 {
+            state.blacklist.record_outcome(
+                "bloomberg.com",
+                FetchOutcomeClass::PermanentBlock,
+                Some("http status 403"),
+                now,
+            );
+        }
+        let result = state.ingest_urls(
+            vec![
+                "https://www.bloomberg.com/news/a".to_string(),
+                "https://example.com/ok".to_string(),
+            ],
+            now,
+        );
+        assert_eq!(result.enqueued, 1);
+        assert!(result.skipped >= 1);
+    }
+
+    #[test]
+    fn ingest_blacklisted_url_not_marked_seen_and_can_be_enqueued_after_cooldown() {
+        use harvester_engine::FetchOutcomeClass;
+        let mut state = AppState::new();
+        let t0 = chrono::DateTime::from_timestamp(0, 0).unwrap();
+        let t_after_cooldown = chrono::DateTime::from_timestamp(8 * 86_400, 0).unwrap();
+        for _ in 0..3 {
+            state.blacklist.record_outcome(
+                "bloomberg.com",
+                FetchOutcomeClass::PermanentBlock,
+                Some("http status 403"),
+                t0,
+            );
+        }
+
+        let blocked = state.ingest_urls(vec!["https://www.bloomberg.com/news/a".to_string()], t0);
+        assert_eq!(blocked.enqueued, 0);
+        assert_eq!(blocked.skipped, 1);
+
+        let after_cooldown = state.ingest_urls(
+            vec!["https://www.bloomberg.com/news/a".to_string()],
+            t_after_cooldown,
+        );
+        assert_eq!(
+            after_cooldown.enqueued, 1,
+            "URL must be enqueueable after cooldown expires"
+        );
+        assert_eq!(after_cooldown.skipped, 0);
+    }
+
+    #[test]
+    fn ingest_indirect_links_skips_blacklisted_domain() {
+        use harvester_engine::FetchOutcomeClass;
+        let mut state = AppState::new();
+        let now = chrono::DateTime::from_timestamp(0, 0).unwrap();
+        for _ in 0..3 {
+            state.blacklist.record_outcome(
+                "bloomberg.com",
+                FetchOutcomeClass::PermanentBlock,
+                Some("http status 403"),
+                now,
+            );
+        }
+        let result = state.ingest_indirect_links(
+            vec![
+                IndirectLink {
+                    url: "https://www.bloomberg.com/news/article".to_string(),
+                    source_job_id: 1,
+                },
+                IndirectLink {
+                    url: "https://example.com/allowed".to_string(),
+                    source_job_id: 1,
+                },
+            ],
+            now,
+        );
+        assert_eq!(result.enqueued, 1);
+        assert!(result.skipped >= 1);
+        let enqueued_id = result.enqueued_job_ids[0];
+        let job = state.jobs.get(&enqueued_id).expect("enqueued job exists");
+        assert_eq!(job.url, "https://example.com/allowed");
+        assert!(matches!(job.origin, JobOrigin::Indirect { .. }));
     }
 }
 

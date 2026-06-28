@@ -25,7 +25,7 @@ pub(super) fn handle_poll_indirect_links(state: &mut AppState) -> Vec<Effect> {
     } else {
         state.set_indirect_poll_in_progress(true);
         let links = state.drain_indirect_links();
-        let result = state.ingest_indirect_links(links);
+        let result = state.ingest_indirect_links(links, chrono::Utc::now());
         state.set_indirect_poll_in_progress(false);
         result.effects
     }
@@ -46,7 +46,7 @@ pub(super) fn handle_source_poll_completed(
 ) -> Vec<Effect> {
     engine_info!("[source-poll] {} returned {} urls", source_id, urls.len());
     state.record_source_poll(&source_id, urls.len());
-    let ingest = state.ingest_urls(urls);
+    let ingest = state.ingest_urls(urls, chrono::Utc::now());
     state.record_poll_stat(crate::SourcePollStat {
         source_id: source_id.clone(),
         kind,

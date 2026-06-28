@@ -281,10 +281,6 @@ impl AppState {
         self.dirty = true;
     }
 
-    pub(crate) fn is_url_seen(&mut self, normalized_url: &str) -> bool {
-        !self.seen_urls.insert(normalized_url.to_owned())
-    }
-
     pub(crate) fn left_panel_width(&self) -> i32 {
         self.ui.left_panel_width()
     }

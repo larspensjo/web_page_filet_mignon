@@ -67,7 +67,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 return (state, Vec::new());
             }
 
-            let ingest = state.ingest_urls(urls);
+            let ingest = state.ingest_urls(urls, chrono::Utc::now());
             state.set_last_paste_stats(ingest.enqueued, ingest.skipped);
             if ingest.enqueued > 0 {
                 state.clear_input_buffer();

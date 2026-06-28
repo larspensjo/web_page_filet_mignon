@@ -3,6 +3,8 @@ use super::{
     normalize_url_for_dedupe, AppState, Effect, IngestResult, JobId, JobOrigin, JobResultKind,
     JobState, LinkKind, PreviewState, SessionState, Stage,
 };
+use chrono::{DateTime, Utc};
+use engine_logging::engine_info;
 use harvester_engine::{ExtractedLink, ImportedArchiveRef};
 
 impl AppState {
@@ -55,14 +57,24 @@ impl AppState {
         enqueued
     }
 
-    pub(crate) fn ingest_urls(&mut self, urls: Vec<String>) -> IngestResult {
+    pub(crate) fn ingest_urls(&mut self, urls: Vec<String>, now: DateTime<Utc>) -> IngestResult {
         let mut unique = Vec::new();
         let mut skipped = 0;
         for url in urls {
             let normalized = normalize_url_for_dedupe(&url);
-            if self.is_url_seen(&normalized) {
+            if self.has_seen_url(&normalized) {
+                skipped += 1;
+            } else if self.blacklist.is_url_blocked(&url, now) {
+                let domain = harvester_engine::registrable_domain(&url)
+                    .unwrap_or_else(|| "<unknown>".to_string());
+                engine_info!(
+                    "[blacklist] skipping blacklisted domain={} url={}",
+                    domain,
+                    url
+                );
                 skipped += 1;
             } else {
+                self.seen_urls.insert(normalized);
                 unique.push(url);
             }
         }
@@ -146,7 +158,11 @@ impl AppState {
         }
     }
 
-    pub(crate) fn ingest_indirect_links(&mut self, links: Vec<IndirectLink>) -> IngestResult {
+    pub(crate) fn ingest_indirect_links(
+        &mut self,
+        links: Vec<IndirectLink>,
+        now: DateTime<Utc>,
+    ) -> IngestResult {
         let mut unique = Vec::new();
         let mut skipped = 0;
         for link in links {
@@ -154,10 +170,22 @@ impl AppState {
             if normalized.is_empty() {
                 continue;
             }
-            if self.is_url_seen(&normalized) {
+            if self.has_seen_url(&normalized) {
                 skipped += 1;
                 continue;
             }
+            if self.blacklist.is_url_blocked(&link.url, now) {
+                let domain = harvester_engine::registrable_domain(&link.url)
+                    .unwrap_or_else(|| "<unknown>".to_string());
+                engine_info!(
+                    "[blacklist] skipping blacklisted domain={} url={}",
+                    domain,
+                    link.url
+                );
+                skipped += 1;
+                continue;
+            }
+            self.seen_urls.insert(normalized);
             unique.push(link);
         }
 
