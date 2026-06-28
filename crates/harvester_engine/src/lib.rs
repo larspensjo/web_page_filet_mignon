@@ -8,10 +8,12 @@ pub mod content_extraction;
 pub mod content_prep;
 mod convert;
 mod decode;
+mod domain;
 mod engine;
 mod export;
 mod extract;
 mod fetch;
+mod fetch_outcome;
 mod filename;
 mod frontmatter;
 pub mod import;
@@ -42,12 +44,14 @@ pub use briefing::{
 };
 pub use convert::{Converter, Html2MdConverter};
 pub use decode::{decode_html, DecodeError, DecodedHtml};
+pub use domain::registrable_domain;
 pub use engine::{EngineConfig, EngineHandle};
 pub use export::{
     build_concatenated_export, build_triage_archive, ExportError, ExportOptions, ExportSummary,
 };
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher, RetrySettings};
+pub use fetch_outcome::{classify_failure, classify_fetch_outcome, FetchOutcomeClass};
 pub use filename::{
     deterministic_filename, import_filename_base, resolve_non_overwriting_filename,
 };

@@ -29,6 +29,7 @@ serde_json.workspace = true
 serde.workspace = true
 hex = "0.4"
 toml.workspace = true
+psl = "2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
