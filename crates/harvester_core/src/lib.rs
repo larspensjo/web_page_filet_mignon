@@ -1,4 +1,5 @@
 //! Harvester core: pure state machine and view-model helpers.
+pub mod blacklist;
 mod briefing;
 mod cache_utils;
 mod context_draft;
