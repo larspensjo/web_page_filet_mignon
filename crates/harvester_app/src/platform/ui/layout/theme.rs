@@ -716,6 +716,7 @@ pub(super) fn apply_dark_theme(window_id: WindowId, commands: &mut Vec<PlatformC
         PANEL_JOBS,
         PANEL_PREVIEW,
         PANEL_AI_WARNING,
+        PANEL_SIGNAL_CANDIDATE,
         PANEL_TAB_TRIAGE,
         PANEL_TAB_SUMMARY,
         PANEL_TAB_BRIEFING,

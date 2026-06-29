@@ -14,6 +14,7 @@ pub(super) const PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY: i32 = 42;
 pub(super) const PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH: i32 = 120;
 pub(super) const AI_WARNING_ROW_HEIGHT: i32 = 42;
 pub(super) const PREVIEW_CONTEXT_ROW_HEIGHT: i32 = 32;
+pub(super) const SIGNAL_CANDIDATE_PANEL_HEIGHT: i32 = 96;
 pub(super) const TOKEN_METER_BAR_WIDTH: i32 = 190;
 pub(super) const TOKEN_METER_LABEL_WIDTH: i32 = 120;
 pub(super) const TOKEN_COUNTS_LABEL_WIDTH: i32 = 160;
@@ -436,7 +437,7 @@ pub(super) fn build_layout_rules(
             dock_style: DockStyle::Top,
             order: 4,
             fixed_size: if signal_candidate_preview_visible {
-                Some(72)
+                Some(SIGNAL_CANDIDATE_PANEL_HEIGHT)
             } else {
                 Some(0)
             },

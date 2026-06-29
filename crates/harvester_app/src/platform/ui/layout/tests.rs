@@ -9,8 +9,8 @@ use super::rules::{
     PROMPT_LAB_ROW_HEIGHT_ACTION, PROMPT_LAB_ROW_HEIGHT_CONTEXT_INPUT,
     PROMPT_LAB_ROW_HEIGHT_RUN_DETAILS_BODY, PROMPT_LAB_ROW_HEIGHT_STANDARD,
     PROMPT_LAB_ROW_HEIGHT_STATUS, PROMPT_LAB_ROW_HEIGHT_TEMPLATE_EDITOR_INPUT,
-    PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH, TOKEN_COUNTS_LABEL_WIDTH, TOKEN_METER_BAR_WIDTH,
-    TOKEN_METER_LABEL_WIDTH,
+    PROMPT_LAB_TEMPLATE_TOGGLE_BUTTON_WIDTH, SIGNAL_CANDIDATE_PANEL_HEIGHT,
+    TOKEN_COUNTS_LABEL_WIDTH, TOKEN_METER_BAR_WIDTH, TOKEN_METER_LABEL_WIDTH,
 };
 use super::{build_layout_command, initial_commands, LayoutConfig, PromptLabLayoutConfig};
 
@@ -712,6 +712,54 @@ fn preview_context_row_is_tall_enough_for_metadata_label() {
 }
 
 #[test]
+fn signal_candidate_panel_is_tall_enough_for_visible_rows() {
+    let cmd = build_layout_command(
+        WindowId::new(34),
+        LayoutConfig {
+            left_panel_width: 600,
+            input_panel_visible: true,
+            operation_progress_visible: false,
+            left_header_meta_visible: true,
+            ai_warning_banner_visible: false,
+            preview_header_override_visible: false,
+            preview_context_visible: true,
+            preview_attention_visible: false,
+            signal_candidate_preview_visible: true,
+            active_tab: AppTab::Summary,
+            left_tab: LeftTab::Jobs,
+            prompt_lab: PromptLabLayoutConfig {
+                visible: false,
+                advanced_mode: false,
+                compare_section_open: false,
+                context_section_open: false,
+                template_section_open: false,
+                run_details_section_open: false,
+                template_editor_open: false,
+            },
+        },
+    );
+    let rules = match cmd {
+        PlatformCommand::DefineLayout { rules, .. } => rules,
+        _ => panic!("expected DefineLayout"),
+    };
+    let panel = rules
+        .iter()
+        .find(|r| r.control_id == PANEL_SIGNAL_CANDIDATE)
+        .expect("signal candidate panel rule");
+    assert_eq!(panel.fixed_size, Some(SIGNAL_CANDIDATE_PANEL_HEIGHT));
+
+    let visible_child_height: i32 = rules
+        .iter()
+        .filter(|r| r.parent_control_id == Some(PANEL_SIGNAL_CANDIDATE))
+        .map(|r| r.fixed_size.unwrap_or_default() + r.margin.1 + r.margin.3)
+        .sum();
+    assert!(
+        panel.fixed_size.unwrap_or_default() >= visible_child_height,
+        "signal candidate panel should leave enough vertical room for state, duplicate cluster, URLs, and checkbox rows"
+    );
+}
+
+#[test]
 fn ai_warning_controls_created_in_initial_commands() {
     let commands = initial_commands(WindowId::new(33));
     assert!(commands.iter().any(|cmd| {
@@ -1206,6 +1254,28 @@ fn all_tab_panels_receive_panel_background_dark_theme_style() {
         PANEL_TAB_TRENDS,
         PANEL_TAB_POLL_STATS,
     ] {
+        let has_style = cmds.iter().any(|cmd| {
+            matches!(
+                cmd,
+                PlatformCommand::ApplyStyleToControl {
+                    control_id,
+                    style_id: StyleId::PanelBackground,
+                    ..
+                } if *control_id == panel_id
+            )
+        });
+        assert!(
+            has_style,
+            "PANEL {:?} should receive PanelBackground style in initial_commands",
+            panel_id
+        );
+    }
+}
+
+#[test]
+fn preview_auxiliary_panels_receive_panel_background_dark_theme_style() {
+    let cmds = initial_commands(WindowId::new(99));
+    for panel_id in [PANEL_PREVIEW_CONTEXT, PANEL_SIGNAL_CANDIDATE] {
         let has_style = cmds.iter().any(|cmd| {
             matches!(
                 cmd,
