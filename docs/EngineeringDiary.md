@@ -1992,3 +1992,9 @@ Change: Added deterministic canonicalization for model access restriction/export
 Lessons Learned: LLM-generated slugs are useful labels but not stable enough to be the sole duplicate key for high-impact story clusters; reducer-side normalization should guard known wording variance.
 Prevention: Keep regression tests using the observed Anthropic slug variants and a release/pricing guard case so access-restriction dedupe does not sweep unrelated product-launch stories into the same cluster.
 Refs: crates/harvester_core/src/signal_candidate.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests.rs
+
+## 2026-06-29 - Multi-step briefing stream UI wiring
+Type: Implementation
+Context: Phase 4 of `Plan.MultiStepBriefingStream.md` needed the already-added streaming reducer state to surface in the desktop UI: Generate should restart an active stream, and `Next item` should append one synthesized story at a time.
+Change: Added `next_item_enabled` to `AppViewModel`, changed the Generate gate to `BriefingSession::can_generate()`, and added a `Next item` footer button routed to `Msg::NextBriefingItemClicked` with dynamic enablement. The stream uses a frozen full-base-corpus snapshot including duplicates, not `archive_final_selection`. The cache-prefix invariant remains enforced by the shared `BRIEFING_STREAM_SYSTEM_PREFIX`, the byte-identical rendered-system test, and deterministic prompt-context ordering; first-Generate dispatch waits for prompt context/template/model hydration before resuming.
+Refs: crates/harvester_core/src/view_model.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/tests/briefing_stream_tests.rs, crates/harvester_app/src/platform/ui/groups/bottom_buttons.rs, crates/harvester_app/src/platform/ui/render_tests.rs, docs/plans/Plan.MultiStepBriefingStream.md

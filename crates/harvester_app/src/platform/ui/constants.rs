@@ -28,6 +28,7 @@ pub const INPUT_PROMPT_LAB_URL: ControlId = ControlId::new(1016);
 // ui/groups/prompt_lab_actions.rs.
 pub const BTN_PROMPT_LAB_RESOLVE: ControlId = ControlId::new(1017);
 pub const BTN_PROMPT_LAB_RUN: ControlId = ControlId::new(1018);
+pub const BUTTON_NEXT_ITEM: ControlId = ControlId::new(1019);
 pub const PANEL_BOTTOM: ControlId = ControlId::new(2001);
 pub const PANEL_INPUT: ControlId = ControlId::new(2002);
 pub const PANEL_PROGRESS: ControlId = ControlId::new(2003);

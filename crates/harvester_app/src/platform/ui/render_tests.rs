@@ -122,8 +122,14 @@ fn preview_header_text_override_wins_over_article_header() {
         _ => None,
     });
     assert_eq!(header, Some("Executive Briefing | 3 articles | Done"));
-    assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION), Some(""));
-    assert_eq!(control_text(&commands, BUTTON_PREVIEW_SOURCE_LINK), Some(""));
+    assert_eq!(
+        control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION),
+        Some("")
+    );
+    assert_eq!(
+        control_text(&commands, BUTTON_PREVIEW_SOURCE_LINK),
+        Some("")
+    );
     assert_eq!(control_text(&commands, LABEL_PREVIEW_STATUS), Some(""));
     assert_eq!(control_text(&commands, LABEL_PREVIEW_ATTENTION), Some(""));
 }
@@ -138,8 +144,14 @@ fn preview_metadata_clears_when_no_article_is_selected() {
     let commands = render(window_id, &view, &mut tree_state);
 
     assert_eq!(control_text(&commands, LABEL_PREVIEW_HEADER), Some(""));
-    assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION), Some(""));
-    assert_eq!(control_text(&commands, BUTTON_PREVIEW_SOURCE_LINK), Some(""));
+    assert_eq!(
+        control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION),
+        Some("")
+    );
+    assert_eq!(
+        control_text(&commands, BUTTON_PREVIEW_SOURCE_LINK),
+        Some("")
+    );
     assert_eq!(control_text(&commands, LABEL_PREVIEW_STATUS), Some(""));
     assert_eq!(control_text(&commands, LABEL_PREVIEW_ATTENTION), Some(""));
 }
@@ -161,7 +173,10 @@ fn preview_source_renders_caption_and_link_text() {
 
     let commands = render(window_id, &view, &mut tree_state);
 
-    assert_eq!(control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION), Some("Source"));
+    assert_eq!(
+        control_text(&commands, LABEL_PREVIEW_SOURCE_CAPTION),
+        Some("Source")
+    );
     assert_eq!(
         control_text(&commands, BUTTON_PREVIEW_SOURCE_LINK),
         Some("epochai.substack.com")
@@ -222,7 +237,10 @@ fn jobs_search_input_text_resyncs_to_state() {
 
     view.left_pane.jobs_search_query = "kube".to_string();
     let changed_commands = render(window_id, &view, &mut tree_state);
-    assert_eq!(input_text(&changed_commands, INPUT_JOBS_SEARCH), Some("kube"));
+    assert_eq!(
+        input_text(&changed_commands, INPUT_JOBS_SEARCH),
+        Some("kube")
+    );
 
     let unchanged_commands = render(window_id, &view, &mut tree_state);
     assert!(
@@ -1155,6 +1173,41 @@ fn render_disables_briefing_when_generate_disabled() {
 }
 
 #[test]
+fn render_enables_next_item_when_available() {
+    init_logging();
+    let mut view = make_view(vec![]);
+    view.next_item_enabled = true;
+    let mut tree_state = TreeRenderState::new();
+    let window_id = WindowId::new(1);
+    let cmds = render(window_id, &view, &mut tree_state);
+    let enabled = cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: true, .. }
+            if *control_id == BUTTON_NEXT_ITEM
+        )
+    });
+    assert!(enabled, "BUTTON_NEXT_ITEM should be enabled");
+}
+
+#[test]
+fn render_disables_next_item_when_unavailable() {
+    init_logging();
+    let view = make_view(vec![]);
+    let mut tree_state = TreeRenderState::new();
+    let window_id = WindowId::new(1);
+    let cmds = render(window_id, &view, &mut tree_state);
+    let disabled = cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlEnabled { control_id, enabled: false, .. }
+            if *control_id == BUTTON_NEXT_ITEM
+        )
+    });
+    assert!(disabled, "BUTTON_NEXT_ITEM should be disabled");
+}
+
+#[test]
 fn stop_button_uses_secondary_style_when_not_running() {
     init_logging();
     let view = make_view(vec![]);
@@ -1631,7 +1684,10 @@ fn left_header_only_renders_meta_row() {
     let empty_meta =
         control_text(&empty_cmds, LABEL_JOBS_HEADER_META).expect("empty triage meta rendered");
     assert_eq!(empty_meta, "no triage results yet");
-    assert_eq!(control_text(&empty_cmds, LABEL_JOBS_HEADER_TITLE), Some("Results"));
+    assert_eq!(
+        control_text(&empty_cmds, LABEL_JOBS_HEADER_TITLE),
+        Some("Results")
+    );
 
     let mut populated_view = empty_view.clone();
     populated_view.jobs[0].triage_annotation = Some(harvester_core::TriageAnnotationView {
@@ -1795,7 +1851,10 @@ fn triage_results_meta_uses_ai_unavailable_copy_when_blocked() {
     let cmds = render(window_id, &view, &mut tree_state);
     let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
     assert_eq!(meta, "no triage results yet · AI unavailable");
-    assert_eq!(control_text(&cmds, LABEL_JOBS_HEADER_TITLE), Some("Results"));
+    assert_eq!(
+        control_text(&cmds, LABEL_JOBS_HEADER_TITLE),
+        Some("Results")
+    );
 }
 
 #[test]
@@ -1838,7 +1897,10 @@ fn triage_results_meta_preserves_count_when_ai_unavailable() {
     let cmds = render(window_id, &view, &mut tree_state);
     let meta = control_text(&cmds, LABEL_JOBS_HEADER_META).expect("triage meta rendered");
     assert_eq!(meta, "1 with triage · AI unavailable");
-    assert_eq!(control_text(&cmds, LABEL_JOBS_HEADER_TITLE), Some("Results"));
+    assert_eq!(
+        control_text(&cmds, LABEL_JOBS_HEADER_TITLE),
+        Some("Results")
+    );
 }
 
 #[test]
@@ -2368,5 +2430,3 @@ fn trends_show_end_labels_is_true() {
             panic!("SetChartData not emitted");
         }
 }
-
-

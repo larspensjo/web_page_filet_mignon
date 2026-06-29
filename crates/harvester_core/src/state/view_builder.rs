@@ -232,8 +232,9 @@ impl AppState {
             briefing_generate_enabled: matches!(
                 self.briefing_generate_readiness(),
                 crate::state::BriefingGenerateReadiness::Ready { .. }
-            ) && self.briefing.can_start()
+            ) && self.briefing.can_generate()
                 && self.briefing_ai_available(),
+            next_item_enabled: self.briefing.next_item_enabled() && self.briefing_ai_available(),
             summaries_can_start: self.summaries_can_start() && self.briefing_ai_available(),
             briefing_preview,
             stop_finish_button,

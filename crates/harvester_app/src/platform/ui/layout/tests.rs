@@ -1355,6 +1355,7 @@ fn secondary_footer_buttons_use_secondary_button_style() {
         BUTTON_TRIAGE,
         BUTTON_SUMMARIZE,
         BUTTON_BRIEFING,
+        BUTTON_NEXT_ITEM,
         BUTTON_ARCHIVE,
     ] {
         let has_style = cmds.iter().any(|cmd| {
@@ -1480,6 +1481,7 @@ fn footer_buttons_share_a_common_vertical_alignment() {
     for button_id in [
         BUTTON_STOP,
         BUTTON_BRIEFING,
+        BUTTON_NEXT_ITEM,
         BUTTON_SUMMARIZE,
         BUTTON_TRIAGE,
         BUTTON_POLL_SOURCES,
@@ -1544,7 +1546,8 @@ fn footer_buttons_follow_workflow_order() {
             (2, BUTTON_TRIAGE),
             (3, BUTTON_SUMMARIZE),
             (4, BUTTON_BRIEFING),
-            (5, BUTTON_ARCHIVE),
+            (5, BUTTON_NEXT_ITEM),
+            (6, BUTTON_ARCHIVE),
         ]
     );
 }

@@ -276,3 +276,13 @@ fn streaming_with_item_in_flight_counts_as_active_work() {
     assert!(state.briefing().next_item_in_flight());
     assert!(state.view().stop_finish_button.is_enabled());
 }
+
+#[test]
+fn view_exposes_next_item_enabled_and_keeps_generate_enabled_mid_stream() {
+    init_logging();
+    let state = enter_streaming_state();
+
+    let view = state.view();
+    assert!(view.next_item_enabled);
+    assert!(view.briefing_generate_enabled);
+}

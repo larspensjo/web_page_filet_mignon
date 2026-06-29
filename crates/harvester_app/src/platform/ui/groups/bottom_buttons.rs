@@ -3,8 +3,8 @@ use commanductui::{PlatformCommand, StyleId, WindowId};
 use harvester_core::{AppViewModel, Msg};
 
 use crate::platform::ui::constants::{
-    BUTTON_ARCHIVE, BUTTON_BRIEFING, BUTTON_POLL_SOURCES, BUTTON_STOP, BUTTON_SUMMARIZE,
-    BUTTON_TRIAGE, PANEL_BUTTONS,
+    BUTTON_ARCHIVE, BUTTON_BRIEFING, BUTTON_NEXT_ITEM, BUTTON_POLL_SOURCES, BUTTON_STOP,
+    BUTTON_SUMMARIZE, BUTTON_TRIAGE, PANEL_BUTTONS,
 };
 use crate::platform::ui::render::emit_if_changed;
 
@@ -77,9 +77,18 @@ const BUTTONS: &[BottomButtonDescriptor] = &[
         msg: || Msg::GenerateBriefingClicked,
     },
     BottomButtonDescriptor {
+        control_id: BUTTON_NEXT_ITEM,
+        label: "Next item",
+        order: 5,
+        width: 130,
+        margin: footer_button_margin(6, 6),
+        initial_style: StyleId::SecondaryButton,
+        msg: || Msg::NextBriefingItemClicked,
+    },
+    BottomButtonDescriptor {
         control_id: BUTTON_ARCHIVE,
         label: "Archive",
-        order: 5,
+        order: 6,
         width: 112,
         margin: footer_button_margin(6, 6),
         initial_style: StyleId::SecondaryButton,
@@ -92,6 +101,7 @@ pub(in crate::platform) struct BottomButtonsRenderState {
     prev_stop_enabled: Option<bool>,
     prev_stop_style: Option<StyleId>,
     prev_briefing_enabled: Option<bool>,
+    prev_next_item_enabled: Option<bool>,
     prev_summarize_enabled: Option<bool>,
     prev_triage_enabled: Option<bool>,
     prev_poll_enabled: Option<bool>,
@@ -172,6 +182,16 @@ pub(in crate::platform) fn render(
         |enabled| PlatformCommand::SetControlEnabled {
             window_id,
             control_id: BUTTON_BRIEFING,
+            enabled,
+        },
+    );
+    emit_if_changed(
+        &mut state.prev_next_item_enabled,
+        view.next_item_enabled,
+        cmds,
+        |enabled| PlatformCommand::SetControlEnabled {
+            window_id,
+            control_id: BUTTON_NEXT_ITEM,
             enabled,
         },
     );
@@ -292,8 +312,15 @@ mod tests {
                     StyleId::SecondaryButton
                 ),
                 (
-                    BUTTON_ARCHIVE,
+                    BUTTON_NEXT_ITEM,
                     5,
+                    130,
+                    (0, 6, 6, 6),
+                    StyleId::SecondaryButton
+                ),
+                (
+                    BUTTON_ARCHIVE,
+                    6,
                     112,
                     (0, 6, 6, 6),
                     StyleId::SecondaryButton
@@ -317,6 +344,10 @@ mod tests {
         assert_eq!(
             msg_for_control(BUTTON_BRIEFING),
             Some(Msg::GenerateBriefingClicked)
+        );
+        assert_eq!(
+            msg_for_control(BUTTON_NEXT_ITEM),
+            Some(Msg::NextBriefingItemClicked)
         );
         assert_eq!(msg_for_control(BUTTON_ARCHIVE), Some(Msg::ArchiveClicked));
     }

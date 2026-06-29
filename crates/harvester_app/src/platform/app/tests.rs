@@ -674,6 +674,17 @@ fn archive_footer_button_emits_archive_clicked() {
 }
 
 #[test]
+fn next_item_footer_button_emits_next_briefing_item_clicked() {
+    let (mut handler, rx) = test_handler_with_outbound();
+    handler.handle_event(AppEvent::ButtonClicked {
+        window_id: WindowId::new(1),
+        control_id: ui::constants::BUTTON_NEXT_ITEM,
+    });
+    let msg = rx.recv_timeout(Duration::from_millis(250)).expect("msg");
+    assert_eq!(msg, Msg::NextBriefingItemClicked);
+}
+
+#[test]
 fn summarize_footer_button_emits_prepare_summaries_clicked() {
     let (mut handler, rx) = test_handler_with_outbound();
     handler.handle_event(AppEvent::ButtonClicked {
