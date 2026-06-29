@@ -248,6 +248,13 @@ impl TriageSession {
             .filter(|title| !title.is_empty())
     }
 
+    pub fn fetched_utc_for_url(&self, url: &str) -> Option<&str> {
+        self.articles
+            .iter()
+            .find(|article| article.url == url)
+            .and_then(|article| article.fetched_utc.as_deref())
+    }
+
     pub fn article_content_hash(&self, url: &str) -> Option<&str> {
         self.articles
             .iter()
@@ -332,5 +339,22 @@ mod tests {
         let sorted = session.sorted_results();
         assert_eq!(sorted[0].priority, 5);
         assert_eq!(sorted[1].priority, 3);
+    }
+
+    #[test]
+    fn fetched_utc_for_url_returns_timestamp_when_present() {
+        let mut session = TriageSession::new_loading(None);
+        session.set_articles(vec![LoadedArticle {
+            url: "https://example.com/a".to_string(),
+            source_title: None,
+            prepared_text: String::new(),
+            content_hash: "h".to_string(),
+            fetched_utc: Some("2026-06-10T00:00:00Z".to_string()),
+        }]);
+        assert_eq!(
+            session.fetched_utc_for_url("https://example.com/a"),
+            Some("2026-06-10T00:00:00Z")
+        );
+        assert_eq!(session.fetched_utc_for_url("https://nope"), None);
     }
 }

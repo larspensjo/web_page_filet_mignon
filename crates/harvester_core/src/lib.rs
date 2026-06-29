@@ -1,6 +1,7 @@
 //! Harvester core: pure state machine and view-model helpers.
 pub mod blacklist;
 mod briefing;
+pub mod briefing_snapshot;
 mod cache_utils;
 mod context_draft;
 mod effect;
@@ -32,6 +33,9 @@ pub use briefing::{
     format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
     BriefingHistoryEntry, BriefingHistoryStory, BriefingPhase, BriefingResult, BriefingSession,
     BriefingStoryResult, LoadedArticle, TriageSelectionPolicy,
+};
+pub use briefing_snapshot::{
+    build_briefing_snapshot, BriefingSnapshot, SnapshotArticle, BRIEFING_SNAPSHOT_BUDGET_BYTES,
 };
 pub use cache_utils::model_ids_compatible;
 pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};

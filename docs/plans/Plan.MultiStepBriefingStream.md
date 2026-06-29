@@ -1253,6 +1253,8 @@ fn dispatch_executive_summary_call(state: &mut AppState) -> Effect {
 >
 > **Hydration accessors:** `prompt_contexts_loaded()`, `prompt_templates_loaded()`, `llm_metadata_loaded()` and `set_phase(...)` may not exist verbatim. Mirror the existing readiness flags the summarize/`try_start_briefing_with_metadata` path already consults (search `AppState` for the booleans set by `PromptContextsLoaded`/`LlmMetadataLoaded`/`PromptTemplateFilesLoaded`). If `set_phase` is absent, add a small `pub(crate) fn set_phase(&mut self, phase: BriefingPhase)` to `BriefingSession`.
 
+> **Phase 2 review follow-up:** when wiring this handler, remove the temporary `#[allow(dead_code)]` on `AppState::build_briefing_snapshot_now()`. Also decide whether the snapshot budget remains the fixed `BRIEFING_SNAPSHOT_BUDGET_BYTES` default or should be threaded from the runtime `max_input_bytes` configuration; do not leave an accidental fourth unsynchronized copy of the limit.
+
 > **Update `begin_briefing_article_load` callers / imports:** `handle_generate_clicked` no longer calls `begin_briefing_article_load`. Leave that function in place (still used by `handle_prepare_summaries_clicked`). Remove now-unused imports if clippy flags them.
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -1769,8 +1771,10 @@ Expected: PASS.
 
 - [ ] **Step 1:** `cargo build` → SUCCESS.
 - [ ] **Step 2:** `cargo test -p harvester_core` → PASS (whole crate).
-- [ ] **Step 3:** `cargo clippy --all-targets -- -D warnings` then `cargo fmt` → clean. (Resolve any dead-code warnings from the removed single-shot path — e.g. unused `BriefingResult` plumbing — by removing genuinely unused private items, but keep `BriefingResult`/history types if still referenced by persistence/history code paths.)
-- [ ] **Step 4:** Leave changes for review — do NOT commit.
+- [ ] **Step 3:** Remove the temporary `#[allow(dead_code)]` from `AppState::build_briefing_snapshot_now()` once Task 3.4 consumes it.
+- [ ] **Step 4:** Confirm the briefing snapshot byte budget is either sourced from the runtime `max_input_bytes` path or deliberately documented as a fixed stream budget.
+- [ ] **Step 5:** `cargo clippy --all-targets -- -D warnings` then `cargo fmt` → clean. (Resolve any dead-code warnings from the removed single-shot path — e.g. unused `BriefingResult` plumbing — by removing genuinely unused private items, but keep `BriefingResult`/history types if still referenced by persistence/history code paths.)
+- [ ] **Step 6:** Leave changes for review — do NOT commit.
 
 ---
 

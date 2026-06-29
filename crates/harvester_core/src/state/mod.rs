@@ -28,6 +28,7 @@ use std::path::PathBuf;
 mod ai_availability;
 mod batch;
 mod briefing_orchestration;
+mod briefing_snapshot_access;
 mod cache_state;
 mod indirect_links;
 mod ingest;
