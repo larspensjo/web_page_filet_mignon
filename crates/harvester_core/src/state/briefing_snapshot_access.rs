@@ -7,7 +7,6 @@ impl AppState {
     /// Assemble the frozen briefing snapshot from the triaged base corpus
     /// (duplicates included), pulling each article's cached summary and applying
     /// the active coverage window.
-    #[allow(dead_code)]
     pub(crate) fn build_briefing_snapshot_now(&self) -> BriefingSnapshot {
         let coverage_window_label =
             crate::briefing::format_briefing_time_window_label(self.briefing_since_utc());
@@ -31,6 +30,8 @@ impl AppState {
         build_briefing_snapshot(
             &articles,
             self.briefing_since_utc(),
+            // Deliberately fixed for the stream: matching the default input budget keeps
+            // frozen snapshot prefixes stable across runtime max-input overrides.
             BRIEFING_SNAPSHOT_BUDGET_BYTES,
             coverage_window_label,
         )

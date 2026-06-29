@@ -13,6 +13,7 @@ pub enum BriefingPhase {
     LoadingArticles,
     Summarizing,
     GeneratingBriefing,
+    Streaming,
     Complete,
     Failed { reason: String },
 }
@@ -49,6 +50,12 @@ pub struct BriefingArticle {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BriefingStoryResult {
+    pub headline: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BriefingItem {
     pub headline: String,
     pub body: String,
 }
@@ -176,6 +183,17 @@ pub struct BriefingSession {
     briefing_result: Option<BriefingResult>,
     started_at: Option<String>,
     coverage_window_label: Option<String>,
+    summaries_snapshot: Option<String>,
+    executive_summary: Option<String>,
+    stream_items: Vec<BriefingItem>,
+    next_item_request_id: Option<u64>,
+    exhausted: bool,
+    stream_epoch: u64,
+    snapshot_included_count: usize,
+    snapshot_skipped_count: usize,
+    snapshot_dropped_count: usize,
+    snapshot_truncated: bool,
+    exec_dispatch_deferred: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -224,6 +242,17 @@ impl Default for BriefingSession {
             briefing_result: None,
             started_at: None,
             coverage_window_label: None,
+            summaries_snapshot: None,
+            executive_summary: None,
+            stream_items: Vec::new(),
+            next_item_request_id: None,
+            exhausted: false,
+            stream_epoch: 0,
+            snapshot_included_count: 0,
+            snapshot_skipped_count: 0,
+            snapshot_dropped_count: 0,
+            snapshot_truncated: false,
+            exec_dispatch_deferred: false,
         }
     }
 }
@@ -238,6 +267,17 @@ impl BriefingSession {
             briefing_result: None,
             started_at,
             coverage_window_label: None,
+            summaries_snapshot: None,
+            executive_summary: None,
+            stream_items: Vec::new(),
+            next_item_request_id: None,
+            exhausted: false,
+            stream_epoch: 0,
+            snapshot_included_count: 0,
+            snapshot_skipped_count: 0,
+            snapshot_dropped_count: 0,
+            snapshot_truncated: false,
+            exec_dispatch_deferred: false,
         }
     }
 
@@ -252,13 +292,148 @@ impl BriefingSession {
         )
     }
 
+    pub fn can_generate(&self) -> bool {
+        matches!(
+            self.phase,
+            BriefingPhase::Idle
+                | BriefingPhase::Complete
+                | BriefingPhase::Failed { .. }
+                | BriefingPhase::Streaming
+        )
+    }
+
     pub fn is_active(&self) -> bool {
         matches!(
             self.phase,
             BriefingPhase::LoadingArticles
                 | BriefingPhase::Summarizing
                 | BriefingPhase::GeneratingBriefing
-        )
+        ) || self.next_item_in_flight()
+    }
+
+    pub(crate) fn set_phase(&mut self, phase: BriefingPhase) {
+        self.phase = phase;
+    }
+
+    pub fn start_stream(
+        &mut self,
+        snapshot: String,
+        coverage_window_label: String,
+        included_count: usize,
+        skipped_count: usize,
+        dropped_count: usize,
+        truncated: bool,
+    ) {
+        self.summaries_snapshot = Some(snapshot);
+        self.coverage_window_label = Some(coverage_window_label);
+        self.snapshot_included_count = included_count;
+        self.snapshot_skipped_count = skipped_count;
+        self.snapshot_dropped_count = dropped_count;
+        self.snapshot_truncated = truncated;
+        self.executive_summary = None;
+        self.stream_items.clear();
+        self.next_item_request_id = None;
+        self.exhausted = false;
+        self.briefing_request_id = None;
+        self.exec_dispatch_deferred = false;
+        self.stream_epoch = self.stream_epoch.wrapping_add(1);
+    }
+
+    pub fn enter_streaming(&mut self, executive_summary: String) {
+        self.executive_summary = Some(executive_summary);
+        self.phase = BriefingPhase::Streaming;
+        self.briefing_request_id = None;
+    }
+
+    pub fn summaries_snapshot(&self) -> Option<&str> {
+        self.summaries_snapshot.as_deref()
+    }
+
+    pub fn executive_summary(&self) -> Option<&str> {
+        self.executive_summary.as_deref()
+    }
+
+    pub fn stream_items(&self) -> &[BriefingItem] {
+        &self.stream_items
+    }
+
+    pub fn append_stream_item(&mut self, item: BriefingItem) {
+        self.stream_items.push(item);
+    }
+
+    pub fn exhausted(&self) -> bool {
+        self.exhausted
+    }
+
+    pub fn set_exhausted(&mut self) {
+        self.exhausted = true;
+    }
+
+    pub fn stream_epoch(&self) -> u64 {
+        self.stream_epoch
+    }
+
+    pub fn set_next_item_request_id(&mut self, request_id: u64) {
+        self.next_item_request_id = Some(request_id);
+    }
+
+    pub fn next_item_request_id(&self) -> Option<u64> {
+        self.next_item_request_id
+    }
+
+    pub fn clear_next_item_request_id(&mut self) {
+        self.next_item_request_id = None;
+    }
+
+    pub fn snapshot_counts(&self) -> (usize, usize) {
+        (self.snapshot_included_count, self.snapshot_skipped_count)
+    }
+
+    pub fn snapshot_dropped_count(&self) -> usize {
+        self.snapshot_dropped_count
+    }
+
+    pub fn snapshot_truncated(&self) -> bool {
+        self.snapshot_truncated
+    }
+
+    pub fn next_item_in_flight(&self) -> bool {
+        matches!(self.phase, BriefingPhase::Streaming) && self.next_item_request_id.is_some()
+    }
+
+    pub fn has_active_llm_request(&self) -> bool {
+        self.briefing_request_id.is_some() || self.next_item_request_id.is_some()
+    }
+
+    pub fn defer_exec_dispatch(&mut self) {
+        self.exec_dispatch_deferred = true;
+    }
+
+    pub fn exec_dispatch_deferred(&self) -> bool {
+        self.exec_dispatch_deferred
+    }
+
+    pub fn take_exec_dispatch_deferred(&mut self) -> bool {
+        std::mem::take(&mut self.exec_dispatch_deferred)
+    }
+
+    pub fn next_item_enabled(&self) -> bool {
+        matches!(self.phase, BriefingPhase::Streaming)
+            && self.executive_summary.is_some()
+            && self.next_item_request_id.is_none()
+            && !self.exhausted
+    }
+
+    pub fn already_shown_headlines(&self) -> String {
+        if self.stream_items.is_empty() {
+            return "(none)".to_string();
+        }
+        self.stream_items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| format!("{}. {}", idx + 1, item.headline))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn articles(&self) -> &[BriefingArticle] {
@@ -424,6 +599,8 @@ impl BriefingSession {
     pub fn fail(&mut self, reason: String) {
         self.phase = BriefingPhase::Failed { reason };
         self.briefing_request_id = None;
+        self.next_item_request_id = None;
+        self.exec_dispatch_deferred = false;
     }
 
     pub fn fail_all_pending(&mut self, reason: &str) {
@@ -467,7 +644,14 @@ impl BriefingSession {
                 let total = self.total();
                 format!("Summarizing {completed}/{total} articles...")
             }
-            BriefingPhase::GeneratingBriefing => "Generating briefing...".to_string(),
+            BriefingPhase::GeneratingBriefing => "Generating executive summary...".to_string(),
+            BriefingPhase::Streaming => {
+                if self.next_item_request_id.is_some() {
+                    "Fetching next item...".to_string()
+                } else {
+                    return None;
+                }
+            }
             BriefingPhase::Failed { ref reason } => format!("Briefing failed: {reason}"),
             _ => return None,
         };
@@ -475,58 +659,57 @@ impl BriefingSession {
     }
 
     pub fn format_preview(&self) -> Option<String> {
-        match &self.phase {
-            BriefingPhase::Failed { reason } => {
-                let mut sections = Vec::new();
-                sections.push("# Executive Briefing".to_string());
-                sections.push(format!("## Failed\n\n{reason}"));
-                if let Some(label) = self.coverage_window_label.as_deref() {
-                    sections.push(format!("## Session Info\n\nCoverage Window: {label}"));
-                }
-                return Some(truncate_preview(&sections.join("\n\n")));
+        if let BriefingPhase::Failed { reason } = &self.phase {
+            let mut sections = Vec::new();
+            sections.push("# Executive Briefing".to_string());
+            sections.push(format!("## Failed\n\n{reason}"));
+            if let Some(label) = self.coverage_window_label.as_deref() {
+                sections.push(format!("## Session Info\n\nCoverage Window: {label}"));
             }
-            BriefingPhase::Complete => {}
-            _ => return None,
+            return Some(truncate_preview(&sections.join("\n\n")));
         }
-        let result = match &self.briefing_result {
-            Some(result) => result,
-            None => return None,
-        };
+
+        let exec = self.executive_summary.as_deref()?;
         let mut sections = Vec::new();
         sections.push("# Executive Briefing".to_string());
-        sections.push(format!(
-            "## Executive Summary\n\n{}",
-            result.executive_summary.trim()
-        ));
+        sections.push(format!("## Executive Summary\n\n{}", exec.trim()));
 
-        let mut stories = String::from("## Top Stories");
-        if result.top_stories.is_empty() {
-            stories.push_str("\n\n(none)");
-        } else {
-            for (idx, story) in result.top_stories.iter().enumerate() {
+        if !self.stream_items.is_empty() {
+            let mut items = String::from("## News Items");
+            for (idx, story) in self.stream_items.iter().enumerate() {
                 let indented_body = indent_markdown_list_item_body(&story.body);
                 let _ = writeln!(
-                    stories,
+                    items,
                     "\n{}. **{}**\n\n{}",
                     idx + 1,
                     story.headline,
                     indented_body
                 );
             }
-            stories.pop();
+            items.pop();
+            sections.push(items);
         }
-        sections.push(stories);
 
-        sections.push(format!(
-            "## Session Info\n\n{}Articles: {} total, {} summarized, {} failed",
-            self.coverage_window_label
-                .as_deref()
-                .map(|label| format!("Coverage Window: {label}\n"))
-                .unwrap_or_default(),
-            self.articles.len(),
-            self.completed_summary_count(),
-            self.failed_summary_count()
-        ));
+        let coverage = self
+            .coverage_window_label
+            .as_deref()
+            .map(|label| format!("Coverage Window: {label}\n"))
+            .unwrap_or_default();
+        let mut session_info = format!(
+            "## Session Info\n\n{coverage}Sources: {} article summaries ({} skipped: no summary)",
+            self.snapshot_included_count, self.snapshot_skipped_count
+        );
+        if self.snapshot_truncated || self.snapshot_dropped_count > 0 {
+            let _ = write!(
+                session_info,
+                " - {} dropped (snapshot truncated to fit the byte budget)",
+                self.snapshot_dropped_count
+            );
+        }
+        if self.exhausted {
+            session_info.push_str("\n\nNo further notable items.");
+        }
+        sections.push(session_info);
 
         let preview = sections.join("\n\n");
         Some(truncate_preview(&preview))
@@ -644,103 +827,119 @@ mod tests {
         assert!(session.summary_for_url("https://other.com").is_none());
     }
 
-    fn completed_session_with_stories(top_stories: Vec<BriefingStoryResult>) -> BriefingSession {
-        let mut session = BriefingSession::new_loading(None);
-        session.set_articles(
-            vec![
-                LoadedArticle {
-                    url: "https://example.com/a".to_string(),
-                    source_title: None,
-                    prepared_text: "Article A".to_string(),
-                    content_hash: "hash-a".to_string(),
-                    fetched_utc: None,
-                },
-                LoadedArticle {
-                    url: "https://example.com/b".to_string(),
-                    source_title: None,
-                    prepared_text: "Article B".to_string(),
-                    content_hash: "hash-b".to_string(),
-                    fetched_utc: None,
-                },
-            ],
-            "collection".to_string(),
+    fn streaming_session() -> BriefingSession {
+        let mut session = BriefingSession::default();
+        session.start_stream(
+            "[A1] T\nbody".to_string(),
+            "All available articles (no briefing checkpoint filter).".to_string(),
+            3,
+            1,
+            0,
+            false,
         );
-        session.transition_to_summarizing();
-        session.start_article(0, 1);
-        session.complete_article(0, make_result());
-        session.start_article(1, 2);
-        session.fail_article(1, "network".to_string());
-        session.set_briefing_request_id(3);
-        session.complete_briefing(BriefingResult {
-            executive_summary: "Concise executive summary".to_string(),
-            top_stories,
-            article_count: 2,
-            input_tokens: 20,
-            output_tokens: 10,
-        });
+        session.enter_streaming("Concise executive synthesis.".to_string());
         session
     }
 
     #[test]
-    fn briefing_format_preview_contains_sections() {
-        let session = completed_session_with_stories(vec![BriefingStoryResult {
-            headline: "Story A".to_string(),
-            body: "Description A".to_string(),
-        }]);
+    fn can_generate_allows_streaming_but_can_start_does_not() {
+        let session = streaming_session();
+        assert!(matches!(session.phase(), BriefingPhase::Streaming));
+        assert!(session.can_generate());
+        assert!(!session.can_start());
+    }
+
+    #[test]
+    fn restart_bumps_epoch_and_clears_stream() {
+        let mut session = streaming_session();
+        session.append_stream_item(BriefingItem {
+            headline: "H".to_string(),
+            body: "B".to_string(),
+        });
+        let epoch = session.stream_epoch();
+
+        session.start_stream("snap2".to_string(), "win2".to_string(), 1, 0, 0, false);
+
+        assert!(session.stream_epoch() > epoch);
+        assert!(session.executive_summary().is_none());
+        assert!(session.stream_items().is_empty());
+        assert!(!session.exhausted());
+        assert_eq!(session.summaries_snapshot(), Some("snap2"));
+    }
+
+    #[test]
+    fn append_and_exhaust_stream_items() {
+        let mut session = streaming_session();
+        session.append_stream_item(BriefingItem {
+            headline: "H1".to_string(),
+            body: "B1".to_string(),
+        });
+        assert_eq!(session.stream_items().len(), 1);
+        session.set_exhausted();
+        assert!(session.exhausted());
+    }
+
+    #[test]
+    fn stream_preview_has_exec_summary_numbered_items_and_session_info() {
+        let mut session = streaming_session();
+        session.append_stream_item(BriefingItem {
+            headline: "First".to_string(),
+            body: "Body one".to_string(),
+        });
+        session.append_stream_item(BriefingItem {
+            headline: "Second".to_string(),
+            body: "Body two".to_string(),
+        });
         let preview = session.format_preview().expect("preview");
         assert!(preview.contains("# Executive Briefing"));
         assert!(preview.contains("## Executive Summary"));
-        assert!(preview.contains("## Top Stories"));
-        assert!(preview.contains("## Session Info"));
-    }
-
-    #[test]
-    fn briefing_format_preview_story_list_stable() {
-        let session = completed_session_with_stories(vec![
-            BriefingStoryResult {
-                headline: "First".to_string(),
-                body: "A".to_string(),
-            },
-            BriefingStoryResult {
-                headline: "Second".to_string(),
-                body: "B".to_string(),
-            },
-        ]);
-        let preview = session.format_preview().expect("preview");
-        let first_pos = preview.find("1. **First**").expect("first story");
-        let second_pos = preview.find("2. **Second**").expect("second story");
+        assert!(preview.contains("Concise executive synthesis."));
+        assert!(preview.contains("## News Items"));
+        let first_pos = preview.find("1. **First**").expect("first item");
+        let second_pos = preview.find("2. **Second**").expect("second item");
         assert!(first_pos < second_pos);
-        assert!(preview.contains("1. **First**\n\n   A"));
-        assert!(preview.contains("2. **Second**\n\n   B"));
+        assert!(preview.contains("1. **First**\n\n   Body one"));
+        assert!(preview.contains("2. **Second**\n\n   Body two"));
+        assert!(preview.contains("## Session Info"));
+        assert!(preview.contains("Coverage Window:"));
+        assert!(preview.contains("3 article summaries"));
+        assert!(preview.contains("1 skipped"));
     }
 
     #[test]
-    fn briefing_format_preview_indents_multiline_story_body_under_list_item() {
-        let session = completed_session_with_stories(vec![BriefingStoryResult {
+    fn stream_preview_indents_multiline_item_body_under_list_item() {
+        let mut session = streaming_session();
+        session.append_stream_item(BriefingItem {
             headline: "First".to_string(),
             body: "Line one\n\nLine two".to_string(),
-        }]);
+        });
         let preview = session.format_preview().expect("preview");
         assert!(preview.contains("1. **First**\n\n   Line one\n   \n   Line two"));
     }
 
     #[test]
-    fn briefing_format_preview_counts_correct() {
-        let session = completed_session_with_stories(vec![]);
+    fn stream_preview_session_info_reports_truncation_and_dropped() {
+        let mut session = BriefingSession::default();
+        session.start_stream("[A1] T\nbody".to_string(), "win".to_string(), 2, 0, 5, true);
+        session.enter_streaming("Synthesis.".to_string());
         let preview = session.format_preview().expect("preview");
-        assert!(preview.contains("Articles: 2 total, 1 summarized, 1 failed"));
+        assert!(preview.contains("5 dropped"));
+        assert!(preview.contains("truncated"));
     }
 
     #[test]
-    fn briefing_format_preview_includes_coverage_window_when_present() {
-        let mut session = completed_session_with_stories(vec![]);
-        session.set_coverage_window_label(
-            "Articles fetched on or after 2026-02-24T00:00:00Z (briefing checkpoint filter)."
-                .to_string(),
-        );
+    fn stream_preview_shows_exhausted_note() {
+        let mut session = streaming_session();
+        session.set_exhausted();
         let preview = session.format_preview().expect("preview");
-        assert!(preview.contains("Coverage Window:"));
-        assert!(preview.contains("2026-02-24T00:00:00Z"));
+        assert!(preview.contains("No further notable items."));
+    }
+
+    #[test]
+    fn stream_preview_none_before_exec_summary() {
+        let mut session = BriefingSession::default();
+        session.start_stream("snap".to_string(), "win".to_string(), 1, 0, 0, false);
+        assert!(session.format_preview().is_none());
     }
 
     #[test]
@@ -784,20 +983,9 @@ mod tests {
     #[test]
     fn briefing_format_preview_truncates_at_limit() {
         let long_summary = "a".repeat(MAX_BRIEFING_PREVIEW_CHARS + 500);
-        let mut session = completed_session_with_stories(vec![BriefingStoryResult {
-            headline: "Story".to_string(),
-            body: "Description".to_string(),
-        }]);
-        session.complete_briefing(BriefingResult {
-            executive_summary: long_summary,
-            top_stories: vec![BriefingStoryResult {
-                headline: "Story".to_string(),
-                body: "Description".to_string(),
-            }],
-            article_count: 2,
-            input_tokens: 20,
-            output_tokens: 10,
-        });
+        let mut session = BriefingSession::default();
+        session.start_stream("snap".to_string(), "win".to_string(), 1, 0, 0, false);
+        session.enter_streaming(long_summary);
 
         let preview = session.format_preview().expect("preview");
         assert!(preview.ends_with(PREVIEW_TRUNCATE_MARKER));

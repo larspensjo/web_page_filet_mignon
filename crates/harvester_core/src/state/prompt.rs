@@ -31,6 +31,22 @@ impl AppState {
         self.prompt_contexts_load_failed
     }
 
+    pub(crate) fn prompt_contexts_loaded(&self) -> bool {
+        self.prompt_contexts
+            .contains_key(&PromptId::BriefingExecutiveSummary)
+            && self
+                .prompt_contexts
+                .contains_key(&PromptId::BriefingNextItem)
+    }
+
+    pub(crate) fn mark_prompt_template_files_loaded(&mut self) {
+        self.prompt_template_files_loaded = true;
+    }
+
+    pub(crate) fn prompt_templates_loaded(&self) -> bool {
+        self.prompt_template_files_loaded
+    }
+
     /// Get the active prompt version for a specific prompt.
     pub fn active_version_for(&self, prompt_id: PromptId) -> Option<PromptVersion> {
         self.active_prompt_versions.get(&prompt_id).copied()
@@ -39,6 +55,20 @@ impl AppState {
     /// Get the effective model for a specific prompt.
     pub fn effective_model_for(&self, prompt_id: PromptId) -> Option<&str> {
         self.effective_models.get(&prompt_id).map(|s| s.as_str())
+    }
+
+    pub(crate) fn llm_metadata_loaded(&self) -> bool {
+        self.active_prompt_versions
+            .contains_key(&PromptId::BriefingExecutiveSummary)
+            && self
+                .active_prompt_versions
+                .contains_key(&PromptId::BriefingNextItem)
+            && self
+                .effective_models
+                .contains_key(&PromptId::BriefingExecutiveSummary)
+            && self
+                .effective_models
+                .contains_key(&PromptId::BriefingNextItem)
     }
 
     pub(crate) fn set_llm_metadata(

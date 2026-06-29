@@ -552,9 +552,7 @@ mod app_state_tests {
 
     #[test]
     fn briefing_complete_then_job_selected_shows_summary_not_briefing() {
-        use crate::briefing::{
-            ArticleSummaryResult, BriefingResult, BriefingStoryResult, LoadedArticle,
-        };
+        use crate::briefing::{ArticleSummaryResult, BriefingItem, LoadedArticle};
 
         let mut state = AppState::new();
         state.jobs.insert(
@@ -591,16 +589,18 @@ mod app_state_tests {
                 entities: Default::default(),
             },
         );
-        briefing.set_briefing_request_id(2);
-        briefing.complete_briefing(BriefingResult {
-            executive_summary: "Executive summary".to_string(),
-            top_stories: vec![BriefingStoryResult {
-                headline: "Story 1".to_string(),
-                body: "desc".to_string(),
-            }],
-            article_count: 1,
-            input_tokens: 20,
-            output_tokens: 10,
+        briefing.start_stream(
+            "[A1] Article Title\nArticle summary text".to_string(),
+            "win".to_string(),
+            1,
+            0,
+            0,
+            false,
+        );
+        briefing.enter_streaming("Executive summary".to_string());
+        briefing.append_stream_item(BriefingItem {
+            headline: "Story 1".to_string(),
+            body: "desc".to_string(),
         });
         state.set_briefing(briefing);
 
@@ -627,9 +627,7 @@ mod app_state_tests {
 
     #[test]
     fn job_selected_then_briefing_completes_shows_briefing() {
-        use crate::briefing::{
-            ArticleSummaryResult, BriefingResult, BriefingStoryResult, LoadedArticle,
-        };
+        use crate::briefing::{ArticleSummaryResult, BriefingItem, LoadedArticle};
 
         let mut state = AppState::new();
         state.jobs.insert(
@@ -666,16 +664,18 @@ mod app_state_tests {
                 entities: Default::default(),
             },
         );
-        briefing.set_briefing_request_id(2);
-        briefing.complete_briefing(BriefingResult {
-            executive_summary: "Executive summary".to_string(),
-            top_stories: vec![BriefingStoryResult {
-                headline: "Story 1".to_string(),
-                body: "desc".to_string(),
-            }],
-            article_count: 1,
-            input_tokens: 20,
-            output_tokens: 10,
+        briefing.start_stream(
+            "[A1] Article Title\nArticle summary text".to_string(),
+            "win".to_string(),
+            1,
+            0,
+            0,
+            false,
+        );
+        briefing.enter_streaming("Executive summary".to_string());
+        briefing.append_stream_item(BriefingItem {
+            headline: "Story 1".to_string(),
+            body: "desc".to_string(),
         });
         state.set_briefing(briefing);
 
@@ -698,21 +698,23 @@ mod app_state_tests {
 
     #[test]
     fn no_selection_shows_briefing_when_complete() {
-        use crate::briefing::{BriefingResult, BriefingStoryResult};
+        use crate::briefing::BriefingItem;
 
         let mut state = AppState::new();
         let mut briefing = crate::briefing::BriefingSession::new_loading(None);
         briefing.set_articles(vec![], "collection".to_string());
-        briefing.set_briefing_request_id(1);
-        briefing.complete_briefing(BriefingResult {
-            executive_summary: "Executive summary text".to_string(),
-            top_stories: vec![BriefingStoryResult {
-                headline: "Story".to_string(),
-                body: "desc".to_string(),
-            }],
-            article_count: 0,
-            input_tokens: 10,
-            output_tokens: 5,
+        briefing.start_stream(
+            "[A1] Story\ndesc".to_string(),
+            "win".to_string(),
+            1,
+            0,
+            0,
+            false,
+        );
+        briefing.enter_streaming("Executive summary text".to_string());
+        briefing.append_stream_item(BriefingItem {
+            headline: "Story".to_string(),
+            body: "desc".to_string(),
         });
         state.set_briefing(briefing);
 
@@ -933,18 +935,15 @@ mod app_state_tests {
     fn selecting_job_sets_preview_mode_to_selected_job_summary() {
         let mut state = make_state_with_summarized_job();
         state.select_job(10);
-        use crate::briefing::{BriefingResult, BriefingStoryResult};
+        use crate::briefing::BriefingItem;
         let mut s2 = make_state_with_summarized_job();
-        s2.briefing_mut().set_briefing_request_id(99);
-        s2.briefing_mut().complete_briefing(BriefingResult {
-            executive_summary: "Exec summary".to_string(),
-            top_stories: vec![BriefingStoryResult {
-                headline: "T".to_string(),
-                body: "d".to_string(),
-            }],
-            article_count: 1,
-            input_tokens: 10,
-            output_tokens: 5,
+        s2.briefing_mut()
+            .start_stream("[A1] T\nd".to_string(), "win".to_string(), 1, 0, 0, false);
+        s2.briefing_mut()
+            .enter_streaming("Exec summary".to_string());
+        s2.briefing_mut().append_stream_item(BriefingItem {
+            headline: "T".to_string(),
+            body: "d".to_string(),
         });
         s2.select_job(10);
         let view = s2.view();
@@ -2578,18 +2577,20 @@ mod app_state_tests {
 
     #[test]
     fn briefing_tab_still_uses_page_level_header_override() {
-        use crate::briefing::{BriefingResult, BriefingSession};
+        use crate::briefing::BriefingSession;
 
         let mut state = AppState::new();
         let mut briefing = BriefingSession::new_loading(None);
         briefing.set_articles(vec![], "collection".to_string());
-        briefing.complete_briefing(BriefingResult {
-            executive_summary: "Summary".to_string(),
-            top_stories: vec![],
-            article_count: 0,
-            input_tokens: 10,
-            output_tokens: 5,
-        });
+        briefing.start_stream(
+            "[A1] Summary\nbody".to_string(),
+            "win".to_string(),
+            1,
+            0,
+            0,
+            false,
+        );
+        briefing.enter_streaming("Summary".to_string());
         state.set_briefing(briefing);
         state.select_tab(AppTab::Briefing);
 

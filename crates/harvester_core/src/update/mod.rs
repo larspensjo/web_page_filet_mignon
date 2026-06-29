@@ -297,6 +297,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::GenerateBriefingClicked => briefing::handle_generate_clicked(&mut state),
+        Msg::NextBriefingItemClicked => briefing::handle_next_item_clicked(&mut state),
         Msg::PrepareSummariesClicked => briefing::handle_prepare_summaries_clicked(&mut state),
         Msg::BriefingHistoryLoaded { entries } => {
             briefing::handle_history_loaded(&mut state, entries)
@@ -408,7 +409,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.set_prompt_contexts(contexts);
             state.mark_triage_metadata_ready();
             state.mark_dirty();
-            Vec::new()
+            briefing::resume_deferred_exec_dispatch(&mut state)
         }
         Msg::PromptContextsLoadFailed { reason } => {
             engine_warn!("[PromptContext] Failed to load contexts: {}", reason);
@@ -416,6 +417,17 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_triage_metadata_pending();
             state.mark_dirty();
             Vec::new()
+        }
+        Msg::PromptTemplateFilesLoaded => {
+            engine_info!("[prompt-lab-template] Saved template overlays loaded");
+            state.mark_prompt_template_files_loaded();
+            state.mark_dirty();
+            let mut effects = Vec::new();
+            if state.briefing().exec_dispatch_deferred() && !state.llm_metadata_loaded() {
+                effects.push(Effect::LoadLlmMetadata);
+            }
+            effects.extend(briefing::resume_deferred_exec_dispatch(&mut state));
+            effects
         }
         Msg::LlmMetadataLoaded {
             active_versions,
@@ -433,6 +445,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             let mut effects = Vec::new();
             briefing::try_start_briefing_with_metadata(&mut state, &mut effects);
+            effects.extend(briefing::resume_deferred_exec_dispatch(&mut state));
             signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
             effects
         }

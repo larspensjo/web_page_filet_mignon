@@ -31,8 +31,8 @@ pub mod working_corpus;
 
 pub use briefing::{
     format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
-    BriefingHistoryEntry, BriefingHistoryStory, BriefingPhase, BriefingResult, BriefingSession,
-    BriefingStoryResult, LoadedArticle, TriageSelectionPolicy,
+    BriefingHistoryEntry, BriefingHistoryStory, BriefingItem, BriefingPhase, BriefingResult,
+    BriefingSession, BriefingStoryResult, LoadedArticle, TriageSelectionPolicy,
 };
 pub use briefing_snapshot::{
     build_briefing_snapshot, BriefingSnapshot, SnapshotArticle, BRIEFING_SNAPSHOT_BUDGET_BYTES,

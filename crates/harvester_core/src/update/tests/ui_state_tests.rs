@@ -262,28 +262,13 @@ fn briefing_generate_enabled_false_while_briefing_is_running() {
     init_logging();
     let state = complete_triage_with_settled_summaries(1);
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    assert!(effects
-        .iter()
-        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefing { .. })));
-
-    let (state, _) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles: vec![LoadedArticle {
-                url: "https://triage-complete.com/0".to_string(),
-                source_title: None,
-                prepared_text: format!(
-                    "Article text {}",
-                    std::iter::repeat_n("content", 220)
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                ),
-                content_hash: "hash-tc-0".to_string(),
-                fetched_utc: None,
-            }],
-            collection_text: "Collection text".to_string(),
-        },
-    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::BriefingExecutiveSummary,
+            ..
+        }
+    )));
 
     let view = state.view();
     assert!(!view.briefing_generate_enabled);

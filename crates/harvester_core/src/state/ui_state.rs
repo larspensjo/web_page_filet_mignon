@@ -219,7 +219,8 @@ impl AppState {
                 crate::BriefingPhase::LoadingArticles
                     | crate::BriefingPhase::Summarizing
                     | crate::BriefingPhase::GeneratingBriefing
-            );
+            )
+            || self.briefing.next_item_in_flight();
 
         if matches!(self.session, SessionState::Running) && has_active_work {
             crate::StopFinishButtonState::Enabled {

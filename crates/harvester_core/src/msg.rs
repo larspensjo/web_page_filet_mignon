@@ -189,6 +189,8 @@ pub enum Msg {
     },
     /// User requested generation of a briefing.
     GenerateBriefingClicked,
+    /// User requested the next item in the active briefing stream.
+    NextBriefingItemClicked,
     /// Headless batch flow: run triage + per-article summaries but skip aggregate briefing.
     PrepareSummariesClicked,
     /// User requested triage.
@@ -280,6 +282,8 @@ pub enum Msg {
     PromptContextsLoadFailed {
         reason: String,
     },
+    /// Saved prompt template overlays have been loaded into the prompt registry.
+    PromptTemplateFilesLoaded,
     /// LLM metadata (active prompt versions and effective models) loaded.
     LlmMetadataLoaded {
         active_versions: std::collections::HashMap<PromptId, PromptVersion>,

@@ -64,9 +64,19 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
     let mut active_versions = HashMap::new();
     active_versions.insert(PromptId::ArticleTriage, 1);
     active_versions.insert(PromptId::ArticleSummary, 1);
+    active_versions.insert(PromptId::BriefingExecutiveSummary, 1);
+    active_versions.insert(PromptId::BriefingNextItem, 1);
     let mut effective_models = HashMap::new();
     effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
     effective_models.insert(PromptId::ArticleSummary, "test-model".to_string());
+    effective_models.insert(
+        PromptId::BriefingExecutiveSummary,
+        "test-briefing-model".to_string(),
+    );
+    effective_models.insert(
+        PromptId::BriefingNextItem,
+        "test-briefing-model".to_string(),
+    );
     let (state, _) = update(
         state,
         Msg::LlmMetadataLoaded {
@@ -75,6 +85,17 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
             templates: HashMap::new(),
         },
     );
+    let (state, _) = update(state, Msg::PromptTemplateFilesLoaded);
+    let mut contexts = HashMap::new();
+    contexts.insert(
+        PromptId::BriefingExecutiveSummary,
+        vec![("policy".to_string(), "briefing context".to_string())],
+    );
+    contexts.insert(
+        PromptId::BriefingNextItem,
+        vec![("policy".to_string(), "briefing context".to_string())],
+    );
+    let (state, _) = update(state, Msg::PromptContextsLoaded { contexts });
     state
 }
 
@@ -83,12 +104,22 @@ pub(super) fn with_signal_candidate_metadata(state: AppState) -> AppState {
     active_versions.insert(PromptId::ArticleTriage, 1);
     active_versions.insert(PromptId::ArticleSummary, 1);
     active_versions.insert(PromptId::ArticleSignalCandidate, 1);
+    active_versions.insert(PromptId::BriefingExecutiveSummary, 1);
+    active_versions.insert(PromptId::BriefingNextItem, 1);
     let mut effective_models = HashMap::new();
     effective_models.insert(PromptId::ArticleTriage, "test-triage-model".to_string());
     effective_models.insert(PromptId::ArticleSummary, "test-summary-model".to_string());
     effective_models.insert(
         PromptId::ArticleSignalCandidate,
         "test-signal-model".to_string(),
+    );
+    effective_models.insert(
+        PromptId::BriefingExecutiveSummary,
+        "test-briefing-model".to_string(),
+    );
+    effective_models.insert(
+        PromptId::BriefingNextItem,
+        "test-briefing-model".to_string(),
     );
     let (state, _) = update(
         state,

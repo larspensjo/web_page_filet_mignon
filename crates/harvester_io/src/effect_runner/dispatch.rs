@@ -701,6 +701,7 @@ impl EffectRunner {
                 });
             }
             Effect::LoadPromptTemplateFiles => {
+                let msg_tx = self.msg_tx.clone();
                 let prompts_dir = self.paths.prompts_dir.clone();
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
@@ -735,6 +736,7 @@ impl EffectRunner {
                         }
                         engine_info!("[prompt-lab-template] Loaded saved template prompt_id={:?} version={} path={}", loaded_template.prompt_id, loaded_template.template_file.version, loaded_template.path.display());
                     }
+                    let _ = msg_tx.send(Msg::PromptTemplateFilesLoaded);
                 });
             }
             Effect::LoadLlmMetadata => {

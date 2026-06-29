@@ -541,6 +541,13 @@ impl AppState {
                 format!("Summaries {settled}/{total}")
             }
             BriefingPhase::GeneratingBriefing => "Generating briefing".to_string(),
+            BriefingPhase::Streaming => {
+                if self.briefing.next_item_in_flight() {
+                    "Fetching next item".to_string()
+                } else {
+                    "Streaming".to_string()
+                }
+            }
             BriefingPhase::Complete => "Done".to_string(),
             BriefingPhase::Failed { .. } => "Failed".to_string(),
         };

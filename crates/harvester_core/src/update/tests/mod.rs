@@ -87,14 +87,18 @@ fn complete_signal_candidate(state: &mut AppState, index: usize, score: u8, key:
         .complete(&url, signal_result(score, key));
 }
 
-fn briefing_load_urls(effects: &[Effect]) -> Vec<String> {
+fn briefing_exec_snapshot(effects: &[Effect]) -> String {
     effects
         .iter()
         .find_map(|effect| match effect {
-            Effect::LoadArticlesForBriefing { ordered_urls, .. } => Some(ordered_urls.clone()),
+            Effect::RequestLlmCompletion {
+                prompt_id: PromptId::BriefingExecutiveSummary,
+                input_content,
+                ..
+            } => Some(input_content.clone()),
             _ => None,
         })
-        .expect("expected LoadArticlesForBriefing effect")
+        .expect("expected BriefingExecutiveSummary request")
 }
 
 #[test]
@@ -109,14 +113,20 @@ fn generate_briefing_loads_archive_final_selection() {
         selection.source,
         ArchiveSelectionSource::FullCorpusSignalUnavailable
     );
-    let expected = selection.ordered_urls;
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    let load = briefing_load_urls(&effects);
+    let snapshot = briefing_exec_snapshot(&effects);
 
-    assert_eq!(load, expected);
-    assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
+    assert!(snapshot.contains("[A1]"));
+    assert!(snapshot.contains("[A2]"));
+    assert_eq!(
+        state.briefing().snapshot_counts().0,
+        state.archive_corpus().ordered_urls().len()
+    );
+    assert_eq!(state.briefing().phase(), &BriefingPhase::GeneratingBriefing);
     assert_eq!(state.active_tab(), AppTab::Briefing);
-    assert!(!state.briefing_orchestration_skip_aggregate());
+    assert!(effects
+        .iter()
+        .all(|effect| { !matches!(effect, Effect::LoadArticlesForBriefing { .. }) }));
 }
 
 #[test]
@@ -142,12 +152,15 @@ fn generate_briefing_loads_signal_filtered_archive_final_selection() {
 
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
 
-    assert_eq!(briefing_load_urls(&effects), selection.ordered_urls);
+    let snapshot = briefing_exec_snapshot(&effects);
+    assert!(snapshot.contains("[A1]"));
+    assert!(snapshot.contains("[A2]"));
     assert_eq!(
-        briefing_load_urls(&effects),
-        vec!["https://triage-complete.com/0".to_string()]
+        state.briefing().snapshot_counts().0,
+        state.archive_corpus().ordered_urls().len(),
+        "briefing stream uses the full base corpus, not the signal-narrowed archive selection"
     );
-    assert_eq!(state.briefing().phase(), &BriefingPhase::LoadingArticles);
+    assert_eq!(state.briefing().phase(), &BriefingPhase::GeneratingBriefing);
 }
 
 #[test]
@@ -177,9 +190,18 @@ fn generate_briefing_preserves_signal_order_and_honors_exclusions() {
         "selection should keep score order after removing the excluded cluster"
     );
 
-    let (_state, effects) = update(state, Msg::GenerateBriefingClicked);
+    let (state, effects) = update(state, Msg::GenerateBriefingClicked);
+    let snapshot = briefing_exec_snapshot(&effects);
 
-    assert_eq!(briefing_load_urls(&effects), expected.ordered_urls);
+    assert!(snapshot.contains("[A1]"));
+    assert!(snapshot.contains("[A2]"));
+    assert!(snapshot.contains("[A3]"));
+    assert_eq!(state.briefing().snapshot_counts().0, 3);
+    assert_ne!(
+        state.briefing().snapshot_counts().0,
+        expected.ordered_urls.len(),
+        "briefing stream intentionally ignores signal ordering/exclusions for its source pool"
+    );
 }
 
 #[test]
@@ -235,40 +257,17 @@ fn generate_briefing_cache_hit_reuses_summary_for_aligned_selection() {
     complete_signal_candidate(&mut state, 1, 30, "cluster-b");
 
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    assert_eq!(
-        briefing_load_urls(&effects),
-        vec!["https://triage-complete.com/0".to_string()]
-    );
-    let state = with_summary_metadata(state);
-    let (state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles: vec![LoadedArticle {
-                url: "https://triage-complete.com/0".to_string(),
-                source_title: None,
-                prepared_text: "Article text".to_string(),
-                content_hash: "hash-tc-0".to_string(),
-                fetched_utc: None,
-            }],
-            collection_text: "Collection text".to_string(),
-        },
-    );
-
+    let snapshot = briefing_exec_snapshot(&effects);
+    assert!(snapshot.contains("[A1]"));
+    assert!(snapshot.contains("[A2]"));
     assert!(effects.iter().all(|effect| !matches!(
         effect,
         Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleSummary,
+            prompt_id: PromptId::ArticleSummary | PromptId::AggregateBriefing,
             ..
         }
     )));
-    assert!(effects.iter().any(|effect| matches!(
-        effect,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::AggregateBriefing,
-            ..
-        }
-    )));
-    assert_eq!(state.briefing().completed_summary_count(), 1);
+    assert_eq!(state.briefing().snapshot_counts().0, 2);
 }
 
 #[test]
@@ -762,47 +761,18 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
         },
     );
 
-    let expected_urls = loaded_single_article()
-        .0
-        .iter()
-        .map(|article| article.url.clone())
-        .collect::<Vec<_>>();
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);
-    assert!(effects.iter().any(|effect| {
-        matches!(
-            effect,
-            Effect::LoadArticlesForBriefing { ordered_urls, .. }
-                if ordered_urls == &expected_urls
-        )
-    }));
-    let state = with_summary_metadata(state);
-    let (articles, collection_text) = loaded_single_article();
-    let (_state, effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text,
-        },
-    );
-
-    // effects[0] = UpsertEntityIndexEntry (summary cache hit for Article A)
-    // effects[1] = RequestLlmCompletion for AggregateBriefing
-    assert_eq!(effects.len(), 2);
-    let aggregate_request_id =
-        request_id_for_prompt(&effects, PromptId::AggregateBriefing).expect("aggregate request");
-    assert!(matches!(
-        &effects[1],
-        Effect::RequestLlmCompletion {
-            request_id,
-            prompt_id: PromptId::AggregateBriefing,
-            input_content,
-            extra_template_vars,
-            ..
-        } if *request_id == aggregate_request_id
-            && input_content == "Collection text"
-            // History was set on the first run — previous_briefings must now be non-empty
-            && extra_template_vars.iter().any(|(k, v)| k == "previous_briefings" && v != "(none)")
-    ));
+    let snapshot = briefing_exec_snapshot(&effects);
+    assert!(snapshot.contains("[A1]"));
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::LoadArticlesForBriefing { .. }
+            | Effect::RequestLlmCompletion {
+                prompt_id: PromptId::ArticleSummary | PromptId::AggregateBriefing,
+                ..
+            }
+    )));
+    assert_eq!(state.briefing().phase(), &BriefingPhase::GeneratingBriefing);
 }
 
 #[test]
@@ -864,6 +834,7 @@ fn open_in_browser_with_no_selection_emits_nothing() {
 mod archive_tests;
 mod blacklist_tests;
 mod briefing_history_tests;
+mod briefing_stream_tests;
 mod entity_index_tests;
 mod import_tests;
 mod pre_triage_refresh_tests;

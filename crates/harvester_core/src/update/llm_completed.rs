@@ -3,7 +3,7 @@ use super::summary_cache_support::{
     log_summary_cache_lookup_mismatch, log_summary_cache_run_summary, short_hash,
     summary_cache_key_error_reason,
 };
-use crate::briefing::{ArticleSummaryResult, BriefingResult, BriefingStoryResult};
+use crate::briefing::{ArticleSummaryResult, BriefingItem, BriefingResult, BriefingStoryResult};
 use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage};
 use crate::tabs::{AppTab, LeftTab};
 use crate::triage::ArticleTriageResult;
@@ -11,7 +11,10 @@ use crate::update::signal_candidate::{handle_signal_candidate_completion, try_en
 use crate::{AppState, Effect, LlmRequestState, LlmResultKind};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::{validate_briefing, validate_summary, validate_triage, LlmRunMetadata};
+use harvester_engine::llm::{
+    validate_briefing, validate_briefing_executive_summary, validate_briefing_next_item,
+    validate_summary, validate_triage, BriefingNextItem, LlmRunMetadata,
+};
 
 pub(super) fn handle(
     state: &mut AppState,
@@ -19,6 +22,10 @@ pub(super) fn handle(
     result: LlmResultKind,
     metadata: Option<LlmRunMetadata>,
 ) -> Vec<Effect> {
+    let request_prompt_id = match state.llm_request_state(request_id) {
+        Some(LlmRequestState::Pending { prompt_id }) => Some(*prompt_id),
+        _ => None,
+    };
     record_llm_result(state, request_id, &result);
     if let Some(run_metadata) = metadata.as_ref() {
         state.record_llm_usage_from_metadata(run_metadata);
@@ -38,7 +45,26 @@ pub(super) fn handle(
         handle_triage_completion(state, article_idx, &result, &mut effects);
         super::triage::dispatch_next_triage_step(state, &mut effects);
     } else if state.briefing().is_briefing_request(request_id) {
-        handle_briefing_completion(state, &result, &mut effects);
+        match request_prompt_id {
+            Some(PromptId::BriefingExecutiveSummary) => {
+                handle_executive_summary_completion(state, &result);
+            }
+            Some(PromptId::AggregateBriefing) | None => {
+                // Retained for the legacy single-shot aggregate path used by summary-prep
+                // orchestration and batch-adjacent tests. The live Generate flow now routes
+                // through BriefingExecutiveSummary + BriefingNextItem.
+                handle_aggregate_briefing_completion(state, &result, &mut effects);
+            }
+            Some(other) => {
+                engine_warn!(
+                    "[briefing] ignoring briefing request_id={} with unexpected prompt_id={:?}",
+                    request_id,
+                    other
+                );
+            }
+        }
+    } else if state.briefing().next_item_request_id() == Some(request_id) {
+        handle_next_item_completion(state, &result);
     } else if let Some(run_id) = state.prompt_lab().ownership_for(request_id) {
         handle_prompt_lab_completion(state, request_id, run_id, &result, metadata, &mut effects);
     }
@@ -283,7 +309,39 @@ fn handle_triage_completion(
     }
 }
 
-fn handle_briefing_completion(
+fn handle_executive_summary_completion(state: &mut AppState, result: &LlmResultKind) {
+    match result {
+        LlmResultKind::Success { output_json, .. } => {
+            match validate_briefing_executive_summary(output_json) {
+                Ok(exec) => {
+                    state.briefing_mut().enter_streaming(exec.executive_summary);
+                    state.revert_preview_to_briefing();
+                }
+                Err(err) => {
+                    engine_warn!("[briefing-stream] exec summary validation failed: {err}");
+                    state
+                        .briefing_mut()
+                        .fail(format!("validation failed: {err}"));
+                    state.revert_preview_to_briefing();
+                }
+            }
+        }
+        LlmResultKind::QuotaExhausted { reason } | LlmResultKind::Failed { reason } => {
+            state.briefing_mut().fail(reason.clone());
+            state.revert_preview_to_briefing();
+        }
+        LlmResultKind::ValidationFailed { reason, .. } => {
+            state
+                .briefing_mut()
+                .fail(format!("validation failed: {reason}"));
+            state.revert_preview_to_briefing();
+        }
+    }
+
+    state.mark_dirty();
+}
+
+fn handle_aggregate_briefing_completion(
     state: &mut AppState,
     result: &LlmResultKind,
     effects: &mut Vec<Effect>,
@@ -356,6 +414,38 @@ fn handle_briefing_completion(
     }
 
     log_summary_cache_run_summary(state);
+    state.mark_dirty();
+}
+
+fn handle_next_item_completion(state: &mut AppState, result: &LlmResultKind) {
+    match result {
+        LlmResultKind::Success { output_json, .. } => {
+            match validate_briefing_next_item(output_json) {
+                Ok(BriefingNextItem::Item { headline, body }) => {
+                    state
+                        .briefing_mut()
+                        .append_stream_item(BriefingItem { headline, body });
+                    state.briefing_mut().clear_next_item_request_id();
+                    state.revert_preview_to_briefing();
+                }
+                Ok(BriefingNextItem::Exhausted) => {
+                    state.briefing_mut().set_exhausted();
+                    state.briefing_mut().clear_next_item_request_id();
+                    state.revert_preview_to_briefing();
+                }
+                Err(err) => {
+                    engine_warn!("[briefing-stream] next item validation failed: {err}");
+                    state.briefing_mut().clear_next_item_request_id();
+                }
+            }
+        }
+        LlmResultKind::QuotaExhausted { reason }
+        | LlmResultKind::Failed { reason }
+        | LlmResultKind::ValidationFailed { reason, .. } => {
+            engine_warn!("[briefing-stream] next item call failed: {reason}");
+            state.briefing_mut().clear_next_item_request_id();
+        }
+    }
     state.mark_dirty();
 }
 

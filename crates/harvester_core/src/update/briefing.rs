@@ -13,6 +13,28 @@ fn briefing_ready_to_start(state: &AppState) -> bool {
     state.briefing_ai_available() && state.briefing().can_start()
 }
 
+fn briefing_ready_to_generate(state: &AppState) -> bool {
+    state.briefing_ai_available() && state.briefing().can_generate()
+}
+
+fn briefing_stream_hydrated(state: &AppState) -> bool {
+    state.prompt_contexts_loaded() && state.prompt_templates_loaded() && state.llm_metadata_loaded()
+}
+
+fn briefing_stream_hydration_effects(state: &AppState) -> Vec<Effect> {
+    let mut effects = Vec::new();
+    if !state.prompt_contexts_loaded() {
+        effects.push(Effect::LoadPromptContexts);
+    }
+    if !state.prompt_templates_loaded() {
+        effects.push(Effect::LoadPromptTemplateFiles);
+    }
+    if state.prompt_templates_loaded() && !state.llm_metadata_loaded() {
+        effects.push(Effect::LoadLlmMetadata);
+    }
+    effects
+}
+
 fn begin_briefing_article_load(
     state: &mut AppState,
     ordered_urls: Vec<String>,
@@ -48,34 +70,146 @@ fn fail_generate(state: &mut AppState, reason: &str) -> Vec<Effect> {
 }
 
 pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
-    if !briefing_ready_to_start(state) {
+    if !briefing_ready_to_generate(state) {
         return Vec::new();
     }
     state.select_tab(AppTab::Briefing);
     match state.briefing_generate_readiness() {
-        BriefingGenerateReadiness::Ready { selection } => {
-            if selection.ordered_urls.is_empty() {
-                return fail_generate(state, "No articles with sufficient priority");
-            }
-            engine_info!(
-                "[briefing-triage] generate ready source={:?} count={}",
-                selection.source,
-                selection.ordered_urls.len()
+        BriefingGenerateReadiness::Ready { .. } => {}
+        BriefingGenerateReadiness::TriageOrCorpusNotReady => {
+            return fail_generate(
+                state,
+                "No completed triage. Run triage before generating a briefing.",
             );
-            begin_briefing_article_load(state, selection.ordered_urls, false)
         }
-        BriefingGenerateReadiness::TriageOrCorpusNotReady => fail_generate(
-            state,
-            "No completed triage. Run triage before generating a briefing.",
-        ),
         BriefingGenerateReadiness::SummariesNotSettled => {
-            fail_generate(state, "Summarize articles before generating a briefing.")
+            return fail_generate(state, "Summarize articles before generating a briefing.");
         }
-        BriefingGenerateReadiness::SignalScoringInProgress => fail_generate(
-            state,
-            "Signal scoring still in progress. Wait for it to finish.",
-        ),
+        BriefingGenerateReadiness::SignalScoringInProgress => {
+            return fail_generate(
+                state,
+                "Signal scoring still in progress. Wait for it to finish.",
+            );
+        }
+    };
+
+    let snapshot = state.build_briefing_snapshot_now();
+    if snapshot.included_count == 0 {
+        return fail_generate(state, "No article summaries available for the briefing.");
     }
+
+    state.briefing_mut().start_stream(
+        snapshot.text,
+        snapshot.coverage_window_label,
+        snapshot.included_count,
+        snapshot.skipped_count,
+        snapshot.dropped_count,
+        snapshot.truncated,
+    );
+    state
+        .briefing_mut()
+        .set_phase(BriefingPhase::GeneratingBriefing);
+    state.revert_preview_to_briefing();
+    if snapshot.truncated {
+        engine_warn!(
+            "[briefing-stream] snapshot truncated: dropped={} budget_bytes={}",
+            snapshot.dropped_count,
+            crate::BRIEFING_SNAPSHOT_BUDGET_BYTES
+        );
+    }
+    engine_info!(
+        "[briefing-stream] generate frozen snapshot epoch={} included={} skipped={} dropped={} truncated={}",
+        state.briefing().stream_epoch(),
+        snapshot.included_count,
+        snapshot.skipped_count,
+        snapshot.dropped_count,
+        snapshot.truncated
+    );
+    state.mark_dirty();
+
+    if !briefing_stream_hydrated(state) {
+        state.briefing_mut().defer_exec_dispatch();
+        return briefing_stream_hydration_effects(state);
+    }
+
+    vec![dispatch_executive_summary_call(state)]
+}
+
+fn dispatch_executive_summary_call(state: &mut AppState) -> Effect {
+    let snapshot = state
+        .briefing()
+        .summaries_snapshot()
+        .map(str::to_owned)
+        .unwrap_or_default();
+    let coverage = state
+        .briefing()
+        .coverage_window_label()
+        .map(str::to_owned)
+        .unwrap_or_default();
+
+    let request_id = state.allocate_next_llm_request_id();
+    state.record_pending_llm_request(request_id, PromptId::BriefingExecutiveSummary);
+    state.briefing_mut().set_briefing_request_id(request_id);
+
+    let context = state
+        .context_for(PromptId::BriefingExecutiveSummary)
+        .to_vec();
+    state.mark_dirty();
+    Effect::RequestLlmCompletion {
+        request_id,
+        prompt_id: PromptId::BriefingExecutiveSummary,
+        prompt_version: None,
+        model_override: None,
+        input_content: snapshot,
+        context,
+        template_override: None,
+        extra_template_vars: vec![("briefing_time_window".to_string(), coverage)],
+    }
+}
+
+pub(super) fn resume_deferred_exec_dispatch(state: &mut AppState) -> Vec<Effect> {
+    if !state.briefing().exec_dispatch_deferred() || !briefing_stream_hydrated(state) {
+        return Vec::new();
+    }
+    state.briefing_mut().take_exec_dispatch_deferred();
+    vec![dispatch_executive_summary_call(state)]
+}
+
+pub(super) fn handle_next_item_clicked(state: &mut AppState) -> Vec<Effect> {
+    if !state.briefing().next_item_enabled() {
+        return Vec::new();
+    }
+    let Some(snapshot) = state.briefing().summaries_snapshot().map(str::to_owned) else {
+        return Vec::new();
+    };
+    let already_shown = state.briefing().already_shown_headlines();
+    let coverage = state
+        .briefing()
+        .coverage_window_label()
+        .map(str::to_owned)
+        .unwrap_or_else(|| {
+            crate::briefing::format_briefing_time_window_label(state.briefing_since_utc())
+        });
+
+    let request_id = state.allocate_next_llm_request_id();
+    state.record_pending_llm_request(request_id, PromptId::BriefingNextItem);
+    state.briefing_mut().set_next_item_request_id(request_id);
+
+    let context = state.context_for(PromptId::BriefingNextItem).to_vec();
+    state.mark_dirty();
+    vec![Effect::RequestLlmCompletion {
+        request_id,
+        prompt_id: PromptId::BriefingNextItem,
+        prompt_version: None,
+        model_override: None,
+        input_content: snapshot,
+        context,
+        template_override: None,
+        extra_template_vars: vec![
+            ("already_shown".to_string(), already_shown),
+            ("briefing_time_window".to_string(), coverage),
+        ],
+    }]
 }
 
 pub(super) fn handle_prepare_summaries_clicked(state: &mut AppState) -> Vec<Effect> {
