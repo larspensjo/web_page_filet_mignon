@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision", "reason", "next_step_summary", "confidence"],
+  "properties": {
+    "decision": { "type": "string", "enum": ["extract", "stop"] },
+    "reason": { "type": "string" },
+    "next_step_summary": { "type": "string" },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "suggested_destination", "estimated_lines"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "suggested_destination": { "type": "string" },
+        "estimated_lines": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "confidence": { "type": "string", "enum": ["low", "medium", "high"] }
+  }
+}
