@@ -116,6 +116,10 @@ pub(super) fn render_preview_section(
         .as_deref()
         .unwrap_or(SUMMARY_EMPTY_STATE_MARKDOWN);
     if tree_state.preview.prev_preview_text.as_deref() != Some(summary_markdown) {
+        engine_warn!(
+            "[render] VIEWER_PREVIEW content changed, markdown_len={}",
+            summary_markdown.len()
+        );
         let (truncated_markdown, was_truncated) = truncate_markdown_for_preview(summary_markdown);
         let mut rtf_text = convert_markdown_to_rtf(&truncated_markdown);
         if was_truncated {
@@ -146,6 +150,10 @@ pub(super) fn render_preview_section(
         .as_deref()
         .unwrap_or_default();
     if tree_state.preview.prev_triage_text.as_deref() != Some(triage_markdown) {
+        engine_warn!(
+            "[render] VIEWER_TRIAGE content changed, markdown_len={}",
+            triage_markdown.len()
+        );
         let (truncated, _) = truncate_markdown_for_preview(triage_markdown);
         cmds.push(PlatformCommand::SetRichEditContent {
             window_id,
@@ -162,6 +170,10 @@ pub(super) fn render_preview_section(
         .as_deref()
         .unwrap_or_default();
     if tree_state.preview.prev_briefing_text.as_deref() != Some(briefing_markdown) {
+        engine_warn!(
+            "[render] VIEWER_BRIEFING content changed, markdown_len={}",
+            briefing_markdown.len()
+        );
         let (truncated, _) = truncate_markdown_for_preview(briefing_markdown);
         let display = strip_leading_h1(&truncated);
         cmds.push(PlatformCommand::SetRichEditContent {
@@ -179,6 +191,10 @@ pub(super) fn render_preview_section(
         .as_deref()
         .unwrap_or("No poll data yet.");
     if tree_state.preview.prev_poll_stats_text.as_deref() != Some(poll_stats_text) {
+        engine_warn!(
+            "[render] VIEWER_POLL_STATS content changed, markdown_len={}",
+            poll_stats_text.len()
+        );
         cmds.push(PlatformCommand::SetRichEditContent {
             window_id,
             control_id: VIEWER_POLL_STATS,
