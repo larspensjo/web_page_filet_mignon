@@ -83,127 +83,23 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Set-Utf8ProcessEncoding {
-    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-    [Console]::InputEncoding = $utf8NoBom
-    [Console]::OutputEncoding = $utf8NoBom
-    $global:OutputEncoding = $utf8NoBom
+$scriptDir = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+} else {
+    $PSScriptRoot
 }
+Import-Module (Join-Path $scriptDir 'lib\AgentCli.psm1') -Force -DisableNameChecking
 
-function Resolve-FullPath {
+function Assert-WorktreeStatusUnchanged {
     param(
-        [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][string]$BasePath,
-        [switch]$MustExist
+        [AllowNull()][string]$BeforeStatus,
+        [Parameter(Mandatory)][string]$Context,
+        [string[]]$ExcludedPaths = @()
     )
 
-    $candidate = if ([System.IO.Path]::IsPathRooted($Path)) {
-        $Path
-    } else {
-        Join-Path $BasePath $Path
-    }
-
-    $fullPath = [System.IO.Path]::GetFullPath($candidate)
-    if ($MustExist -and -not (Test-Path -LiteralPath $fullPath)) {
-        throw "Path not found: $fullPath"
-    }
-
-    return $fullPath
-}
-
-function Ensure-Dir {
-    param([Parameter(Mandatory)][string]$DirPath)
-
-    if (-not (Test-Path -LiteralPath $DirPath)) {
-        New-Item -ItemType Directory -Path $DirPath | Out-Null
-    }
-}
-
-function Write-AtomicUtf8 {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [AllowNull()][string]$Content
-    )
-
-    $dir = Split-Path -Parent $Path
-    Ensure-Dir $dir
-
-    $tmp = Join-Path $dir ("~tmp.{0}.{1}.tmp" -f ([System.IO.Path]::GetFileName($Path)), ([guid]::NewGuid().ToString('N').Substring(0, 8)))
-    [System.IO.File]::WriteAllText($tmp, $Content, [System.Text.UTF8Encoding]::new($false))
-    Move-Item -Force -LiteralPath $tmp -Destination $Path
-}
-
-function Add-LogLine {
-    param(
-        [Parameter(Mandatory)][string]$LogPath,
-        [Parameter(Mandatory)][string]$Line
-    )
-
-    $timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    Add-Content -LiteralPath $LogPath -Value "[$timestamp] $Line" -Encoding utf8
-}
-
-function Normalize-Text {
-    param([AllowNull()][object]$Output)
-
-    if ($null -eq $Output) {
-        return ''
-    }
-
-    return (($Output | Out-String).TrimEnd())
-}
-
-function Invoke-Git {
-    param(
-        [Parameter(Mandatory)][string[]]$Arguments,
-        [switch]$AllowNonZero
-    )
-
-    $gitArgs = @('-c', 'core.quotepath=false') + $Arguments
-    $tmpOut = [System.IO.Path]::GetTempFileName()
-    $tmpErr = [System.IO.Path]::GetTempFileName()
-    Push-Location $script:RepoRoot
-    try {
-        & git @gitArgs > $tmpOut 2> $tmpErr
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
-
-    try {
-        $stdout = if (Test-Path -LiteralPath $tmpOut) { Read-TextFile $tmpOut } else { '' }
-        $stderr = if (Test-Path -LiteralPath $tmpErr) { Read-TextFile $tmpErr } else { '' }
-        $text = Normalize-Text $stdout
-        $errorText = Normalize-Text $stderr
-
-        if (-not $AllowNonZero -and $exitCode -ne 0) {
-            throw "git $($Arguments -join ' ') failed with exit code $exitCode.`nSTDERR:`n$errorText`nSTDOUT:`n$text"
-        }
-
-        [pscustomobject]@{
-            ExitCode = $exitCode
-            Text     = $text
-            Stderr   = $errorText
-        }
-    } finally {
-        Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $tmpErr -ErrorAction SilentlyContinue
-    }
-}
-
-function Assert-CliExists {
-    param([Parameter(Mandatory)][string]$CliName)
-
-    $cmd = Get-Command $CliName -ErrorAction SilentlyContinue
-    if (-not $cmd) {
-        throw "CLI '$CliName' not found in PATH."
-    }
-}
-
-function Assert-CleanWorktree {
-    $status = (Invoke-Git -Arguments @('status', '--porcelain=v1')).Text
-    if (-not [string]::IsNullOrWhiteSpace($status)) {
-        throw "Workspace must be clean before starting a phase cycle. If this follows an interrupted cycle, inspect the dirty files and either keep, stage, or restore them before rerunning.`n$status"
+    $afterStatus = Get-WorktreeStatusText -RepoRoot $script:RepoRoot -ExcludedPaths $ExcludedPaths
+    if ($BeforeStatus -ne $afterStatus) {
+        throw "$Context changed the worktree outside expected generated artifacts.`nBefore:`n$BeforeStatus`nAfter:`n$afterStatus"
     }
 }
 
@@ -213,130 +109,12 @@ function Assert-SkipPlanningStartWorktree {
     Write-Verbose "-SkipPlanning guard for repo: $script:RepoRoot"
     Write-Verbose "-SkipPlanning plan path: $script:PlanPath"
     Write-Verbose "-SkipPlanning plans dir: $script:PlansDir"
-    $unexpectedStatus = Get-WorktreeStatusText -ExcludedPaths $AllowedPaths
+    $unexpectedStatus = Get-WorktreeStatusText -RepoRoot $script:RepoRoot -ExcludedPaths $AllowedPaths
     if (-not [string]::IsNullOrWhiteSpace($unexpectedStatus)) {
         throw "-SkipPlanning can only start with the target plan and generated cycle artifacts dirty. Resolve or stage unrelated changes before jumping to implementation.`n$unexpectedStatus"
     }
 
-    Unstage-PathsIfNeeded -Paths $AllowedPaths
-}
-
-function ConvertTo-GitStatusPathKey {
-    param([Parameter(Mandatory)][string]$Path)
-
-    $gitPath = if ([System.IO.Path]::IsPathRooted($Path)) {
-        Get-GitPath $Path
-    } else {
-        $Path
-    }
-
-    $gitPath = $gitPath.Trim().Replace('\', '/')
-    while ($gitPath.StartsWith('./', [System.StringComparison]::Ordinal)) {
-        $gitPath = $gitPath.Substring(2)
-    }
-
-    return $gitPath
-}
-
-function Get-StatusPaths {
-    param([Parameter(Mandatory)][string]$StatusLine)
-
-    if ($StatusLine.Length -le 3) {
-        return @()
-    }
-
-    $pathText = $StatusLine.Substring(3)
-    if ($pathText.Contains(' -> ')) {
-        return @($pathText -split ' -> ')
-    }
-
-    return @($pathText)
-}
-
-function Get-WorktreeStatusText {
-    param([string[]]$ExcludedPaths = @())
-
-    $excludedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($path in $ExcludedPaths) {
-        if ([string]::IsNullOrWhiteSpace($path)) {
-            continue
-        }
-
-        [void]$excludedSet.Add((ConvertTo-GitStatusPathKey $path))
-    }
-    Write-Verbose "Allowed dirty path keys:"
-    foreach ($key in @($excludedSet | Sort-Object)) {
-        Write-Verbose "  allow: $key"
-    }
-
-    $statusLines = @((Invoke-Git -Arguments @('status', '--porcelain=v1')).Text -split "`r?`n" | Where-Object {
-        -not [string]::IsNullOrWhiteSpace($_)
-    })
-
-    $keptLines = @()
-    foreach ($line in $statusLines) {
-        $paths = @(Get-StatusPaths -StatusLine $line)
-        $isExcluded = $paths.Count -gt 0
-        foreach ($path in $paths) {
-            $key = ConvertTo-GitStatusPathKey $path
-            $pathIsExcluded = $excludedSet.Contains($key)
-            Write-Verbose ("  status: {0}; path: {1}; key: {2}; allowed: {3}" -f $line, $path, $key, $pathIsExcluded)
-            if (-not $pathIsExcluded) {
-                $isExcluded = $false
-                break
-            }
-        }
-
-        if (-not $isExcluded) {
-            $keptLines += $line
-        }
-    }
-
-    return ($keptLines -join "`n")
-}
-
-function Assert-WorktreeStatusUnchanged {
-    param(
-        [AllowNull()][string]$BeforeStatus,
-        [Parameter(Mandatory)][string]$Context,
-        [string[]]$ExcludedPaths = @()
-    )
-
-    $afterStatus = Get-WorktreeStatusText -ExcludedPaths $ExcludedPaths
-    if ($BeforeStatus -ne $afterStatus) {
-        throw "$Context changed the worktree outside expected generated artifacts.`nBefore:`n$BeforeStatus`nAfter:`n$afterStatus"
-    }
-}
-
-function Get-CliHelpText {
-    param(
-        [Parameter(Mandatory)][string]$Tool,
-        [Parameter(Mandatory)][string[]]$Arguments
-    )
-
-    $output = & $Tool @Arguments 2>&1
-    $exitCode = $LASTEXITCODE
-    $text = Normalize-Text $output
-    if ($exitCode -ne 0) {
-        throw "Could not inspect '$Tool $($Arguments -join ' ')' help output. Exit code $exitCode.`n$text"
-    }
-
-    return $text
-}
-
-function Assert-HelpContains {
-    param(
-        [Parameter(Mandatory)][string]$Tool,
-        [Parameter(Mandatory)][string[]]$Arguments,
-        [Parameter(Mandatory)][string[]]$ExpectedFlags
-    )
-
-    $helpText = Get-CliHelpText -Tool $Tool -Arguments $Arguments
-    foreach ($flag in $ExpectedFlags) {
-        if ($helpText.IndexOf($flag, [System.StringComparison]::Ordinal) -lt 0) {
-            throw "CLI '$Tool' help output does not advertise required flag '$flag'. Inspect or update scripts/Invoke-PlanPhaseCycle.ps1 before running the cycle."
-        }
-    }
+    Unstage-PathsIfNeeded -RepoRoot $script:RepoRoot -Paths $AllowedPaths
 }
 
 function Assert-CliFlagSupport {
@@ -369,182 +147,6 @@ function Assert-PhaseExists {
         Write-Warning "Phase string '$PhaseText' was not found in the plan. Stopping before invoking any AI CLI."
         throw "Phase not found in plan: $PhaseText"
     }
-}
-
-function Assert-PathUnderRepo {
-    param([Parameter(Mandatory)][string]$Path)
-
-    $relative = [System.IO.Path]::GetRelativePath($script:RepoRoot, $Path)
-    if ($relative.StartsWith('..') -or [System.IO.Path]::IsPathRooted($relative)) {
-        throw "Path must be inside repo root '$script:RepoRoot': $Path"
-    }
-}
-
-function Get-GitPath {
-    param([Parameter(Mandatory)][string]$Path)
-
-    $relative = [System.IO.Path]::GetRelativePath($script:RepoRoot, $Path)
-    return ($relative -replace '\\', '/')
-}
-
-function Get-PlanIdFromPath {
-    param([Parameter(Mandatory)][string]$Path)
-
-    $fileName = [System.IO.Path]::GetFileName($Path)
-    $match = [regex]::Match($fileName, '^(?i)Plan\.(?<id>.+?)\.md$')
-    if ($match.Success) {
-        return $match.Groups['id'].Value
-    }
-
-    return [System.IO.Path]::GetFileNameWithoutExtension($fileName)
-}
-
-function New-SafeFileSegment {
-    param([Parameter(Mandatory)][string]$Text)
-
-    $segment = $Text.Trim()
-    foreach ($char in [System.IO.Path]::GetInvalidFileNameChars()) {
-        $segment = $segment.Replace([string]$char, '-')
-    }
-
-    $segment = [regex]::Replace($segment, '\s+', '')
-    $segment = [regex]::Replace($segment, '[^A-Za-z0-9_.-]', '-')
-    $segment = $segment.Trim('.-')
-    if ([string]::IsNullOrWhiteSpace($segment)) {
-        return 'Phase'
-    }
-
-    return $segment
-}
-
-function Read-TextFile {
-    param([Parameter(Mandatory)][string]$Path)
-
-    Get-Content -LiteralPath $Path -Raw -Encoding utf8
-}
-
-function Read-PromptTemplate {
-    param([Parameter(Mandatory)][string]$Name)
-
-    $path = Join-Path $script:PromptsDir $Name
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        throw "Prompt template not found: $path"
-    }
-
-    Read-TextFile $path
-}
-
-function Expand-PromptTemplate {
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][hashtable]$Variables
-    )
-
-    $text = Read-PromptTemplate $Name
-    foreach ($key in $Variables.Keys) {
-        $placeholder = '{{' + $key + '}}'
-        $text = $text.Replace($placeholder, [string]$Variables[$key])
-    }
-
-    return $text
-}
-
-function Extract-MarkedSection {
-    param(
-        [Parameter(Mandatory)][string]$Text,
-        [Parameter(Mandatory)][string]$SectionName
-    )
-
-    $escapedName = [regex]::Escape($SectionName)
-    $pattern = "(?s)--- BEGIN $escapedName ---\s*(.*?)\s*--- END $escapedName ---"
-    $match = [regex]::Match($Text, $pattern)
-    if (-not $match.Success) {
-        throw "Expected marked section not found: $SectionName"
-    }
-
-    return $match.Groups[1].Value.Trim()
-}
-
-function Get-ObjectProperty {
-    param(
-        [AllowNull()][object]$Object,
-        [Parameter(Mandatory)][string]$Name,
-        [AllowNull()][object]$Default = $null
-    )
-
-    if ($null -eq $Object) {
-        return $Default
-    }
-
-    $property = $Object.PSObject.Properties | Where-Object { $_.Name -eq $Name } | Select-Object -First 1
-    if ($null -eq $property) {
-        return $Default
-    }
-
-    return $property.Value
-}
-
-function ConvertFrom-AgentJson {
-    param([Parameter(Mandatory)][string]$Text)
-
-    $jsonText = $Text.Trim()
-    $fenced = [regex]::Match($jsonText, '(?s)^\s*```(?:json)?\s*(.*?)\s*```\s*$')
-    if ($fenced.Success) {
-        $jsonText = $fenced.Groups[1].Value.Trim()
-    }
-
-    try {
-        return ($jsonText | ConvertFrom-Json -Depth 50)
-    } catch {
-        $parseError = $_
-        for ($start = 0; $start -lt $jsonText.Length; $start++) {
-            if ($jsonText[$start] -ne '{') {
-                continue
-            }
-
-            $depth = 0
-            $inString = $false
-            $escaped = $false
-            for ($end = $start; $end -lt $jsonText.Length; $end++) {
-                $char = $jsonText[$end]
-
-                if ($inString) {
-                    if ($escaped) {
-                        $escaped = $false
-                    } elseif ($char -eq '\') {
-                        $escaped = $true
-                    } elseif ($char -eq '"') {
-                        $inString = $false
-                    }
-                    continue
-                }
-
-                if ($char -eq '"') {
-                    $inString = $true
-                } elseif ($char -eq '{') {
-                    $depth++
-                } elseif ($char -eq '}') {
-                    $depth--
-                    if ($depth -eq 0) {
-                        $candidate = $jsonText.Substring($start, $end - $start + 1)
-                        try {
-                            return ($candidate | ConvertFrom-Json -Depth 50)
-                        } catch {
-                            break
-                        }
-                    }
-                }
-            }
-        }
-
-        throw $parseError
-    }
-}
-
-function ConvertTo-PrettyJson {
-    param([Parameter(Mandatory)][object]$Value)
-
-    $Value | ConvertTo-Json -Depth 50
 }
 
 function Write-StepResultSummary {
@@ -788,103 +390,6 @@ function Write-ReviewSummary {
     }
 }
 
-function Invoke-Cli {
-    param(
-        [Parameter(Mandatory)]
-        [ValidateSet('claude', 'codex')]
-        [string]$Tool,
-
-        [Parameter(Mandatory)]
-        [string]$Prompt,
-
-        [Parameter(Mandatory)]
-        [string]$WorkingDir,
-
-        [AllowNull()][string]$Model,
-        [AllowNull()][string]$PermissionMode,
-        [AllowNull()][string]$Sandbox,
-        [AllowNull()][string]$Reasoning,
-        [AllowNull()][string]$OutputLastMessagePath,
-        [AllowNull()][string]$OutputSchemaPath
-    )
-
-    Assert-CliExists $Tool
-
-    $cliArgs = @()
-    switch ($Tool) {
-        'codex' {
-            $cliArgs += @('exec', '--cd', $WorkingDir, '--color', 'never')
-            if (-not [string]::IsNullOrWhiteSpace($Sandbox)) {
-                $cliArgs += @('--sandbox', $Sandbox)
-            }
-            if (-not [string]::IsNullOrWhiteSpace($Model)) {
-                $cliArgs += @('--model', $Model)
-            }
-            if (-not [string]::IsNullOrWhiteSpace($Reasoning)) {
-                $cliArgs += @('-c', "reasoning.level=`"$Reasoning`"")
-            }
-            if (-not [string]::IsNullOrWhiteSpace($OutputSchemaPath)) {
-                $cliArgs += @('--output-schema', $OutputSchemaPath)
-            }
-            if (-not [string]::IsNullOrWhiteSpace($OutputLastMessagePath)) {
-                Ensure-Dir (Split-Path -Parent $OutputLastMessagePath)
-                Remove-Item -LiteralPath $OutputLastMessagePath -ErrorAction SilentlyContinue
-                $cliArgs += @('--output-last-message', $OutputLastMessagePath)
-            }
-            $cliArgs += '-'
-        }
-        'claude' {
-            $cliArgs += @('-p', '--no-session-persistence', '--input-format', 'text')
-            if (-not [string]::IsNullOrWhiteSpace($Model)) {
-                $cliArgs += @('--model', $Model)
-            }
-            if (-not [string]::IsNullOrWhiteSpace($PermissionMode)) {
-                $cliArgs += @('--permission-mode', $PermissionMode)
-            }
-        }
-    }
-
-    $tmpOut = [System.IO.Path]::GetTempFileName()
-    $tmpErr = [System.IO.Path]::GetTempFileName()
-    Push-Location $WorkingDir
-    try {
-        $Prompt | & $Tool @cliArgs > $tmpOut 2> $tmpErr
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
-    }
-
-    try {
-        $stdout = if (Test-Path -LiteralPath $tmpOut) { Read-TextFile $tmpOut } else { '' }
-        $stderr = if (Test-Path -LiteralPath $tmpErr) { Read-TextFile $tmpErr } else { '' }
-
-        if ($exitCode -ne 0) {
-            throw "CLI '$Tool' exited with code $exitCode.`nSTDERR:`n$stderr`nSTDOUT:`n$stdout"
-        }
-
-        $lastMessage = ''
-        if (-not [string]::IsNullOrWhiteSpace($OutputLastMessagePath) -and (Test-Path -LiteralPath $OutputLastMessagePath)) {
-            $lastMessage = Read-TextFile $OutputLastMessagePath
-        }
-
-        $result = if (-not [string]::IsNullOrWhiteSpace($lastMessage)) {
-            $lastMessage
-        } else {
-            $stdout
-        }
-
-        $result = $result.Trim()
-        if ([string]::IsNullOrWhiteSpace($result)) {
-            throw "CLI '$Tool' returned empty output.`nSTDERR:`n$stderr"
-        }
-
-        return $result
-    } finally {
-        Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $tmpErr -ErrorAction SilentlyContinue
-    }
-}
-
 function Invoke-ClaudePlanRewrite {
     param(
         [Parameter(Mandatory)][string]$PromptName,
@@ -894,7 +399,7 @@ function Invoke-ClaudePlanRewrite {
         [Parameter(Mandatory)][string]$Model
     )
 
-    $prompt = Expand-PromptTemplate -Name $PromptName -Variables $Variables
+    $prompt = Expand-PromptTemplate -PromptsDir $script:PromptsDir -Name $PromptName -Variables $Variables
     $output = Invoke-Cli -Tool 'claude' -Prompt $prompt -WorkingDir $script:RepoRoot -Model $Model -PermissionMode 'plan' `
         -Sandbox $null -Reasoning $null -OutputLastMessagePath $null -OutputSchemaPath $null
 
@@ -930,7 +435,7 @@ function Invoke-ReviewJsonStep {
         [AllowNull()][string]$OutputSchemaPath
     )
 
-    $prompt = Expand-PromptTemplate -Name $PromptName -Variables $Variables
+    $prompt = Expand-PromptTemplate -PromptsDir $script:PromptsDir -Name $PromptName -Variables $Variables
     $rawPath = [System.IO.Path]::ChangeExtension($ArtifactPath, '.raw.txt')
     $outputLastMessage = if ($Tool -eq 'codex') { $rawPath } else { $null }
 
@@ -962,10 +467,10 @@ function Invoke-ReviewJsonStep {
 }
 
 function Get-StagedDiffContext {
-    $status = (Invoke-Git -Arguments @('status', '--short')).Text
-    $nameStatus = (Invoke-Git -Arguments @('diff', '--cached', '--name-status', '--')).Text
-    $stat = (Invoke-Git -Arguments @('diff', '--cached', '--stat', '--')).Text
-    $diff = (Invoke-Git -Arguments @('diff', '--cached', '--no-ext-diff', '--')).Text
+    $status = (Invoke-Git -RepoRoot $script:RepoRoot -Arguments @('status', '--short')).Text
+    $nameStatus = (Invoke-Git -RepoRoot $script:RepoRoot -Arguments @('diff', '--cached', '--name-status', '--')).Text
+    $stat = (Invoke-Git -RepoRoot $script:RepoRoot -Arguments @('diff', '--cached', '--stat', '--')).Text
+    $diff = (Invoke-Git -RepoRoot $script:RepoRoot -Arguments @('diff', '--cached', '--no-ext-diff', '--')).Text
 
     $diffNote = 'Full staged diff is included.'
     if ($diff.Length -gt $script:MaxInlineDiffChars) {
@@ -996,53 +501,9 @@ $diff
 "@
 }
 
-function Unstage-PathsIfNeeded {
-    param([Parameter(Mandatory)][string[]]$Paths)
-
-    $staged = @((Invoke-Git -Arguments @('diff', '--cached', '--name-only', '--')).Text -split "`r?`n" | Where-Object {
-        -not [string]::IsNullOrWhiteSpace($_)
-    })
-    if ($staged.Count -eq 0) {
-        return
-    }
-
-    $stagedSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($path in $staged) {
-        [void]$stagedSet.Add((ConvertTo-GitStatusPathKey $path))
-    }
-
-    $toUnstage = @()
-    foreach ($path in $Paths) {
-        if ([string]::IsNullOrWhiteSpace($path)) {
-            continue
-        }
-
-        $gitPath = Get-GitPath $path
-        if ($stagedSet.Contains((ConvertTo-GitStatusPathKey $gitPath))) {
-            $toUnstage += $gitPath
-        }
-    }
-
-    if ($toUnstage.Count -gt 0) {
-        Invoke-Git -Arguments (@('restore', '--staged', '--') + $toUnstage) | Out-Null
-    }
-}
-
-function Assert-StagedChangesExist {
-    param([Parameter(Mandatory)][string]$Context)
-
-    $result = Invoke-Git -Arguments @('diff', '--cached', '--quiet', '--') -AllowNonZero
-    if ($result.ExitCode -eq 0) {
-        throw "No staged implementation changes found after $Context."
-    }
-    if ($result.ExitCode -ne 1) {
-        throw "git diff --cached --quiet failed with exit code $($result.ExitCode).`n$($result.Text)"
-    }
-}
-
 function Stage-Plan {
-    $planGitPath = Get-GitPath $script:PlanPath
-    Invoke-Git -Arguments @('add', '--', $planGitPath) | Out-Null
+    $planGitPath = Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlanPath
+    Invoke-Git -RepoRoot $script:RepoRoot -Arguments @('add', '--', $planGitPath) | Out-Null
 }
 
 function Join-CommitMessage {
@@ -1075,11 +536,6 @@ function Write-Step {
 
 Set-Utf8ProcessEncoding
 
-$scriptDir = if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-    Split-Path -Parent $MyInvocation.MyCommand.Path
-} else {
-    $PSScriptRoot
-}
 Write-Verbose "Script path: $($MyInvocation.MyCommand.Path)"
 Write-Verbose "Script dir: $scriptDir"
 
@@ -1098,7 +554,7 @@ try {
 
 $script:RepoRoot = [System.IO.Path]::GetFullPath($gitRootText)
 $script:PlanPath = $PlanPath
-Assert-PathUnderRepo $script:PlanPath
+Assert-PathUnderRepo -RepoRoot $script:RepoRoot -Path $script:PlanPath
 
 if ([string]::IsNullOrWhiteSpace($PlansDir)) {
     $PlansDir = Join-Path $script:RepoRoot 'docs\plans'
@@ -1167,7 +623,7 @@ $generatedArtifacts = @(
 if ($SkipPlanning) {
     Assert-SkipPlanningStartWorktree -AllowedPaths (@($script:PlanPath) + $generatedArtifacts)
 } else {
-    Assert-CleanWorktree
+    Assert-CleanWorktree -RepoRoot $script:RepoRoot
 }
 
 if ($PreflightOnly) {
@@ -1221,7 +677,7 @@ if ($SkipPlanning) {
     Write-Step -Number 1 -Message 'Claude compacts prior phases and elaborates the selected phase in the plan.' -LogPath $logPath
     $planText = Read-TextFile $script:PlanPath
     Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-elaborate-plan.md' -Variables @{
-        PLAN_PATH = Get-GitPath $script:PlanPath
+        PLAN_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlanPath
         PLAN_TEXT = $planText
         PHASE = $Phase
     } -LogPath $logPath -StepName 'Step1.PreparePlan' -Model $script:ClaudePlanElaborationModel | Out-Null
@@ -1229,9 +685,9 @@ if ($SkipPlanning) {
     Write-Step -Number 2 -Message 'Codex reviews the selected phase plan.' -LogPath $logPath
     $planText = Read-TextFile $script:PlanPath
     $planReviewGeneratedPaths = @($planReviewPath, $planReviewRawPath)
-    $prePlanReviewStatus = Get-WorktreeStatusText -ExcludedPaths $planReviewGeneratedPaths
+    $prePlanReviewStatus = Get-WorktreeStatusText -RepoRoot $script:RepoRoot -ExcludedPaths $planReviewGeneratedPaths
     $planReview = Invoke-ReviewJsonStep -Tool 'codex' -PromptName 'phase-cycle-review-plan.md' -Variables @{
-        PLAN_PATH = Get-GitPath $script:PlanPath
+        PLAN_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlanPath
         PLAN_TEXT = $planText
         PHASE = $Phase
         REVIEW_SCHEMA = $reviewSchemaText
@@ -1244,7 +700,7 @@ if ($SkipPlanning) {
     $planReviewJson = Read-TextFile $planReviewPath
     if (Test-PlanReviewNeedsApplyStep -Review $planReview) {
         Invoke-ClaudePlanRewrite -PromptName 'phase-cycle-apply-plan-review.md' -Variables @{
-            PLAN_PATH = Get-GitPath $script:PlanPath
+            PLAN_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlanPath
             PLAN_TEXT = $planText
             PHASE = $Phase
             REVIEW_JSON = $planReviewJson
@@ -1258,11 +714,11 @@ if ($SkipPlanning) {
 
 Write-Step -Number 4 -Message 'Codex implements the selected phase and stages implementation changes.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
-$implementationPrompt = Expand-PromptTemplate -Name 'phase-cycle-implement-phase.md' -Variables @{
-    PLAN_PATH = Get-GitPath $script:PlanPath
+$implementationPrompt = Expand-PromptTemplate -PromptsDir $script:PromptsDir -Name 'phase-cycle-implement-phase.md' -Variables @{
+    PLAN_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlanPath
     PLAN_TEXT = $planText
     PHASE = $Phase
-    PLAN_REVIEW_PATH = Get-GitPath $planReviewPath
+    PLAN_REVIEW_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $planReviewPath
     PLAN_REVIEW_JSON = $planReviewJson
     STEP_RESULT_SCHEMA = $stepResultSchemaText
 }
@@ -1272,15 +728,15 @@ $implementationOutput = Invoke-Cli -Tool 'codex' -Prompt $implementationPrompt -
     -OutputLastMessagePath $implementationRawPath -OutputSchemaPath $stepResultSchemaPath
 $implementationResult = Write-StepResultArtifact -Output $implementationOutput -ArtifactPath $implementationResultPath -LogPath $logPath
 Assert-StepResultSuccess -StepResult $implementationResult -ArtifactPath $implementationResultPath
-Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
-Assert-StagedChangesExist -Context 'implementation'
+Unstage-PathsIfNeeded -RepoRoot $script:RepoRoot -Paths (@($script:PlanPath) + $generatedArtifacts)
+Assert-StagedChangesExist -RepoRoot $script:RepoRoot -Context 'implementation'
 Add-LogLine -LogPath $logPath -Line 'Implementation step completed with staged changes.'
 
 Write-Step -Number 5 -Message 'Claude reviews the staged changes.' -LogPath $logPath
 $planText = Read-TextFile $script:PlanPath
 $stagedDiffContext = Get-StagedDiffContext
 $stagedReview = Invoke-ReviewJsonStep -Tool 'claude' -PromptName 'phase-cycle-review-staged.md' -Variables @{
-    PLAN_PATH = Get-GitPath $script:PlanPath
+    PLAN_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlanPath
     PLAN_TEXT = $planText
     PHASE = $Phase
     STAGED_DIFF_CONTEXT = $stagedDiffContext
@@ -1293,11 +749,11 @@ $stagedReviewJson = Read-TextFile $stagedReviewPath
 $step6LogLine = 'Staged-review fix step completed.'
 if (Test-StagedReviewNeedsApplyStep -Review $stagedReview) {
     $stagedDiffContext = Get-StagedDiffContext
-    $fixPrompt = Expand-PromptTemplate -Name 'phase-cycle-apply-staged-review.md' -Variables @{
-        PLAN_PATH = Get-GitPath $script:PlanPath
+    $fixPrompt = Expand-PromptTemplate -PromptsDir $script:PromptsDir -Name 'phase-cycle-apply-staged-review.md' -Variables @{
+        PLAN_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlanPath
         PLAN_TEXT = Read-TextFile $script:PlanPath
         PHASE = $Phase
-        STAGED_REVIEW_PATH = Get-GitPath $stagedReviewPath
+        STAGED_REVIEW_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $stagedReviewPath
         STAGED_REVIEW_JSON = $stagedReviewJson
         STAGED_DIFF_CONTEXT = $stagedDiffContext
         STEP_RESULT_SCHEMA = $stepResultSchemaText
@@ -1308,8 +764,8 @@ if (Test-StagedReviewNeedsApplyStep -Review $stagedReview) {
         -OutputLastMessagePath $stagedReviewFixRawPath -OutputSchemaPath $stepResultSchemaPath
     $stagedReviewFixResult = Write-StepResultArtifact -Output $stagedReviewFixOutput -ArtifactPath $stagedReviewFixResultPath -LogPath $logPath
     Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
-    Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
-    Assert-StagedChangesExist -Context 'staged-review fix'
+    Unstage-PathsIfNeeded -RepoRoot $script:RepoRoot -Paths (@($script:PlanPath) + $generatedArtifacts)
+    Assert-StagedChangesExist -RepoRoot $script:RepoRoot -Context 'staged-review fix'
     $commitSubject = [string](Get-ObjectProperty -Object $stagedReviewFixResult -Name 'suggested_commit_message' -Default '')
     if ([string]::IsNullOrWhiteSpace($commitSubject)) {
         throw "Staged-review fix step did not report suggested_commit_message. See $stagedReviewFixResultPath"
@@ -1330,19 +786,19 @@ if (Test-StagedReviewNeedsApplyStep -Review $stagedReview) {
     $stagedReviewFixResult = New-SkippedStagedReviewFixResult -SuggestedCommitMessage $commitSubject -CommitBody $commitBody
     Write-StepResultObject -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath -LogPath $logPath | Out-Null
     Assert-StepResultSuccess -StepResult $stagedReviewFixResult -ArtifactPath $stagedReviewFixResultPath
-    Unstage-PathsIfNeeded -Paths (@($script:PlanPath) + $generatedArtifacts)
-    Assert-StagedChangesExist -Context 'staged-review skip'
+    Unstage-PathsIfNeeded -RepoRoot $script:RepoRoot -Paths (@($script:PlanPath) + $generatedArtifacts)
+    Assert-StagedChangesExist -RepoRoot $script:RepoRoot -Context 'staged-review skip'
     $step6LogLine = 'Staged-review fix step skipped because staged review had no non-nit findings.'
 }
 Stage-Plan
-Unstage-PathsIfNeeded -Paths $generatedArtifacts
+Unstage-PathsIfNeeded -RepoRoot $script:RepoRoot -Paths $generatedArtifacts
 Add-LogLine -LogPath $logPath -Line $step6LogLine
 Add-LogLine -LogPath $logPath -Line 'Final detailed plan staged.'
 Add-LogLine -LogPath $logPath -Line "Suggested commit subject: $commitSubject"
 Add-LogLine -LogPath $logPath -Line "Completed: $(Get-Date)"
 
-$stagedStatus = (Invoke-Git -Arguments @('diff', '--cached', '--name-status', '--')).Text
-$untrackedArtifacts = (Invoke-Git -Arguments @('status', '--short', '--', (Get-GitPath $script:PlansDir))).Text
+$stagedStatus = (Invoke-Git -RepoRoot $script:RepoRoot -Arguments @('diff', '--cached', '--name-status', '--')).Text
+$untrackedArtifacts = (Invoke-Git -RepoRoot $script:RepoRoot -Arguments @('status', '--short', '--', (Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlansDir))).Text
 
 Write-Host ''
 Write-Host 'Cycle complete. Review/log artifacts were left unstaged.'
