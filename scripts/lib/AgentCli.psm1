@@ -59,7 +59,7 @@ function Write-AtomicUtf8 {
 function Add-LogLine {
     param(
         [Parameter(Mandatory)][string]$LogPath,
-        [Parameter(Mandatory)][string]$Line
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Line
     )
 
     $timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')

@@ -1,6 +1,6 @@
-﻿<#
+<#
 Plan review + revision loop across 3 CLIs:
-- codex  : review (gpt-5.3-codex, reasoning=medium)
+- codex  : review (gpt-5.4, reasoning=high)
 - claude : update plan (default model, non-interactive via -p)
 - gemini : review (gemini-3.1-pro-preview)
 
@@ -42,50 +42,24 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path $PSScriptRoot 'lib\AgentCli.psm1') -Force
+
 # =============================================================================
 # CONFIGURATION (edit here first)
 # =============================================================================
 
-# ---- CLI behavior / models ----
-$CliConfig = @{
-  codex = @{
-    # Non-interactive command:
-    # - codex exec [PROMPT]
-    # Model selection:
-    # -m, --model <MODEL>
-    # Reasoning level: not shown in -h output; assume supported via config override:
-    #   -c reasoning.level="medium"  (string parsed as TOML)
-    #
-    # If your codex uses a different dotted key, change it below.
-    ExecArgs = @('exec')
-    ModelArgs = { param($modelName) @('--model', $modelName) }
-    ReasoningArgs = { param($level) @('--config', "reasoning.level=`"$level`"") } # change key if needed
-    DefaultModel = 'gpt-5.4'
-    DefaultReasoning = 'heigh'
-    # Optional safety defaults (you can tweak):
-    ExtraArgs = @() # e.g. @('--sandbox','workspace-write','-a','on-request')
-  }
+function Get-ReviewerModel {
+    param([Parameter(Mandatory)][string]$Tool)
+    switch ($Tool) {
+        'codex'  { 'gpt-5.4' }
+        'gemini' { 'gemini-3.1-pro-preview' }
+        'claude' { $null }   # keep configured default
+    }
+}
 
-  claude = @{
-    # Non-interactive:
-    # -p, --print
-    # Model: --model <model> (we will NOT set by default; uses your configured default)
-    PrintArgs = @('-p')
-    ModelArgs = { param($modelName) @('--model', $modelName) }
-    DefaultModel = $null  # keep default (e.g. Sonnet 4.6)
-    ExtraArgs = @('--no-session-persistence') # keep runs isolated/deterministic in -p mode
-  }
-
-  gemini = @{
-    # Non-interactive:
-    # -p, --prompt "<prompt>"
-    # Model:
-    # -m, --model "<model>"
-    PromptArgs = { param($prompt) @('-p', $prompt) }
-    ModelArgs  = { param($modelName) @('-m', $modelName) }
-    DefaultModel = 'gemini-3.1-pro-preview'
-    ExtraArgs = @() # e.g. @('--approval-mode','plan')
-  }
+function Get-ReviewerReasoning {
+    param([Parameter(Mandatory)][string]$Tool)
+    if ($Tool -eq 'codex') { 'high' } else { $null }
 }
 
 # ---- Review/Update prompt templates ----
@@ -169,179 +143,16 @@ $ReviewText
 # Plan is typically Plan.XXXX.md
 # Reviews saved as Review.XXXX.MODEL.md
 $FileNamePatterns = @{
-  PlanIdRegex = '^(?i)Plan\.(?<id>[^.]+)\.md$'
   ReviewName  = { param($id,$model) "Review.$id.$model.md" }
   LogName     = { param($id) "ReviewLoop.$id.log" }
-}
-
-# ---- Logging ----
-$LogTimestamps = $true
-
-# =============================================================================
-# Helpers
-# =============================================================================
-
-function Resolve-FullPath([string]$Path) {
-  (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
-}
-
-function Set-Utf8ProcessEncoding {
-  $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-  [Console]::InputEncoding = $utf8NoBom
-  [Console]::OutputEncoding = $utf8NoBom
-  $global:OutputEncoding = $utf8NoBom
-}
-
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute]
-function Ensure-Dir([string]$DirPath) {
-  if (-not (Test-Path -LiteralPath $DirPath)) {
-    New-Item -ItemType Directory -Path $DirPath | Out-Null
-  }
-}
-
-function Get-PlanIdFromPath([string]$PlanPath) {
-  $fileName = [IO.Path]::GetFileName($PlanPath)
-  $m = [regex]::Match($fileName, $FileNamePatterns.PlanIdRegex)
-  if ($m.Success) { return $m.Groups['id'].Value }
-  return (Get-Date).ToString('yyyyMMdd-HHmmss')
-}
-
-function Write-AtomicUtf8([string]$Path, [string]$Content) {
-  $dir = Split-Path -Parent $Path
-  Ensure-Dir $dir
-
-  $tmp = Join-Path $dir ("~tmp.{0}.{1}.tmp" -f ([IO.Path]::GetFileName($Path)), ([guid]::NewGuid().ToString('N').Substring(0,8)))
-  [IO.File]::WriteAllText($tmp, $Content, (New-Object System.Text.UTF8Encoding($false)))
-  Move-Item -Force -LiteralPath $tmp -Destination $Path
-}
-
-function Assert-CliExists([string]$CliName) {
-  $cmd = Get-Command $CliName -ErrorAction SilentlyContinue
-  if (-not $cmd) { throw "CLI '$CliName' not found in PATH." }
-}
-
-function Add-LogLine([string]$LogPath, [string]$Line) {
-  if ($LogTimestamps) {
-    $ts = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    Add-Content -LiteralPath $LogPath -Value "[$ts] $Line" -Encoding utf8
-  } else {
-    Add-Content -LiteralPath $LogPath -Value $Line -Encoding utf8
-  }
-}
-
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute]
-function Normalize-Text([object]$Output) {
-  $s = ($Output | Out-String)
-  # Trim only excessive leading/trailing whitespace; keep interior formatting.
-  return $s.Trim()
-}
-
-function Invoke-Cli {
-  <#
-    Invokes one of: claude | codex | gemini
-    Returns: stdout as string (trimmed). Throws on non-zero exit or empty output.
-  #>
-  param(
-    [Parameter(Mandatory)][ValidateSet('claude','codex','gemini')][string]$Tool,
-    [Parameter(Mandatory)][string]$Prompt,
-    [Parameter(Mandatory)][string]$WorkingDir,
-
-    # Optional overrides for model selection:
-    [string]$Model = $null,
-
-    # Optional for codex reasoning:
-    [string]$Reasoning = $null
-  )
-
-  Assert-CliExists $Tool
-  Push-Location $WorkingDir
-  try {
-    $cliArgs = @()
-
-    switch ($Tool) {
-      'codex' {
-        $cfg = $CliConfig.codex
-        $cliArgs += $cfg.ExecArgs
-        $cliArgs += $cfg.ExtraArgs
-
-        $modelToUse = if ($Model) { $Model } else { $cfg.DefaultModel }
-        if ($modelToUse) { $cliArgs += & $cfg.ModelArgs $modelToUse }
-
-        $reasonToUse = if ($Reasoning) { $Reasoning } else { $cfg.DefaultReasoning }
-        if ($reasonToUse) { $cliArgs += & $cfg.ReasoningArgs $reasonToUse }
-
-        # codex exec supports [PROMPT] positional
-        $cliArgs += $Prompt
-      }
-
-      'claude' {
-        $cfg = $CliConfig.claude
-        $cliArgs += $cfg.PrintArgs
-        $cliArgs += $cfg.ExtraArgs
-
-        $modelToUse = if ($Model) { $Model } else { $cfg.DefaultModel }
-        if ($modelToUse) { $cliArgs += & $cfg.ModelArgs $modelToUse }
-
-        # prompt is positional
-        $cliArgs += $Prompt
-      }
-
-      'gemini' {
-        $cfg = $CliConfig.gemini
-        $cliArgs += $cfg.ExtraArgs
-
-        $modelToUse = if ($Model) { $Model } else { $cfg.DefaultModel }
-        if ($modelToUse) { $cliArgs += & $cfg.ModelArgs $modelToUse }
-
-        $cliArgs += & $cfg.PromptArgs $Prompt
-      }
-    }
-
-    $argStr = ($cliArgs -join ' ')
-    if ($argStr.Length -gt 120) { $argStr = $argStr.Substring(0, 117) + '...' }
-    Write-Verbose "Invoking CLI '$Tool' with args: $argStr"
-
-    # codex's npm wrapper (codex.ps1) sets StandardOutputEncoding on the node
-    # process it spawns, which requires stdout to be truly redirected at the OS
-    # level. PowerShell pipeline capture ($out = & tool) doesn't satisfy this,
-    # causing "StandardOutputEncoding is only supported when standard output is
-    # redirected". Workaround: redirect to a temp file (real OS file redirect).
-    if ($Tool -eq 'codex') {
-      $tmpOut = [IO.Path]::GetTempFileName()
-      try {
-        & $Tool @cliArgs > $tmpOut
-        $exit = $LASTEXITCODE
-        $out = Get-Content -LiteralPath $tmpOut -Raw -Encoding utf8
-      } finally {
-        Remove-Item -LiteralPath $tmpOut -ErrorAction SilentlyContinue
-      }
-    } else {
-      $out = & $Tool @cliArgs
-      $exit = $LASTEXITCODE
-    }
-
-    if ($exit -ne 0) {
-      throw "CLI '$Tool' exited with code $exit. Args: $($cliArgs -join ' ')"
-    }
-
-    $text = Normalize-Text $out
-    if ([string]::IsNullOrWhiteSpace($text)) {
-      throw "CLI '$Tool' returned empty output. Args: $($cliArgs -join ' ')"
-    }
-
-    return $text
-  }
-  finally {
-    Pop-Location
-  }
 }
 
 # =============================================================================
 # Main
 # =============================================================================
 
-$RepoRoot = Resolve-FullPath $RepoRoot
-$PlanPath = Resolve-FullPath $PlanPath
+$RepoRoot = Resolve-FullPath -Path $RepoRoot -BasePath (Get-Location).Path -MustExist
+$PlanPath = Resolve-FullPath -Path $PlanPath -BasePath (Get-Location).Path -MustExist
 Set-Utf8ProcessEncoding
 
 if (-not $PlansDir) { $PlansDir = Join-Path $RepoRoot 'docs\plans' }
@@ -375,7 +186,8 @@ foreach ($reviewer in $Reviewers) {
   $reviewPrompt = New-ReviewPrompt -ReviewerModel $reviewer -PlanText $planText
   Add-LogLine $logPath "Invoking reviewer '$reviewer'..."
 
-  $reviewText = Invoke-Cli -Tool $reviewer -Prompt $reviewPrompt -WorkingDir $RepoRoot
+  $reviewText = Invoke-Cli -Tool $reviewer -Prompt $reviewPrompt -WorkingDir $RepoRoot `
+      -Model (Get-ReviewerModel $reviewer) -Reasoning (Get-ReviewerReasoning $reviewer)
 
   $reviewFileName = if ($hasDuplicates) {
     & $FileNamePatterns.ReviewName $planId "R$round.$reviewer"
@@ -391,7 +203,8 @@ foreach ($reviewer in $Reviewers) {
   $updatePrompt = New-UpdatePrompt -PlanModel $PlanModel -PlanPath $PlanPath -ReviewPath $reviewPath -PlanText $planText2 -ReviewText $reviewText
 
   Add-LogLine $logPath "Invoking updater '$PlanModel'..."
-  $updatedPlan = Invoke-Cli -Tool $PlanModel -Prompt $updatePrompt -WorkingDir $RepoRoot
+  $updatedPlan = Invoke-Cli -Tool $PlanModel -Prompt $updatePrompt -WorkingDir $RepoRoot `
+      -Model (Get-ReviewerModel $PlanModel) -Reasoning (Get-ReviewerReasoning $PlanModel)
 
   Write-AtomicUtf8 -Path $PlanPath -Content $updatedPlan
   Add-LogLine $logPath "Updated plan written: $PlanPath"
@@ -405,19 +218,17 @@ Write-Output "Done. Plan updated: $PlanPath. Reviews: $PlansDir\Review.$planId.*
 NOTES / TWEAK POINTS
 
 1) Codex reasoning level:
-   The codex -h output you pasted does not show a direct flag for “reasoning”.
-   This script uses:  codex exec --config reasoning.level="medium"
-   If your codex expects a different dotted config key, change it here:
-     $CliConfig.codex.ReasoningArgs
+   This script uses:  codex exec -c reasoning.level="high"
+   If your codex expects a different dotted config key, change Get-ReviewerReasoning.
 
 2) Change models:
-   - codex:   $CliConfig.codex.DefaultModel
-   - gemini:  $CliConfig.gemini.DefaultModel
-   - claude:  leave null to use your default (Sonnet 4.6 as you said)
+   - codex:   edit Get-ReviewerModel to return a different string for 'codex'
+   - gemini:  edit Get-ReviewerModel to return a different string for 'gemini'
+   - claude:  return $null to use your configured default
 
 3) Safety:
-   If you want “read-only” tool usage for reviewers, add:
-     $CliConfig.codex.ExtraArgs = @('--sandbox','read-only','-a','never')
-     $CliConfig.gemini.ExtraArgs = @('--approval-mode','plan')
-     $CliConfig.claude.ExtraArgs = @('--permission-mode','plan')
+   If you want "read-only" tool usage for reviewers, pass extra args via the
+   Invoke-Cli -ExtraArgs parameter, e.g.:
+     Invoke-Cli ... -ExtraArgs @('--permission-mode','plan')   # claude
+     Invoke-Cli ... -ExtraArgs @('--approval-mode','plan')     # gemini
 #>
