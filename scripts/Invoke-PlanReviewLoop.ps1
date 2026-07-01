@@ -51,7 +51,7 @@ Import-Module (Join-Path $PSScriptRoot 'lib\AgentCli.psm1') -Force
 function Get-ReviewerModel {
     param([Parameter(Mandatory)][string]$Tool)
     switch ($Tool) {
-        'codex'  { 'gpt-5.4' }
+        'codex'  { 'gpt-5.5' }
         'gemini' { 'gemini-3.1-pro-preview' }
         'claude' { $null }   # keep configured default
     }

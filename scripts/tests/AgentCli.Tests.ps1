@@ -131,6 +131,13 @@ Describe 'AgentCli git helpers' {
             $staged.Text.Trim() | Should -BeNullOrEmpty
         } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
     }
+
+    It 'Unstage-PathsIfNeeded tolerates an empty Paths array' {
+        $root = script:New-TempGitRepo
+        try {
+            { Unstage-PathsIfNeeded -RepoRoot $root -Paths @() } | Should -Not -Throw
+        } finally { Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
 }
 
 Describe 'AgentCli Invoke-Cli argument assembly' {

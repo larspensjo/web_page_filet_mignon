@@ -294,7 +294,10 @@ function Assert-CleanWorktree {
 function Unstage-PathsIfNeeded {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][string[]]$Paths
+        # AllowEmptyCollection: callers legitimately pass an empty set (e.g. a fresh
+        # run with no pre-existing artifacts). A Mandatory array otherwise rejects @()
+        # before the body runs, even though "nothing to unstage" is a valid no-op.
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Paths
     )
 
     $staged = @((Invoke-Git -RepoRoot $RepoRoot -Arguments @('diff', '--cached', '--name-only', '--')).Text -split "`r?`n" | Where-Object {
