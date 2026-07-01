@@ -107,6 +107,8 @@ Describe 'Resolve-ShrinkContext preflight' {
                 git init -q | Out-Null
                 git config user.email 'test@example.com' | Out-Null
                 git config user.name 'Test' | Out-Null
+                Set-Content -Path (Join-Path $root 'Cargo.toml') `
+                    -Value "[package]`nname = `"shrinkenv`"`nversion = `"0.1.0`"`nedition = `"2021`"" -Encoding utf8
                 New-Item -ItemType Directory -Path (Join-Path $root 'src') | Out-Null
                 Set-Content -Path (Join-Path $root 'src/big.rs') -Value ('fn foo() {}' * 30) -Encoding utf8
                 git add -A | Out-Null
@@ -132,6 +134,27 @@ Describe 'Resolve-ShrinkContext preflight' {
             { Resolve-ShrinkContext -FilePath (Join-Path $env.Root 'src/big.rs') `
                 -RepoRoot $env.Root -PromptsDir $env.PromptsDir -ArtifactsDir $artifacts } |
                 Should -Not -Throw
+        } finally { Remove-Item -LiteralPath $env.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'resolves CargoRoot to the directory containing the governing Cargo.toml' {
+        $env = script:New-TempShrinkEnv
+        try {
+            $artifacts = Join-Path $env.Root 'artifacts'
+            $ctx = Resolve-ShrinkContext -FilePath (Join-Path $env.Root 'src/big.rs') `
+                -RepoRoot $env.Root -PromptsDir $env.PromptsDir -ArtifactsDir $artifacts
+            $ctx.CargoRoot | Should -Be ([System.IO.Path]::GetFullPath($env.Root).TrimEnd('\', '/'))
+        } finally { Remove-Item -LiteralPath $env.Root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'throws a clear error when the target file has no governing Cargo.toml' {
+        $env = script:New-TempShrinkEnv
+        try {
+            Remove-Item -LiteralPath (Join-Path $env.Root 'Cargo.toml') -Force
+            $artifacts = Join-Path $env.Root 'artifacts'
+            { Resolve-ShrinkContext -FilePath (Join-Path $env.Root 'src/big.rs') `
+                -RepoRoot $env.Root -PromptsDir $env.PromptsDir -ArtifactsDir $artifacts } |
+                Should -Throw -ExpectedMessage '*Could not locate a Cargo.toml*'
         } finally { Remove-Item -LiteralPath $env.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 

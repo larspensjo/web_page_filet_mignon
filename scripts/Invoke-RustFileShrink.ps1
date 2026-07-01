@@ -44,7 +44,8 @@ function Test-ShrinkRecommendation {
     if ($decision -notin @('extract', 'stop')) { throw "Invalid decision: '$decision'" }
 
     $confidence = [string](Get-ObjectProperty -Object $Recommendation -Name 'confidence' -Default '')
-    if ($confidence -notin @('low', 'medium', 'high')) { throw "Invalid confidence: '$confidence'" }
+    if ($confidence -notin @('', 'low', 'medium', 'high')) { Write-Warning "Unexpected confidence value: '$confidence'" }
+    elseif ($confidence -eq '') { Write-Warning "Recommendation missing optional 'confidence' field." }
 
     foreach ($req in @('reason', 'next_step_summary')) {
         if ([string]::IsNullOrWhiteSpace([string](Get-ObjectProperty -Object $Recommendation -Name $req -Default ''))) {
@@ -192,6 +193,21 @@ function Get-ShrinkArtifactGlob {
     return "Shrink.$Slug.*"
 }
 
+function Resolve-ShrinkCargoRoot {
+    param([Parameter(Mandatory)][string]$FileFullPath)
+
+    $dir = Split-Path -Parent $FileFullPath
+    Push-Location $dir
+    try {
+        $manifest = (& cargo locate-project --message-format plain 2>$null | Out-String).Trim()
+        $code = $LASTEXITCODE
+    } finally { Pop-Location }
+    if ($code -ne 0 -or [string]::IsNullOrWhiteSpace($manifest)) {
+        throw "Could not locate a Cargo.toml governing '$FileFullPath' (cargo locate-project failed)."
+    }
+    return (Split-Path -Parent $manifest)
+}
+
 function Resolve-ShrinkContext {
     param(
         [Parameter(Mandatory)][string]$FilePath,
@@ -211,6 +227,7 @@ function Resolve-ShrinkContext {
 
     $relPath = Get-GitPath -RepoRoot $repoFull -Path $fileFull
     $slug = New-SafeFileSegment -Text ([System.IO.Path]::GetFileNameWithoutExtension($fileFull))
+    $cargoRoot = Resolve-ShrinkCargoRoot -FileFullPath $fileFull
 
     $recSchemaPath = Join-Path $PromptsDir 'shrink-recommendation.schema.json'
     $stepSchemaPath = Join-Path $PromptsDir 'phase-cycle-step-result.schema.json'
@@ -225,6 +242,7 @@ function Resolve-ShrinkContext {
 
     [pscustomobject]@{
         RepoRoot         = $repoFull
+        CargoRoot        = $cargoRoot
         FilePath         = $fileFull
         FileRelPath      = $relPath
         Slug             = $slug
@@ -241,7 +259,7 @@ function Resolve-ShrinkContext {
 
 function Invoke-ShrinkGate {
     param(
-        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$CargoRoot,
         [bool]$RunTests = $false
     )
 
@@ -252,7 +270,7 @@ function Invoke-ShrinkGate {
     if ($RunTests) { $commands += @{ Name = 'cargo test'; Args = @('test') } }
 
     foreach ($c in $commands) {
-        Push-Location $RepoRoot
+        Push-Location $CargoRoot
         try {
             $tmpOut = [System.IO.Path]::GetTempFileName()
             & cargo @($c.Args) > $tmpOut 2>&1
@@ -295,6 +313,7 @@ function Invoke-RustFileShrinkMain {
     if ($PreflightOnly) {
         Write-Host 'Preflight OK. No artifacts written, no AI steps invoked.'
         Write-Host "  Repo:      $($ctx.RepoRoot)"
+        Write-Host "  CargoRoot: $($ctx.CargoRoot)"
         Write-Host "  File:      $($ctx.FileRelPath)"
         Write-Host "  Slug:      $($ctx.Slug)"
         Write-Host "  Artifacts: $($ctx.ArtifactsDir) (glob $($ctx.ArtifactGlob))"
@@ -396,7 +415,7 @@ function Invoke-RustFileShrinkMain {
 
         # --- Script gate: fmt, then clippy (+ test) ---
         try {
-            Invoke-ShrinkGate -RepoRoot $ctx.RepoRoot -RunTests:$RunTests.IsPresent
+            Invoke-ShrinkGate -CargoRoot $ctx.CargoRoot -RunTests:$RunTests.IsPresent
         } catch {
             $failedCandidate = (Get-ObjectProperty -Object $candidate -Name 'name' -Default '?')
             $haltReason = "gate failure (iter $n): $($_.Exception.Message)"
