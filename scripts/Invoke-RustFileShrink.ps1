@@ -421,8 +421,19 @@ function Invoke-RustFileShrinkMain {
         $codeChanged = @(Get-ShrinkChangedPaths -RepoRoot $ctx.RepoRoot | Where-Object {
             -not $_.StartsWith($artifactPrefix, [System.StringComparison]::OrdinalIgnoreCase)
         })
+        # Files staged by prior iterations are allowed to be modified (e.g., adding
+        # re-exports to a previously extracted module). These are safe to permit because
+        # the script requires a clean worktree on entry, so all staged files are ours.
+        $priorStagedPaths = @(
+            (Invoke-Git -RepoRoot $ctx.RepoRoot -Arguments @('diff', '--cached', '--name-only', '--')).Text `
+            -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { ConvertTo-GitStatusPathKey -RepoRoot $ctx.RepoRoot -Path $_ } |
+            Where-Object { -not $_.StartsWith($artifactPrefix, [System.StringComparison]::OrdinalIgnoreCase) }
+        )
         $violations = @($codeChanged | Where-Object {
-            -not (Test-ShrinkPathAllowed -Path $_ -TargetRelPath $ctx.FileRelPath -DestinationRelPath $destRel)
+            $p = $_
+            -not (Test-ShrinkPathAllowed -Path $p -TargetRelPath $ctx.FileRelPath -DestinationRelPath $destRel) -and
+            $p -notin $priorStagedPaths
         })
         if ($violations.Count -gt 0) {
             $failedCandidate = (Get-ObjectProperty -Object $candidate -Name 'name' -Default '?')
