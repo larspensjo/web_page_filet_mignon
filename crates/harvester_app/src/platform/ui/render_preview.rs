@@ -1,6 +1,6 @@
 use commanductui::{ChartDataPacket, ChartLineData, ChartLineEmphasis};
 use commanductui::{PlatformCommand, WindowId};
-use engine_logging::engine_warn;
+use engine_logging::{engine_debug, engine_warn};
 use harvester_core::{AppViewModel, TrendsTabView};
 
 use super::constants::*;
@@ -116,7 +116,7 @@ pub(super) fn render_preview_section(
         .as_deref()
         .unwrap_or(SUMMARY_EMPTY_STATE_MARKDOWN);
     if tree_state.preview.prev_preview_text.as_deref() != Some(summary_markdown) {
-        engine_warn!(
+        engine_debug!(
             "[render] VIEWER_PREVIEW content changed, markdown_len={}",
             summary_markdown.len()
         );
@@ -150,7 +150,7 @@ pub(super) fn render_preview_section(
         .as_deref()
         .unwrap_or_default();
     if tree_state.preview.prev_triage_text.as_deref() != Some(triage_markdown) {
-        engine_warn!(
+        engine_debug!(
             "[render] VIEWER_TRIAGE content changed, markdown_len={}",
             triage_markdown.len()
         );
@@ -170,7 +170,7 @@ pub(super) fn render_preview_section(
         .as_deref()
         .unwrap_or_default();
     if tree_state.preview.prev_briefing_text.as_deref() != Some(briefing_markdown) {
-        engine_warn!(
+        engine_debug!(
             "[render] VIEWER_BRIEFING content changed, markdown_len={}",
             briefing_markdown.len()
         );
@@ -191,7 +191,7 @@ pub(super) fn render_preview_section(
         .as_deref()
         .unwrap_or("No poll data yet.");
     if tree_state.preview.prev_poll_stats_text.as_deref() != Some(poll_stats_text) {
-        engine_warn!(
+        engine_debug!(
             "[render] VIEWER_POLL_STATS content changed, markdown_len={}",
             poll_stats_text.len()
         );
