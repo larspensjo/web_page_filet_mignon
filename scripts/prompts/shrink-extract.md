@@ -8,6 +8,10 @@ Task:
 
 Repo and git rules:
 - Do NOT commit. Do NOT run `git add` — the calling script does the staging.
+- Do NOT create scratch files, helper scripts, or any files other than the destination
+  module and the source file(s) you rewire. The script stages changes with a strict path
+  allowlist and will HALT if it sees an unexpected file. If you use a temporary script to
+  move code, delete it before you finish so the worktree contains only the extraction.
 - The script runs `cargo fmt` and `cargo clippy --all-targets -- -D warnings` after you finish;
   that is the authoritative gate. You may run cargo to self-check, but the script decides.
 - Respect AGENTS.md and the repository architecture rules.

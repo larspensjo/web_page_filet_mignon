@@ -13,7 +13,7 @@ param(
     [string]$PromptsDir,
     [string]$ArtifactsDir,
     [ValidateRange(1, 100)][int]$MaxIterations = 10,
-    [ValidateRange(1, 1000000)][int]$MinLines = 300,
+    [ValidateRange(1, 1000000)][int]$MinLines = 500,
     [string]$RecommendModel = 'opus',
     [string]$ExtractModel = 'sonnet',
     [switch]$RunTests,
@@ -29,7 +29,10 @@ function Get-FileLineCount {
     param([Parameter(Mandatory)][string]$Path)
     $text = Read-TextFile $Path
     if ([string]::IsNullOrEmpty($text)) { return 0 }
-    return @($text -split "`r?`n").Count
+    $parts = @($text -split "`r?`n")
+    # A trailing newline yields one empty final element; don't count it as a line.
+    if ($parts[-1] -eq '') { return $parts.Count - 1 }
+    return $parts.Count
 }
 
 function Test-ShrinkRecommendation {
@@ -117,6 +120,16 @@ function Test-ShrinkPathAllowed {
     $dest = & $norm $DestinationRelPath
 
     if ($key -eq $target -or $key -eq $dest) { return $true }
+
+    # Files inside the target's (or destination's) own submodule directory are part of
+    # the module being shrunk — e.g. a sibling extracted and committed by a previous
+    # run whose imports must be re-pointed when shared helpers move again.
+    foreach ($anchor in @($target, $dest)) {
+        if ($anchor.EndsWith('.rs', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $moduleDir = $anchor.Substring(0, $anchor.Length - 3)
+            if ($key.StartsWith("$moduleDir/", [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+    }
 
     $wiringNames = @('mod.rs', 'lib.rs', 'main.rs')
     $leaf = Split-Path -Leaf $key

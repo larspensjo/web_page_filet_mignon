@@ -29,13 +29,45 @@ Describe 'Test-ShrinkRecommendation' {
         $r = [pscustomobject]@{ decision='maybe'; reason='x'; next_step_summary='y'; confidence='high' }
         { Test-ShrinkRecommendation -Recommendation $r } | Should -Throw
     }
-    It 'rejects a bad confidence value' {
+    It 'warns but does not throw on an unexpected confidence value' {
         $r = [pscustomobject]@{ decision='stop'; reason='x'; next_step_summary='y'; confidence='maybe' }
-        { Test-ShrinkRecommendation -Recommendation $r } | Should -Throw
+        Test-ShrinkRecommendation -Recommendation $r -WarningVariable warnings -WarningAction SilentlyContinue
+        @($warnings).Count | Should -BeGreaterThan 0
+        [string]$warnings[0] | Should -Match 'Unexpected confidence'
     }
     It 'rejects an unknown top-level field' {
         $r = [pscustomobject]@{ decision='stop'; reason='x'; next_step_summary='y'; confidence='high'; extra='nope' }
         { Test-ShrinkRecommendation -Recommendation $r } | Should -Throw
+    }
+}
+
+Describe 'Get-FileLineCount' {
+    BeforeAll {
+        $script:TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("shrinklc-{0}" -f ([guid]::NewGuid().ToString('N')))
+        New-Item -ItemType Directory -Path $script:TmpDir | Out-Null
+        function script:New-CountFile {
+            param([string]$Content)
+            $p = Join-Path $script:TmpDir ("f-{0}.rs" -f ([guid]::NewGuid().ToString('N')))
+            [System.IO.File]::WriteAllText($p, $Content)
+            return $p
+        }
+    }
+    AfterAll { Remove-Item -LiteralPath $script:TmpDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'returns 0 for an empty file' {
+        Get-FileLineCount -Path (script:New-CountFile -Content '') | Should -Be 0
+    }
+    It 'counts a file without a trailing newline' {
+        Get-FileLineCount -Path (script:New-CountFile -Content "a`nb") | Should -Be 2
+    }
+    It 'does not count the trailing newline as an extra line (LF)' {
+        Get-FileLineCount -Path (script:New-CountFile -Content "a`nb`n") | Should -Be 2
+    }
+    It 'does not count the trailing newline as an extra line (CRLF)' {
+        Get-FileLineCount -Path (script:New-CountFile -Content "a`r`nb`r`n") | Should -Be 2
+    }
+    It 'counts interior blank lines' {
+        Get-FileLineCount -Path (script:New-CountFile -Content "a`n`nb`n") | Should -Be 3
     }
 }
 
@@ -81,6 +113,15 @@ Describe 'Test-ShrinkPathAllowed' {
     }
     It 'rejects an unrelated file' {
         Test-ShrinkPathAllowed -Path 'crates/y/src/other.rs' -TargetRelPath 'crates/x/src/big.rs' -DestinationRelPath 'crates/x/src/parser.rs' | Should -BeFalse
+    }
+    It 'allows a sibling inside the target''s own submodule directory (prior-run extraction)' {
+        Test-ShrinkPathAllowed -Path 'crates/x/src/big/report.rs' -TargetRelPath 'crates/x/src/big.rs' -DestinationRelPath 'crates/x/src/big/telemetry.rs' | Should -BeTrue
+    }
+    It 'allows a nested file under the destination''s submodule directory' {
+        Test-ShrinkPathAllowed -Path 'crates/x/src/parser/tokens.rs' -TargetRelPath 'crates/x/src/big.rs' -DestinationRelPath 'crates/x/src/parser.rs' | Should -BeTrue
+    }
+    It 'rejects a file whose directory merely shares the target''s name prefix' {
+        Test-ShrinkPathAllowed -Path 'crates/x/src/bigger/other.rs' -TargetRelPath 'crates/x/src/big.rs' -DestinationRelPath 'crates/x/src/big/telemetry.rs' | Should -BeFalse
     }
 }
 
