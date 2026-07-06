@@ -2004,3 +2004,11 @@ Type: Implementation
 Context: `Invoke-PlanPhaseCycle.ps1` already used high Codex reasoning for review/fix steps, but implementation defaulted to medium and Claude model calls did not receive an effort setting.
 Change: Added Claude `-Reasoning` support in `AgentCli` by mapping it to `claude --effort`, changed the phase-cycle defaults so Claude and all Codex steps use `high`, and preflight now checks Claude advertises `--effort`.
 Refs: scripts/Invoke-PlanPhaseCycle.ps1, scripts/lib/AgentCli.psm1, scripts/tests/AgentCli.Tests.ps1
+
+## 2026-07-06 - Preserve Rust shrink gate failures
+Type: Bug Fix
+Context: `Invoke-RustFileShrink.ps1` restored the worktree when the post-extraction `cargo fmt`/`cargo clippy` gate failed, which discarded the failed candidate edits needed for diagnosis.
+Change: Gate failures now halt the shrink loop without restoring the checkpoint, leave the failed candidate changes in the worktree, and log/warn that the edits were preserved. Other failed editable steps still restore to the last checkpoint.
+Lessons Learned: Verification failures are different from malformed tool output; the edited tree is the primary debugging artifact.
+Prevention: Added a Pester regression test that mocks a Clippy gate failure and asserts `Restore-ShrinkCheckpoint` is not invoked.
+Refs: scripts/Invoke-RustFileShrink.ps1, scripts/tests/InvokeRustFileShrink.Tests.ps1

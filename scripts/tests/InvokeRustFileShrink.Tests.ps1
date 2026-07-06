@@ -232,3 +232,66 @@ Describe 'Resolve-ShrinkContext preflight' {
         } finally { Remove-Item -LiteralPath $env.Root -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
+
+Describe 'Invoke-RustFileShrinkMain gate failures' {
+    BeforeEach {
+        $script:FilePath = 'src/big.rs'
+        $script:RepoRoot = 'C:\repo'
+        $script:PromptsDir = ''
+        $script:ArtifactsDir = ''
+        $script:MaxIterations = 1
+        $script:MinLines = 1
+        $script:RecommendModel = 'opus'
+        $script:ExtractModel = 'sonnet'
+        $script:RunTests = [System.Management.Automation.SwitchParameter]::new($false)
+        $script:PreflightOnly = [System.Management.Automation.SwitchParameter]::new($false)
+
+        $script:CliCall = 0
+        $script:MockCtx = [pscustomobject]@{
+            RepoRoot       = 'C:\repo'
+            CargoRoot      = 'C:\repo'
+            FilePath       = 'C:\repo\src\big.rs'
+            FileRelPath    = 'src/big.rs'
+            Slug           = 'big'
+            PromptsDir     = 'C:\repo\prompts'
+            ArtifactsDir   = 'C:\repo\docs\plans'
+            ArtifactGlob   = 'Shrink.big.*'
+            LogPath        = 'C:\repo\docs\plans\Shrink.big.log'
+            RecSchemaText  = '{}'
+            StepSchemaText = '{}'
+        }
+
+        Mock Set-Utf8ProcessEncoding {}
+        Mock Resolve-ShrinkContext { $script:MockCtx }
+        Mock Assert-CliExists {}
+        Mock Assert-HelpContains {}
+        Mock Write-Host {}
+        Mock Write-Warning {}
+        Mock Get-ChildItem { @() }
+        Mock Get-WorktreeStatusText { '' }
+        Mock Invoke-ShrinkCleanArtifacts {}
+        Mock Write-AtomicUtf8 {}
+        Mock Add-LogLine {}
+        Mock Read-TextFile { 'fn parser() {}' }
+        Mock Get-FileLineCount { 1000 }
+        Mock Expand-PromptTemplate { 'prompt' }
+        Mock Invoke-Cli {
+            $script:CliCall++
+            if ($script:CliCall -eq 1) {
+                return '{"decision":"extract","reason":"big","next_step_summary":"extract parser","candidate":{"name":"parser","description":"d","suggested_destination":"src/parser.rs","estimated_lines":50},"confidence":"high"}'
+            }
+            return '{"status":"success","summary":"ok"}'
+        }
+        Mock Invoke-ShrinkGate { throw "Gate failed: cargo clippy exited 101.`nclippy output" }
+        Mock Restore-ShrinkCheckpoint {}
+    }
+
+    It 'leaves failed candidate changes in the worktree when clippy fails' {
+        Invoke-RustFileShrinkMain | Out-Null
+
+        Should -Invoke Restore-ShrinkCheckpoint -Times 0 -Exactly
+        Should -Invoke Add-LogLine -ParameterFilter {
+            $Line -eq 'Gate failed; leaving failed candidate changes in the worktree for inspection.'
+        } -Times 1 -Exactly
+    }
+}

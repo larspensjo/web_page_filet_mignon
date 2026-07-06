@@ -344,6 +344,7 @@ function Invoke-RustFileShrinkMain {
     $checkpoints = 0
     $haltReason = $null
     $failedCandidate = $null
+    $failedCandidateChangesKept = $false
 
     for ($n = 1; $n -le $MaxIterations; $n++) {
         $lineCount = Get-FileLineCount -Path $ctx.FilePath
@@ -432,7 +433,8 @@ function Invoke-RustFileShrinkMain {
         } catch {
             $failedCandidate = (Get-ObjectProperty -Object $candidate -Name 'name' -Default '?')
             $haltReason = "gate failure (iter $n): $($_.Exception.Message)"
-            Restore-ShrinkCheckpoint -RepoRoot $ctx.RepoRoot -ArtifactGlob $ctx.ArtifactGlob
+            $failedCandidateChangesKept = $true
+            Add-LogLine -LogPath $ctx.LogPath -Line 'Gate failed; leaving failed candidate changes in the worktree for inspection.'
             break
         }
 
@@ -503,13 +505,22 @@ function Invoke-RustFileShrinkMain {
         Assert-NoPartiallyStagedFiles -RepoRoot $ctx.RepoRoot -ExcludedPaths $artifactRelPaths
         $commitMessage = New-ShrinkCommitMessage -TargetRelPath $ctx.FileRelPath -Extractions $extractions
         Write-Host "Shrink complete: $checkpoints extraction(s) staged. Halt reason: $haltReason"
-        if ($failedCandidate) { Write-Warning "Halted after a failed candidate: $failedCandidate (its changes were restored)." }
+        if ($failedCandidate) {
+            if ($failedCandidateChangesKept) {
+                Write-Warning "Halted after a failed candidate: $failedCandidate (its changes were left in the worktree)."
+            } else {
+                Write-Warning "Halted after a failed candidate: $failedCandidate (its changes were restored)."
+            }
+        }
         Write-Host ''
         Write-Host 'Suggested git commit message (nothing was committed):'
         Write-Host $commitMessage
         Add-LogLine -LogPath $ctx.LogPath -Line "Suggested commit subject: $(($commitMessage -split "`n")[0])"
     } else {
         Write-Host "No staged extraction produced. Halt reason: $haltReason"
+        if ($failedCandidate -and $failedCandidateChangesKept) {
+            Write-Warning "Halted after a failed candidate: $failedCandidate (its changes were left in the worktree)."
+        }
     }
     Add-LogLine -LogPath $ctx.LogPath -Line "Completed: $(Get-Date)"
 }
