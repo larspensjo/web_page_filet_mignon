@@ -541,6 +541,7 @@ function Get-CliArgs {
         'claude' {
             $cliArgs += @('-p', '--no-session-persistence', '--input-format', 'text')
             if (-not [string]::IsNullOrWhiteSpace($Model))          { $cliArgs += @('--model', $Model) }
+            if (-not [string]::IsNullOrWhiteSpace($Reasoning))      { $cliArgs += @('--effort', $Reasoning) }
             if (-not [string]::IsNullOrWhiteSpace($PermissionMode)) { $cliArgs += @('--permission-mode', $PermissionMode) }
             if ($AllowedTools.Count -gt 0)                          { $cliArgs += @('--allowedTools') + $AllowedTools }
             $cliArgs += $ExtraArgs

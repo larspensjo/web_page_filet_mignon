@@ -1998,3 +1998,9 @@ Type: Implementation
 Context: Phase 4 of `Plan.MultiStepBriefingStream.md` needed the already-added streaming reducer state to surface in the desktop UI: Generate should restart an active stream, and `Next item` should append one synthesized story at a time.
 Change: Added `next_item_enabled` to `AppViewModel`, changed the Generate gate to `BriefingSession::can_generate()`, and added a `Next item` footer button routed to `Msg::NextBriefingItemClicked` with dynamic enablement. The stream uses a frozen full-base-corpus snapshot including duplicates, not `archive_final_selection`. The cache-prefix invariant remains enforced by the shared `BRIEFING_STREAM_SYSTEM_PREFIX`, the byte-identical rendered-system test, and deterministic prompt-context ordering; first-Generate dispatch waits for prompt context/template/model hydration before resuming.
 Refs: crates/harvester_core/src/view_model.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/update/tests/briefing_stream_tests.rs, crates/harvester_app/src/platform/ui/groups/bottom_buttons.rs, crates/harvester_app/src/platform/ui/render_tests.rs, docs/plans/Plan.MultiStepBriefingStream.md
+
+## 2026-07-05 - Phase-cycle agents default to high reasoning
+Type: Implementation
+Context: `Invoke-PlanPhaseCycle.ps1` already used high Codex reasoning for review/fix steps, but implementation defaulted to medium and Claude model calls did not receive an effort setting.
+Change: Added Claude `-Reasoning` support in `AgentCli` by mapping it to `claude --effort`, changed the phase-cycle defaults so Claude and all Codex steps use `high`, and preflight now checks Claude advertises `--effort`.
+Refs: scripts/Invoke-PlanPhaseCycle.ps1, scripts/lib/AgentCli.psm1, scripts/tests/AgentCli.Tests.ps1

@@ -153,10 +153,11 @@ Describe 'AgentCli Invoke-Cli argument assembly' {
     }
     It 'claude args include print/stdin flags, model, permission-mode and allowedTools' {
         $args = Get-CliArgs -Tool 'claude' -WorkingDir 'C:\repo' -Model 'opus' `
-            -PermissionMode 'acceptEdits' -AllowedTools @('Edit', 'Write') -OutputLastMessagePath 'C:\last.txt'
+            -Reasoning 'high' -PermissionMode 'acceptEdits' -AllowedTools @('Edit', 'Write') -OutputLastMessagePath 'C:\last.txt'
         ($args -join ' ') | Should -Match '-p'
         ($args -join ' ') | Should -Match '--input-format text'
         ($args -join ' ') | Should -Match '--model opus'
+        ($args -join ' ') | Should -Match '--effort high'
         ($args -join ' ') | Should -Match '--permission-mode acceptEdits'
         ($args -join ' ') | Should -Match '--allowedTools Edit Write'
         # claude has no native last-message flag; Invoke-Cli persists stdout instead.

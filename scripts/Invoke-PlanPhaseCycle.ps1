@@ -43,8 +43,8 @@ Recovery:
 
 CLI assumptions:
   The script preflights the required advertised flags in `claude --help` and
-  `codex exec --help`. The Codex reasoning config key is still an external
-  convention: `reasoning.level`.
+  `codex exec --help`. Claude reasoning maps to `--effort`; the Codex reasoning
+  config key is still an external convention: `reasoning.level`.
 #>
 
 [CmdletBinding()]
@@ -69,8 +69,9 @@ param(
     [string]$CodexImplementationModel = 'gpt-5.4-mini',
     [string]$CodexStagedReviewFixModel = 'gpt-5.5',
 
+    [string]$ClaudeReasoning = 'high',
     [string]$CodexPlanReviewReasoning = 'high',
-    [string]$CodexImplementationReasoning = 'medium',
+    [string]$CodexImplementationReasoning = 'high',
     [string]$CodexStagedReviewFixReasoning = 'high',
 
     [ValidateSet('read-only', 'workspace-write', 'danger-full-access')]
@@ -123,6 +124,7 @@ function Assert-CliFlagSupport {
         '--no-session-persistence',
         '--input-format',
         '--model',
+        '--effort',
         '--permission-mode'
     )
 
@@ -396,12 +398,13 @@ function Invoke-ClaudePlanRewrite {
         [Parameter(Mandatory)][hashtable]$Variables,
         [Parameter(Mandatory)][string]$LogPath,
         [Parameter(Mandatory)][string]$StepName,
-        [Parameter(Mandatory)][string]$Model
+        [Parameter(Mandatory)][string]$Model,
+        [Parameter(Mandatory)][string]$Reasoning
     )
 
     $prompt = Expand-PromptTemplate -PromptsDir $script:PromptsDir -Name $PromptName -Variables $Variables
     $output = Invoke-Cli -Tool 'claude' -Prompt $prompt -WorkingDir $script:RepoRoot -Model $Model -PermissionMode 'plan' `
-        -Sandbox $null -Reasoning $null -OutputLastMessagePath $null -OutputSchemaPath $null
+        -Sandbox $null -Reasoning $Reasoning -OutputLastMessagePath $null -OutputSchemaPath $null
 
     try {
         $updatedPlan = Extract-MarkedSection -Text $output -SectionName 'UPDATED PLAN'
@@ -572,6 +575,7 @@ $script:PromptsDir = $PromptsDir
 
 $script:ClaudeModel = $ClaudeModel
 $script:ClaudePlanElaborationModel = $ClaudePlanElaborationModel
+$script:ClaudeReasoning = $ClaudeReasoning
 $script:Phase = $Phase
 $script:MaxInlineDiffChars = $MaxInlineDiffChars
 $script:PlanId = Get-PlanIdFromPath $script:PlanPath
@@ -650,9 +654,13 @@ SkipPlanning: $($SkipPlanning.IsPresent)
 PreflightOnly: $($PreflightOnly.IsPresent)
 ClaudeModel: $ClaudeModel
 ClaudePlanElaborationModel: $ClaudePlanElaborationModel
+ClaudeReasoning: $ClaudeReasoning
 CodexPlanReviewModel: $CodexPlanReviewModel
 CodexImplementationModel: $CodexImplementationModel
 CodexStagedReviewFixModel: $CodexStagedReviewFixModel
+CodexPlanReviewReasoning: $CodexPlanReviewReasoning
+CodexImplementationReasoning: $CodexImplementationReasoning
+CodexStagedReviewFixReasoning: $CodexStagedReviewFixReasoning
 CodexPlanReviewSandbox: $CodexPlanReviewSandbox
 
 "@
@@ -680,7 +688,7 @@ if ($SkipPlanning) {
         PLAN_PATH = Get-GitPath -RepoRoot $script:RepoRoot -Path $script:PlanPath
         PLAN_TEXT = $planText
         PHASE = $Phase
-    } -LogPath $logPath -StepName 'Step1.PreparePlan' -Model $script:ClaudePlanElaborationModel | Out-Null
+    } -LogPath $logPath -StepName 'Step1.PreparePlan' -Model $script:ClaudePlanElaborationModel -Reasoning $script:ClaudeReasoning | Out-Null
 
     Write-Step -Number 2 -Message 'Codex reviews the selected phase plan.' -LogPath $logPath
     $planText = Read-TextFile $script:PlanPath
@@ -704,7 +712,7 @@ if ($SkipPlanning) {
             PLAN_TEXT = $planText
             PHASE = $Phase
             REVIEW_JSON = $planReviewJson
-        } -LogPath $logPath -StepName 'Step3.ApplyPlanReview' -Model $script:ClaudeModel | Out-Null
+        } -LogPath $logPath -StepName 'Step3.ApplyPlanReview' -Model $script:ClaudeModel -Reasoning $script:ClaudeReasoning | Out-Null
     } else {
         $skipReason = 'Skipped Step 3 because the plan review had no blocker, high, or medium findings.'
         Write-Host "  $skipReason"
@@ -741,7 +749,7 @@ $stagedReview = Invoke-ReviewJsonStep -Tool 'claude' -PromptName 'phase-cycle-re
     PHASE = $Phase
     STAGED_DIFF_CONTEXT = $stagedDiffContext
     REVIEW_SCHEMA = $reviewSchemaText
-} -ArtifactPath $stagedReviewPath -LogPath $logPath -Model $ClaudeModel -Reasoning $null `
+} -ArtifactPath $stagedReviewPath -LogPath $logPath -Model $ClaudeModel -Reasoning $script:ClaudeReasoning `
     -Sandbox $null -OutputSchemaPath $null
 
 Write-Step -Number 6 -Message 'Codex applies relevant staged-review findings and proposes a commit message.' -LogPath $logPath
