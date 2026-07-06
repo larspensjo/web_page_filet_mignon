@@ -645,12 +645,8 @@ impl BriefingSession {
                 format!("Summarizing {completed}/{total} articles...")
             }
             BriefingPhase::GeneratingBriefing => "Generating executive summary...".to_string(),
-            BriefingPhase::Streaming => {
-                if self.next_item_request_id.is_some() {
-                    "Fetching next item...".to_string()
-                } else {
-                    return None;
-                }
+            BriefingPhase::Streaming if self.next_item_request_id.is_some() => {
+                "Fetching next item...".to_string()
             }
             BriefingPhase::Failed { ref reason } => format!("Briefing failed: {reason}"),
             _ => return None,
