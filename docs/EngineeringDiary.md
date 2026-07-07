@@ -2012,3 +2012,11 @@ Change: Gate failures now halt the shrink loop without restoring the checkpoint,
 Lessons Learned: Verification failures are different from malformed tool output; the edited tree is the primary debugging artifact.
 Prevention: Added a Pester regression test that mocks a Clippy gate failure and asserts `Restore-ShrinkCheckpoint` is not invoked.
 Refs: scripts/Invoke-RustFileShrink.ps1, scripts/tests/InvokeRustFileShrink.Tests.ps1
+
+## 2026-07-06 - Suppress AgentCli import verb warning
+Type: Bug Fix
+Context: `Invoke-RustFileShrink.ps1` imported `AgentCli.psm1` without disabling PowerShell command name checks, so users saw an unapproved-verb warning for shared helper exports even though the warning was not relevant to running the shrink command.
+Change: Added `-DisableNameChecking` to the shrink script's `Import-Module` call, matching the existing phase-cycle import behavior, and applied the same suppression to the remaining script/test `AgentCli` imports.
+Lessons Learned: Shared PowerShell helper modules may intentionally export internal automation verbs that are not user-facing command names; script entry points should suppress name-check noise at import boundaries when the warning does not help the caller.
+Prevention: Use `Import-Module ... -DisableNameChecking` for `AgentCli.psm1` imports from automation scripts unless the import is specifically validating public cmdlet discoverability.
+Refs: scripts/Invoke-RustFileShrink.ps1, scripts/Invoke-PlanReviewLoop.ps1, scripts/tests/AgentCli.Tests.ps1, scripts/tests/InvokeRustFileShrink.Tests.ps1, scripts/lib/AgentCli.psm1

@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 BeforeAll {
     $script:ModulePath = Join-Path $PSScriptRoot '..\lib\AgentCli.psm1'
     Get-Module -Name 'AgentCli' -All | Remove-Module -Force -ErrorAction SilentlyContinue
-    Import-Module $script:ModulePath -Force
+    Import-Module $script:ModulePath -Force -DisableNameChecking
 }
 
 Describe 'AgentCli module' {

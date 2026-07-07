@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 BeforeAll {
     $script:ScriptPath = Join-Path $PSScriptRoot '..\Invoke-RustFileShrink.ps1'
     Get-Module -Name 'AgentCli' -All | Remove-Module -Force -ErrorAction SilentlyContinue
-    Import-Module (Join-Path $PSScriptRoot '..\lib\AgentCli.psm1') -Force
+    Import-Module (Join-Path $PSScriptRoot '..\lib\AgentCli.psm1') -Force -DisableNameChecking
     . $script:ScriptPath -FilePath 'placeholder-for-dot-source'   # dot-source: defines functions, does NOT run main (guarded)
 }
 

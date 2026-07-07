@@ -23,7 +23,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'lib\AgentCli.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib\AgentCli.psm1') -Force -DisableNameChecking
 
 function Get-FileLineCount {
     param([Parameter(Mandatory)][string]$Path)

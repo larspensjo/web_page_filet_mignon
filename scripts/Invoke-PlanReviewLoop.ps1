@@ -42,7 +42,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'lib\AgentCli.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'lib\AgentCli.psm1') -Force -DisableNameChecking
 
 # =============================================================================
 # CONFIGURATION (edit here first)
