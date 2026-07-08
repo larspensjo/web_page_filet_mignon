@@ -16,12 +16,15 @@ pub const BRIEFING_STREAM_SYSTEM_PREFIX: &str = concat!(
 
 pub const BRIEFING_EXECUTIVE_SUMMARY_PROMPT: PromptTemplate = PromptTemplate {
     id: PromptId::BriefingExecutiveSummary,
-    version: 1,
+    version: 2,
     system_template: BRIEFING_STREAM_SYSTEM_PREFIX,
     user_template: concat!(
-        "Write only the executive summary for this briefing: a concise high-level synthesis ",
-        "of the most important business-significant changes in the coverage window. ",
-        "Do not list individual stories. ",
+        "Write only the executive summary for this briefing: a short orientation paragraph ",
+        "(2-4 sentences, 80 words or fewer) capturing the overall picture of the coverage ",
+        "window. Individual stories will be presented separately after this summary, so stay ",
+        "at the level of trends and themes: do not list individual stories, do not give ",
+        "article-level examples, and avoid naming specific companies unless a single ",
+        "development dominates the entire window. ",
         "Return JSON with exactly this field: { \"executive_summary\": string }."
     ),
     description: "Briefing stream: executive summary only",
@@ -78,7 +81,7 @@ mod prompt_tests {
             PromptId::BriefingExecutiveSummary
         );
         assert_eq!(BRIEFING_NEXT_ITEM_PROMPT.id, PromptId::BriefingNextItem);
-        assert_eq!(BRIEFING_EXECUTIVE_SUMMARY_PROMPT.version, 1);
+        assert_eq!(BRIEFING_EXECUTIVE_SUMMARY_PROMPT.version, 2);
         assert_eq!(BRIEFING_NEXT_ITEM_PROMPT.version, 1);
     }
 
