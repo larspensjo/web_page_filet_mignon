@@ -52,9 +52,16 @@ pwsh -NoLogo -NoProfile -File .\scripts\Test-HarvesterMcpSmoke.ps1 `
 
 The Harvester tools operate on an `output/` directory containing harvested article markdown files plus derived caches such as:
 
+- `harvester-corpus.json`
 - `.entity_index.ron`
 - `.summary_cache.ron`
 - `.triage_cache.ron`
+
+`harvester-corpus.json` is the public corpus format marker for applications
+that read the output folder directly. Its `schema_version` is the compatibility
+signal for the article layout. External readers should treat root `*.md` files
+and `linked/*.md` files as article records, and should treat hidden `.ron` files
+as Harvester-internal state. See [docs/CorpusFormat.md](docs/CorpusFormat.md).
 
 For day-to-day use across multiple worktrees, the recommended setup is:
 
@@ -148,6 +155,7 @@ If your MCP client supports workspace-local configuration, prefer that over a gl
 
 - [docs/ApplicationDescription.md](docs/ApplicationDescription.md)
 - [docs/Architecture.md](docs/Architecture.md)
+- [docs/CorpusFormat.md](docs/CorpusFormat.md)
 - [docs/PromptContextFiles.md](docs/PromptContextFiles.md)
 - [docs/ThreatModel.md](docs/ThreatModel.md)
 - [docs/plans/Plan.McpKnowledgeBaseServer.md](docs/plans/Plan.McpKnowledgeBaseServer.md)

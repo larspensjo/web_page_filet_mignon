@@ -4,6 +4,7 @@
 - Build with `cargo build`.
 - When a task is completed with Rust changes, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
 - When adding a CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change.
+- When changing the public output corpus layout, update `docs/CorpusFormat.md`, bump `CORPUS_SCHEMA_VERSION` if compatibility changes, and keep `harvester-corpus.json` generation/tests in sync.
 - When creating complex plans, they should be divided into incremental phases that can be tested.
 - If harvester_mcp processes block building and testing, kill these processes.
 - When implementing a plan, don't commit the changes; they shall first be reviewed.

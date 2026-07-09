@@ -7,6 +7,7 @@ pub mod briefing;
 pub mod content_extraction;
 pub mod content_prep;
 mod convert;
+mod corpus_manifest;
 mod decode;
 mod domain;
 mod engine;
@@ -43,6 +44,9 @@ pub use briefing::{
     ArticleScanProgress, LoadedArticle,
 };
 pub use convert::{Converter, Html2MdConverter};
+pub use corpus_manifest::{
+    build_corpus_manifest, write_corpus_manifest, CORPUS_MANIFEST_FILENAME, CORPUS_SCHEMA_VERSION,
+};
 pub use decode::{decode_html, DecodeError, DecodedHtml};
 pub use domain::registrable_domain;
 pub use engine::{EngineConfig, EngineHandle};

@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 
 use crate::archive_url_key;
+use crate::corpus_manifest::write_corpus_manifest;
 use crate::frontmatter::{parse_frontmatter, strip_frontmatter};
 use crate::persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 use crate::truncate_to_char_boundary;
@@ -66,6 +67,7 @@ pub fn build_concatenated_export(
     options: ExportOptions,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
+    write_corpus_manifest(output_dir)?;
     let mut entries = collect_archive_md_files(output_dir)?;
     exclude_export_artifacts(
         &mut entries,
@@ -135,6 +137,7 @@ pub fn build_triage_archive(
     summaries: &HashMap<String, String>,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
+    write_corpus_manifest(output_dir)?;
     let mut entries = collect_archive_md_files(output_dir)?;
     exclude_export_artifacts(
         &mut entries,

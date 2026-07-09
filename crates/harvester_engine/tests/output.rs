@@ -1,7 +1,8 @@
 use harvester_engine::{
     archive_url_key, build_concatenated_export, build_markdown_document, build_triage_archive,
     deterministic_filename, Converter, ExportOptions, Extractor, Html2MdConverter,
-    ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter,
+    ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter, CORPUS_MANIFEST_FILENAME,
+    CORPUS_SCHEMA_VERSION,
 };
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -110,6 +111,27 @@ fn concatenated_export_creates_missing_output_dir() {
     assert_eq!(manifest["doc_count"].as_u64(), Some(0));
     assert_eq!(manifest["total_tokens"].as_u64(), Some(0));
     assert_eq!(manifest["files"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn concatenated_export_writes_corpus_manifest() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    let md = "---\nurl: \"https://a\"\ntitle: \"A\"\ntoken_count: 2\nfetched_utc: \"2024-01-01T00:00:00Z\"\nencoding: \"UTF-8\"\n---\n\nBody A\n";
+    std::fs::write(dir.join("a.md"), md).unwrap();
+
+    build_concatenated_export(dir, ExportOptions::default()).unwrap();
+
+    let manifest_path = dir.join(CORPUS_MANIFEST_FILENAME);
+    assert!(manifest_path.exists());
+    let manifest: Value =
+        serde_json::from_str(&std::fs::read_to_string(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["format"].as_str(), Some("harvester-corpus"));
+    assert_eq!(
+        manifest["schema_version"].as_u64(),
+        Some(CORPUS_SCHEMA_VERSION as u64)
+    );
+    assert_eq!(manifest["layout"]["articles"].as_array().unwrap().len(), 2);
 }
 
 #[test]

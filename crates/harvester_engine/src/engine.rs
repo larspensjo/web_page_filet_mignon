@@ -13,13 +13,14 @@ use crate::content_extraction::{ExtractionPipeline, ExtractionPolicy};
 use crate::decode::decode_html;
 use crate::fetch::{ChannelProgressSink, FetchSettings, Fetcher, ReqwestFetcher};
 use crate::frontmatter::build_markdown_document;
-use crate::persist::AtomicFileWriter;
+use crate::persist::{AtomicFileWriter, PersistError};
 use crate::preview::prepare_preview_content;
 use crate::quota::{QuotaTracker, SessionQuotas};
 use crate::token::TokenCounter;
 use crate::url_policy::UrlPolicy;
 use crate::{
-    deterministic_filename, EngineEvent, FailureKind, JobId, JobOutcome, JobProgress, Stage,
+    deterministic_filename, write_corpus_manifest, EngineEvent, FailureKind, JobId, JobOutcome,
+    JobProgress, Stage,
 };
 
 const MAX_LOG_URL_LEN: usize = 96;
@@ -430,10 +431,16 @@ async fn run_job(
 
     let filename = deterministic_filename(extracted_article.title.as_deref(), &url);
     let writer = AtomicFileWriter::new(config.output_dir.clone());
+    let output_dir = config.output_dir.clone();
 
     let doc_for_write = doc.clone();
     let write_result = timeout(config.writing_timeout, async move {
-        tokio::task::spawn_blocking(move || writer.write(&filename, &doc)).await
+        tokio::task::spawn_blocking(move || {
+            let path = writer.write(&filename, &doc)?;
+            write_corpus_manifest(&output_dir)?;
+            Ok::<_, PersistError>(path)
+        })
+        .await
     })
     .await;
 

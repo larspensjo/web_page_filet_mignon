@@ -22,6 +22,7 @@ use crate::filename::{import_filename_base, resolve_non_overwriting_filename};
 use crate::frontmatter::{build_imported_markdown_document, ImportedFrontmatterFields};
 use crate::persist::AtomicFileWriter;
 use crate::token::WhitespaceTokenCounter;
+use crate::write_corpus_manifest;
 
 /// Maximum accepted file size before decode/DOM parse.
 const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
@@ -233,6 +234,16 @@ pub fn import_saved_webpages(dir: &Path, options: &ImportOptions) -> ImportRepor
     let mut duplicate_url_count = 0usize;
     let mut duplicate_content_count = 0usize;
 
+    if let Err(err) = write_corpus_manifest(&options.archive_dir) {
+        let reason = format!("failed to write corpus manifest: {err}");
+        engine_warn!("[import-saved-web] {}", reason);
+        failures.push(ImportFailure {
+            source_path: options.archive_dir.clone(),
+            stage: ImportFailureStage::Persistence,
+            reason,
+        });
+    }
+
     // Track URLs and hashes seen within this batch.
     let mut batch_urls: HashSet<String> = HashSet::new();
     let mut batch_hashes: HashSet<String> = HashSet::new();
@@ -313,6 +324,15 @@ pub fn import_saved_webpages(dir: &Path, options: &ImportOptions) -> ImportRepor
                         });
                     }
                     Ok(persisted_path) => {
+                        if let Err(err) = write_corpus_manifest(&options.archive_dir) {
+                            let reason = format!("failed to write corpus manifest: {err}");
+                            engine_warn!("[import-saved-web] {}", reason);
+                            failures.push(ImportFailure {
+                                source_path: options.archive_dir.clone(),
+                                stage: ImportFailureStage::Persistence,
+                                reason,
+                            });
+                        }
                         engine_info!(
                             "[import-saved-web] imported url={} path={}",
                             doc.canonical_url,
@@ -391,6 +411,11 @@ pub fn import_single_saved_webpage(
                 stage: ImportFailureStage::Persistence,
                 reason: format!("failed to write {filename}: {e}"),
             })?;
+        write_corpus_manifest(&options.archive_dir).map_err(|e| ImportFailure {
+            source_path: path.to_path_buf(),
+            stage: ImportFailureStage::Persistence,
+            reason: format!("failed to write corpus manifest: {e}"),
+        })?;
     }
 
     Ok(doc)

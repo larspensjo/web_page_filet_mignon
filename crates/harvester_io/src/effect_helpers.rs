@@ -15,8 +15,9 @@ use harvester_engine::llm::types::{ModelId, ProviderKind};
 use harvester_engine::llm::{LlmCompletionError, LlmEvent, LlmRunMetadata};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
-    poll_rss_source, AtomicFileWriter, BraveSeenSet, DecodeError, ExtractionPipeline,
-    ExtractionPolicy, FetchSettings, RssSeenSet, SourceId, UrlPolicy, WhitespaceTokenCounter,
+    poll_rss_source, write_corpus_manifest, AtomicFileWriter, BraveSeenSet, DecodeError,
+    ExtractionPipeline, ExtractionPolicy, FetchSettings, RssSeenSet, SourceId, UrlPolicy,
+    WhitespaceTokenCounter,
 };
 use reqwest::blocking::Client;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
@@ -381,7 +382,11 @@ pub fn download_link_page(
 
     let filename = deterministic_filename(extracted_article.title.as_deref(), &final_url);
     let writer = AtomicFileWriter::new(linked_dir);
-    writer.write(&filename, &doc).map_err(|err| err.to_string())
+    let path = writer
+        .write(&filename, &doc)
+        .map_err(|err| err.to_string())?;
+    write_corpus_manifest(output_dir).map_err(|err| err.to_string())?;
+    Ok(path)
 }
 
 pub fn map_stage(stage: harvester_engine::Stage) -> Stage {

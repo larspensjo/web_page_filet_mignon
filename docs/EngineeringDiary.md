@@ -2020,3 +2020,9 @@ Change: Added `-DisableNameChecking` to the shrink script's `Import-Module` call
 Lessons Learned: Shared PowerShell helper modules may intentionally export internal automation verbs that are not user-facing command names; script entry points should suppress name-check noise at import boundaries when the warning does not help the caller.
 Prevention: Use `Import-Module ... -DisableNameChecking` for `AgentCli.psm1` imports from automation scripts unless the import is specifically validating public cmdlet discoverability.
 Refs: scripts/Invoke-RustFileShrink.ps1, scripts/Invoke-PlanReviewLoop.ps1, scripts/tests/AgentCli.Tests.ps1, scripts/tests/InvokeRustFileShrink.Tests.ps1, scripts/lib/AgentCli.psm1
+
+## 2026-07-09 - Versioned corpus output contract
+Type: Implementation
+Context: External applications need to read the Harvester output folder without reverse-engineering private cache and state files.
+Change: Added generated `harvester-corpus.json` with `schema_version`, centralized corpus manifest constants/writer in `harvester_engine`, refreshed the marker from article/export write paths, and documented the public Markdown article layout plus schema maintenance workflow.
+Refs: crates/harvester_engine/src/corpus_manifest.rs, crates/harvester_engine/src/engine.rs, crates/harvester_engine/src/export.rs, crates/harvester_engine/src/import.rs, crates/harvester_io/src/effect_helpers.rs, docs/CorpusFormat.md, README.md, Agents.md

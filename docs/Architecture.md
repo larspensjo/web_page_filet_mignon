@@ -40,11 +40,13 @@ Key rules:
 - **Input handling:** user actions and timers create messages.
 - **State management:** a single authoritative state tracks session, work items, progress, and UI-facing snapshots.
 - **Content pipeline:** downloading, extraction, conversion, safety checks, budgeting, and persistence are executed as effects.
+- **Corpus contract:** output folders publish `harvester-corpus.json` with a `schema_version`; external readers may depend on the documented Markdown article layout, not on hidden cache/state files.
 - **LLM workflow:** request orchestration, validation, and replay are executed as effects with results fed back into state.
 - **Rendering:** UI is a projection of state, designed for fast updates and clear feedback.
 
 ## Determinism and robustness
 - Stable ordering, identifiers, and output formats keep behavior reproducible.
+- Corpus schema changes are versioned through `CORPUS_SCHEMA_VERSION` and documented in `docs/CorpusFormat.md`.
 - Resource usage is bounded by quotas and budgets.
 - All failures are surfaced as explicit outcomes and never silently ignored.
 
