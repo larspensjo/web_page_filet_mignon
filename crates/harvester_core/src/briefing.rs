@@ -214,18 +214,27 @@ pub struct TriageSelectionPolicy {
 
 impl TriageSelectionPolicy {
     pub fn eligible_urls(&self, triage: &TriageSession) -> Vec<String> {
-        let mut entries: Vec<_> = triage
+        let scored = triage
             .articles()
             .iter()
             .filter_map(|article| match &article.triage_state {
-                ArticleTriageState::Completed { result }
-                    if result.priority > self.cutoff_exclusive =>
-                {
+                ArticleTriageState::Completed { result } => {
                     Some((result.priority, article.url.clone()))
                 }
-                _ if self.exclude_untriaged => None,
                 _ => None,
-            })
+            });
+        self.rank_eligible(scored)
+    }
+
+    /// Apply the priority cutoff and deterministic ordering to `(priority, url)`
+    /// pairs. Shared by [`eligible_urls`] (live triage session) and the
+    /// cache-derived archive corpus so both rank identically.
+    ///
+    /// Orders by descending priority, then ascending URL for a stable tie-break.
+    pub fn rank_eligible(&self, scored: impl IntoIterator<Item = (u8, String)>) -> Vec<String> {
+        let mut entries: Vec<_> = scored
+            .into_iter()
+            .filter(|(priority, _)| *priority > self.cutoff_exclusive)
             .collect();
         entries.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         entries.into_iter().map(|(_, url)| url).collect()

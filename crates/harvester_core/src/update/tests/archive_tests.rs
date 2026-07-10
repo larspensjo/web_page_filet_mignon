@@ -2292,3 +2292,161 @@ fn signal_candidate_mode_keeps_raw_count_over_full_archive_corpus() {
     // Raw stays the full-corpus backlog: /1 and /2 have no summary → 2 raw.
     assert_eq!(view.raw_unprocessed_count, 2);
 }
+
+/// Seed the persisted triage cache with a completed result for each URL, keyed
+/// under the current metadata snapshot. Mirrors what a prior triage run would
+/// have persisted. Requires triage metadata to be primed first.
+fn seed_triage_cache_for_urls(state: &mut AppState, urls: &[&str], priority: u8) {
+    for url in urls {
+        state.store_triage_result(
+            &format!("hash-{url}"),
+            crate::triage::ArticleTriageResult {
+                category: "tech".to_string(),
+                priority,
+                tags: vec![],
+                rationale: "cached".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+    }
+}
+
+#[test]
+fn archive_counts_derive_from_triage_cache_at_startup_without_running_triage() {
+    init_logging();
+    // Reproduces the startup state: completed jobs restored, pre-triage rebuilt to
+    // ReadyToTriage, triage metadata + a fully-covering triage cache hydrated — but
+    // the user has NOT clicked Run Triage, so the live TriageSession is still Idle.
+    let urls = &["https://startup.com/1", "https://startup.com/2"];
+    let mut state = ready_pre_triage_state(urls);
+    state = prime_llm_metadata(state);
+    seed_triage_cache_for_urls(&mut state, urls, 3);
+
+    let view = state.view();
+    assert_eq!(
+        view.archive_filtered_count, 2,
+        "archive counts must reflect the cached triage results at startup, not 0"
+    );
+    assert_eq!(
+        view.raw_unprocessed_count, 2,
+        "both cached-triaged articles lack a summary → both are raw backlog"
+    );
+    assert_eq!(
+        state.current_working_corpus().source(),
+        crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
+        "working corpus stays PreTriageReady — only the archive corpus is cache-derived"
+    );
+}
+
+#[test]
+fn cache_derived_archive_counts_do_not_mutate_the_live_triage_session() {
+    init_logging();
+    // The cache-derived archive corpus is a display-only projection. It must not
+    // touch the load-bearing TriageSession, or batch orchestration would skip its
+    // triage dispatch (which also drives signal-candidate enqueue).
+    let urls = &["https://startup.com/1", "https://startup.com/2"];
+    let mut state = ready_pre_triage_state(urls);
+    state = prime_llm_metadata(state);
+    seed_triage_cache_for_urls(&mut state, urls, 3);
+
+    // Force the archive corpus to be computed (this is what the view does).
+    let _ = state.view();
+
+    assert!(
+        matches!(state.triage().phase(), crate::triage::TriagePhase::Idle),
+        "live triage session must remain Idle; the derived corpus is display-only"
+    );
+    assert_eq!(
+        state.batch_next_action(),
+        crate::BatchNextAction::DispatchTriage,
+        "batch must still dispatch triage — the derived corpus must not pre-empt it"
+    );
+}
+
+#[test]
+fn cache_derived_archive_corpus_counts_the_covered_subset_under_partial_coverage() {
+    init_logging();
+    // Only one of two ready articles has a cached triage result — the common real
+    // case, where some articles were triaged under a superseded prompt/model or are
+    // newly polled. The count must reflect the triaged subset (1), not collapse to 0.
+    let urls = &["https://partial.com/1", "https://partial.com/2"];
+    let mut state = ready_pre_triage_state(urls);
+    state = prime_llm_metadata(state);
+    seed_triage_cache_for_urls(&mut state, &urls[..1], 3);
+
+    let view = state.view();
+    assert_eq!(
+        view.archive_filtered_count, 1,
+        "partial cache coverage must count the already-triaged subset, not 0"
+    );
+}
+
+#[test]
+fn cache_derived_archive_counts_populate_while_pre_triage_is_reviewing() {
+    init_logging();
+    // Real corpora with borderline-length articles land pre-triage in `Reviewing`,
+    // not `ReadyToTriage`. The archive counts must still derive from the cache for
+    // the tentatively-included corpus, mirroring that triage can start from review.
+    let review_content: String = std::iter::repeat_n("longword", 100)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let url1 = "https://review-derive.com/1";
+    let url2 = "https://review-derive.com/2";
+    let state = add_completed_job_for_test(AppState::new(), url1);
+    let state = add_completed_job_for_test(state, url2);
+    let (state, request_id) = tick_until_dispatch(state);
+    let articles = vec![
+        LoadedArticle {
+            url: url1.to_string(),
+            source_title: None,
+            prepared_text: review_content.clone(),
+            content_hash: format!("hash-{url1}"),
+            fetched_utc: None,
+        },
+        LoadedArticle {
+            url: url2.to_string(),
+            source_title: None,
+            prepared_text: review_content,
+            content_hash: format!("hash-{url2}"),
+            fetched_utc: None,
+        },
+    ];
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            articles,
+        },
+    );
+    // Resolve one review item, leaving the other unresolved → Reviewing phase, both
+    // articles tentatively included.
+    let key = state.pre_triage().entries()[0].key.clone();
+    let (mut state, _) = update(
+        state,
+        Msg::PreTriageDecisionSet {
+            key,
+            decision: crate::pre_triage_filter::ManualDecision::Include,
+        },
+    );
+    assert!(
+        matches!(
+            state.pre_triage().phase(),
+            crate::pre_triage_filter::PreTriagePhase::Reviewing
+        ),
+        "test setup must leave pre-triage in Reviewing"
+    );
+
+    state = prime_llm_metadata(state);
+    seed_triage_cache_for_urls(&mut state, &[url1, url2], 3);
+
+    assert_eq!(
+        state.view().archive_filtered_count,
+        2,
+        "archive counts must derive from the cache even while pre-triage is Reviewing"
+    );
+    assert!(
+        matches!(state.triage().phase(), crate::triage::TriagePhase::Idle),
+        "live triage session must stay Idle — the derived corpus is display-only"
+    );
+}

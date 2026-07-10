@@ -142,8 +142,65 @@ impl AppState {
     /// Returns the corpus for archive export: triage-completed articles only.
     ///
     /// Pre-triage articles (even when ready) are excluded - they need triage first.
+    ///
+    /// When the live triage session has not completed this session, the corpus is
+    /// derived from the persisted triage cache (see [`cache_derived_archive_urls`])
+    /// so archive counts reflect prior work at startup instead of showing zero
+    /// until the user re-runs triage. That derivation is read-only and never
+    /// mutates the [`TriageSession`], so batch orchestration — which reads the live
+    /// session — behaves exactly as before.
     pub(crate) fn archive_corpus(&self) -> CurrentWorkingCorpus {
+        if matches!(self.triage().phase(), TriagePhase::Complete) {
+            return CurrentWorkingCorpus::select_for_archive(
+                self.triage(),
+                self.briefing_triage_policy(),
+            );
+        }
+        if let Some(urls) = self.cache_derived_archive_urls() {
+            return CurrentWorkingCorpus::triage_complete_from_urls(urls);
+        }
         CurrentWorkingCorpus::select_for_archive(self.triage(), self.briefing_triage_policy())
+    }
+
+    /// Derive the archive corpus URLs from the persisted triage cache for display
+    /// when the live triage session has not run this session.
+    ///
+    /// Covers the actionable pre-triage corpus — both `ReadyToTriage` and the
+    /// tentative `Reviewing` set, mirroring [`can_start_triage_from_pre_triage`] —
+    /// and includes each article that already has a triage cache hit under the
+    /// current prompt version, model, and context. Articles without a hit (never
+    /// triaged, or triaged under a now-superseded prompt/model) are simply omitted,
+    /// so the count reflects exactly the portion of the corpus that is already
+    /// triaged rather than collapsing to zero when coverage is partial.
+    ///
+    /// Returns `None` only when triage metadata is not yet loaded (cache keys can't
+    /// resolve) or there is no actionable pre-triage corpus, so the normal
+    /// live-session path applies. This is read-only and never mutates the
+    /// [`TriageSession`].
+    fn cache_derived_archive_urls(&self) -> Option<Vec<String>> {
+        if !self.triage_metadata_ready() {
+            return None;
+        }
+        if !self.can_start_triage_from_pre_triage() {
+            return None;
+        }
+        let included = self.pre_triage().tentative_included_urls();
+        if included.is_empty() {
+            return None;
+        }
+        let scored: Vec<(u8, String)> = included
+            .into_iter()
+            .filter_map(|url| {
+                let content_hash = self.pre_triage().article_content_hash(&url)?;
+                match self.try_reuse_triage(content_hash) {
+                    crate::state::TriageCacheLookupResult::Hit(result) => {
+                        Some((result.priority, url))
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+        Some(self.briefing_triage_policy().rank_eligible(scored))
     }
 
     /// Compute token estimates for the two archive modes for the given ordered URL list.
