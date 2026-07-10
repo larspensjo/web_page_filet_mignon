@@ -14,9 +14,7 @@ target
 **/mutants.out*/
 
 # Keep Claude local state ignored by default, but allow repo-managed project skills.
-/.claude/*
-!/.claude/skills/
-!/.claude/skills/**
+/.claude/settings.json
 /output*/
 /lcov.info
 /incoming_urls.txt
