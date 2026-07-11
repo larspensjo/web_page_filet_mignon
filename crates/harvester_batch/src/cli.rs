@@ -1,4 +1,5 @@
 use clap::Parser;
+use harvester_io::default_sources_path;
 use std::path::PathBuf;
 
 const DEFAULT_POLL_INTERVAL_MINUTES: u32 = 15;
@@ -9,9 +10,9 @@ const MAX_LLM_CONCURRENCY: usize = 12;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
-    /// Path to sources configuration file
-    #[arg(long, default_value = "sources.ron")]
-    pub sources: PathBuf,
+    /// Path to sources configuration file (defaults to <output-dir>/.sources.ron)
+    #[arg(long, value_name = "PATH")]
+    pub sources: Option<PathBuf>,
 
     /// Output directory for downloaded content and state
     #[arg(long, default_value = "output")]
@@ -125,6 +126,12 @@ impl Args {
 
         // Clamp poll_interval to valid range (1 minute to 24 hours)
         self.poll_interval = self.poll_interval.clamp(1, 1440);
+    }
+
+    pub fn sources_path(&self) -> PathBuf {
+        self.sources
+            .clone()
+            .unwrap_or_else(|| default_sources_path(&self.output_dir))
     }
 
     /// Resolve the checkpoint flags into a single command, or `None` if no flags are set.
@@ -254,7 +261,7 @@ mod tests {
             "--force-unlock",
             "--allow-unsupported-sources",
         ]);
-        assert_eq!(args.sources, PathBuf::from("custom_sources.ron"));
+        assert_eq!(args.sources, Some(PathBuf::from("custom_sources.ron")));
         assert_eq!(args.output_dir, PathBuf::from("custom_output"));
         assert_eq!(args.contexts_dir, PathBuf::from("custom_contexts"));
         assert_eq!(args.prompts_dir, PathBuf::from("custom_prompts"));
@@ -264,6 +271,16 @@ mod tests {
         assert!(!args.single_shot);
         assert!(args.force_unlock);
         assert!(args.allow_unsupported_sources);
+    }
+
+    #[test]
+    fn sources_default_tracks_output_directory() {
+        let args = Args::parse_from(&["harvester_batch", "--output-dir", "custom_output"]);
+
+        assert_eq!(
+            args.sources_path(),
+            PathBuf::from("custom_output").join(".sources.ron")
+        );
     }
 
     #[test]

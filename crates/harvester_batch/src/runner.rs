@@ -1061,9 +1061,10 @@ fn should_log_batch_msg(msg: &Msg) -> bool {
 pub fn run(args: Args) -> Result<i32, String> {
     engine_info!("[batch] Initializing runtime paths");
 
+    let sources_path = args.sources_path();
     let paths = RuntimePaths::new(
         args.output_dir.clone(),
-        args.sources.clone(),
+        sources_path,
         args.contexts_dir.clone(),
         args.prompts_dir.clone(),
     );

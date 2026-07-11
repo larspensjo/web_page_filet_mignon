@@ -17,7 +17,7 @@ use tempfile::TempDir;
 fn create_test_args(dry_run: bool, temp_dir: &TempDir) -> Args {
     Args {
         output_dir: temp_dir.path().to_path_buf(),
-        sources: PathBuf::from("test_sources.json"),
+        sources: Some(PathBuf::from("test_sources.json")),
         contexts_dir: PathBuf::from("contexts"),
         prompts_dir: PathBuf::from("prompts"),
         dry_run,

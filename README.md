@@ -53,6 +53,7 @@ pwsh -NoLogo -NoProfile -File .\scripts\Test-HarvesterMcpSmoke.ps1 `
 The Harvester tools operate on an `output/` directory containing harvested article markdown files plus derived caches such as:
 
 - `harvester-corpus.json`
+- `.sources.ron`
 - `.entity_index.ron`
 - `.summary_cache.ron`
 - `.triage_cache.ron`
@@ -62,6 +63,8 @@ that read the output folder directly. Its `schema_version` is the compatibility
 signal for the article layout. External readers should treat root `*.md` files
 and `linked/*.md` files as article records, and should treat hidden `.ron` files
 as Harvester-internal state. See [docs/CorpusFormat.md](docs/CorpusFormat.md).
+The editable source registry is stored as `output/.sources.ron` by default, so
+backing up the output directory also preserves the configured web sources.
 
 For day-to-day use across multiple worktrees, the recommended setup is:
 

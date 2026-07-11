@@ -21,7 +21,7 @@ fn main() {
 
     engine_info!("[batch] Starting harvester_batch");
     engine_info!("[batch] output_dir: {:?}", args.output_dir);
-    engine_info!("[batch] sources: {:?}", args.sources);
+    engine_info!("[batch] sources: {:?}", args.sources_path());
     engine_info!("[batch] dry_run: {}", args.dry_run);
     engine_info!("[batch] single_shot: {}", args.single_shot);
     engine_info!(

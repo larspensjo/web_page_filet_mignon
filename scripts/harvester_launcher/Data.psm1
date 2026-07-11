@@ -36,7 +36,7 @@ function New-LauncherDefaults {
         PollInterval     = 15
         ForceUnlock      = $false
         AllowUnsupported = $false
-        Sources          = 'sources.ron'
+        Sources          = (Join-Path 'output' '.sources.ron')
         OutputDir        = 'output'
         ContextsDir      = 'contexts'
         PromptsDir       = 'prompts'

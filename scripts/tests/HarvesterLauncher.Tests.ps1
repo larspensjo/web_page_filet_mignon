@@ -251,6 +251,10 @@ Describe 'Reducer - Build-CommandArgs' {
     It 'FilePath matches HarvesterCmd' {
         (Build-CommandArgs -State (S) -DryRun $false).FilePath | Should -Be 'hb'
     }
+    It 'defaults the sources file into the output directory' {
+        $s = S
+        $s.Values.Sources | Should -Be (Join-Path 'output' '.sources.ron')
+    }
     It 'includes --sources and its value' {
         $s = S
         $s.Values.Sources = 'my-sources.ron'

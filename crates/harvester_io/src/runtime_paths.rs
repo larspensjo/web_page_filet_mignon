@@ -1,4 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+pub const DEFAULT_SOURCES_FILENAME: &str = ".sources.ron";
+
+/// Return the default source registry path for an output directory.
+pub fn default_sources_path(output_dir: &Path) -> PathBuf {
+    output_dir.join(DEFAULT_SOURCES_FILENAME)
+}
 
 /// Runtime paths for all IO operations.
 /// All paths are derived from explicit CLI or default values, never from process CWD.
@@ -65,9 +72,10 @@ impl RuntimePaths {
 
     /// Build RuntimePaths with default values for a given output directory.
     pub fn with_defaults(output_dir: PathBuf) -> Self {
+        let sources_path = default_sources_path(&output_dir);
         Self::new(
             output_dir,
-            PathBuf::from("sources.ron"),
+            sources_path,
             PathBuf::from("contexts"),
             PathBuf::from("prompts"),
         )
@@ -100,6 +108,7 @@ mod tests {
             .ends_with(".signal_candidate_overrides.ron"));
         assert!(paths.seen_set_path.ends_with(".seen_set.ron"));
         assert!(paths.state_path.ends_with(".harvester_state.ron"));
+        assert_eq!(paths.sources_path, dir.path().join(".sources.ron"));
     }
 
     #[test]

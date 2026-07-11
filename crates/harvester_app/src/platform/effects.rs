@@ -1,4 +1,5 @@
-use super::{prompt_template_store, source_loader};
+use super::prompt_template_store;
+use harvester_io::default_sources_path;
 use std::path::PathBuf;
 
 /// Default output directory based on current working directory.
@@ -15,8 +16,8 @@ pub(crate) fn contexts_directory() -> PathBuf {
 }
 
 /// Default source configuration file path.
-pub(crate) fn default_source_config_path() -> PathBuf {
-    source_loader::default_source_config_path()
+pub(crate) fn default_source_config_path(output_dir: &std::path::Path) -> PathBuf {
+    default_sources_path(output_dir)
 }
 
 /// Default prompts directory.

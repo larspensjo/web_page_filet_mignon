@@ -52,7 +52,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     let output_dir = effects::default_output_dir();
     let paths = RuntimePaths::new(
         output_dir.clone(),
-        effects::default_source_config_path(),
+        effects::default_source_config_path(&output_dir),
         effects::contexts_directory(),
         effects::prompts_directory(),
     );

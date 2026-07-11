@@ -3,15 +3,7 @@ use harvester_engine::{SourceRegistry, SourceRegistryValidationError};
 use ron::de::{from_str, SpannedError};
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
-
-/// Default path for the source registry.
-#[allow(dead_code)]
-pub fn default_source_config_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("sources.ron")
-}
+use std::path::Path;
 
 /// Load the source registry, returning empty registry when the file is missing or invalid.
 #[allow(dead_code)]

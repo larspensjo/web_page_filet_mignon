@@ -18,7 +18,6 @@ target
 /output*/
 /lcov.info
 /incoming_urls.txt
-/sources.ron
 /target_codex/
 /engine.log/
 /.superpowers/

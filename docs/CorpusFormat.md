@@ -58,9 +58,10 @@ Markdown extensions. Readers should ignore files listed in
 
 ## Private Files
 
-Hidden `.ron` files, `llm_results/`, `logs/`, and refresh reports are internal
-implementation details. They may change without a corpus schema version bump and
-external readers must not depend on them.
+Hidden `.ron` files, `llm_results/`, `logs/`, and refresh reports are outside the
+public corpus contract. External readers must not depend on them. The
+`.sources.ron` file is the user-editable source registry; it lives in the output
+folder so corpus backups preserve ingestion configuration as well as state.
 
 ## Versioning Rules
 
