@@ -8,7 +8,8 @@ use super::*;
 use commanductui::{ChartLineEmphasis, ListBoxItemId, ListBoxRowDensity};
 use harvester_core::Stage;
 use harvester_core::{
-    JobFilterStatus, JobListScope, JobResultKind, JobRowView, LeftPaneHeaderView,
+    ArchivePartialCoverageView, JobFilterStatus, JobListScope, JobResultKind, JobRowView,
+    LeftPaneHeaderView,
     LlmModelUsageView, LlmQuotaSeverity, LlmQuotaView, SessionState, StopFinishButtonState,
     StopPolicy,
 };
@@ -1645,6 +1646,28 @@ fn token_counts_label_shows_filtered_and_raw_counts() {
             cmd,
             PlatformCommand::SetControlText { control_id, text, .. }
             if *control_id == LABEL_TOKEN_COUNTS && text == "12 filtered · 3 raw"
+        )
+    }));
+}
+
+#[test]
+fn token_counts_label_shows_partial_archive_coverage() {
+    let window_id = WindowId::new(48);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![]);
+    view.archive_partial_coverage = Some(ArchivePartialCoverageView {
+        triaged: 3,
+        actionable_total: 10,
+    });
+
+    let cmds = render(window_id, &view, &mut tree_state);
+
+    assert!(cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetControlText { control_id, text, .. }
+            if *control_id == LABEL_TOKEN_COUNTS
+                && text == "3 of 10 triaged — run triage to export"
         )
     }));
 }

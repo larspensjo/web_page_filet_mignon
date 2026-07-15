@@ -1531,7 +1531,7 @@ fn archive_clicked_reports_signal_candidate_snapshot() {
     use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 
     init_logging();
-    let mut state = AppState::new();
+    let mut state = complete_triage_state_for_test(1);
     state
         .signal_candidate_mut()
         .enqueue("https://signal.example/a".to_string());
@@ -1596,7 +1596,7 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
     use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 
     init_logging();
-    let mut state = AppState::new();
+    let mut state = complete_triage_state_for_test(1);
     state
         .signal_candidate_mut()
         .enqueue("https://signal.example/a".to_string());
@@ -2340,6 +2340,156 @@ fn archive_counts_derive_from_triage_cache_at_startup_without_running_triage() {
 }
 
 #[test]
+fn cache_derived_archive_estimates_use_pre_triage_content_hash_for_summaries() {
+    use crate::briefing::ArticleSummaryResult;
+    use crate::summary_cache::SummaryCacheKey;
+    use harvester_engine::llm::dto::SummaryEntities;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let url = "https://startup-summary.example/1";
+    let mut state = ready_pre_triage_state(&[url]);
+    state = prime_llm_metadata(state);
+    seed_triage_cache_for_urls(&mut state, &[url], 3);
+    state.store_summary_result(
+        SummaryCacheKey {
+            content_hash: format!("hash-{url}"),
+            prompt_id: PromptId::ArticleSummary,
+            prompt_version: 1,
+            model_id: "summary-model".to_string(),
+            context_hash: "ctx".to_string(),
+        },
+        ArticleSummaryResult {
+            title: "Cached".to_string(),
+            summary: "summary".to_string(),
+            key_points: vec![],
+            input_tokens: 1,
+            output_tokens: 42,
+            entities: SummaryEntities::default(),
+        },
+        "2026-07-12T00:00:00Z".to_string(),
+    );
+
+    let estimates = state.archive_token_estimates(&[url.to_string()]);
+    assert_eq!(estimates.summary_coverage, 1);
+    assert_eq!(estimates.summary_tokens, 42);
+    assert_eq!(state.view().raw_unprocessed_count, 0);
+}
+
+#[test]
+fn cache_derived_startup_counts_never_reach_full_archive_export() {
+    init_logging();
+    let urls = &[
+        "https://startup-export.example/1",
+        "https://startup-export.example/2",
+    ];
+    let mut state = ready_pre_triage_state(urls);
+    state = prime_llm_metadata(state);
+    seed_triage_cache_for_urls(&mut state, urls, 3);
+
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    let open = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog { article_count, .. } => Some(*article_count),
+            _ => None,
+        })
+        .expect("OpenArchiveDialog effect expected");
+    assert_eq!(open, 0);
+    assert!(matches!(
+        state.pinned_archive_corpus().map(|corpus| corpus.source()),
+        Some(crate::CurrentWorkingCorpusSource::Unavailable)
+    ));
+
+    let request_id = state.archive_request_id();
+    let (_, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+    let ordered_urls = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested { ordered_urls, .. } => Some(ordered_urls),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert!(ordered_urls.is_empty());
+}
+
+#[test]
+fn cache_derived_startup_counts_do_not_enable_signal_candidate_export() {
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    init_logging();
+    let urls = &["https://startup-signal.example/1"];
+    let mut state = ready_pre_triage_state(urls);
+    state = prime_llm_metadata(state);
+    seed_triage_cache_for_urls(&mut state, urls, 3);
+    state.signal_candidate_mut().enqueue(urls[0].to_string());
+    state.signal_candidate_mut().mark_scoring(urls[0], 1);
+    state.signal_candidate_mut().complete(
+        urls[0],
+        SignalCandidateResult {
+            signal_score: 90,
+            signal_key: "cached-cluster".to_string(),
+            themes: vec![],
+            draft_gist: "cached".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "cached".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+        },
+    );
+
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    let (signal_candidate_count, signal_candidate_default) = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog {
+                signal_candidate_count,
+                signal_candidate_default,
+                ..
+            } => Some((*signal_candidate_count, *signal_candidate_default)),
+            _ => None,
+        })
+        .expect("OpenArchiveDialog effect expected");
+    assert_eq!(signal_candidate_count, 0);
+    assert!(matches!(
+        signal_candidate_default,
+        crate::SignalCandidateDialogDefault::OffDisabled
+    ));
+
+    let request_id = state.archive_request_id();
+    let (_, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: true,
+        },
+    );
+    let ordered_urls = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested { ordered_urls, .. } => Some(ordered_urls),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert!(ordered_urls.is_empty());
+}
+
+#[test]
 fn cache_derived_archive_counts_do_not_mutate_the_live_triage_session() {
     init_logging();
     // The cache-derived archive corpus is a display-only projection. It must not
@@ -2380,6 +2530,40 @@ fn cache_derived_archive_corpus_counts_the_covered_subset_under_partial_coverage
         view.archive_filtered_count, 1,
         "partial cache coverage must count the already-triaged subset, not 0"
     );
+}
+
+#[test]
+fn cache_derived_view_counts_ignore_settled_signal_candidate_override() {
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    init_logging();
+    let urls = &[
+        "https://cache-view.example/1",
+        "https://cache-view.example/2",
+    ];
+    let mut state = ready_pre_triage_state(urls);
+    state = prime_llm_metadata(state);
+    seed_triage_cache_for_urls(&mut state, urls, 3);
+    state.signal_candidate_mut().enqueue(urls[0].to_string());
+    state.signal_candidate_mut().mark_scoring(urls[0], 1);
+    state.signal_candidate_mut().complete(
+        urls[0],
+        SignalCandidateResult {
+            signal_score: 90,
+            signal_key: "cache-view-cluster".to_string(),
+            themes: vec![],
+            draft_gist: "cached".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "cached".to_string(),
+            input_tokens: 0,
+            output_tokens: 0,
+        },
+    );
+
+    let view = state.view();
+    assert_eq!(view.archive_filtered_count, 2);
+    assert_eq!(view.archive_token_estimate, 0);
 }
 
 #[test]

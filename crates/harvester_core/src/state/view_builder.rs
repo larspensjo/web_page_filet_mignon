@@ -3,6 +3,7 @@ use super::{
     format_lab_triage_markdown, map_job_filter_status, AppState, JobResultKind, PreviewMode,
     SessionState, Stage,
 };
+use crate::archive_display::ArchiveCoverage;
 use crate::briefing::BriefingPhase;
 use crate::pre_triage_filter::PreTriagePhase;
 use crate::preview::format_summary_for_preview;
@@ -164,9 +165,20 @@ impl AppState {
         let triage_blocked_reason = self.triage_blocked_reason();
         let briefing_blocked_reason = self.briefing_blocked_reason();
         let stop_finish_button = self.stop_finish_button_state();
-        let archive_corpus = self.archive_corpus();
-        let full_filtered_count = archive_corpus.count();
-        let archive_estimates = self.archive_token_estimates(archive_corpus.ordered_urls());
+        let archive_display = self.archive_display_counts();
+        let full_filtered_count = archive_display.filtered_count();
+        let archive_estimates = self.archive_token_estimates(archive_display.ordered_urls());
+
+        let archive_partial_coverage = match archive_display.coverage() {
+            ArchiveCoverage::CacheDerived {
+                triaged,
+                actionable_total,
+            } if *triaged > 0 => Some(crate::ArchivePartialCoverageView {
+                triaged: *triaged,
+                actionable_total: *actionable_total,
+            }),
+            ArchiveCoverage::LiveComplete | ArchiveCoverage::CacheDerived { .. } => None,
+        };
 
         // "raw" is a backlog indicator over the whole archive corpus: triaged articles
         // that do not yet have a cached summary. It is independent of which subset the
@@ -182,33 +194,37 @@ impl AppState {
             .enqueued_count()
             .saturating_sub(settled)
             .saturating_sub(sc.failed_count());
-        let (archive_token_estimate, archive_filtered_count) = if settled > 0 && in_progress == 0 {
-            let scored: Vec<ScoredCandidate> = sc
-                .iter_completed()
-                .map(|(url, result)| ScoredCandidate {
-                    url: url.to_string(),
-                    result: result.clone(),
-                })
-                .collect();
-            let policy = SelectionPolicy {
-                threshold: self.signal_candidate_threshold(),
-                active_prompt_version: self
-                    .active_version_for(
-                        harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate,
-                    )
-                    .unwrap_or_default(),
-                excluded: sc.excluded().clone(),
-            };
-            let selection = SignalCandidateSelection::compute(&scored, policy);
-            if selection.selected_urls.is_empty() {
-                (archive_estimates.summary_tokens, full_filtered_count)
+        let (archive_token_estimate, archive_filtered_count) =
+            if matches!(archive_display.coverage(), ArchiveCoverage::LiveComplete)
+                && settled > 0
+                && in_progress == 0
+            {
+                let scored: Vec<ScoredCandidate> = sc
+                    .iter_completed()
+                    .map(|(url, result)| ScoredCandidate {
+                        url: url.to_string(),
+                        result: result.clone(),
+                    })
+                    .collect();
+                let policy = SelectionPolicy {
+                    threshold: self.signal_candidate_threshold(),
+                    active_prompt_version: self
+                        .active_version_for(
+                            harvester_engine::llm::prompt::PromptId::ArticleSignalCandidate,
+                        )
+                        .unwrap_or_default(),
+                    excluded: sc.excluded().clone(),
+                };
+                let selection = SignalCandidateSelection::compute(&scored, policy);
+                if selection.selected_urls.is_empty() {
+                    (archive_estimates.summary_tokens, full_filtered_count)
+                } else {
+                    let sc_estimates = self.archive_token_estimates(&selection.selected_urls);
+                    (sc_estimates.summary_tokens, selection.selected_urls.len())
+                }
             } else {
-                let sc_estimates = self.archive_token_estimates(&selection.selected_urls);
-                (sc_estimates.summary_tokens, selection.selected_urls.len())
-            }
-        } else {
-            (archive_estimates.summary_tokens, full_filtered_count)
-        };
+                (archive_estimates.summary_tokens, full_filtered_count)
+            };
         AppViewModel {
             session: self.session,
             queued_urls: self.ui.urls.clone(),
@@ -220,6 +236,7 @@ impl AppState {
             token_limit: TOKEN_LIMIT,
             archive_token_estimate,
             archive_filtered_count,
+            archive_partial_coverage,
             raw_unprocessed_count,
             preview_text,
             selected_job_id,

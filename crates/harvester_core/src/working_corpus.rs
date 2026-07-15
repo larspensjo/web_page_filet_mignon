@@ -146,25 +146,6 @@ impl CurrentWorkingCorpus {
         }
     }
 
-    /// Build a display-only archive corpus from an explicit, already-ranked URL
-    /// list derived from the persisted triage cache.
-    ///
-    /// Used when the live triage session has not run this session but the cache
-    /// fully covers the ready pre-triage corpus, so archive counts can reflect
-    /// prior work at startup. Empty input yields `Unavailable`.
-    pub(crate) fn triage_complete_from_urls(urls: Vec<String>) -> Self {
-        if urls.is_empty() {
-            return Self {
-                source: CurrentWorkingCorpusSource::Unavailable,
-                ordered_urls: Vec::new(),
-            };
-        }
-        Self {
-            source: CurrentWorkingCorpusSource::TriageComplete,
-            ordered_urls: urls,
-        }
-    }
-
     /// Number of articles in this corpus.
     pub fn count(&self) -> usize {
         self.ordered_urls.len()
@@ -182,6 +163,7 @@ impl CurrentWorkingCorpus {
 
     /// Whether this corpus can be acted on (e.g., start briefing, export).
     ///
+    /// Every constructible ready corpus represents live actionable state;
     /// `PreTriageReviewing` is explicitly excluded because manual review is still pending.
     pub fn is_ready_for_actions(&self) -> bool {
         matches!(

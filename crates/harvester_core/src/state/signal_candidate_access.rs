@@ -179,6 +179,7 @@ impl AppState {
     ///
     /// Note: in-flight scoring is intentionally not consulted here. Callers that
     /// must not act mid-scoring should gate before calling this accessor.
+    /// Callers must also gate on live [`crate::TriagePhase::Complete`].
     pub fn archive_final_selection(&self) -> ArchiveFinalSelection {
         let base = self.archive_corpus();
         let completed = self.signal_candidate().completed_count();

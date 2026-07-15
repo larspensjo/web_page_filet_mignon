@@ -247,10 +247,16 @@ pub(super) fn render_token_progress_section(
         format_compact_tokens(estimate),
         format_compact_tokens(view.token_limit)
     );
-    let counts_text = format!(
-        "{} filtered · {} raw",
-        view.archive_filtered_count, view.raw_unprocessed_count
-    );
+    let counts_text = match &view.archive_partial_coverage {
+        Some(coverage) => format!(
+            "{} of {} triaged — run triage to export",
+            coverage.triaged, coverage.actionable_total
+        ),
+        None => format!(
+            "{} filtered · {} raw",
+            view.archive_filtered_count, view.raw_unprocessed_count
+        ),
+    };
     let progress_style = if percent >= 100.0 {
         StyleId::ProgressBar
     } else {

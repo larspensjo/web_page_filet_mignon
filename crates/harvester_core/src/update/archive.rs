@@ -22,12 +22,17 @@ pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
     state.pin_archive_corpus(corpus);
     let since_utc = state.briefing_since_utc();
     state.pin_signal_candidate_selection(signal_candidate_snapshot.clone());
-    let signal_candidate_default = crate::signal_candidate::compute_dialog_default(
-        state.signal_candidate().completed_count(),
-        state.signal_candidate().in_flight_count(),
-        state.signal_candidate().failed_count(),
-        signal_candidate_snapshot.selected_urls.len(),
-    );
+    let signal_candidate_default = if matches!(state.triage().phase(), crate::TriagePhase::Complete)
+    {
+        crate::signal_candidate::compute_dialog_default(
+            state.signal_candidate().completed_count(),
+            state.signal_candidate().in_flight_count(),
+            state.signal_candidate().failed_count(),
+            signal_candidate_snapshot.selected_urls.len(),
+        )
+    } else {
+        crate::signal_candidate::SignalCandidateDialogDefault::OffDisabled
+    };
     let signal_candidate_count = signal_candidate_snapshot.selected_urls.len();
     let signal_candidate_scoring_done =
         state.signal_candidate().completed_count() + state.signal_candidate().failed_count();
@@ -271,6 +276,16 @@ fn format_summary_body(result: &crate::briefing::ArticleSummaryResult) -> String
 fn build_signal_candidate_snapshot(
     state: &AppState,
 ) -> crate::signal_candidate::SignalCandidateArchiveSelection {
+    if !matches!(state.triage().phase(), crate::TriagePhase::Complete) {
+        return crate::signal_candidate::SignalCandidateArchiveSelection::new(
+            Vec::new(),
+            state.signal_candidate_threshold(),
+            state.signal_candidate().override_fingerprint(),
+            signal_candidate_selection_fingerprint(state, &[]),
+            crate::ArchiveTokenEstimates::default(),
+            false,
+        );
+    }
     let selection = state.signal_candidate_selection();
     let token_estimates = state.archive_token_estimates(&selection.selected_urls);
     let cache_fingerprint = signal_candidate_selection_fingerprint(state, &selection.selected_urls);

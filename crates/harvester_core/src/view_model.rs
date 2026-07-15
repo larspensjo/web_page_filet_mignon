@@ -309,6 +309,12 @@ pub struct LayoutViewModel {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ArchivePartialCoverageView {
+    pub triaged: usize,
+    pub actionable_total: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct AppViewModel {
     pub session: SessionState,
     pub queued_urls: Vec<String>,
@@ -323,8 +329,10 @@ pub struct AppViewModel {
     pub archive_token_estimate: u64,
     /// Number of articles in the filtered archive corpus.
     pub archive_filtered_count: usize,
-    /// Successfully downloaded jobs (`Stage::Done` + `Success` + `tokens.is_some()`)
-    /// that have no cached summary.
+    /// Cache-derived triage coverage shown alongside the archive count meter.
+    pub archive_partial_coverage: Option<ArchivePartialCoverageView>,
+    /// Archive-eligible articles that lack a cached summary (`filtered` minus
+    /// the summary-coverage count).
     pub raw_unprocessed_count: usize,
     pub preview_text: Option<String>,
     pub selected_job_id: Option<crate::JobId>,
@@ -385,6 +393,7 @@ impl Default for AppViewModel {
             token_limit: TOKEN_LIMIT,
             archive_token_estimate: 0,
             archive_filtered_count: 0,
+            archive_partial_coverage: None,
             raw_unprocessed_count: 0,
             preview_text: None,
             selected_job_id: None,

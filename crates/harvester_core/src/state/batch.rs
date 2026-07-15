@@ -2,6 +2,7 @@ use super::{
     AppState, ArchiveTokenEstimates, BatchNextAction, BatchObservation, BatchStatus, JobResultKind,
     PreTriagePhase, TriagePhase,
 };
+use crate::archive_display::{ArchiveDisplayCounts, CacheDerivedArchive};
 use crate::working_corpus::CurrentWorkingCorpus;
 
 impl AppState {
@@ -139,27 +140,32 @@ impl AppState {
         }
     }
 
-    /// Returns the corpus for archive export: triage-completed articles only.
+    /// Returns the live-triage-only corpus used by archive actions.
     ///
     /// Pre-triage articles (even when ready) are excluded - they need triage first.
-    ///
-    /// When the live triage session has not completed this session, the corpus is
-    /// derived from the persisted triage cache (see [`cache_derived_archive_urls`])
-    /// so archive counts reflect prior work at startup instead of showing zero
-    /// until the user re-runs triage. That derivation is read-only and never
-    /// mutates the [`TriageSession`], so batch orchestration — which reads the live
-    /// session — behaves exactly as before.
     pub(crate) fn archive_corpus(&self) -> CurrentWorkingCorpus {
+        CurrentWorkingCorpus::select_for_archive(self.triage(), self.briefing_triage_policy())
+    }
+
+    pub(in crate::state) fn archive_display_counts(&self) -> ArchiveDisplayCounts {
         if matches!(self.triage().phase(), TriagePhase::Complete) {
-            return CurrentWorkingCorpus::select_for_archive(
+            return ArchiveDisplayCounts::live(CurrentWorkingCorpus::select_for_archive(
                 self.triage(),
                 self.briefing_triage_policy(),
-            );
+            ));
         }
-        if let Some(urls) = self.cache_derived_archive_urls() {
-            return CurrentWorkingCorpus::triage_complete_from_urls(urls);
+
+        if let Some(cache_derived) = self.cache_derived_archive_display() {
+            let actionable_total = self.pre_triage().tentative_included_urls().len();
+            if cache_derived.cache_hit_count() > 0 {
+                return ArchiveDisplayCounts::cache_derived(cache_derived, actionable_total);
+            }
         }
-        CurrentWorkingCorpus::select_for_archive(self.triage(), self.briefing_triage_policy())
+
+        ArchiveDisplayCounts::live(CurrentWorkingCorpus::select_for_archive(
+            self.triage(),
+            self.briefing_triage_policy(),
+        ))
     }
 
     /// Derive the archive corpus URLs from the persisted triage cache for display
@@ -177,7 +183,7 @@ impl AppState {
     /// resolve) or there is no actionable pre-triage corpus, so the normal
     /// live-session path applies. This is read-only and never mutates the
     /// [`TriageSession`].
-    fn cache_derived_archive_urls(&self) -> Option<Vec<String>> {
+    fn cache_derived_archive_display(&self) -> Option<CacheDerivedArchive> {
         if !self.triage_metadata_ready() {
             return None;
         }
@@ -200,15 +206,23 @@ impl AppState {
                 }
             })
             .collect();
-        Some(self.briefing_triage_policy().rank_eligible(scored))
+        Some(CacheDerivedArchive::from_scored(
+            scored,
+            self.briefing_triage_policy(),
+        ))
     }
 
     /// Compute token estimates for the two archive modes for the given ordered URL list.
     ///
+    /// `filtered` is the number of archive-eligible URLs, `raw` is the eligible
+    /// count minus summary coverage, and `tokens` use summary output tokens when
+    /// available or full article tokens otherwise. The content hash is resolved
+    /// from live triage first and pre-triage as the cache-derived fallback.
+    ///
     /// **Limitation:** `full_tokens` aggregates `JobState::tokens`; articles whose job
     /// has been pruned, or imported articles without a job, contribute 0 and are likely
-    /// underreported. Summary coverage uses the active triage session's URL to
-    /// content-hash map.
+    /// underreported. Summary coverage uses the same live-triage-first,
+    /// pre-triage-fallback content-hash resolver as cached summary rows.
     pub(crate) fn archive_token_estimates(&self, urls: &[String]) -> ArchiveTokenEstimates {
         use harvester_engine::archive_url_key;
 
@@ -230,8 +244,7 @@ impl AppState {
             full_tokens = full_tokens.saturating_add(article_tokens);
 
             let maybe_summary = self
-                .triage()
-                .article_content_hash(url)
+                .content_hash_for_url(url)
                 .and_then(|hash| self.summary_cache().lookup_any_by_content_hash(hash));
 
             if let Some(entry) = maybe_summary {
@@ -250,13 +263,16 @@ impl AppState {
     }
 
     pub(crate) fn summary_output_tokens_for_url(&self, url: &str) -> Option<u32> {
-        let hash = self
-            .triage()
-            .article_content_hash(url)
-            .or_else(|| self.pre_triage.article_content_hash(url))?;
+        let hash = self.content_hash_for_url(url)?;
         self.summary_cache()
             .lookup_any_by_content_hash(hash)
             .map(|entry| entry.result.output_tokens)
+    }
+
+    pub(crate) fn content_hash_for_url(&self, url: &str) -> Option<&str> {
+        self.triage()
+            .article_content_hash(url)
+            .or_else(|| self.pre_triage.article_content_hash(url))
     }
 
     pub fn allocate_next_archive_request_id(&mut self) -> u64 {
@@ -289,5 +305,85 @@ impl AppState {
     /// A subsequent `ArchiveClicked` will naturally overwrite the pin.
     pub fn clear_pinned_archive_corpus(&mut self) {
         self.pinned_archive_corpus = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::archive_display::ArchiveCoverage;
+    use crate::briefing::LoadedArticle;
+    use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
+    use crate::triage::TriageSession;
+    use crate::ArticleTriageResult;
+    use harvester_engine::llm::prompt::PromptId;
+    use std::collections::HashMap;
+
+    #[test]
+    fn live_archive_display_counts_match_archive_selection() {
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: "https://batch-display.example/article".to_string(),
+            source_title: None,
+            prepared_text: "body".to_string(),
+            content_hash: "hash".to_string(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "tech".to_string(),
+                priority: 3,
+                tags: vec![],
+                rationale: "test".to_string(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+        triage.complete();
+
+        let mut state = AppState::new();
+        state.set_triage(triage);
+        let expected = state.archive_corpus();
+        let display = state.archive_display_counts();
+
+        assert_eq!(display.coverage(), &ArchiveCoverage::LiveComplete);
+        assert_eq!(display.ordered_urls(), expected.ordered_urls());
+        assert_eq!(display.filtered_count(), expected.count());
+    }
+
+    #[test]
+    fn zero_cache_hits_use_live_complete_archive_display_counts() {
+        let url = "https://batch-display.example/pre-triage";
+        let pre_triage = PreTriageSession::load_articles(
+            vec![LoadedArticle {
+                url: url.to_string(),
+                source_title: None,
+                prepared_text: std::iter::repeat_n("contentword", 220)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                content_hash: "pre-triage-hash".to_string(),
+                fetched_utc: None,
+            }],
+            &PreTriagePolicy::default(),
+        );
+        assert_eq!(pre_triage.phase(), PreTriagePhase::ReadyToTriage);
+
+        let mut active_versions = HashMap::new();
+        active_versions.insert(PromptId::ArticleTriage, 1);
+        let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "test-model".to_string());
+
+        let mut state = AppState::new();
+        state.set_pre_triage(pre_triage);
+        state.set_llm_metadata(active_versions, effective_models, HashMap::new());
+        state.set_prompt_contexts(HashMap::new());
+        state.mark_triage_metadata_ready();
+
+        let display = state.archive_display_counts();
+
+        assert_eq!(display.coverage(), &ArchiveCoverage::LiveComplete);
+        assert_eq!(display.filtered_count(), 0);
     }
 }

@@ -2040,3 +2040,11 @@ Type: Implementation
 Context: The user-maintained `sources.ron` lived at the repository root, so backups of the output directory omitted the configuration needed to reproduce ingestion.
 Change: Renamed the default registry to `output/.sources.ron`, centralized its output-relative path in `harvester_io`, made the batch default follow `--output-dir`, updated the desktop app and launcher defaults, and documented the private sidecar. Explicit `--sources` paths remain supported.
 Refs: crates/harvester_io/src/runtime_paths.rs, crates/harvester_batch/src/cli.rs, crates/harvester_app/src/platform/effects.rs, scripts/harvester_launcher/Data.psm1, docs/CorpusFormat.md, README.md
+
+## 2026-07-12 - Separate archive display counts from the action corpus
+Type: Bug Fix
+Context: The 2026-07-10 startup-count fix routed persisted triage-cache estimates through `CurrentWorkingCorpus`, which let a display-only projection look actionable to archive, briefing, and signal-candidate paths.
+Change: Added the distinct `ArchiveDisplayCounts` read-model with cache-coverage provenance, restricted its accessor to `crate::state`, restored `archive_corpus()` to live-triage-only, deleted `triage_complete_from_urls`, and gated signal-candidate export before live triage. Added the partial-coverage indicator and unified content-hash resolution across archive token estimates and cached summary lookup.
+Lessons Learned: A display metric derived from persisted state must live in a type that no action path can name; it must not be smuggled through the action corpus type. Reverting one accessor is insufficient—sibling export paths such as signal candidates need the same live-triage policy audit.
+Prevention: Keep the distinct triage-cache-coverage, archive-eligibility, and summary-coverage axes explicit in types, names, and regression tests. The deleted constructor, distinct display type, restricted accessor, live-only corpus, and signal gate provide a by-construction boundary.
+Refs: crates/harvester_core/src/archive_display.rs, crates/harvester_core/src/state/batch.rs, crates/harvester_core/src/update/archive.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_app/src/platform/ui/render_controls.rs, crates/harvester_core/src/update/tests/archive_tests.rs, crates/harvester_app/src/platform/ui/render_tests.rs, 2026-07-10 archive-count entry
