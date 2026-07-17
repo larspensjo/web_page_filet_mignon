@@ -1170,6 +1170,29 @@ mod app_state_tests {
     }
 
     #[test]
+    fn provider_alert_banner_shown_when_ai_available() {
+        let mut state = AppState::new();
+        state.note_provider_out_of_credits("provider quota exhausted: billing".into());
+
+        let view = state.view();
+        let banner = view.ai_warning_banner.expect("provider warning banner");
+        assert!(banner.title.contains("credits"));
+    }
+
+    #[test]
+    fn missing_api_key_banner_takes_priority_over_provider_alert() {
+        let mut state = AppState::new();
+        state.set_ai_availability(AiAvailability::Unavailable {
+            reason: AiUnavailableReason::MissingApiKey,
+        });
+        state.note_provider_out_of_credits("provider quota exhausted: billing".into());
+
+        let view = state.view();
+        let banner = view.ai_warning_banner.expect("missing-key warning banner");
+        assert_eq!(banner.title, "AI features are disabled");
+    }
+
+    #[test]
     fn ai_warning_banner_absent_for_non_key_ai_unavailability() {
         let mut state = AppState::new();
         state.set_ai_availability(AiAvailability::Unavailable {

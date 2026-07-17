@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::types::ModelId;
+use harvester_engine::llm::QuotaOrigin;
 use harvester_engine::ExtractedLink;
 
 use crate::prompt_lab::{
@@ -520,6 +521,13 @@ pub enum LlmResultKind {
         raw_response: String,
     },
     QuotaExhausted {
+        reason: String,
+        origin: QuotaOrigin,
+    },
+    /// Provider refused the call with a rate-limit response (HTTP 429 that is
+    /// not insufficient_quota). Kept distinct from Failed so the reducer can
+    /// detect systemic provider refusal and stop the run.
+    RateLimited {
         reason: String,
     },
     Failed {

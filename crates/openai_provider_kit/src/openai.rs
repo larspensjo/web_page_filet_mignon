@@ -62,17 +62,48 @@ impl OpenAiProvider {
     fn map_status_code(status: StatusCode, headers: &header::HeaderMap, body: String) -> LlmError {
         match status.as_u16() {
             401 => LlmError::AuthenticationFailed,
-            429 => LlmError::RateLimited {
-                retry_after_secs: headers
-                    .get(header::RETRY_AFTER)
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.parse::<u64>().ok()),
+            429 => match Self::insufficient_quota_description(&body) {
+                Some(description) => LlmError::QuotaExhausted { description },
+                None => LlmError::RateLimited {
+                    retry_after_secs: headers
+                        .get(header::RETRY_AFTER)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| value.parse::<u64>().ok()),
+                },
             },
             _ => LlmError::Http {
                 status: status.as_u16(),
                 body,
             },
         }
+    }
+
+    /// OpenAI returns 429 for both rate limiting and an exhausted credit
+    /// balance; only the body's `error.code`/`error.type` distinguishes them.
+    fn insufficient_quota_description(body: &str) -> Option<String> {
+        #[derive(Deserialize)]
+        struct ErrorBody {
+            error: ErrorDetail,
+        }
+        #[derive(Deserialize)]
+        struct ErrorDetail {
+            #[serde(default)]
+            code: Option<String>,
+            #[serde(default, rename = "type")]
+            kind: Option<String>,
+            #[serde(default)]
+            message: Option<String>,
+        }
+
+        let parsed: ErrorBody = serde_json::from_str(body).ok()?;
+        let is_quota = parsed.error.code.as_deref() == Some("insufficient_quota")
+            || parsed.error.kind.as_deref() == Some("insufficient_quota");
+        is_quota.then(|| {
+            parsed
+                .error
+                .message
+                .unwrap_or_else(|| "insufficient quota".to_string())
+        })
     }
 
     fn parse_response_body(bytes: &[u8]) -> Result<LlmResponse, LlmError> {
@@ -650,6 +681,53 @@ mod tests {
             err,
             LlmError::RateLimited {
                 retry_after_secs: Some(7)
+            }
+        ));
+    }
+
+    #[test]
+    fn maps_429_insufficient_quota_body_to_quota_exhausted() {
+        let body = r#"{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","param":null,"code":"insufficient_quota"}}"#;
+        let err = OpenAiProvider::map_status_code(
+            StatusCode::TOO_MANY_REQUESTS,
+            &HeaderMap::new(),
+            body.into(),
+        );
+        match err {
+            LlmError::QuotaExhausted { description } => {
+                assert!(description.contains("exceeded your current quota"));
+            }
+            other => panic!("expected QuotaExhausted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn maps_429_rate_limit_body_to_rate_limited() {
+        let body = r#"{"error":{"message":"Rate limit reached for gpt-5.4-mini","type":"requests","param":null,"code":"rate_limit_exceeded"}}"#;
+        let err = OpenAiProvider::map_status_code(
+            StatusCode::TOO_MANY_REQUESTS,
+            &HeaderMap::new(),
+            body.into(),
+        );
+        assert!(matches!(
+            err,
+            LlmError::RateLimited {
+                retry_after_secs: None
+            }
+        ));
+    }
+
+    #[test]
+    fn maps_429_unparseable_body_to_rate_limited() {
+        let err = OpenAiProvider::map_status_code(
+            StatusCode::TOO_MANY_REQUESTS,
+            &HeaderMap::new(),
+            "<html>not json</html>".into(),
+        );
+        assert!(matches!(
+            err,
+            LlmError::RateLimited {
+                retry_after_secs: None
             }
         ));
     }

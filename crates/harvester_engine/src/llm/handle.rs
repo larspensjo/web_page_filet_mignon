@@ -7,6 +7,7 @@ use std::{
 use tokio::sync::Semaphore;
 
 use engine_logging::{engine_error, engine_info, engine_warn};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::runtime::Runtime;
 
@@ -157,6 +158,7 @@ pub enum LlmCompletionError {
     },
     QuotaExhausted {
         description: String,
+        origin: QuotaOrigin,
         failure_metadata: Option<LlmFailureMetadata>,
     },
     PromptNotFound {
@@ -180,6 +182,15 @@ pub enum LlmCompletionError {
         model: ModelId,
         reason: String,
     },
+}
+
+/// Where a quota-exhausted stop originated. Provider = the LLM vendor refused
+/// the call (e.g. OpenAI insufficient_quota / out of credits). SessionBudget =
+/// Harvester's own per-session call/token/cost limit tripped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QuotaOrigin {
+    Provider,
+    SessionBudget,
 }
 
 pub enum LlmEvent {
@@ -338,6 +349,7 @@ async fn handle_completion_concurrent(
                 request_id,
                 Err(LlmCompletionError::QuotaExhausted {
                     description: failure.to_string(),
+                    origin: QuotaOrigin::SessionBudget,
                     failure_metadata: None,
                 }),
                 quota_tracker,
@@ -578,10 +590,9 @@ async fn handle_completion_concurrent(
         send_llm_completed(
             event_tx,
             request_id,
-            Err(LlmCompletionError::ProviderError(err)),
+            Err(map_provider_failure(err, failure_metadata)),
             quota_tracker,
         );
-        drop(failure_metadata); // metadata available if needed in future
         return;
     }
 
@@ -625,6 +636,7 @@ async fn handle_completion_concurrent(
                 request_id,
                 Err(LlmCompletionError::QuotaExhausted {
                     description: failure.to_string(),
+                    origin: QuotaOrigin::SessionBudget,
                     failure_metadata: Some(failure_metadata),
                 }),
                 quota_tracker,
@@ -964,6 +976,17 @@ impl ModelOverrideValidationError {
     }
 }
 
+fn map_provider_failure(err: LlmError, failure_metadata: LlmFailureMetadata) -> LlmCompletionError {
+    match err {
+        LlmError::QuotaExhausted { description } => LlmCompletionError::QuotaExhausted {
+            description: format!("provider quota exhausted: {description}"),
+            origin: QuotaOrigin::Provider,
+            failure_metadata: Some(failure_metadata),
+        },
+        other => LlmCompletionError::ProviderError(other),
+    }
+}
+
 fn fetch_prompt_template(
     config: &LlmConfig,
     prompt_id: PromptId,
@@ -1090,6 +1113,17 @@ mod tests {
     use super::*;
     use crate::llm::mock_provider::MockLlmProvider;
     use crate::llm::OPENAI_MODEL_GPT_4O_MINI;
+
+    fn stub_failure_metadata() -> LlmFailureMetadata {
+        LlmFailureMetadata {
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: 1,
+            resolved_model: Some(OPENAI_MODEL_GPT_4O_MINI.to_string()),
+            input_bytes: 100,
+            wall_ms: Some(50),
+            timestamp_utc: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
 
     /// Simulate the TemplateVars construction that handle_completion_concurrent does,
     /// then verify that extra_template_vars are NOT folded into {{context}}.
@@ -1235,5 +1269,54 @@ mod tests {
             let model = resolve_model(id, None, &cfg);
             assert_eq!(model.model_name(), "gpt-briefing");
         }
+    }
+
+    #[test]
+    fn provider_quota_error_maps_to_quota_exhausted_with_provider_origin() {
+        let metadata = stub_failure_metadata();
+        let mapped = map_provider_failure(
+            LlmError::QuotaExhausted {
+                description: "billing hard limit reached".to_string(),
+            },
+            metadata,
+        );
+        match mapped {
+            LlmCompletionError::QuotaExhausted {
+                description,
+                origin,
+                failure_metadata,
+            } => {
+                assert!(description.contains("billing hard limit reached"));
+                assert_eq!(origin, QuotaOrigin::Provider);
+                assert!(failure_metadata.is_some());
+            }
+            other => panic!("expected QuotaExhausted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rate_limited_error_stays_provider_error() {
+        let mapped = map_provider_failure(
+            LlmError::RateLimited {
+                retry_after_secs: None,
+            },
+            stub_failure_metadata(),
+        );
+        assert!(matches!(
+            mapped,
+            LlmCompletionError::ProviderError(LlmError::RateLimited { .. })
+        ));
+    }
+
+    #[test]
+    fn http_error_stays_provider_error() {
+        let mapped = map_provider_failure(
+            LlmError::Http {
+                status: 500,
+                body: "boom".to_string(),
+            },
+            stub_failure_metadata(),
+        );
+        assert!(matches!(mapped, LlmCompletionError::ProviderError(_)));
     }
 }

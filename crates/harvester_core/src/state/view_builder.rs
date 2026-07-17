@@ -160,7 +160,9 @@ impl AppState {
             .is_some();
         let preview_source = self.ui.preview.content_kind();
         let operation_progress = self.build_operation_progress();
-        let ai_warning_banner = self.ai_warning_banner();
+        let ai_warning_banner = self
+            .ai_warning_banner()
+            .or_else(|| self.provider_alert_banner());
         let ai_unavailable_message = self.ai_unavailable_message();
         let triage_blocked_reason = self.triage_blocked_reason();
         let briefing_blocked_reason = self.briefing_blocked_reason();
@@ -600,7 +602,8 @@ impl AppState {
                 self.left_tab(),
                 LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults
             ),
-            ai_warning_banner_visible: self.ai_warning_banner().is_some(),
+            ai_warning_banner_visible: self.ai_warning_banner().is_some()
+                || self.provider_alert_banner().is_some(),
             preview_header_override_visible,
             preview_context_visible: selected_job.is_some() && !preview_header_override_visible,
             preview_attention_visible: selected_job

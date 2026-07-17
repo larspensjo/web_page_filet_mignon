@@ -238,6 +238,7 @@ pub(super) fn dispatch_pre_triage_if_due(
 }
 
 fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
+    state.clear_provider_alert();
     // Consumes the pre-triage articles via a phase-guarded helper that atomically
     // resets pre-triage to Idle, ensuring it cannot remain action-ready after
     // its articles have been handed off to triage.

@@ -839,6 +839,7 @@ mod entity_index_tests;
 mod import_tests;
 mod pre_triage_refresh_tests;
 mod prompt_lab_tests;
+mod provider_alert_tests;
 mod signal_candidate_tests;
 mod triage_tests;
 mod ui_state_tests;

@@ -38,6 +38,7 @@ mod link_helpers;
 mod llm;
 mod pre_triage_access;
 mod prompt;
+mod provider_alert;
 mod signal_candidate_access;
 mod source_poll;
 mod ui_state;
@@ -60,6 +61,7 @@ use link_helpers::{
 };
 use ui_state::{MetricsState, PreviewMode, PreviewState, UiState};
 
+pub use provider_alert::ProviderAlert;
 pub(crate) use signal_candidate_access::BriefingGenerateReadiness;
 
 pub type JobId = u64;
@@ -342,6 +344,8 @@ pub struct AppState {
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
     effective_models: HashMap<PromptId, String>,
     ai_availability: AiAvailability,
+    provider_alert: Option<provider_alert::ProviderAlert>,
+    consecutive_rate_limit_failures: u32,
     prompt_lab_templates: HashMap<PromptId, PromptLabTemplateSnapshot>,
     summary_cache: SummaryCache,
     signal_candidate: crate::signal_candidate::SignalCandidateSession,
@@ -459,6 +463,8 @@ impl Default for AppState {
             active_prompt_versions: HashMap::new(),
             effective_models: HashMap::new(),
             ai_availability: AiAvailability::Available,
+            provider_alert: None,
+            consecutive_rate_limit_failures: 0,
             summary_cache: SummaryCache::new(),
             signal_candidate: crate::signal_candidate::SignalCandidateSession::default(),
             signal_candidate_cache: crate::signal_candidate_cache::SignalCandidateCache::default(),

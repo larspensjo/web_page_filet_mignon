@@ -40,6 +40,7 @@ fn begin_briefing_article_load(
     ordered_urls: Vec<String>,
     skip_aggregate: bool,
 ) -> Vec<Effect> {
+    state.clear_provider_alert();
     if skip_aggregate {
         state.request_summary_preparation();
     } else {
@@ -98,6 +99,7 @@ pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
         return fail_generate(state, "No article summaries available for the briefing.");
     }
 
+    state.clear_provider_alert();
     state.briefing_mut().start_stream(
         snapshot.text,
         snapshot.coverage_window_label,

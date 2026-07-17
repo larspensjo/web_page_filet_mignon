@@ -12,7 +12,7 @@ use engine_logging::{engine_info, engine_warn};
 use harvester_core::{LlmQuotaUsage, LlmResultKind, Msg, Stage};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::types::{ModelId, ProviderKind};
-use harvester_engine::llm::{LlmCompletionError, LlmEvent, LlmRunMetadata};
+use harvester_engine::llm::{LlmCompletionError, LlmError, LlmEvent, LlmRunMetadata};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
     poll_rss_source, write_corpus_manifest, AtomicFileWriter, BraveSeenSet, DecodeError,
@@ -428,12 +428,25 @@ pub fn map_llm_event(event: LlmEvent) -> Msg {
                 ),
                 Err(LlmCompletionError::QuotaExhausted {
                     description,
+                    origin,
                     failure_metadata,
                 }) => (
                     LlmResultKind::QuotaExhausted {
                         reason: description,
+                        origin,
                     },
                     failure_metadata.map(LlmRunMetadata::from),
+                ),
+                Err(LlmCompletionError::ProviderError(LlmError::RateLimited {
+                    retry_after_secs,
+                })) => (
+                    LlmResultKind::RateLimited {
+                        reason: match retry_after_secs {
+                            Some(secs) => format!("provider rate limited; retry after {secs}s"),
+                            None => "provider rate limited".to_string(),
+                        },
+                    },
+                    None,
                 ),
                 Err(LlmCompletionError::PersistenceFailed {
                     detail,
@@ -465,6 +478,52 @@ pub fn map_llm_event(event: LlmEvent) -> Msg {
                 cost_microdollars: usage.cost_microdollars,
             },
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use harvester_engine::llm::QuotaOrigin;
+
+    #[test]
+    fn map_llm_event_rate_limited_provider_error_maps_to_rate_limited_kind() {
+        let event = LlmEvent::Completed {
+            request_id: 7,
+            result: Err(LlmCompletionError::ProviderError(LlmError::RateLimited {
+                retry_after_secs: Some(20),
+            })),
+        };
+        match map_llm_event(event) {
+            Msg::LlmCompleted { result, .. } => match result {
+                LlmResultKind::RateLimited { reason } => {
+                    assert!(reason.contains("rate limited"))
+                }
+                other => panic!("expected RateLimited, got {other:?}"),
+            },
+            other => panic!("expected LlmCompleted, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_llm_event_quota_exhausted_preserves_origin() {
+        let event = LlmEvent::Completed {
+            request_id: 8,
+            result: Err(LlmCompletionError::QuotaExhausted {
+                description: "provider quota exhausted: billing".to_string(),
+                origin: QuotaOrigin::Provider,
+                failure_metadata: None,
+            }),
+        };
+        match map_llm_event(event) {
+            Msg::LlmCompleted { result, .. } => match result {
+                LlmResultKind::QuotaExhausted { origin, .. } => {
+                    assert_eq!(origin, QuotaOrigin::Provider)
+                }
+                other => panic!("expected QuotaExhausted, got {other:?}"),
+            },
+            other => panic!("expected LlmCompleted, got {other:?}"),
+        }
     }
 }
 

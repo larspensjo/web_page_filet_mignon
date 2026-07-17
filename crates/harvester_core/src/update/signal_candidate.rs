@@ -109,7 +109,7 @@ pub(crate) fn handle_signal_candidate_completion(
                 .fail(&url, format!("validation: {reason}"));
             state.clear_signal_candidate_input_snapshot(&url);
         }
-        LlmResultKind::QuotaExhausted { reason } => {
+        LlmResultKind::QuotaExhausted { reason, .. } => {
             engine_warn!(
                 "[signal-dispatch] quota exhausted url={} reason={}",
                 url,
@@ -118,6 +118,15 @@ pub(crate) fn handle_signal_candidate_completion(
             state
                 .signal_candidate_mut()
                 .fail(&url, format!("quota exhausted: {reason}"));
+            state.clear_signal_candidate_input_snapshot(&url);
+        }
+        LlmResultKind::RateLimited { reason } => {
+            engine_warn!(
+                "[signal-dispatch] rate limited url={} reason={}",
+                url,
+                reason
+            );
+            state.signal_candidate_mut().fail(&url, reason.clone());
             state.clear_signal_candidate_input_snapshot(&url);
         }
         LlmResultKind::Failed { reason } => {

@@ -138,6 +138,7 @@ fn triage_quota_exhausted_fails_all_pending() {
             request_id: 1,
             result: LlmResultKind::QuotaExhausted {
                 reason: "too many calls".to_string(),
+                origin: harvester_engine::llm::QuotaOrigin::SessionBudget,
             },
             metadata: None,
         },

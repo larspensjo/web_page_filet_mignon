@@ -589,6 +589,7 @@ fn map_llm_event_quota_exhausted_with_metadata_propagates_it() {
         request_id: 1,
         result: Err(LlmCompletionError::QuotaExhausted {
             description: "rate limited".to_string(),
+            origin: harvester_engine::llm::QuotaOrigin::SessionBudget,
             failure_metadata: Some(failure_metadata),
         }),
     };

@@ -74,7 +74,7 @@ pub use state::{
     normalize_url_for_dedupe, AiAvailability, AiUnavailableReason, AppState, ArchiveTokenEstimates,
     BatchNextAction, BatchObservation, BatchStatus, CompletedJobSnapshot, JobId, JobOrigin,
     JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
-    PreTriageActionability, SessionState, Stage,
+    PreTriageActionability, ProviderAlert, SessionState, Stage,
 };
 // ImportPhase is re-exported from import_session above; BatchObservation uses it.
 pub use summary_cache::{

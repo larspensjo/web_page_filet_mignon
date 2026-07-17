@@ -137,6 +137,7 @@ fn triage_success(priority: u8) -> LlmResultKind {
 fn triage_quota() -> LlmResultKind {
     LlmResultKind::QuotaExhausted {
         reason: "quota".to_string(),
+        origin: harvester_engine::llm::QuotaOrigin::SessionBudget,
     }
 }
 

@@ -427,6 +427,7 @@ fn llm_completed_quota_exhausted_routes_to_lab_run_as_failed() {
             request_id,
             result: LlmResultKind::QuotaExhausted {
                 reason: "over limit".to_string(),
+                origin: harvester_engine::llm::QuotaOrigin::SessionBudget,
             },
             metadata: None,
         },

@@ -15,3 +15,11 @@ The format follows Keep a Changelog-style sections, and this crate uses semantic
 - Optional `test-support` mock providers for downstream tests.
 - Optional `reqwest-passthrough` feature for explicit Reqwest client injection.
 - README, license, example, and future GitHub Actions CI workflow for repository split preparation.
+
+## 0.2.0 - 2026-07-15
+
+### Changed
+- HTTP 429 responses whose body carries `error.code`/`error.type` of
+  `insufficient_quota` now map to `LlmError::QuotaExhausted` instead of
+  `LlmError::RateLimited`, so callers can distinguish an exhausted credit
+  balance from transient rate limiting. Other 429s are unchanged.

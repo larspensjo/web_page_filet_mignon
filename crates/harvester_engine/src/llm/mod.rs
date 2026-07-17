@@ -32,7 +32,7 @@ pub use dto::{
 };
 pub use handle::{
     LlmCommand, LlmCompletionCommand, LlmCompletionError, LlmCompletionResult, LlmConfig, LlmEvent,
-    LlmHandle,
+    LlmHandle, QuotaOrigin,
 };
 pub use mock_provider::{BlockingMockProvider, MockLlmProvider};
 pub use pricing::{ModelPricing, PricingRegistry};
