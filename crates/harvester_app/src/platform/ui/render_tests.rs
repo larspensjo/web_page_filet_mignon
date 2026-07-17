@@ -292,6 +292,159 @@ fn tree_updates_text_without_repopulate_on_progress_change() {
     assert_eq!(populated[0].metadata, "example.com · 100 · 2.0 KB");
 }
 
+fn list_box_command_count(commands: &[PlatformCommand]) -> usize {
+    commands
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                PlatformCommand::SetListBoxRowDensity { .. }
+                    | PlatformCommand::PopulateListBox { .. }
+                    | PlatformCommand::SetListBoxSelection { .. }
+            )
+        })
+        .count()
+}
+
+#[test]
+fn list_box_initial_render_emits_density_and_population() {
+    let window_id = WindowId::new(67);
+    let mut tree_state = TreeRenderState::new();
+    let view = make_view(vec![make_job(
+        1,
+        "https://example.com",
+        Stage::Queued,
+        None,
+        None,
+        None,
+    )]);
+
+    let commands = render(window_id, &view, &mut tree_state);
+
+    assert!(commands
+        .iter()
+        .any(|command| matches!(command, PlatformCommand::SetListBoxRowDensity { .. })));
+    assert!(commands
+        .iter()
+        .any(|command| matches!(command, PlatformCommand::PopulateListBox { .. })));
+}
+
+#[test]
+fn list_box_identical_second_render_emits_no_commands() {
+    let window_id = WindowId::new(68);
+    let mut tree_state = TreeRenderState::new();
+    let view = make_view(vec![make_job(
+        1,
+        "https://example.com",
+        Stage::Queued,
+        None,
+        None,
+        None,
+    )]);
+
+    let _ = render(window_id, &view, &mut tree_state);
+    let commands = render(window_id, &view, &mut tree_state);
+
+    assert_eq!(list_box_command_count(&commands), 0);
+}
+
+#[test]
+fn list_box_selection_only_change_emits_selection_without_population() {
+    let window_id = WindowId::new(69);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![make_job(
+        1,
+        "https://example.com",
+        Stage::Queued,
+        None,
+        None,
+        None,
+    )]);
+    let _ = render(window_id, &view, &mut tree_state);
+
+    view.selected_job_id = Some(1);
+    let commands = render(window_id, &view, &mut tree_state);
+
+    assert_eq!(list_box_command_count(&commands), 1);
+    assert!(commands.iter().any(|command| {
+        matches!(
+            command,
+            PlatformCommand::SetListBoxSelection { item_id, .. }
+                if *item_id == ListBoxItemId::new(1)
+        )
+    }));
+}
+
+#[test]
+fn list_box_badge_or_content_change_emits_only_population() {
+    let window_id = WindowId::new(70);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![make_job(
+        1,
+        "https://example.com",
+        Stage::Queued,
+        None,
+        None,
+        None,
+    )]);
+    let _ = render(window_id, &view, &mut tree_state);
+
+    view.jobs[0].stage = Stage::Downloading;
+    let commands = render(window_id, &view, &mut tree_state);
+
+    assert_eq!(list_box_command_count(&commands), 1);
+    assert!(commands
+        .iter()
+        .any(|command| matches!(command, PlatformCommand::PopulateListBox { .. })));
+}
+
+#[test]
+fn list_box_tab_transition_emits_changed_density() {
+    let window_id = WindowId::new(71);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![make_job(
+        1,
+        "https://example.com",
+        Stage::Done,
+        Some(JobResultKind::Success),
+        None,
+        None,
+    )]);
+    let _ = render(window_id, &view, &mut tree_state);
+
+    view.left_pane.left_tab = LeftTab::TriageResults;
+    let commands = render(window_id, &view, &mut tree_state);
+
+    assert!(commands.iter().any(|command| {
+        matches!(
+            command,
+            PlatformCommand::SetListBoxRowDensity { density, .. }
+                if *density == ListBoxRowDensity::Compact
+        )
+    }));
+}
+
+#[test]
+fn list_box_selection_some_to_none_with_unchanged_items_emits_no_command() {
+    let window_id = WindowId::new(72);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![make_job(
+        1,
+        "https://example.com",
+        Stage::Queued,
+        None,
+        None,
+        None,
+    )]);
+    view.selected_job_id = Some(1);
+    let _ = render(window_id, &view, &mut tree_state);
+
+    view.selected_job_id = None;
+    let commands = render(window_id, &view, &mut tree_state);
+
+    assert_eq!(list_box_command_count(&commands), 0);
+}
+
 #[test]
 fn triage_review_items_show_indirect_badge_and_disabled_state() {
     let mut job = make_job(1, "https://example.com", Stage::Done, None, None, None);
@@ -664,6 +817,47 @@ fn list_box_selected_id_omitted_when_selection_filtered_out() {
         )
     }));
     assert!(!cmds.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetListBoxSelection { control_id, item_id, .. }
+                if *control_id == TREE_JOBS && *item_id == ListBoxItemId::new(2)
+        )
+    }));
+}
+
+#[test]
+fn list_box_selection_is_reemitted_when_selected_item_leaves_and_returns() {
+    init_logging();
+    let window_id = WindowId::new(62);
+    let mut tree_state = TreeRenderState::new();
+    let mut view = make_view(vec![
+        make_job(1, "https://a.com/", Stage::Done, None, None, None),
+        make_job(2, "https://b.com/", Stage::Done, None, None, None),
+    ]);
+    view.selected_job_id = Some(2);
+    view.left_pane.left_tab = LeftTab::Jobs;
+
+    let initial_commands = render(window_id, &view, &mut tree_state);
+    assert!(initial_commands.iter().any(|cmd| {
+        matches!(
+            cmd,
+            PlatformCommand::SetListBoxSelection { control_id, item_id, .. }
+                if *control_id == TREE_JOBS && *item_id == ListBoxItemId::new(2)
+        )
+    }));
+
+    view.left_pane.visible_jobs_after_filter = vec![1];
+    let filtered_commands = render(window_id, &view, &mut tree_state);
+    assert!(filtered_commands
+        .iter()
+        .any(|cmd| matches!(cmd, PlatformCommand::PopulateListBox { .. })));
+    assert!(!filtered_commands
+        .iter()
+        .any(|cmd| matches!(cmd, PlatformCommand::SetListBoxSelection { .. })));
+
+    view.left_pane.visible_jobs_after_filter = vec![1, 2];
+    let restored_commands = render(window_id, &view, &mut tree_state);
+    assert!(restored_commands.iter().any(|cmd| {
         matches!(
             cmd,
             PlatformCommand::SetListBoxSelection { control_id, item_id, .. }

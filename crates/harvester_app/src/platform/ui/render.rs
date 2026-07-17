@@ -13,7 +13,7 @@ use super::render_controls::{
     render_operation_progress_section, render_status_section, render_tab_bar_section,
     render_token_progress_section,
 };
-use super::render_list_box::{append_list_box_commands, ListBoxRenderModel};
+use super::render_list_box::{append_list_box_commands, ListBoxRenderModel, ListBoxRenderState};
 use super::render_preview::render_preview_section;
 pub(crate) use super::render_prompt_lab::combo_index_to_model;
 use super::render_prompt_lab::render_prompt_lab_section;
@@ -157,6 +157,7 @@ pub struct TreeRenderState {
     pub(super) prompt_lab: PromptLabRenderState,
     pub(super) preview: PreviewRenderState,
     pub(super) blacklist: BlacklistRenderState,
+    pub(super) list_box: ListBoxRenderState,
 }
 
 impl TreeRenderState {
@@ -204,7 +205,7 @@ pub fn render(
     render_blacklist_section(window_id, view, &mut tree_state.blacklist, &mut cmds);
 
     let list_box = ListBoxRenderModel::from_view(view);
-    append_list_box_commands(window_id, list_box, &mut cmds);
+    append_list_box_commands(window_id, list_box, &mut tree_state.list_box, &mut cmds);
 
     render_preview_section(window_id, view, tree_state, &mut cmds);
 

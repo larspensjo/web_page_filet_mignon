@@ -21,9 +21,17 @@ const LIST_BOX_BADGE_PAD_X: i32 = 6;
 
 const LIST_BOX_BADGE_GAP: i32 = 4;
 
+#[derive(Debug, Default)]
+pub(super) struct ListBoxRenderState {
+    pub(super) prev_row_density: Option<ListBoxRowDensity>,
+    pub(super) prev_items: Option<Vec<ListBoxItemDescriptor>>,
+    pub(super) prev_selected_item_id: Option<ListBoxItemId>,
+}
+
 pub(super) fn append_list_box_commands(
     window_id: WindowId,
     list_box: ListBoxRenderModel,
+    state: &mut ListBoxRenderState,
     cmds: &mut Vec<PlatformCommand>,
 ) {
     let ListBoxRenderModel {
@@ -31,25 +39,37 @@ pub(super) fn append_list_box_commands(
         items,
         selected_item_id,
     } = list_box;
-    let badge_column_width = compute_list_box_badge_column_width(&items);
-    let badge_column_width = badge_column_width.clamp(0, u16::MAX as i32) as u16;
-    cmds.push(PlatformCommand::SetListBoxRowDensity {
-        window_id,
-        control_id: TREE_JOBS,
-        density: row_density,
-    });
-    cmds.push(PlatformCommand::PopulateListBox {
-        window_id,
-        control_id: TREE_JOBS,
-        items,
-        badge_column_width,
-    });
-    if let Some(item_id) = selected_item_id {
+    if state.prev_row_density != Some(row_density) {
+        cmds.push(PlatformCommand::SetListBoxRowDensity {
+            window_id,
+            control_id: TREE_JOBS,
+            density: row_density,
+        });
+        state.prev_row_density = Some(row_density);
+    }
+    if state.prev_items.as_deref() != Some(items.as_slice()) {
+        // The width is derived from exactly the payload being emitted, rather
+        // than becoming an independent render-diff key.
+        let badge_column_width = compute_list_box_badge_column_width(&items);
+        let badge_column_width = badge_column_width.clamp(0, u16::MAX as i32) as u16;
+        cmds.push(PlatformCommand::PopulateListBox {
+            window_id,
+            control_id: TREE_JOBS,
+            items: items.clone(),
+            badge_column_width,
+        });
+        state.prev_items = Some(items);
+        state.prev_selected_item_id = None;
+    }
+    if let Some(item_id) =
+        selected_item_id.filter(|item_id| state.prev_selected_item_id != Some(*item_id))
+    {
         cmds.push(PlatformCommand::SetListBoxSelection {
             window_id,
             control_id: TREE_JOBS,
             item_id,
         });
+        state.prev_selected_item_id = Some(item_id);
     }
 }
 

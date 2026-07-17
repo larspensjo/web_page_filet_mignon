@@ -2056,3 +2056,11 @@ Change: Classified 429 bodies in `openai_provider_kit` 0.2.0, carried a typed `Q
 Lessons Learned: When a provider multiplexes distinct failure modes onto one status code, preserve the discriminating detail at the lowest layer—upper layers cannot recover it. Global alert state mutated from completion events must be gated on request ownership, or late completions from a stopped run corrupt the next run's state.
 Prevention: Added provider-mapping, quota-origin, threshold, reducer ownership, stale-completion, run-start clearing, and banner-priority regression tests.
 Refs: crates/openai_provider_kit/src/openai.rs, crates/harvester_engine/src/llm/handle.rs, crates/harvester_io/src/effect_helpers.rs, crates/harvester_core/src/state/provider_alert.rs, crates/harvester_core/src/update/tests/provider_alert_tests.rs
+
+## 2026-07-17 - Results-list hover repaint suppression
+Type: Bug Fix
+Context: Results-row hover transitions could visibly flicker because the generic native control painted directly to the window, and full application renders repeatedly sent unchanged list commands.
+Change: Integrated CommanDuctUI 2.3.3's atomic buffered list paint path and added `ListBoxRenderState` host diffing for row density, descriptors, and supported selected IDs. Unchanged renders emit no list commands; a selection changing from `Some` to `None` intentionally retains the existing native highlight until a clear-selection API is designed.
+Lessons Learned: Native-control idempotency is a necessary safety net, while render-layer diffs prevent needless platform work before it reaches the control.
+Prevention: Keep list render-state inputs separate, derive badge-column width only when emitting changed descriptors, and preserve the explicit retained-highlight test until public API semantics change.
+Refs: crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_list_box.rs, crates/harvester_app/src/platform/ui/render_tests.rs, src/CommanDuctUI
