@@ -12,6 +12,8 @@
 ## Planning & Documentation
 - When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.
 - Prefer plans with proper long term solutions, even if more work or refactoring are required.
+- Consult `docs/Architecture.md` for the current system shape when planning or reviewing changes.
+- UI-surface work must follow `docs/visual_design/VisualDesignSpec.md` (the warm dark-theme TUI rendered through CommanDuctUI).
 
 ## Architecture
 - Preserve the unidirectional data flow: input -> action -> reducer -> state -> render, with side effects isolated and fed back as actions.
