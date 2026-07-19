@@ -9,6 +9,8 @@ use harvester_engine::llm::{run_metadata::LlmRunMetadata, DEFAULT_BRIEFING_MODEL
 mod support;
 use support::*;
 
+mod batch_api_tests;
+
 #[test]
 fn prompt_context_load_failure_keeps_triage_metadata_unready() {
     init_logging();

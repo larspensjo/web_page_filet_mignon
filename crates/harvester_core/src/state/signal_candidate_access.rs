@@ -8,7 +8,7 @@ use crate::signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,
 };
 use crate::update::signal_candidate::SignalCandidateInputSnapshot;
-use crate::SummaryCacheKey;
+use crate::{FrozenBatchKey, StageKind, SummaryCacheKey};
 use harvester_engine::llm::dto::SignalCandidateResult;
 use harvester_engine::llm::prompt::PromptId;
 
@@ -25,6 +25,46 @@ pub enum BriefingGenerateReadiness {
 }
 
 impl AppState {
+    pub(crate) fn frozen_signal_batch_key_for_request(
+        &self,
+        request_id: u64,
+    ) -> Option<FrozenBatchKey> {
+        let url = self.signal_candidate.url_for_request(request_id)?;
+        let snapshot = self.signal_candidate_inputs.get(url)?;
+        let bundle = crate::signal_candidate_cache::SignalCandidateInputBundle {
+            url,
+            outlet: &snapshot.outlet,
+            title: &snapshot.title,
+            published_at: &snapshot.published_at,
+            triage_priority: snapshot.triage_priority,
+            triage_tags_sorted: snapshot
+                .triage_tags_sorted
+                .iter()
+                .map(String::as_str)
+                .collect(),
+            summary: &snapshot.summary,
+            key_points: &snapshot.key_points,
+            upstream_summary_cache_digest: snapshot.upstream_summary_cache_digest.clone(),
+        };
+        let key = SignalCandidateCacheKey::try_new(
+            &bundle,
+            Some(snapshot.prompt_version),
+            Some(snapshot.model_id.as_str()),
+            &snapshot.context,
+        )
+        .ok()?;
+        Some(FrozenBatchKey {
+            content_hash: key.signal_input_hash,
+            prompt_id: PromptId::ArticleSignalCandidate,
+            prompt_version: key.prompt_version,
+            model_id: key.model_id,
+            context_hash: key.context_hash,
+            stage: StageKind::SignalCandidate,
+            url: url.to_string(),
+            rendered_system: String::new(),
+            rendered_user: String::new(),
+        })
+    }
     /// Pin the signal-candidate archive selection snapshot for the current dialog session.
     pub fn pin_signal_candidate_selection(&mut self, selection: SignalCandidateArchiveSelection) {
         self.pinned_signal_candidate_selection = Some(selection);

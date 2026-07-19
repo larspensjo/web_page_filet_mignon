@@ -2064,3 +2064,18 @@ Change: Integrated CommanDuctUI 2.3.3's atomic buffered list paint path and adde
 Lessons Learned: Native-control idempotency is a necessary safety net, while render-layer diffs prevent needless platform work before it reaches the control.
 Prevention: Keep list render-state inputs separate, derive badge-column width only when emitting changed descriptors, and preserve the explicit retained-highlight test until public API semantics change.
 Refs: crates/harvester_app/src/platform/ui/render.rs, crates/harvester_app/src/platform/ui/render_list_box.rs, crates/harvester_app/src/platform/ui/render_tests.rs, src/CommanDuctUI
+
+## 2026-07-19 - Durable deferred OpenAI Batch collection
+Type: Implementation
+Context: Scheduled article triage, summaries, and signal-candidate scoring need the Batch API discount without allowing paid work, template drift, or asynchronous completion to escape the reducer-owned workflow.
+Change: Added `DeferredToBatch` settlement and a runner-driven re-arm epoch, froze cache-key inputs plus rendered prompts in `.batch_manifest.ron`, and used reserve-before-create/attach-after-create persistence with startup `list_batches` reconciliation. Completed JSONL is snapshotted to the manifest before `BatchResultsCollected` writes validated caches; the normal next-cycle cache-hit path performs post-processing once. Per-line errors retry through Batch twice before synchronous fallback; batch output also produces replay audit records and discounted usage/cost reporting. Shutdown intentionally leaves paid remote batches running for a later collection cycle.
+Lessons Learned: An asynchronous external stage inside a settle-until-quiescent loop needs both an explicit non-terminal outcome and a cross-cycle re-dispatch epoch. Freeze both cache-key inputs and rendered prompts at submission because disk-loaded templates and contexts can drift. Create-time ordering alone cannot prove non-creation, so the provider must reconcile reservations.
+Refs: crates/harvester_batch/src/runner.rs, crates/harvester_batch/src/batch_coordinator.rs, crates/harvester_batch/src/batch_manifest.rs, crates/harvester_core/src/batch.rs
+
+## 2026-07-19 - Make deferred Batch submission genuinely quiescent
+Type: Bug Fix
+Context: Review found a circular flush gate: diverted requests remained reducer-in-flight, but the runner waited for full settlement before sending the deferral replies that would settle them. Re-arm effects also bypassed diversion and could pay synchronously for already-submitted work.
+Change: Defined batch quiescence as an idle inbox with no newly queued effects and no pending LLM request outside the coordinator buffer; routed every pre-loop reduction through the same diversion boundary. Added quota-backed submission budgets, stage chunking, paginated reconciliation, persisted-cache re-read confirmation, durable failure counters with failed-batch pruning, direct signal replay, and idempotent audit/cost recording.
+Lessons Learned: A buffered asynchronous boundary must subtract its own reservations from in-flight accounting before deciding to flush. Durable snapshots are not persistence acknowledgements: destructive removal must verify the destination store, and replay side effects need their own stable idempotency key.
+Prevention: Reducer, coordinator, manifest, crash/restart, pagination, budget, chunking, worker-parity, quiescence, signal replay, and discounted-cost regression tests now cover the submit-to-collect loop.
+Refs: crates/harvester_batch/src/runner.rs, crates/harvester_batch/src/batch_coordinator.rs, crates/harvester_batch/src/batch_manifest.rs, crates/harvester_core/src/update/batch_results.rs, crates/harvester_core/src/update/tests/batch_api_tests.rs, crates/harvester_engine/src/llm/handle.rs

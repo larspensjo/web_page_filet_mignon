@@ -12,6 +12,7 @@ pub const DEFAULT_SELECTION_THRESHOLD: u8 = 60;
 pub enum SignalCandidateState {
     Pending,
     Scoring { request_id: u64 },
+    Deferred,
     Completed { result: SignalCandidateResult },
     Failed { reason: String },
 }
@@ -97,6 +98,28 @@ impl SignalCandidateSession {
         }
     }
 
+    pub fn defer(&mut self, url: &str) {
+        if let Some(slot) = self.states.get_mut(url) {
+            *slot = SignalCandidateState::Deferred;
+            if let Some(request_id) = self.pending_request_ids.remove(url) {
+                self.pending_urls_by_request.remove(&request_id);
+            }
+        }
+    }
+
+    pub fn rearm_deferred(&mut self) {
+        self.states
+            .retain(|_, state| !matches!(state, SignalCandidateState::Deferred));
+    }
+
+    pub fn deferred_urls(&self) -> Vec<String> {
+        self.states
+            .iter()
+            .filter(|(_, state)| matches!(state, SignalCandidateState::Deferred))
+            .map(|(url, _)| url.clone())
+            .collect()
+    }
+
     pub fn state_for(&self, url: &str) -> Option<&SignalCandidateState> {
         self.states.get(url)
     }
@@ -135,7 +158,15 @@ impl SignalCandidateSession {
     }
 
     pub fn in_flight_count(&self) -> u32 {
-        self.enqueued.saturating_sub(self.completed + self.failed)
+        self.states
+            .values()
+            .filter(|state| {
+                matches!(
+                    state,
+                    SignalCandidateState::Pending | SignalCandidateState::Scoring { .. }
+                )
+            })
+            .count() as u32
     }
 
     pub fn excluded(&self) -> &HashSet<OverrideKey> {

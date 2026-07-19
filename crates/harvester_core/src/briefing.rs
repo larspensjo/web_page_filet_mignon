@@ -12,6 +12,7 @@ pub enum BriefingPhase {
     Idle,
     LoadingArticles,
     Summarizing,
+    AwaitingBatch,
     GeneratingBriefing,
     Streaming,
     Complete,
@@ -22,6 +23,7 @@ pub enum BriefingPhase {
 pub enum ArticleSummaryState {
     Pending,
     InProgress { request_id: u64 },
+    Deferred,
     Completed { result: ArticleSummaryResult },
     Failed { reason: String },
 }
@@ -500,6 +502,31 @@ impl BriefingSession {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.summary_state = ArticleSummaryState::Failed { reason };
             article.cache_key_snapshot = None;
+        }
+    }
+
+    pub fn defer_article(&mut self, article_id: BriefingArticleId) {
+        if let Some(article) = self.articles.get_mut(article_id) {
+            article.summary_state = ArticleSummaryState::Deferred;
+            article.cache_key_snapshot = None;
+        }
+    }
+
+    pub fn deferred_count(&self) -> usize {
+        self.articles
+            .iter()
+            .filter(|article| matches!(article.summary_state, ArticleSummaryState::Deferred))
+            .count()
+    }
+
+    pub fn rearm_deferred(&mut self) {
+        for article in &mut self.articles {
+            if matches!(article.summary_state, ArticleSummaryState::Deferred) {
+                article.summary_state = ArticleSummaryState::Pending;
+            }
+        }
+        if matches!(self.phase, BriefingPhase::AwaitingBatch) {
+            self.phase = BriefingPhase::Summarizing;
         }
     }
 

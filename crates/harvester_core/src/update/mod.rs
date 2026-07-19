@@ -7,6 +7,7 @@ use crate::{
 };
 
 mod archive;
+mod batch_results;
 mod briefing;
 mod import;
 mod llm_completed;
@@ -286,6 +287,25 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             result,
             metadata,
         } => llm_completed::handle(&mut state, request_id, result, metadata),
+        Msg::RearmDeferredBatchStages => {
+            let deferred_signal_urls = state.signal_candidate().deferred_urls();
+            state.triage_mut().rearm_deferred();
+            state.briefing_mut().rearm_deferred();
+            state.signal_candidate_mut().rearm_deferred();
+            let mut effects = Vec::new();
+            if matches!(state.triage().phase(), crate::TriagePhase::Triaging) {
+                triage::dispatch_next_triage_step(&mut state, &mut effects);
+            }
+            if matches!(state.briefing().phase(), crate::BriefingPhase::Summarizing) {
+                briefing::dispatch_next_briefing_step(&mut state, &mut effects);
+            }
+            for url in deferred_signal_urls {
+                signal_candidate::try_enqueue(&mut state, &url, &mut effects);
+            }
+            state.mark_dirty();
+            effects
+        }
+        Msg::BatchResultsCollected { entries } => batch_results::handle(&mut state, entries),
         Msg::LlmQuotaConfigured { limits } => {
             state.set_llm_quota_limits(limits);
             state.mark_dirty();

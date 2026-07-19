@@ -28,6 +28,7 @@ use crate::llm::{
 };
 
 /// Configuration for the LLM worker + handle.
+#[derive(Clone)]
 pub struct LlmConfig {
     pub provider: Arc<dyn crate::llm::provider::LlmProvider>,
     pub default_model: ModelId,
@@ -120,6 +121,7 @@ impl LlmHandle {
     }
 }
 
+#[derive(Clone)]
 pub struct LlmCompletionCommand {
     pub request_id: u64,
     pub prompt_id: PromptId,
@@ -145,6 +147,94 @@ pub enum LlmCommand {
 pub struct LlmCompletionResult {
     pub output_json: String,
     pub metadata: LlmRunMetadata,
+}
+
+/// Fully rendered completion request shared by synchronous and Batch callers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedCompletion {
+    pub model: ModelId,
+    pub system_message: String,
+    pub user_message: String,
+    pub request: LlmRequest,
+    pub prompt_version: PromptVersion,
+}
+
+/// Resolves a model and renders a completion request without performing I/O.
+///
+/// The returned request is the one used by the synchronous worker and is safe
+/// to embed unchanged in an OpenAI Batch JSONL line.
+#[allow(clippy::result_large_err)]
+pub fn prepare_completion(
+    command: &LlmCompletionCommand,
+    config: &LlmConfig,
+) -> Result<PreparedCompletion, LlmCompletionError> {
+    if let Some(override_model) = command.model_override.as_ref() {
+        if let Err(validation_err) = validate_model_override(override_model, config, None) {
+            return Err(validation_err.into_completion_error(override_model.clone()));
+        }
+    }
+    let model = resolve_model(command.prompt_id, command.model_override.as_ref(), config);
+    let (system_template, user_template, prompt_version) =
+        if let Some(template) = &command.template_override {
+            (
+                template.system_template.clone(),
+                template.user_template.clone(),
+                template.version,
+            )
+        } else {
+            let (template, version) =
+                fetch_prompt_template(config, command.prompt_id, command.prompt_version).ok_or(
+                    LlmCompletionError::PromptNotFound {
+                        prompt_id: command.prompt_id,
+                    },
+                )?;
+            (template.system_template, template.user_template, version)
+        };
+    let document_key = match command.prompt_id {
+        PromptId::AggregateBriefing => "collection",
+        _ => "content",
+    };
+    let mut vars = TemplateVars::new();
+    vars.set_document(document_key, &command.input_content);
+    let context_text = command
+        .context
+        .iter()
+        .map(|(key, value)| format!("{key}: {value}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    vars.insert("context".to_string(), context_text);
+    for (key, value) in &command.context {
+        vars.insert(key.clone(), value.clone());
+    }
+    for (key, value) in &command.extra_template_vars {
+        vars.insert(key.clone(), value.clone());
+    }
+    let rendered = vars.to_map();
+    let system_message = render_template(&system_template, &rendered).map_err(|err| {
+        LlmCompletionError::TemplateRenderFailed {
+            detail: format!("system template: {err}"),
+        }
+    })?;
+    let user_message = render_template(&user_template, &rendered).map_err(|err| {
+        LlmCompletionError::TemplateRenderFailed {
+            detail: format!("user template: {err}"),
+        }
+    })?;
+    let request = LlmRequest::new(
+        model.clone(),
+        vec![
+            ChatMessage::new(ChatRole::System, system_message.clone()),
+            ChatMessage::new(ChatRole::User, user_message.clone()),
+        ],
+    )
+    .with_json_response();
+    Ok(PreparedCompletion {
+        model,
+        system_message,
+        user_message,
+        request,
+        prompt_version,
+    })
 }
 
 /// Typed error categories surfaced by the worker.
@@ -363,20 +453,33 @@ async fn handle_completion_concurrent(
         );
     }
 
-    // Validate the model override (if any) before doing any further work.
-    if let Some(ref override_model) = model_override {
-        if let Err(validation_err) = validate_model_override(override_model, config, None) {
+    let prepared = match prepare_completion(
+        &LlmCompletionCommand {
+            request_id,
+            prompt_id,
+            prompt_version,
+            model_override: model_override.clone(),
+            input_content: input_content.clone(),
+            context,
+            template_override,
+            extra_template_vars,
+        },
+        config,
+    ) {
+        Ok(prepared) => prepared,
+        Err(err) => {
             quota_tracker.lock().unwrap().release_call();
-            send_llm_completed(
-                event_tx,
-                request_id,
-                Err(validation_err.into_completion_error(override_model.clone())),
-                quota_tracker,
-            );
+            send_llm_completed(event_tx, request_id, Err(err), quota_tracker);
             return;
         }
-    }
-    let model = resolve_model(prompt_id, model_override.as_ref(), config);
+    };
+    let PreparedCompletion {
+        model,
+        system_message,
+        user_message,
+        request,
+        prompt_version: version,
+    } = prepared;
     if let Some(ref override_model) = model_override {
         engine_info!(
             "[llm-dispatch] request_id={} override model={:?}/{} resolved={:?}/{}",
@@ -387,90 +490,6 @@ async fn handle_completion_concurrent(
             model.model_name()
         );
     }
-    let (system_template, user_template, version) = if let Some(override_template) =
-        &template_override
-    {
-        (
-            override_template.system_template.clone(),
-            override_template.user_template.clone(),
-            override_template.version,
-        )
-    } else {
-        let (template, version) = match fetch_prompt_template(config, prompt_id, prompt_version) {
-            Some(pair) => pair,
-            None => {
-                quota_tracker.lock().unwrap().release_call();
-                send_llm_completed(
-                    event_tx,
-                    request_id,
-                    Err(LlmCompletionError::PromptNotFound { prompt_id }),
-                    quota_tracker,
-                );
-                return;
-            }
-        };
-        (template.system_template, template.user_template, version)
-    };
-
-    let document_key = match prompt_id {
-        PromptId::AggregateBriefing => "collection",
-        _ => "content",
-    };
-
-    let mut vars = TemplateVars::new();
-    vars.set_document(document_key, &input_content);
-
-    // Build context string from key-value pairs
-    let context_text = if context.is_empty() {
-        String::new()
-    } else {
-        context
-            .iter()
-            .map(|(k, v)| format!("{}: {}", k, v))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    vars.insert("context".to_string(), context_text);
-
-    for (key, value) in context.iter() {
-        vars.insert(key.clone(), value.clone());
-    }
-    for (key, value) in extra_template_vars.iter() {
-        vars.insert(key.clone(), value.clone());
-    }
-    let rendered = vars.to_map();
-    let system_message = match render_template(&system_template, &rendered) {
-        Ok(msg) => msg,
-        Err(e) => {
-            engine_error!("[llm-render] Failed to render system template: {}", e);
-            quota_tracker.lock().unwrap().release_call();
-            send_llm_completed(
-                event_tx,
-                request_id,
-                Err(LlmCompletionError::TemplateRenderFailed {
-                    detail: format!("system template: {}", e),
-                }),
-                quota_tracker,
-            );
-            return;
-        }
-    };
-    let user_message = match render_template(&user_template, &rendered) {
-        Ok(msg) => msg,
-        Err(e) => {
-            engine_error!("[llm-render] Failed to render user template: {}", e);
-            quota_tracker.lock().unwrap().release_call();
-            send_llm_completed(
-                event_tx,
-                request_id,
-                Err(LlmCompletionError::TemplateRenderFailed {
-                    detail: format!("user template: {}", e),
-                }),
-                quota_tracker,
-            );
-            return;
-        }
-    };
     let input_hash = content_hash(&input_content);
 
     if let Some(ref cache) = config.replay_cache {
@@ -519,15 +538,6 @@ async fn handle_completion_concurrent(
             }
         }
     }
-
-    let request = LlmRequest::new(
-        model.clone(),
-        vec![
-            ChatMessage::new(ChatRole::System, system_message.clone()),
-            ChatMessage::new(ChatRole::User, user_message.clone()),
-        ],
-    )
-    .with_json_response();
 
     engine_info!(
         "[llm-worker] request_id={} model={} start",
@@ -1210,6 +1220,61 @@ mod tests {
                 max_concurrent_requests: 1,
             }
         }
+    }
+
+    #[test]
+    fn worker_request_matches_prepare_completion() {
+        let output_dir = tempfile::TempDir::new().unwrap();
+        let provider = Arc::new(MockLlmProvider::new());
+        provider.queue_json_success(
+            r#"{"category":"Technology","priority":2,"tags":["ai"],"rationale":"relevant"}"#,
+        );
+        let mut config = test_llm_config();
+        config.provider = provider.clone();
+        config.output_dir = output_dir.path().to_path_buf();
+        let command = LlmCompletionCommand {
+            request_id: 41,
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: None,
+            model_override: None,
+            input_content: "A compact article body".to_string(),
+            context: vec![("audience".to_string(), "engineers".to_string())],
+            template_override: Some(PromptTemplateOwned {
+                id: PromptId::ArticleTriage,
+                system_template: "Classify for {{audience}}".to_string(),
+                user_template: "{{content}}\n{{context}}".to_string(),
+                version: 17,
+                description: String::new(),
+                expected_format: String::new(),
+            }),
+            extra_template_vars: Vec::new(),
+        };
+        let prepared = prepare_completion(&command, &config).unwrap();
+        let handle = LlmHandle::new(config);
+        let events = handle.event_receiver();
+        handle
+            .send(LlmCommand::Complete(Box::new(command)))
+            .unwrap();
+        loop {
+            if matches!(
+                events.lock().unwrap().recv_timeout(Duration::from_secs(5)),
+                Ok(LlmEvent::Completed { request_id: 41, .. })
+            ) {
+                break;
+            }
+        }
+        handle.drain_and_stop();
+
+        let recorded = provider.recorded_requests();
+        assert_eq!(recorded, vec![prepared.request.clone()]);
+        assert_eq!(
+            prepared.request.messages()[0].content(),
+            prepared.system_message
+        );
+        assert_eq!(
+            prepared.request.messages()[1].content(),
+            prepared.user_message
+        );
     }
 
     #[test]

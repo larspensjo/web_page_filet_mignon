@@ -60,6 +60,7 @@ Key rules:
 - **Preview flow:** deliver extracted content through the message pipeline for in-session inspection, with a fallback to on-demand loading after restart.
 - **Executive briefing:** a multi-step, message-driven workflow that loads completed content, summarizes it, and produces an aggregate briefing with partial-failure tolerance.
 - **Automation path:** future input sources (such as feeds) and scheduled runs remain subject to the same unidirectional flow and security boundaries.
+- **Batch API automation path:** `harvester_batch --batch-api` diverts only cache-keyed article triage, summary, and signal-candidate requests after the reducer emits them. The runner freezes the cache identity and rendered messages, durably reserves `.batch_manifest.ron` before creating provider work, and later snapshots completed JSONL before returning `Msg::BatchResultsCollected`. `DeferredToBatch` settles the current cycle; the runner's next-cycle re-arm message enables ordinary cache-hit replay. Collected output remains untrusted until the reducer validates it, and collection writes caches only—normal replay performs article completion and downstream effects.
 
 ## Crates and purposes
 - **harvester_app:** UI, event loop, effect execution, and platform integration.

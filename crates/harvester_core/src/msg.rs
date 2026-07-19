@@ -17,6 +17,7 @@ use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
 use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
+use crate::CollectedEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Msg {
@@ -179,6 +180,13 @@ pub enum Msg {
         /// Full run metadata. `None` only for pre-flight errors that fire
         /// before timing/model info is available (e.g. `PromptNotFound`).
         metadata: Option<LlmRunMetadata>,
+    },
+    /// Runner-defined cycle boundary that permits deferred batch work to be
+    /// replayed through the normal cache-aware dispatch paths.
+    RearmDeferredBatchStages,
+    /// Validated batch output supplied by the runner after durable collection.
+    BatchResultsCollected {
+        entries: Vec<CollectedEntry>,
     },
     /// Startup/effect boundary configured session LLM quota limits.
     LlmQuotaConfigured {
@@ -507,6 +515,9 @@ pub enum Msg {
 /// Result payload returned by the LLM worker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LlmResultKind {
+    /// Non-terminal runner outcome: paid work has been durably submitted to a
+    /// batch and is retired for this cycle.
+    DeferredToBatch,
     Success {
         output_json: String,
         input_tokens: u32,

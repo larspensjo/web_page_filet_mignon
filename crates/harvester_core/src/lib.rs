@@ -1,5 +1,6 @@
 //! Harvester core: pure state machine and view-model helpers.
 mod archive_display;
+mod batch;
 pub mod blacklist;
 mod briefing;
 pub mod briefing_snapshot;
@@ -30,6 +31,7 @@ mod url_age;
 mod view_model;
 pub mod working_corpus;
 
+pub use batch::{CollectedEntry, CollectedOutcome, FrozenBatchKey, StageKind};
 pub use briefing::{
     format_previous_briefings_block, ArticleSummaryResult, BriefingArticle, BriefingArticleId,
     BriefingHistoryEntry, BriefingHistoryStory, BriefingItem, BriefingPhase, BriefingResult,

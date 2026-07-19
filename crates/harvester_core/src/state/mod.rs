@@ -546,6 +546,9 @@ pub enum LlmRequestState {
     Pending {
         prompt_id: PromptId,
     },
+    Deferred {
+        prompt_id: PromptId,
+    },
     Completed {
         output_json: String,
         input_tokens: u32,

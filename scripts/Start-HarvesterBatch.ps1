@@ -6,7 +6,8 @@ param(
     [string]$HarvesterBatchCmd = '',
     [string]$ProjectRoot       = (Split-Path -Parent $PSScriptRoot),
     [int]$RefreshStaleSummariesLimit = 0,
-    [int]$SignalCandidateThreshold = 0
+    [int]$SignalCandidateThreshold = 0,
+    [switch]$BatchApi
 )
 
 # Resolve invocation style: cargo run (default) vs direct binary
@@ -15,18 +16,27 @@ $script:harvesterDisplayCmd = if ($script:useCargoRun) { 'harvester_batch' } els
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+if ($BatchApi -and $RefreshStaleSummariesLimit -gt 0) {
+    throw '-BatchApi cannot be combined with -RefreshStaleSummariesLimit.'
+}
+
 # Optional direct batch mode for bounded summary refreshes without entering the TUI.
-if ($RefreshStaleSummariesLimit -gt 0) {
+if ($RefreshStaleSummariesLimit -gt 0 -or $BatchApi) {
     $extra = @()
+    if ($BatchApi) {
+        $extra += '--batch-api'
+    }
     if ($SignalCandidateThreshold -gt 0) {
         $extra += @('--signal-candidate-threshold', "$SignalCandidateThreshold")
     }
     if ($script:useCargoRun) {
-        Write-Host "Running: cargo run -p harvester_batch -- --refresh-stale-summaries-limit $RefreshStaleSummariesLimit $($extra -join ' ')"
-        & cargo run -p harvester_batch -- '--refresh-stale-summaries-limit' "$RefreshStaleSummariesLimit" @extra
+        $refreshArgs = if ($RefreshStaleSummariesLimit -gt 0) { @('--refresh-stale-summaries-limit', "$RefreshStaleSummariesLimit") } else { @() }
+        Write-Host "Running: cargo run -p harvester_batch -- $($refreshArgs + $extra -join ' ')"
+        & cargo run -p harvester_batch -- @refreshArgs @extra
     } else {
-        Write-Host "Running: $HarvesterBatchCmd --refresh-stale-summaries-limit $RefreshStaleSummariesLimit $($extra -join ' ')"
-        & $HarvesterBatchCmd '--refresh-stale-summaries-limit' "$RefreshStaleSummariesLimit" @extra
+        $refreshArgs = if ($RefreshStaleSummariesLimit -gt 0) { @('--refresh-stale-summaries-limit', "$RefreshStaleSummariesLimit") } else { @() }
+        Write-Host "Running: $HarvesterBatchCmd $($refreshArgs + $extra -join ' ')"
+        & $HarvesterBatchCmd @refreshArgs @extra
     }
     return
 }

@@ -419,6 +419,7 @@ impl AppState {
             };
             match state {
                 SignalCandidateState::Pending => continue,
+                SignalCandidateState::Deferred => continue,
                 SignalCandidateState::Scoring { .. } => {
                     rows.push(SignalCandidateRow {
                         job_id,
@@ -560,6 +561,7 @@ impl AppState {
                     self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
                 format!("Summaries {settled}/{total}")
             }
+            BriefingPhase::AwaitingBatch => "Awaiting batch".to_string(),
             BriefingPhase::GeneratingBriefing => "Generating briefing".to_string(),
             BriefingPhase::Streaming => {
                 if self.briefing.next_item_in_flight() {

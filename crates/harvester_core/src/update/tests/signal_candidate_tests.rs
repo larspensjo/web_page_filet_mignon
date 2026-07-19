@@ -530,6 +530,98 @@ fn summary_completion_enqueues_signal_scoring() {
 }
 
 #[test]
+fn deferred_signal_round_trip_rearms_directly_and_completes_from_collected_cache() {
+    let state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());
+    let mut state = with_signal_candidate_metadata(state);
+    state.request_summary_preparation();
+    let (articles, collection_text) = loaded_single_article();
+    let (state, effects) = update(
+        state,
+        Msg::ArticlesLoaded {
+            articles,
+            collection_text,
+        },
+    );
+    let summary_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSummary).expect("summary request");
+    let (state, effects) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: summary_request_id,
+            result: LlmResultKind::Success {
+                output_json: summary_json("Article A"),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 1,
+                resolved_model: "test-summary-model".to_string(),
+            },
+            metadata: None,
+        },
+    );
+    let signal_request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleSignalCandidate).expect("signal request");
+    let key = state
+        .frozen_batch_key_for_request(signal_request_id)
+        .expect("frozen signal key");
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: signal_request_id,
+            result: LlmResultKind::DeferredToBatch,
+            metadata: None,
+        },
+    );
+    assert!(matches!(
+        state.signal_candidate().state_for("https://example.com/a"),
+        Some(crate::signal_candidate::SignalCandidateState::Deferred)
+    ));
+    assert_eq!(state.signal_candidate().in_flight_count(), 0);
+    assert_eq!(state.signal_candidate().failed_count(), 0);
+    assert!(matches!(
+        state.llm_request_state(signal_request_id),
+        Some(crate::LlmRequestState::Deferred { .. })
+    ));
+    assert_eq!(state.batch_status(), crate::BatchStatus::Settled);
+
+    let (state, effects) = update(
+        state,
+        Msg::BatchResultsCollected {
+            entries: vec![crate::CollectedEntry {
+                batch_id: "batch-signal".to_string(),
+                custom_id: "signal-line".to_string(),
+                stage: crate::StageKind::SignalCandidate,
+                key,
+                created_at_utc: "2026-07-19T00:00:00Z".to_string(),
+                outcome: crate::CollectedOutcome::Success {
+                    raw_output_json: signal_result_json(),
+                    usage: harvester_engine::llm::TokenUsage::new(20, 8),
+                    resolved_model: "test-signal-model".to_string(),
+                },
+            }],
+        },
+    );
+    assert_eq!(
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::PersistSignalCandidateCache { .. }))
+            .count(),
+        1
+    );
+    let (state, effects) = update(state, Msg::RearmDeferredBatchStages);
+    assert!(effects.iter().all(|effect| !matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleSignalCandidate,
+            ..
+        }
+    )));
+    assert!(matches!(
+        state.signal_candidate().state_for("https://example.com/a"),
+        Some(crate::signal_candidate::SignalCandidateState::Completed { .. })
+    ));
+}
+
+#[test]
 fn summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak() {
     super::init_logging();
     let mut state = start_briefing_after_triage(AppState::new(), loaded_single_article().0.clone());

@@ -42,6 +42,15 @@ pub struct Args {
     #[arg(long)]
     pub dry_run: bool,
 
+    /// Route non-interactive article LLM stages through OpenAI's asynchronous Batch API.
+    #[arg(
+        long,
+        conflicts_with = "dry_run",
+        conflicts_with = "refresh_stale_summaries_limit",
+        conflicts_with = "import_saved_web_dir"
+    )]
+    pub batch_api: bool,
+
     /// Single-shot mode: run one full cycle (poll + triage + persist) and exit
     #[arg(long, conflicts_with = "dry_run")]
     pub single_shot: bool,
@@ -294,6 +303,29 @@ mod tests {
         let result =
             <Args as Parser>::try_parse_from(["harvester_batch", "--single-shot", "--dry-run"]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn batch_api_parses_and_conflicts_with_excluded_modes() {
+        assert!(Args::parse_from(&["harvester_batch", "--batch-api"]).batch_api);
+        assert!(
+            <Args as Parser>::try_parse_from(["harvester_batch", "--batch-api", "--dry-run"])
+                .is_err()
+        );
+        assert!(<Args as Parser>::try_parse_from([
+            "harvester_batch",
+            "--batch-api",
+            "--import-saved-web-dir",
+            "saved"
+        ])
+        .is_err());
+        assert!(<Args as Parser>::try_parse_from([
+            "harvester_batch",
+            "--batch-api",
+            "--refresh-stale-summaries-limit",
+            "1"
+        ])
+        .is_err());
     }
 
     #[test]

@@ -1,20 +1,25 @@
 use crate::cli::{Args, CheckpointCommand};
 use crate::lock;
 use crate::progress::ProgressReporter;
+use crate::{
+    batch_coordinator::{BatchCoordinator, BufferedRequest, SubmissionBudget},
+    batch_manifest::{BatchManifestStore, PendingEntry},
+};
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
 use harvester_core::{
-    update, AppState, ArticleSummaryResult, BatchObservation, CompletedJobSnapshot, ImportPhase,
-    LlmModelUsageView, Msg, SummaryCache, SummaryCacheEntry, SummaryCacheKey,
+    update, AppState, ArticleSummaryResult, BatchObservation, CompletedJobSnapshot, FrozenBatchKey,
+    ImportPhase, LlmModelUsageView, Msg, SignalCandidateCacheKey, StageKind, SummaryCache,
+    SummaryCacheEntry, SummaryCacheKey, TriageCacheKey,
 };
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PROMPT_VERSION_DRAFT};
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
     load_context_file, validate_summary, LlmCommand, LlmCompletionCommand, LlmCompletionError,
     LlmConfig, LlmEvent, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry,
-    PromptRegistry, ProviderKind, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL,
-    DEFAULT_TRIAGE_MODEL, OPENAI_MODEL_GPT_4O_MINI,
+    PromptRegistry, ProviderKind, ReplayRecord, TokenUsage, DEFAULT_BRIEFING_MODEL,
+    DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL, OPENAI_MODEL_GPT_4O_MINI,
 };
 use harvester_engine::{
     ensure_output_dir, load_and_prepare_articles_filtered, scan_archive_article_metadata,
@@ -36,6 +41,36 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
+
+struct BatchRuntime {
+    coordinator: BatchCoordinator<OpenAiProvider>,
+    config: LlmConfig,
+    runtime: tokio::runtime::Runtime,
+    reconciled: bool,
+    realized_cost_microdollars: u64,
+    recorded_replay_lines: HashSet<String>,
+}
+
+impl BatchRuntime {
+    fn new(
+        provider: OpenAiProvider,
+        config: LlmConfig,
+        paths: &RuntimePaths,
+    ) -> Result<Self, String> {
+        let manifest =
+            BatchManifestStore::load(paths.output_dir.clone()).map_err(|err| err.to_string())?;
+        let budget = SubmissionBudget::from_quotas(&config.quotas);
+        let recorded_replay_lines = load_recorded_batch_replay_lines(&config.replay_output_dir());
+        Ok(Self {
+            coordinator: BatchCoordinator::new(provider, manifest, budget),
+            config,
+            runtime: tokio::runtime::Runtime::new().map_err(|err| err.to_string())?,
+            reconciled: false,
+            realized_cost_microdollars: 0,
+            recorded_replay_lines,
+        })
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CycleOutcome {
@@ -193,6 +228,13 @@ fn should_check_settlement_this_iteration(orchestrated: bool) -> bool {
     !orchestrated
 }
 
+fn batch_buffer_is_quiescent(state: &AppState, buffered_ids: &HashSet<u64>) -> bool {
+    !buffered_ids.is_empty()
+        && state
+            .pending_llm_request_ids()
+            .all(|request_id| buffered_ids.contains(&request_id))
+}
+
 fn should_stop_after_cycle(single_shot: bool, shutdown_requested: bool) -> bool {
     shutdown_requested || single_shot
 }
@@ -308,14 +350,19 @@ fn build_effect_runner(
     msg_tx: mpsc::Sender<Msg>,
     llm_concurrency: usize,
     platform_handler: Box<NoOpPlatformHandler>,
-) -> EffectRunner {
+    batch_api: bool,
+) -> Result<(EffectRunner, Option<BatchRuntime>), String> {
     if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
         if api_key.trim().is_empty() {
             engine_warn!("[batch] OPENAI_API_KEY is empty; AI triage/summary features disabled");
-            return EffectRunner::new(paths.clone(), msg_tx, platform_handler);
+            return Ok((
+                EffectRunner::new(paths.clone(), msg_tx, platform_handler),
+                None,
+            ));
         }
+        let batch_provider = OpenAiProvider::new(api_key);
         let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
-            Arc::new(OpenAiProvider::new(api_key));
+            Arc::new(batch_provider.clone());
         let provider_clone = Arc::clone(&provider);
         let mut registry = PromptRegistry::new();
         register_defaults(&mut registry);
@@ -340,21 +387,32 @@ fn build_effect_runner(
             max_concurrent_requests: llm_concurrency,
         };
         let model_map = effective_model_map(&config);
+        let batch_runtime = if batch_api {
+            Some(BatchRuntime::new(batch_provider, config.clone(), paths)?)
+        } else {
+            None
+        };
         let handle = LlmHandle::new(config);
-        EffectRunner::new_with_llm(
-            paths.clone(),
-            msg_tx,
-            handle,
-            100_000,
-            Arc::clone(&registry),
-            model_map,
-            provider_clone,
-            ProviderKind::OpenAi,
-            platform_handler,
-        )
+        Ok((
+            EffectRunner::new_with_llm(
+                paths.clone(),
+                msg_tx,
+                handle,
+                100_000,
+                Arc::clone(&registry),
+                model_map,
+                provider_clone,
+                ProviderKind::OpenAi,
+                platform_handler,
+            ),
+            batch_runtime,
+        ))
     } else {
         engine_warn!("[batch] OPENAI_API_KEY not set; AI triage/summary features disabled");
-        EffectRunner::new(paths.clone(), msg_tx, platform_handler)
+        Ok((
+            EffectRunner::new(paths.clone(), msg_tx, platform_handler),
+            None,
+        ))
     }
 }
 
@@ -1159,8 +1217,16 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Hydrate state
     engine_info!("[batch] Hydrating state from disk");
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(args.llm_concurrency);
-    state.set_summary_max_in_flight(args.llm_concurrency);
+    if args.batch_api {
+        let session_limit = LlmQuotas::default()
+            .max_calls_per_session
+            .map(|limit| limit as usize)
+            .unwrap_or(crate::batch_coordinator::MAX_BATCH_LINES);
+        state.set_deferred_batch_max_in_flight(session_limit);
+    } else {
+        state.set_triage_max_in_flight(args.llm_concurrency);
+        state.set_summary_max_in_flight(args.llm_concurrency);
+    }
     apply_signal_candidate_selection_settings(&mut state, &args);
 
     // Restore completed jobs
@@ -1188,12 +1254,13 @@ pub fn run(args: Args) -> Result<i32, String> {
     engine_info!("[batch] Building EffectRunner");
     let enable_ai_orchestration = is_ai_orchestration_enabled();
     let platform_handler = Box::new(NoOpPlatformHandler);
-    let effect_runner = build_effect_runner(
+    let (effect_runner, mut batch_runtime) = build_effect_runner(
         &paths,
         msg_tx.clone(),
         args.llm_concurrency,
         platform_handler,
-    );
+        args.batch_api,
+    )?;
     effect_runner.enqueue(vec![
         harvester_core::Effect::LoadPromptTemplateFiles,
         harvester_core::Effect::LoadLlmMetadata,
@@ -1293,6 +1360,70 @@ pub fn run(args: Args) -> Result<i32, String> {
         engine_info!("[batch] === Starting cycle {} ===", cycle_count);
         let cycle_jobs_total_baseline = state.batch_observation().jobs_total;
 
+        // Batch results are collected at the cycle boundary before re-arming.
+        // A collected manifest snapshot is durable before this reducer message,
+        // so a crash after the snapshot is replayed safely on the next run.
+        if let Some(batch) = batch_runtime.as_mut() {
+            if !batch.reconciled {
+                match batch.runtime.block_on(batch.coordinator.reconcile_once()) {
+                    Ok(()) => batch.reconciled = true,
+                    Err(err) => {
+                        engine_warn!("[batch-reconcile] failed; retrying next cycle: {}", err)
+                    }
+                }
+            }
+            if let Err(err) = remove_collected_with_persisted_cache_confirmation(batch, &paths) {
+                engine_warn!(
+                    "[batch-collect] persisted cache confirmation failed; retaining snapshots: {}",
+                    err
+                );
+            }
+            let collected = match batch
+                .runtime
+                .block_on(batch.coordinator.collect_completed())
+            {
+                Ok(collected) => collected,
+                Err(err) => {
+                    engine_warn!("[batch-collect] failed; retrying next cycle: {}", err);
+                    Vec::new()
+                }
+            };
+            if !collected.is_empty() {
+                let invalid = invalid_collected_custom_ids(&collected);
+                if !invalid.is_empty() {
+                    if let Err(err) = batch.coordinator.release_invalid_collected(&invalid) {
+                        engine_warn!(
+                            "[batch-collect] invalid-line release failed; snapshots retained for retry: {}",
+                            err
+                        );
+                    }
+                }
+                persist_batch_replay_records(&collected, batch);
+                let (new_state, collection_effects) =
+                    update(state, Msg::BatchResultsCollected { entries: collected });
+                state = new_state;
+                if !collection_effects.is_empty() {
+                    let collection_effects =
+                        divert_batch_effects(&state, collection_effects, batch, &msg_tx);
+                    if !collection_effects.is_empty() {
+                        effect_runner.enqueue(collection_effects);
+                    }
+                }
+            }
+
+            // Only the runner advances deferred work into a new dispatch
+            // epoch. Pre-loop effects use the same diversion path as effects
+            // reduced inside the dispatch loop.
+            let (new_state, rearm_effects) = update(state, Msg::RearmDeferredBatchStages);
+            state = new_state;
+            if !rearm_effects.is_empty() {
+                let rearm_effects = divert_batch_effects(&state, rearm_effects, batch, &msg_tx);
+                if !rearm_effects.is_empty() {
+                    effect_runner.enqueue(rearm_effects);
+                }
+            }
+        }
+
         // Start the cycle by dispatching poll
         engine_info!("[batch] Dispatching poll sources");
         msg_tx
@@ -1316,6 +1447,7 @@ pub fn run(args: Args) -> Result<i32, String> {
                 tick_interval: Duration::from_millis(75),
             },
             Some(&mut progress),
+            batch_runtime.as_mut(),
         )?;
 
         // Track outcome statistics
@@ -1337,7 +1469,14 @@ pub fn run(args: Args) -> Result<i32, String> {
         if cycle_count == 1 {
             print_cycle_table_header();
         }
-        print_cycle_summary(cycle_count, &outcome, &cycle_counts);
+        print_cycle_summary(
+            cycle_count,
+            &outcome,
+            &cycle_counts,
+            batch_runtime
+                .as_ref()
+                .map_or(0, |batch| batch.realized_cost_microdollars),
+        );
         print_poll_stats(&state.batch_observation().source_poll_stats);
         for line in format_llm_usage_lines(&state.llm_usage_rows()) {
             println!("{}", line);
@@ -1392,6 +1531,9 @@ pub fn run(args: Args) -> Result<i32, String> {
         total_new_articles,
         total_triaged,
         total_summarized,
+        batch_runtime
+            .as_ref()
+            .map_or(0, |batch| batch.realized_cost_microdollars),
     );
 
     engine_info!("[batch] Shutdown complete");
@@ -1440,9 +1582,377 @@ fn run_dispatch_loop(
         shutdown_flag,
         options,
         None,
+        None,
     )
 }
 
+fn stage_label(stage: StageKind) -> &'static str {
+    match stage {
+        StageKind::Triage => "triage",
+        StageKind::Summary => "summary",
+        StageKind::SignalCandidate => "signal_candidate",
+    }
+}
+
+fn is_batch_eligible_prompt(prompt_id: PromptId) -> bool {
+    matches!(
+        prompt_id,
+        PromptId::ArticleTriage | PromptId::ArticleSummary | PromptId::ArticleSignalCandidate
+    )
+}
+
+fn batch_custom_id(key: &FrozenBatchKey) -> String {
+    let custom_stage = match key.stage {
+        StageKind::Triage => "triage",
+        StageKind::Summary => "summary",
+        StageKind::SignalCandidate => "signal",
+    };
+    let model_hash = harvester_engine::llm::content_hash(&key.model_id);
+    format!(
+        "{}-{}-v{}-{}-{}",
+        custom_stage,
+        &key.content_hash[..key.content_hash.len().min(16)],
+        key.prompt_version,
+        &key.context_hash[..key.context_hash.len().min(8)],
+        &model_hash[..8]
+    )
+}
+
+/// Diverts only cache-keyed, non-interactive article stages. Every other
+/// effect remains on the normal EffectRunner path.
+fn divert_batch_effects(
+    state: &AppState,
+    effects: Vec<harvester_core::Effect>,
+    batch: &mut BatchRuntime,
+    msg_tx: &mpsc::Sender<Msg>,
+) -> Vec<harvester_core::Effect> {
+    let mut passthrough = Vec::new();
+    for effect in effects {
+        let harvester_core::Effect::RequestLlmCompletion {
+            request_id,
+            prompt_id,
+            prompt_version,
+            model_override,
+            input_content,
+            context,
+            template_override,
+            extra_template_vars,
+        } = effect
+        else {
+            passthrough.push(effect);
+            continue;
+        };
+        if !is_batch_eligible_prompt(prompt_id) {
+            passthrough.push(harvester_core::Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                prompt_version,
+                model_override,
+                input_content,
+                context,
+                template_override,
+                extra_template_vars,
+            });
+            continue;
+        }
+        let Some(mut key) = state.frozen_batch_key_for_request(request_id) else {
+            engine_logging::engine_warn!(
+                "[batch-submit] request_id={} prompt_id={:?} missing frozen cache key; dispatching synchronously",
+                request_id, prompt_id
+            );
+            passthrough.push(harvester_core::Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id,
+                prompt_version,
+                model_override,
+                input_content,
+                context,
+                template_override,
+                extra_template_vars,
+            });
+            continue;
+        };
+        let command = LlmCompletionCommand {
+            request_id,
+            prompt_id,
+            prompt_version,
+            model_override,
+            input_content,
+            context,
+            template_override,
+            extra_template_vars,
+        };
+        match harvester_engine::llm::prepare_completion(&command, &batch.config) {
+            Ok(prepared) => {
+                let stage = key.stage;
+                key.rendered_system = prepared.system_message;
+                key.rendered_user = prepared.user_message;
+                let custom_id = batch_custom_id(&key);
+                if batch.coordinator.failed_attempts_for(&custom_id) >= 2 {
+                    engine_logging::engine_warn!(
+                        "[batch-submit] custom_id={} cache_key={} reached two batch attempts; falling back to synchronous dispatch",
+                        custom_id, key.content_hash
+                    );
+                    passthrough.push(harvester_core::Effect::RequestLlmCompletion {
+                        request_id: command.request_id,
+                        prompt_id: command.prompt_id,
+                        prompt_version: command.prompt_version,
+                        model_override: command.model_override,
+                        input_content: command.input_content,
+                        context: command.context,
+                        template_override: command.template_override,
+                        extra_template_vars: command.extra_template_vars,
+                    });
+                    continue;
+                }
+                let estimated_input_tokens = prepared
+                    .request
+                    .messages()
+                    .iter()
+                    .map(|message| message.content().chars().count() as u64)
+                    .sum::<u64>()
+                    .div_ceil(4);
+                let estimated_usage =
+                    TokenUsage::new(estimated_input_tokens.min(u64::from(u32::MAX)) as u32, 0);
+                let estimated_cost_microdollars = batch
+                    .config
+                    .pricing
+                    .batch_cost_microdollars(prepared.model.model_name(), &estimated_usage);
+                batch.coordinator.buffer(BufferedRequest {
+                    request_id,
+                    stage: stage_label(stage).to_string(),
+                    line: openai_provider_kit::BatchInputLine {
+                        custom_id: custom_id.clone(),
+                        method: "POST".to_string(),
+                        url: "/v1/chat/completions".to_string(),
+                        body: openai_provider_kit::openai_chat_completion_body(&prepared.request),
+                    },
+                    entry: PendingEntry {
+                        custom_id,
+                        key,
+                        stage,
+                        attempts: 0,
+                        collected: None,
+                    },
+                    estimated_input_tokens,
+                    estimated_cost_microdollars,
+                });
+            }
+            Err(err) => {
+                send_batch_preparation_failure(msg_tx, request_id, &err);
+            }
+        }
+    }
+    passthrough
+}
+
+fn send_batch_preparation_failure(
+    msg_tx: &mpsc::Sender<Msg>,
+    request_id: u64,
+    err: &LlmCompletionError,
+) {
+    engine_warn!(
+        "[batch-submit] request_id={} render/preparation failed: {:?}",
+        request_id,
+        err
+    );
+    let _ = msg_tx.send(Msg::LlmCompleted {
+        request_id,
+        result: harvester_core::LlmResultKind::Failed {
+            reason: format!("batch request preparation failed: {err:?}"),
+        },
+        metadata: None,
+    });
+}
+
+fn persist_batch_replay_records(
+    entries: &[harvester_core::CollectedEntry],
+    batch: &mut BatchRuntime,
+) {
+    for entry in entries {
+        let replay_line_id = format!("batch-{}-{}", entry.batch_id, entry.custom_id);
+        if batch.recorded_replay_lines.contains(&replay_line_id) {
+            continue;
+        }
+        let (raw_response, usage, resolved_model, validated_output, validation_error) = match &entry
+            .outcome
+        {
+            harvester_core::CollectedOutcome::Success {
+                raw_output_json,
+                usage,
+                resolved_model,
+            } => {
+                let validation_error = match entry.stage {
+                    StageKind::Triage => harvester_engine::llm::validate_triage(raw_output_json)
+                        .err()
+                        .map(|err| err.to_string()),
+                    StageKind::Summary => harvester_engine::llm::validate_summary(raw_output_json)
+                        .err()
+                        .map(|err| err.to_string()),
+                    StageKind::SignalCandidate => {
+                        harvester_engine::llm::validate_signal_candidate(raw_output_json)
+                            .err()
+                            .map(|err| err.to_string())
+                    }
+                };
+                match validation_error {
+                    None => (
+                        raw_output_json.clone(),
+                        *usage,
+                        resolved_model.clone(),
+                        serde_json::from_str(raw_output_json).ok(),
+                        None,
+                    ),
+                    Some(err) => (
+                        raw_output_json.clone(),
+                        *usage,
+                        resolved_model.clone(),
+                        None,
+                        Some(err),
+                    ),
+                }
+            }
+            harvester_core::CollectedOutcome::LineError { detail } => (
+                detail.clone(),
+                TokenUsage::new(0, 0),
+                entry.key.model_id.clone(),
+                None,
+                Some(detail.clone()),
+            ),
+        };
+        let priced_model = if resolved_model.trim().is_empty() {
+            &entry.key.model_id
+        } else {
+            &resolved_model
+        };
+        let cost_microdollars = batch
+            .config
+            .pricing
+            .batch_cost_microdollars(priced_model, &usage);
+        let record = ReplayRecord {
+            request_id: replay_line_id.clone(),
+            input_content_hash: entry.key.content_hash.clone(),
+            prompt_id: entry.key.prompt_id,
+            prompt_version: entry.key.prompt_version,
+            model_id: priced_model.to_string(),
+            timestamp_utc: entry.created_at_utc.clone(),
+            rendered_system_message: entry.key.rendered_system.clone(),
+            rendered_user_message: entry.key.rendered_user.clone(),
+            raw_response,
+            usage,
+            validated_output,
+            validation_error,
+            cost_microdollars,
+            wall_ms: 0,
+            cache_status: "batch_collected".to_string(),
+        };
+        match harvester_engine::llm::persist_replay_record(
+            &batch.config.replay_output_dir(),
+            &record,
+        ) {
+            Ok(_) => {
+                batch.recorded_replay_lines.insert(replay_line_id);
+                batch.realized_cost_microdollars = batch
+                    .realized_cost_microdollars
+                    .saturating_add(cost_microdollars);
+            }
+            Err(err) => {
+                engine_logging::engine_warn!(
+                    "[batch-replay] batch_id={} custom_id={} cache_key={} persist failed: {}",
+                    entry.batch_id,
+                    entry.custom_id,
+                    entry.key.content_hash,
+                    err
+                );
+            }
+        }
+    }
+}
+
+fn load_recorded_batch_replay_lines(dir: &std::path::Path) -> HashSet<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return HashSet::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| harvester_engine::llm::load_replay_record(&entry.path()).ok())
+        .filter(|record| record.request_id.starts_with("batch-"))
+        .map(|record| record.request_id)
+        .collect()
+}
+
+fn remove_collected_with_persisted_cache_confirmation(
+    batch: &mut BatchRuntime,
+    paths: &RuntimePaths,
+) -> Result<(), String> {
+    let triage_cache = load_triage_cache(&paths.triage_cache_path);
+    let summary_cache = load_summary_cache(&paths.summary_cache_path);
+    let signal_cache =
+        load_signal_candidate_cache(&paths.signal_candidate_cache_path).map_err(|err| {
+            format!(
+                "signal cache {}: {err}",
+                paths.signal_candidate_cache_path.display()
+            )
+        })?;
+    batch
+        .coordinator
+        .remove_collected_if(|entry| match entry.stage {
+            StageKind::Triage => TriageCacheKey::try_new_with_context_hash(
+                &entry.key.content_hash,
+                entry.key.prompt_id,
+                Some(entry.key.prompt_version),
+                Some(&entry.key.model_id),
+                &entry.key.context_hash,
+            )
+            .ok()
+            .is_some_and(|key| triage_cache.lookup(&key).is_some()),
+            StageKind::Summary => summary_cache
+                .lookup(&SummaryCacheKey {
+                    content_hash: entry.key.content_hash.clone(),
+                    prompt_id: entry.key.prompt_id,
+                    prompt_version: entry.key.prompt_version,
+                    model_id: entry.key.model_id.clone(),
+                    context_hash: entry.key.context_hash.clone(),
+                })
+                .is_some(),
+            StageKind::SignalCandidate => signal_cache
+                .get(&SignalCandidateCacheKey {
+                    signal_input_hash: entry.key.content_hash.clone(),
+                    prompt_id: entry.key.prompt_id,
+                    prompt_version: entry.key.prompt_version,
+                    model_id: entry.key.model_id.clone(),
+                    context_hash: entry.key.context_hash.clone(),
+                })
+                .is_some(),
+        })
+}
+
+fn invalid_collected_custom_ids(entries: &[harvester_core::CollectedEntry]) -> HashSet<String> {
+    entries
+        .iter()
+        .filter_map(|entry| match &entry.outcome {
+            harvester_core::CollectedOutcome::Success {
+                raw_output_json, ..
+            } => {
+                let valid = match entry.stage {
+                    StageKind::Triage => {
+                        harvester_engine::llm::validate_triage(raw_output_json).is_ok()
+                    }
+                    StageKind::Summary => {
+                        harvester_engine::llm::validate_summary(raw_output_json).is_ok()
+                    }
+                    StageKind::SignalCandidate => {
+                        harvester_engine::llm::validate_signal_candidate(raw_output_json).is_ok()
+                    }
+                };
+                (!valid).then(|| entry.custom_id.clone())
+            }
+            harvester_core::CollectedOutcome::LineError { .. } => None,
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)] // Batch runtime is optional at this runner boundary.
 fn run_dispatch_loop_with_tick_interval(
     state: &mut AppState,
     msg_tx: &mpsc::Sender<Msg>,
@@ -1451,6 +1961,7 @@ fn run_dispatch_loop_with_tick_interval(
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
     mut progress: Option<&mut crate::progress::BatchProgressReporter>,
+    mut batch_runtime: Option<&mut BatchRuntime>,
 ) -> Result<CycleOutcome, String> {
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
@@ -1477,6 +1988,8 @@ fn run_dispatch_loop_with_tick_interval(
         // Receive at least one message with timeout, then drain a bounded batch.
         // Large restored states make reducer clones expensive; bounding the batch
         // keeps progress and tick-driven orchestration responsive under bursts.
+        let mut recv_idle = false;
+        let mut enqueued_effects = false;
         match msg_rx.recv_timeout(timeout) {
             Ok(first_msg) => {
                 let mut inbox = vec![first_msg];
@@ -1521,11 +2034,19 @@ fn run_dispatch_loop_with_tick_interval(
 
                 if !queued_effects.is_empty() {
                     engine_debug!("[batch] Enqueuing {} effects", queued_effects.len());
-                    effect_runner.enqueue(queued_effects);
+                    let queued_effects = if let Some(batch) = batch_runtime.as_deref_mut() {
+                        divert_batch_effects(state, queued_effects, batch, msg_tx)
+                    } else {
+                        queued_effects
+                    };
+                    if !queued_effects.is_empty() {
+                        enqueued_effects = true;
+                        effect_runner.enqueue(queued_effects);
+                    }
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // No message available, continue loop
+                recv_idle = true;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 return Err("Message channel disconnected unexpectedly".to_string());
@@ -1536,7 +2057,15 @@ fn run_dispatch_loop_with_tick_interval(
             let (new_state, tick_effects) = update(state.clone(), Msg::Tick);
             *state = new_state;
             if !tick_effects.is_empty() {
-                effect_runner.enqueue(tick_effects);
+                let tick_effects = if let Some(batch) = batch_runtime.as_deref_mut() {
+                    divert_batch_effects(state, tick_effects, batch, msg_tx)
+                } else {
+                    tick_effects
+                };
+                if !tick_effects.is_empty() {
+                    enqueued_effects = true;
+                    effect_runner.enqueue(tick_effects);
+                }
             }
             last_tick = Instant::now();
         }
@@ -1566,6 +2095,24 @@ fn run_dispatch_loop_with_tick_interval(
 
         // This prevents an immediate idle-state exit before queued actions
         // (like PollSourcesClicked) have been reduced.
+        if !orchestrated && recv_idle && !enqueued_effects {
+            if let Some(batch) = batch_runtime.as_deref_mut() {
+                let buffered_ids = batch.coordinator.buffered_request_ids();
+                if batch_buffer_is_quiescent(state, &buffered_ids) {
+                    if let Err(err) = batch
+                        .runtime
+                        .block_on(batch.coordinator.flush(msg_tx, Utc::now().to_rfc3339()))
+                    {
+                        engine_warn!(
+                            "[batch-submit] flush failed; manifest/buffer state retained where possible: {}",
+                            err
+                        );
+                    }
+                    continue;
+                }
+            }
+        }
+
         if should_check_settlement_this_iteration(orchestrated)
             && should_settle_cycle(state.batch_status())
         {
@@ -1634,7 +2181,12 @@ fn print_cycle_table_header() {
 }
 
 /// Prints a summary of the completed cycle.
-fn print_cycle_summary(cycle: usize, outcome: &CycleOutcome, counts: &CycleCounts) {
+fn print_cycle_summary(
+    cycle: usize,
+    outcome: &CycleOutcome,
+    counts: &CycleCounts,
+    batch_cost_microdollars: u64,
+) {
     println!(
         "{:<6} {:<9} {:>20} {:>18} {:>21}",
         cycle,
@@ -1646,6 +2198,13 @@ fn print_cycle_summary(cycle: usize, outcome: &CycleOutcome, counts: &CycleCount
         format!("{}/{}", counts.triage_completed, counts.triage_failed),
         format!("{}/{}", counts.summary_completed, counts.summary_failed),
     );
+    if batch_cost_microdollars > 0 {
+        println!(
+            "  Batch API realized tokens/cost: discounted ${} ({} microdollars)",
+            microdollars_to_display(batch_cost_microdollars),
+            batch_cost_microdollars
+        );
+    }
 }
 
 /// Prints the final summary when batch runner exits.
@@ -1654,11 +2213,19 @@ fn print_final_summary(
     total_new_articles: usize,
     total_triaged: usize,
     total_summarized: usize,
+    batch_cost_microdollars: u64,
 ) {
     println!(
         "\n-- Batch complete: {} cycles, {} new articles, {} triaged, {} summarized --\n",
         total_cycles, total_new_articles, total_triaged, total_summarized
     );
+    if batch_cost_microdollars > 0 {
+        println!(
+            "Batch API discounted cost: {} ({} microdollars)",
+            microdollars_to_display(batch_cost_microdollars),
+            batch_cost_microdollars
+        );
+    }
 }
 
 /// Sleeps for the specified duration, checking shutdown flag periodically.
@@ -1726,12 +2293,13 @@ fn run_import_mode(
 
     let enable_ai_orchestration = is_ai_orchestration_enabled();
     let platform_handler = Box::new(NoOpPlatformHandler);
-    let effect_runner = build_effect_runner(
+    let (effect_runner, _) = build_effect_runner(
         paths,
         msg_tx.clone(),
         args.llm_concurrency,
         platform_handler,
-    );
+        false,
+    )?;
 
     // Hydrate prompt/template metadata needed for downstream work.
     effect_runner.enqueue(vec![

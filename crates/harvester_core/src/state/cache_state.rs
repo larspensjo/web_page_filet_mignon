@@ -186,6 +186,15 @@ impl AppState {
         &self.triage_cache
     }
 
+    /// Whether the live prompt metadata still addresses the frozen paid-work
+    /// key. Collection still stores under the frozen key; callers use this to
+    /// report results that can no longer be consumed by the current pipeline.
+    pub fn frozen_batch_key_is_current(&self, key: &crate::FrozenBatchKey) -> bool {
+        self.active_version_for(key.prompt_id) == Some(key.prompt_version)
+            && self.effective_model_for(key.prompt_id) == Some(key.model_id.as_str())
+            && context_hash(self.context_for(key.prompt_id)) == key.context_hash
+    }
+
     pub(crate) fn start_triage_cache_run(&mut self) {
         self.triage_cache_run_metrics = TriageCacheRunMetrics::default();
         self.triage_cache_run_start_logged = false;
@@ -278,6 +287,21 @@ impl AppState {
         };
 
         self.triage_cache.insert(key, result);
+    }
+
+    pub(crate) fn store_frozen_triage_result(
+        &mut self,
+        key: TriageCacheKey,
+        result: ArticleTriageResult,
+        created_at_utc: String,
+    ) {
+        self.triage_cache.insert_entry(
+            key,
+            crate::triage_cache::TriageCacheEntry {
+                result,
+                created_at_utc,
+            },
+        );
     }
 
     pub(crate) fn record_triage_cache_hit(&mut self) {

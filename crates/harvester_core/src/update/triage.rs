@@ -368,6 +368,11 @@ pub(super) fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<
 
     // Check if all articles are settled (no pending, no in-progress).
     if state.triage().pending_count() == 0 && state.triage().in_progress_count() == 0 {
+        if state.triage().deferred_count() > 0 {
+            state.triage_mut().set_awaiting_batch();
+            state.mark_dirty();
+            return;
+        }
         if state.triage().completed_count() == 0 {
             state
                 .triage_mut()

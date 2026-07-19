@@ -56,6 +56,10 @@ pub(crate) fn handle_signal_candidate_completion(
     };
 
     match result {
+        LlmResultKind::DeferredToBatch => {
+            state.signal_candidate_mut().defer(&url);
+            state.clear_signal_candidate_input_snapshot(&url);
+        }
         LlmResultKind::Success {
             output_json,
             input_tokens,

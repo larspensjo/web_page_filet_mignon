@@ -1,6 +1,6 @@
 [package]
 name = "openai_provider_kit"
-version = "0.2.0"
+version = "0.3.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
@@ -21,7 +21,7 @@ reqwest-passthrough = []
 
 [dependencies]
 async-trait = "0.1"
-reqwest = { version = "0.13.1", default-features = false, features = [] }
+reqwest = { version = "0.13.1", default-features = false, features = ["json", "multipart"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

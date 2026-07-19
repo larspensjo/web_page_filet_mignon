@@ -1,5 +1,7 @@
 //! Harvester batch runner - headless CLI for scheduled execution
 
+mod batch_coordinator;
+mod batch_manifest;
 mod cli;
 mod lock;
 mod progress;
@@ -24,6 +26,7 @@ fn main() {
     engine_info!("[batch] sources: {:?}", args.sources_path());
     engine_info!("[batch] dry_run: {}", args.dry_run);
     engine_info!("[batch] single_shot: {}", args.single_shot);
+    engine_info!("[batch] batch_api: {}", args.batch_api);
     engine_info!(
         "[batch] refresh_stale_summaries_limit: {:?}",
         args.refresh_stale_summaries_limit

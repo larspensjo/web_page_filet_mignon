@@ -7,6 +7,7 @@ pub enum TriagePhase {
     Idle,
     LoadingArticles,
     Triaging,
+    AwaitingBatch,
     Complete,
     Failed { reason: String },
 }
@@ -15,6 +16,7 @@ pub enum TriagePhase {
 pub enum ArticleTriageState {
     Pending,
     InProgress { request_id: u64 },
+    Deferred,
     Completed { result: ArticleTriageResult },
     Failed { reason: String },
 }
@@ -136,6 +138,30 @@ impl TriageSession {
         }
     }
 
+    pub fn defer_article(&mut self, article_id: TriageArticleId) {
+        if let Some(article) = self.articles.get_mut(article_id) {
+            article.triage_state = ArticleTriageState::Deferred;
+        }
+    }
+
+    pub fn deferred_count(&self) -> usize {
+        self.articles
+            .iter()
+            .filter(|article| matches!(article.triage_state, ArticleTriageState::Deferred))
+            .count()
+    }
+
+    pub fn rearm_deferred(&mut self) {
+        for article in &mut self.articles {
+            if matches!(article.triage_state, ArticleTriageState::Deferred) {
+                article.triage_state = ArticleTriageState::Pending;
+            }
+        }
+        if matches!(self.phase, TriagePhase::AwaitingBatch) {
+            self.phase = TriagePhase::Triaging;
+        }
+    }
+
     pub fn total(&self) -> usize {
         self.articles.len()
     }
@@ -215,6 +241,10 @@ impl TriageSession {
 
     pub fn complete(&mut self) {
         self.phase = TriagePhase::Complete;
+    }
+
+    pub fn set_awaiting_batch(&mut self) {
+        self.phase = TriagePhase::AwaitingBatch;
     }
 
     pub fn progress_text(&self) -> Option<String> {

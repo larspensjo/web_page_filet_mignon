@@ -14,9 +14,9 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone)]
 pub struct OpenAiProvider {
-    client: reqwest::Client,
-    api_key: String,
-    base_url: String,
+    pub(crate) client: reqwest::Client,
+    pub(crate) api_key: String,
+    pub(crate) base_url: String,
 }
 
 impl OpenAiProvider {
@@ -59,7 +59,11 @@ impl OpenAiProvider {
         OpenAiChatCompletionRequest::from_llm_request(request)
     }
 
-    fn map_status_code(status: StatusCode, headers: &header::HeaderMap, body: String) -> LlmError {
+    pub(crate) fn map_status_code(
+        status: StatusCode,
+        headers: &header::HeaderMap,
+        body: String,
+    ) -> LlmError {
         match status.as_u16() {
             401 => LlmError::AuthenticationFailed,
             429 => match Self::insufficient_quota_description(&body) {
@@ -154,7 +158,7 @@ impl OpenAiProvider {
         }
     }
 
-    fn map_reqwest_error(err: reqwest::Error) -> LlmError {
+    pub(crate) fn map_reqwest_error(err: reqwest::Error) -> LlmError {
         if err.is_timeout() {
             LlmError::Timeout
         } else {
@@ -168,9 +172,10 @@ impl OpenAiProvider {
 #[async_trait]
 impl LlmProvider for OpenAiProvider {
     async fn complete(&self, request: &LlmRequest) -> Result<LlmResponse, LlmError> {
-        let payload = Self::build_request_body(request);
-        let body = serde_json::to_vec(&payload).map_err(|err| LlmError::InvalidResponse {
-            detail: format!("request serialization failed: {err}"),
+        let body = serde_json::to_vec(&openai_chat_completion_body(request)).map_err(|err| {
+            LlmError::InvalidResponse {
+                detail: format!("request serialization failed: {err}"),
+            }
         })?;
 
         let response = self
@@ -258,6 +263,15 @@ impl LlmProvider for OpenAiProvider {
 
         Ok(chat_models)
     }
+}
+
+/// Builds the exact JSON object sent to OpenAI's Chat Completions endpoint.
+///
+/// Batch callers can embed this object in a JSONL request line, guaranteeing it
+/// stays byte-for-byte equivalent to the synchronous request payload.
+pub fn openai_chat_completion_body(request: &LlmRequest) -> serde_json::Value {
+    serde_json::to_value(OpenAiProvider::build_request_body(request))
+        .expect("OpenAI chat completion request must be serializable")
 }
 
 #[derive(Serialize)]

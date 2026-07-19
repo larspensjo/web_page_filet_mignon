@@ -31,8 +31,8 @@ pub use dto::{
     TriageResult,
 };
 pub use handle::{
-    LlmCommand, LlmCompletionCommand, LlmCompletionError, LlmCompletionResult, LlmConfig, LlmEvent,
-    LlmHandle, QuotaOrigin,
+    prepare_completion, LlmCommand, LlmCompletionCommand, LlmCompletionError, LlmCompletionResult,
+    LlmConfig, LlmEvent, LlmHandle, PreparedCompletion, QuotaOrigin,
 };
 pub use mock_provider::{BlockingMockProvider, MockLlmProvider};
 pub use pricing::{ModelPricing, PricingRegistry};

@@ -4,8 +4,46 @@ use super::{
 };
 use crate::archive_display::{ArchiveDisplayCounts, CacheDerivedArchive};
 use crate::working_corpus::CurrentWorkingCorpus;
+use crate::{FrozenBatchKey, StageKind};
+use harvester_engine::llm::PromptId;
 
 impl AppState {
+    /// Returns the immutable cache identity captured by an in-flight
+    /// batch-eligible request. Rendered messages are filled by the runner after
+    /// it calls `prepare_completion`; the core owns every cache-key component.
+    pub fn frozen_batch_key_for_request(&self, request_id: u64) -> Option<FrozenBatchKey> {
+        if let Some(index) = self.triage.find_article_by_request_id(request_id) {
+            let article = self.triage.articles().get(index)?;
+            let prompt_id = PromptId::ArticleTriage;
+            return Some(FrozenBatchKey {
+                content_hash: article.content_hash.clone(),
+                prompt_id,
+                prompt_version: self.active_version_for(prompt_id)?,
+                model_id: self.effective_model_for(prompt_id)?.to_string(),
+                context_hash: crate::context_hash(self.context_for(prompt_id)),
+                stage: StageKind::Triage,
+                url: article.url.clone(),
+                rendered_system: String::new(),
+                rendered_user: String::new(),
+            });
+        }
+        if let Some(index) = self.briefing.find_article_by_request_id(request_id) {
+            let article = self.briefing.articles().get(index)?;
+            let key = self.briefing.article_cache_key(index)?;
+            return Some(FrozenBatchKey {
+                content_hash: key.content_hash.clone(),
+                prompt_id: key.prompt_id,
+                prompt_version: key.prompt_version,
+                model_id: key.model_id.clone(),
+                context_hash: key.context_hash.clone(),
+                stage: StageKind::Summary,
+                url: article.url.clone(),
+                rendered_system: String::new(),
+                rendered_user: String::new(),
+            });
+        }
+        self.frozen_signal_batch_key_for_request(request_id)
+    }
     /// Returns a snapshot of batch processing state for headless monitoring.
     /// Provides metrics without UI dependencies.
     pub fn batch_observation(&self) -> BatchObservation {

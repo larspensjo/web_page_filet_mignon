@@ -36,6 +36,15 @@ impl ModelPricing {
             .saturating_add(output_cost)
     }
 
+    /// Batch API pricing is exactly half of standard input/output pricing.
+    /// Batch requests do not receive an additional cached-input tier.
+    pub fn batch_cost_microdollars(&self, usage: &TokenUsage) -> u64 {
+        let standard_without_cache = self
+            .cost_component(usage.input_tokens, self.input_per_million)
+            .saturating_add(self.cost_component(usage.output_tokens, self.output_per_million));
+        standard_without_cache.div_ceil(2)
+    }
+
     fn cost_component(&self, tokens: u32, per_million: u64) -> u64 {
         if per_million == 0 || tokens == 0 {
             return 0;
@@ -49,6 +58,7 @@ impl ModelPricing {
 }
 
 /// Registry of pricing information keyed by model name.
+#[derive(Clone)]
 pub struct PricingRegistry {
     prices: HashMap<String, ModelPricing>,
 }
@@ -102,6 +112,12 @@ impl PricingRegistry {
             .map(|pricing| pricing.cost_microdollars(usage))
             .unwrap_or(0)
     }
+
+    pub fn batch_cost_microdollars(&self, model_name: &str, usage: &TokenUsage) -> u64 {
+        self.get(model_name)
+            .map(|pricing| pricing.batch_cost_microdollars(usage))
+            .unwrap_or(0)
+    }
 }
 
 impl Default for PricingRegistry {
@@ -141,6 +157,19 @@ mod tests {
         assert_eq!(
             registry.get("gpt-5.4-mini-2026-03-17"),
             Some(&ModelPricing::new(0.75, 4.50))
+        );
+    }
+
+    #[test]
+    fn batch_price_is_half_of_standard_without_cached_input_tier() {
+        let registry = PricingRegistry::with_defaults();
+        let usage = TokenUsage::new(1_000_000, 1_000_000).with_cached_input_tokens(900_000);
+        let standard_without_cache = ModelPricing::new(0.75, 4.50)
+            .cost_component(usage.input_tokens, 750_000)
+            + ModelPricing::new(0.75, 4.50).cost_component(usage.output_tokens, 4_500_000);
+        assert_eq!(
+            registry.batch_cost_microdollars("gpt-5.4-mini-2026-03-17", &usage),
+            standard_without_cache / 2
         );
     }
 }

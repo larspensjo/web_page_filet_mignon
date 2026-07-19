@@ -21,6 +21,7 @@ fn create_test_args(dry_run: bool, temp_dir: &TempDir) -> Args {
         contexts_dir: PathBuf::from("contexts"),
         prompts_dir: PathBuf::from("prompts"),
         dry_run,
+        batch_api: false,
         single_shot: false,
         allow_unsupported_sources: false,
         llm_concurrency: 1,
@@ -34,6 +35,44 @@ fn create_test_args(dry_run: bool, temp_dir: &TempDir) -> Args {
         refresh_stale_summaries_limit: None,
         signal_candidate_threshold: None,
     }
+}
+
+fn test_batch_runtime(temp_dir: &TempDir) -> BatchRuntime {
+    let provider = OpenAiProvider::new("test-key".to_string());
+    let mock: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
+        Arc::new(harvester_engine::llm::MockLlmProvider::new());
+    let mut registry = PromptRegistry::new();
+    register_defaults(&mut registry);
+    let config = LlmConfig {
+        provider: mock,
+        default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O_MINI),
+        triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
+        summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
+        signal_candidate_model: None,
+        briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
+        registry: Arc::new(RwLock::new(registry)),
+        quotas: LlmQuotas::default(),
+        output_dir: temp_dir.path().to_path_buf(),
+        pricing: PricingRegistry::with_defaults(),
+        max_input_bytes: 100_000,
+        #[allow(deprecated)]
+        max_input_chars: 0,
+        timestamp_utc: Arc::new(|| "2026-07-19T00:00:00Z".to_string()),
+        session_id: "test-batch".to_string(),
+        replay_cache: None,
+        max_concurrent_requests: 1,
+    };
+    BatchRuntime::new(
+        provider,
+        config,
+        &RuntimePaths::new(
+            temp_dir.path().to_path_buf(),
+            temp_dir.path().join("sources.ron"),
+            temp_dir.path().join("contexts"),
+            temp_dir.path().join("prompts"),
+        ),
+    )
+    .unwrap()
 }
 
 fn observation_with_totals(
@@ -173,6 +212,109 @@ fn test_should_not_settle_cycle_when_batch_status_is_running() {
 fn test_orchestration_dispatch_skips_settlement_in_same_iteration() {
     assert!(!should_check_settlement_this_iteration(true));
     assert!(should_check_settlement_this_iteration(false));
+}
+
+#[test]
+fn buffered_batch_requests_are_quiescent_but_other_pending_requests_are_not() {
+    let mut state = AppState::new();
+    state.record_pending_llm_request(1, PromptId::ArticleTriage);
+    let buffered = HashSet::from([1]);
+    assert!(batch_buffer_is_quiescent(&state, &buffered));
+
+    state.record_pending_llm_request(2, PromptId::AggregateBriefing);
+    assert!(!batch_buffer_is_quiescent(&state, &buffered));
+    assert!(!batch_buffer_is_quiescent(&state, &HashSet::new()));
+}
+
+#[test]
+fn batch_custom_id_changes_when_model_changes() {
+    let mut key = FrozenBatchKey {
+        content_hash: "content-hash".to_string(),
+        prompt_id: PromptId::ArticleTriage,
+        prompt_version: 3,
+        model_id: "gpt-5.4-nano".to_string(),
+        context_hash: "context-hash".to_string(),
+        stage: StageKind::Triage,
+        url: "https://example.test".to_string(),
+        rendered_system: String::new(),
+        rendered_user: String::new(),
+    };
+    let first = batch_custom_id(&key);
+    key.model_id = "gpt-5.4-mini".to_string();
+    assert_ne!(first, batch_custom_id(&key));
+}
+
+#[test]
+fn batch_routing_partition_keeps_briefing_synchronous() {
+    assert!(is_batch_eligible_prompt(PromptId::ArticleTriage));
+    assert!(is_batch_eligible_prompt(PromptId::ArticleSummary));
+    assert!(is_batch_eligible_prompt(PromptId::ArticleSignalCandidate));
+    assert!(!is_batch_eligible_prompt(PromptId::AggregateBriefing));
+    assert!(!is_batch_eligible_prompt(
+        PromptId::BriefingExecutiveSummary
+    ));
+    assert!(!is_batch_eligible_prompt(PromptId::BriefingNextItem));
+}
+
+#[test]
+fn batch_render_failure_replies_failed_exactly_once() {
+    let (tx, rx) = mpsc::channel();
+    send_batch_preparation_failure(
+        &tx,
+        17,
+        &LlmCompletionError::TemplateRenderFailed {
+            detail: "missing variable".to_string(),
+        },
+    );
+    assert!(matches!(
+        rx.recv().unwrap(),
+        Msg::LlmCompleted {
+            request_id: 17,
+            result: harvester_core::LlmResultKind::Failed { .. },
+            ..
+        }
+    ));
+    assert!(matches!(rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+}
+
+#[test]
+fn collected_replay_audit_is_idempotent_and_uses_discounted_cost() {
+    let temp_dir = TempDir::new().unwrap();
+    let mut runtime = test_batch_runtime(&temp_dir);
+    let entry = harvester_core::CollectedEntry {
+        batch_id: "batch-1".to_string(),
+        custom_id: "line-1".to_string(),
+        stage: StageKind::Triage,
+        key: FrozenBatchKey {
+            content_hash: "content-hash".to_string(),
+            prompt_id: PromptId::ArticleTriage,
+            prompt_version: 1,
+            model_id: DEFAULT_TRIAGE_MODEL.to_string(),
+            context_hash: "context-hash".to_string(),
+            stage: StageKind::Triage,
+            url: "https://example.test".to_string(),
+            rendered_system: "system".to_string(),
+            rendered_user: "user".to_string(),
+        },
+        created_at_utc: "2026-07-19T00:00:00Z".to_string(),
+        outcome: harvester_core::CollectedOutcome::Success {
+            raw_output_json: r#"{"category":"news","priority":3,"tags":["ai"],"rationale":"ok"}"#
+                .to_string(),
+            usage: TokenUsage::new(1_000_000, 0),
+            resolved_model: DEFAULT_TRIAGE_MODEL.to_string(),
+        },
+    };
+
+    persist_batch_replay_records(std::slice::from_ref(&entry), &mut runtime);
+    persist_batch_replay_records(&[entry], &mut runtime);
+
+    assert_eq!(runtime.realized_cost_microdollars, 100_000);
+    assert_eq!(
+        std::fs::read_dir(temp_dir.path().join("llm_results"))
+            .unwrap()
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -408,6 +550,7 @@ fn test_dispatch_loop_ticks_drive_pretriage_from_restore_signal() {
             require_new_jobs_since: None,
             tick_interval: Duration::ZERO,
         },
+        None,
         None,
     )
     .expect("dispatch loop should complete");
