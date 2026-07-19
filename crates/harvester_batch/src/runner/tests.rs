@@ -167,9 +167,31 @@ fn test_dry_run_exits_successfully_without_api_key() {
     );
 
     // Dry-run should succeed even without OPENAI_API_KEY
-    let result = run_dry_run(&runtime_paths, &args);
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let result = run_dry_run(&runtime_paths, &args, &shutdown_flag);
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 0);
+}
+
+#[test]
+fn dry_run_returns_130_when_shutdown_is_already_requested() {
+    engine_logging::initialize_for_tests();
+    let temp_dir = TempDir::new().unwrap();
+    let args = create_test_args(true, &temp_dir);
+    let sources_path = temp_dir.path().join("test_sources.json");
+    std::fs::write(&sources_path, r#"{"sources": []}"#).unwrap();
+    let runtime_paths = RuntimePaths::new(
+        args.output_dir.clone(),
+        sources_path,
+        args.contexts_dir.clone(),
+        args.prompts_dir.clone(),
+    );
+    let shutdown_flag = Arc::new(AtomicBool::new(true));
+
+    assert_eq!(
+        run_dry_run(&runtime_paths, &args, &shutdown_flag).unwrap(),
+        130
+    );
 }
 
 #[test]
@@ -194,7 +216,8 @@ fn test_dry_run_does_not_modify_state_files() {
     assert!(!state_path.exists());
 
     // Run dry-run
-    let result = run_dry_run(&runtime_paths, &args);
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let result = run_dry_run(&runtime_paths, &args, &shutdown_flag);
     assert!(result.is_ok());
 
     // State file should still not exist (no writes)
@@ -372,6 +395,14 @@ fn test_should_continue_after_cycle_when_not_single_shot_and_no_shutdown() {
 }
 
 #[test]
+fn new_jobs_gate_is_disabled_for_batch_api_single_shot_mode() {
+    assert_eq!(require_new_jobs_since(true, false, 42), Some(42));
+    assert_eq!(require_new_jobs_since(true, true, 42), None);
+    assert_eq!(require_new_jobs_since(false, false, 42), None);
+    assert_eq!(require_new_jobs_since(false, true, 42), None);
+}
+
+#[test]
 fn test_should_run_ai_orchestration_when_enabled_without_new_jobs_gate() {
     let obs = observation_with_totals(10, 0, 0, 0, 0, 0, 0);
     assert!(should_run_ai_orchestration(true, None, &obs));
@@ -397,6 +428,13 @@ fn determine_exit_code_returns_zero_when_only_partial_failures_occur() {
 #[test]
 fn determine_exit_code_returns_nonzero_when_total_failure_occurs() {
     assert_eq!(determine_exit_code(1), 1);
+}
+
+#[test]
+fn shutdown_overrides_each_modes_default_exit_code() {
+    assert_eq!(exit_code_with_shutdown(0, true), 130);
+    assert_eq!(exit_code_with_shutdown(1, true), 130);
+    assert_eq!(exit_code_with_shutdown(1, false), 1);
 }
 
 #[test]
@@ -1179,6 +1217,111 @@ fn format_awaiting_batch_line_reports_per_stage_and_total_counts() {
     assert_eq!(
         line,
         "  Awaiting batch results: 3 triage, 2 summaries, 1 signal (6 total)"
+    );
+}
+
+fn batch_peek(
+    status: Option<openai_provider_kit::BatchLifecycle>,
+    completed: u32,
+    total: u32,
+) -> BatchPeek {
+    let request_counts = status
+        .as_ref()
+        .map(|_| openai_provider_kit::BatchRequestCounts {
+            total,
+            completed,
+            failed: 0,
+        });
+    BatchPeek {
+        batch_id: "batch-test".to_string(),
+        stage: "triage".to_string(),
+        status,
+        request_counts,
+    }
+}
+
+#[test]
+fn batch_wait_keeps_waiting_when_all_peeked_batches_are_nonterminal() {
+    let peeks = vec![
+        batch_peek(Some(openai_provider_kit::BatchLifecycle::InProgress), 3, 10),
+        batch_peek(Some(openai_provider_kit::BatchLifecycle::Finalizing), 8, 8),
+        batch_peek(None, 0, 0),
+    ];
+
+    assert_eq!(decide_batch_wait(&peeks), BatchWaitDecision::KeepWaiting);
+}
+
+#[test]
+fn batch_wait_runs_collect_cycle_when_a_peeked_batch_is_terminal() {
+    for terminal in [
+        openai_provider_kit::BatchLifecycle::Completed,
+        openai_provider_kit::BatchLifecycle::Failed,
+        openai_provider_kit::BatchLifecycle::Expired,
+        openai_provider_kit::BatchLifecycle::Cancelled,
+    ] {
+        let peeks = vec![
+            batch_peek(Some(openai_provider_kit::BatchLifecycle::InProgress), 3, 10),
+            batch_peek(Some(terminal), 10, 10),
+        ];
+
+        assert_eq!(
+            decide_batch_wait(&peeks),
+            BatchWaitDecision::RunCollectCycle
+        );
+    }
+}
+
+#[test]
+fn batch_wait_runs_collect_cycle_when_no_batches_can_be_peeked() {
+    assert_eq!(decide_batch_wait(&[]), BatchWaitDecision::RunCollectCycle);
+}
+
+#[test]
+fn batch_drain_progress_compares_manifest_and_deferred_work() {
+    let before = BatchDrainSnapshot {
+        pending_manifest_batches: vec![("file-1".to_string(), None)],
+        triage_deferred: 1,
+        summary_deferred: 0,
+        signal_deferred: 0,
+    };
+    assert!(!batch_drain_made_progress(&before, &before));
+
+    let after_reconcile = BatchDrainSnapshot {
+        pending_manifest_batches: vec![("file-1".to_string(), Some("batch-1".to_string()))],
+        ..before.clone()
+    };
+    assert!(batch_drain_made_progress(&before, &after_reconcile));
+
+    let after_collection = BatchDrainSnapshot {
+        pending_manifest_batches: Vec::new(),
+        triage_deferred: 0,
+        ..after_reconcile.clone()
+    };
+    assert!(batch_drain_made_progress(
+        &after_reconcile,
+        &after_collection
+    ));
+}
+
+#[test]
+fn batch_drain_exits_after_second_consecutive_no_progress_cycle() {
+    assert!(!should_exit_batch_drain_after_no_progress(0));
+    assert!(!should_exit_batch_drain_after_no_progress(1));
+    assert!(should_exit_batch_drain_after_no_progress(2));
+}
+
+#[test]
+fn format_batch_wait_status_line_reports_request_and_stage_progress() {
+    let peeks = vec![
+        batch_peek(Some(openai_provider_kit::BatchLifecycle::InProgress), 8, 10),
+        batch_peek(Some(openai_provider_kit::BatchLifecycle::Finalizing), 5, 5),
+        batch_peek(Some(openai_provider_kit::BatchLifecycle::Completed), 7, 7),
+        batch_peek(None, 0, 0),
+    ];
+
+    assert_eq!(
+        format_batch_wait_status_line(&peeks, 3, 2, 1, "2026-07-19T12:00:00Z".to_string()),
+        "[batch-wait] 2 batches in progress, requests 20/22 — pending: 3 triage, 2 summaries, 1 signal — next check in 5m (2026-07-19T12:00:00Z)"
     );
 }
 

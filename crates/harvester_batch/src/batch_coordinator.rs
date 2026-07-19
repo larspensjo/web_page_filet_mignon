@@ -5,7 +5,8 @@ use chrono::Utc;
 use harvester_core::{CollectedEntry, LlmResultKind, Msg};
 use harvester_engine::llm::LlmQuotas;
 use openai_provider_kit::{
-    parse_batch_output_jsonl, BatchInputLine, BatchLifecycle, BatchTransport, LlmError,
+    parse_batch_output_jsonl, BatchInputLine, BatchLifecycle, BatchRequestCounts, BatchTransport,
+    LlmError,
 };
 use serde_json::Value;
 
@@ -56,6 +57,16 @@ pub struct BufferedRequest {
     pub entry: PendingEntry,
     pub estimated_input_tokens: u64,
     pub estimated_cost_microdollars: u64,
+}
+
+/// Status-only snapshot of a manifest batch obtained during drain-mode waits.
+/// A missing status means the provider lookup failed and will be retried.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BatchPeek {
+    pub batch_id: String,
+    pub stage: String,
+    pub status: Option<BatchLifecycle>,
+    pub request_counts: Option<BatchRequestCounts>,
 }
 
 pub struct BatchCoordinator<T> {
@@ -320,6 +331,76 @@ impl<T: BatchTransport> BatchCoordinator<T> {
     }
     pub fn failed_attempts_for(&self, custom_id: &str) -> u32 {
         self.manifest.failed_attempts_for(custom_id)
+    }
+
+    pub fn pending_batch_count(&self) -> usize {
+        self.manifest
+            .manifest()
+            .batches
+            .iter()
+            .filter(|batch| batch.status != BatchState::Collected && batch.batch_id.is_some())
+            .count()
+    }
+
+    pub fn pending_manifest_batches(&self) -> Vec<(String, Option<String>)> {
+        let mut batches: Vec<_> = self
+            .manifest
+            .manifest()
+            .batches
+            .iter()
+            .filter(|batch| batch.status != BatchState::Collected)
+            .map(|batch| (batch.input_file_id.clone(), batch.batch_id.clone()))
+            .collect();
+        batches.sort();
+        batches
+    }
+
+    /// Retrieves the status for every pending remote batch without downloading
+    /// output. Lookup failures are intentionally non-fatal during drain waits.
+    pub async fn peek_pending_batches(&self) -> Vec<BatchPeek> {
+        let candidates: Vec<_> = self
+            .manifest
+            .manifest()
+            .batches
+            .iter()
+            .filter_map(|batch| {
+                (batch.status != BatchState::Collected)
+                    .then(|| {
+                        batch
+                            .batch_id
+                            .as_ref()
+                            .map(|id| (id.clone(), batch.stage.clone()))
+                    })
+                    .flatten()
+            })
+            .collect();
+
+        let mut peeks = Vec::with_capacity(candidates.len());
+        for (batch_id, stage) in candidates {
+            match self.transport.retrieve_batch(&batch_id).await {
+                Ok(handle) => peeks.push(BatchPeek {
+                    batch_id,
+                    stage,
+                    status: Some(handle.status),
+                    request_counts: Some(handle.request_counts),
+                }),
+                Err(err) => {
+                    engine_logging::engine_warn!(
+                        "[batch-wait] batch_id={} stage={} status retrieve failed; retrying next check: {}",
+                        batch_id,
+                        stage,
+                        err
+                    );
+                    peeks.push(BatchPeek {
+                        batch_id,
+                        stage,
+                        status: None,
+                        request_counts: None,
+                    });
+                }
+            }
+        }
+        peeks
     }
 
     pub async fn flush(

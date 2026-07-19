@@ -2,7 +2,7 @@ use crate::cli::{Args, CheckpointCommand};
 use crate::lock;
 use crate::progress::ProgressReporter;
 use crate::{
-    batch_coordinator::{BatchCoordinator, BufferedRequest, SubmissionBudget},
+    batch_coordinator::{BatchCoordinator, BatchPeek, BufferedRequest, SubmissionBudget},
     batch_manifest::{BatchManifestStore, PendingEntry},
 };
 use chrono::Utc;
@@ -113,6 +113,22 @@ struct DispatchLoopOptions {
 }
 
 const MAX_DISPATCH_INBOX_BATCH: usize = 32;
+const BATCH_WAIT_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const MAX_CONSECUTIVE_BATCH_COLLECT_NO_PROGRESS: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BatchWaitDecision {
+    KeepWaiting,
+    RunCollectCycle,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BatchDrainSnapshot {
+    pending_manifest_batches: Vec<(String, Option<String>)>,
+    triage_deferred: usize,
+    summary_deferred: usize,
+    signal_deferred: usize,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SummaryRefreshTarget {
@@ -237,6 +253,53 @@ fn batch_buffer_is_quiescent(state: &AppState, buffered_ids: &HashSet<u64>) -> b
 
 fn should_stop_after_cycle(single_shot: bool, shutdown_requested: bool) -> bool {
     shutdown_requested || single_shot
+}
+
+fn require_new_jobs_since(
+    single_shot: bool,
+    batch_api: bool,
+    cycle_jobs_total_baseline: usize,
+) -> Option<usize> {
+    (single_shot && !batch_api).then_some(cycle_jobs_total_baseline)
+}
+
+fn is_terminal_batch_status(status: &openai_provider_kit::BatchLifecycle) -> bool {
+    matches!(
+        status,
+        openai_provider_kit::BatchLifecycle::Completed
+            | openai_provider_kit::BatchLifecycle::Failed
+            | openai_provider_kit::BatchLifecycle::Expired
+            | openai_provider_kit::BatchLifecycle::Cancelled
+    )
+}
+
+fn decide_batch_wait(peeks: &[BatchPeek]) -> BatchWaitDecision {
+    if peeks.is_empty()
+        || peeks
+            .iter()
+            .filter_map(|peek| peek.status.as_ref())
+            .any(is_terminal_batch_status)
+    {
+        BatchWaitDecision::RunCollectCycle
+    } else {
+        BatchWaitDecision::KeepWaiting
+    }
+}
+
+fn batch_drain_made_progress(before: &BatchDrainSnapshot, after: &BatchDrainSnapshot) -> bool {
+    before != after
+}
+
+fn should_exit_batch_drain_after_no_progress(consecutive_cycles: usize) -> bool {
+    consecutive_cycles >= MAX_CONSECUTIVE_BATCH_COLLECT_NO_PROGRESS
+}
+
+fn exit_code_with_shutdown(default_exit_code: i32, shutdown_requested: bool) -> i32 {
+    if shutdown_requested {
+        130
+    } else {
+        default_exit_code
+    }
 }
 
 fn determine_exit_code(total_failure_cycles: usize) -> i32 {
@@ -671,7 +734,11 @@ fn persist_summary_refresh_report(
     Ok(report_path)
 }
 
-fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
+fn run_refresh_stale_summaries_mode(
+    paths: &RuntimePaths,
+    args: &Args,
+    shutdown_flag: &Arc<AtomicBool>,
+) -> Result<i32, String> {
     let limit = args
         .refresh_stale_summaries_limit
         .ok_or_else(|| "missing --refresh-stale-summaries-limit".to_string())?;
@@ -773,6 +840,12 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
         let mut request_id = 0u64;
 
         for article in articles {
+            if shutdown_flag.load(Ordering::Relaxed) {
+                engine_info!(
+                    "[summary-refresh] Shutdown requested; stopping new LLM request dispatch"
+                );
+                break;
+            }
             let Some(target) = targets_by_url.remove(&article.url) else {
                 continue;
             };
@@ -797,7 +870,8 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
         }
 
         report.attempted = pending.len();
-        if !targets_by_url.is_empty() {
+        let interrupted_during_dispatch = shutdown_flag.load(Ordering::Relaxed);
+        if !interrupted_during_dispatch && !targets_by_url.is_empty() {
             report.failed += targets_by_url.len();
             report.skipped_unloadable = targets_by_url.len();
             engine_warn!(
@@ -821,6 +895,11 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                 }
             }
         }
+        if pending.is_empty() && interrupted_during_dispatch {
+            report.status = "interrupted".to_string();
+            report.finished_at_utc = Utc::now().to_rfc3339();
+            return Ok((report, 130));
+        }
         if pending.is_empty() {
             return Err("no stale summaries could be dispatched".to_string());
         }
@@ -828,12 +907,18 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
         let event_rx = llm_handle.event_receiver();
         let mut entity_index = load_entity_index(&paths.entity_index_path);
 
-        while !pending.is_empty() {
+        while !pending.is_empty() && !shutdown_flag.load(Ordering::Relaxed) {
             let event = {
                 let receiver = event_rx.lock().unwrap();
-                receiver.recv()
-            }
-            .map_err(|err| format!("summary refresh worker stopped unexpectedly: {err}"))?;
+                receiver.recv_timeout(Duration::from_millis(100))
+            };
+            let event = match event {
+                Ok(event) => event,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("summary refresh worker stopped unexpectedly".to_string())
+                }
+            };
 
             let LlmEvent::Completed { request_id, result } = event else {
                 continue;
@@ -953,7 +1038,12 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
         report.summary_cache_entries_after = summary_cache.len();
         report.remaining_stale_estimate =
             report.stale_total_before.saturating_sub(report.succeeded);
-        report.status = summary_refresh_status_label(report.succeeded, report.failed).to_string();
+        let interrupted = shutdown_flag.load(Ordering::Relaxed);
+        report.status = if interrupted {
+            "interrupted".to_string()
+        } else {
+            summary_refresh_status_label(report.succeeded, report.failed).to_string()
+        };
         report.finished_at_utc = Utc::now().to_rfc3339();
 
         engine_info!(
@@ -961,11 +1051,19 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
             report.succeeded,
             report.failed
         );
-        let exit_code = summary_refresh_exit_code(report.succeeded, report.failed);
+        let exit_code = if interrupted {
+            130
+        } else {
+            summary_refresh_exit_code(report.succeeded, report.failed)
+        };
         Ok((report, exit_code))
     })();
 
-    let usage_totals = llm_handle.usage_totals();
+    let usage_totals = if shutdown_flag.load(Ordering::Relaxed) {
+        None
+    } else {
+        llm_handle.usage_totals()
+    };
     llm_handle.drain_and_stop();
     match result {
         Ok((mut report, exit_code)) => {
@@ -1005,7 +1103,10 @@ fn run_refresh_stale_summaries_mode(paths: &RuntimePaths, args: &Args) -> Result
                     &mut std::io::stdout(),
                 );
             }
-            Ok(exit_code)
+            Ok(exit_code_with_shutdown(
+                exit_code,
+                shutdown_flag.load(Ordering::Relaxed),
+            ))
         }
         Err(err) => Err(err),
     }
@@ -1143,19 +1244,16 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
 
     engine_info!("[batch] Acquiring lock");
-    let lock_guard = lock::acquire_lock(&paths.output_dir, args.force_unlock)?;
+    let _lock_guard = lock::acquire_lock(&paths.output_dir, args.force_unlock)?;
 
     // Install signal handler immediately after lock acquisition so Ctrl-C always
-    // removes the lock file, regardless of which execution path follows.
+    // reaches the shared graceful-shutdown path for every execution mode.
     let shutdown_flag = Arc::new(AtomicBool::new(false));
-    install_signal_handler(
-        Arc::clone(&shutdown_flag),
-        lock_guard.lock_path().to_path_buf(),
-    );
+    install_signal_handler(Arc::clone(&shutdown_flag));
 
     if args.dry_run {
         engine_info!("[batch] Dry-run mode: single poll only");
-        return run_dry_run(&paths, &args);
+        return run_dry_run(&paths, &args, &shutdown_flag);
     }
 
     // Import mode: branch before source loading
@@ -1171,7 +1269,7 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     if args.refresh_stale_summaries_limit.is_some() {
         engine_info!("[batch] Summary refresh mode enabled");
-        return run_refresh_stale_summaries_mode(&paths, &args);
+        return run_refresh_stale_summaries_mode(&paths, &args, &shutdown_flag);
     }
 
     // Validate source configuration
@@ -1344,7 +1442,8 @@ pub fn run(args: Args) -> Result<i32, String> {
     let progress_enabled = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
     let mut progress = crate::progress::BatchProgressReporter::new(progress_enabled);
 
-    // Outer cycle loop - poll repeatedly until shutdown
+    // Ordinary mode polls repeatedly. Batch API mode runs one intake cycle,
+    // then drains exactly that cycle's deferred work without polling again.
     let poll_interval = Duration::from_secs((args.poll_interval * 60) as u64);
     let mut cycle_count = 0;
     let mut total_cycles = 0;
@@ -1353,11 +1452,21 @@ pub fn run(args: Args) -> Result<i32, String> {
     let mut total_new_articles = 0usize;
     let mut total_triaged = 0usize;
     let mut total_summarized = 0usize;
+    let mut collect_cycle_baseline: Option<BatchDrainSnapshot> = None;
+    let mut consecutive_no_progress_collect_cycles = 0usize;
 
-    loop {
+    'cycles: loop {
         cycle_count += 1;
         total_cycles += 1;
-        engine_info!("[batch] === Starting cycle {} ===", cycle_count);
+        let collect_only_cycle = args.batch_api && cycle_count > 1;
+        if collect_only_cycle {
+            engine_info!(
+                "[batch] === Starting collect-only cycle {} ===",
+                cycle_count
+            );
+        } else {
+            engine_info!("[batch] === Starting cycle {} ===", cycle_count);
+        }
         let cycle_jobs_total_baseline = state.batch_observation().jobs_total;
 
         // Batch results are collected at the cycle boundary before re-arming.
@@ -1424,11 +1533,12 @@ pub fn run(args: Args) -> Result<i32, String> {
             }
         }
 
-        // Start the cycle by dispatching poll
-        engine_info!("[batch] Dispatching poll sources");
-        msg_tx
-            .send(Msg::PollSourcesClicked)
-            .map_err(|e| format!("Failed to dispatch poll: {}", e))?;
+        if !collect_only_cycle {
+            engine_info!("[batch] Dispatching poll sources");
+            msg_tx
+                .send(Msg::PollSourcesClicked)
+                .map_err(|e| format!("Failed to dispatch poll: {}", e))?;
+        }
 
         // Run dispatch loop until settled
         let outcome = run_dispatch_loop_with_tick_interval(
@@ -1439,11 +1549,11 @@ pub fn run(args: Args) -> Result<i32, String> {
             &shutdown_flag,
             DispatchLoopOptions {
                 enable_ai_orchestration,
-                require_new_jobs_since: if args.single_shot {
-                    Some(cycle_jobs_total_baseline)
-                } else {
-                    None
-                },
+                require_new_jobs_since: require_new_jobs_since(
+                    args.single_shot,
+                    args.batch_api,
+                    cycle_jobs_total_baseline,
+                ),
                 tick_interval: Duration::from_millis(75),
             },
             Some(&mut progress),
@@ -1499,6 +1609,100 @@ pub fn run(args: Args) -> Result<i32, String> {
 
         let shutdown_requested = shutdown_flag.load(Ordering::Relaxed);
 
+        if args.batch_api {
+            let deferred_total = obs.triage_deferred + obs.summary_deferred + obs.signal_deferred;
+            if shutdown_requested {
+                engine_info!("[batch] Shutdown signal received, exiting");
+                break;
+            }
+            if deferred_total == 0 {
+                engine_info!("[batch] Batch API drain settled; exiting");
+                break;
+            }
+
+            let Some(batch) = batch_runtime.as_mut() else {
+                engine_warn!(
+                    "[batch-wait] {} deferred requests cannot be drained because Batch API runtime is unavailable",
+                    deferred_total
+                );
+                break;
+            };
+            let drain_snapshot = BatchDrainSnapshot {
+                pending_manifest_batches: batch.coordinator.pending_manifest_batches(),
+                triage_deferred: obs.triage_deferred,
+                summary_deferred: obs.summary_deferred,
+                signal_deferred: obs.signal_deferred,
+            };
+            let delay_before_peek = if let Some(before) = collect_cycle_baseline.take() {
+                if batch_drain_made_progress(&before, &drain_snapshot) {
+                    consecutive_no_progress_collect_cycles = 0;
+                    false
+                } else {
+                    consecutive_no_progress_collect_cycles += 1;
+                    true
+                }
+            } else {
+                false
+            };
+            if should_exit_batch_drain_after_no_progress(consecutive_no_progress_collect_cycles) {
+                engine_warn!(
+                    "[batch-wait] collect-only operation made no progress for {} consecutive cycles; exiting with deferred triage={} summaries={} signal={} pending_manifest_batches={:?}",
+                    consecutive_no_progress_collect_cycles,
+                    obs.triage_deferred,
+                    obs.summary_deferred,
+                    obs.signal_deferred,
+                    drain_snapshot.pending_manifest_batches
+                );
+                break;
+            }
+            println!(
+                "[batch-wait] waiting for {} batches; checking every {} minutes. Ctrl+C is safe — a later run collects the results.",
+                batch.coordinator.pending_batch_count(),
+                BATCH_WAIT_INTERVAL.as_secs() / 60
+            );
+
+            if delay_before_peek {
+                engine_warn!(
+                    "[batch-wait] collect-only operation made no progress; waiting {} minutes before retrying pending_manifest_batches={:?}",
+                    BATCH_WAIT_INTERVAL.as_secs() / 60,
+                    drain_snapshot.pending_manifest_batches
+                );
+                if sleep_interruptible(BATCH_WAIT_INTERVAL, &shutdown_flag) {
+                    progress.finish_cycle(&mut std::io::stdout());
+                    engine_info!("[batch] Shutdown during batch retry wait, exiting");
+                    break 'cycles;
+                }
+            }
+
+            loop {
+                let peeks = batch
+                    .runtime
+                    .block_on(batch.coordinator.peek_pending_batches());
+                let wait_line = format_batch_wait_status_line(
+                    &peeks,
+                    obs.triage_deferred,
+                    obs.summary_deferred,
+                    obs.signal_deferred,
+                    Utc::now().to_rfc3339(),
+                );
+                progress.status_line(&wait_line, &mut std::io::stdout());
+
+                if decide_batch_wait(&peeks) == BatchWaitDecision::RunCollectCycle {
+                    progress.finish_cycle(&mut std::io::stdout());
+                    collect_cycle_baseline = Some(drain_snapshot.clone());
+                    engine_info!(
+                        "[batch-wait] collection or reconciliation is ready; starting collect-only cycle"
+                    );
+                    continue 'cycles;
+                }
+                if sleep_interruptible(BATCH_WAIT_INTERVAL, &shutdown_flag) {
+                    progress.finish_cycle(&mut std::io::stdout());
+                    engine_info!("[batch] Shutdown during batch wait, exiting");
+                    break 'cycles;
+                }
+            }
+        }
+
         // Check for shutdown signal or single-shot completion.
         if should_stop_after_cycle(args.single_shot, shutdown_requested) {
             if args.single_shot {
@@ -1510,7 +1714,7 @@ pub fn run(args: Args) -> Result<i32, String> {
             break;
         }
 
-        // Sleep interruptibly before next cycle
+        // Sleep interruptibly before the next ordinary polling cycle.
         engine_info!(
             "[batch] Sleeping for {} minutes before next cycle",
             args.poll_interval
@@ -1554,7 +1758,10 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     engine_info!("[batch] Shutdown complete");
 
-    Ok(determine_exit_code(total_failure_cycles))
+    Ok(exit_code_with_shutdown(
+        determine_exit_code(total_failure_cycles),
+        shutdown_flag.load(Ordering::Relaxed),
+    ))
 }
 
 /// Writes or clears the briefing checkpoint file.
@@ -2180,6 +2387,43 @@ fn format_awaiting_batch_line(
     })
 }
 
+/// Formats a single drain-mode status check from manifest batch peeks.
+fn format_batch_wait_status_line(
+    peeks: &[BatchPeek],
+    triage_deferred: usize,
+    summary_deferred: usize,
+    signal_deferred: usize,
+    checked_at_utc: String,
+) -> String {
+    let (completed_requests, total_requests) = peeks.iter().fold((0u32, 0u32), |counts, peek| {
+        let Some(request_counts) = peek.request_counts.as_ref() else {
+            return counts;
+        };
+        (
+            counts.0.saturating_add(request_counts.completed),
+            counts.1.saturating_add(request_counts.total),
+        )
+    });
+    format!(
+        "[batch-wait] {} batches in progress, requests {}/{} — pending: {} triage, {} summaries, {} signal — next check in {}m ({})",
+        peeks
+            .iter()
+            .filter(|peek| {
+                peek.status
+                    .as_ref()
+                    .is_some_and(|status| !is_terminal_batch_status(status))
+            })
+            .count(),
+        completed_requests,
+        total_requests,
+        triage_deferred,
+        summary_deferred,
+        signal_deferred,
+        BATCH_WAIT_INTERVAL.as_secs() / 60,
+        checked_at_utc
+    )
+}
+
 /// Formats per-model usage rows as indented display lines.
 fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
     rows.iter()
@@ -2281,15 +2525,16 @@ fn sleep_interruptible(duration: Duration, shutdown_flag: &Arc<AtomicBool>) -> b
 
 /// Installs a signal handler for SIGINT/SIGTERM.
 ///
-/// On interrupt the handler removes the lock file (so a subsequent run does not
-/// need --force-unlock) and exits immediately with code 130 (128 + SIGINT).
-fn install_signal_handler(shutdown_flag: Arc<AtomicBool>, lock_path: std::path::PathBuf) {
+/// The first interrupt requests the runner's graceful shutdown path. The lock
+/// remains held until `LockGuard` drops after the run returns. A second signal
+/// hard-exits so a stuck network call cannot make the process unkillable.
+fn install_signal_handler(shutdown_flag: Arc<AtomicBool>) {
     let handler = move || {
-        // Best-effort lock removal; ignore errors (lock may already be gone).
-        let _ = std::fs::remove_file(&lock_path);
-        shutdown_flag.store(true, Ordering::Relaxed);
-        eprintln!("harvester_batch: interrupted — lock released");
-        std::process::exit(130);
+        if shutdown_flag.swap(true, Ordering::Relaxed) {
+            eprintln!("harvester_batch: interrupted again — exiting immediately");
+            std::process::exit(130);
+        }
+        eprintln!("harvester_batch: interrupted — shutting down; lock remains held");
     };
 
     ctrlc::set_handler(handler).expect("Error setting signal handler");
@@ -2451,11 +2696,14 @@ fn run_import_mode(
     );
     persist_completed_jobs(&paths.state_path, &merged_completed_jobs);
 
-    Ok(match outcome {
-        CycleOutcome::Success => 0,
-        CycleOutcome::PartialFailure => 1,
-        CycleOutcome::TotalFailure => 1,
-    })
+    Ok(exit_code_with_shutdown(
+        match outcome {
+            CycleOutcome::Success => 0,
+            CycleOutcome::PartialFailure => 1,
+            CycleOutcome::TotalFailure => 1,
+        },
+        shutdown_flag.load(Ordering::Relaxed),
+    ))
 }
 
 fn merge_completed_jobs_for_import(
@@ -2583,7 +2831,11 @@ fn run_import_dispatch_loop(
     }
 }
 
-fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
+fn run_dry_run(
+    paths: &RuntimePaths,
+    args: &Args,
+    shutdown_flag: &Arc<AtomicBool>,
+) -> Result<i32, String> {
     engine_info!("[dry-run] Starting dry-run mode: single poll, no downloads/triage");
 
     // Hydrate state (read-only)
@@ -2618,14 +2870,13 @@ fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
         .send(Msg::PollSourcesClicked)
         .map_err(|e| format!("Failed to send poll message: {}", e))?;
 
-    // Run dispatch loop until settlement (read-only, no signal handling needed)
-    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    // Run dispatch loop until settlement or graceful shutdown.
     let outcome = run_dispatch_loop(
         &mut state,
         &msg_tx,
         &msg_rx,
         &effect_runner,
-        &shutdown_flag,
+        shutdown_flag,
         DispatchLoopOptions {
             enable_ai_orchestration: false,
             require_new_jobs_since: None,
@@ -2650,7 +2901,10 @@ fn run_dry_run(paths: &RuntimePaths, args: &Args) -> Result<i32, String> {
     println!("======================\n");
 
     engine_info!("[dry-run] Dry-run complete (no state modifications)");
-    Ok(0)
+    Ok(exit_code_with_shutdown(
+        0,
+        shutdown_flag.load(Ordering::Relaxed),
+    ))
 }
 
 #[cfg(test)]

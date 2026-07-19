@@ -342,6 +342,20 @@ impl BatchProgressReporter {
         self.painted_status = true;
     }
 
+    /// Renders a one-off status using the same terminal/plain-output
+    /// convention as batch progress updates.
+    pub fn status_line<W: Write>(&mut self, line: &str, stdout: &mut W) {
+        if self.enabled {
+            let pad = self.last_line_width.saturating_sub(line.len());
+            let _ = write!(stdout, "\r{}{:pad$}", line, "", pad = pad);
+            let _ = stdout.flush();
+            self.last_line_width = line.len();
+            self.painted_status = true;
+        } else {
+            let _ = writeln!(stdout, "{}", line);
+        }
+    }
+
     /// Call before printing the per-cycle table so the status line is cleared.
     pub fn finish_cycle<W: Write>(&mut self, stdout: &mut W) {
         if self.enabled && self.painted_status {
