@@ -132,6 +132,9 @@ fn observation_with_import(
         summary_in_flight: 0,
         summary_completed,
         summary_failed,
+        triage_deferred: 0,
+        summary_deferred: 0,
+        signal_deferred: 0,
         triage_cache_hits: 0,
         triage_cache_misses: 0,
         triage_cache_key_unavailable: 0,
@@ -588,6 +591,9 @@ fn test_classify_outcome_success() {
         summary_in_flight: 0,
         summary_completed: 0,
         summary_failed: 0,
+        triage_deferred: 0,
+        summary_deferred: 0,
+        signal_deferred: 0,
         triage_cache_hits: 0,
         triage_cache_misses: 0,
         triage_cache_key_unavailable: 0,
@@ -629,6 +635,9 @@ fn test_classify_outcome_partial_failure() {
         summary_in_flight: 0,
         summary_completed: 0,
         summary_failed: 0,
+        triage_deferred: 0,
+        summary_deferred: 0,
+        signal_deferred: 0,
         triage_cache_hits: 0,
         triage_cache_misses: 0,
         triage_cache_key_unavailable: 0,
@@ -670,6 +679,9 @@ fn test_classify_outcome_total_failure() {
         summary_in_flight: 0,
         summary_completed: 0,
         summary_failed: 0,
+        triage_deferred: 0,
+        summary_deferred: 0,
+        signal_deferred: 0,
         triage_cache_hits: 0,
         triage_cache_misses: 0,
         triage_cache_key_unavailable: 0,
@@ -991,6 +1003,9 @@ fn idle_import_obs() -> BatchObservation {
         summary_in_flight: 0,
         summary_completed: 0,
         summary_failed: 0,
+        triage_deferred: 0,
+        summary_deferred: 0,
+        signal_deferred: 0,
         triage_cache_hits: 0,
         triage_cache_misses: 0,
         triage_cache_key_unavailable: 0,
@@ -1150,6 +1165,20 @@ fn classify_import_cycle_total_failure_when_zero_imported() {
     assert_eq!(
         classify_import_cycle_outcome(&obs),
         CycleOutcome::TotalFailure
+    );
+}
+
+#[test]
+fn format_awaiting_batch_line_is_absent_when_nothing_deferred() {
+    assert_eq!(format_awaiting_batch_line(0, 0, 0), None);
+}
+
+#[test]
+fn format_awaiting_batch_line_reports_per_stage_and_total_counts() {
+    let line = format_awaiting_batch_line(3, 2, 1).unwrap();
+    assert_eq!(
+        line,
+        "  Awaiting batch results: 3 triage, 2 summaries, 1 signal (6 total)"
     );
 }
 

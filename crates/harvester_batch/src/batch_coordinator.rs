@@ -227,6 +227,14 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                     self.manifest
                         .mark_collected(&input_file_id, records)
                         .map_err(|err| err.to_string())?;
+                    engine_logging::engine_info!(
+                        "[batch-collect] batch_id={} input_file_id={} completed; requests completed={}/{} failed={}; results collected",
+                        batch_id,
+                        input_file_id,
+                        handle.request_counts.completed,
+                        handle.request_counts.total,
+                        handle.request_counts.failed
+                    );
                 }
                 BatchLifecycle::Failed | BatchLifecycle::Expired | BatchLifecycle::Cancelled => {
                     engine_logging::engine_warn!(
@@ -240,7 +248,17 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                 BatchLifecycle::Validating
                 | BatchLifecycle::InProgress
                 | BatchLifecycle::Finalizing
-                | BatchLifecycle::Cancelling => {}
+                | BatchLifecycle::Cancelling => {
+                    engine_logging::engine_info!(
+                        "[batch-collect] batch_id={} input_file_id={} lifecycle={:?}; progress completed={}/{} failed={}; awaiting completion",
+                        batch_id,
+                        input_file_id,
+                        handle.status,
+                        handle.request_counts.completed,
+                        handle.request_counts.total,
+                        handle.request_counts.failed
+                    );
+                }
             }
         }
         for batch in &self.manifest.manifest().batches {
@@ -401,6 +419,15 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                     .await
                 {
                     Ok(handle) => {
+                        engine_logging::engine_info!(
+                            "[batch-submit] stage={} batch_id={} input_file_id={} requests={} estimated_input_tokens={} estimated_cost_microdollars={}",
+                            stage,
+                            handle.id,
+                            input_file_id,
+                            submitted_requests,
+                            submitted_input_tokens,
+                            submitted_cost_microdollars
+                        );
                         if let Err(err) = self
                             .manifest
                             .attach_batch_id(&input_file_id, handle.id.clone())

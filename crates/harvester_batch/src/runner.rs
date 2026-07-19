@@ -1477,6 +1477,13 @@ pub fn run(args: Args) -> Result<i32, String> {
                 .as_ref()
                 .map_or(0, |batch| batch.realized_cost_microdollars),
         );
+        if let Some(line) = format_awaiting_batch_line(
+            obs.triage_deferred,
+            obs.summary_deferred,
+            obs.signal_deferred,
+        ) {
+            println!("{}", line);
+        }
         print_poll_stats(&state.batch_observation().source_poll_stats);
         for line in format_llm_usage_lines(&state.llm_usage_rows()) {
             println!("{}", line);
@@ -1535,6 +1542,15 @@ pub fn run(args: Args) -> Result<i32, String> {
             .as_ref()
             .map_or(0, |batch| batch.realized_cost_microdollars),
     );
+    let final_obs = state.batch_observation();
+    if let Some(line) = format_awaiting_batch_line(
+        final_obs.triage_deferred,
+        final_obs.summary_deferred,
+        final_obs.signal_deferred,
+    ) {
+        println!("{}", line);
+        println!("  Run again after the batches complete to collect results.");
+    }
 
     engine_info!("[batch] Shutdown complete");
 
@@ -2146,6 +2162,22 @@ fn format_compact_tokens(n: u64) -> String {
     } else {
         n.to_string()
     }
+}
+
+/// Formats the awaiting-batch-results summary line, or `None` when no work is
+/// deferred to a pending Batch API job.
+fn format_awaiting_batch_line(
+    triage_deferred: usize,
+    summary_deferred: usize,
+    signal_deferred: usize,
+) -> Option<String> {
+    let total = triage_deferred + summary_deferred + signal_deferred;
+    (total > 0).then(|| {
+        format!(
+            "  Awaiting batch results: {} triage, {} summaries, {} signal ({} total)",
+            triage_deferred, summary_deferred, signal_deferred, total
+        )
+    })
 }
 
 /// Formats per-model usage rows as indented display lines.

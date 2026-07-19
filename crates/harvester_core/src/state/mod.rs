@@ -240,6 +240,12 @@ pub struct BatchObservation {
     pub summary_completed: usize,
     /// Articles that failed summary generation.
     pub summary_failed: usize,
+    /// Articles deferred to a pending Batch API job for triage.
+    pub triage_deferred: usize,
+    /// Articles deferred to a pending Batch API job for summaries.
+    pub summary_deferred: usize,
+    /// Signal-candidate URLs deferred to a pending Batch API job.
+    pub signal_deferred: usize,
     /// Triage cache hits during the latest triage cache run.
     pub triage_cache_hits: usize,
     /// Triage cache misses during the latest triage cache run.
