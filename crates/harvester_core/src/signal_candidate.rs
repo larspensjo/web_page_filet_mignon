@@ -17,6 +17,16 @@ pub enum SignalCandidateState {
     Failed { reason: String },
 }
 
+/// Current-epoch signal-candidate state counts for batch observation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignalCandidateObservationCounts {
+    pub total: usize,
+    pub pending_or_in_flight: usize,
+    pub deferred: usize,
+    pub completed: usize,
+    pub failed: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SignalCandidateDialogDefault {
     OnAllSettled,
@@ -118,6 +128,30 @@ impl SignalCandidateSession {
             .filter(|(_, state)| matches!(state, SignalCandidateState::Deferred))
             .map(|(url, _)| url.clone())
             .collect()
+    }
+
+    /// Returns a single-snapshot classification of the current state map.
+    pub fn observation_counts(&self) -> SignalCandidateObservationCounts {
+        let mut counts = SignalCandidateObservationCounts {
+            total: self.states.len(),
+            pending_or_in_flight: 0,
+            deferred: 0,
+            completed: 0,
+            failed: 0,
+        };
+
+        for state in self.states.values() {
+            match state {
+                SignalCandidateState::Pending | SignalCandidateState::Scoring { .. } => {
+                    counts.pending_or_in_flight += 1;
+                }
+                SignalCandidateState::Deferred => counts.deferred += 1,
+                SignalCandidateState::Completed { .. } => counts.completed += 1,
+                SignalCandidateState::Failed { .. } => counts.failed += 1,
+            }
+        }
+
+        counts
     }
 
     pub fn state_for(&self, url: &str) -> Option<&SignalCandidateState> {
@@ -652,6 +686,65 @@ mod tests {
         s.enqueue("u".into());
         s.enqueue("u".into());
         assert_eq!(s.enqueued_count(), 1);
+    }
+
+    #[test]
+    fn observation_counts_classify_each_current_signal_state() {
+        let mut session = SignalCandidateSession::default();
+        session.enqueue("pending".into());
+        session.enqueue("scoring".into());
+        session.mark_scoring("scoring", 1);
+        session.enqueue("deferred".into());
+        session.defer("deferred");
+        session.enqueue("completed".into());
+        session.complete(
+            "completed",
+            sample_result(80, "complete", SourceTier::Tier1),
+        );
+        session.enqueue("failed".into());
+        session.fail("failed", "validation: bad");
+
+        let counts = session.observation_counts();
+
+        assert_eq!(counts.total, 5);
+        assert_eq!(counts.pending_or_in_flight, 2);
+        assert_eq!(counts.deferred, 1);
+        assert_eq!(counts.completed, 1);
+        assert_eq!(counts.failed, 1);
+        assert_eq!(
+            counts.total,
+            session.states.len(),
+            "the current-map partition must include every signal URL exactly once"
+        );
+    }
+
+    #[test]
+    fn observation_counts_use_current_rearmed_epoch_not_historical_counters() {
+        let mut session = SignalCandidateSession::default();
+        session.enqueue("completed".into());
+        session.complete(
+            "completed",
+            sample_result(80, "complete", SourceTier::Tier1),
+        );
+        session.enqueue("failed".into());
+        session.fail("failed", "validation: bad");
+        session.defer("completed");
+        session.defer("failed");
+
+        session.rearm_deferred();
+        session.enqueue("replayed".into());
+
+        let counts = session.observation_counts();
+
+        assert_eq!(session.completed_count(), 1);
+        assert_eq!(session.failed_count(), 1);
+        assert_eq!(session.enqueued_count(), 3);
+        assert_eq!(counts.total, 1);
+        assert_eq!(counts.pending_or_in_flight, 1);
+        assert_eq!(counts.deferred, 0);
+        assert_eq!(counts.completed, 0);
+        assert_eq!(counts.failed, 0);
+        assert_eq!(counts.total, session.states.len());
     }
 
     #[test]

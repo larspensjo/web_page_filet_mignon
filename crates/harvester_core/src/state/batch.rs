@@ -87,6 +87,7 @@ impl AppState {
         let summary_in_flight = self.briefing.in_progress_count();
         let summary_completed = self.briefing.completed_summary_count();
         let summary_failed = self.briefing.failed_summary_count();
+        let signal_counts = self.signal_candidate.observation_counts();
 
         BatchObservation {
             poll_in_progress: self.source_states.is_poll_in_progress(),
@@ -113,7 +114,11 @@ impl AppState {
             summary_failed,
             triage_deferred: self.triage.deferred_count(),
             summary_deferred: self.briefing.deferred_count(),
-            signal_deferred: self.signal_candidate.deferred_urls().len(),
+            signal_total: signal_counts.total,
+            signal_pending_or_in_flight: signal_counts.pending_or_in_flight,
+            signal_completed: signal_counts.completed,
+            signal_failed: signal_counts.failed,
+            signal_deferred: signal_counts.deferred,
             triage_cache_hits: self.triage_cache_run_metrics.hits() as usize,
             triage_cache_misses: self.triage_cache_run_metrics.misses() as usize,
             triage_cache_key_unavailable: self.triage_cache_run_metrics.key_unavailable() as usize,

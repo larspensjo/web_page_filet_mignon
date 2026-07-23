@@ -244,6 +244,14 @@ pub struct BatchObservation {
     pub triage_deferred: usize,
     /// Articles deferred to a pending Batch API job for summaries.
     pub summary_deferred: usize,
+    /// Total signal-candidate URLs in the current observation epoch.
+    pub signal_total: usize,
+    /// Signal-candidate URLs awaiting or actively undergoing scoring.
+    pub signal_pending_or_in_flight: usize,
+    /// Signal-candidate URLs with completed scoring.
+    pub signal_completed: usize,
+    /// Signal-candidate URLs with failed scoring.
+    pub signal_failed: usize,
     /// Signal-candidate URLs deferred to a pending Batch API job.
     pub signal_deferred: usize,
     /// Triage cache hits during the latest triage cache run.
