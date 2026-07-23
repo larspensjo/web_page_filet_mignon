@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::mpsc::Sender;
 
 use chrono::Utc;
-use harvester_core::{CollectedEntry, LlmResultKind, Msg};
+use harvester_core::{CollectedEntry, LlmResultKind, Msg, StageKind};
 use harvester_engine::llm::LlmQuotas;
 use openai_provider_kit::{
     parse_batch_output_jsonl, BatchInputLine, BatchLifecycle, BatchRequestCounts, BatchTransport,
@@ -11,8 +11,8 @@ use openai_provider_kit::{
 use serde_json::Value;
 
 use crate::batch_manifest::{
-    BatchManifestStore, BatchState, CollectedEntryRecord, CollectedOutcomeRecord, PendingBatch,
-    PendingEntry,
+    manifest_stage_label, parse_manifest_stage_label, BatchManifestStore, BatchState,
+    CollectedEntryRecord, CollectedOutcomeRecord, PendingBatch, PendingEntry, BATCH_STAGES,
 };
 
 pub const MAX_BATCH_LINES: usize = 50_000;
@@ -52,7 +52,7 @@ impl SubmissionBudget {
 #[derive(Debug, Clone)]
 pub struct BufferedRequest {
     pub request_id: u64,
-    pub stage: String,
+    pub stage: StageKind,
     pub line: BatchInputLine,
     pub entry: PendingEntry,
     pub estimated_input_tokens: u64,
@@ -64,7 +64,7 @@ pub struct BufferedRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchPeek {
     pub batch_id: String,
-    pub stage: String,
+    pub stage: StageKind,
     pub status: Option<BatchLifecycle>,
     pub request_counts: Option<BatchRequestCounts>,
 }
@@ -366,10 +366,13 @@ impl<T: BatchTransport> BatchCoordinator<T> {
             .filter_map(|batch| {
                 (batch.status != BatchState::Collected)
                     .then(|| {
-                        batch
-                            .batch_id
-                            .as_ref()
-                            .map(|id| (id.clone(), batch.stage.clone()))
+                        batch.batch_id.as_ref().map(|id| {
+                            (
+                                id.clone(),
+                                parse_manifest_stage_label(&batch.stage)
+                                    .expect("BatchManifestStore validates persisted stage labels"),
+                            )
+                        })
                     })
                     .flatten()
             })
@@ -388,7 +391,7 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                     engine_logging::engine_warn!(
                         "[batch-wait] batch_id={} stage={} status retrieve failed; retrying next check: {}",
                         batch_id,
-                        stage,
+                        manifest_stage_label(stage),
                         err
                     );
                     peeks.push(BatchPeek {
@@ -421,7 +424,7 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                 deduped.push(request);
             }
         }
-        for stage in ["triage", "summary", "signal_candidate"] {
+        for stage in BATCH_STAGES {
             let group: Vec<_> = deduped
                 .iter()
                 .filter(|request| request.stage == stage)
@@ -441,7 +444,7 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                     self.submission_stopped = true;
                     engine_logging::engine_warn!(
                     "[batch-submit] outcome=budget-exhausted stage={} requests_submitted={} estimated_input_tokens={} estimated_cost_microdollars={}; leaving {} requests deferred",
-                    stage,
+                    manifest_stage_label(stage),
                     self.submitted_requests,
                     self.submitted_input_tokens,
                     self.submitted_cost_microdollars,
@@ -478,7 +481,7 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                 let batch = PendingBatch {
                     input_file_id: input_file_id.clone(),
                     batch_id: None,
-                    stage: stage.into(),
+                    stage: manifest_stage_label(stage).into(),
                     completion_window: "24h".into(),
                     submitted_at_utc: submitted_at_utc.clone(),
                     status: BatchState::Created,
@@ -502,7 +505,7 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                     Ok(handle) => {
                         engine_logging::engine_info!(
                             "[batch-submit] stage={} batch_id={} input_file_id={} requests={} estimated_input_tokens={} estimated_cost_microdollars={}",
-                            stage,
+                            manifest_stage_label(stage),
                             handle.id,
                             input_file_id,
                             submitted_requests,
@@ -839,7 +842,7 @@ mod tests {
         };
         BufferedRequest {
             request_id,
-            stage: stage.into(),
+            stage: stage_kind,
             line: BatchInputLine {
                 custom_id: custom_id.into(),
                 method: "POST".into(),

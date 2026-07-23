@@ -10,6 +10,40 @@ use serde::{Deserialize, Serialize};
 const MANIFEST_FILE: &str = ".batch_manifest.ron";
 const MANIFEST_VERSION: u32 = 2;
 
+/// The batchable pipeline stages in their stable submission order.
+///
+/// `StageKind` is shared with `harvester_core` because frozen request keys and
+/// collected results cross that crate boundary.  The persisted manifest labels
+/// remain owned here.
+pub const BATCH_STAGES: [StageKind; 3] = [
+    StageKind::Triage,
+    StageKind::Summary,
+    StageKind::SignalCandidate,
+];
+
+/// Returns the canonical label written to `.batch_manifest.ron`.
+pub const fn manifest_stage_label(stage: StageKind) -> &'static str {
+    match stage {
+        StageKind::Triage => "triage",
+        StageKind::Summary => "summary",
+        StageKind::SignalCandidate => "signal_candidate",
+    }
+}
+
+/// Parses the stable manifest representation into the typed runtime key.
+///
+/// Existing manifests have always written `signal_candidate`; `signal` is a
+/// custom-id prefix only, so it is deliberately not accepted as a manifest
+/// alias.
+pub fn parse_manifest_stage_label(label: &str) -> Result<StageKind, String> {
+    match label {
+        "triage" => Ok(StageKind::Triage),
+        "summary" => Ok(StageKind::Summary),
+        "signal_candidate" => Ok(StageKind::SignalCandidate),
+        _ => Err(format!("unknown manifest batch stage {label:?}")),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BatchState {
     Created,
@@ -139,6 +173,9 @@ impl BatchManifestStore {
         } else {
             BatchManifest::default()
         };
+        for batch in &manifest.batches {
+            parse_manifest_stage_label(&batch.stage).map_err(ManifestError::Unreadable)?;
+        }
         let failed_batches: Vec<_> = manifest
             .batches
             .iter()
@@ -391,6 +428,15 @@ mod tests {
         let loaded = BatchManifestStore::load(dir).unwrap();
         assert_eq!(loaded.manifest().batches[0].batch_id, None);
         assert!(loaded.pending_custom_ids().contains("id"));
+    }
+
+    #[test]
+    fn manifest_stage_labels_round_trip_through_typed_stage_keys() {
+        for stage in BATCH_STAGES {
+            let label = manifest_stage_label(stage);
+            assert_eq!(parse_manifest_stage_label(label), Ok(stage));
+        }
+        assert!(parse_manifest_stage_label("signal").is_err());
     }
     #[test]
     fn corrupt_manifest_fails_closed() {

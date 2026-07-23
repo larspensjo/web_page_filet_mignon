@@ -1809,14 +1809,6 @@ fn run_dispatch_loop(
     )
 }
 
-fn stage_label(stage: StageKind) -> &'static str {
-    match stage {
-        StageKind::Triage => "triage",
-        StageKind::Summary => "summary",
-        StageKind::SignalCandidate => "signal_candidate",
-    }
-}
-
 fn is_batch_eligible_prompt(prompt_id: PromptId) -> bool {
     matches!(
         prompt_id,
@@ -1943,7 +1935,7 @@ fn divert_batch_effects(
                     .batch_cost_microdollars(prepared.model.model_name(), &estimated_usage);
                 batch.coordinator.buffer(BufferedRequest {
                     request_id,
-                    stage: stage_label(stage).to_string(),
+                    stage,
                     line: openai_provider_kit::BatchInputLine {
                         custom_id: custom_id.clone(),
                         method: "POST".to_string(),

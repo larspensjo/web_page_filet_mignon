@@ -275,6 +275,35 @@ fn batch_custom_id_changes_when_model_changes() {
 }
 
 #[test]
+fn signal_custom_id_prefix_does_not_control_provider_stage_grouping() {
+    let key = FrozenBatchKey {
+        content_hash: "content-hash".to_string(),
+        prompt_id: PromptId::ArticleSignalCandidate,
+        prompt_version: 3,
+        model_id: "gpt-5.4-nano".to_string(),
+        context_hash: "context-hash".to_string(),
+        stage: StageKind::SignalCandidate,
+        url: "https://example.test".to_string(),
+        rendered_system: String::new(),
+        rendered_user: String::new(),
+    };
+    assert!(batch_custom_id(&key).starts_with("signal-"));
+
+    let provider = crate::progress::ProviderProgress::from_peeks(&[BatchPeek {
+        batch_id: "batch-with-signal-custom-id".to_string(),
+        stage: StageKind::SignalCandidate,
+        status: Some(openai_provider_kit::BatchLifecycle::InProgress),
+        request_counts: Some(openai_provider_kit::BatchRequestCounts {
+            total: 1,
+            completed: 0,
+            failed: 0,
+        }),
+    }]);
+    assert_eq!(provider.signals.submitted, 1);
+    assert_eq!(provider.triage.submitted, 0);
+}
+
+#[test]
 fn batch_routing_partition_keeps_briefing_synchronous() {
     assert!(is_batch_eligible_prompt(PromptId::ArticleTriage));
     assert!(is_batch_eligible_prompt(PromptId::ArticleSummary));
@@ -1254,7 +1283,7 @@ fn batch_peek(
         });
     BatchPeek {
         batch_id: "batch-test".to_string(),
-        stage: "triage".to_string(),
+        stage: harvester_core::StageKind::Triage,
         status,
         request_counts,
     }
