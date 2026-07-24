@@ -3,11 +3,6 @@
 //! Activated only when both stdout and stderr are terminals; otherwise every
 //! method is a no-op.
 
-// Phase 2 deliberately introduces the pure renderer input before Phase 4
-// wires it into the runner. The legacy stdout reporter remains the sole live
-// consumer until that later phase.
-#![allow(dead_code)]
-
 use chrono::{DateTime, FixedOffset, Local};
 use crossterm::{
     cursor::{Hide, MoveDown, MoveToColumn, MoveUp, Show},
@@ -19,7 +14,9 @@ use openai_provider_kit::BatchLifecycle;
 use std::io::Write;
 use std::path::Path;
 use std::time::{Duration, Instant};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
+#[cfg(test)]
+use unicode_width::UnicodeWidthStr;
 
 use crate::batch_coordinator::BatchPeek;
 
@@ -946,6 +943,7 @@ fn clip_to_display_width(input: &str, width: usize) -> String {
     clipped
 }
 
+#[cfg(test)]
 fn display_width(input: &str) -> usize {
     UnicodeWidthStr::width(input)
 }
@@ -975,6 +973,7 @@ impl<W: Write> TerminalProgressSurface<W> {
 
     /// Creates an inert surface for callers that intentionally selected plain
     /// output. It emits no terminal-control bytes.
+    #[cfg(test)]
     pub fn disabled(sink: W, glyphs: ProgressGlyphs) -> Self {
         Self {
             sink,
@@ -1059,6 +1058,7 @@ impl<W: Write> TerminalProgressSurface<W> {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn sink(&self) -> &W {
         &self.sink
     }
@@ -1126,6 +1126,7 @@ impl<W: Write> PlainProgressReporter<W> {
         self.sink.flush()
     }
 
+    #[cfg(test)]
     pub fn sink(&self) -> &W {
         &self.sink
     }
@@ -1404,111 +1405,6 @@ impl Drop for ImportProgressReporter {
             let _ = writeln!(out);
         }
     }
-}
-
-/// Live progress reporter for regular batch mode (poll → triage → summaries).
-///
-/// Renders a single overwritten status line each loop iteration.
-/// Disabled when stdout is not a terminal.
-pub struct BatchProgressReporter {
-    enabled: bool,
-    last_line_width: usize,
-    painted_status: bool,
-    start: Instant,
-    frame_index: usize,
-}
-
-impl BatchProgressReporter {
-    pub fn new(enabled: bool) -> Self {
-        Self {
-            enabled,
-            last_line_width: 0,
-            painted_status: false,
-            start: Instant::now(),
-            frame_index: 0,
-        }
-    }
-
-    pub fn update_from_obs<W: Write>(
-        &mut self,
-        obs: &harvester_core::BatchObservation,
-        stdout: &mut W,
-    ) {
-        if !self.enabled {
-            return;
-        }
-        let elapsed = format_elapsed(self.start.elapsed());
-        let phase = batch_phase_label(obs);
-        let frame = ["|", "/", "-", "\\"][self.frame_index % 4];
-        self.frame_index = self.frame_index.wrapping_add(1);
-        let body = format!(
-            "[batch] {} {}  jobs={}/{} fail={} active={}  triage={}/{} fail={}  summary={}/{} fail={}  t={}",
-            phase,
-            frame,
-            obs.jobs_done,
-            obs.jobs_total,
-            obs.jobs_failed,
-            obs.jobs_in_flight,
-            obs.triage_completed,
-            obs.triage_total,
-            obs.triage_failed,
-            obs.summary_completed,
-            obs.summary_total,
-            obs.summary_failed,
-            elapsed,
-        );
-        let pad = self.last_line_width.saturating_sub(body.len());
-        let _ = write!(stdout, "\r{}{:pad$}", body, "", pad = pad);
-        let _ = stdout.flush();
-        self.last_line_width = body.len();
-        self.painted_status = true;
-    }
-
-    /// Renders a one-off status using the same terminal/plain-output
-    /// convention as batch progress updates.
-    pub fn status_line<W: Write>(&mut self, line: &str, stdout: &mut W) {
-        if self.enabled {
-            let pad = self.last_line_width.saturating_sub(line.len());
-            let _ = write!(stdout, "\r{}{:pad$}", line, "", pad = pad);
-            let _ = stdout.flush();
-            self.last_line_width = line.len();
-            self.painted_status = true;
-        } else {
-            let _ = writeln!(stdout, "{}", line);
-        }
-    }
-
-    /// Call before printing the per-cycle table so the status line is cleared.
-    pub fn finish_cycle<W: Write>(&mut self, stdout: &mut W) {
-        if self.enabled && self.painted_status {
-            let _ = writeln!(stdout);
-            self.painted_status = false;
-            self.last_line_width = 0;
-        }
-    }
-}
-
-impl Drop for BatchProgressReporter {
-    fn drop(&mut self) {
-        if self.enabled && self.painted_status {
-            let _ = writeln!(std::io::stdout());
-        }
-    }
-}
-
-fn batch_phase_label(obs: &harvester_core::BatchObservation) -> &'static str {
-    if obs.poll_in_progress
-        || (obs.jobs_total > 0 && obs.jobs_done + obs.jobs_failed < obs.jobs_total)
-    {
-        return "FETCHING ";
-    }
-    if obs.triage_in_flight > 0 || obs.triage_pending > 0 {
-        return "TRIAGING ";
-    }
-    if obs.summary_in_flight > 0 || obs.summary_pending > 0 {
-        return "SUMMARIZE";
-    }
-    "SETTLING "
 }
 
 fn phase_label(obs: &harvester_core::BatchObservation) -> &'static str {
@@ -2025,77 +1921,6 @@ mod tests {
         let mut cleanup = Vec::<u8>::new();
         reporter.drop_cleanup_into(&mut cleanup);
         assert!(out.is_empty() && err.is_empty() && cleanup.is_empty());
-    }
-
-    #[test]
-    fn batch_progress_update_writes_status_line_with_counts() {
-        let mut reporter = BatchProgressReporter::new(true);
-        let mut obs = import_obs_idle();
-        obs.jobs_total = 10;
-        obs.jobs_done = 7;
-        obs.jobs_failed = 1;
-        obs.jobs_in_flight = 2;
-        obs.triage_completed = 5;
-        obs.triage_total = 8;
-        obs.triage_failed = 2;
-        obs.summary_completed = 1;
-        obs.summary_total = 3;
-        obs.summary_failed = 1;
-        let mut out = Vec::<u8>::new();
-        reporter.update_from_obs(&obs, &mut out);
-        let s = std::str::from_utf8(&out).unwrap();
-        assert!(s.starts_with('\r'), "must start with CR: {s:?}");
-        assert!(s.contains("[batch]"), "must show prefix: {s:?}");
-        assert!(
-            s.contains("jobs=7/10 fail=1 active=2"),
-            "must show job counts: {s:?}"
-        );
-        assert!(
-            s.contains("triage=5/8 fail=2"),
-            "must show triage counts: {s:?}"
-        );
-        assert!(
-            s.contains("summary=1/3 fail=1"),
-            "must show summary counts: {s:?}"
-        );
-    }
-
-    #[test]
-    fn batch_progress_heartbeat_changes_between_updates() {
-        let mut reporter = BatchProgressReporter::new(true);
-        let obs = import_obs_idle();
-        let mut out = Vec::<u8>::new();
-        reporter.update_from_obs(&obs, &mut out);
-        reporter.update_from_obs(&obs, &mut out);
-        let s = std::str::from_utf8(&out).unwrap();
-        assert!(
-            s.contains("SETTLING  |") && s.contains("SETTLING  /"),
-            "must show a changing heartbeat: {s:?}"
-        );
-    }
-
-    #[test]
-    fn batch_progress_disabled_writes_nothing() {
-        let mut reporter = BatchProgressReporter::new(false);
-        let obs = import_obs_idle();
-        let mut out = Vec::<u8>::new();
-        reporter.update_from_obs(&obs, &mut out);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn batch_progress_finish_cycle_clears_status_line() {
-        let mut reporter = BatchProgressReporter::new(true);
-        let obs = import_obs_idle();
-        let mut out = Vec::<u8>::new();
-        reporter.update_from_obs(&obs, &mut out);
-        out.clear();
-        reporter.finish_cycle(&mut out);
-        let s = std::str::from_utf8(&out).unwrap();
-        assert!(
-            s.ends_with('\n'),
-            "finish_cycle must end with newline: {s:?}"
-        );
     }
 
     struct ManualProgressClock {
@@ -2932,5 +2757,39 @@ mod tests {
             1
         );
         assert!(finished.ends_with(b"\n"));
+    }
+
+    #[test]
+    fn terminal_surface_repaint_clears_the_prior_multiline_frame_before_repainting() {
+        let mut first = renderer_snapshot(BatchDisplayPhase::Signals);
+        first.wait = Some(WaitProgress {
+            last_provider_check: None,
+            next_provider_check: None,
+            checked_age: None,
+            countdown: None,
+            last_provider_check_local: None,
+            next_provider_check_local: None,
+            last_provider_check_display: None,
+            next_provider_check_display: None,
+        });
+        let second = renderer_snapshot(BatchDisplayPhase::Complete);
+        let shared = SharedOutput(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())));
+        let mut surface = TerminalProgressSurface::new(shared.clone(), ProgressGlyphs::Unicode);
+
+        surface.repaint_with_width(&first, 140).unwrap();
+        surface.repaint_with_width(&second, 60).unwrap();
+
+        let output = String::from_utf8(shared.0.lock().unwrap().clone()).unwrap();
+        // The first wide dashboard is six rows; the second repaint must move
+        // back to its first row and clear every previous row before drawing a
+        // one-line narrow fallback.
+        assert!(
+            output.contains("\u{1b}[5A"),
+            "missing MoveUp for prior frame: {output:?}"
+        );
+        assert!(
+            output.matches("\u{1b}[2K").count() >= 7,
+            "prior rows were not all cleared"
+        );
     }
 }

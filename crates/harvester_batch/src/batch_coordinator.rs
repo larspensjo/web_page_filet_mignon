@@ -333,15 +333,6 @@ impl<T: BatchTransport> BatchCoordinator<T> {
         self.manifest.failed_attempts_for(custom_id)
     }
 
-    pub fn pending_batch_count(&self) -> usize {
-        self.manifest
-            .manifest()
-            .batches
-            .iter()
-            .filter(|batch| batch.status != BatchState::Collected && batch.batch_id.is_some())
-            .count()
-    }
-
     pub fn pending_manifest_batches(&self) -> Vec<(String, Option<String>)> {
         let mut batches: Vec<_> = self
             .manifest

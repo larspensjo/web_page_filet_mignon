@@ -1,11 +1,16 @@
 use crate::cli::{Args, CheckpointCommand};
 use crate::lock;
-use crate::progress::ProgressReporter;
+use crate::progress::{
+    BatchDisplayPhase, BatchProgressProjection, BatchProgressSnapshot, BatchRunBaseline,
+    PassCounts, PlainProgressReporter, ProgressClock, ProgressGlyphs, ProgressReporter,
+    ProjectionContext, SystemProgressClock, TerminalProgressSurface,
+};
 use crate::{
     batch_coordinator::{BatchCoordinator, BatchPeek, BufferedRequest, SubmissionBudget},
     batch_manifest::{BatchManifestStore, PendingEntry},
 };
 use chrono::Utc;
+use crossterm::{cursor::Show, QueueableCommand};
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
 use harvester_core::{
@@ -34,7 +39,7 @@ use harvester_io::{
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -115,6 +120,360 @@ struct DispatchLoopOptions {
 const MAX_DISPATCH_INBOX_BATCH: usize = 32;
 const BATCH_WAIT_INTERVAL: Duration = Duration::from_secs(5 * 60);
 const MAX_CONSECUTIVE_BATCH_COLLECT_NO_PROGRESS: usize = 2;
+const PROGRESS_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
+const PLAIN_PROGRESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
+const LOCAL_WAIT_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+enum BatchProgressSurface<W: Write> {
+    Terminal(TerminalProgressSurface<W>),
+    Plain(PlainProgressReporter<W>),
+}
+
+impl BatchProgressSurface<std::io::Stdout> {
+    fn new(interactive: bool) -> Self {
+        if interactive {
+            Self::Terminal(TerminalProgressSurface::new(
+                std::io::stdout(),
+                ProgressGlyphs::Unicode,
+            ))
+        } else {
+            Self::Plain(PlainProgressReporter::new(std::io::stdout()))
+        }
+    }
+}
+
+impl<W: Write> BatchProgressSurface<W> {
+    fn paint(&mut self, snapshot: &BatchProgressSnapshot) {
+        let result = match self {
+            Self::Terminal(surface) => surface.repaint(snapshot),
+            Self::Plain(reporter) => reporter.report(snapshot),
+        };
+        if let Err(err) = result {
+            engine_warn!(
+                "[batch-progress] stdout repaint failed; continuing safely: {}",
+                err
+            );
+        }
+    }
+
+    fn suspend_for_output(&mut self) {
+        if let Self::Terminal(surface) = self {
+            if let Err(err) = surface.suspend_for_output() {
+                engine_warn!("[batch-progress] failed to suspend dashboard: {}", err);
+            }
+        }
+    }
+
+    fn resume(&mut self, snapshot: &BatchProgressSnapshot) {
+        if let Self::Terminal(surface) = self {
+            if let Err(err) = surface.resume(snapshot) {
+                engine_warn!("[batch-progress] failed to resume dashboard: {}", err);
+            }
+        } else {
+            self.paint(snapshot);
+        }
+    }
+
+    fn finish(&mut self) {
+        if let Self::Terminal(surface) = self {
+            if let Err(err) = surface.finish() {
+                engine_warn!("[batch-progress] failed to finish dashboard: {}", err);
+            }
+        }
+    }
+
+    fn is_terminal(&self) -> bool {
+        matches!(self, Self::Terminal(_))
+    }
+}
+
+struct LiveBatchProgress<C: ProgressClock, W: Write> {
+    clock: C,
+    projection: BatchProgressProjection,
+    surface: BatchProgressSurface<W>,
+    phase_override: Option<BatchDisplayPhase>,
+    peeks: Vec<BatchPeek>,
+    last_provider_check: Option<Instant>,
+    next_provider_check: Option<Instant>,
+    last_provider_check_local: Option<chrono::DateTime<chrono::FixedOffset>>,
+    next_provider_check_local: Option<chrono::DateTime<chrono::FixedOffset>>,
+    pass_counts: PassCounts,
+    last_render: Instant,
+    last_plain_phase: Option<BatchDisplayPhase>,
+}
+
+type LiveSystemBatchProgress = LiveBatchProgress<SystemProgressClock, std::io::Stdout>;
+
+impl LiveBatchProgress<SystemProgressClock, std::io::Stdout> {
+    fn new(baseline: BatchRunBaseline, interactive: bool) -> Self {
+        let clock = SystemProgressClock;
+        let surface = BatchProgressSurface::new(interactive);
+        Self::with_parts(baseline, clock, surface)
+    }
+}
+
+impl<C: ProgressClock, W: Write> LiveBatchProgress<C, W> {
+    fn with_parts(baseline: BatchRunBaseline, clock: C, surface: BatchProgressSurface<W>) -> Self {
+        let started_at = clock.monotonic_now();
+        Self {
+            clock,
+            projection: BatchProgressProjection::new(baseline, started_at),
+            surface,
+            phase_override: None,
+            peeks: Vec::new(),
+            last_provider_check: None,
+            next_provider_check: None,
+            last_provider_check_local: None,
+            next_provider_check_local: None,
+            pass_counts: PassCounts::default(),
+            last_render: started_at,
+            last_plain_phase: None,
+        }
+    }
+
+    fn set_phase(&mut self, phase: BatchDisplayPhase) {
+        self.phase_override = Some(phase);
+    }
+
+    fn clear_phase_override(&mut self) {
+        self.phase_override = None;
+    }
+
+    fn set_provider_check(&mut self, peeks: Vec<BatchPeek>) {
+        self.peeks = retain_last_successful_provider_counts(&self.peeks, peeks);
+        let now = self.clock.monotonic_now();
+        let local_now = self.clock.wall_now();
+        let wait_interval = chrono::Duration::from_std(BATCH_WAIT_INTERVAL)
+            .expect("batch wait interval fits chrono duration");
+        self.last_provider_check = Some(now);
+        self.next_provider_check = Some(now + BATCH_WAIT_INTERVAL);
+        self.last_provider_check_local = Some(local_now);
+        self.next_provider_check_local = Some(local_now + wait_interval);
+    }
+
+    fn set_provider_wait_render(&mut self, render: &ProviderWaitRender) {
+        self.set_phase(render.phase);
+        self.peeks = retain_last_successful_provider_counts(&self.peeks, render.peeks.clone());
+        self.last_provider_check = render.last_provider_check;
+        self.next_provider_check = render.next_provider_check;
+        self.last_provider_check_local = render.last_provider_check_local;
+        self.next_provider_check_local = render.next_provider_check_local;
+    }
+
+    fn snapshot(
+        &mut self,
+        state: &AppState,
+        cost_this_run_microdollars: u64,
+    ) -> BatchProgressSnapshot {
+        self.projection.snapshot(
+            &state.batch_observation(),
+            &self.peeks,
+            ProjectionContext {
+                phase_override: self.phase_override,
+                pass_counts: self.pass_counts,
+                cost_this_run_microdollars,
+                last_provider_check: self.last_provider_check,
+                next_provider_check: self.next_provider_check,
+                last_provider_check_local: self.last_provider_check_local,
+                next_provider_check_local: self.next_provider_check_local,
+            },
+            &self.clock,
+        )
+    }
+
+    fn paint(&mut self, state: &AppState, cost: u64, force: bool) {
+        let now = self.clock.monotonic_now();
+        let due = now.saturating_duration_since(self.last_render) >= PROGRESS_REFRESH_INTERVAL;
+        let plain_due =
+            now.saturating_duration_since(self.last_render) >= PLAIN_PROGRESS_HEARTBEAT_INTERVAL;
+        if !force && !due {
+            return;
+        }
+        let snapshot = self.snapshot(state, cost);
+        let phase_changed = self.last_plain_phase != Some(snapshot.phase);
+        if !self.surface.is_terminal() && !force && !phase_changed && !plain_due {
+            return;
+        }
+        self.surface.paint(&snapshot);
+        self.last_render = now;
+        self.last_plain_phase = Some(snapshot.phase);
+    }
+
+    fn suspend_for_output(&mut self) {
+        self.surface.suspend_for_output();
+    }
+
+    fn resume(&mut self, state: &AppState, cost: u64) {
+        let snapshot = self.snapshot(state, cost);
+        self.surface.resume(&snapshot);
+        self.last_render = self.clock.monotonic_now();
+        self.last_plain_phase = Some(snapshot.phase);
+    }
+
+    fn finish(&mut self) {
+        self.surface.finish();
+    }
+
+    fn record_pass(&mut self, collect_only: bool) {
+        self.pass_counts.intake_passes = 1;
+        if collect_only {
+            self.pass_counts.collection_passes =
+                self.pass_counts.collection_passes.saturating_add(1);
+        }
+    }
+}
+
+/// Retains the last successful provider counts when a status lookup fails.
+/// The current failed lookup remains in the result, so the pure formatter keeps
+/// showing its retry/indeterminate state rather than pretending the old result
+/// was fresh.
+fn retain_last_successful_provider_counts(
+    previous: &[BatchPeek],
+    current: Vec<BatchPeek>,
+) -> Vec<BatchPeek> {
+    let mut retained: Vec<_> = previous
+        .iter()
+        .filter(|peek| peek.status.is_some() && peek.request_counts.is_some())
+        .cloned()
+        .collect();
+    retained.retain(|old| {
+        !current
+            .iter()
+            .any(|new| new.batch_id == old.batch_id && new.status.is_some())
+    });
+    retained.extend(current);
+    retained
+}
+
+#[derive(Debug, Clone)]
+struct ProviderWaitRender {
+    phase: BatchDisplayPhase,
+    peeks: Vec<BatchPeek>,
+    last_provider_check: Option<Instant>,
+    next_provider_check: Option<Instant>,
+    last_provider_check_local: Option<chrono::DateTime<chrono::FixedOffset>>,
+    next_provider_check_local: Option<chrono::DateTime<chrono::FixedOffset>>,
+}
+
+enum ProviderWaitOutcome {
+    Collect(Vec<BatchPeek>),
+    Shutdown,
+}
+
+/// Waits locally between existing provider peeks. The injected clock makes the
+/// heartbeat cadence and shutdown polling deterministic without changing
+/// coordinator transport or provider-check frequency.
+fn run_provider_wait_loop<C, P, R>(
+    clock: &C,
+    shutdown_flag: &AtomicBool,
+    mut latest_peeks: Vec<BatchPeek>,
+    mut peek: P,
+    mut render: R,
+) -> ProviderWaitOutcome
+where
+    C: ProgressClock,
+    P: FnMut() -> Vec<BatchPeek>,
+    R: FnMut(ProviderWaitRender),
+{
+    let mut last_provider_check = None;
+    let mut next_provider_check = None;
+    let mut last_provider_check_local = None;
+    let mut next_provider_check_local = None;
+    loop {
+        render(ProviderWaitRender {
+            phase: BatchDisplayPhase::CheckingProvider,
+            peeks: latest_peeks.clone(),
+            last_provider_check,
+            next_provider_check,
+            last_provider_check_local,
+            next_provider_check_local,
+        });
+        latest_peeks = peek();
+        // A signal cannot be observed during the synchronous provider call,
+        // but it must win as soon as that atomic call returns.
+        if shutdown_flag.load(Ordering::Relaxed) {
+            return ProviderWaitOutcome::Shutdown;
+        }
+        if decide_batch_wait(&latest_peeks) == BatchWaitDecision::RunCollectCycle {
+            return ProviderWaitOutcome::Collect(latest_peeks);
+        }
+
+        let checked_at = clock.monotonic_now();
+        let next_check = checked_at + BATCH_WAIT_INTERVAL;
+        let checked_at_local = clock.wall_now();
+        let next_check_local = checked_at_local
+            + chrono::Duration::from_std(BATCH_WAIT_INTERVAL)
+                .expect("batch wait interval fits chrono duration");
+        last_provider_check = Some(checked_at);
+        next_provider_check = Some(next_check);
+        last_provider_check_local = Some(checked_at_local);
+        next_provider_check_local = Some(next_check_local);
+        let mut next_refresh = checked_at;
+        loop {
+            if shutdown_flag.load(Ordering::Relaxed) {
+                return ProviderWaitOutcome::Shutdown;
+            }
+            let now = clock.monotonic_now();
+            if now >= next_check {
+                break;
+            }
+            if now >= next_refresh {
+                render(ProviderWaitRender {
+                    phase: BatchDisplayPhase::WaitingForProvider,
+                    peeks: latest_peeks.clone(),
+                    last_provider_check,
+                    next_provider_check,
+                    last_provider_check_local,
+                    next_provider_check_local,
+                });
+                next_refresh = now + LOCAL_WAIT_REFRESH_INTERVAL;
+            }
+            let until_refresh = next_refresh.saturating_duration_since(now);
+            let until_check = next_check.saturating_duration_since(now);
+            let sleep_for = SHUTDOWN_POLL_INTERVAL.min(until_refresh).min(until_check);
+            if !sleep_for.is_zero() {
+                clock.sleep(sleep_for);
+            }
+        }
+    }
+}
+
+/// Local-only retry delay used by the no-progress safeguard. It deliberately
+/// shares the same 500 ms shutdown polling and one-second presentation cadence
+/// as the provider wait, while making no provider calls.
+fn wait_with_local_heartbeat<C, R>(
+    clock: &C,
+    shutdown_flag: &AtomicBool,
+    duration: Duration,
+    mut render: R,
+) -> bool
+where
+    C: ProgressClock,
+    R: FnMut(),
+{
+    let deadline = clock.monotonic_now() + duration;
+    let mut next_refresh = clock.monotonic_now();
+    loop {
+        if shutdown_flag.load(Ordering::Relaxed) {
+            return true;
+        }
+        let now = clock.monotonic_now();
+        if now >= deadline {
+            return false;
+        }
+        if now >= next_refresh {
+            render();
+            next_refresh = now + LOCAL_WAIT_REFRESH_INTERVAL;
+        }
+        let sleep_for = SHUTDOWN_POLL_INTERVAL
+            .min(next_refresh.saturating_duration_since(now))
+            .min(deadline.saturating_duration_since(now));
+        if !sleep_for.is_zero() {
+            clock.sleep(sleep_for);
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BatchWaitDecision {
@@ -292,6 +651,17 @@ fn batch_drain_made_progress(before: &BatchDrainSnapshot, after: &BatchDrainSnap
 
 fn should_exit_batch_drain_after_no_progress(consecutive_cycles: usize) -> bool {
     consecutive_cycles >= MAX_CONSECUTIVE_BATCH_COLLECT_NO_PROGRESS
+}
+
+fn write_no_progress_bailout<W: Write>(
+    sink: &mut W,
+    snapshot: &BatchDrainSnapshot,
+) -> std::io::Result<()> {
+    writeln!(
+        sink,
+        "[batch-wait] no-progress bailout; remaining triage={} summaries={} signal={}",
+        snapshot.triage_deferred, snapshot.summary_deferred, snapshot.signal_deferred
+    )
 }
 
 fn exit_code_with_shutdown(default_exit_code: i32, shutdown_requested: bool) -> i32 {
@@ -1249,7 +1619,8 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Install signal handler immediately after lock acquisition so Ctrl-C always
     // reaches the shared graceful-shutdown path for every execution mode.
     let shutdown_flag = Arc::new(AtomicBool::new(false));
-    install_signal_handler(Arc::clone(&shutdown_flag));
+    let interactive = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
+    install_signal_handler(Arc::clone(&shutdown_flag), interactive);
 
     if args.dry_run {
         engine_info!("[batch] Dry-run mode: single poll only");
@@ -1439,8 +1810,8 @@ pub fn run(args: Args) -> Result<i32, String> {
         ),
     }
 
-    let progress_enabled = std::io::stdout().is_terminal() && std::io::stderr().is_terminal();
-    let mut progress = crate::progress::BatchProgressReporter::new(progress_enabled);
+    let run_baseline = BatchRunBaseline::from_observation(&state.batch_observation());
+    let mut progress = LiveBatchProgress::new(run_baseline, interactive);
 
     // Ordinary mode polls repeatedly. Batch API mode runs one intake cycle,
     // then drains exactly that cycle's deferred work without polling again.
@@ -1459,6 +1830,7 @@ pub fn run(args: Args) -> Result<i32, String> {
         cycle_count += 1;
         total_cycles += 1;
         let collect_only_cycle = args.batch_api && cycle_count > 1;
+        progress.record_pass(collect_only_cycle);
         if collect_only_cycle {
             engine_info!(
                 "[batch] === Starting collect-only cycle {} ===",
@@ -1474,6 +1846,8 @@ pub fn run(args: Args) -> Result<i32, String> {
         // so a crash after the snapshot is replayed safely on the next run.
         if let Some(batch) = batch_runtime.as_mut() {
             if !batch.reconciled {
+                progress.set_phase(BatchDisplayPhase::Reconciling);
+                progress.paint(&state, batch.realized_cost_microdollars, true);
                 match batch.runtime.block_on(batch.coordinator.reconcile_once()) {
                     Ok(()) => batch.reconciled = true,
                     Err(err) => {
@@ -1487,6 +1861,8 @@ pub fn run(args: Args) -> Result<i32, String> {
                     err
                 );
             }
+            progress.set_phase(BatchDisplayPhase::Collecting);
+            progress.paint(&state, batch.realized_cost_microdollars, true);
             let collected = match batch
                 .runtime
                 .block_on(batch.coordinator.collect_completed())
@@ -1523,6 +1899,8 @@ pub fn run(args: Args) -> Result<i32, String> {
             // Only the runner advances deferred work into a new dispatch
             // epoch. Pre-loop effects use the same diversion path as effects
             // reduced inside the dispatch loop.
+            progress.set_phase(BatchDisplayPhase::Replaying);
+            progress.paint(&state, batch.realized_cost_microdollars, true);
             let (new_state, rearm_effects) = update(state, Msg::RearmDeferredBatchStages);
             state = new_state;
             if !rearm_effects.is_empty() {
@@ -1534,6 +1912,14 @@ pub fn run(args: Args) -> Result<i32, String> {
         }
 
         if !collect_only_cycle {
+            progress.clear_phase_override();
+            progress.paint(
+                &state,
+                batch_runtime
+                    .as_ref()
+                    .map_or(0, |batch| batch.realized_cost_microdollars),
+                true,
+            );
             engine_info!("[batch] Dispatching poll sources");
             msg_tx
                 .send(Msg::PollSourcesClicked)
@@ -1567,26 +1953,20 @@ pub fn run(args: Args) -> Result<i32, String> {
             CycleOutcome::TotalFailure => total_failure_cycles += 1,
         }
 
-        // Clear progress line before printing the cycle table.
-        progress.finish_cycle(&mut std::io::stdout());
-
         // Print cycle summary
         let obs = state.batch_observation();
         let cycle_counts = cycle_baseline.measure_cycle_and_advance(&obs);
         total_new_articles += cycle_counts.new_jobs;
         total_triaged += cycle_counts.triage_completed;
         total_summarized += cycle_counts.summary_completed;
+        let current_cost = batch_runtime
+            .as_ref()
+            .map_or(0, |batch| batch.realized_cost_microdollars);
+        progress.suspend_for_output();
         if cycle_count == 1 {
             print_cycle_table_header();
         }
-        print_cycle_summary(
-            cycle_count,
-            &outcome,
-            &cycle_counts,
-            batch_runtime
-                .as_ref()
-                .map_or(0, |batch| batch.realized_cost_microdollars),
-        );
+        print_cycle_summary(cycle_count, &outcome, &cycle_counts, current_cost);
         if let Some(line) = format_awaiting_batch_line(
             obs.triage_deferred,
             obs.summary_deferred,
@@ -1598,9 +1978,12 @@ pub fn run(args: Args) -> Result<i32, String> {
         for line in format_llm_usage_lines(&state.llm_usage_rows()) {
             println!("{}", line);
         }
+        progress.resume(&state, current_cost);
 
         // Persist state
         engine_info!("[batch] Persisting state");
+        progress.set_phase(BatchDisplayPhase::Persisting);
+        progress.paint(&state, current_cost, true);
         let completed_jobs = state.completed_jobs_snapshot();
         persist_completed_jobs(&paths.state_path, &completed_jobs);
         if let Err(err) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
@@ -1653,50 +2036,70 @@ pub fn run(args: Args) -> Result<i32, String> {
                     obs.signal_deferred,
                     drain_snapshot.pending_manifest_batches
                 );
+                progress.suspend_for_output();
+                if let Err(err) = write_no_progress_bailout(&mut std::io::stdout(), &drain_snapshot)
+                {
+                    engine_warn!("[batch-progress] failed to print bailout summary: {}", err);
+                }
+                progress.resume(
+                    &state,
+                    batch_runtime
+                        .as_ref()
+                        .map_or(0, |runtime| runtime.realized_cost_microdollars),
+                );
                 break;
             }
-            println!(
-                "[batch-wait] waiting for {} batches; checking every {} minutes. Ctrl+C is safe — a later run collects the results.",
-                batch.coordinator.pending_batch_count(),
-                BATCH_WAIT_INTERVAL.as_secs() / 60
-            );
-
             if delay_before_peek {
                 engine_warn!(
                     "[batch-wait] collect-only operation made no progress; waiting {} minutes before retrying pending_manifest_batches={:?}",
                     BATCH_WAIT_INTERVAL.as_secs() / 60,
                     drain_snapshot.pending_manifest_batches
                 );
-                if sleep_interruptible(BATCH_WAIT_INTERVAL, &shutdown_flag) {
-                    progress.finish_cycle(&mut std::io::stdout());
+                progress.clear_phase_override();
+                let delay_cost = batch.realized_cost_microdollars;
+                let delay_clock = SystemProgressClock;
+                if wait_with_local_heartbeat(
+                    &delay_clock,
+                    shutdown_flag.as_ref(),
+                    BATCH_WAIT_INTERVAL,
+                    || progress.paint(&state, delay_cost, false),
+                ) {
+                    progress.set_phase(BatchDisplayPhase::Interrupted);
+                    progress.paint(&state, delay_cost, true);
                     engine_info!("[batch] Shutdown during batch retry wait, exiting");
                     break 'cycles;
                 }
             }
-
-            loop {
-                let peeks = batch
-                    .runtime
-                    .block_on(batch.coordinator.peek_pending_batches());
-                let wait_line = format_batch_wait_status_line(
-                    &peeks,
-                    obs.triage_deferred,
-                    obs.summary_deferred,
-                    obs.signal_deferred,
-                    Utc::now().to_rfc3339(),
-                );
-                progress.status_line(&wait_line, &mut std::io::stdout());
-
-                if decide_batch_wait(&peeks) == BatchWaitDecision::RunCollectCycle {
-                    progress.finish_cycle(&mut std::io::stdout());
+            let wait_cost = batch.realized_cost_microdollars;
+            let clock = SystemProgressClock;
+            match run_provider_wait_loop(
+                &clock,
+                shutdown_flag.as_ref(),
+                progress.peeks.clone(),
+                || {
+                    batch
+                        .runtime
+                        .block_on(batch.coordinator.peek_pending_batches())
+                },
+                |render| {
+                    let force = render.phase == BatchDisplayPhase::CheckingProvider;
+                    progress.set_provider_wait_render(&render);
+                    progress.paint(&state, wait_cost, force);
+                },
+            ) {
+                ProviderWaitOutcome::Collect(peeks) => {
+                    progress.set_provider_check(peeks);
+                    progress.set_phase(BatchDisplayPhase::Collecting);
+                    progress.paint(&state, wait_cost, true);
                     collect_cycle_baseline = Some(drain_snapshot.clone());
                     engine_info!(
                         "[batch-wait] collection or reconciliation is ready; starting collect-only cycle"
                     );
                     continue 'cycles;
                 }
-                if sleep_interruptible(BATCH_WAIT_INTERVAL, &shutdown_flag) {
-                    progress.finish_cycle(&mut std::io::stdout());
+                ProviderWaitOutcome::Shutdown => {
+                    progress.set_phase(BatchDisplayPhase::Interrupted);
+                    progress.paint(&state, wait_cost, true);
                     engine_info!("[batch] Shutdown during batch wait, exiting");
                     break 'cycles;
                 }
@@ -1736,15 +2139,24 @@ pub fn run(args: Args) -> Result<i32, String> {
         engine_warn!("[batch] failed to save blacklist on shutdown: {}", err);
     }
 
+    let final_cost = batch_runtime
+        .as_ref()
+        .map_or(0, |batch| batch.realized_cost_microdollars);
+    progress.set_phase(if shutdown_flag.load(Ordering::Relaxed) {
+        BatchDisplayPhase::Interrupted
+    } else {
+        BatchDisplayPhase::Complete
+    });
+    progress.paint(&state, final_cost, true);
+    progress.suspend_for_output();
+
     // Print final summary
     print_final_summary(
         total_cycles,
         total_new_articles,
         total_triaged,
         total_summarized,
-        batch_runtime
-            .as_ref()
-            .map_or(0, |batch| batch.realized_cost_microdollars),
+        final_cost,
     );
     let final_obs = state.batch_observation();
     if let Some(line) = format_awaiting_batch_line(
@@ -1755,6 +2167,7 @@ pub fn run(args: Args) -> Result<i32, String> {
         println!("{}", line);
         println!("  Run again after the batches complete to collect results.");
     }
+    progress.finish();
 
     engine_info!("[batch] Shutdown complete");
 
@@ -2175,13 +2588,12 @@ fn run_dispatch_loop_with_tick_interval(
     effect_runner: &EffectRunner,
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
-    mut progress: Option<&mut crate::progress::BatchProgressReporter>,
+    mut progress: Option<&mut LiveSystemBatchProgress>,
     mut batch_runtime: Option<&mut BatchRuntime>,
 ) -> Result<CycleOutcome, String> {
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
     let mut last_tick = Instant::now();
-    let mut last_progress_render = Instant::now();
     const MAX_ITERATIONS: usize = 10_000; // Safety limit
 
     loop {
@@ -2223,12 +2635,12 @@ fn run_dispatch_loop_with_tick_interval(
                     let (new_state, effects) = update(state.clone(), msg);
                     *state = new_state;
                     queued_effects.extend(effects);
-                    if last_progress_render.elapsed() >= Duration::from_millis(250) {
-                        if let Some(p) = progress.as_deref_mut() {
-                            let obs = state.batch_observation();
-                            p.update_from_obs(&obs, &mut std::io::stdout());
-                        }
-                        last_progress_render = Instant::now();
+                    if let Some(p) = progress.as_deref_mut() {
+                        let cost = batch_runtime
+                            .as_ref()
+                            .map_or(0, |batch| batch.realized_cost_microdollars);
+                        p.clear_phase_override();
+                        p.paint(state, cost, false);
                     }
                 }
 
@@ -2287,11 +2699,14 @@ fn run_dispatch_loop_with_tick_interval(
 
         // Check for settlement after processing available work.
         let mut orchestrated = false;
-        let obs = state.batch_observation();
         if let Some(p) = progress.as_deref_mut() {
-            p.update_from_obs(&obs, &mut std::io::stdout());
-            last_progress_render = Instant::now();
+            let cost = batch_runtime
+                .as_ref()
+                .map_or(0, |batch| batch.realized_cost_microdollars);
+            p.clear_phase_override();
+            p.paint(state, cost, false);
         }
+        let obs = state.batch_observation();
         if should_run_ai_orchestration(
             options.enable_ai_orchestration,
             options.require_new_jobs_since,
@@ -2377,43 +2792,6 @@ fn format_awaiting_batch_line(
             triage_deferred, summary_deferred, signal_deferred, total
         )
     })
-}
-
-/// Formats a single drain-mode status check from manifest batch peeks.
-fn format_batch_wait_status_line(
-    peeks: &[BatchPeek],
-    triage_deferred: usize,
-    summary_deferred: usize,
-    signal_deferred: usize,
-    checked_at_utc: String,
-) -> String {
-    let (completed_requests, total_requests) = peeks.iter().fold((0u32, 0u32), |counts, peek| {
-        let Some(request_counts) = peek.request_counts.as_ref() else {
-            return counts;
-        };
-        (
-            counts.0.saturating_add(request_counts.completed),
-            counts.1.saturating_add(request_counts.total),
-        )
-    });
-    format!(
-        "[batch-wait] {} batches in progress, requests {}/{} — pending: {} triage, {} summaries, {} signal — next check in {}m ({})",
-        peeks
-            .iter()
-            .filter(|peek| {
-                peek.status
-                    .as_ref()
-                    .is_some_and(|status| !is_terminal_batch_status(status))
-            })
-            .count(),
-        completed_requests,
-        total_requests,
-        triage_deferred,
-        summary_deferred,
-        signal_deferred,
-        BATCH_WAIT_INTERVAL.as_secs() / 60,
-        checked_at_utc
-    )
 }
 
 /// Formats per-model usage rows as indented display lines.
@@ -2520,16 +2898,27 @@ fn sleep_interruptible(duration: Duration, shutdown_flag: &Arc<AtomicBool>) -> b
 /// The first interrupt requests the runner's graceful shutdown path. The lock
 /// remains held until `LockGuard` drops after the run returns. A second signal
 /// hard-exits so a stuck network call cannot make the process unkillable.
-fn install_signal_handler(shutdown_flag: Arc<AtomicBool>) {
+fn install_signal_handler(shutdown_flag: Arc<AtomicBool>, interactive: bool) {
     let handler = move || {
         if shutdown_flag.swap(true, Ordering::Relaxed) {
             eprintln!("harvester_batch: interrupted again — exiting immediately");
+            // The process exits without unwinding on the second interrupt, so
+            // Drop cannot restore a cursor hidden by the dashboard.
+            let mut stdout = std::io::stdout();
+            restore_cursor_before_immediate_exit(&mut stdout, interactive);
             std::process::exit(130);
         }
         eprintln!("harvester_batch: interrupted — shutting down; lock remains held");
     };
 
     ctrlc::set_handler(handler).expect("Error setting signal handler");
+}
+
+fn restore_cursor_before_immediate_exit<W: Write>(stdout: &mut W, interactive: bool) {
+    if interactive {
+        let _ = stdout.queue(Show);
+        let _ = stdout.flush();
+    }
 }
 
 /// Converts microdollars to a human-readable dollar string with exact rounding.
