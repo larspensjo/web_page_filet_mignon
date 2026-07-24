@@ -705,12 +705,19 @@ fn fail_group(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::progress::{
+        format_dashboard, BatchDisplayPhase, BatchProgressProjection, BatchRunBaseline, PassCounts,
+        ProgressClock, ProgressGlyphs, ProjectionContext,
+    };
     use async_trait::async_trait;
-    use harvester_core::{FrozenBatchKey, StageKind};
+    use chrono::TimeZone;
+    use harvester_core::{BatchObservation, FrozenBatchKey, StageKind};
     use harvester_engine::llm::PromptId;
     use openai_provider_kit::{BatchHandle, BatchLifecycle, BatchRequestCounts};
+    use std::cell::{Cell, RefCell};
     use std::collections::{HashMap, VecDeque};
     use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
     use tempfile::TempDir;
 
     #[derive(Clone, Default)]
@@ -850,6 +857,394 @@ mod tests {
             estimated_input_tokens: 10,
             estimated_cost_microdollars: 1,
         }
+    }
+
+    struct ScenarioProgressClock {
+        started_at: Instant,
+        elapsed: Cell<Duration>,
+        wall: RefCell<chrono::DateTime<chrono::FixedOffset>>,
+    }
+
+    impl ScenarioProgressClock {
+        fn new(wall: chrono::DateTime<chrono::FixedOffset>) -> Self {
+            Self {
+                started_at: Instant::now(),
+                elapsed: Cell::new(Duration::ZERO),
+                wall: RefCell::new(wall),
+            }
+        }
+
+        fn advance(&self, duration: Duration) {
+            self.elapsed.set(self.elapsed.get() + duration);
+            *self.wall.borrow_mut() += chrono::Duration::from_std(duration).unwrap();
+        }
+    }
+
+    impl ProgressClock for ScenarioProgressClock {
+        fn monotonic_now(&self) -> Instant {
+            self.started_at + self.elapsed.get()
+        }
+
+        fn wall_now(&self) -> chrono::DateTime<chrono::FixedOffset> {
+            *self.wall.borrow()
+        }
+
+        fn sleep(&self, duration: Duration) {
+            self.advance(duration);
+        }
+    }
+
+    fn scenario_observation() -> BatchObservation {
+        BatchObservation {
+            poll_in_progress: false,
+            session_state: harvester_core::SessionState::Idle,
+            jobs_total: 1,
+            jobs_done: 1,
+            jobs_failed: 0,
+            jobs_in_flight: 0,
+            pre_triage_phase: harvester_core::PreTriagePhase::Idle,
+            pre_triage_total: 0,
+            pre_triage_included: 0,
+            pre_triage_review: 0,
+            pre_triage_filtered: 0,
+            triage_phase: harvester_core::TriagePhase::Idle,
+            triage_total: 2,
+            triage_pending: 0,
+            triage_in_flight: 0,
+            triage_completed: 0,
+            triage_failed: 0,
+            summary_total: 0,
+            summary_pending: 0,
+            summary_in_flight: 0,
+            summary_completed: 0,
+            summary_failed: 0,
+            triage_deferred: 0,
+            summary_deferred: 0,
+            signal_total: 0,
+            signal_pending_or_in_flight: 0,
+            signal_completed: 0,
+            signal_failed: 0,
+            signal_deferred: 0,
+            triage_cache_hits: 0,
+            triage_cache_misses: 0,
+            triage_cache_key_unavailable: 0,
+            summary_cache_hits: 0,
+            summary_cache_misses: 0,
+            summary_cache_key_unavailable: 0,
+            import_phase: harvester_core::ImportPhase::Idle,
+            imports_completed: 0,
+            imports_failed: 0,
+            import_in_flight: false,
+            source_poll_stats: vec![],
+        }
+    }
+
+    fn provider_handle(
+        id: &str,
+        input_file_id: &str,
+        status: BatchLifecycle,
+        completed: u32,
+        total: u32,
+        failed: u32,
+        output_file_id: Option<&str>,
+    ) -> BatchHandle {
+        BatchHandle {
+            id: id.to_string(),
+            status,
+            input_file_id: input_file_id.to_string(),
+            output_file_id: output_file_id.map(str::to_string),
+            error_file_id: None,
+            request_counts: BatchRequestCounts {
+                total,
+                completed,
+                failed,
+            },
+        }
+    }
+
+    fn successful_output_line(custom_id: &str) -> String {
+        serde_json::json!({
+            "custom_id": custom_id,
+            "response": {
+                "status_code": 200,
+                "body": {
+                    "choices": [{
+                        "message": {
+                            "content": r#"{"category":"news","priority":3,"tags":["ai"],"rationale":"ok"}"#,
+                        },
+                    }],
+                    "usage": {"prompt_tokens": 20, "completion_tokens": 8},
+                    "model": "model",
+                },
+            },
+            "error": serde_json::Value::Null,
+        })
+        .to_string()
+    }
+
+    fn failed_output_line(custom_id: &str) -> String {
+        serde_json::json!({
+            "custom_id": custom_id,
+            "response": serde_json::Value::Null,
+            "error": {"message": "synthetic provider failure"},
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn fake_transport_batch_drain_reports_the_full_multistage_progress_lifecycle() {
+        let dir = TempDir::new().unwrap();
+        let transport = FakeTransport::default();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut coordinator = BatchCoordinator::new(
+            transport.clone(),
+            BatchManifestStore::load(dir.path().to_path_buf()).unwrap(),
+            SubmissionBudget::default(),
+        );
+        let clock = ScenarioProgressClock::new(
+            chrono::FixedOffset::east_opt(2 * 60 * 60)
+                .unwrap()
+                .with_ymd_and_hms(2026, 7, 24, 9, 43, 30)
+                .single()
+                .unwrap(),
+        );
+        let mut projection = BatchProgressProjection::new(
+            BatchRunBaseline {
+                jobs_total: 0,
+                jobs_done: 0,
+                jobs_failed: 0,
+            },
+            clock.monotonic_now(),
+        );
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut observation = scenario_observation();
+        let mut phases = Vec::new();
+
+        // Intake has settled, then each downstream stage is submitted through
+        // the fake transport, waits on provider counts, collects, and replays.
+        for (request_id, stage, custom_id, batch_id, output_file, should_fail) in [
+            (1, "triage", "triage-progress", "batch_1", "output_1", false),
+            (
+                3,
+                "summary",
+                "summary-progress",
+                "batch_2",
+                "output_2",
+                true,
+            ),
+            (
+                5,
+                "signal_candidate",
+                "signal-progress",
+                "batch_3",
+                "output_3",
+                false,
+            ),
+        ] {
+            match stage {
+                "triage" => observation.triage_deferred = 2,
+                "summary" => {
+                    observation.summary_total = 2;
+                    observation.summary_deferred = 2;
+                }
+                "signal_candidate" => {
+                    observation.signal_total = 2;
+                    observation.signal_deferred = 2;
+                }
+                _ => unreachable!(),
+            }
+            coordinator.buffer(buffered_request_with(request_id, custom_id, stage));
+            let second_custom_id = format!("{custom_id}-second");
+            coordinator.buffer(buffered_request_with(
+                request_id + 1,
+                &second_custom_id,
+                stage,
+            ));
+            runtime
+                .block_on(coordinator.flush(&tx, "2026-07-24T07:43:30Z".into()))
+                .unwrap();
+            for _ in 0..2 {
+                assert!(matches!(
+                    rx.recv().unwrap(),
+                    Msg::LlmCompleted {
+                        result: LlmResultKind::DeferredToBatch,
+                        ..
+                    }
+                ));
+            }
+
+            transport.retrieved.lock().unwrap().insert(
+                batch_id.to_string(),
+                provider_handle(
+                    batch_id,
+                    &format!("file_{request_id}"),
+                    BatchLifecycle::InProgress,
+                    1,
+                    2,
+                    0,
+                    None,
+                ),
+            );
+            clock.advance(Duration::from_secs(1));
+            let peeks = runtime.block_on(coordinator.peek_pending_batches());
+            let waiting = projection.snapshot(
+                &observation,
+                &peeks,
+                ProjectionContext {
+                    pass_counts: PassCounts {
+                        intake_passes: 1,
+                        collection_passes: phases.len(),
+                        replay_passes: phases.len(),
+                    },
+                    last_provider_check: Some(clock.monotonic_now()),
+                    next_provider_check: Some(clock.monotonic_now() + Duration::from_secs(300)),
+                    last_provider_check_local: Some(clock.wall_now()),
+                    next_provider_check_local: Some(
+                        clock.wall_now() + chrono::Duration::minutes(5),
+                    ),
+                    ..ProjectionContext::default()
+                },
+                &clock,
+            );
+            phases.push(waiting.phase);
+            assert_eq!(waiting.phase, BatchDisplayPhase::WaitingForProvider);
+            let active = match stage {
+                "triage" => waiting.triage,
+                "summary" => waiting.summaries,
+                "signal_candidate" => waiting.signals,
+                _ => unreachable!(),
+            };
+            assert_eq!(active.settled(), 0, "collection has not settled locally");
+            assert_eq!(active.provider_completed, 1);
+            assert_eq!(active.provisional_settled, 1);
+            let waiting_output = format_dashboard(&waiting, 140, ProgressGlyphs::Ascii).join("\n");
+            assert!(!waiting_output.contains("requests 0/0"));
+
+            transport.retrieved.lock().unwrap().insert(
+                batch_id.to_string(),
+                provider_handle(
+                    batch_id,
+                    &format!("file_{request_id}"),
+                    BatchLifecycle::Completed,
+                    2,
+                    2,
+                    u32::from(should_fail),
+                    Some(output_file),
+                ),
+            );
+            transport.downloads.lock().unwrap().insert(
+                output_file.to_string(),
+                [
+                    successful_output_line(custom_id),
+                    if should_fail {
+                        failed_output_line(&second_custom_id)
+                    } else {
+                        successful_output_line(&second_custom_id)
+                    },
+                ]
+                .join("\n")
+                .into_bytes(),
+            );
+            let terminal_peeks = runtime.block_on(coordinator.peek_pending_batches());
+            let collecting = projection.snapshot(
+                &observation,
+                &terminal_peeks,
+                ProjectionContext {
+                    phase_override: Some(BatchDisplayPhase::Collecting),
+                    ..ProjectionContext::default()
+                },
+                &clock,
+            );
+            phases.push(collecting.phase);
+            assert_eq!(collecting.phase, BatchDisplayPhase::Collecting);
+            let collected = runtime.block_on(coordinator.collect_completed()).unwrap();
+            let expected_stage = match stage {
+                "triage" => StageKind::Triage,
+                "summary" => StageKind::Summary,
+                "signal_candidate" => StageKind::SignalCandidate,
+                _ => unreachable!(),
+            };
+            assert_eq!(collected.len(), (phases.len() / 3 + 1) * 2);
+            assert!(
+                collected
+                    .iter()
+                    .rev()
+                    .take(2)
+                    .all(|entry| entry.stage == expected_stage),
+                "the current completed batch must be appended after prior durable replay records"
+            );
+
+            match stage {
+                "triage" => {
+                    observation.triage_deferred = 0;
+                    observation.triage_completed = 2;
+                }
+                "summary" => {
+                    observation.summary_deferred = 0;
+                    observation.summary_completed = 1;
+                    observation.summary_failed = 1;
+                }
+                "signal_candidate" => {
+                    observation.signal_deferred = 0;
+                    observation.signal_completed = 2;
+                }
+                _ => unreachable!(),
+            }
+            let replaying = projection.snapshot(
+                &observation,
+                &[],
+                ProjectionContext {
+                    phase_override: Some(BatchDisplayPhase::Replaying),
+                    ..ProjectionContext::default()
+                },
+                &clock,
+            );
+            phases.push(replaying.phase);
+            assert_eq!(replaying.phase, BatchDisplayPhase::Replaying);
+        }
+
+        let complete = projection.snapshot(
+            &observation,
+            &[],
+            ProjectionContext {
+                phase_override: Some(BatchDisplayPhase::Complete),
+                cost_this_run_microdollars: 25_000,
+                pass_counts: PassCounts {
+                    intake_passes: 1,
+                    collection_passes: 3,
+                    replay_passes: 3,
+                },
+                ..ProjectionContext::default()
+            },
+            &clock,
+        );
+        assert_eq!(
+            phases,
+            [
+                BatchDisplayPhase::WaitingForProvider,
+                BatchDisplayPhase::Collecting,
+                BatchDisplayPhase::Replaying,
+                BatchDisplayPhase::WaitingForProvider,
+                BatchDisplayPhase::Collecting,
+                BatchDisplayPhase::Replaying,
+                BatchDisplayPhase::WaitingForProvider,
+                BatchDisplayPhase::Collecting,
+                BatchDisplayPhase::Replaying,
+            ]
+        );
+        assert_eq!(complete.phase, BatchDisplayPhase::Complete);
+        assert_eq!((complete.triage.settled(), complete.triage.failed), (2, 0));
+        assert_eq!(
+            (complete.summaries.settled(), complete.summaries.failed),
+            (2, 1)
+        );
+        assert_eq!(
+            (complete.signals.settled(), complete.signals.failed),
+            (2, 0)
+        );
+        let final_output = format_dashboard(&complete, 140, ProgressGlyphs::Ascii).join("\n");
+        assert!(final_output.contains("cost this run"));
+        assert!(final_output.contains("1 failed"));
     }
 
     #[test]
