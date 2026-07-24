@@ -7,6 +7,7 @@ use harvester_core::{
     SummaryCacheEntry, SummaryCacheKey,
 };
 use harvester_engine::llm::prompt::PromptId;
+use harvester_engine::{SourceId, SourceKind};
 use harvester_io::{load_briefing_checkpoint, EffectRunner, NoOpPlatformHandler, RuntimePaths};
 use std::cell::{Cell, RefCell};
 use std::io::Write;
@@ -49,6 +50,8 @@ fn create_test_args(dry_run: bool, temp_dir: &TempDir) -> Args {
         prompts_dir: PathBuf::from("prompts"),
         dry_run,
         batch_api: false,
+        verbose_progress: false,
+        ascii_progress: false,
         single_shot: false,
         allow_unsupported_sources: false,
         llm_concurrency: 1,
@@ -1294,6 +1297,159 @@ fn format_awaiting_batch_line_reports_per_stage_and_total_counts() {
         line,
         "  Awaiting batch results: 3 triage, 2 summaries, 1 signal (6 total)"
     );
+}
+
+#[test]
+fn default_progress_output_includes_poll_summary_once_but_excludes_verbose_diagnostics() {
+    let mut observation = observation_with_totals(1, 1, 0, 1, 0, 1, 0);
+    observation.triage_deferred = 1;
+    observation
+        .source_poll_stats
+        .push(harvester_core::SourcePollStat {
+            source_id: SourceId::new("test-rss").unwrap(),
+            kind: SourceKind::Rss,
+            parsed: 2,
+            dedup_filtered: 1,
+            emitted: 1,
+        });
+    let usage_rows = [LlmModelUsageView {
+        model: "gpt-test".to_string(),
+        input_tokens: 10,
+        output_tokens: 20,
+    }];
+
+    let intake_details = format_optional_cycle_diagnostics(
+        false,
+        true,
+        true,
+        1,
+        &CycleOutcome::Success,
+        &CycleCounts::default(),
+        0,
+        &observation,
+        &usage_rows,
+        None,
+    );
+    let collect_only_details = format_optional_cycle_diagnostics(
+        false,
+        false,
+        false,
+        2,
+        &CycleOutcome::Success,
+        &CycleCounts::default(),
+        0,
+        &observation,
+        &usage_rows,
+        None,
+    );
+    let details = intake_details
+        .into_iter()
+        .chain(collect_only_details)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert_eq!(details.matches("--- Poll summary ---").count(), 1);
+    assert!(details.contains("test-rss"));
+    assert!(!details.contains("Cycle"));
+    assert!(!details.contains("Awaiting batch results"));
+    assert!(!details.contains("gpt-test: in=10 out=20"));
+}
+
+#[test]
+fn verbose_progress_output_contains_cycle_source_and_model_diagnostics() {
+    let mut observation = observation_with_totals(1, 1, 0, 1, 0, 1, 0);
+    observation
+        .source_poll_stats
+        .push(harvester_core::SourcePollStat {
+            source_id: SourceId::new("test-rss").unwrap(),
+            kind: SourceKind::Rss,
+            parsed: 2,
+            dedup_filtered: 1,
+            emitted: 1,
+        });
+    let details = format_optional_cycle_diagnostics(
+        true,
+        true,
+        true,
+        1,
+        &CycleOutcome::Success,
+        &CycleCounts::default(),
+        0,
+        &observation,
+        &[LlmModelUsageView {
+            model: "gpt-test".to_string(),
+            input_tokens: 10,
+            output_tokens: 20,
+        }],
+        None,
+    )
+    .join("\n");
+
+    assert!(details.contains("Cycle"));
+    assert!(details.contains("--- Poll summary ---"));
+    assert!(details.contains("gpt-test: in=10 out=20"));
+}
+
+#[test]
+fn verbose_wait_timestamp_uses_injected_local_offset() {
+    let checked_at = chrono::FixedOffset::east_opt(2 * 60 * 60)
+        .unwrap()
+        .with_ymd_and_hms(2026, 7, 24, 9, 48, 30)
+        .single()
+        .unwrap();
+    let line = format_verbose_awaiting_batch_line(1, 0, 0, Some(checked_at)).unwrap();
+
+    assert!(line.contains("2026-07-24 09:48:30 +02:00"));
+    assert!(!line.contains("Z"));
+    assert!(!line.contains("+00:00"));
+}
+
+#[test]
+fn batch_api_final_summary_distinguishes_intake_from_collection_passes_and_cost_scope() {
+    let summary = format_final_summary(
+        true,
+        7,
+        &observation_with_totals(2, 2, 0, 1, 0, 1, 0),
+        2,
+        1,
+        1,
+        Duration::from_secs(136),
+        25_000,
+    );
+
+    assert!(summary.contains("intake=1 collection_passes=6"));
+    assert!(summary.contains("triage_success=1 triage_failed=0"));
+    assert!(summary.contains("cost_this_run=$0.03"));
+    assert!(!summary.contains("7 cycles"));
+}
+
+#[test]
+fn ordinary_final_summary_retains_cycle_wording() {
+    let summary = format_final_summary(
+        false,
+        7,
+        &observation_with_totals(2, 2, 0, 1, 0, 1, 0),
+        2,
+        1,
+        1,
+        Duration::from_secs(136),
+        0,
+    );
+
+    assert!(summary.contains("Batch complete: 7 cycles"));
+    assert!(!summary.contains("collection_passes"));
+}
+
+#[test]
+fn ascii_progress_selects_ascii_glyphs_only_for_interactive_dashboard() {
+    assert_eq!(progress_glyphs(true), ProgressGlyphs::Ascii);
+    assert_eq!(progress_glyphs(false), ProgressGlyphs::Unicode);
+}
+
+#[test]
+fn redirected_start_line_uses_the_operational_mode_label() {
+    assert_eq!(batch_mode_label(true), "batch-api");
+    assert_eq!(batch_mode_label(false), "recurring");
 }
 
 fn batch_peek(

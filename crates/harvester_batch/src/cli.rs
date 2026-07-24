@@ -51,6 +51,14 @@ pub struct Args {
     )]
     pub batch_api: bool,
 
+    /// Print per-pass progress diagnostics, including cycle, source, and model details.
+    #[arg(long)]
+    pub verbose_progress: bool,
+
+    /// Use ASCII markers and progress bars in the interactive dashboard.
+    #[arg(long)]
+    pub ascii_progress: bool,
+
     /// Single-shot mode: run one full cycle (poll + triage + persist) and exit
     #[arg(long, conflicts_with = "dry_run")]
     pub single_shot: bool,
@@ -280,6 +288,8 @@ mod tests {
         assert!(!args.single_shot);
         assert!(args.force_unlock);
         assert!(args.allow_unsupported_sources);
+        assert!(!args.verbose_progress);
+        assert!(!args.ascii_progress);
     }
 
     #[test]
@@ -326,6 +336,22 @@ mod tests {
             "1"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn progress_flags_default_to_false_and_parse_without_conflicts() {
+        let defaults = Args::parse_from(&["harvester_batch"]);
+        assert!(!defaults.verbose_progress);
+        assert!(!defaults.ascii_progress);
+
+        let args = Args::parse_from(&[
+            "harvester_batch",
+            "--batch-api",
+            "--verbose-progress",
+            "--ascii-progress",
+        ]);
+        assert!(args.verbose_progress);
+        assert!(args.ascii_progress);
     }
 
     #[test]

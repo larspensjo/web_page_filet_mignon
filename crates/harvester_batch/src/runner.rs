@@ -131,15 +131,31 @@ enum BatchProgressSurface<W: Write> {
 }
 
 impl BatchProgressSurface<std::io::Stdout> {
-    fn new(interactive: bool) -> Self {
+    fn new(interactive: bool, ascii_progress: bool) -> Self {
         if interactive {
             Self::Terminal(TerminalProgressSurface::new(
                 std::io::stdout(),
-                ProgressGlyphs::Unicode,
+                progress_glyphs(ascii_progress),
             ))
         } else {
             Self::Plain(PlainProgressReporter::new(std::io::stdout()))
         }
+    }
+}
+
+fn progress_glyphs(ascii_progress: bool) -> ProgressGlyphs {
+    if ascii_progress {
+        ProgressGlyphs::Ascii
+    } else {
+        ProgressGlyphs::Unicode
+    }
+}
+
+fn batch_mode_label(batch_api: bool) -> &'static str {
+    if batch_api {
+        "batch-api"
+    } else {
+        "recurring"
     }
 }
 
@@ -206,9 +222,9 @@ struct LiveBatchProgress<C: ProgressClock, W: Write> {
 type LiveSystemBatchProgress = LiveBatchProgress<SystemProgressClock, std::io::Stdout>;
 
 impl LiveBatchProgress<SystemProgressClock, std::io::Stdout> {
-    fn new(baseline: BatchRunBaseline, interactive: bool) -> Self {
+    fn new(baseline: BatchRunBaseline, interactive: bool, ascii_progress: bool) -> Self {
         let clock = SystemProgressClock;
-        let surface = BatchProgressSurface::new(interactive);
+        let surface = BatchProgressSurface::new(interactive, ascii_progress);
         Self::with_parts(baseline, clock, surface)
     }
 }
@@ -1811,7 +1827,11 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
 
     let run_baseline = BatchRunBaseline::from_observation(&state.batch_observation());
-    let mut progress = LiveBatchProgress::new(run_baseline, interactive);
+    let run_started_at = Instant::now();
+    let mut progress = LiveBatchProgress::new(run_baseline, interactive, args.ascii_progress);
+    if !interactive {
+        println!("[batch] started mode={}", batch_mode_label(args.batch_api));
+    }
 
     // Ordinary mode polls repeatedly. Batch API mode runs one intake cycle,
     // then drains exactly that cycle's deferred work without polling again.
@@ -1962,23 +1982,25 @@ pub fn run(args: Args) -> Result<i32, String> {
         let current_cost = batch_runtime
             .as_ref()
             .map_or(0, |batch| batch.realized_cost_microdollars);
-        progress.suspend_for_output();
-        if cycle_count == 1 {
-            print_cycle_table_header();
+        let diagnostics = format_optional_cycle_diagnostics(
+            args.verbose_progress,
+            cycle_count == 1,
+            !collect_only_cycle,
+            cycle_count,
+            &outcome,
+            &cycle_counts,
+            current_cost,
+            &obs,
+            &state.llm_usage_rows(),
+            progress.last_provider_check_local,
+        );
+        if !diagnostics.is_empty() {
+            progress.suspend_for_output();
+            for line in diagnostics {
+                println!("{line}");
+            }
+            progress.resume(&state, current_cost);
         }
-        print_cycle_summary(cycle_count, &outcome, &cycle_counts, current_cost);
-        if let Some(line) = format_awaiting_batch_line(
-            obs.triage_deferred,
-            obs.summary_deferred,
-            obs.signal_deferred,
-        ) {
-            println!("{}", line);
-        }
-        print_poll_stats(&state.batch_observation().source_poll_stats);
-        for line in format_llm_usage_lines(&state.llm_usage_rows()) {
-            println!("{}", line);
-        }
-        progress.resume(&state, current_cost);
 
         // Persist state
         engine_info!("[batch] Persisting state");
@@ -2152,20 +2174,26 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     // Print final summary
     print_final_summary(
+        args.batch_api,
         total_cycles,
+        &state.batch_observation(),
         total_new_articles,
         total_triaged,
         total_summarized,
+        run_started_at.elapsed(),
         final_cost,
     );
     let final_obs = state.batch_observation();
-    if let Some(line) = format_awaiting_batch_line(
-        final_obs.triage_deferred,
-        final_obs.summary_deferred,
-        final_obs.signal_deferred,
-    ) {
-        println!("{}", line);
-        println!("  Run again after the batches complete to collect results.");
+    print_poll_stats(&final_obs.source_poll_stats);
+    if args.verbose_progress {
+        if let Some(line) = format_awaiting_batch_line(
+            final_obs.triage_deferred,
+            final_obs.summary_deferred,
+            final_obs.signal_deferred,
+        ) {
+            println!("{line}");
+            println!("  Run again after the batches complete to collect results.");
+        }
     }
     progress.finish();
 
@@ -2794,6 +2822,25 @@ fn format_awaiting_batch_line(
     })
 }
 
+/// Formats the verbose Batch API wait detail with a presentation-only local
+/// wall-clock timestamp. Durable batch timestamps remain UTC elsewhere.
+fn format_verbose_awaiting_batch_line(
+    triage_deferred: usize,
+    summary_deferred: usize,
+    signal_deferred: usize,
+    checked_at_local: Option<chrono::DateTime<chrono::FixedOffset>>,
+) -> Option<String> {
+    format_awaiting_batch_line(triage_deferred, summary_deferred, signal_deferred).map(|line| {
+        match checked_at_local {
+            Some(checked_at) => format!(
+                "{line} · checked_at={}",
+                checked_at.format("%Y-%m-%d %H:%M:%S %:z")
+            ),
+            None => line,
+        }
+    })
+}
+
 /// Formats per-model usage rows as indented display lines.
 fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
     rows.iter()
@@ -2810,67 +2857,157 @@ fn format_llm_usage_lines(rows: &[LlmModelUsageView]) -> Vec<String> {
 
 /// Prints a grouped poll-stats summary (RSS / Brave / other source types).
 fn print_poll_stats(stats: &[harvester_core::SourcePollStat]) {
-    if stats.is_empty() {
-        return;
+    if let Some(summary) = format_poll_summary(stats) {
+        println!("{summary}");
     }
-    println!("\n--- Poll summary ---");
-    println!("{}", harvester_core::format_poll_stats(stats));
-    println!("--------------------");
 }
 
-fn print_cycle_table_header() {
-    println!(
-        "{:<6} {:<9} {:>20} {:>18} {:>21}",
-        "Cycle", "Outcome", "Jobs(new/done/fail)", "Triage(ok/fail)", "Summaries(ok/fail)"
-    );
-    println!("{}", "-".repeat(78));
+fn format_poll_summary(stats: &[harvester_core::SourcePollStat]) -> Option<String> {
+    (!stats.is_empty()).then(|| {
+        format!(
+            "\n--- Poll summary ---\n{}\n--------------------",
+            harvester_core::format_poll_stats(stats)
+        )
+    })
 }
 
-/// Prints a summary of the completed cycle.
-fn print_cycle_summary(
+/// Returns the once-per-intake poll summary plus the former per-pass transcript
+/// when the operator explicitly opts in. Runtime logging is unaffected.
+#[allow(clippy::too_many_arguments)]
+fn format_optional_cycle_diagnostics(
+    verbose_progress: bool,
+    include_header: bool,
+    include_poll_summary: bool,
     cycle: usize,
     outcome: &CycleOutcome,
     counts: &CycleCounts,
     batch_cost_microdollars: u64,
-) {
-    println!(
-        "{:<6} {:<9} {:>20} {:>18} {:>21}",
-        cycle,
-        cycle_outcome_label(outcome),
-        format!(
-            "{}/{}/{}",
-            counts.new_jobs, counts.jobs_done, counts.jobs_failed
-        ),
-        format!("{}/{}", counts.triage_completed, counts.triage_failed),
-        format!("{}/{}", counts.summary_completed, counts.summary_failed),
-    );
-    if batch_cost_microdollars > 0 {
-        println!(
-            "  Batch API realized tokens/cost: discounted ${} ({} microdollars)",
-            microdollars_to_display(batch_cost_microdollars),
-            batch_cost_microdollars
-        );
+    observation: &BatchObservation,
+    usage_rows: &[LlmModelUsageView],
+    checked_at_local: Option<chrono::DateTime<chrono::FixedOffset>>,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    if verbose_progress {
+        if include_header {
+            lines.push(format!(
+                "{:<6} {:<9} {:>20} {:>18} {:>21}",
+                "Cycle", "Outcome", "Jobs(new/done/fail)", "Triage(ok/fail)", "Summaries(ok/fail)"
+            ));
+            lines.push("-".repeat(78));
+        }
+        lines.push(format!(
+            "{:<6} {:<9} {:>20} {:>18} {:>21}",
+            cycle,
+            cycle_outcome_label(outcome),
+            format!(
+                "{}/{}/{}",
+                counts.new_jobs, counts.jobs_done, counts.jobs_failed
+            ),
+            format!("{}/{}", counts.triage_completed, counts.triage_failed),
+            format!("{}/{}", counts.summary_completed, counts.summary_failed),
+        ));
+        if batch_cost_microdollars > 0 {
+            lines.push(format!(
+                "  Batch API realized tokens/cost this run: discounted {} ({} microdollars)",
+                microdollars_to_display(batch_cost_microdollars),
+                batch_cost_microdollars
+            ));
+        }
+        if let Some(line) = format_verbose_awaiting_batch_line(
+            observation.triage_deferred,
+            observation.summary_deferred,
+            observation.signal_deferred,
+            checked_at_local,
+        ) {
+            lines.push(line);
+        }
     }
+    if include_poll_summary {
+        lines.extend(format_poll_summary(&observation.source_poll_stats));
+    }
+    if verbose_progress {
+        lines.extend(format_llm_usage_lines(usage_rows));
+    }
+    lines
 }
 
 /// Prints the final summary when batch runner exits.
+#[allow(clippy::too_many_arguments)]
 fn print_final_summary(
+    batch_api: bool,
     total_cycles: usize,
+    observation: &BatchObservation,
     total_new_articles: usize,
     total_triaged: usize,
     total_summarized: usize,
+    elapsed: Duration,
     batch_cost_microdollars: u64,
 ) {
     println!(
-        "\n-- Batch complete: {} cycles, {} new articles, {} triaged, {} summarized --\n",
-        total_cycles, total_new_articles, total_triaged, total_summarized
+        "{}",
+        format_final_summary(
+            batch_api,
+            total_cycles,
+            observation,
+            total_new_articles,
+            total_triaged,
+            total_summarized,
+            elapsed,
+            batch_cost_microdollars,
+        )
     );
-    if batch_cost_microdollars > 0 {
-        println!(
-            "Batch API discounted cost: {} ({} microdollars)",
-            microdollars_to_display(batch_cost_microdollars),
-            batch_cost_microdollars
-        );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn format_final_summary(
+    batch_api: bool,
+    total_cycles: usize,
+    observation: &BatchObservation,
+    total_new_articles: usize,
+    total_triaged: usize,
+    total_summarized: usize,
+    elapsed: Duration,
+    batch_cost_microdollars: u64,
+) -> String {
+    let elapsed = format_summary_elapsed(elapsed);
+    let deferred =
+        observation.triage_deferred + observation.summary_deferred + observation.signal_deferred;
+    let stages = format!(
+        "intake_success={} intake_failed={} triage_success={} triage_failed={} summaries_success={} summaries_failed={} signals_success={} signals_failed={} deferred={} elapsed={} cost_this_run={}",
+        observation.jobs_done,
+        observation.jobs_failed,
+        observation.triage_completed,
+        observation.triage_failed,
+        observation.summary_completed,
+        observation.summary_failed,
+        observation.signal_completed,
+        observation.signal_failed,
+        deferred,
+        elapsed,
+        microdollars_to_display(batch_cost_microdollars),
+    );
+    if batch_api {
+        format!(
+            "[batch] complete intake=1 collection_passes={} {}",
+            total_cycles.saturating_sub(1),
+            stages
+        )
+    } else {
+        format!(
+            "\n-- Batch complete: {} cycles, {} new articles, {} triaged, {} summarized --\n{}",
+            total_cycles, total_new_articles, total_triaged, total_summarized, stages
+        )
+    }
+}
+
+fn format_summary_elapsed(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    let hours = seconds / 3_600;
+    let minutes = (seconds % 3_600) / 60;
+    if hours > 0 {
+        format!("{hours}h{minutes:02}m")
+    } else {
+        format!("{minutes}m")
     }
 }
 
