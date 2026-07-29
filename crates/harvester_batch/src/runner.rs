@@ -151,11 +151,11 @@ fn progress_glyphs(ascii_progress: bool) -> ProgressGlyphs {
     }
 }
 
-fn batch_mode_label(batch_api: bool) -> &'static str {
-    if batch_api {
-        "batch-api"
-    } else {
-        "recurring"
+fn batch_mode_label(batch_api_enabled: bool, drain: bool) -> &'static str {
+    match (batch_api_enabled, drain) {
+        (_, true) => "drain",
+        (true, false) => "batch-api",
+        (false, false) => "recurring",
     }
 }
 
@@ -628,6 +628,31 @@ fn batch_buffer_is_quiescent(state: &AppState, buffered_ids: &HashSet<u64>) -> b
 
 fn should_stop_after_cycle(single_shot: bool, shutdown_requested: bool) -> bool {
     shutdown_requested || single_shot
+}
+
+/// A collect-only cycle skips source polling and only advances work the batch
+/// manifest already owns. Batch API mode polls once and then collects; drain
+/// mode never polls, so its very first cycle is already collect-only.
+fn is_collect_only_cycle(batch_api_enabled: bool, drain: bool, cycle_count: usize) -> bool {
+    batch_api_enabled && (drain || cycle_count > 1)
+}
+
+/// Summarizes a finished drain for stdout. Batches that are still running
+/// remain in the manifest and are reported so the operator knows a later drain
+/// still has work to collect.
+fn format_drain_summary(pending_manifest_batches: &[(String, Option<String>)]) -> String {
+    if pending_manifest_batches.is_empty() {
+        return "[batch-drain] collected and exiting; no batches remain pending".to_string();
+    }
+    let ids: Vec<_> = pending_manifest_batches
+        .iter()
+        .map(|(input_file_id, batch_id)| batch_id.clone().unwrap_or_else(|| input_file_id.clone()))
+        .collect();
+    format!(
+        "[batch-drain] collected and exiting; {} batch(es) still pending: {}",
+        ids.len(),
+        ids.join(", ")
+    )
 }
 
 fn require_new_jobs_since(
@@ -1504,6 +1529,13 @@ fn is_ai_orchestration_enabled() -> bool {
         .unwrap_or(false)
 }
 
+/// Drain must never orchestrate. Restored completed jobs feed the pre-triage
+/// session, so orchestration would dispatch triage over the whole corpus and
+/// submit fresh batches — exactly the new work drain exists to avoid.
+fn should_enable_ai_orchestration_for_mode(api_key_available: bool, drain: bool) -> bool {
+    api_key_available && !drain
+}
+
 const MAX_BATCH_MSG_LOG_LEN: usize = 240;
 
 fn truncate_for_log(input: &str, max_len: usize) -> String {
@@ -1666,7 +1698,9 @@ pub fn run(args: Args) -> Result<i32, String> {
     );
     let source_registry = load_sources(&paths.sources_path);
 
-    if !args.allow_unsupported_sources {
+    // Drain never polls, so an unsupported source must not be able to abort a
+    // collection of work that has already been paid for.
+    if !args.allow_unsupported_sources && !args.drain {
         let unsupported: Vec<_> = source_registry
             .sources
             .iter()
@@ -1702,7 +1736,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     // Hydrate state
     engine_info!("[batch] Hydrating state from disk");
     let mut state = AppState::new();
-    if args.batch_api {
+    if args.batch_api_enabled() {
         let session_limit = LlmQuotas::default()
             .max_calls_per_session
             .map(|limit| limit as usize)
@@ -1737,14 +1771,15 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     // Build EffectRunner (with optional LLM support based on OPENAI_API_KEY)
     engine_info!("[batch] Building EffectRunner");
-    let enable_ai_orchestration = is_ai_orchestration_enabled();
+    let enable_ai_orchestration =
+        should_enable_ai_orchestration_for_mode(is_ai_orchestration_enabled(), args.drain);
     let platform_handler = Box::new(NoOpPlatformHandler);
     let (effect_runner, mut batch_runtime) = build_effect_runner(
         &paths,
         msg_tx.clone(),
         args.llm_concurrency,
         platform_handler,
-        args.batch_api,
+        args.batch_api_enabled(),
     )?;
     effect_runner.enqueue(vec![
         harvester_core::Effect::LoadPromptTemplateFiles,
@@ -1830,7 +1865,10 @@ pub fn run(args: Args) -> Result<i32, String> {
     let run_started_at = Instant::now();
     let mut progress = LiveBatchProgress::new(run_baseline, interactive, args.ascii_progress);
     if !interactive {
-        println!("[batch] started mode={}", batch_mode_label(args.batch_api));
+        println!(
+            "[batch] started mode={}",
+            batch_mode_label(args.batch_api_enabled(), args.drain)
+        );
     }
 
     // Ordinary mode polls repeatedly. Batch API mode runs one intake cycle,
@@ -1849,7 +1887,8 @@ pub fn run(args: Args) -> Result<i32, String> {
     'cycles: loop {
         cycle_count += 1;
         total_cycles += 1;
-        let collect_only_cycle = args.batch_api && cycle_count > 1;
+        let collect_only_cycle =
+            is_collect_only_cycle(args.batch_api_enabled(), args.drain, cycle_count);
         progress.record_pass(collect_only_cycle);
         if collect_only_cycle {
             engine_info!(
@@ -1957,7 +1996,7 @@ pub fn run(args: Args) -> Result<i32, String> {
                 enable_ai_orchestration,
                 require_new_jobs_since: require_new_jobs_since(
                     args.single_shot,
-                    args.batch_api,
+                    args.batch_api_enabled(),
                     cycle_jobs_total_baseline,
                 ),
                 tick_interval: Duration::from_millis(75),
@@ -2014,7 +2053,38 @@ pub fn run(args: Args) -> Result<i32, String> {
 
         let shutdown_requested = shutdown_flag.load(Ordering::Relaxed);
 
-        if args.batch_api {
+        // Drain collects whatever the provider has already finished and exits.
+        // It deliberately does not consult the reducer's deferred counters: a
+        // fresh drain process has no deferred work to begin with, because that
+        // state lives in memory rather than on disk. The manifest is the only
+        // durable record of what is still outstanding.
+        if args.drain {
+            // A drain has no next cycle to run the confirmation, so snapshots
+            // whose results already reached the caches are pruned here. Failure
+            // only retains them for the next run, so it is not fatal.
+            if let Some(batch) = batch_runtime.as_mut() {
+                if let Err(err) = remove_collected_with_persisted_cache_confirmation(batch, &paths)
+                {
+                    engine_warn!(
+                        "[batch-collect] persisted cache confirmation failed; retaining snapshots: {}",
+                        err
+                    );
+                }
+            }
+            let summary = format_drain_summary(
+                &batch_runtime
+                    .as_ref()
+                    .map(|batch| batch.coordinator.pending_manifest_batches())
+                    .unwrap_or_default(),
+            );
+            engine_info!("{}", summary);
+            progress.suspend_for_output();
+            println!("{summary}");
+            progress.resume(&state, current_cost);
+            break;
+        }
+
+        if args.batch_api_enabled() {
             let deferred_total = obs.triage_deferred + obs.summary_deferred + obs.signal_deferred;
             if shutdown_requested {
                 engine_info!("[batch] Shutdown signal received, exiting");
@@ -2174,7 +2244,7 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     // Print final summary
     print_final_summary(
-        args.batch_api,
+        args.batch_api_enabled(),
         total_cycles,
         &state.batch_observation(),
         total_new_articles,

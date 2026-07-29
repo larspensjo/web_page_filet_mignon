@@ -25,7 +25,12 @@ Describe 'Start-HarvesterBatch progress switches' {
         $capturePath = Join-Path $tempDir 'arguments.txt'
         try {
             $commandPath = New-CaptureCommand -TempDir $tempDir -CapturePath $capturePath
-            $launchParams = @{ HarvesterBatchCmd = $commandPath; BatchApi = $true }
+            $launchParams = @{ HarvesterBatchCmd = $commandPath }
+            if ($Switches -contains '-Drain') {
+                $launchParams.Drain = $true
+            } else {
+                $launchParams.BatchApi = $true
+            }
             if ($Switches -contains '-VerboseProgress') { $launchParams.VerboseProgress = $true }
             if ($Switches -contains '-AsciiProgress') { $launchParams.AsciiProgress = $true }
             & $script:LauncherPath @launchParams
@@ -101,6 +106,28 @@ Export-ModuleMember -Function Render-LauncherState
 
     It 'does not forward --ascii-progress on the direct path when -AsciiProgress is absent' {
         (Invoke-DirectStartHarvesterBatchCapture -Switches @()) | Should -Not -Match '--ascii-progress'
+    }
+
+    It 'forwards -Drain as --drain without also passing --batch-api' {
+        $arguments = Invoke-DirectStartHarvesterBatchCapture -Switches @('-Drain')
+        $arguments | Should -Match '--drain'
+        $arguments | Should -Not -Match '--batch-api'
+    }
+
+    It 'forwards -BatchApi as --batch-api without --drain' {
+        $arguments = Invoke-DirectStartHarvesterBatchCapture -Switches @()
+        $arguments | Should -Match '--batch-api'
+        $arguments | Should -Not -Match '--drain'
+    }
+
+    It 'forwards progress switches alongside -Drain' {
+        (Invoke-DirectStartHarvesterBatchCapture -Switches @('-Drain', '-AsciiProgress')) |
+            Should -Match '--ascii-progress'
+    }
+
+    It 'rejects -Drain combined with -RefreshStaleSummariesLimit' {
+        { & $script:LauncherPath -Drain -RefreshStaleSummariesLimit 5 } |
+            Should -Throw -ExpectedMessage '*-Drain cannot be combined with -RefreshStaleSummariesLimit.*'
     }
 
     It 'forwards -VerboseProgress as --verbose-progress on the regular-run path' {

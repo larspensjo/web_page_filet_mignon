@@ -248,13 +248,7 @@ impl<T: BatchTransport> BatchCoordinator<T> {
                     );
                 }
                 BatchLifecycle::Failed | BatchLifecycle::Expired | BatchLifecycle::Cancelled => {
-                    engine_logging::engine_warn!(
-                        "[batch-collect] batch_id={} input_file_id={} lifecycle={:?}; releasing entries",
-                        batch_id, input_file_id, handle.status
-                    );
-                    self.manifest
-                        .mark_failed(&input_file_id)
-                        .map_err(|err| err.to_string())?;
+                    self.salvage_terminal_batch(&input_file_id, &handle).await?;
                 }
                 BatchLifecycle::Validating
                 | BatchLifecycle::InProgress
@@ -284,6 +278,86 @@ impl<T: BatchTransport> BatchCoordinator<T> {
             }
         }
         Ok(replay)
+    }
+
+    /// Recovers already-billed output from a batch that ended without completing.
+    ///
+    /// Cancelled and expired batches still return whatever finished before they
+    /// stopped, and the provider charges for it, so the output is downloaded
+    /// before anything is released. Requests the provider never returned are
+    /// marked as line errors: that releases them for a future attempt and lets
+    /// the batch be pruned once the salvaged results reach the caches.
+    async fn salvage_terminal_batch(
+        &mut self,
+        input_file_id: &str,
+        handle: &openai_provider_kit::BatchHandle,
+    ) -> Result<(), String> {
+        let records = match self.download_records(handle).await {
+            Ok(records) => records,
+            Err(err) => {
+                // The lifecycle is terminal, so retrying cannot cost more than
+                // one extra download. Retaining is safer than discarding paid
+                // output because of a transient transport failure.
+                engine_logging::engine_warn!(
+                    "[batch-collect] batch_id={} input_file_id={} lifecycle={:?}; salvage download failed, retaining for retry: {}",
+                    handle.id,
+                    input_file_id,
+                    handle.status,
+                    err
+                );
+                return Ok(());
+            }
+        };
+        if records.is_empty() {
+            engine_logging::engine_warn!(
+                "[batch-collect] batch_id={} input_file_id={} lifecycle={:?}; no salvageable output, releasing entries",
+                handle.id,
+                input_file_id,
+                handle.status
+            );
+            return self
+                .manifest
+                .mark_failed(input_file_id)
+                .map_err(|err| err.to_string());
+        }
+
+        let returned: HashSet<_> = records
+            .iter()
+            .map(|record| record.custom_id.clone())
+            .collect();
+        let unreturned: HashSet<_> = self
+            .manifest
+            .manifest()
+            .batches
+            .iter()
+            .filter(|batch| batch.input_file_id == input_file_id)
+            .flat_map(|batch| batch.entries.iter())
+            .map(|entry| entry.custom_id.clone())
+            .filter(|custom_id| !returned.contains(custom_id))
+            .collect();
+        engine_logging::engine_warn!(
+            "[batch-collect] batch_id={} input_file_id={} lifecycle={:?}; salvaged {} result(s), releasing {} unreturned request(s)",
+            handle.id,
+            input_file_id,
+            handle.status,
+            records.len(),
+            unreturned.len()
+        );
+        self.manifest
+            .mark_collected(input_file_id, records)
+            .map_err(|err| err.to_string())?;
+        if !unreturned.is_empty() {
+            self.manifest
+                .mark_entries_line_error(
+                    &unreturned,
+                    &format!(
+                        "batch reached {:?} before this request completed",
+                        handle.status
+                    ),
+                )
+                .map_err(|err| err.to_string())?;
+        }
+        Ok(())
     }
 
     async fn download_records(
@@ -1547,6 +1621,148 @@ mod tests {
                 .as_deref(),
             Some("target-batch")
         );
+    }
+
+    /// Reserves a submitted batch holding `custom_ids`, all in the triage stage.
+    fn reserve_submitted_batch(
+        store: &mut BatchManifestStore,
+        input_file_id: &str,
+        batch_id: &str,
+        custom_ids: &[&str],
+    ) {
+        let entries = custom_ids
+            .iter()
+            .enumerate()
+            .map(|(index, custom_id)| {
+                buffered_request_with(index as u64 + 1, custom_id, "triage").entry
+            })
+            .collect();
+        store
+            .reserve(PendingBatch {
+                input_file_id: input_file_id.to_string(),
+                batch_id: Some(batch_id.to_string()),
+                stage: "triage".to_string(),
+                completion_window: "24h".to_string(),
+                submitted_at_utc: "now".to_string(),
+                status: BatchState::Submitted,
+                entries,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn cancelled_batch_salvages_paid_output_and_releases_unreturned_requests() {
+        let dir = TempDir::new().unwrap();
+        let mut store = BatchManifestStore::load(dir.path().to_path_buf()).unwrap();
+        reserve_submitted_batch(
+            &mut store,
+            "input-file",
+            "cancelled-batch",
+            &["done", "never"],
+        );
+
+        // The provider stopped mid-flight: "done" finished and was billed,
+        // "never" was not returned at all.
+        let transport = FakeTransport::default();
+        let mut cancelled = handle("cancelled-batch", "input-file", BatchLifecycle::Cancelled);
+        cancelled.output_file_id = Some("output-file".to_string());
+        transport
+            .retrieved
+            .lock()
+            .unwrap()
+            .insert("cancelled-batch".to_string(), cancelled);
+        transport.downloads.lock().unwrap().insert(
+            "output-file".to_string(),
+            successful_output_line("done").into_bytes(),
+        );
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut coordinator = BatchCoordinator::new(transport, store, SubmissionBudget::default());
+        let collected = runtime.block_on(coordinator.collect_completed()).unwrap();
+
+        // The billed result replays as a success; the unreturned request
+        // replays as a line error, which the reducer skips with a warning.
+        let outcome_for = |custom_id: &str| {
+            collected
+                .iter()
+                .find(|entry| entry.custom_id == custom_id)
+                .unwrap_or_else(|| panic!("{custom_id} missing from replay"))
+                .outcome
+                .clone()
+        };
+        assert_eq!(collected.len(), 2);
+        assert!(
+            matches!(
+                outcome_for("done"),
+                harvester_core::CollectedOutcome::Success { .. }
+            ),
+            "the completed-and-billed result must survive cancellation"
+        );
+        assert!(matches!(
+            outcome_for("never"),
+            harvester_core::CollectedOutcome::LineError { .. }
+        ));
+
+        // The unreturned request is released for a future attempt, and no
+        // longer blocks the batch from being pruned once "done" is cached.
+        assert_eq!(coordinator.failed_attempts_for("never"), 1);
+        assert!(!coordinator.pending_custom_ids().contains("never"));
+        coordinator
+            .remove_collected_if(|entry| entry.custom_id == "done")
+            .unwrap();
+        assert!(coordinator.manifest().manifest().batches.is_empty());
+    }
+
+    #[test]
+    fn cancelled_batch_without_output_releases_every_entry() {
+        let dir = TempDir::new().unwrap();
+        let mut store = BatchManifestStore::load(dir.path().to_path_buf()).unwrap();
+        reserve_submitted_batch(&mut store, "input-file", "cancelled-batch", &["one", "two"]);
+
+        let transport = FakeTransport::default();
+        transport.retrieved.lock().unwrap().insert(
+            "cancelled-batch".to_string(),
+            handle("cancelled-batch", "input-file", BatchLifecycle::Cancelled),
+        );
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut coordinator = BatchCoordinator::new(transport, store, SubmissionBudget::default());
+        let collected = runtime.block_on(coordinator.collect_completed()).unwrap();
+
+        assert!(collected.is_empty());
+        assert!(coordinator.manifest().manifest().batches.is_empty());
+        assert_eq!(coordinator.failed_attempts_for("one"), 1);
+        assert_eq!(coordinator.failed_attempts_for("two"), 1);
+    }
+
+    #[test]
+    fn terminal_batch_is_retained_when_the_salvage_download_fails() {
+        let dir = TempDir::new().unwrap();
+        let mut store = BatchManifestStore::load(dir.path().to_path_buf()).unwrap();
+        reserve_submitted_batch(&mut store, "input-file", "expired-batch", &["one"]);
+
+        // The handle advertises output that the transport cannot serve, which
+        // stands in for a transient download failure.
+        let transport = FakeTransport::default();
+        let mut expired = handle("expired-batch", "input-file", BatchLifecycle::Expired);
+        expired.output_file_id = Some("missing-file".to_string());
+        transport
+            .retrieved
+            .lock()
+            .unwrap()
+            .insert("expired-batch".to_string(), expired);
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut coordinator = BatchCoordinator::new(transport, store, SubmissionBudget::default());
+        let collected = runtime.block_on(coordinator.collect_completed()).unwrap();
+
+        assert!(collected.is_empty());
+        assert_eq!(
+            coordinator.manifest().manifest().batches.len(),
+            1,
+            "paid output must not be discarded because of a transport failure"
+        );
+        assert_eq!(coordinator.failed_attempts_for("one"), 0);
     }
 
     #[test]

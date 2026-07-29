@@ -50,6 +50,7 @@ fn create_test_args(dry_run: bool, temp_dir: &TempDir) -> Args {
         prompts_dir: PathBuf::from("prompts"),
         dry_run,
         batch_api: false,
+        drain: false,
         verbose_progress: false,
         ascii_progress: false,
         single_shot: false,
@@ -455,6 +456,52 @@ fn test_should_stop_after_cycle_for_shutdown_signal() {
 #[test]
 fn test_should_continue_after_cycle_when_not_single_shot_and_no_shutdown() {
     assert!(!should_stop_after_cycle(false, false));
+}
+
+#[test]
+fn drain_makes_the_first_cycle_collect_only_so_no_sources_are_polled() {
+    // Batch API mode polls once before it starts collecting.
+    assert!(!is_collect_only_cycle(true, false, 1));
+    assert!(is_collect_only_cycle(true, false, 2));
+
+    // Drain never polls, so it collects from the very first cycle.
+    assert!(is_collect_only_cycle(true, true, 1));
+    assert!(is_collect_only_cycle(true, true, 2));
+
+    // Without the Batch API runtime there is no manifest to collect from.
+    assert!(!is_collect_only_cycle(false, false, 1));
+    assert!(!is_collect_only_cycle(false, false, 2));
+}
+
+#[test]
+fn drain_never_orchestrates_so_no_new_batches_are_submitted() {
+    // Restored completed jobs feed pre-triage, so leaving orchestration on
+    // would let a drain dispatch triage and submit fresh batch work.
+    assert!(!should_enable_ai_orchestration_for_mode(true, true));
+    assert!(should_enable_ai_orchestration_for_mode(true, false));
+    assert!(!should_enable_ai_orchestration_for_mode(false, false));
+}
+
+#[test]
+fn drain_summary_reports_batches_left_pending_for_a_later_run() {
+    assert_eq!(
+        format_drain_summary(&[]),
+        "[batch-drain] collected and exiting; no batches remain pending"
+    );
+
+    let summary = format_drain_summary(&[
+        ("file_1".to_string(), Some("batch_1".to_string())),
+        ("file_2".to_string(), Some("batch_2".to_string())),
+    ]);
+    assert_eq!(
+        summary,
+        "[batch-drain] collected and exiting; 2 batch(es) still pending: batch_1, batch_2"
+    );
+
+    // A reservation that never reached the provider has no batch id yet, so the
+    // input file id has to identify it.
+    let unreconciled = format_drain_summary(&[("file_3".to_string(), None)]);
+    assert!(unreconciled.contains("file_3"), "got {unreconciled}");
 }
 
 #[test]
@@ -1448,8 +1495,9 @@ fn ascii_progress_selects_ascii_glyphs_only_for_interactive_dashboard() {
 
 #[test]
 fn redirected_start_line_uses_the_operational_mode_label() {
-    assert_eq!(batch_mode_label(true), "batch-api");
-    assert_eq!(batch_mode_label(false), "recurring");
+    assert_eq!(batch_mode_label(true, false), "batch-api");
+    assert_eq!(batch_mode_label(false, false), "recurring");
+    assert_eq!(batch_mode_label(true, true), "drain");
 }
 
 fn batch_peek(

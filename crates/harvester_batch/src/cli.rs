@@ -51,6 +51,17 @@ pub struct Args {
     )]
     pub batch_api: bool,
 
+    /// Collect results for batches already submitted to the OpenAI Batch API, then exit
+    /// without polling sources or submitting new work. Implies --batch-api.
+    #[arg(
+        long,
+        conflicts_with = "dry_run",
+        conflicts_with = "single_shot",
+        conflicts_with = "import_saved_web_dir",
+        conflicts_with = "refresh_stale_summaries_limit"
+    )]
+    pub drain: bool,
+
     /// Print per-pass progress diagnostics, including cycle, source, and model details.
     #[arg(long)]
     pub verbose_progress: bool,
@@ -143,6 +154,12 @@ impl Args {
 
         // Clamp poll_interval to valid range (1 minute to 24 hours)
         self.poll_interval = self.poll_interval.clamp(1, 1440);
+    }
+
+    /// The Batch API runtime is requested by `--batch-api` and implied by `--drain`,
+    /// which can only collect work that the manifest and coordinator own.
+    pub fn batch_api_enabled(&self) -> bool {
+        self.batch_api || self.drain
     }
 
     pub fn sources_path(&self) -> PathBuf {
@@ -336,6 +353,46 @@ mod tests {
             "1"
         ])
         .is_err());
+    }
+
+    #[test]
+    fn drain_implies_batch_api_and_conflicts_with_excluded_modes() {
+        let defaults = Args::parse_from(&["harvester_batch"]);
+        assert!(!defaults.drain);
+        assert!(!defaults.batch_api_enabled());
+
+        let drain = Args::parse_from(&["harvester_batch", "--drain"]);
+        assert!(drain.drain);
+        assert!(!drain.batch_api, "--drain does not set the raw flag");
+        assert!(drain.batch_api_enabled(), "--drain implies the runtime");
+
+        assert!(
+            Args::parse_from(&["harvester_batch", "--drain", "--batch-api"]).batch_api_enabled(),
+            "--drain and --batch-api are redundant, not conflicting"
+        );
+        assert!(Args::parse_from(&["harvester_batch", "--batch-api"]).batch_api_enabled());
+
+        for conflicting in [
+            vec!["harvester_batch", "--drain", "--dry-run"],
+            vec!["harvester_batch", "--drain", "--single-shot"],
+            vec![
+                "harvester_batch",
+                "--drain",
+                "--import-saved-web-dir",
+                "saved",
+            ],
+            vec![
+                "harvester_batch",
+                "--drain",
+                "--refresh-stale-summaries-limit",
+                "1",
+            ],
+        ] {
+            assert!(
+                <Args as Parser>::try_parse_from(conflicting.clone()).is_err(),
+                "expected conflict for {conflicting:?}"
+            );
+        }
     }
 
     #[test]

@@ -8,6 +8,9 @@ param(
     [int]$RefreshStaleSummariesLimit = 0,
     [int]$SignalCandidateThreshold = 0,
     [switch]$BatchApi,
+    # Collect results for already-submitted Batch API work and exit without
+    # polling sources or submitting anything new.
+    [switch]$Drain,
     [switch]$VerboseProgress,
     [switch]$AsciiProgress
 )
@@ -22,6 +25,10 @@ if ($BatchApi -and $RefreshStaleSummariesLimit -gt 0) {
     throw '-BatchApi cannot be combined with -RefreshStaleSummariesLimit.'
 }
 
+if ($Drain -and $RefreshStaleSummariesLimit -gt 0) {
+    throw '-Drain cannot be combined with -RefreshStaleSummariesLimit.'
+}
+
 $progressArgs = @()
 if ($VerboseProgress) {
     $progressArgs += '--verbose-progress'
@@ -31,9 +38,13 @@ if ($AsciiProgress) {
 }
 
 # Optional direct batch mode for bounded summary refreshes without entering the TUI.
-if ($RefreshStaleSummariesLimit -gt 0 -or $BatchApi) {
+if ($RefreshStaleSummariesLimit -gt 0 -or $BatchApi -or $Drain) {
     $extra = @($progressArgs)
-    if ($BatchApi) {
+    if ($Drain) {
+        # --drain already implies the Batch API runtime, so passing --batch-api
+        # alongside it would only be redundant.
+        $extra += '--drain'
+    } elseif ($BatchApi) {
         $extra += '--batch-api'
     }
     if ($SignalCandidateThreshold -gt 0) {
