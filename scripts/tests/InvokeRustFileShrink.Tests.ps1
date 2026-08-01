@@ -123,6 +123,18 @@ Describe 'Test-ShrinkPathAllowed' {
     It 'rejects a file whose directory merely shares the target''s name prefix' {
         Test-ShrinkPathAllowed -Path 'crates/x/src/bigger/other.rs' -TargetRelPath 'crates/x/src/big.rs' -DestinationRelPath 'crates/x/src/big/telemetry.rs' | Should -BeFalse
     }
+    It 'allows the Rust 2018 module file of the target''s own directory (renderer.rs beside renderer/)' {
+        Test-ShrinkPathAllowed -Path 'gfx/src/renderer.rs' -TargetRelPath 'gfx/src/renderer/frame_render.rs' -DestinationRelPath 'gfx/src/renderer/frame_foliage.rs' | Should -BeTrue
+    }
+    It 'allows the Rust 2018 module file of a higher ancestor directory' {
+        Test-ShrinkPathAllowed -Path 'gfx/src/renderer.rs' -TargetRelPath 'gfx/src/renderer/frame/render.rs' -DestinationRelPath 'gfx/src/renderer/frame/foliage.rs' | Should -BeTrue
+    }
+    It 'rejects a sibling .rs file that is not an ancestor module file' {
+        Test-ShrinkPathAllowed -Path 'gfx/src/renderer/other_pass.rs' -TargetRelPath 'gfx/src/renderer/frame_render.rs' -DestinationRelPath 'gfx/src/renderer/frame_foliage.rs' | Should -BeFalse
+    }
+    It 'rejects a module file whose directory merely shares an ancestor name prefix' {
+        Test-ShrinkPathAllowed -Path 'gfx/src/render.rs' -TargetRelPath 'gfx/src/renderer/frame_render.rs' -DestinationRelPath 'gfx/src/renderer/frame_foliage.rs' | Should -BeFalse
+    }
 }
 
 Describe 'New-ShrinkCommitMessage' {
@@ -242,7 +254,8 @@ Describe 'Invoke-RustFileShrinkMain gate failures' {
         $script:MaxIterations = 1
         $script:MinLines = 1
         $script:RecommendModel = 'opus'
-        $script:ExtractModel = 'sonnet'
+        $script:ExtractModel = 'gpt-5.6-luna'
+        $script:ExtractReasoning = 'high'
         $script:RunTests = [System.Management.Automation.SwitchParameter]::new($false)
         $script:PreflightOnly = [System.Management.Automation.SwitchParameter]::new($false)
 
@@ -283,15 +296,173 @@ Describe 'Invoke-RustFileShrinkMain gate failures' {
             return '{"status":"success","summary":"ok"}'
         }
         Mock Invoke-ShrinkGate { throw "Gate failed: cargo clippy exited 101.`nclippy output" }
-        Mock Restore-ShrinkCheckpoint {}
+        Mock Invoke-Git { [pscustomobject]@{ ExitCode = 0; Text = ''; Stderr = '' } }
     }
 
     It 'leaves failed candidate changes in the worktree when clippy fails' {
         Invoke-RustFileShrinkMain | Out-Null
 
-        Should -Invoke Restore-ShrinkCheckpoint -Times 0 -Exactly
         Should -Invoke Add-LogLine -ParameterFilter {
             $Line -eq 'Gate failed; leaving failed candidate changes in the worktree for inspection.'
         } -Times 1 -Exactly
+        # No git command may revert the worktree or delete the candidate's new files.
+        Should -Invoke Invoke-Git -ParameterFilter {
+            $Arguments -contains 'restore' -or $Arguments -contains 'clean'
+        } -Times 0 -Exactly
+    }
+
+    It 'recommends with claude (read-only) and extracts with codex (full access)' {
+        Invoke-RustFileShrinkMain | Out-Null
+
+        Should -Invoke Invoke-Cli -ParameterFilter {
+            $Tool -eq 'claude' -and $Model -eq 'opus' -and $PermissionMode -eq 'plan'
+        } -Times 1 -Exactly
+        # -ceq: codex rejects a mis-cased model slug ("GPT-5.6-Luna" -> HTTP 400),
+        # and PowerShell's default -eq would not catch a casing regression.
+        Should -Invoke Invoke-Cli -ParameterFilter {
+            $Tool -eq 'codex' -and $Model -ceq 'gpt-5.6-luna' -and
+            $Sandbox -eq 'danger-full-access' -and $Reasoning -eq 'high'
+        } -Times 1 -Exactly
+    }
+
+    It 'preflights the codex exec flags it depends on' {
+        Invoke-RustFileShrinkMain | Out-Null
+
+        Should -Invoke Assert-CliExists -ParameterFilter { $CliName -eq 'codex' } -Times 1 -Exactly
+        Should -Invoke Assert-HelpContains -ParameterFilter {
+            $Tool -eq 'codex' -and $ExpectedFlags -contains '--sandbox'
+        } -Times 1 -Exactly
+    }
+}
+
+Describe 'Invoke-RustFileShrinkMain never discards a failed candidate' {
+    BeforeEach {
+        $script:FilePath = 'src/big.rs'
+        $script:RepoRoot = 'C:\repo'
+        $script:PromptsDir = ''
+        $script:ArtifactsDir = ''
+        $script:MaxIterations = 1
+        $script:MinLines = 1
+        $script:RecommendModel = 'opus'
+        $script:ExtractModel = 'gpt-5.6-luna'
+        $script:ExtractReasoning = 'high'
+        $script:RunTests = [System.Management.Automation.SwitchParameter]::new($false)
+        $script:PreflightOnly = [System.Management.Automation.SwitchParameter]::new($false)
+
+        $script:CliCall = 0
+        $script:LineCall = 0
+        $script:ExtractStatus = 'success'
+        $script:MockCtx = [pscustomobject]@{
+            RepoRoot       = 'C:\repo'
+            CargoRoot      = 'C:\repo'
+            FilePath       = 'C:\repo\src\big.rs'
+            FileRelPath    = 'src/big.rs'
+            Slug           = 'big'
+            PromptsDir     = 'C:\repo\prompts'
+            ArtifactsDir   = 'C:\repo\docs\plans'
+            ArtifactGlob   = 'Shrink.big.*'
+            LogPath        = 'C:\repo\docs\plans\Shrink.big.log'
+            RecSchemaText  = '{}'
+            StepSchemaText = '{}'
+        }
+
+        Mock Set-Utf8ProcessEncoding {}
+        Mock Resolve-ShrinkContext { $script:MockCtx }
+        Mock Assert-CliExists {}
+        Mock Assert-HelpContains {}
+        Mock Write-Host {}
+        Mock Write-Warning {}
+        Mock Get-ChildItem { @() }
+        Mock Get-WorktreeStatusText { '' }
+        Mock Invoke-ShrinkCleanArtifacts {}
+        Mock Write-AtomicUtf8 {}
+        Mock Add-LogLine {}
+        Mock Read-TextFile { 'fn parser() {}' }
+        Mock Expand-PromptTemplate { 'prompt' }
+        # 1000 lines at the iteration head, 800 after a successful extraction.
+        Mock Get-FileLineCount { $script:LineCall++; if ($script:LineCall -eq 1) { 1000 } else { 800 } }
+        # Keyed on the tool, not the call index: the recommend step must keep answering
+        # after a successful iteration, and it stops so the run ends at one extraction.
+        Mock Invoke-Cli {
+            $script:CliCall++
+            if ($Tool -eq 'claude') {
+                if ($script:CliCall -eq 1) {
+                    return '{"decision":"extract","reason":"big","next_step_summary":"extract parser","candidate":{"name":"parser","description":"d","suggested_destination":"src/parser.rs","estimated_lines":50},"confidence":"high"}'
+                }
+                return '{"decision":"stop","reason":"nothing cohesive left","next_step_summary":"done","confidence":"high"}'
+            }
+            return ('{"status":"' + $script:ExtractStatus + '","summary":"ok"}')
+        }
+        Mock Invoke-ShrinkGate {}
+        Mock Save-ShrinkCheckpoint {}
+        Mock Unstage-PathsIfNeeded {}
+        Mock Assert-NoPartiallyStagedFiles {}
+        Mock Get-ShrinkChangedPaths { @('src/big.rs', 'src/parser.rs') }
+        Mock Invoke-Git { [pscustomobject]@{ ExitCode = 0; Text = ''; Stderr = '' } }
+    }
+
+    It 'keeps partial edits when the extract CLI fails' {
+        Mock Invoke-Cli {
+            if ($Tool -eq 'claude') {
+                return '{"decision":"extract","reason":"big","next_step_summary":"s","candidate":{"name":"parser","description":"d","suggested_destination":"src/parser.rs","estimated_lines":50},"confidence":"high"}'
+            }
+            throw 'CLI codex exited with code 1.'
+        }
+
+        Invoke-RustFileShrinkMain | Out-Null
+
+        Should -Invoke Add-LogLine -ParameterFilter {
+            $Line -eq 'Extract step failed; leaving any partial changes in the worktree for inspection.'
+        } -Times 1 -Exactly
+        Should -Invoke Invoke-Git -ParameterFilter { $Arguments -contains 'restore' -or $Arguments -contains 'clean' } -Times 0 -Exactly
+    }
+
+    It 'keeps changes when the extract step reports a non-success status' {
+        $script:ExtractStatus = 'partial'
+
+        Invoke-RustFileShrinkMain | Out-Null
+
+        Should -Invoke Add-LogLine -ParameterFilter {
+            $Line -eq "Extract reported 'partial'; leaving its changes in the worktree for inspection."
+        } -Times 1 -Exactly
+        Should -Invoke Invoke-Git -ParameterFilter { $Arguments -contains 'restore' -or $Arguments -contains 'clean' } -Times 0 -Exactly
+    }
+
+    It 'keeps changes when the extraction does not reduce the file' {
+        Mock Get-FileLineCount { 1000 }
+
+        Invoke-RustFileShrinkMain | Out-Null
+
+        Should -Invoke Add-LogLine -ParameterFilter {
+            $Line -eq 'No size reduction; leaving the candidate changes in the worktree for inspection.'
+        } -Times 1 -Exactly
+        Should -Invoke Invoke-Git -ParameterFilter { $Arguments -contains 'restore' -or $Arguments -contains 'clean' } -Times 0 -Exactly
+    }
+
+    It 'keeps changes when a changed path falls outside the allowlist' {
+        Mock Get-ShrinkChangedPaths { @('src/big.rs', 'src/unrelated.rs') }
+
+        Invoke-RustFileShrinkMain | Out-Null
+
+        Should -Invoke Add-LogLine -ParameterFilter {
+            $Line -eq 'Unexpected changed paths; leaving the candidate changes in the worktree for inspection.'
+        } -Times 1 -Exactly
+        Should -Invoke Save-ShrinkCheckpoint -Times 0 -Exactly
+        Should -Invoke Invoke-Git -ParameterFilter { $Arguments -contains 'restore' -or $Arguments -contains 'clean' } -Times 0 -Exactly
+    }
+
+    It 'stages the extraction when every changed path is allowed' {
+        Invoke-RustFileShrinkMain | Out-Null
+
+        Should -Invoke Save-ShrinkCheckpoint -Times 1 -Exactly
+        Should -Invoke Add-LogLine -ParameterFilter { $Line -like 'Checkpoint 1 staged:*' } -Times 1 -Exactly
+    }
+}
+
+Describe 'Get-ShrinkDiscardCommand' {
+    It 'reverts to the index and cleans new files while preserving artifacts' {
+        $cmd = Get-ShrinkDiscardCommand -ArtifactGlob 'Shrink.big.*'
+        $cmd | Should -BeLike '*git restore --worktree -- .*'
+        $cmd | Should -BeLike "*git clean -fd -e 'Shrink.big.*' -- .*"
     }
 }

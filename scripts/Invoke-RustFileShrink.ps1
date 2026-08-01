@@ -3,6 +3,11 @@
 <#
 Iteratively shrinks one Rust source file by extracting cohesive modules, verifying
 each extraction with cargo fmt + clippy, staging (never committing) verified results.
+
+Claude recommends the next candidate (read-only); Codex performs the extraction edits.
+
+Nothing is ever discarded: a halted candidate's edits stay in the worktree for
+inspection, and the run prints the command that rolls them back.
 See docs/plans/Design.RustFileShrink.md.
 #>
 
@@ -15,7 +20,9 @@ param(
     [ValidateRange(1, 100)][int]$MaxIterations = 10,
     [ValidateRange(1, 1000000)][int]$MinLines = 500,
     [string]$RecommendModel = 'opus',
-    [string]$ExtractModel = 'sonnet',
+    # Codex model slugs are case-sensitive; 'GPT-5.6-Luna' is rejected by the API.
+    [string]$ExtractModel = 'gpt-5.6-luna',
+    [string]$ExtractReasoning = 'high',
     [switch]$RunTests,
     [switch]$PreflightOnly
 )
@@ -143,6 +150,20 @@ function Test-ShrinkPathAllowed {
             }
         }
     }
+
+    # Rust 2018 module files: a directory `foo/` may be declared by a sibling `foo.rs`
+    # instead of `foo/mod.rs`. The new `mod` declaration for an extracted module lands
+    # there, so allow the module file of any ancestor directory of the target/destination.
+    if ($key.EndsWith('.rs', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $keyModuleDir = $key.Substring(0, $key.Length - 3)
+        foreach ($anchor in @($target, $dest)) {
+            $anchorDir = (Split-Path -Parent $anchor) -replace '\\', '/'
+            if ($anchorDir -eq $keyModuleDir -or
+                $anchorDir.StartsWith("$keyModuleDir/", [System.StringComparison]::Ordinal)) {
+                return $true
+            }
+        }
+    }
     return $false
 }
 
@@ -190,15 +211,30 @@ function Save-ShrinkCheckpoint {
     Invoke-Git -RepoRoot $RepoRoot -Arguments (@('add', '--') + $Paths) | Out-Null
 }
 
-function Restore-ShrinkCheckpoint {
+function Get-ShrinkDiscardCommand {
+    param([Parameter(Mandatory)][string]$ArtifactGlob)
+    # The script never discards a failed candidate's edits itself: a guard can misjudge
+    # legitimate work (e.g. module wiring the allowlist does not recognize), and an
+    # extraction is expensive to reproduce. Hand the operator the exact rollback instead.
+    # 'git restore --worktree' reverts tracked files to the index (the last verified
+    # checkpoint); 'git clean' removes files the iteration created, minus our artifacts.
+    return "git restore --worktree -- . ; git clean -fd -e '$ArtifactGlob' -- ."
+}
+
+function Write-ShrinkFailedCandidateNotice {
     param(
-        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][string]$Candidate,
+        [Parameter(Mandatory)][bool]$ChangesKept,
         [Parameter(Mandatory)][string]$ArtifactGlob
     )
-    # Revert tracked worktree files to the index (the last verified checkpoint).
-    Invoke-Git -RepoRoot $RepoRoot -Arguments @('restore', '--worktree', '--', '.') | Out-Null
-    # Remove untracked files created during the failed iteration, but keep artifacts.
-    Invoke-Git -RepoRoot $RepoRoot -Arguments @('clean', '-fd', '-e', $ArtifactGlob, '--', '.') | Out-Null
+    if (-not $ChangesKept) {
+        # Halts that precede any edit (e.g. an invalid destination) leave nothing behind.
+        Write-Warning "Halted after a failed candidate: $Candidate (no changes were made)."
+        return
+    }
+    Write-Warning "Halted after a failed candidate: $Candidate. Its changes were LEFT in the worktree for inspection."
+    Write-Host '  Inspect:  git status ; git diff'
+    Write-Host "  Discard:  $(Get-ShrinkDiscardCommand -ArtifactGlob $ArtifactGlob)"
 }
 
 function Get-ShrinkArtifactGlob {
@@ -310,9 +346,14 @@ function Invoke-RustFileShrinkMain {
 
     $ctx = Resolve-ShrinkContext -FilePath $FilePath -RepoRoot $RepoRoot -PromptsDir $promptsDir -ArtifactsDir $artifactsDir
 
+    # Recommend runs on claude (read-only); extract runs on codex (edits).
     Assert-CliExists 'claude'
     Assert-HelpContains -Tool 'claude' -Arguments @('--help') -ExpectedFlags @(
         '-p', '--no-session-persistence', '--input-format', '--model', '--permission-mode', '--allowedTools'
+    )
+    Assert-CliExists 'codex'
+    Assert-HelpContains -Tool 'codex' -Arguments @('exec', '--help') -ExpectedFlags @(
+        '--cd', '--color', '--sandbox', '--model', '--config', '--output-last-message'
     )
 
     # Clean-worktree guard, tolerating this command's own artifacts (design §4.4).
@@ -338,7 +379,8 @@ function Invoke-RustFileShrinkMain {
     }
 
     Invoke-ShrinkCleanArtifacts -Ctx $ctx
-    Write-AtomicUtf8 -Path $ctx.LogPath -Content "Started: $(Get-Date)`nFile: $($ctx.FileRelPath)`nMinLines: $MinLines`nMaxIterations: $MaxIterations`n"
+    Write-AtomicUtf8 -Path $ctx.LogPath -Content ("Started: $(Get-Date)`nFile: $($ctx.FileRelPath)`nMinLines: $MinLines`nMaxIterations: $MaxIterations`n" +
+        "RecommendModel (claude): $RecommendModel`nExtractModel (codex): $ExtractModel (reasoning=$ExtractReasoning)`n")
 
     $extractions = @()
     $checkpoints = 0
@@ -390,7 +432,7 @@ function Invoke-RustFileShrinkMain {
 
         Write-Host (Get-ObjectProperty -Object $recommendation -Name 'next_step_summary' -Default '')
 
-        # --- Extract (Sonnet, edits) ---
+        # --- Extract (Codex, edits) ---
         $extractPrompt = Expand-PromptTemplate -PromptsDir $ctx.PromptsDir -Name 'shrink-extract.md' -Variables @{
             STEP_RESULT_SCHEMA  = $ctx.StepSchemaText
             RECOMMENDATION_JSON = (ConvertTo-PrettyJson -Value $recommendation)
@@ -400,11 +442,12 @@ function Invoke-RustFileShrinkMain {
         $extractPath = Join-Path $ctx.ArtifactsDir ("Shrink.$($ctx.Slug).iter{0:D2}.extract.json" -f $n)
 
         # The extract step has edit permission, so ANY failure here — a CLI error or
-        # invalid/unparseable JSON — can leave half-applied Rust edits. Restore the
-        # checkpoint on every failure path before exiting (review finding #2 / §4.3).
+        # invalid/unparseable JSON — can leave half-applied Rust edits. Those are kept
+        # in the worktree for inspection; the exit block prints the discard command.
         try {
-            $extractOut = Invoke-Cli -Tool 'claude' -Prompt $extractPrompt -WorkingDir $ctx.RepoRoot -Model $ExtractModel `
-                -PermissionMode 'acceptEdits' -OutputLastMessagePath $extractRawPath
+            $extractOut = Invoke-Cli -Tool 'codex' -Prompt $extractPrompt -WorkingDir $ctx.RepoRoot -Model $ExtractModel `
+                -PermissionMode $null -Sandbox 'danger-full-access' -Reasoning $ExtractReasoning `
+                -OutputLastMessagePath $extractRawPath
             $stepResult = ConvertFrom-AgentJson -Text $extractOut
             Write-AtomicUtf8 -Path $extractPath -Content (ConvertTo-PrettyJson -Value $stepResult)
         } catch {
@@ -414,7 +457,8 @@ function Invoke-RustFileShrinkMain {
             }
             $failedCandidate = (Get-ObjectProperty -Object $candidate -Name 'name' -Default '?')
             $haltReason = "extract step failed (iter $n): $($_.Exception.Message)"
-            Restore-ShrinkCheckpoint -RepoRoot $ctx.RepoRoot -ArtifactGlob $ctx.ArtifactGlob
+            $failedCandidateChangesKept = $true
+            Add-LogLine -LogPath $ctx.LogPath -Line 'Extract step failed; leaving any partial changes in the worktree for inspection.'
             break
         }
 
@@ -423,7 +467,8 @@ function Invoke-RustFileShrinkMain {
         if ($status -ne 'success') {
             $failedCandidate = (Get-ObjectProperty -Object $candidate -Name 'name' -Default '?')
             $haltReason = "extract status '$status' (iter $n)"
-            Restore-ShrinkCheckpoint -RepoRoot $ctx.RepoRoot -ArtifactGlob $ctx.ArtifactGlob
+            $failedCandidateChangesKept = $true
+            Add-LogLine -LogPath $ctx.LogPath -Line "Extract reported '$status'; leaving its changes in the worktree for inspection."
             break
         }
 
@@ -443,7 +488,8 @@ function Invoke-RustFileShrinkMain {
         if ($newCount -ge $lineCount) {
             $failedCandidate = (Get-ObjectProperty -Object $candidate -Name 'name' -Default '?')
             $haltReason = "no size reduction (iter $n): $lineCount -> $newCount"
-            Restore-ShrinkCheckpoint -RepoRoot $ctx.RepoRoot -ArtifactGlob $ctx.ArtifactGlob
+            $failedCandidateChangesKept = $true
+            Add-LogLine -LogPath $ctx.LogPath -Line 'No size reduction; leaving the candidate changes in the worktree for inspection.'
             break
         }
 
@@ -472,7 +518,8 @@ function Invoke-RustFileShrinkMain {
         if ($violations.Count -gt 0) {
             $failedCandidate = (Get-ObjectProperty -Object $candidate -Name 'name' -Default '?')
             $haltReason = "unexpected changed paths (iter $n): $($violations -join ', ')"
-            Restore-ShrinkCheckpoint -RepoRoot $ctx.RepoRoot -ArtifactGlob $ctx.ArtifactGlob
+            $failedCandidateChangesKept = $true
+            Add-LogLine -LogPath $ctx.LogPath -Line 'Unexpected changed paths; leaving the candidate changes in the worktree for inspection.'
             break
         }
         Save-ShrinkCheckpoint -RepoRoot $ctx.RepoRoot -Paths $codeChanged
@@ -500,27 +547,23 @@ function Invoke-RustFileShrinkMain {
     # --- Exit ---
     Write-Host ''
     if ($checkpoints -gt 0) {
-        # Re-assert the staged index maps to a consistent diff before suggesting a
-        # commit message (review finding #5 / §4.3).
-        Assert-NoPartiallyStagedFiles -RepoRoot $ctx.RepoRoot -ExcludedPaths $artifactRelPaths
+        # A kept failed candidate deliberately leaves worktree edits on top of the
+        # staged checkpoints, so index-vs-worktree consistency no longer holds and
+        # asserting it would turn a diagnosable halt into an exception. The index
+        # itself is still exactly the verified extractions (review finding #5 / §4.3).
+        if (-not $failedCandidateChangesKept) {
+            Assert-NoPartiallyStagedFiles -RepoRoot $ctx.RepoRoot -ExcludedPaths $artifactRelPaths
+        }
         $commitMessage = New-ShrinkCommitMessage -TargetRelPath $ctx.FileRelPath -Extractions $extractions
         Write-Host "Shrink complete: $checkpoints extraction(s) staged. Halt reason: $haltReason"
-        if ($failedCandidate) {
-            if ($failedCandidateChangesKept) {
-                Write-Warning "Halted after a failed candidate: $failedCandidate (its changes were left in the worktree)."
-            } else {
-                Write-Warning "Halted after a failed candidate: $failedCandidate (its changes were restored)."
-            }
-        }
+        if ($failedCandidate) { Write-ShrinkFailedCandidateNotice -Candidate $failedCandidate -ChangesKept $failedCandidateChangesKept -ArtifactGlob $ctx.ArtifactGlob }
         Write-Host ''
-        Write-Host 'Suggested git commit message (nothing was committed):'
+        Write-Host 'Suggested git commit message (nothing was committed). Stage-only diff: git diff --cached'
         Write-Host $commitMessage
         Add-LogLine -LogPath $ctx.LogPath -Line "Suggested commit subject: $(($commitMessage -split "`n")[0])"
     } else {
         Write-Host "No staged extraction produced. Halt reason: $haltReason"
-        if ($failedCandidate -and $failedCandidateChangesKept) {
-            Write-Warning "Halted after a failed candidate: $failedCandidate (its changes were left in the worktree)."
-        }
+        if ($failedCandidate) { Write-ShrinkFailedCandidateNotice -Candidate $failedCandidate -ChangesKept $failedCandidateChangesKept -ArtifactGlob $ctx.ArtifactGlob }
     }
     Add-LogLine -LogPath $ctx.LogPath -Line "Completed: $(Get-Date)"
 }
