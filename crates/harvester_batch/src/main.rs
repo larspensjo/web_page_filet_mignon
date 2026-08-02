@@ -3,9 +3,11 @@
 mod batch_coordinator;
 mod batch_manifest;
 mod cli;
+mod import_mode;
 mod lock;
 mod progress;
 mod runner;
+mod summary_refresh;
 
 use cli::Args;
 use engine_logging::{engine_error, engine_info};
