@@ -533,6 +533,10 @@ only its own token. An agent cannot do either.
 
 ## Phase 2 — Delete `harvester_mcp` and everything coupled to it
 
+**Status: implemented 2026-08-15, uncommitted and awaiting review.** See
+"Implementation record" at the end of this phase for what actually landed and
+where it departed from the text below.
+
 Repository: Harvester. Independent of Phase 1; no secrets involved. Self-
 contained and verifiable on its own.
 
@@ -569,10 +573,25 @@ restart Claude Code and Codex afterwards so the clients drop the stale server.
 ### Replace the agent guidance the skill provided
 
 Removing the skill removes the only instruction telling agents how to answer
-corpus questions. Add one bullet to `Agents.md` in the same change, under
+corpus questions. Add guidance to `Agents.md` in the same change, under
 `## Workflow` or a short `## Corpus` heading: research questions about harvested
-articles are answered by reading `output/*.md` and `output/linked/*.md` directly
-(and `output/harvester-corpus.json` for the index); there is no corpus server.
+articles are answered by reading the corpus files directly, and there is no
+corpus server. The guidance must be actionable, because it replaces a 68-line
+skill that carried a full retrieval workflow — name grepping `output/*.md` as
+the entry point, say that each article's title is in its filename and that each
+file opens with `---` frontmatter carrying `url`, `title` and `fetched_utc`, and
+mention `output/linked/*.md` with an "if present" qualifier (it is part of the
+documented public layout in `docs/CorpusFormat.md:47` and is written by
+`crates/harvester_engine/src/export.rs:247`, but the directory does not exist in
+this repository's `output/` folder today).
+
+**Do not describe `output/harvester-corpus.json` as an index.** An earlier draft
+of this plan did, and that claim is false: the file is a ~420-byte version
+marker holding `format`, `layout` (glob patterns), `producer`, `schema_version`
+and `written_at_utc`, with no article list, no titles and no URLs
+(`docs/CorpusFormat.md:7-38` calls it exactly that). An agent sent there for an
+index finds a glob manifest and is left facing ~8500 unindexed article files.
+Describe it as recording the corpus layout and schema version, or omit it.
 
 ### Documentation edits that belong in this phase
 
@@ -635,6 +654,80 @@ Get-ChildItem -Recurse -File -Exclude '*.lock' |
 
 **Human testing recommended:** after restarting Claude Code and Codex, confirm
 neither reports a failed MCP server and neither still lists the corpus tools.
+
+### Implementation record (2026-08-15)
+
+Implemented as written above, with the deviations and additions noted below. The
+changes are uncommitted, as Agents.md requires.
+
+**Landed as specified:** `crates/harvester_mcp/` (14 files, 5157 lines), the
+workspace member entry, `scripts/Start-HarvesterMcp.ps1`,
+`scripts/Test-HarvesterMcpSmoke.ps1`, `.mcp.json` and the `.agents/` skill tree
+are gone; `Cargo.lock` regenerated; the kill rule and `## Skills` section removed
+from `Agents.md`; the `taskkill` entry removed from
+`.claude/settings.local.json` with `mcp__code-review-graph__*` left intact; all
+six `README.md` edits applied; `docs/SmartQueryCandidateFilteringChecklist.md`
+marked `Obsolete` with its reasoning preserved; one diary entry appended.
+`docs/Architecture.md` was checked and, as the plan predicted, needed no change.
+`docs/CorpusFormat.md`, `CORPUS_SCHEMA_VERSION`, `output/.sources.ron`,
+`docs/plans/Plan.McpKnowledgeBaseServer.md` and the `src/CommanDuctUI` submodule
+pointer are untouched.
+
+**Deviations and additions:**
+
+1. **The plan missed one piece of coupled code.** Its footprint check asked what
+   depended *on* `harvester_mcp` and correctly found nothing, but not what
+   existed *for* it. `engine_logging::initialize_to_path` was written solely for
+   the server (`crates/harvester_mcp/src/main.rs:33` was its only call site) and
+   its doc comment advertised "processes where stdout is used as a transport
+   (e.g. MCP stdio)". Being `pub` in a library crate, it survives
+   `cargo clippy --all-targets -- -D warnings` untouched, so the deletion would
+   have passed clean while carrying dead public API — the exact cost the
+   "Keep the crate but unregister it" rejection was written to avoid. The
+   function was deleted. **Lesson for the remaining phases:** a deletion sweep
+   must search both directions, and `pub` items in library crates are invisible
+   to the dead-code lint.
+2. **The corpus guidance became a `## Corpus` section**, not a `## Workflow`
+   bullet — the plan permitted either. It is guidance rather than a build or
+   process rule, and Phase 3's `## Secrets` section now has a natural neighbour.
+3. **The `harvester-corpus.json` "index" claim was corrected**, in `Agents.md`
+   and in this document; see the correction recorded under "Replace the agent
+   guidance the skill provided".
+4. **Two orphaned README cross-references were fixed** beyond the plan's list.
+   `Test-HarvesterMcpSmoke.ps1` was the repo's only smoke-test script, so
+   `README.md:14` ("launchers, smoke tests, and supporting PowerShell
+   utilities") and `README.md:20` ("the modern launcher and smoke-test scripts")
+   both pointed at nothing once it was deleted, and neither line appears in any
+   phase's edit list. `README.md:21`'s "smart-query features" wording has the
+   same problem but sits on a line Phase 5 rewrites, so it was left alone —
+   **Phase 5 must still fix it.**
+5. **The running MCP process was force-stopped** rather than stopped by hand.
+   The plan asked for a manual stop; the process turned out to be a child of the
+   active Claude Code session, so stopping it by hand would have ended the
+   session doing the work. The user authorized terminating it directly.
+
+**Verification results:** `cargo build`, `cargo test` (47 test binaries, 0
+failures), `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check`
+all pass. `Cargo.lock` shows **0 added lines**; the removed packages are exactly
+`harvester_mcp` plus its `rmcp`/`schemars` transitive closure, with no
+opportunistic version bumps. The repo-wide reference sweep returns hits only in
+`docs/EngineeringDiary.md`, `docs/plans/*.md` and
+`docs/SmartQueryCandidateFilteringChecklist.md`, as the plan requires.
+`git submodule status` shows `src/CommanDuctUI` unmoved at `0fcffba`. No backup
+files.
+
+`Invoke-Pester -Path .\scripts\tests -CI` reports 241/250 passing. The 9
+failures are all in `scripts/tests/HarvesterLauncher.Tests.ps1`
+(import-mode / `ImportAction` enum reducer cases) and are **pre-existing and
+unrelated** — an identical run against a clean worktree at `HEAD` produces the
+same 9 failures, and nothing in this change touches `scripts/`. Phase 4 deletes
+that file, which resolves them incidentally; if Phase 4 is ever abandoned, they
+need fixing on their own merits.
+
+**Still outstanding for the user:** run `codex mcp remove harvester-mcp` (or the
+equivalent) if the server was registered globally in Codex, then restart Claude
+Code and Codex so both clients drop the stale server, and confirm neither reports
+a failed MCP server or still lists the corpus tools.
 
 ## Phase 3 — The two launch scripts
 

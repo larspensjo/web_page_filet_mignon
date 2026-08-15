@@ -6,8 +6,12 @@
 - When adding a CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change.
 - When changing the public output corpus layout, update `docs/CorpusFormat.md`, bump `CORPUS_SCHEMA_VERSION` if compatibility changes, and keep `harvester-corpus.json` generation/tests in sync.
 - When creating complex plans, they should be divided into incremental phases that can be tested.
-- If harvester_mcp processes block building and testing, kill these processes.
 - When implementing a plan, don't commit the changes; they shall first be reviewed.
+
+## Corpus
+- Answer research questions about harvested articles by reading the corpus files directly; there is no corpus server.
+- Start by grepping `output/*.md` for relevant articles. Each article's title is in its filename, and each file starts with `---` frontmatter containing `url`, `title`, and `fetched_utc`.
+- Also search `output/linked/*.md` if that directory is present. `output/harvester-corpus.json` records the corpus layout and schema version; it is not an article index.
 
 ## Planning & Documentation
 - When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.
@@ -34,9 +38,6 @@
 ## Logging
 - Use `engine_logging` for runtime logging.
 - Include enough context in error logs to identify the failing job, URL, or operation.
-
-## Skills
-- For research questions that should be answered from the local harvested article corpus, use `$harvester-mcp-research`.
 
 ## Diary
 - Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations, and bug fixes with reusable lessons.
