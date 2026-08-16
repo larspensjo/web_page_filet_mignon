@@ -914,6 +914,88 @@ git status --short
 
 The `Select-String` sweep must return no live hits outside `docs/`.
 
+### Implementation record (2026-08-16)
+
+Implemented as written above. The changes are uncommitted at the time of
+writing, as Agents.md requires; the user reviewed them and then asked for the
+commit.
+
+**Landed as specified:** all five `scripts/harvester_launcher/*.psm1` modules and
+`scripts/tests/HarvesterLauncher.Tests.ps1` are gone (2080 deleted lines, 0
+inserted), leaving no `scripts/harvester_launcher` directory; the dangling
+`Start-HarvesterBatch.ps1` parse-check entry was dropped from
+`.claude/settings.local.json` with every other entry and valid JSON preserved.
+`scripts/tests/HarvesterLaunch.Tests.ps1` and the two Phase 3 launch scripts are
+untouched. No Rust changed. `src/CommanDuctUI` is unmoved at `0fcffba`.
+
+**Reference classification, as the phase required:** live and handled — the
+`.claude` parse-check entry, plus `README.md`'s launch commands (see deviation 2).
+Historical and left alone — `docs/EngineeringDiary.md`,
+`docs/plans/Plan.HarvesterBatchContinuousProgress.md`,
+`docs/Review.RustFileShrinkPhaseD.md` (a dated 2026-06-30 review, not a live
+checklist). Out of scope — `src/CommanDuctUI/`.
+
+**Deviations and additions:**
+
+1. **`git rm` was unavailable and staging turned out not to matter.** The
+   implementing agent's sandbox exposes `.git` read-only, so it could not stage
+   the removals. The files were removed from the working tree unstaged instead.
+   The repo rule is only that plan changes are left uncommitted for review, and
+   an unstaged working-tree removal produces the same reviewable diff. **Lesson
+   for the remaining phase:** do not specify `git rm` when plain removal
+   satisfies the actual requirement.
+2. **`README.md`'s launch commands were fixed here, not in Phase 5.** Phase 3
+   made `README.md:40`'s `pwsh -NoLogo -NoProfile -File .\scripts\Start-HarvesterBatch.ps1`
+   actively broken — under `-NoProfile` the launcher aborts at
+   `HarvesterLaunch.psm1:121` with "load your PowerShell profile". Review caught
+   that the tree was shipping a documented command that cannot work. The user
+   fixed both command blocks by hand: `.\scripts\Start-HarvesterApp.ps1` now
+   replaces `cargo run -p harvester_app`, and the batch command lost `-NoProfile`.
+   The surrounding prose was deliberately left to Phase 5, which rewrites that
+   whole section: `README.md:14` and `README.md:20` still say "the batch
+   launcher" in the singular, and `README.md:21` still tells the reader to set
+   `OPENAI_API_KEY` in the environment, which the launchers now supply.
+3. **The phase's sweep pattern is not a completeness check for live TUI
+   references.** `Select-String -Pattern 'harvester_launcher'` structurally
+   cannot find `docs/FutureIdeas.md`'s two live backlog entries, which say "TUI
+   launcher" and "the TUI launcher startup probe" instead. They are Phase 5's
+   work and are recorded there, so nothing was lost — but a literal identifier
+   sweep is not sufficient on its own when the retired thing is also described in
+   prose.
+4. **The permissions-file edit is invisible to Git.**
+   `.claude/settings.local.json` is matched by the user's *global* gitignore
+   (`~/.config/git/ignore:3`, `**/.claude/settings.local.json`), so it appears in
+   neither `git status` nor the review diff, and it also mutates whenever the
+   user grants a permission mid-session. Entry counts are therefore not a
+   verification signal; the edit was confirmed by diffing the file against a
+   capture taken before the run.
+
+**Verification results:** `Invoke-Pester -Path .\scripts\tests -CI` reports
+92/92 passing, 0 failures — the 9 pre-existing `ImportAction` / import-mode
+failures recorded at the end of Phase 2 are resolved by the removal of the file
+that carried them, exactly as that record predicted. `cargo build` succeeds and
+`cargo test` passes across all 47 test binaries with 0 failures.
+`Invoke-ScriptAnalyzer -Path .\scripts -Recurse -Settings .\scripts\PSScriptAnalyzerSettings.psd1`
+reports 16 findings, identical to the pre-change count and all in untouched
+files (`Invoke-RustFileShrink.ps1`, `AgentCli.*`). The `harvester_launcher` sweep
+over `README.md`, `Agents.md` and `scripts/**` returns nothing; repo-wide the
+identifier survives only under `docs/`. `Test-Path .\scripts\harvester_launcher`
+is `False`. `git diff --check` is clean and no backup files exist.
+`cargo clippy` / `cargo fmt` were not run: no Rust changed, and Agents.md scopes
+that rule to Rust changes.
+
+**Still outstanding, carried into Phase 5:** the `docs/EngineeringDiary.md` entry
+covering this removal (the plan folds it into Phase 5's combined entry, so ~2080
+deleted lines currently carry no diary record); the `docs/FutureIdeas.md` entries
+from deviation 3; and the `README.md` prose from deviation 2. Separately and
+outside this plan, `src/CommanDuctUI/Agents.md:7` still carries the stale rule
+"When adding a CLI flag to `harvester_batch`, update
+`scripts/Start-HarvesterBatch.ps1` in the same change" — the rule Phase 3
+replaced in this repository. The submodule is correctly out of scope and its
+pointer unmoved, but that rule points at a retired design and will mislead its
+next reader; it wants a one-line change in the CommanDuctUI repository on its own
+schedule.
+
 ## Phase 5 — Remaining documentation and coupled artifacts
 
 Everything that was not already landed alongside its code change.

@@ -31,13 +31,13 @@ cargo build
 Run the desktop app:
 
 ```powershell
-cargo run -p harvester_app
+.\scripts\Start-HarvesterApp.ps1
 ```
 
-Launch the batch workflow UI:
+Launch the batch workflow:
 
 ```powershell
-pwsh -NoLogo -NoProfile -File .\scripts\Start-HarvesterBatch.ps1
+.\scripts\Start-HarvesterBatch.ps1
 ```
 
 ## Harvester Output
