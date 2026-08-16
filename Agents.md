@@ -3,7 +3,7 @@
 ## Workflow
 - Build with `cargo build`.
 - When a task is completed with Rust changes, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
-- When adding a CLI flag to `harvester_batch`, update `scripts/Start-HarvesterBatch.ps1` in the same change.
+- The launch scripts encode a fixed launch policy and change only when that policy changes, not when a CLI flag is added.
 - When changing the public output corpus layout, update `docs/CorpusFormat.md`, bump `CORPUS_SCHEMA_VERSION` if compatibility changes, and keep `harvester-corpus.json` generation/tests in sync.
 - When creating complex plans, they should be divided into incremental phases that can be tested.
 - When implementing a plan, don't commit the changes; they shall first be reviewed.
@@ -12,6 +12,10 @@
 - Answer research questions about harvested articles by reading the corpus files directly; there is no corpus server.
 - Start by grepping `output/*.md` for relevant articles. Each article's title is in its filename, and each file starts with `---` frontmatter containing `url`, `title`, and `fetched_utc`.
 - Also search `output/linked/*.md` if that directory is present. `output/harvester-corpus.json` records the corpus layout and schema version; it is not an article index.
+
+## Secrets
+- Agents must not attempt to obtain API keys, run the Harvester launchers, or iterate against live LLM APIs.
+- The keyless paths (`cargo build`, `cargo test`, and the Pester suites) are the agent-visible surface.
 
 ## Planning & Documentation
 - When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.

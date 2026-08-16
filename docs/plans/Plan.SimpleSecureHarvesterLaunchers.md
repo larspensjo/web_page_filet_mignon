@@ -6,8 +6,9 @@ Three changes land together:
 
 1. Replace the interactive PowerShell launcher TUI with small, explicit,
    argument-free launch scripts.
-2. Change how API keys reach the Harvester binaries so that a key is never
-   inherited by a process an LLM coding agent controls or can spawn.
+2. Change how API keys reach the Harvester binaries so the launchers retrieve
+   and inject only the keys each child needs, while warning about any key the
+   parent process already inherited.
 3. Delete `harvester_mcp` and everything coupled to it. The corpus research
    capability does not earn its keep: an agent reading the corpus markdown files
    directly works just as well, and the server was the one component that
@@ -15,17 +16,24 @@ Three changes land together:
 
 ## Governing security principle
 
-**Harvester API keys — and every other secret in the vault — must never enter
-the environment of a process an LLM coding agent controls or can spawn. Reaching
-a secret requires typing the SecretStore password into a session the user
-started. Everything an agent can invoke on its own (`cargo run`, `cargo test`,
-any launcher) either has no key or stops at a password prompt it cannot answer.**
+**The launchers must never add Harvester API keys — or any other vault secret —
+to the environment of a process an LLM coding agent controls or can spawn.
+Retrieving a secret from SecretStore requires typing its password into a session
+the user started. A pre-existing non-empty key in the parent environment is a
+deliberate exception: the launcher warns, then both `cargo build` and the child
+process inherit it.**
 
 Motivation: prompt injection. Harvested article content flows into agent
 context, so an injected instruction must not be able to read a key out of the
 agent's environment. Environment variables are inherited downward, so any key
 given to a process an agent spawns must first exist in the agent's own process.
-Cutting inheritance is what this plan actually enforces.
+Scoped injection by the launcher is what this plan actually enforces.
+
+Persistent Windows User-scope or Machine-scope key variables defeat that
+inheritance guarantee. The user has deliberately kept `BRAVE_SEARCH_API_KEY`
+and `OPENAI_API_KEY` at User scope because other applications depend on them.
+The launcher warns rather than refuses, and the user accepts that the build and
+child process inherit those values as a residual risk.
 
 ### What this guarantee is not
 
@@ -37,10 +45,10 @@ real keys in the process. Nothing in this plan prevents that.
 **Accepted residual risk.** The user has considered this and accepts it. The
 reasoning: code changes are reviewable and are reviewed before they are run
 (Agents.md already forbids agents from committing), whereas environment
-inheritance is invisible and automatic. Closing the inheritance channel removes
-the silent path; the code-modification path stays visible in a diff. Record this
-verbatim in the threat-model update so it is not later mistaken for an
-oversight.
+inheritance is invisible and automatic. Scoped child injection removes one
+silent path; deliberately persistent parent keys remain the explicit exception,
+while the code-modification path stays visible in a diff. Record this in the
+threat-model update so it is not later mistaken for an oversight.
 
 ### The scope is every secret, not just Harvester's
 
@@ -94,16 +102,18 @@ Both use the user's existing main OpenAI key. There is no third launcher:
 2. Never place a secret value in a command line, source file, Git diff, test
    fixture, or PowerShell history.
 3. No secret is retrieved before or during a build. `cargo`, `rustc`, build
-   scripts and tests are never handed a key by a launcher. They do inherit the
-   parent environment, so this is enforced by requirement 6 rather than assumed.
+   scripts and tests are never handed a key by a launcher. They still inherit
+   any pre-existing parent environment values; requirement 6 warns about that
+   risk but no longer prevents it.
 4. Launch each runtime in the temporary child session created by the SecretStore
    helper.
 5. Select secrets explicitly per invocation. No API in the profile module
    defaults to "all secrets"; a caller that names no secret gets none.
 6. A launcher never adds `BRAVE_SEARCH_API_KEY` or `OPENAI_API_KEY` to the
-   parent PowerShell process, and **refuses to run** if either is already
-   present there (the `Unlock-Secrets` case). This makes the "the build never
-   sees a key" claim true rather than aspirational.
+   parent PowerShell process. If either has a non-empty value there, the launcher
+   warns, names the variable, states that `cargo build` and the child process
+   will inherit it, and continues. A blank value produces no warning. This is
+   diagnostic only and does not enforce requirement 3's inheritance boundary.
 7. Preserve the launched process's exit code, and keep it off the success
    pipeline so runtime stdout cannot be mistaken for it.
 8. Keep temporary invocation files free of secret values; remove them in a
@@ -114,8 +124,10 @@ Both use the user's existing main OpenAI key. There is no third launcher:
    detect a non-interactive session and exit immediately with an actionable
    error. This is what makes the password gate clean rather than a mysterious
    freeze.
-10. No secret enters a process an LLM coding agent controls or can spawn, except
-    the single model-provider token described in the governing principle.
+10. The launcher and profile helpers inject no secret into a process an LLM
+    coding agent controls or can spawn, except the single model-provider token
+    described in the governing principle. Pre-existing inherited environment
+    variables remain the accepted exception described in requirement 6.
 
 ## Locked decisions
 
@@ -162,10 +174,10 @@ interactive terminal. The user intends to use it rarely or never but wants it
 for special cases. Do not change it, do not narrow it, do not add a warning
 banner.
 
-The consequence is that a launcher started from an unlocked terminal would
-inherit real keys into `cargo build` and into the child session. That is handled
-by the parent-contamination precondition in security requirement 6, not by
-weakening `Unlock-Secrets`.
+The consequence is that a launcher started from an unlocked terminal inherits
+real keys into `cargo build` and into the child session. Security requirement 6
+requires an actionable warning but deliberately does not block the launch; this
+does not weaken or change `Unlock-Secrets` itself.
 
 ### Explicit secret lists everywhere; no implicit global default
 
@@ -270,9 +282,9 @@ become argument-free wrappers. Rationale:
 
 - Keeps the scripts genuinely argument-free (no test-only parameters on the
   user-facing surface).
-- Keeps repository-root resolution, the profile-availability check, the
-  contamination precondition, build sequencing, exit-code propagation and
-  location restore in one place (Agents.md DRY rule; entry points stay thin).
+- Keeps repository-root resolution, the profile-availability check, inherited-
+  key warnings, build sequencing, exit-code propagation and location restore in
+  one place (Agents.md DRY rule; entry points stay thin).
 - Avoids depending on PowerShell command-resolution order to shadow the native
   `cargo`, which is fragile and silently stops working if a call site is written
   as `cargo.exe` or resolved via `Get-Command`.
@@ -738,21 +750,24 @@ therefore pass before Phase 1 is installed in the current session.
 ### `scripts/lib/HarvesterLaunch.psm1`
 
 - `Get-HarvesterLaunchSpec -Name <App|Batch> -RepositoryRoot <path>` returns the
-  launch policy as data: package, binary name, runtime arguments (absolute paths
-  already resolved), and the ordered secret map. This table is the single source
-  of truth for what each launcher does.
-- `Invoke-HarvesterLaunch -Spec <spec> -RepositoryRoot <path>
-  -ExitCode ([ref]$code) [-BuildInvoker] [-SecretInvoker] [-PromptCheck]`
+  launch policy as data: repository root, package, binary name, runtime
+  arguments (absolute paths already resolved), and the ordered secret map. This
+  table is the single source of truth for what each launcher does.
+- `Invoke-HarvesterLaunch -Spec <spec> -ExitCode ([ref]$code) [-BuildInvoker]
+  [-SecretInvoker] [-PromptCheck] [-EnvironmentVariableProbe]`
   performs, in order:
   1. verify `Invoke-WithSecretMap` and `Test-SecretStorePromptAvailable` are
      available, else fail with a short actionable message ("load your PowerShell
      profile; this launcher does not dot-source it");
   2. verify a password can be prompted for, else fail fast **before** the build;
-  3. **contamination precondition** — if any environment variable the spec is
-     about to scope is already present in the parent process, fail with a
-     message naming the variable and suggesting `Lock-Secrets`. This is what
-     makes security requirements 3 and 6 true in an unlocked terminal;
-  4. `Push-Location` the repository root inside `try`/`finally`;
+  3. **inherited-key warning** — if any environment variable the spec is about
+     to scope has a non-empty value in the parent process, warn and continue.
+     Name the variable, state that `cargo build` and the child inherit it, and
+     distinguish persistent Windows User/Machine scope from a session-only
+     value so the session-level remedy is actionable. A blank value produces no
+     warning;
+  4. `Push-Location` the repository root carried by the spec inside
+     `try`/`finally`;
   5. `cargo build -p <package>`, stopping on failure without retrieving any
      secret;
   6. resolve `target\debug\<binary>.exe`, failing clearly if absent;
@@ -773,7 +788,7 @@ with a `[ref]` exit-code variable, and `exit`s with it. Nothing else:
 
 ```powershell
 $code = 1
-Invoke-HarvesterLaunch -Spec $spec -RepositoryRoot $root -ExitCode ([ref]$code)
+Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code)
 exit $code
 ```
 
@@ -812,10 +827,11 @@ Fakes only; never retrieve a real SecretStore value.
 - No spec selects `DeepSeekProductionKey`, `MoonshotApiKey`, or `TEST_SECRET`;
   no spec injects any environment variable beyond the ones its row in the
   target-state table names.
-- **Contaminated parent:** with `OPENAI_API_KEY` set to a dummy value in the
-  test's own process, the launch fails before the build invoker is called, the
-  message names `OPENAI_API_KEY`, and the test restores its environment
-  afterwards. Repeat for `BRAVE_SEARCH_API_KEY`.
+- **Contaminated parent:** injected dummy process/User/Machine probe results
+  verify that a non-empty value produces the appropriate persistent-scope or
+  session-only warning and the build and secret invokers still run. A blank
+  value produces no warning. Tests never read or write real User-scope or
+  Machine-scope state and do not depend on ambient process variables.
 - **Exit-code channel:** a fake secret invoker that writes several lines to
   stdout and reports exit code `3` results in `$code -eq 3` (an `[int]`, not an
   array), and the launch routine itself emits nothing on the success stream.
@@ -825,6 +841,11 @@ Fakes only; never retrieve a real SecretStore value.
 - Missing `Invoke-WithSecretMap` produces the actionable message and no build.
 - Each of the two scripts parses, declares no parameters, and calls
   `Get-HarvesterLaunchSpec` (AST assertion).
+- Delete `scripts/tests/Start-HarvesterBatch.Tests.ps1` in Phase 3 rather than
+  Phase 4. It invokes the replacement launcher eleven times with obsolete named
+  arguments; because the argument-free script intentionally has no `param()`
+  block, PowerShell ignores those unrecognised arguments and executes the real
+  launcher body.
 
 ### Verification
 
@@ -844,10 +865,10 @@ the user one at a time, never run them unattended):
 ```
 
 Tell the user that each launcher asks for the SecretStore password once, and
-that running from an unlocked terminal will now be refused with a message
-pointing at `Lock-Secrets`. Ask them to confirm the batch run shows Brave
-sources polling successfully in `engine.log` rather than "environment variable
-... is not set".
+that a non-empty inherited key produces an actionable warning but does not stop
+the build or launch. Ask them to confirm the batch run shows Brave sources
+polling successfully in `engine.log` rather than "environment variable ... is
+not set".
 
 ## Phase 4 — Remove the launcher TUI
 
@@ -858,8 +879,7 @@ Before deleting, search for live references to `harvester_launcher` and
 alone). Expected hits at this point:
 
 - Live: `.claude/settings.local.json` (the parse-check permission entry at line
-  41), `scripts/tests/Start-HarvesterBatch.Tests.ps1`, plus any README language
-  the earlier phases have not already replaced.
+  41), plus any README language the earlier phases have not already replaced.
 - Historical, leave alone: `docs/EngineeringDiary.md`,
   `docs/plans/Plan.HarvesterBatchContinuousProgress.md`,
   `docs/Review.RustFileShrinkPhaseD.md`.
@@ -873,10 +893,11 @@ Delete:
 - `scripts/harvester_launcher/Reducer.psm1`
 - `scripts/harvester_launcher/Render.psm1`
 - `scripts/tests/HarvesterLauncher.Tests.ps1`
-- `scripts/tests/Start-HarvesterBatch.Tests.ps1` — its cases exercise the
-  obsolete TUI and optional switches; the coverage that still matters (fixed
-  argument list, argument boundaries, exit code) lives in the new launcher
-  tests, so remove the file rather than porting it.
+
+`scripts/tests/Start-HarvesterBatch.Tests.ps1` is not in this delete list: its
+deletion moved into Phase 3 because it executes the replacement launcher eleven
+times and the new argument-free script ignores its unrecognised legacy named
+arguments.
 
 Also drop the now-dangling `Start-HarvesterBatch.ps1` parse-check entry from
 `.claude/settings.local.json`.
@@ -902,11 +923,11 @@ Everything that was not already landed alongside its code change.
 - Replace the TUI language with the two explicit launcher commands. Do **not**
   recommend `pwsh -NoProfile -File`; the scripts intentionally depend on the
   loaded profile (currently recommended at `README.md:41`).
-- Fix `README.md:22` — `OPENAI_API_KEY` is no longer something the user sets in
-  their environment; state that the launchers inject `BRAVE_SEARCH_API_KEY` and
-  `OPENAI_API_KEY` into the child process only, and name the variables without
-  any values. Mention that launching from a terminal where `Unlock-Secrets` has
-  been run is refused.
+- Fix `README.md:22` — explain that the launchers inject
+  `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` into the child session. Also state
+  that a non-empty inherited value causes a warning, not a refusal, and is
+  passed to both `cargo build` and the child process. Name the variables without
+  including any values.
 - Add one sentence on Brave key naming: each Brave source names its own key
   environment variable in the source registry (`api_key_env` in
   `output/.sources.ron`), and the value in use is `BRAVE_SEARCH_API_KEY`, so
@@ -922,8 +943,9 @@ Everything that was not already landed alongside its code change.
 
 Add to the key-management asset and mitigations:
 
-- API keys are never inherited by an agent-controlled process; the SecretStore
-  password prompt is the trust boundary.
+- The intended scoped model is that API keys are not inherited by an
+  agent-controlled process and the SecretStore password prompt is the trust
+  boundary.
 - The rule covers every vault secret, not only Harvester's.
 - The one deliberate exception: an agent may hold the single token it uses to
   authenticate to its own model provider.
@@ -931,6 +953,13 @@ Add to the key-management asset and mitigations:
   helper, or application source that the user subsequently runs with real keys.
   Record the user's reasoning (code changes are reviewable and reviewed;
   environment inheritance is not) so this reads as a decision rather than a gap.
+- A second accepted residual risk, stated just as plainly: persistent Windows
+  User-scope or Machine-scope key variables defeat the inheritance guarantee
+  entirely. This user has deliberately kept `BRAVE_SEARCH_API_KEY` and
+  `OPENAI_API_KEY` at User scope because other applications depend on them. The
+  launchers therefore warn rather than refuse and do pass those inherited keys
+  to `cargo build` and to the child process. Record the user's dependency on the
+  persistent settings as the reasoning for this deliberate exception.
 - The corpus MCP server is gone, so there is no long-lived key-bearing process
   answering agent questions.
 
@@ -958,9 +987,9 @@ Append one entry in the existing format (Type / Context / Change / Evidence /
 Refs), separate from the deletion entry written in Phase 2, covering:
 
 - the TUI removal and the fixed launch-policy scripts;
-- the scoped SecretStore launch model, the inheritance guarantee, its
-  prompt-injection motivation, the accepted residual risk, and the
-  one-token-per-agent exception;
+- the scoped SecretStore launch model, its prompt-injection motivation, the
+  intended inheritance boundary, both accepted residual risks (agent-modified
+  code and persistent parent keys), and the one-token-per-agent exception;
 - the `Invoke-ClaudeDeepSeek` over-injection defect (a Bug Fix sub-entry with
   Lessons Learned and Prevention, as Agents.md requires for bug fixes);
 - the two exit-code defects — preference-driven flattening and the pipeline
@@ -980,8 +1009,10 @@ git status --short
 ```
 
 **Human testing recommended:** open a fresh terminal, run `Unlock-Secrets`, then
-attempt `.\scripts\Start-HarvesterBatch.ps1` and confirm it refuses with the
-`Lock-Secrets` message; run `Lock-Secrets` and confirm it then proceeds.
+attempt `.\scripts\Start-HarvesterBatch.ps1` and confirm it warns that each
+non-empty inherited variable reaches `cargo build` and the child process, then
+continues. Confirm the warning gives a session-level clearing remedy and
+distinguishes persistent User/Machine scope from a session-only value.
 
 ## Documents this work updates
 
@@ -1011,9 +1042,11 @@ Three things in this work are commitments, not implementation details, and must
 survive in `docs/EngineeringDiary.md` and `docs/ThreatModel.md` rather than only
 in this plan:
 
-1. Secrets are never inherited by agent-controlled processes; the exception is
-   one model-provider token per agent; the residual risk of agent-modified code
-   is accepted with stated reasoning.
+1. Secret helpers inject no secret into agent-controlled processes; the
+   exceptions are one model-provider token per agent and any pre-existing key
+   inherited from the parent environment. The residual risks of agent-modified
+   code and deliberately persistent User-scope keys are accepted with stated
+   reasoning.
 2. The corpus MCP capability is deliberately removed, not deferred. Agents read
    corpus files directly.
 3. Launch scripts encode a fixed launch policy; they are not a mirror of the
@@ -1060,8 +1093,9 @@ one at a time.
 - No profile-module function injects secrets a caller did not name;
   `Invoke-WithSecrets` cannot be called without an explicit secret list.
 - `Invoke-ClaudeDeepSeek` injects exactly one secret, verified by test.
-- A launcher run from a terminal where `Unlock-Secrets` has been used is refused
-  with a message naming the contaminating variable.
+- A launcher run from a terminal where `Unlock-Secrets` has been used warns for
+  each non-empty inherited variable, states that the build and child inherit it,
+  and continues; blank values produce no warning.
 - Runtime child processes receive only their documented secrets, and the app and
   batch launchers inject `BRAVE_SEARCH_API_KEY`, matching the `api_key_env`
   values already in `output/.sources.ron`.
