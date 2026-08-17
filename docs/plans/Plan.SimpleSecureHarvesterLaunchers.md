@@ -1096,6 +1096,52 @@ non-empty inherited variable reaches `cargo build` and the child process, then
 continues. Confirm the warning gives a session-level clearing remedy and
 distinguishes persistent User/Machine scope from a session-only value.
 
+### Implementation record (2026-08-16)
+
+Implemented the Phase 5 documentation work as specified. The changes are
+uncommitted and limited to the requested reviewable working-tree edits.
+
+**Landed as specified:** `README.md` now describes both fixed launchers, their
+SecretStore-sourced child injection, inherited-parent warning behavior, Brave
+`api_key_env` naming, and the interactive security boundary. `docs/ThreatModel.md`
+records the all-vault-secret scoped model, the one-token agent exception, both
+accepted residual risks, and the removal of the corpus MCP server. The three
+named `docs/FutureIdeas.md` entries now reflect the shipped flags, the obsolete
+TUI, and the partially implemented key-management outcome. Four new
+`2026-08-16` diary entries record the launch decision and the three bug fixes
+without rewriting the historical entries.
+
+**Deviations and additions:** The case-insensitive `mcp` sweep of
+`docs/FutureIdeas.md` returned no hits, so no additional backlog entry was
+invented. The key-management item uses the existing `Partially Implemented`
+status because rotation support remains open. The launcher command blocks were
+verified as the profile-dependent argument-free scripts already present; no
+`pwsh -NoProfile -File` recommendation or `cargo run -p harvester_app` prose
+was added. The three bug fixes are top-level diary entries, following the
+diary's entry template, rather than the sub-entries described in the phase text.
+
+**Verification results:** `cargo build` passed. `git diff --check` passed with
+only Git's existing LF-to-CRLF conversion warnings. `git status --short` shows
+only `README.md`, `docs/ThreatModel.md`, `docs/FutureIdeas.md`,
+`docs/EngineeringDiary.md`, and this plan. `git submodule status` reports
+`src/CommanDuctUI` unmoved at `0fcffba`.
+`Invoke-Pester -Path .\scripts\tests -CI`, run plainly from the repository
+root with no configuration changes, reports 92 passed, 0 failed, and 0 skipped.
+The earlier registry `SecurityException` was an artifact of the implementing
+agent's sandbox, not a repository condition. No launcher was run.
+`cargo clippy` and `cargo fmt` were not run because this phase made no Rust
+changes, as permitted by the repository instructions.
+
+**Still outstanding for the user:** run `codex mcp remove harvester-mcp` (or the
+equivalent) if the server was registered globally in Codex, restart Claude Code
+and Codex, and confirm neither client reports or lists the stale corpus server.
+Separately and outside this plan, `src/CommanDuctUI/Agents.md:7` still carries
+the stale launcher-mirroring rule identified in Phase 4. Also complete the
+interactive check above: in a fresh terminal, run `Unlock-Secrets`, launch
+`.\scripts\Start-HarvesterBatch.ps1`, and confirm the inherited-variable warning
+and its session-level clearing guidance. These actions require the user's
+interactive environment and remain intentionally unperformed by agents.
+
 ## Documents this work updates
 
 | Document | Why | Phase |

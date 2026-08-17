@@ -1,12 +1,12 @@
 Structured threat model covering:
 
-1. **Assets**: downloaded content, output files, persisted state, LLM API keys (sensitive credentials that must never be committed), user's system
+1. **Assets**: downloaded content, output files, persisted state, LLM API keys (sensitive credentials that must never be committed), the encrypted SecretStore vault and its password, user's system
 2. **Trust boundaries**:
    - User input (semi-trusted)
    - Downloaded web content (untrusted)
    - Persisted state (untrusted for side effects — may be hand-edited or corrupted)
    - LLM API responses (untrusted, Phase 1+)
-   - LLM API keys and provisioning secrets (confidential trust boundary)
+   - LLM API keys and provisioning secrets (confidential trust boundary; the SecretStore password prompt is the boundary for scoped retrieval)
 3. **Threat categories** with mitigations:
    - SSRF → URL policy module (Part 4)
    - Content injection (frontmatter) → sanitization (Part 2)
@@ -15,11 +15,16 @@ Structured threat model covering:
    - Prompt injection via article content → nonce-delimited rendering, DTO validation, replay auditing (Phase 1+)
    - Data exfiltration via prompt injection (LLM output leak) → strict validation, result gating, replay records for forensic review
    - Resource exhaustion → session quotas, per-URL limits
+   - Secret inheritance into agent-controlled processes → every vault secret follows the scoped model: launchers inject only the explicitly needed secret into the launched child, and do not inherit vault secrets into a process an agent controls or can spawn. The SecretStore password prompt must be typed into a session the user started. The one deliberate exception is that an agent may hold exactly the single token it uses to authenticate to its own model provider, because there is nowhere else for that credential to live.
+   - Agent-modified launcher, helper, or application code → accepted residual risk: an agent can change source that the user subsequently runs with real keys. The user accepts this because code changes are reviewable and reviewed before they are run, whereas environment inheritance is invisible and automatic.
+   - Persistent parent key variables → accepted residual risk: Windows User-scope or Machine-scope values defeat the inheritance guarantee entirely. This user deliberately keeps `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` at User scope because other applications depend on them; the launchers therefore warn rather than refuse and pass those inherited values to `cargo build` and the child process.
+   - Long-lived key-bearing research service → the corpus MCP server is gone, so no long-lived key-bearing process answers agent questions.
 4. **System invariants**:
    - Untrusted content is never interpolated into structured formats without sanitization
    - Persisted data is untrusted input for side effects
    - LLM outputs and replay payloads are advisory only and must be treated as tainted (Phase 1+)
    - LLM API keys are never checked into source and must be rotated/encrypted in production
+   - Vault secrets are scoped per launched process; the rule applies to every vault secret, not only Harvester keys
    - Side effects require passing through `EffectRunner` policy checks
    - All resource consumption is bounded
 5. **Lessons learned** (from review):

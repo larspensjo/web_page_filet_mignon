@@ -2137,3 +2137,34 @@ Context: The corpus server was the only component needing a long-lived key-beari
 Change: Removed the corpus server as a workspace member, along with its launchers, project configuration, and agent skill. Corpus research guidance now tells agents to grep the article Markdown files directly and identifies `output/harvester-corpus.json` as a layout and schema-version marker rather than an article index.
 Evidence: The remaining corpus files are directly readable from each worktree's `output/` folder, and the SmartQuery checklist is marked obsolete because its unchecked work targeted the removed server.
 Refs: crates/harvester_mcp/, scripts/Start-HarvesterMcp.ps1, scripts/Test-HarvesterMcpSmoke.ps1, .mcp.json, .agents/skills/harvester-mcp-research/, Cargo.toml, README.md, Agents.md, docs/SmartQueryCandidateFilteringChecklist.md, .claude/settings.local.json
+
+## 2026-08-16 - Fixed-policy SecretStore launch boundary
+Type: Implementation
+Context: The batch TUI was removed because the Harvester launch policy is fixed and should be easy to audit. Harvested article content flows into agent context, while environment variables are inherited downward, so vault retrieval must require a SecretStore password typed into a session the user started.
+Change: Replaced the TUI with two argument-free scripts: one for `harvester_app` and one for `harvester_batch`, each encoding its fixed package, runtime arguments, and scoped SecretStore environment map. The intended boundary is that vault secrets are never added to an environment an LLM coding agent controls or can spawn. The user accepts two residual risks: an agent can modify launcher, helper, or application source that the user later runs with real keys, because code changes are reviewable and reviewed while inheritance is invisible and automatic; and persistent Windows User-scope or Machine-scope key variables defeat the guarantee. This user deliberately keeps `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` at User scope for other applications, so the launchers warn rather than refuse and pass those inherited values to `cargo build` and the child process. The one deliberate exception is exactly one token per agent, the token used to authenticate to its own model provider because there is nowhere else for it to live.
+Evidence: `scripts/tests/HarvesterLaunch.Tests.ps1` covers scoped maps, inherited-key warnings, and launcher exit-code channels; the profile repository's `Tests/SecretLaunch.Tests.ps1` suite covers exact secret maps and child exit-code preservation; `Invoke-Pester -Path .\scripts\tests -CI` run plainly from the repository root reports 92 passed, 0 failed, and 0 skipped.
+Refs: scripts/Start-HarvesterApp.ps1, scripts/Start-HarvesterBatch.ps1, scripts/lib/HarvesterLaunch.psm1, scripts/tests/HarvesterLaunch.Tests.ps1, SecretLaunch module, Tests/SecretLaunch.Tests.ps1, Invoke-WithSecretMap, Invoke-ClaudeDeepSeek, Invoke-ClaudeKimi, docs/ThreatModel.md
+
+## 2026-08-16 - Stop over-injecting the agent credential
+Type: Bug Fix
+Context: `Invoke-ClaudeDeepSeek` handed the Claude Code process every secret in the store instead of only the token needed for its model-provider authentication.
+Change: Scoped `Invoke-ClaudeDeepSeek` to an explicit one-secret map through `Invoke-WithSecretMap`; the child now receives exactly one token.
+Lessons Learned: A convenience path that defaults to the whole secret registry turns an ordinary wrapper into a credential-disclosure boundary. The consumer's required environment name must be selected at the call site.
+Prevention: Keep secret lists explicit, make the no-secret default empty, and test each wrapper's child environment as an exact map rather than checking only for the presence of its expected token.
+Refs: SecretLaunch module, Invoke-ClaudeDeepSeek, Invoke-WithSecretMap
+
+## 2026-08-16 - Preserve distinct child exit codes
+Type: Bug Fix
+Context: `$PSNativeCommandUseErrorActionPreference` caused every non-zero native child exit to be treated as an error and flattened to exit code `1`.
+Change: Preserved `Stop` for cmdlet failures while preventing the native-command preference from converting distinct child exit codes into a catch-path failure code.
+Lessons Learned: PowerShell's error preference and native process exit status are separate channels; combining them destroys the child program's diagnostic contract.
+Prevention: Keep the native-command preference explicit around the invocation and test several distinct non-zero child exit codes, not only success versus failure.
+Refs: SecretLaunch module, Invoke-WithSecretMap
+
+## 2026-08-16 - Keep exit codes off the success stream
+Type: Bug Fix
+Context: Returning an exit code on the success stream mixed it with runtime stdout, so callers could receive an array of application output and a number instead of one status.
+Change: Kept runtime stdout visible while reporting the child exit code through the dedicated out-parameter and interactive exit-code channel.
+Lessons Learned: A process status is control data, not pipeline output; putting it on the success stream makes ordinary application output change the caller's exit behavior.
+Prevention: Keep the module contract free of success-stream exit codes, require the explicit exit-code out-parameter, and test noisy stdout with a distinct non-zero status.
+Refs: SecretLaunch module, Invoke-WithSecretMap, Invoke-ClaudeDeepSeek, Invoke-ClaudeKimi

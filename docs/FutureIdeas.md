@@ -93,7 +93,7 @@ SuccessCriteria:
 - Exit code reflects cycle outcome (success, partial, fatal).
 
 #### [FI-Architecture-BatchOrchestration-0007] harvester_batch checkpoint CLI flags for briefing window management
-Status: Candidate
+Status: Implemented
 TopLevel: Architecture
 SubLevel: BatchOrchestration
 Priority: P1
@@ -104,13 +104,13 @@ Origin:
 - SourceSection: Blockers — item 5 (Checkpoint CLI flags absent until Slice A ships)
 - Captured: 2026-02-21
 Tags: [batch, checkpoint, briefing, cli, slice-a]
-Summary: Add `--set-briefing-since`, `--set-briefing-since-now`, and `--clear-briefing-since` CLI flags to `crates/harvester_batch/src/cli.rs`. The TUI launcher probes for all three at startup and gracefully degrades with a "Checkpoint CLI not yet available" message until the flags ship.
-Rationale: The TUI launcher's checkpoint management UI and startup probe are fully implemented; shipping the Rust CLI flags is the only remaining step to unlock the checkpoint action items.
+Summary: Add `--set-briefing-since`, `--set-briefing-since-now`, and `--clear-briefing-since` CLI flags to `crates/harvester_batch/src/cli.rs` for direct checkpoint management.
+Rationale: The shipped flags provide checkpoint management directly against the built batch binary without a launcher UI dependency.
 SuccessCriteria:
 - `harvester_batch --set-briefing-since <timestamp>` persists the briefing window start.
 - `harvester_batch --set-briefing-since-now` sets briefing-since to the current timestamp.
 - `harvester_batch --clear-briefing-since` removes the briefing window constraint.
-- The TUI launcher startup probe detects all three flags and enables checkpoint action items.
+- The launcher probe was removed; the flags are invoked directly against the built binary.
 Related: FI-Architecture-BatchOrchestration-0006, FI-LLM-Briefing-0001
 
 ### DownloadPipeline
@@ -1327,7 +1327,7 @@ SuccessCriteria:
 ### KeyManagement
 
 #### [FI-Security-KeyManagement-0001] Secure API key management
-Status: Candidate
+Status: Partially Implemented
 TopLevel: Security
 SubLevel: KeyManagement
 Priority: P1
@@ -1338,11 +1338,11 @@ Origin:
 - SourceSection: Cross-cutting future work
 - Captured: 2026-02-12
 Tags: [security, secrets]
-Summary: Move API keys from environment variables to encrypted configuration with rotation support.
-Rationale: Reduces exposure risk and supports operational key rotation.
+Summary: Use scoped per-launch environment variables sourced from an encrypted SecretStore vault instead of encrypted application configuration; rotation support remains open.
+Rationale: The scoped SecretStore launch model limits vault-secret inheritance while preserving the existing application configuration shape, but it does not yet provide key rotation support.
 SuccessCriteria:
-- API keys load from an encrypted configuration store.
-- Key rotation can be performed without code changes.
+- API keys are sourced per launch from an encrypted SecretStore vault rather than encrypted application configuration.
+- Key rotation can be performed without code changes. (Open.)
 
 ### PolicyConfig
 
@@ -2027,7 +2027,7 @@ SuccessCriteria:
 - Using the override bypasses reuse checks and runs triage against the current corpus.
 
 #### [FI-UX-SessionControls-0004] Confirm guard before clearing briefing checkpoint in TUI launcher
-Status: Candidate
+Status: Obsolete
 TopLevel: UX
 SubLevel: SessionControls
 Priority: P3
@@ -2039,7 +2039,7 @@ Origin:
 - Captured: 2026-02-21
 Tags: [tui, checkpoint, confirmation, safety]
 Summary: Add an inline confirmation prompt before executing the "Clear checkpoint" action in the TUI launcher, while keeping "Run batch" and other run actions immediately executable.
-Rationale: Clearing the briefing checkpoint is irreversible and causes the next briefing to include all-time items; a confirm step prevents accidental activation while preserving quick keyboard flow for run actions.
+Rationale: Clearing the briefing checkpoint is irreversible and causes the next briefing to include all-time items; a confirm step prevents accidental activation while preserving quick keyboard flow for run actions. Obsolete because the TUI launcher was removed in favor of fixed launch scripts.
 SuccessCriteria:
 - Pressing Enter on "Clear checkpoint" shows an inline Y/n prompt before executing.
 - Pressing Enter on "Run batch" or "Run dry-run" launches immediately with no confirm step.
