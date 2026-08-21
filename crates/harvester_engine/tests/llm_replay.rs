@@ -1,7 +1,7 @@
 use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::{
-    content_hash, load_replay_record, persist_replay_record, PromptId, ReplayProvider,
-    ReplayRecord, TokenUsage,
+    content_hash, load_replay_record, persist_replay_record, replay_filename_request_id,
+    sanitize_replay_request_id, PromptId, ReplayProvider, ReplayRecord, TokenUsage,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -69,6 +69,43 @@ fn persist_appends_suffix_when_collision() {
     assert_ne!(first, second);
     assert!(first.exists());
     assert!(second.exists());
+}
+
+#[test]
+fn replay_filename_request_id_roundtrips_persisted_filenames() {
+    let dir = tempdir().unwrap();
+    // Request id deliberately contains "--" to stress the filename grammar.
+    let record = mock_record("batch-b1--triage-abc");
+    let first = persist_replay_record(dir.path(), &record).unwrap();
+    let second = persist_replay_record(dir.path(), &record).unwrap();
+    for path in [first, second] {
+        let name = path.file_name().unwrap().to_str().unwrap();
+        assert_eq!(
+            replay_filename_request_id(name),
+            Some("batch-b1--triage-abc")
+        );
+    }
+}
+
+#[test]
+fn replay_filename_request_id_returns_sanitized_form_of_unsafe_ids() {
+    let dir = tempdir().unwrap();
+    let record = mock_record("batch:b1/x");
+    let path = persist_replay_record(dir.path(), &record).unwrap();
+    let name = path.file_name().unwrap().to_str().unwrap();
+    let sanitized = sanitize_replay_request_id("batch:b1/x");
+    assert_eq!(replay_filename_request_id(name), Some(sanitized.as_str()));
+}
+
+#[test]
+fn replay_filename_request_id_rejects_non_record_filenames() {
+    assert_eq!(replay_filename_request_id("manifest.json"), None);
+    assert_eq!(replay_filename_request_id("notes.txt"), None);
+    assert_eq!(replay_filename_request_id("--deadbeef.json"), None);
+    assert_eq!(
+        replay_filename_request_id("batch-b1--deadbeef.json.tmp"),
+        None
+    );
 }
 
 #[test]

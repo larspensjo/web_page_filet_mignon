@@ -87,6 +87,25 @@ pub fn persist_replay_record(
     unreachable!("append-only filename generation should not loop forever")
 }
 
+/// Returns the sanitized request id encoded in a replay record filename
+/// produced by [`persist_replay_record`], or `None` for any other file.
+///
+/// This allows callers to index a replay directory by request id from the
+/// directory listing alone, without opening or parsing any record.
+pub fn replay_filename_request_id(file_name: &str) -> Option<&str> {
+    let stem = file_name.strip_suffix(".json")?;
+    // The hash prefix after the last "--" is hex, so the id is everything
+    // before it even when the id itself contains "--".
+    let (request_id, _) = stem.rsplit_once("--")?;
+    (!request_id.is_empty()).then_some(request_id)
+}
+
+/// Returns the sanitized form of a request id as it appears in replay record
+/// filenames. Matches what [`replay_filename_request_id`] extracts.
+pub fn sanitize_replay_request_id(value: &str) -> String {
+    sanitize_request_id(value)
+}
+
 /// Load a replay record from disk.
 pub fn load_replay_record(path: &Path) -> Result<ReplayRecord, String> {
     let content =

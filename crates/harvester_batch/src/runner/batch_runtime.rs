@@ -226,7 +226,10 @@ pub(crate) fn persist_batch_replay_records(
 ) {
     for entry in entries {
         let replay_line_id = format!("batch-{}-{}", entry.batch_id, entry.custom_id);
-        if batch.recorded_replay_lines.contains(&replay_line_id) {
+        // The index holds filename-derived (sanitized) ids, so probe and
+        // insert with the same form.
+        let replay_line_key = harvester_engine::llm::sanitize_replay_request_id(&replay_line_id);
+        if batch.recorded_replay_lines.contains(&replay_line_key) {
             continue;
         }
         let (raw_response, usage, resolved_model, validated_output, validation_error) = match &entry
@@ -306,7 +309,7 @@ pub(crate) fn persist_batch_replay_records(
             &record,
         ) {
             Ok(_) => {
-                batch.recorded_replay_lines.insert(replay_line_id);
+                batch.recorded_replay_lines.insert(replay_line_key);
                 batch.realized_cost_microdollars = batch
                     .realized_cost_microdollars
                     .saturating_add(cost_microdollars);
@@ -324,15 +327,24 @@ pub(crate) fn persist_batch_replay_records(
     }
 }
 
+/// Indexes already-persisted batch replay lines from the directory listing
+/// alone. Replay filenames encode the request id, so opening or parsing the
+/// records (hundreds of MB across tens of thousands of files) is unnecessary
+/// and once stalled startup for minutes.
 fn load_recorded_batch_replay_lines(dir: &std::path::Path) -> HashSet<String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return HashSet::new();
     };
     entries
         .filter_map(Result::ok)
-        .filter_map(|entry| harvester_engine::llm::load_replay_record(&entry.path()).ok())
-        .filter(|record| record.request_id.starts_with("batch-"))
-        .map(|record| record.request_id)
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .and_then(harvester_engine::llm::replay_filename_request_id)
+                .filter(|request_id| request_id.starts_with("batch-"))
+                .map(str::to_owned)
+        })
         .collect()
 }
 
@@ -485,4 +497,33 @@ pub(super) fn invalid_collected_custom_ids(
             harvester_core::CollectedOutcome::LineError { .. } => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod replay_index_tests {
+    use super::*;
+
+    #[test]
+    fn replay_line_index_is_built_from_filenames_without_reading_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "batch-b1-triage-abc--deadbeef.json",
+            "batch-b1-triage-abc--deadbeef-1.json",
+        ] {
+            std::fs::write(dir.path().join(name), "not json").unwrap();
+        }
+        // Non-batch replay records and stray files must not enter the index.
+        std::fs::write(dir.path().join("req-42--cafe0123.json"), "not json").unwrap();
+        std::fs::write(dir.path().join("README.txt"), "ignore").unwrap();
+
+        let lines = load_recorded_batch_replay_lines(dir.path());
+
+        assert_eq!(lines, HashSet::from(["batch-b1-triage-abc".to_string()]));
+    }
+
+    #[test]
+    fn missing_replay_dir_yields_empty_index() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load_recorded_batch_replay_lines(&dir.path().join("absent")).is_empty());
+    }
 }

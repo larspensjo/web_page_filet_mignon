@@ -52,7 +52,7 @@ use live_progress::LiveBatchProgress;
 pub(crate) use reporting::microdollars_to_display;
 use reporting::{
     format_awaiting_batch_line, format_drain_summary, format_optional_cycle_diagnostics,
-    print_final_summary, print_poll_stats, CycleCounts,
+    format_startup_notice, print_final_summary, print_poll_stats, CycleCounts,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -258,6 +258,16 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     // Create message channel
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
+
+    // Hydration takes seconds on a large corpus; say so instead of sitting
+    // silent until the dashboard exists. Non-interactive runs keep their
+    // existing "[batch] started" line below.
+    if interactive {
+        println!(
+            "{}",
+            format_startup_notice(batch_mode_label(args.batch_api_enabled(), args.drain))
+        );
+    }
 
     let (mut state, effect_runner, mut batch_runtime, enable_ai_orchestration) =
         bootstrap::prepare_runtime(&paths, &args, msg_tx.clone())?;
