@@ -10,7 +10,7 @@ use harvester_core::{
     update, AppTab, AppViewModel, Effect, JobListScope, JobResultKind, LayoutViewModel, LeftTab,
     Msg, PromptLabStage, SignalCandidateState, TrendCategory,
 };
-use harvester_io::PersistenceSnapshot;
+use harvester_io::{host_bootstrap::pump_pre_triage_refresh, PersistenceSnapshot};
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_ESCAPE, VK_RETURN};
 
 use super::archive_dialog::{
@@ -74,7 +74,7 @@ impl AppEventHandler {
         let mut persist_overrides_needed = false;
         let mut persist_blacklist_needed = false;
         let mut archive_failure_notice: Option<(String, String)> = None;
-        let mut refresh_evaluation_dispatched = false;
+        let refresh_evaluation_dispatched;
         let mut persistence_enqueued = false;
         let mut queued_effects = Vec::new();
         let (maybe_render, render_mode, render_snapshot_ms, rendered_job_count) = {
@@ -119,21 +119,10 @@ impl AppEventHandler {
                 any_dirty |= state.consume_dirty();
             }
 
-            if let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request()
-            {
-                refresh_evaluation_dispatched = true;
-                let ordered_urls = state.ordered_completed_job_urls_snapshot();
-                let (next_state, effects) = update(
-                    state,
-                    Msg::EvaluatePreTriageRefresh {
-                        ordered_urls,
-                        triggered_by_job_done,
-                    },
-                );
-                state = next_state;
-                queued_effects.extend(effects);
-                any_dirty |= state.consume_dirty();
-            }
+            let (effects, dispatched) = pump_pre_triage_refresh(&mut state);
+            refresh_evaluation_dispatched = dispatched;
+            queued_effects.extend(effects);
+            any_dirty |= state.consume_dirty();
 
             let persistence_snapshot =
                 if persist_completed_needed || persist_overrides_needed || persist_blacklist_needed

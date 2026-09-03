@@ -1,12 +1,14 @@
 use crate::cli::Args;
 use crate::runner::{
-    apply_signal_candidate_selection_settings, build_effect_runner, exit_code_with_shutdown,
+    apply_signal_candidate_selection_settings, batch_host_llm_defaults, exit_code_with_shutdown,
     is_ai_orchestration_enabled, maybe_dispatch_batch_ai_orchestration, should_log_batch_msg,
-    summarize_batch_msg, CycleOutcome, DispatchLoopOptions, MAX_DISPATCH_INBOX_BATCH,
+    summarize_batch_msg, CycleOutcome, DispatchLoopOptions, BATCH_EMPTY_API_KEY_WARNING,
+    BATCH_MISSING_API_KEY_WARNING, MAX_DISPATCH_INBOX_BATCH,
 };
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, CompletedJobSnapshot, ImportPhase, Msg};
 use harvester_io::{
+    host_bootstrap::{build_effect_runner, pump_pre_triage_refresh},
     load_completed_jobs, load_signal_candidate_cache, load_signal_candidate_overrides,
     load_summary_cache, persist_completed_jobs, EffectRunner, NoOpPlatformHandler, RuntimePaths,
 };
@@ -70,19 +72,19 @@ pub(crate) fn run_import_mode(
 
     let enable_ai_orchestration = is_ai_orchestration_enabled();
     let platform_handler = Box::new(NoOpPlatformHandler);
-    let (effect_runner, _) = build_effect_runner(
+    let defaults = batch_host_llm_defaults();
+    let (effect_runner, _, _) = build_effect_runner(
         paths,
         msg_tx.clone(),
         args.llm_concurrency,
+        &defaults,
         platform_handler,
-        false,
+        BATCH_MISSING_API_KEY_WARNING,
+        Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
 
     // Hydrate prompt/template metadata needed for downstream work.
-    effect_runner.enqueue(vec![
-        harvester_core::Effect::LoadPromptTemplateFiles,
-        harvester_core::Effect::LoadLlmMetadata,
-    ]);
+    effect_runner.enqueue(vec![harvester_core::Effect::LoadPromptTemplateFiles]);
     let (new_state, startup_effects) = update(state, Msg::StartupHydrationRequested);
     state = new_state;
     if !startup_effects.is_empty() {
@@ -274,20 +276,8 @@ fn run_import_dispatch_loop(
                     }
                 }
 
-                if let Some(triggered_by_job_done) =
-                    state.take_pre_triage_refresh_evaluation_request()
-                {
-                    let ordered_urls = state.ordered_completed_job_urls_snapshot();
-                    let (new_state, effects) = update(
-                        state.clone(),
-                        Msg::EvaluatePreTriageRefresh {
-                            ordered_urls,
-                            triggered_by_job_done,
-                        },
-                    );
-                    *state = new_state;
-                    queued_effects.extend(effects);
-                }
+                let (effects, _) = pump_pre_triage_refresh(state);
+                queued_effects.extend(effects);
 
                 if !queued_effects.is_empty() {
                     effect_runner.enqueue(queued_effects);

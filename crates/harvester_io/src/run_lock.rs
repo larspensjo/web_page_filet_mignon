@@ -5,7 +5,14 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-const LOCK_FILENAME: &str = ".harvester_batch.lock";
+/// Names and messages that identify one independently exclusive host.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LockIdentity {
+    pub filename: &'static str,
+    pub log_tag: &'static str,
+    pub actor_description: &'static str,
+    pub force_unlock_hint: Option<&'static str>,
+}
 
 /// Lock metadata stored in the lock file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +34,7 @@ struct LockMetadata {
 pub struct LockGuard {
     lock_path: PathBuf,
     owner: String,
+    identity: LockIdentity,
     file: Option<File>,
 }
 
@@ -37,7 +45,7 @@ impl Drop for LockGuard {
         drop(self.file.take());
 
         if !self.lock_path.exists() {
-            engine_info!("[batch-lock] Released lock");
+            engine_info!("{} Released lock", self.identity.log_tag);
             return;
         }
 
@@ -48,33 +56,43 @@ impl Drop for LockGuard {
             Ok(content) => match serde_json::from_str::<LockMetadata>(&content) {
                 Ok(meta) if meta.owner == self.owner => {
                     if let Err(err) = fs::remove_file(&self.lock_path) {
-                        engine_warn!("[batch-lock] Failed to remove lock file: {}", err);
+                        engine_warn!(
+                            "{} Failed to remove lock file: {}",
+                            self.identity.log_tag,
+                            err
+                        );
                     } else {
-                        engine_info!("[batch-lock] Released lock");
+                        engine_info!("{} Released lock", self.identity.log_tag);
                     }
                 }
                 Ok(meta) => {
                     engine_warn!(
-                        "[batch-lock] Lock ownership changed (expected: {}, found: {}), not removing",
+                        "{} Lock ownership changed (expected: {}, found: {}), not removing",
+                        self.identity.log_tag,
                         self.owner,
                         meta.owner
                     );
                 }
                 Err(err) => {
                     engine_warn!(
-                        "[batch-lock] Failed to parse lock metadata on drop: {}",
+                        "{} Failed to parse lock metadata on drop: {}",
+                        self.identity.log_tag,
                         err
                     );
                 }
             },
             Err(err) => {
-                engine_warn!("[batch-lock] Failed to read lock file on drop: {}", err);
+                engine_warn!(
+                    "{} Failed to read lock file on drop: {}",
+                    self.identity.log_tag,
+                    err
+                );
             }
         }
     }
 }
 
-/// Try to acquire the batch run lock.
+/// Try to acquire a host-specific lock.
 ///
 /// Exclusion comes from holding the lock file open, not from the file existing:
 /// the open fails while another run holds the handle, and succeeds once that
@@ -88,8 +106,12 @@ impl Drop for LockGuard {
 /// Returns a guard that releases the lock by closing the handle, and that
 /// removes a surviving lock file only if the ownership token still matches
 /// (prevents stale guards from removing newer locks).
-pub fn acquire_lock(output_dir: &Path, force: bool) -> Result<LockGuard, String> {
-    let lock_path = output_dir.join(LOCK_FILENAME);
+pub fn acquire_lock(
+    output_dir: &Path,
+    identity: LockIdentity,
+    force: bool,
+) -> Result<LockGuard, String> {
+    let lock_path = output_dir.join(identity.filename);
 
     // Ensure output directory exists
     fs::create_dir_all(output_dir)
@@ -106,13 +128,17 @@ pub fn acquire_lock(output_dir: &Path, force: bool) -> Result<LockGuard, String>
     if force && lock_path.exists() {
         match &previous {
             Some(meta) => engine_warn!(
-                "[batch-lock] Force-unlocking existing lock (pid: {}, owner: {}, started: {})",
+                "{} Force-unlocking existing lock (pid: {}, owner: {}, started: {})",
+                identity.log_tag,
                 meta.pid,
                 meta.owner,
                 meta.started_utc
             ),
             None => {
-                engine_warn!("[batch-lock] Force-unlocking existing lock (corrupted or unreadable)")
+                engine_warn!(
+                    "{} Force-unlocking existing lock (corrupted or unreadable)",
+                    identity.log_tag
+                )
             }
         }
 
@@ -127,7 +153,7 @@ pub fn acquire_lock(output_dir: &Path, force: bool) -> Result<LockGuard, String>
 
     let mut file = match open_lock_handle(&lock_path) {
         Ok(file) => file,
-        Err(err) if is_lock_held(&err) => return Err(describe_active_lock(&lock_path)),
+        Err(err) if is_lock_held(&err) => return Err(describe_active_lock(&lock_path, identity)),
         Err(err) if err.kind() == io::ErrorKind::PermissionDenied => {
             return Err("Permission denied writing lock file".to_string());
         }
@@ -137,14 +163,16 @@ pub fn acquire_lock(output_dir: &Path, force: bool) -> Result<LockGuard, String>
     if reclaiming {
         match &previous {
             Some(meta) => engine_warn!(
-                "[batch-lock] Reclaimed lock left by a run that is no longer holding it \
+                "{} Reclaimed lock left by a run that is no longer holding it \
                  (pid: {}, owner: {}, started: {})",
+                identity.log_tag,
                 meta.pid,
                 meta.owner,
                 meta.started_utc
             ),
             None => engine_warn!(
-                "[batch-lock] Reclaimed lock file with corrupted or unreadable metadata"
+                "{} Reclaimed lock file with corrupted or unreadable metadata",
+                identity.log_tag
             ),
         }
     }
@@ -165,11 +193,16 @@ pub fn acquire_lock(output_dir: &Path, force: bool) -> Result<LockGuard, String>
     file.flush()
         .map_err(|err| format!("Failed to flush lock metadata: {}", err))?;
 
-    engine_info!("[batch-lock] Acquired lock (pid: {})", std::process::id());
+    engine_info!(
+        "{} Acquired lock (pid: {})",
+        identity.log_tag,
+        std::process::id()
+    );
 
     Ok(LockGuard {
         lock_path,
         owner,
+        identity,
         file: Some(file),
     })
 }
@@ -184,14 +217,22 @@ fn read_lock_metadata(lock_path: &Path) -> Option<LockMetadata> {
 ///
 /// Re-reads the metadata so a holder that had not finished writing it when this
 /// acquisition began is still reported by identity where possible.
-fn describe_active_lock(lock_path: &Path) -> String {
+fn describe_active_lock(lock_path: &Path, identity: LockIdentity) -> String {
     match read_lock_metadata(lock_path) {
-        Some(meta) => format!(
-            "Another batch run is already active (pid: {}, started: {}, owner: {}). \
-             Use --force-unlock to override.",
-            meta.pid, meta.started_utc, meta.owner
-        ),
-        None => "Lock file exists but is unreadable. Use --force-unlock to override.".to_string(),
+        Some(meta) => {
+            let hint = identity
+                .force_unlock_hint
+                .map(|hint| format!(" {hint}"))
+                .unwrap_or_default();
+            format!(
+                "Another {} is already active (pid: {}, started: {}, owner: {}).{}",
+                identity.actor_description, meta.pid, meta.started_utc, meta.owner, hint
+            )
+        }
+        None => identity
+            .force_unlock_hint
+            .map(|hint| format!("Lock file exists but is unreadable. {hint}"))
+            .unwrap_or_else(|| "Lock file exists but is unreadable.".to_string()),
     }
 }
 
@@ -265,13 +306,24 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    const BATCH_LOCK: LockIdentity = LockIdentity {
+        filename: ".harvester_batch.lock",
+        log_tag: "[batch-lock]",
+        actor_description: "batch run",
+        force_unlock_hint: Some("Use --force-unlock to override."),
+    };
+
+    fn acquire_batch_lock(output_dir: &Path, force: bool) -> Result<LockGuard, String> {
+        acquire_lock(output_dir, BATCH_LOCK, force)
+    }
+
     #[test]
     fn acquire_lock_succeeds_when_no_lock_exists() {
         let dir = tempdir().unwrap();
-        let guard = acquire_lock(dir.path(), false).expect("should acquire");
+        let guard = acquire_batch_lock(dir.path(), false).expect("should acquire");
 
         // Lock file should exist
-        let lock_path = dir.path().join(LOCK_FILENAME);
+        let lock_path = dir.path().join(BATCH_LOCK.filename);
         assert!(lock_path.exists());
 
         // Should be able to read metadata
@@ -288,26 +340,26 @@ mod tests {
     #[test]
     fn acquire_lock_fails_when_lock_exists() {
         let dir = tempdir().unwrap();
-        let _guard1 = acquire_lock(dir.path(), false).expect("first acquire");
+        let _guard1 = acquire_batch_lock(dir.path(), false).expect("first acquire");
 
-        let err = acquire_lock(dir.path(), false).expect_err("second should fail");
+        let err = acquire_batch_lock(dir.path(), false).expect_err("second should fail");
         assert!(err.contains("already active"));
     }
 
     #[test]
     fn force_unlock_removes_existing_lock() {
         let dir = tempdir().unwrap();
-        let guard1 = acquire_lock(dir.path(), false).expect("first acquire");
+        let guard1 = acquire_batch_lock(dir.path(), false).expect("first acquire");
 
         // Manually drop first guard to release it
         drop(guard1);
 
         // Create a stale lock manually
-        let lock_path = dir.path().join(LOCK_FILENAME);
+        let lock_path = dir.path().join(BATCH_LOCK.filename);
         fs::write(&lock_path, r#"{"pid": 99999, "started_utc": "2020-01-01T00:00:00Z", "owner": "stale", "command": null}"#).unwrap();
 
         // Force unlock should succeed
-        let guard2 = acquire_lock(dir.path(), true).expect("force unlock should work");
+        let guard2 = acquire_batch_lock(dir.path(), true).expect("force unlock should work");
         assert!(lock_path.exists());
         drop(guard2);
         assert!(!lock_path.exists());
@@ -320,7 +372,7 @@ mod tests {
     fn lock_left_by_a_departed_run_is_reclaimed_without_force() {
         engine_logging::initialize_for_tests();
         let dir = tempdir().unwrap();
-        let lock_path = dir.path().join(LOCK_FILENAME);
+        let lock_path = dir.path().join(BATCH_LOCK.filename);
 
         // No handle is open on this file: its owner is gone.
         fs::write(
@@ -329,7 +381,7 @@ mod tests {
         )
         .unwrap();
 
-        let guard = acquire_lock(dir.path(), false).expect("stale lock should be reclaimed");
+        let guard = acquire_batch_lock(dir.path(), false).expect("stale lock should be reclaimed");
 
         let meta = read_lock_metadata(&lock_path).expect("metadata should be rewritten");
         assert_eq!(meta.pid, std::process::id());
@@ -344,9 +396,9 @@ mod tests {
     #[test]
     fn lock_held_by_a_live_run_is_still_refused_with_holder_identity() {
         let dir = tempdir().unwrap();
-        let guard = acquire_lock(dir.path(), false).expect("first acquire");
+        let guard = acquire_batch_lock(dir.path(), false).expect("first acquire");
 
-        let err = acquire_lock(dir.path(), false).expect_err("second should fail");
+        let err = acquire_batch_lock(dir.path(), false).expect_err("second should fail");
         assert!(
             err.contains("already active"),
             "unexpected message: {}",
@@ -368,7 +420,7 @@ mod tests {
     #[test]
     fn closing_the_handle_removes_the_lock_file_without_a_guard() {
         let dir = tempdir().unwrap();
-        let lock_path = dir.path().join(LOCK_FILENAME);
+        let lock_path = dir.path().join(BATCH_LOCK.filename);
 
         let file = open_lock_handle(&lock_path).expect("open lock handle");
         assert!(lock_path.exists());
@@ -403,14 +455,14 @@ mod tests {
         let barrier1 = Arc::clone(&barrier);
         let handle1 = thread::spawn(move || {
             barrier1.wait();
-            acquire_lock(&dir1, false)
+            acquire_batch_lock(&dir1, false)
         });
 
         let dir2 = Arc::clone(&dir_path);
         let barrier2 = Arc::clone(&barrier);
         let handle2 = thread::spawn(move || {
             barrier2.wait();
-            acquire_lock(&dir2, false)
+            acquire_batch_lock(&dir2, false)
         });
 
         let result1 = handle1.join().unwrap();
@@ -437,8 +489,8 @@ mod tests {
         let dir = tempdir().unwrap();
 
         // First acquire
-        let guard1 = acquire_lock(dir.path(), false).expect("first acquire");
-        let lock_path = dir.path().join(LOCK_FILENAME);
+        let guard1 = acquire_batch_lock(dir.path(), false).expect("first acquire");
+        let lock_path = dir.path().join(BATCH_LOCK.filename);
 
         // Read owner from first lock
         let _content1 = fs::read_to_string(&lock_path).unwrap();
@@ -453,7 +505,7 @@ mod tests {
         .unwrap();
 
         // Force unlock should succeed and log the old metadata
-        let guard2 = acquire_lock(dir.path(), true).expect("force unlock should work");
+        let guard2 = acquire_batch_lock(dir.path(), true).expect("force unlock should work");
 
         // New lock should have different owner
         let content2 = fs::read_to_string(&lock_path).unwrap();
@@ -467,10 +519,10 @@ mod tests {
     #[test]
     fn stale_owner_cannot_delete_newly_acquired_lock() {
         let dir = tempdir().unwrap();
-        let lock_path = dir.path().join(LOCK_FILENAME);
+        let lock_path = dir.path().join(BATCH_LOCK.filename);
 
         // First acquire
-        let guard1 = acquire_lock(dir.path(), false).expect("first acquire");
+        let guard1 = acquire_batch_lock(dir.path(), false).expect("first acquire");
 
         // Read owner from first lock
         let content1 = fs::read_to_string(&lock_path).unwrap();
@@ -478,7 +530,7 @@ mod tests {
         let owner1 = meta1.owner.clone();
 
         // Force-unlock and acquire new lock
-        let guard2 = acquire_lock(dir.path(), true).expect("force unlock should work");
+        let guard2 = acquire_batch_lock(dir.path(), true).expect("force unlock should work");
 
         // Verify new lock has different owner
         let content2 = fs::read_to_string(&lock_path).unwrap();
@@ -501,5 +553,26 @@ mod tests {
 
         // Now lock should be removed
         assert!(!lock_path.exists());
+    }
+
+    #[test]
+    fn lock_identity_keeps_hosts_independent_and_describes_the_holder() {
+        const GUI_LOCK: LockIdentity = LockIdentity {
+            filename: ".harvester_gui.lock",
+            log_tag: "[gui-lock]",
+            actor_description: "Harvester window",
+            force_unlock_hint: None,
+        };
+
+        let dir = tempdir().unwrap();
+        let batch_guard = acquire_batch_lock(dir.path(), false).expect("batch lock acquires");
+        let gui_guard = acquire_lock(dir.path(), GUI_LOCK, false).expect("GUI lock acquires");
+
+        let err = acquire_lock(dir.path(), GUI_LOCK, false).expect_err("second GUI lock fails");
+        assert!(err.contains("Another Harvester window is already active"));
+        assert!(err.contains(&std::process::id().to_string()));
+
+        drop(gui_guard);
+        drop(batch_guard);
     }
 }

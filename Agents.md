@@ -44,5 +44,5 @@
 - Include enough context in error logs to identify the failing job, URL, or operation.
 
 ## Diary
-- Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations, and bug fixes with reusable lessons.
-- See the "How to use" section in the beginning.
+- Use `docs/DecisionLog.md` as append-only memory for settled architecture, API, product, technology, workflow, safety, or scope commitments. Consult relevant entries before planning; record reversals as new entries rather than editing old ones.
+- Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations and bug fixes with reusable lessons. See its "How to use" section.

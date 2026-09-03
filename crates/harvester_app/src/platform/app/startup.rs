@@ -1,11 +1,7 @@
 use super::ui;
 use commanductui::{PlatformCommand, WindowId};
-use engine_logging::engine_warn;
 use harvester_core::{update, AiAvailability, AppState, AppViewModel, Effect, LlmQuotaLimits, Msg};
-use harvester_io::{
-    load_blacklist, load_completed_jobs, load_pre_triage_overrides, load_signal_candidate_cache,
-    load_signal_candidate_overrides, load_summary_cache, load_triage_cache, RuntimePaths,
-};
+use harvester_io::{host_bootstrap::hydrate_state_from_disk, RuntimePaths};
 
 fn apply_startup_msg(state: AppState, msg: Msg, startup_effects: &mut Vec<Effect>) -> AppState {
     let (next_state, effects) = update(state, msg);
@@ -50,98 +46,9 @@ pub(super) fn prepare_startup_state(
         );
     }
 
-    // Asynchronous startup hydration begins here. Reducer-owned startup
-    // scheduling stays adjacent to the state transition that emits those effects.
-    state = apply_startup_msg(state, Msg::StartupHydrationRequested, &mut startup_effects);
-
-    let completed = load_completed_jobs(&paths.state_path);
-    if !completed.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::RestoreCompletedJobs(completed),
-            &mut startup_effects,
-        );
-    }
-
-    let summary_cache = load_summary_cache(&paths.summary_cache_path);
-    if !summary_cache.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::SummaryCacheHydrated {
-                cache: summary_cache,
-            },
-            &mut startup_effects,
-        );
-    }
-
-    let triage_cache = load_triage_cache(&paths.triage_cache_path);
-    if !triage_cache.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::TriageCacheHydrated {
-                cache: triage_cache,
-            },
-            &mut startup_effects,
-        );
-    }
-
-    match load_signal_candidate_cache(&paths.signal_candidate_cache_path) {
-        Ok(signal_candidate_cache) if !signal_candidate_cache.is_empty() => {
-            state = apply_startup_msg(
-                state,
-                Msg::SignalCandidateCacheLoaded {
-                    cache: signal_candidate_cache,
-                },
-                &mut startup_effects,
-            );
-        }
-        Ok(_) => {}
-        Err(err) => {
-            engine_warn!(
-                "[signal-cache] failed to hydrate {}: {}",
-                paths.signal_candidate_cache_path.display(),
-                err
-            );
-        }
-    }
-
-    match load_signal_candidate_overrides(&paths.signal_candidate_overrides_path) {
-        Ok(signal_candidate_overrides) if !signal_candidate_overrides.is_empty() => {
-            state = apply_startup_msg(
-                state,
-                Msg::SignalCandidateOverridesLoaded {
-                    overrides: signal_candidate_overrides,
-                },
-                &mut startup_effects,
-            );
-        }
-        Ok(_) => {}
-        Err(err) => {
-            engine_warn!(
-                "[signal-overrides] failed to hydrate {}: {}",
-                paths.signal_candidate_overrides_path.display(),
-                err
-            );
-        }
-    }
-
-    let overrides = load_pre_triage_overrides(&paths.state_path);
-    if !overrides.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::PreTriageOverridesHydrated { overrides },
-            &mut startup_effects,
-        );
-    }
-
-    let blacklist = load_blacklist(&paths.blacklist_path);
-    if !blacklist.is_empty() {
-        state = apply_startup_msg(
-            state,
-            Msg::BlacklistHydrated { state: blacklist },
-            &mut startup_effects,
-        );
-    }
+    let (hydrated_state, hydration_effects) = hydrate_state_from_disk(state, paths);
+    state = hydrated_state;
+    startup_effects.extend(hydration_effects);
 
     (state, startup_effects)
 }

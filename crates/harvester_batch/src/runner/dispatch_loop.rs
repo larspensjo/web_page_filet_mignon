@@ -3,7 +3,7 @@ use super::live_progress::LiveSystemBatchProgress;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, Msg};
-use harvester_io::EffectRunner;
+use harvester_io::{host_bootstrap::pump_pre_triage_refresh, EffectRunner};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -239,20 +239,8 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
                     }
                 }
 
-                if let Some(triggered_by_job_done) =
-                    state.take_pre_triage_refresh_evaluation_request()
-                {
-                    let ordered_urls = state.ordered_completed_job_urls_snapshot();
-                    let (new_state, effects) = update(
-                        state.clone(),
-                        Msg::EvaluatePreTriageRefresh {
-                            ordered_urls,
-                            triggered_by_job_done,
-                        },
-                    );
-                    *state = new_state;
-                    queued_effects.extend(effects);
-                }
+                let (effects, _) = pump_pre_triage_refresh(state);
+                queued_effects.extend(effects);
 
                 if !queued_effects.is_empty() {
                     engine_debug!("[batch] Enqueuing {} effects", queued_effects.len());

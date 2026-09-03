@@ -65,8 +65,10 @@ Key rules:
 
 ## Crates and purposes
 - **harvester_app:** UI, event loop, effect execution, and platform integration.
+- **harvester_batch:** command-line and scheduled batch host orchestration.
 - **harvester_core:** domain state, update logic, and view-friendly snapshots.
 - **harvester_engine:** content processing pipeline, persistence, and LLM-related workflows.
+- **harvester_io:** shared runtime paths, persistence, and effect execution. `harvester_io::host_bootstrap` is the shared home for executable-host startup and state hydration. `harvester_io::run_lock` provides the parameterized single-instance lock shared by the batch and GUI hosts.
 - **engine_logging:** shared logging setup used across the workspace.
 - **commanductui:** UI framework dependency used for the Windows interface.
 

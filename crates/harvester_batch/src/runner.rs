@@ -1,15 +1,15 @@
 #[cfg(test)]
 use crate::batch_coordinator::BatchPeek;
 use crate::cli::{Args, CheckpointCommand};
-use crate::lock;
 use crate::progress::{BatchDisplayPhase, BatchRunBaseline};
 use chrono::Utc;
 use crossterm::{cursor::Show, QueueableCommand};
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{BatchObservation, Msg};
+use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_4O_MINI};
 use harvester_io::{
-    load_briefing_checkpoint, load_sources, persist_completed_jobs, save_blacklist,
-    save_briefing_checkpoint, RuntimePaths,
+    acquire_lock, host_bootstrap::HostLlmDefaults, load_briefing_checkpoint, load_sources,
+    persist_completed_jobs, save_blacklist, save_briefing_checkpoint, LockIdentity, RuntimePaths,
 };
 use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +25,25 @@ mod dry_run;
 mod live_progress;
 mod reporting;
 
+const BATCH_LOCK_IDENTITY: LockIdentity = LockIdentity {
+    filename: ".harvester_batch.lock",
+    log_tag: "[batch-lock]",
+    actor_description: "batch run",
+    force_unlock_hint: Some("Use --force-unlock to override."),
+};
+
+pub(crate) const BATCH_MISSING_API_KEY_WARNING: &str =
+    "[batch] OPENAI_API_KEY not set; AI triage/summary features disabled";
+pub(crate) const BATCH_EMPTY_API_KEY_WARNING: &str =
+    "[batch] OPENAI_API_KEY is empty; AI triage/summary features disabled";
+
+pub(crate) fn batch_host_llm_defaults() -> HostLlmDefaults {
+    HostLlmDefaults {
+        default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_4O_MINI),
+        session_id_prefix: "batch-",
+    }
+}
+
 #[cfg(test)]
 use dispatch_loop::run_dispatch_loop;
 use dispatch_loop::run_dispatch_loop_with_tick_interval;
@@ -39,7 +58,7 @@ use batch_runtime::collect_and_rearm_batch_cycle;
 pub(crate) use batch_runtime::persist_batch_replay_records;
 use batch_runtime::remove_collected_with_persisted_cache_confirmation;
 pub(crate) use bootstrap::{
-    apply_signal_candidate_selection_settings, build_effect_runner, is_ai_orchestration_enabled,
+    apply_signal_candidate_selection_settings, is_ai_orchestration_enabled,
 };
 #[cfg(test)]
 use drain_control::{
@@ -176,7 +195,8 @@ pub fn run(args: Args) -> Result<i32, String> {
             return Ok(0);
         }
         Some(cmd) => {
-            let _lock_guard = lock::acquire_lock(&paths.output_dir, args.force_unlock)?;
+            let _lock_guard =
+                acquire_lock(&paths.output_dir, BATCH_LOCK_IDENTITY, args.force_unlock)?;
             execute_checkpoint_write(cmd, &paths)?;
             return Ok(0);
         }
@@ -184,7 +204,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     }
 
     engine_info!("[batch] Acquiring lock");
-    let _lock_guard = lock::acquire_lock(&paths.output_dir, args.force_unlock)?;
+    let _lock_guard = acquire_lock(&paths.output_dir, BATCH_LOCK_IDENTITY, args.force_unlock)?;
 
     // Install signal handler immediately after lock acquisition so Ctrl-C always
     // reaches the shared graceful-shutdown path for every execution mode.

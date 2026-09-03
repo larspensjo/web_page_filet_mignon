@@ -1281,6 +1281,50 @@ extraction. `docs/FutureIdeas.md`: `FI-Architecture-ReducerPurity-####` (scoped
 as *all* non-test `Utc::now()` sites, re-grep at pickup) and
 `FI-UX-TriageUi-####`.
 
+**Status: complete, 2026-09-03**, on `feature/tauri-desktop-UI`. All ten items
+landed. Verified with `cargo build`, `cargo test` (all suites ok, 0 failed),
+`cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, and
+`Invoke-Pester scripts/tests/HarvesterLaunch.Tests.ps1` (20 passed). Both
+recommended human tests were run by the user and passed: a second `harvester_app`
+launch is refused with a dialog naming the first's pid before any window is
+created, and a full batch cycle completes.
+
+What the implementation changed about this document's assumptions:
+
+- **A fourth behaviour change.** The duplicate `Effect::LoadLlmMetadata` enqueue
+  exists in `harvester_batch/src/import_mode.rs` as well, not only at
+  `runner/bootstrap.rs:213-216`. Both were removed; `Msg::StartupHydrationRequested`
+  is now the single source on every batch entry path.
+- **The `Utc::now()` count above is wrong.** A fresh grep of `harvester_core/src`
+  at implementation time found **13** non-test sites, not "roughly fifteen", and
+  `view_model.rs:1210` is inside a `#[cfg(test)]` block, so it is *not* a
+  production site as this document claims. Two of the 13 also disappear without
+  anyone doing the refactor: `state/view_builder.rs:303` in 1b, and
+  `prompt_lab.rs:896` when Prompt Lab is deleted in 7. About eleven remain.
+- **`FI-Architecture-ReducerPurity-0001` does not enumerate the known set**, which
+  this document required. The user considers `docs/FutureIdeas.md` largely stale
+  and explicitly declined further work there; the scope line and the "re-grep at
+  pickup" caveat are present, the list is not. Do not treat the omission as an
+  oversight to fix in a later phase.
+- **`docs/Architecture.md` was updated here**, not deferred — the coupled-artifacts
+  table says "phase 1" and 1a is what introduces `host_bootstrap` and the run
+  lock. The edit was deliberately narrow: the two missing crates plus one sentence
+  each on `host_bootstrap` and `run_lock`. The host-serviced-effect boundary and
+  the UDF diagram remain for 1c and 7.
+
+Observations for later phases, deliberately not acted on:
+
+- `harvester_batch/src/import_mode.rs` retains ~60 lines of hydration ordering
+  that duplicate the middle of `hydrate_state_from_disk`. Import mode hydrates a
+  genuinely *different* set (no completed-job restore, no triage cache, no
+  blacklist), so collapsing it would need the `HydrationSet` parameter *Retiring
+  pre-triage manual overrides* explicitly rules out. Left alone on purpose.
+- `harvester_batch/src/summary_refresh.rs:167-187` is a fourth `LlmConfig`
+  construction that this document's dedup list never named. It differs for real
+  (`build_prompt_registry_with_saved_overlays` rather than `register_defaults`,
+  its own session prefix), so it cannot fold into `build_effect_runner` as
+  specified — but it is where a fifth copy will appear.
+
 #### 1b — Core and bridge IPC contract (no window yet)
 
 10. **Introduce `[workspace] default-members`**, enumerating every crate except

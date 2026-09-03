@@ -84,4 +84,4 @@ When bumping the corpus schema:
 1. Update `CORPUS_SCHEMA_VERSION` and `build_corpus_manifest`.
 2. Update this document and the README output summary.
 3. Add or update regression tests for the new marker/layout.
-4. Record the decision in `docs/EngineeringDiary.md`.
+4. Record the decision in `docs/DecisionLog.md`.

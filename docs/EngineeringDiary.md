@@ -5,15 +5,16 @@ Purpose: durable project memory for AI-assisted development.
 ## How to use
 - Add an entry when a noteworthy implementation lands.
 - Add an entry for every bug fix, including lessons learned and prevention.
-- Add an entry for important decisions and tradeoffs.
+- Record settled commitments in `docs/DecisionLog.md`, not in this diary.
 - Keep entries concise and reference concrete artifacts.
-- New entries goes to the end of the file.
+- New entries go to the end of the file.
 - A plan in itself, or change thereof, isn't noteworthy. It is meta information, which doesn't mean anything unless the plan is implemented.
+- The 308 existing entries are historical record and are not migrated, including existing `Type: Decision` entries.
 
 ## Entry Template
 
 ## YYYY-MM-DD - Short title
-Type: Implementation | Bug Fix | Decision
+Type: Implementation | Bug Fix
 Context: Why this change happened.
 Change: What was implemented/changed.
 Lessons Learned: (required for Bug Fix)
@@ -2184,3 +2185,9 @@ Change: The index is now built from the directory listing alone. Replay filename
 Lessons Learned: An O(entire-history) scan on the startup path is a time bomb: it was invisible when the corpus was small and became a multi-minute hang at 22k records. When a filename already encodes the identity a scan is recovering by parsing content, the directory listing is the index. Also, feedback gaps compound diagnosis: because the progress display was created after bootstrap, the slowest phase of the program was precisely the one with no output — timestamped logs (`engine.log`) were what localized the gap to a single function.
 Prevention: Regression test writes unparseable content into correctly named replay files and asserts the index still finds them — proving the index reads no file contents. Filename-grammar round-trip tests (ids containing `--`, collision suffixes, sanitized ids, non-record files) pin the extraction against `persist_replay_record`'s naming.
 Refs: crates/harvester_engine/src/llm/replay.rs, crates/harvester_batch/src/runner/batch_runtime.rs, crates/harvester_batch/src/runner/reporting.rs, replay_line_index_is_built_from_filenames_without_reading_contents, replay_filename_request_id_roundtrips_persisted_filenames, startup_notice_names_mode_and_hydration_work
+
+## 2026-08-31 - Extract shared host bootstrap and run lock
+Type: Implementation
+Context: Batch and the frozen legacy app duplicated LLM bootstrap, state hydration, and pre-triage refresh-loop code, while the batch-only lock could not safely identify a GUI holder.
+Change: Moved the parameterized run lock and shared host bootstrap into `harvester_io`; preserved each host's model default and host-owned behavior; removed the duplicate metadata enqueue from both batch entry paths; stopped hydrating pre-triage manual overrides; and added the GUI startup lock with a native failure message box.
+Refs: crates/harvester_io/src/host_bootstrap.rs, crates/harvester_io/src/run_lock.rs, crates/harvester_batch/src/runner/bootstrap.rs, crates/harvester_app/src/platform/app.rs, docs/DecisionLog.md

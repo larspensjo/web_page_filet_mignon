@@ -12,6 +12,7 @@ Maintained manually in this repository.
 | Architecture | SessionInvariants| Enforce lifecycle invariants in state            |
 | Architecture | BatchOrchestration | Batch runner modes and external scheduler support |
 | Architecture | PersistenceEffects | Reducer-emitted persistence for strict UDF       |
+| Architecture | ReducerPurity     | Message-carried timestamps for pure reducers     |
 | Architecture | TrustTypes       | Typed wrappers for trusted/untrusted data        |
 | Architecture | UiFramework      | Reusable UI control primitives and message routing |
 | Ingestion  | AuthenticatedFetch | Cookie/session-backed authenticated ingestion    |
@@ -70,6 +71,27 @@ Maintained manually in this repository.
 | UX        | WorkflowAutomation  | One-click multi-step workflows                   |
 
 ## Architecture
+
+### ReducerPurity
+
+#### [FI-Architecture-ReducerPurity-0001] Carry reducer timestamps in messages
+Status: Deferred
+TopLevel: Architecture
+SubLevel: ReducerPurity
+Priority: P2
+Effort: L
+Risk: M
+Origin:
+- SourceDoc: Plan.TauriDesktopUi.md
+- SourceSection: Phase 1a — Decision records, shared extraction, and the lock
+- Captured: 2026-08-31
+Tags: [architecture, reducer, purity, time]
+Summary: Convert remaining direct `Utc::now()` call sites to message-carried timestamps.
+Rationale: Reducers must remain pure and deterministic under unit test.
+Scope: all non-test `Utc::now()` sites in `harvester_core/src` — re-grep at pickup.
+SuccessCriteria:
+- All non-test `Utc::now()` sites in `harvester_core/src` are replaced by message-carried timestamps.
+- Reducer tests can supply deterministic timestamps without clock access.
 
 ### BatchOrchestration
 
@@ -2260,6 +2282,25 @@ SuccessCriteria:
 - Bulk action results are persisted as manual overrides and are fully reversible.
 - Reducer tests verify deterministic behavior for mixed review sets.
 Notes: Still open. Current implementation keeps per-item review controls and scope filtering but does not add one-click include-all/exclude-all actions.
+
+#### [FI-UX-TriageUi-0003] Re-introduce manual pre-triage curation
+Status: Deferred
+TopLevel: UX
+SubLevel: TriageUi
+Priority: P2
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.TauriDesktopUi.md
+- SourceSection: Retiring pre-triage manual overrides
+- Captured: 2026-08-31
+Tags: [ux, triage, pre-triage, curation]
+Summary: Re-introduce manual pre-triage curation in a future user-facing workflow.
+Rationale: Manual curation remains potentially useful, but its old producer belongs to a retired surface and invisible persisted decisions are not acceptable. The persisted override format is gone, so this is a re-implementation item.
+SuccessCriteria:
+- A supported UI lets users inspect, apply, and clear manual pre-triage decisions.
+- The persisted override format is re-implemented rather than re-enabled from the retired format.
+- Reducer and persistence contracts cover the new workflow.
 
 ### WorkflowAutomation
 

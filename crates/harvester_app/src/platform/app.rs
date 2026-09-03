@@ -1,9 +1,7 @@
 use std::collections::VecDeque;
-use std::sync::{mpsc, Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-
-use chrono::Utc;
 
 use commanductui::types::TreeItemMarkerKind;
 use commanductui::{
@@ -12,18 +10,17 @@ use commanductui::{
 };
 
 use harvester_core::{
-    AiAvailability, AiUnavailableReason, AppState, Effect, JobFilterStatus, ManualDecision, Msg,
+    AiAvailability, AiUnavailableReason, AppState, JobFilterStatus, ManualDecision, Msg,
 };
 
-use engine_logging::{engine_info, engine_warn};
+use engine_logging::engine_info;
 
-use harvester_engine::llm::prompts::register_defaults;
-use harvester_engine::llm::{
-    LlmConfig, LlmHandle, LlmQuotas, ModelId, OpenAiProvider, PricingRegistry, PromptRegistry,
-    ProviderKind, DEFAULT_BRIEFING_MODEL, DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL,
-    OPENAI_MODEL_GPT_5_4_NANO,
+use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_5_4_NANO};
+use harvester_io::{
+    acquire_lock,
+    host_bootstrap::{build_effect_runner, HostLlmDefaults},
+    load_window_size, EffectRunner, LockIdentity, PersistenceWorker, RuntimePaths,
 };
-use harvester_io::{load_window_size, EffectRunner, PersistenceWorker, RuntimePaths};
 
 use super::effects;
 use super::logging::{self, LogDestination};
@@ -36,11 +33,32 @@ mod event_handler;
 mod render_batch;
 mod startup;
 mod ui_state;
-use config::{
-    effective_model_map, llm_max_concurrency_requests_from_env, llm_quota_limits_from_engine,
-};
+use config::llm_max_concurrency_requests_from_env;
 use startup::{assemble_startup_commands, prepare_startup_state};
 use ui_state::AppUiStateProvider;
+
+const GUI_LOCK_IDENTITY: LockIdentity = LockIdentity {
+    filename: ".harvester_gui.lock",
+    log_tag: "[gui-lock]",
+    actor_description: "Harvester window",
+    force_unlock_hint: None,
+};
+
+fn show_startup_lock_failure(message: &str) {
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
+
+    let title = HSTRING::from("Harvester already running");
+    let message = HSTRING::from(message);
+    unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(message.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            MB_OK | MB_ICONERROR,
+        );
+    }
+}
 
 pub fn run_app() -> commanductui::PlatformResult<()> {
     logging::initialize(LogDestination::Both);
@@ -56,6 +74,14 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         effects::contexts_directory(),
         effects::prompts_directory(),
     );
+
+    let _lock_guard = match acquire_lock(&paths.output_dir, GUI_LOCK_IDENTITY, false) {
+        Ok(guard) => guard,
+        Err(message) => {
+            show_startup_lock_failure(&message);
+            return Err(commanductui::PlatformError::InitializationFailed(message));
+        }
+    };
 
     // Restore persisted window size, falling back to defaults.
     // Both dimensions must meet the minimum; otherwise use defaults for both.
@@ -87,57 +113,20 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
         })
     };
 
-    let effect_runner = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-        let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
-            Arc::new(OpenAiProvider::new(api_key));
-        let provider_clone = Arc::clone(&provider);
-        let mut registry = PromptRegistry::new();
-        register_defaults(&mut registry);
-        let registry = Arc::new(RwLock::new(registry));
-        let quotas = LlmQuotas::default();
-        let quota_limits = llm_quota_limits_from_engine(&quotas);
-        let config = LlmConfig {
-            provider,
-            default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_5_4_NANO),
-            triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
-            summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
-            signal_candidate_model: None,
-            briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
-            registry: Arc::clone(&registry),
-            quotas,
-            output_dir: output_dir.clone(),
-            pricing: PricingRegistry::with_defaults(),
-            max_input_bytes: 100_000,
-            #[allow(deprecated)]
-            max_input_chars: 0,
-            timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
-            session_id: format!("session-{}", Utc::now().format("%Y%m%d-%H%M%S")),
-            replay_cache: None,
-            max_concurrent_requests: llm_max_concurrent_requests,
-        };
-        let model_map = effective_model_map(&config);
-        let handle = LlmHandle::new(config);
-        let runner = EffectRunner::new_with_llm(
-            paths.clone(),
-            msg_tx.clone(),
-            handle,
-            100_000,
-            Arc::clone(&registry),
-            model_map,
-            provider_clone,
-            ProviderKind::OpenAi,
-            platform_handler,
-        );
-        (runner, Some(quota_limits))
-    } else {
-        engine_warn!("OPENAI_API_KEY not set; LLM features disabled");
-        (
-            EffectRunner::new(paths.clone(), msg_tx.clone(), platform_handler),
-            None,
-        )
+    let defaults = HostLlmDefaults {
+        default_model: ModelId::new(ProviderKind::OpenAi, OPENAI_MODEL_GPT_5_4_NANO),
+        session_id_prefix: "session-",
     };
-    let (effect_runner, startup_llm_quota_limits) = effect_runner;
-    effect_runner.enqueue(vec![Effect::LoadPromptTemplateFiles]);
+    let (effect_runner, startup_llm_quota_limits, _) = build_effect_runner(
+        &paths,
+        msg_tx.clone(),
+        llm_max_concurrent_requests,
+        &defaults,
+        platform_handler,
+        "OPENAI_API_KEY not set; LLM features disabled",
+        None,
+    )
+    .map_err(commanductui::PlatformError::InitializationFailed)?;
     {
         let mut guard = shared_state.lock().expect("lock shared state");
         let state = std::mem::take(&mut guard.state);

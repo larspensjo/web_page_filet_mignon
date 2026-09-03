@@ -4,9 +4,11 @@ mod blacklist_store;
 mod effect_helpers;
 mod effect_runner;
 mod entity_index_store;
+pub mod host_bootstrap;
 mod persistence;
 mod persistence_worker;
 mod prompt_template_store;
+pub mod run_lock;
 mod runtime_paths;
 mod seen_set_store;
 pub mod signal_candidate_cache_store;
@@ -27,6 +29,7 @@ pub use persistence::{
 };
 pub use persistence_worker::{PersistenceSnapshot, PersistenceWorker};
 pub use prompt_template_store::{load_prompt_templates, save_prompt_template};
+pub use run_lock::{acquire_lock, LockGuard, LockIdentity};
 pub use runtime_paths::{default_sources_path, RuntimePaths, DEFAULT_SOURCES_FILENAME};
 pub use seen_set_store::{
     load_brave_seen_set, load_seen_set, persist_brave_metadata, persist_brave_seen_set,
