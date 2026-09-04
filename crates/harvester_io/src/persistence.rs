@@ -32,6 +32,10 @@ struct PersistedState {
     window_width: Option<i32>,
     #[serde(default)]
     window_height: Option<i32>,
+    #[serde(default)]
+    desktop_window_width: Option<i32>,
+    #[serde(default)]
+    desktop_window_height: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,6 +197,48 @@ pub fn persist_window_size(state_path: &Path, width: i32, height: i32) {
     }
 }
 
+pub fn load_desktop_window_size(state_path: &Path) -> Option<(i32, i32)> {
+    let content = fs::read_to_string(state_path).ok()?;
+    let state: PersistedState = ron::from_str(&content).ok()?;
+    match (state.desktop_window_width, state.desktop_window_height) {
+        (Some(width), Some(height)) => Some((width, height)),
+        _ => None,
+    }
+}
+
+pub fn persist_desktop_window_size(state_path: &Path, width: i32, height: i32) {
+    let content = fs::read_to_string(state_path).unwrap_or_default();
+    let mut state: PersistedState = ron::from_str(&content).unwrap_or_default();
+    state.desktop_window_width = Some(width);
+    state.desktop_window_height = Some(height);
+
+    let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
+    if let Err(err) = ensure_output_dir(output_dir) {
+        engine_error!("Failed to ensure output dir {:?}: {}", output_dir, err);
+        return;
+    }
+
+    let serialized = match ron::ser::to_string_pretty(&state, ron::ser::PrettyConfig::new()) {
+        Ok(text) => text,
+        Err(err) => {
+            engine_error!("Failed to serialize desktop window size: {}", err);
+            return;
+        }
+    };
+    let writer = AtomicFileWriter::new(PathBuf::from(output_dir));
+    let filename = state_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(".harvester_state.ron");
+    if let Err(err) = writer.write(filename, &serialized) {
+        engine_error!(
+            "Failed to write desktop window size to {:?}: {}",
+            state_path,
+            err
+        );
+    }
+}
+
 fn sanitize_downloaded_path(path: Option<String>) -> Option<String> {
     match path {
         Some(value) if is_safe_downloaded_path(&value) => Some(value),
@@ -235,7 +281,7 @@ pub fn persist_runtime_state(
         return;
     }
 
-    // Carry forward window size from existing state to avoid clobbering.
+    // Carry forward both hosts' window sizes from existing state to avoid clobbering.
     let existing: PersistedState = fs::read_to_string(state_path)
         .ok()
         .and_then(|text| ron::from_str(&text).ok())
@@ -269,6 +315,8 @@ pub fn persist_runtime_state(
             .collect(),
         window_width: existing.window_width,
         window_height: existing.window_height,
+        desktop_window_width: existing.desktop_window_width,
+        desktop_window_height: existing.desktop_window_height,
     };
 
     let pretty = ron::ser::PrettyConfig::new();
@@ -669,6 +717,8 @@ mod tests {
         let state: super::PersistedState = ron::from_str(&text).unwrap();
         assert_eq!(state.window_width, None);
         assert_eq!(state.window_height, None);
+        assert_eq!(state.desktop_window_width, None);
+        assert_eq!(state.desktop_window_height, None);
     }
 
     #[test]
@@ -715,6 +765,36 @@ mod tests {
         persist_completed_jobs(&path, &jobs);
         let loaded_size = load_window_size(&path);
         assert_eq!(loaded_size, Some((1200, 900)));
+    }
+
+    #[test]
+    fn desktop_window_size_roundtrips_without_changing_legacy_window_size() {
+        let temp = tempdir().expect("tempdir");
+        let path = state_path(temp.path());
+        persist_window_size(&path, 1200, 900);
+
+        persist_desktop_window_size(&path, 960, 720);
+
+        assert_eq!(load_window_size(&path), Some((1200, 900)));
+        assert_eq!(load_desktop_window_size(&path), Some((960, 720)));
+    }
+
+    #[test]
+    fn persist_runtime_state_preserves_desktop_window_size() {
+        let temp = tempdir().expect("tempdir");
+        let path = state_path(temp.path());
+        persist_desktop_window_size(&path, 1200, 900);
+        let jobs = vec![CompletedJobSnapshot {
+            url: "https://example.com".to_string(),
+            tokens: Some(10),
+            bytes: Some(512),
+            links: vec![],
+            fetched_utc: None,
+        }];
+
+        persist_completed_jobs(&path, &jobs);
+
+        assert_eq!(load_desktop_window_size(&path), Some((1200, 900)));
     }
 
     #[test]

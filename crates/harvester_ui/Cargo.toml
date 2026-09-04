@@ -1,0 +1,26 @@
+[package]
+name = "harvester_ui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+build = "build.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["clock"] }
+engine_logging = { path = "../engine_logging" }
+harvester_core = { path = "../harvester_core" }
+harvester_engine = { path = "../harvester_engine" }
+harvester_io = { path = "../harvester_io" }
+harvester_ui_bridge = { path = "../harvester_ui_bridge" }
+open = "5.4.3"
+rfd = "0.17.2"
+serde.workspace = true
+serde_json.workspace = true
+log.workspace = true
+# Tauri exposes devtools in debug builds without this feature; omitting it keeps
+# the inspector out of release builds that may hold API keys.
+tauri = { version = "2.11.5" }
+
+[build-dependencies]
+tauri-build = "2.6.3"

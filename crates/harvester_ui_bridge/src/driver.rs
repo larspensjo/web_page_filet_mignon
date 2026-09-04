@@ -8,17 +8,18 @@ use harvester_core::{AppState, ArchiveTokenEstimates, Effect, Msg, SignalCandida
 use harvester_io::{
     host_bootstrap::pump_pre_triage_refresh, requires_persistence_snapshot, PersistenceSnapshot,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::snapshot::{project, BodyTable, ProjectedSnapshot, SnapshotEnvelope};
 
 pub const SNAPSHOT_MIN_INTERVAL_MS: u64 = 50;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiCommand {
     ShowArchiveDialog(ArchiveDialogRequest),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArchiveDialogRequest {
     pub request_id: u64,
     pub article_count: usize,

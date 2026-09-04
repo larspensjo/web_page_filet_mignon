@@ -8,6 +8,7 @@ members = [
     "crates/harvester_batch",
     "crates/engine_logging",
     "crates/harvester_ui_bridge",
+    "crates/harvester_ui",
     "src/CommanDuctUI",
 ]
 default-members = [

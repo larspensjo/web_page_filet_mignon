@@ -39,3 +39,27 @@ Decision: The workspace enumerates root build targets through `default-members`;
 Context: Root Cargo commands must keep their existing Rust-only surface while allowing the window host to require its independently built frontend and WebView2.
 Consequences: `cargo build`, `cargo test`, and root clippy do not require Node or WebView2; the Tauri-free bridge remains in the root surface.
 Refs: Cargo.toml, docs/plans/Plan.TauriDesktopUi.md
+
+## 2026-09-04 - Desktop window serves built local assets only
+Decision: `harvester_ui` serves a disk-built frontend through its confined custom URI scheme and never starts a dev server or loads remote content.
+Context: The desktop host holds user workflow state and may receive scoped secrets through the launcher.
+Consequences: Bundle/schema mismatches are blocking errors and launcher builds the frontend before the host binary.
+Refs: docs/ThreatModel.md, crates/harvester_ui, frontend/
+
+## 2026-09-04 - Desktop intents are a restricted vocabulary
+Decision: The web UI talks to core through `UiIntent`, never by deserializing the internal `Msg` enum.
+Context: The renderer displays untrusted harvested content while reducer messages include privileged result and effect paths.
+Consequences: IPC decoding is fail-closed and host-stamped context remains outside the web payload.
+Refs: crates/harvester_core/src/ui_intent.rs, crates/harvester_ui_bridge/src/ipc.rs
+
+## 2026-09-04 - Native failure dialogs use rfd
+Decision: The desktop host uses `rfd::MessageDialog` directly only for pre-window GUI-lock refusal.
+Context: The GUI lock must fail before Tauri creates any window or app handle.
+Consequences: The host has no dialog-plugin IPC surface and can name the lock holder before window creation; an in-window driver failure rides the snapshot contract instead.
+Refs: crates/harvester_ui/src/host.rs
+
+## 2026-09-04 - Desktop hosts persist distinct window geometry
+Decision: The Tauri desktop host persists logical inner dimensions in its own optional state fields; the legacy host keeps its existing outer-frame dimensions and persistence path unchanged.
+Context: Sharing one pair of dimensions made DPI conversion compound across Tauri launches and gave the two hosts incompatible meanings for the same persisted values.
+Consequences: Existing state files remain compatible, each host restores only its own geometry, and the separate Tauri fields remain until phase 7 removes the legacy window-size contract.
+Refs: crates/harvester_core/src/msg.rs, crates/harvester_io/src/persistence.rs, crates/harvester_ui/src/host.rs

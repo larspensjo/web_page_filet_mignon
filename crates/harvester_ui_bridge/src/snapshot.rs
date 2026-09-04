@@ -22,6 +22,7 @@ pub struct SnapshotEnvelope {
     pub generation: u64,
     pub schema_version: u32,
     pub view: serde_json::Value,
+    pub fatal_message: Option<String>,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectedSnapshot {
@@ -35,6 +36,18 @@ impl ProjectedSnapshot {
             generation,
             schema_version: self.schema_version,
             view: self.view,
+            fatal_message: None,
+        }
+    }
+}
+
+impl SnapshotEnvelope {
+    pub fn fatal(generation: u64, message: String) -> Self {
+        Self {
+            generation,
+            schema_version: crate::IPC_SCHEMA_VERSION,
+            view: serde_json::Value::Null,
+            fatal_message: Some(message),
         }
     }
 }

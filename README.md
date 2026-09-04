@@ -17,6 +17,8 @@ You need an OpenAI API key, but the costs are intentionally kept low by pushing 
 ## Prerequisites
 
 - Rust toolchain with `cargo`
+- Node.js/npm for the separately built desktop frontend
+- Microsoft Edge WebView2 Evergreen Runtime for the Tauri desktop window
 - PowerShell 7 for the two launchers and supporting scripts
 - A PowerShell profile that loads the external `SecretLaunch` module and provides `Invoke-WithSecretMap` and `Test-SecretStorePromptAvailable`, plus SecretStore vault entries named `BraveSearchApiKey` and `OpenAIProductionKey`. Run the launchers from a session with that profile loaded; the launchers do not load it themselves.
 - The launchers retrieve `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` from encrypted SecretStore vault entries and inject them into the launched process. If either variable already has a non-empty value in the parent shell, the launcher warns rather than refuses; that value is inherited by both `cargo build` and the child process.
@@ -38,6 +40,12 @@ Run the desktop app:
 
 ```powershell
 .\scripts\Start-HarvesterApp.ps1
+```
+
+Run the Tauri desktop UI:
+
+```powershell
+.\scripts\Start-HarvesterUi.ps1
 ```
 
 Launch the batch workflow:

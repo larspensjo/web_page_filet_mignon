@@ -35,11 +35,11 @@ function script:New-BuildFake {
     {
         param(
             [Parameter(Mandatory)]
-            [string]$Package
+            [psobject]$BuildSpec
         )
-        $Calls.BuildPackages += $Package
+        $Calls.BuildPackages += $BuildSpec.Package
         if ($Fail) {
-            throw "fake build failed for $Package"
+            throw "fake build failed for $($BuildSpec.Package)"
         }
 
         $binaryParent = Split-Path -Parent $Spec.ExecutablePath
@@ -140,6 +140,113 @@ Describe 'Harvester launch policy' {
         @($spec.RuntimeArguments) | Should -Be @('--single-shot', '--batch-api')
         $spec.Package | Should -Be 'harvester_batch'
         $spec.BinaryName | Should -Be 'harvester_batch.exe'
+    }
+
+    It 'builds Batch with one cargo call and no frontend step' {
+        $spec = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
+        $calls = [System.Collections.Generic.List[string]]::new()
+        InModuleScope HarvesterLaunch -Parameters @{ Spec = $spec; Calls = $calls } {
+            param($Spec, $Calls)
+            Invoke-DefaultHarvesterBuild -Spec $Spec -ProcessRunner {
+                param($command, $arguments, $workingDirectory)
+                $Calls.Add("$command|$($arguments -join ' ')|$workingDirectory")
+                0
+            }
+        }
+
+        $spec.FrontendDirectory | Should -BeNullOrEmpty
+        $spec.FrontendBuildCommand | Should -BeNullOrEmpty
+        @($calls) | Should -Be @("cargo|build -p harvester_batch|$($spec.RepositoryRoot)")
+    }
+
+    It 'returns the UI policy with independent frontend build fields' {
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
+        $spec.ExecutablePath | Should -Be (Join-Path $script:TestRoot 'target\debug\harvester_ui.exe')
+        $spec.FrontendDirectory | Should -Be 'frontend'
+        @($spec.FrontendBuildCommand) | Should -Be @('npm', 'run', 'build')
+        $spec.FrontendBuildCommand[1] = 'mutated'
+        @(Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot).FrontendBuildCommand | Should -Be @('npm', 'run', 'build')
+    }
+
+    It 'runs npm before cargo in the default UI build path' {
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
+        $calls = [System.Collections.Generic.List[string]]::new()
+        InModuleScope HarvesterLaunch -Parameters @{ Spec = $spec; Calls = $calls } {
+            param($Spec, $Calls)
+            Invoke-DefaultHarvesterBuild -Spec $Spec -ProcessRunner {
+                param($command, $arguments, $workingDirectory)
+                $Calls.Add("$command $($arguments -join ' ')")
+                0
+            }
+        }
+        @($calls) | Should -Be @('npm run build', 'cargo build -p harvester_ui')
+    }
+
+    It 'default runner keeps stdout out of the exit code and runs frontend in its directory' {
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
+        $frontendDirectory = Join-Path $script:TestRoot 'frontend'
+        $shimDirectory = Join-Path $script:TestRoot 'default-runner-bin'
+        $workingDirectoryReport = Join-Path $script:TestRoot 'frontend-working-directory.txt'
+        New-Item -ItemType Directory -Path $frontendDirectory, $shimDirectory -Force | Out-Null
+        $frontendScript = Join-Path $shimDirectory 'frontend-build.cmd'
+        Set-Content -LiteralPath $frontendScript -Value @(
+            '@echo off',
+            ('cd > "{0}"' -f $workingDirectoryReport),
+            'echo frontend output',
+            'exit /b 0'
+        )
+        Set-Content -LiteralPath (Join-Path $shimDirectory 'cargo.cmd') -Value @(
+            '@echo off',
+            'echo cargo output',
+            'exit /b 0'
+        )
+        $spec.FrontendBuildCommand = @($frontendScript)
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = "$shimDirectory$([System.IO.Path]::PathSeparator)$oldPath"
+            {
+                InModuleScope HarvesterLaunch -Parameters @{ Spec = $spec } {
+                    param($Spec)
+                    Invoke-DefaultHarvesterBuild -Spec $Spec
+                }
+            } | Should -Not -Throw
+        }
+        finally {
+            $env:PATH = $oldPath
+        }
+
+        (Get-Content -LiteralPath $workingDirectoryReport -Raw).Trim() | Should -Be $frontendDirectory
+    }
+
+    It 'throws on default npm failure before cargo and secrets' {
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
+        $launchCalls = New-Calls
+        $code = 1
+        $shimDirectory = Join-Path $script:TestRoot 'failing-npm-bin'
+        $npmMarker = Join-Path $script:TestRoot 'failing-npm-invoked.txt'
+        New-Item -ItemType Directory -Path (Join-Path $script:TestRoot 'frontend'), $shimDirectory -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $shimDirectory 'npm.cmd') -Value @(
+            '@echo off',
+            ('echo invoked > "{0}"' -f $npmMarker),
+            'echo npm failure output',
+            'exit /b 1'
+        )
+        $oldPath = $env:PATH
+        try {
+            $env:PATH = "$shimDirectory$([System.IO.Path]::PathSeparator)$oldPath"
+            {
+                Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
+                    -SecretInvoker (New-SecretFake -Calls $launchCalls) `
+                    -PromptCheck { $true } `
+                    -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
+            } | Should -Throw '*frontend build failed*'
+        }
+        finally {
+            $env:PATH = $oldPath
+        }
+
+        Test-Path -LiteralPath $npmMarker -PathType Leaf | Should -BeTrue
+        $launchCalls.SecretInvocations | Should -Be 0
     }
 
     It 'returns an independent copy of the runtime argument policy' {
@@ -432,6 +539,7 @@ Describe 'Harvester launcher script contracts' {
     It '<file> parses, has no parameter block, and gets a launch spec' -ForEach @(
         @{ file = 'Start-HarvesterApp.ps1' }
         @{ file = 'Start-HarvesterBatch.ps1' }
+        @{ file = 'Start-HarvesterUi.ps1' }
     ) {
         $path = Join-Path $PSScriptRoot ('..\{0}' -f $file)
         $tokens = $null

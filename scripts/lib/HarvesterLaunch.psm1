@@ -10,12 +10,24 @@ $script:HarvesterLaunchPolicies = [ordered]@{
         Package              = 'harvester_app'
         BinaryName           = 'harvester_app.exe'
         RuntimeArguments     = [string[]]@()
+        FrontendDirectory    = $null
+        FrontendBuildCommand = $null
         SecretEnvironmentMap = $script:HarvesterSecretEnvironmentMap
     }
     Batch = [pscustomobject]@{
         Package              = 'harvester_batch'
         BinaryName           = 'harvester_batch.exe'
         RuntimeArguments     = [string[]]@('--single-shot', '--batch-api')
+        FrontendDirectory    = $null
+        FrontendBuildCommand = $null
+        SecretEnvironmentMap = $script:HarvesterSecretEnvironmentMap
+    }
+    Ui = [pscustomobject]@{
+        Package              = 'harvester_ui'
+        BinaryName           = 'harvester_ui.exe'
+        RuntimeArguments     = [string[]]@()
+        FrontendDirectory    = 'frontend'
+        FrontendBuildCommand = [string[]]@('npm', 'run', 'build')
         SecretEnvironmentMap = $script:HarvesterSecretEnvironmentMap
     }
 }
@@ -24,7 +36,7 @@ function Get-HarvesterLaunchSpec {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('App', 'Batch')]
+        [ValidateSet('App', 'Batch', 'Ui')]
         [string]$Name,
 
         [Parameter(Mandatory)]
@@ -45,6 +57,8 @@ function Get-HarvesterLaunchSpec {
         BinaryName       = $policy.BinaryName
         ExecutablePath   = Join-Path $root (Join-Path 'target\debug' $policy.BinaryName)
         RuntimeArguments = [string[]]$policy.RuntimeArguments.Clone()
+        FrontendDirectory = $policy.FrontendDirectory
+        FrontendBuildCommand = if ($null -eq $policy.FrontendBuildCommand) { $null } else { [string[]]$policy.FrontendBuildCommand.Clone() }
         SecretEnvironmentMap = $secretMap
     }
 }
@@ -52,13 +66,35 @@ function Get-HarvesterLaunchSpec {
 function Invoke-DefaultHarvesterBuild {
     param(
         [Parameter(Mandatory)]
-        [string]$Package
+        [psobject]$Spec,
+
+        [Parameter()]
+        [scriptblock]$ProcessRunner
     )
 
-    & cargo build -p $Package
-    if ($LASTEXITCODE -ne 0) {
-        throw "cargo build -p $Package failed with exit code $LASTEXITCODE."
+    $runner = if ($null -eq $ProcessRunner) {
+        {
+            param([string]$Command, [string[]]$Arguments, [string]$WorkingDirectory)
+            Push-Location -LiteralPath $WorkingDirectory
+            try {
+                & $Command @Arguments | Out-Host
+                $LASTEXITCODE
+            }
+            finally {
+                Pop-Location
+            }
+        }
+    } else { $ProcessRunner }
+
+    if ($null -ne $Spec.FrontendDirectory) {
+        $frontendDirectory = Join-Path $Spec.RepositoryRoot $Spec.FrontendDirectory
+        $frontendCommand = [string[]]$Spec.FrontendBuildCommand
+        $frontendArguments = [string[]]@($frontendCommand | Select-Object -Skip 1)
+        $frontendExitCode = & $runner $frontendCommand[0] $frontendArguments $frontendDirectory
+        if ($frontendExitCode -ne 0) { throw "frontend build failed with exit code $frontendExitCode." }
     }
+    $cargoExitCode = & $runner 'cargo' @('build', '-p', $Spec.Package) $Spec.RepositoryRoot
+    if ($cargoExitCode -ne 0) { throw "cargo build -p $($Spec.Package) failed with exit code $cargoExitCode." }
 }
 
 function Invoke-DefaultHarvesterSecret {
@@ -189,7 +225,7 @@ function Invoke-HarvesterLaunch {
         Push-Location -LiteralPath $Spec.RepositoryRoot
         $pushed = $true
 
-        & $build $Spec.Package
+        & $build $Spec
 
         if (-not (Test-Path -LiteralPath $Spec.ExecutablePath -PathType Leaf)) {
             throw "Built binary was not found at '$($Spec.ExecutablePath)'."

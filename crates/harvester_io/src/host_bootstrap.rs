@@ -3,7 +3,7 @@ use std::sync::{mpsc, Arc, RwLock};
 
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{update, AppState, Effect, LlmQuotaLimits, Msg};
+use harvester_core::{update, AiAvailability, AppState, Effect, LlmQuotaLimits, Msg};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::prompts::register_defaults;
 use harvester_engine::llm::{
@@ -22,6 +22,59 @@ use crate::{
 pub struct HostLlmDefaults {
     pub default_model: ModelId,
     pub session_id_prefix: &'static str,
+}
+
+pub const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
+pub const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
+
+pub fn parse_llm_max_concurrency_requests(raw: Option<&str>) -> usize {
+    raw.and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(DEFAULT_LLM_MAX_CONCURRENT_REQUESTS)
+        .clamp(1, MAX_LLM_CONCURRENT_REQUESTS)
+}
+
+pub fn llm_max_concurrency_requests_from_env() -> usize {
+    let raw = std::env::var("LLM_MAX_CONCURRENT_REQUESTS").ok();
+    let value = parse_llm_max_concurrency_requests(raw.as_deref());
+    if let Some(raw) = raw {
+        engine_info!("[llm-concurrency] LLM_MAX_CONCURRENT_REQUESTS='{raw}' -> {value}");
+    }
+    value
+}
+
+/// Seeds shared GUI facts before hydration and returns effects that must be enqueued.
+pub fn prepare_desktop_startup_state(
+    mut state: AppState,
+    paths: &RuntimePaths,
+    initial_width: i32,
+    llm_max_concurrent_requests: usize,
+    startup_ai_availability: Option<AiAvailability>,
+    llm_quota_limits: Option<LlmQuotaLimits>,
+) -> (AppState, Vec<Effect>) {
+    let mut startup_effects = Vec::new();
+    let (mut state_after_width, _) = update(
+        state,
+        Msg::WindowResized {
+            window_width: initial_width,
+        },
+    );
+    state_after_width.set_triage_max_in_flight(llm_max_concurrent_requests);
+    state_after_width.set_summary_max_in_flight(llm_max_concurrent_requests);
+    state = state_after_width;
+    for message in [
+        startup_ai_availability.map(|availability| Msg::AiAvailabilityDetected { availability }),
+        llm_quota_limits.map(|limits| Msg::LlmQuotaConfigured { limits }),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let (next, effects) = update(state, message);
+        state = next;
+        startup_effects.extend(effects);
+    }
+    let (state, hydration_effects) = hydrate_state_from_disk(state, paths);
+    startup_effects.extend(hydration_effects);
+    (state, startup_effects)
 }
 
 /// LLM construction details a host may need in addition to its effect runner.
@@ -292,6 +345,33 @@ mod tests {
         persist_runtime_state(&paths.state_path, &[], &overrides);
         assert_eq!(load_pre_triage_overrides(&paths.state_path), overrides);
         (dir, paths)
+    }
+
+    #[test]
+    fn parse_llm_max_concurrency_uses_default_when_missing_or_invalid() {
+        assert_eq!(
+            parse_llm_max_concurrency_requests(None),
+            DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
+        );
+        assert_eq!(
+            parse_llm_max_concurrency_requests(Some("not-a-number")),
+            DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
+        );
+        assert_eq!(
+            parse_llm_max_concurrency_requests(Some("")),
+            DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
+        );
+    }
+
+    #[test]
+    fn parse_llm_max_concurrency_clamps_to_valid_range() {
+        assert_eq!(parse_llm_max_concurrency_requests(Some("1")), 1);
+        assert_eq!(parse_llm_max_concurrency_requests(Some("3")), 3);
+        assert_eq!(
+            parse_llm_max_concurrency_requests(Some("999")),
+            MAX_LLM_CONCURRENT_REQUESTS
+        );
+        assert_eq!(parse_llm_max_concurrency_requests(Some(" 2 ")), 2);
     }
 
     #[test]

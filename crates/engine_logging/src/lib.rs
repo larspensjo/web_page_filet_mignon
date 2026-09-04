@@ -102,6 +102,11 @@ pub fn initialize_for_tests() {
 /// Logs to both stderr and `./engine.log` in the current working directory.
 /// This safely no-ops if another logger has already been initialized.
 pub fn initialize() {
+    initialize_at("engine.log");
+}
+
+/// Initializes terminal and file logging at an explicit path.
+pub fn initialize_at(path: impl AsRef<std::path::Path>) {
     use simplelog::{ColorChoice, CombinedLogger, TermLogger, TerminalMode, WriteLogger};
     use std::fs::OpenOptions;
 
@@ -110,7 +115,7 @@ pub fn initialize() {
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("engine.log")
+        .open(path)
         .expect("Failed to open engine.log");
 
     // Ignore the error if a logger was already set.
@@ -130,6 +135,11 @@ pub fn initialize() {
 /// Logs only to `./engine.log` in the current working directory.
 /// This safely no-ops if another logger has already been initialized.
 pub fn initialize_file_only() {
+    initialize_file_only_at("engine.log");
+}
+
+/// Initializes file-only logging at an explicit path.
+pub fn initialize_file_only_at(path: impl AsRef<std::path::Path>) {
     use simplelog::{CombinedLogger, WriteLogger};
     use std::fs::OpenOptions;
 
@@ -138,7 +148,7 @@ pub fn initialize_file_only() {
     let log_file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open("engine.log")
+        .open(path)
         .expect("Failed to open engine.log");
 
     // Ignore the error if a logger was already set.

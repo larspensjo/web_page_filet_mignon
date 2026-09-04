@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Harvester",
+  "identifier": "com.harvester.desktop",
+  "app": {
+    "security": { "csp": null },
+    "windows": []
+  },
+  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+}

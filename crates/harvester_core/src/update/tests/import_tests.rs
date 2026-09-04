@@ -215,6 +215,25 @@ fn window_resize_completed_emits_persist_effect() {
 }
 
 #[test]
+fn desktop_window_resize_completed_emits_desktop_persist_effect() {
+    let state = AppState::default();
+    let (_, effects) = update(
+        state,
+        Msg::DesktopWindowResizeCompleted {
+            inner_width: 1200,
+            inner_height: 900,
+        },
+    );
+    assert_eq!(
+        effects,
+        vec![Effect::PersistDesktopWindowSize {
+            width: 1200,
+            height: 900,
+        }]
+    );
+}
+
+#[test]
 fn source_poll_completed_emitted_reflects_ingest_dedup() {
     // If the reducer receives two SourcePollCompleted messages with the same URL,
     // the second one should record emitted=0 because ingest_urls drops the duplicate.

@@ -23,15 +23,16 @@ pub use entity_index_store::{
     load_entity_index, save_entity_index, upsert_entry, EntityIndexPatch,
 };
 pub use persistence::{
-    load_briefing_checkpoint, load_briefing_history, load_completed_jobs,
-    load_pre_triage_overrides, load_window_size, persist_completed_jobs, persist_runtime_state,
-    persist_window_size, save_briefing_checkpoint, save_briefing_history,
+    load_briefing_checkpoint, load_briefing_history, load_completed_jobs, load_desktop_window_size,
+    load_pre_triage_overrides, load_window_size, persist_completed_jobs,
+    persist_desktop_window_size, persist_runtime_state, persist_window_size,
+    save_briefing_checkpoint, save_briefing_history,
 };
 pub use persistence_worker::{
     requires_persistence_snapshot, PersistenceSnapshot, PersistenceWorker,
 };
 pub use prompt_template_store::{load_prompt_templates, save_prompt_template};
-pub use run_lock::{acquire_lock, LockGuard, LockIdentity};
+pub use run_lock::{acquire_lock, LockGuard, LockIdentity, GUI_LOCK_IDENTITY};
 pub use runtime_paths::{default_sources_path, RuntimePaths, DEFAULT_SOURCES_FILENAME};
 pub use seen_set_store::{
     load_brave_seen_set, load_seen_set, persist_brave_metadata, persist_brave_seen_set,

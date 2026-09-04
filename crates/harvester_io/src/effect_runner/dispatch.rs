@@ -1051,6 +1051,18 @@ impl EffectRunner {
                     engine_info!("[window-size] Persisted {}x{} to {:?}", width, height, path);
                 });
             }
+            Effect::PersistDesktopWindowSize { width, height } => {
+                let path = self.paths.state_path.clone();
+                thread::spawn(move || {
+                    crate::persist_desktop_window_size(&path, width, height);
+                    engine_info!(
+                        "[desktop-window-size] Persisted logical inner size {}x{} to {:?}",
+                        width,
+                        height,
+                        path
+                    );
+                });
+            }
 
             // --- Import saved webpages ---
             Effect::ImportSavedWebpages { dir, request_id } => {

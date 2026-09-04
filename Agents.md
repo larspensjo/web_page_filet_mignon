@@ -2,6 +2,8 @@
 
 ## Workflow
 - Build with `cargo build`.
+- Frontend commands run from `frontend/`: `npm run check`, `npm run build`, and `npm run fmt`.
+- Root Cargo commands remain Node-free because `harvester_ui` is not a default member; changes to that host additionally require `cargo clippy -p harvester_ui --all-targets -- -D warnings`.
 - When a task is completed with Rust changes, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
 - The launch scripts encode a fixed launch policy and change only when that policy changes, not when a CLI flag is added.
 - When changing the public output corpus layout, update `docs/CorpusFormat.md`, bump `CORPUS_SCHEMA_VERSION` if compatibility changes, and keep `harvester-corpus.json` generation/tests in sync.

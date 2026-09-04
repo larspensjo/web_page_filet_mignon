@@ -1,10 +1,6 @@
-use super::config::{
-    parse_llm_max_concurrency_requests, DEFAULT_LLM_MAX_CONCURRENT_REQUESTS,
-    MAX_LLM_CONCURRENT_REQUESTS,
-};
 use super::event_handler::{VK_ESCAPE_CODE, VK_RETURN_CODE};
 use super::render_batch::{select_render_mode, RenderMode};
-use super::startup::{assemble_startup_commands, prepare_startup_state};
+use super::startup::assemble_startup_commands;
 use super::ui::tree_item_ids::{job_tree_item_id, link_tree_item_id};
 use super::ui_state::AppUiStateProvider;
 use super::*;
@@ -16,6 +12,7 @@ use harvester_core::{
 };
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::{ExtractedLink, LinkKind};
+use harvester_io::host_bootstrap::prepare_desktop_startup_state;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, Mutex};
 
@@ -523,36 +520,9 @@ fn tree_item_marker_suppresses_low_priority_jobs() {
 }
 
 #[test]
-fn parse_llm_max_concurrency_uses_default_when_missing_or_invalid() {
-    assert_eq!(
-        parse_llm_max_concurrency_requests(None),
-        DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
-    );
-    assert_eq!(
-        parse_llm_max_concurrency_requests(Some("not-a-number")),
-        DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
-    );
-    assert_eq!(
-        parse_llm_max_concurrency_requests(Some("")),
-        DEFAULT_LLM_MAX_CONCURRENT_REQUESTS
-    );
-}
-
-#[test]
-fn parse_llm_max_concurrency_clamps_to_valid_range() {
-    assert_eq!(parse_llm_max_concurrency_requests(Some("1")), 1);
-    assert_eq!(parse_llm_max_concurrency_requests(Some("3")), 3);
-    assert_eq!(
-        parse_llm_max_concurrency_requests(Some("999")),
-        MAX_LLM_CONCURRENT_REQUESTS
-    );
-    assert_eq!(parse_llm_max_concurrency_requests(Some(" 2 ")), 2);
-}
-
-#[test]
 fn prepare_startup_state_schedules_metadata_load_once() {
     let (_temp, paths) = startup_test_paths();
-    let (_state, effects) = prepare_startup_state(
+    let (_state, effects) = prepare_desktop_startup_state(
         AppState::new(),
         &paths,
         1200,
@@ -582,7 +552,8 @@ fn prepare_startup_state_schedules_metadata_load_once() {
 #[test]
 fn assembled_startup_commands_render_before_reveal() {
     let (_temp, paths) = startup_test_paths();
-    let (state, _effects) = prepare_startup_state(AppState::new(), &paths, 1200, 4, None, None);
+    let (state, _effects) =
+        prepare_desktop_startup_state(AppState::new(), &paths, 1200, 4, None, None);
     let view = state.view();
     let window_id = WindowId::new(1);
     let mut tree_render_state = ui::render::TreeRenderState::new();
@@ -1258,7 +1229,8 @@ fn prepare_startup_state_hydrates_blacklist_from_disk() {
     }
     save_blacklist(&paths.blacklist_path, &bl).expect("save blacklist");
 
-    let (state, _effects) = prepare_startup_state(AppState::new(), &paths, 1200, 4, None, None);
+    let (state, _effects) =
+        prepare_desktop_startup_state(AppState::new(), &paths, 1200, 4, None, None);
 
     assert!(
         state.blacklist().is_blocked("bloomberg.com", now),

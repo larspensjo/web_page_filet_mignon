@@ -287,6 +287,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 height: outer_height,
             }]
         }
+        Msg::DesktopWindowResizeCompleted {
+            inner_width,
+            inner_height,
+        } => {
+            vec![Effect::PersistDesktopWindowSize {
+                width: inner_width,
+                height: inner_height,
+            }]
+        }
         Msg::RequestLlmCompletion {
             prompt_id,
             prompt_version,

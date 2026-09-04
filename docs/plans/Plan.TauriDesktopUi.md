@@ -1522,6 +1522,111 @@ member; the window never runs a dev server and never loads remote content; the U
 talks to core through a restricted intent vocabulary. Diary:
 `Type: Implementation` for the vertical slice, quoting the probe report.
 
+**Status: implemented, 2026-09-04**, on `feature/tauri-desktop-UI`; the diff is
+uncommitted pending review, and the human tests below are still to run. All
+four items and the throughput gate landed. Verified with `cargo build`,
+`cargo test` (all suites ok, 0 failed), `cargo clippy --all-targets -- -D warnings`,
+`cargo fmt --check`, `cargo build -p harvester_ui`,
+`cargo clippy -p harvester_ui --all-targets -- -D warnings`, `npm ci`,
+`npm run check` (tsc, Biome, 4 Vitest tests), `npm run build`, and
+`Invoke-Pester scripts/tests/HarvesterLaunch.Tests.ps1` (26 passed). **The gate is
+marginal, and this is an open finding.** With measurement anchored to the first
+acknowledgement and every generation acked, three consecutive runs straddled the
+p95 latency threshold: 97/236 ms p95/max (pass), 101/266 ms (fail by 1 ms),
+94/235 ms (pass), with backlog p95/max 2/3 in all three — p95 backlog exactly on its limit — slow
+frames 0.06–0.12 %, cross-origin fetch rejected, `invoke` round trip succeeded,
+envelope p50/p95 107 544 bytes for ~300 jobs, all in the `dev` profile the
+launcher builds. That payload carries no activity feed, so phase 2 will add to
+it. Per this document, a red gate is raised, not routed around: none of the
+named fallbacks (raise `SNAPSHOT_MIN_INTERVAL_MS`, lower
+`ACTIVITY_FEED_CAPACITY`, a separate append-only feed channel) has been applied;
+the choice is the user's.
+**Human tests, run by the user 2026-09-04:** launching `harvester_ui` and
+`harvester_app` against the same output directory refuses the second with a
+native dialog naming the first's pid — passed. The job-list comparison against
+the old app was run and found two things: the phase-1c page renders the full
+`jobs` array and ignores `job_list_mode`, so it shows all 9 475 jobs in stored
+order while the old app shows its default *Since checkpoint* scope (110 jobs,
+filtered on `is_since_checkpoint` and sorted, `render_list_box.rs:141`) — **an open 1c
+item**, a small page-side fix; and the row content differs because titles,
+host, size, triage badges, search and the button row are phase 3, 4 and 6 work,
+which is expected. Whether the `Start-HarvesterUi.ps1` build-then-launch path was
+exercised is not recorded.
+
+**Open finding, plan-level: the snapshot carries the entire corpus.** Every
+snapshot serialises all 9 475 jobs, not the 110 on screen, because `view.jobs`
+is the full list with per-row flags and the old app filtered at render time.
+The probe payload measured ~358 bytes per job, so a production envelope is
+roughly **3.4 MB**, 32× what the gate was measured on, emitted up to twenty
+times a second during a run, with the page rebuilding 9 475 rows each time.
+This document's ~300-job assumption was wrong by a factor of thirty. It
+supersedes the fallback choice above — raising the floor does not rescue a
+3.4 MB payload — and must be settled before phase 2 is planned: project only
+the active scope's rows, page the list, or give the job list its own on-change
+channel. Phase 2's host-side cost test must run at the real corpus size. Filed
+as Open Question 6.
+
+What the implementation changed about this document's assumptions:
+
+- **A Tauri capability file is required, and it is not a fifth channel.**
+  `listen()` from `@tauri-apps/api/event` is the plugin command
+  `plugin:event|listen`, which Tauri denies unless a capability grants
+  `core:default` to the window. Without it the page never receives a snapshot
+  and shows an empty job list forever — the first probe run failed exactly this
+  way. `crates/harvester_ui/capabilities/default.json` grants `core:default` to
+  window `main`; the app's own commands need no grant for the local origin.
+- **`frontendDist` is not needed; an icon is.** `tauri-codegen` accepts an
+  omitted `frontendDist`, so `cargo build -p harvester_ui` stays independent of
+  the bundle. The Windows resource step in `tauri-build` does require an
+  `.ico`, so a 766-byte placeholder `icons/icon.ico` is checked in. That is a
+  build requirement, not branding; the icons non-goal stands.
+- **The fatal state rides channel 1.** *The core thread*'s "terminal
+  `UiCommand`-free fatal state" is a `SnapshotEnvelope` with `fatal_message`
+  set; the page renders the blocking panel from it and the host exits non-zero
+  when the window closes. `IPC_SCHEMA_VERSION` and `schemaVersion.ts` moved
+  1 → 2 together. `rfd` is used only for the pre-window lock refusal.
+- **Settled decision 24 (reuse `Effect::PersistWindowSize`) did not survive.**
+  The Win32 host persists the outer frame in physical pixels; Tauri sets the
+  inner size in logical pixels and reports resizes in physical ones, so one
+  shared field compounded the DPI factor on every launch and gave the two hosts
+  incompatible meanings for the same value. By user decision the desktop host
+  persists its own optional logical-inner-size fields through a sibling
+  message/effect pair, restores only from them, and leaves the legacy path
+  untouched until phase 7 removes it. Recorded in `DecisionLog.md`. Existing
+  state files load unchanged.
+- **The probe's shape.** `probe_report` is page → host, carrying frame counts
+  and the CSP result; generation 1 is a readiness handshake and measurement
+  starts at its acknowledgement; latency is host-emit to host-ack on one
+  monotonic clock; the page acks inside the snapshot listener, not from a
+  render; CSP rejection is detected through the `securitypolicyviolation`
+  event, so an offline machine cannot fake a pass; the run duration reaches
+  the page through the probe URL, not a duplicated constant. The synthetic
+  payload is ~300 mutating job rows with no feed, because the feed is phase-2
+  work; `ACTIVITY_FEED_CAPACITY` is reported as absent.
+- **Open Question 5 is half settled.** `invoke` works and cross-origin `fetch`
+  is rejected under the CSP as written, with `ipc: http://ipc.localhost` in
+  `connect-src`. Whether `invoke` also works *without* that directive was not
+  tested, so the narrowing the question asks about is still open.
+- **The shared extraction grew.** `harvester_io::host_bootstrap` gained
+  `prepare_desktop_startup_state` and the LLM-concurrency parsing (with their
+  tests), replacing the app's local copies; `engine_logging` gained
+  `initialize_at` / `initialize_file_only_at`; `GUI_LOCK_IDENTITY` and
+  `DEFAULT_WINDOW_HEIGHT` moved to their shared homes.
+- **Tauri's `devtools` feature is not enabled** in the shipping window because
+  it is a key-bearing process rendering untrusted text; it is documented as a
+  debug-only opt-in.
+
+Observations for later phases, deliberately not acted on:
+
+- Every snapshot is the whole view: ~107 KB for 300 jobs, twenty times a
+  second during a run. Phase 2's host-side cost test should measure `view()` +
+  comparison + `project()` at that size, and the feed will only add to it.
+- `crates/harvester_ui/gen/schemas/` is regenerated by `tauri-build` on every
+  build and is git-ignored, matching Tauri's own template.
+- The Codex sandbox used for implementation has no network access and cannot
+  open a WebView2 window; dependencies were pre-installed by the dispatcher and
+  the probe was run outside the sandbox.
+
 ---
 
 ### Phase 2 — Core: run progress, activity, driver, completion query
@@ -1833,6 +1938,15 @@ batch-versus-GUI lock.
    1c settles it empirically: the probe asserts a cross-origin fetch is blocked
    *and* that `invoke` still works. If `invoke` works without the directive,
    narrow it and record why.
+
+6. **What rides the snapshot at corpus scale?** The 1c human test showed the
+   real corpus is 9 475 jobs, and `view.jobs` carries all of them in every
+   snapshot (~3.4 MB per envelope at the measured ~358 bytes per row), while the
+   page shows 110. *What rides the snapshot* assumed ~300 jobs. Candidates:
+   project only the rows of the active `JobListMode` (and search filter) with
+   the counts the header needs; page or window the list; or move the job list
+   to its own on-change channel and keep the snapshot small. Decide before
+   phase 2 is planned; the phase-2 host-side cost test must use the real size.
 
 ### Resolved since earlier revisions
 

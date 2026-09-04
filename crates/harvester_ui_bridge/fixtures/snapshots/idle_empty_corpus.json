@@ -1,0 +1,88 @@
+{
+  "generation": 1,
+  "schema_version": 2,
+  "view": {
+    "ai_unavailable_message": null,
+    "ai_warning_banner": null,
+    "archive_filtered_count": 0,
+    "archive_partial_coverage": null,
+    "archive_token_estimate": 0,
+    "blacklist": {
+      "blacklisted_count": 0,
+      "rows": []
+    },
+    "briefing_blocked_reason": null,
+    "briefing_generate_enabled": false,
+    "checkpoint_status_message": null,
+    "dirty": false,
+    "indirect_link_summary": null,
+    "input_panel_visible": false,
+    "is_pre_triage_reviewing": false,
+    "job_count": 0,
+    "job_list_mode": "SinceCheckpoint",
+    "jobs": [],
+    "last_paste_stats": null,
+    "left_pane": {
+      "first_visible_job_id": null,
+      "job_list_scope": "SinceCheckpoint",
+      "jobs_search_query": "",
+      "left_tab": "Jobs",
+      "selected_jobs_visible_in_filter": false,
+      "visible_jobs_after_filter": []
+    },
+    "left_pane_header": {
+      "count_label": "0 jobs",
+      "scope_label": "Since checkpoint",
+      "state_label": "no jobs in scope",
+      "title": "Jobs"
+    },
+    "left_panel_width": 180,
+    "llm_quota": {
+      "label": "LLM calls unavailable",
+      "limit": null,
+      "percent": null,
+      "severity": "Unavailable",
+      "used": 0
+    },
+    "llm_usage_by_model": [],
+    "next_item_enabled": false,
+    "operation_progress": null,
+    "operation_progress_visible": false,
+    "poll_indirect_links_enabled": false,
+    "poll_sources_enabled": true,
+    "preview_context": null,
+    "preview_header": null,
+    "preview_header_text": null,
+    "preview_source": null,
+    "preview_text": null,
+    "queued_urls": [],
+    "raw_unprocessed_count": 0,
+    "reading_pane_mode": "Summary",
+    "right_pane": {
+      "active_tab": "Summary",
+      "poll_stats_markdown": null,
+      "summary_markdown": null,
+      "trends": {
+        "active_category": "Companies",
+        "category_data": null,
+        "is_loading": true
+      },
+      "triage_markdown": null
+    },
+    "selected_job_id": null,
+    "selected_url": null,
+    "session": "Idle",
+    "signal_candidate_preview": null,
+    "signal_candidate_rows": [],
+    "stop_finish_button": "Disabled",
+    "summaries_can_start": false,
+    "token_limit": 100000,
+    "total_tokens": 0,
+    "triage_blocked_reason": null,
+    "triage_can_start": false,
+    "triage_results_reorder_suppressed": false,
+    "window_width": 960,
+    "workspace_view": "Review"
+  },
+  "fatal_message": null
+}

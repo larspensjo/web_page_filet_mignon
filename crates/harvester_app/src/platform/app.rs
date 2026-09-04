@@ -18,8 +18,8 @@ use engine_logging::engine_info;
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_5_4_NANO};
 use harvester_io::{
     acquire_lock,
-    host_bootstrap::{build_effect_runner, HostLlmDefaults},
-    load_window_size, EffectRunner, LockIdentity, PersistenceWorker, RuntimePaths,
+    host_bootstrap::{build_effect_runner, prepare_desktop_startup_state, HostLlmDefaults},
+    load_window_size, EffectRunner, PersistenceWorker, RuntimePaths, GUI_LOCK_IDENTITY,
 };
 
 use super::effects;
@@ -34,15 +34,8 @@ mod render_batch;
 mod startup;
 mod ui_state;
 use config::llm_max_concurrency_requests_from_env;
-use startup::{assemble_startup_commands, prepare_startup_state};
+use startup::assemble_startup_commands;
 use ui_state::AppUiStateProvider;
-
-const GUI_LOCK_IDENTITY: LockIdentity = LockIdentity {
-    filename: ".harvester_gui.lock",
-    log_tag: "[gui-lock]",
-    actor_description: "Harvester window",
-    force_unlock_hint: None,
-};
 
 fn show_startup_lock_failure(message: &str) {
     use windows::core::{HSTRING, PCWSTR};
@@ -64,8 +57,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     logging::initialize(LogDestination::Both);
     engine_info!("Logger initialized. Starting harvester_app...");
 
-    const DEFAULT_WINDOW_WIDTH: i32 = 960;
-    const DEFAULT_WINDOW_HEIGHT: i32 = 720;
+    use harvester_core::{DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH};
 
     let output_dir = effects::default_output_dir();
     let paths = RuntimePaths::new(
@@ -130,7 +122,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     {
         let mut guard = shared_state.lock().expect("lock shared state");
         let state = std::mem::take(&mut guard.state);
-        let (prepared_state, mut startup_effects) = prepare_startup_state(
+        let (prepared_state, mut startup_effects) = prepare_desktop_startup_state(
             state,
             &paths,
             initial_width,

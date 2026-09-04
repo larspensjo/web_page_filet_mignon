@@ -14,6 +14,14 @@ pub struct LockIdentity {
     pub force_unlock_hint: Option<&'static str>,
 }
 
+/// Shared identity for the mutually exclusive desktop hosts.
+pub const GUI_LOCK_IDENTITY: LockIdentity = LockIdentity {
+    filename: ".harvester_gui.lock",
+    log_tag: "[gui-lock]",
+    actor_description: "Harvester window",
+    force_unlock_hint: None,
+};
+
 /// Lock metadata stored in the lock file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct LockMetadata {

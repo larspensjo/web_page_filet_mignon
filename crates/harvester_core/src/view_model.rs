@@ -268,6 +268,8 @@ pub const DEFAULT_LEFT_PANEL_WIDTH: i32 = 680;
 pub const DEFAULT_JOBS_PANEL_WIDTH: i32 = DEFAULT_LEFT_PANEL_WIDTH - INPUT_PANEL_FIXED_WIDTH;
 // Default window width
 pub const DEFAULT_WINDOW_WIDTH: i32 = 960;
+/// Default desktop window height.
+pub const DEFAULT_WINDOW_HEIGHT: i32 = 720;
 
 /// View state for the left-pane tab bar and its content.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

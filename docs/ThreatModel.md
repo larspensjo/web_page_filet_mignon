@@ -19,6 +19,8 @@ Structured threat model covering:
    - Agent-modified launcher, helper, or application code → accepted residual risk: an agent can change source that the user subsequently runs with real keys. The user accepts this because code changes are reviewable and reviewed before they are run, whereas environment inheritance is invisible and automatic.
    - Persistent parent key variables → accepted residual risk: Windows User-scope or Machine-scope values defeat the inheritance guarantee entirely. This user deliberately keeps `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` at User scope because other applications depend on them; the launchers therefore warn rather than refuse and pass those inherited values to `cargo build` and the child process.
    - Long-lived key-bearing research service → the corpus MCP server is gone, so no long-lived key-bearing process answers agent questions.
+   - Desktop IPC → the Tauri page is an untrusted boundary despite being shipped locally. It may send only `UiIntent`, decoded fail-closed; it cannot name reducer result messages or arbitrary URLs. Snapshot bodies are served only from the last derived `BodyTable`.
+   - Desktop assets → the window never starts a dev server or loads remote content. `harvester://` resolves only confined files beneath the built bundle and carries the bridge CSP.
 4. **System invariants**:
    - Untrusted content is never interpolated into structured formats without sanitization
    - Persisted data is untrusted input for side effects
@@ -27,6 +29,7 @@ Structured threat model covering:
    - Vault secrets are scoped per launched process; the rule applies to every vault secret, not only Harvester keys
    - Side effects require passing through `EffectRunner` policy checks
    - All resource consumption is bounded
+   - Probe mode is a scoped diagnostic exemption: it constructs no `AppState`, `RuntimePaths`, effects, or secrets, and only adds its acknowledgement/report IPC commands in that mode.
 5. **Lessons learned** (from review):
    - Duplicate IO paths create policy drift; centralize enforcement
    - Generic failure collapsing removes traceability

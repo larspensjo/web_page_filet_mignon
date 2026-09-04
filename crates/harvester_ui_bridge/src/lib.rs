@@ -2,8 +2,12 @@
 
 pub mod assets;
 pub mod driver;
+#[cfg(test)]
+pub mod fixtures;
 pub mod ipc;
+pub mod probe;
 pub mod snapshot;
+pub mod window;
 
 pub use assets::{resolve, ResolvedAsset, CSP};
 pub use driver::{
@@ -12,5 +16,6 @@ pub use driver::{
 };
 pub use ipc::{decode_intent, IPC_SCHEMA_VERSION};
 pub use snapshot::{
-    fetch_body, project, BodyKey, BodyRef, BodyTable, ProjectedSnapshot, SnapshotEnvelope,
+    fetch_body, project, BodyKey, BodyRef, BodyResponse, BodyTable, ProjectedSnapshot,
+    SnapshotEnvelope,
 };

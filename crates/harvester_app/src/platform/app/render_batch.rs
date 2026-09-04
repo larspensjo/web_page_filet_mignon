@@ -44,7 +44,10 @@ impl GeometryBatchStats {
 pub(super) fn is_geometry_only_message(msg: &Msg) -> bool {
     matches!(
         msg,
-        Msg::SplitterMoved { .. } | Msg::WindowResized { .. } | Msg::WindowResizeCompleted { .. }
+        Msg::SplitterMoved { .. }
+            | Msg::WindowResized { .. }
+            | Msg::WindowResizeCompleted { .. }
+            | Msg::DesktopWindowResizeCompleted { .. }
     )
 }
 

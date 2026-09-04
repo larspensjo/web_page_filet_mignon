@@ -34,3 +34,9 @@ target
 /tests/coverage_reports/*.md
 coverage_*.json
 coverage_*.md
+
+# Desktop UI frontend build output and dependencies, and throughput-probe output
+/frontend/dist/
+/frontend/node_modules/
+/.local/probe/
+/crates/harvester_ui/gen/

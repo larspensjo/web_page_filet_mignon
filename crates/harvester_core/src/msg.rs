@@ -189,6 +189,11 @@ pub enum Msg {
         outer_width: i32,
         outer_height: i32,
     },
+    /// Tauri desktop window resize debounce completed. Carries logical inner dimensions.
+    DesktopWindowResizeCompleted {
+        inner_width: i32,
+        inner_height: i32,
+    },
     /// Fallback for placeholder wiring.
     NoOp,
     /// User requested an LLM completion.

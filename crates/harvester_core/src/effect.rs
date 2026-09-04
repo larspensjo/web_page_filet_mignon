@@ -159,6 +159,11 @@ pub enum Effect {
         width: i32,
         height: i32,
     },
+    /// Persist the Tauri desktop window's logical inner dimensions to disk.
+    PersistDesktopWindowSize {
+        width: i32,
+        height: i32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
