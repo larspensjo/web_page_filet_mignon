@@ -7,6 +7,7 @@ use harvester_engine::llm::run_metadata::LlmRunMetadata;
 use harvester_engine::llm::types::ModelId;
 use harvester_engine::llm::QuotaOrigin;
 use harvester_engine::ExtractedLink;
+use serde::{Deserialize, Serialize};
 
 use crate::prompt_lab::{
     PromptLabCompareBatchId, PromptLabInputSource, PromptLabRunId, PromptLabStage,
@@ -19,7 +20,7 @@ use crate::state::{AiAvailability, ArchiveTokenEstimates};
 use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
 use crate::CollectedEntry;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Msg {
     /// User edited the URL input box (debounced text).
     InputChanged(String),
@@ -89,8 +90,35 @@ pub enum Msg {
     },
     /// User toggled visibility of the URL input/dropbox panel.
     ToggleInputPanel,
-    /// UI/render tick to coalesce rendering.
-    Tick,
+    /// UI/render tick to coalesce rendering and observe host time.
+    Tick {
+        now: DateTime<Utc>,
+    },
+    /// Desktop workspace selection; the legacy tabs remain separately owned.
+    WorkspaceViewSet {
+        view: crate::WorkspaceView,
+    },
+    /// Desktop job-list mode. Filtering is wired in phase 3.
+    JobListModeSet {
+        mode: crate::JobListMode,
+    },
+    /// Reveal desktop search by returning to Review. Focus itself is frontend-local.
+    JobsSearchRevealRequested,
+    /// Open desktop Trends and request its index.
+    TrendsViewOpened,
+    /// Desktop run request; a no-op until the phase-2 driver lands.
+    PipelineRunRequested,
+    /// Dismissal is a no-op until phase 2 adds the notice state.
+    RunFinishedNoticeDismissed,
+    /// Resolve an extracted link by its core-owned job/index pair.
+    ExtractedLinkOpenRequested {
+        job_id: crate::JobId,
+        link_index: u32,
+    },
+    /// Desktop reading-pane selection.
+    ReadingPaneModeSet {
+        mode: crate::ReadingPaneMode,
+    },
     /// Engine progress for a job.
     JobProgress {
         job_id: crate::JobId,
@@ -512,8 +540,14 @@ pub enum Msg {
     ImportedCorpusCleared,
 }
 
+impl Msg {
+    pub fn tick_at(now: DateTime<Utc>) -> Self {
+        Self::Tick { now }
+    }
+}
+
 /// Result payload returned by the LLM worker.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LlmResultKind {
     /// Non-terminal runner outcome: paid work has been durably submitted to a
     /// batch and is retired for this cycle.

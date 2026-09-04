@@ -11,6 +11,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use scraper::{Html, Selector};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::content_extraction::{ExtractionPipeline, ExtractionPolicy};
@@ -38,7 +39,7 @@ const BROWSER_COMMENT_SCAN_BYTES: usize = 2048;
 // ---------------------------------------------------------------------------
 
 /// A single candidate file found in a saved-webpage directory.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedWebpageFile {
     pub source_path: PathBuf,
     pub basename: String,
@@ -46,7 +47,7 @@ pub struct SavedWebpageFile {
 }
 
 /// Result of scanning a directory for saved webpage candidates.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedWebpageScanResult {
     pub candidates: Vec<SavedWebpageFile>,
     pub ignored_directories: usize,
@@ -54,7 +55,7 @@ pub struct SavedWebpageScanResult {
 }
 
 /// A successfully extracted saved webpage, before persistence.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportedDocument {
     pub canonical_url: String,
     pub title: Option<String>,
@@ -68,7 +69,7 @@ pub struct ImportedDocument {
 }
 
 /// A reference to an imported archive entry after persistence.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportedArchiveRef {
     pub persisted_path: PathBuf,
     pub canonical_url: String,
@@ -77,7 +78,7 @@ pub struct ImportedArchiveRef {
 }
 
 /// The pipeline stage at which an import failure occurred.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ImportFailureStage {
     FileRead,
     OversizeRejection,
@@ -89,7 +90,7 @@ pub enum ImportFailureStage {
 }
 
 /// A per-file import failure.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportFailure {
     pub source_path: PathBuf,
     pub stage: ImportFailureStage,
@@ -97,7 +98,7 @@ pub struct ImportFailure {
 }
 
 /// Aggregate result of a batch import operation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportReport {
     pub scanned_count: usize,
     pub imported_entries: Vec<ImportedArchiveRef>,

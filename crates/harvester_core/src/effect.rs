@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use harvester_engine::llm::dto::SummaryEntities;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
 use harvester_engine::llm::types::ModelId;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
@@ -160,7 +161,7 @@ pub enum Effect {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StopPolicy {
     Finish,
     Immediate,

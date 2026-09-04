@@ -1,4 +1,5 @@
 use crate::briefing::LoadedArticle;
+use serde::{Deserialize, Serialize};
 
 pub type TriageArticleId = usize;
 
@@ -21,7 +22,7 @@ pub enum ArticleTriageState {
     Failed { reason: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArticleTriageResult {
     pub category: String,
     pub priority: u8,

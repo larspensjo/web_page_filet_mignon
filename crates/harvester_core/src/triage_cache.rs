@@ -5,10 +5,11 @@ use crate::triage::ArticleTriageResult;
 use chrono::Utc;
 use engine_logging::engine_info;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Cache key for article triage results.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TriageCacheKey {
     pub content_hash: String,
     pub prompt_id: PromptId,
@@ -70,14 +71,14 @@ pub enum TriageCacheKeyError {
 }
 
 /// Cached entry for an article triage result.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriageCacheEntry {
     pub result: ArticleTriageResult,
     pub created_at_utc: String,
 }
 
 /// In-memory cache for article triage results.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriageCache {
     entries: HashMap<TriageCacheKey, TriageCacheEntry>,
 }

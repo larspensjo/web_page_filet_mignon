@@ -26,6 +26,7 @@ pub mod trends;
 mod triage;
 mod triage_cache;
 mod ui_geometry;
+mod ui_intent;
 mod update;
 mod url_age;
 mod view_model;
@@ -78,11 +79,14 @@ pub use state::{
     JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
     PreTriageActionability, ProviderAlert, SessionState, Stage,
 };
+pub use ui_intent::{HostAction, IntentContext, IntentEffect, UiIntent};
 // ImportPhase is re-exported from import_session above; BatchObservation uses it.
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
 };
-pub use tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
+pub use tabs::{
+    AppTab, JobListMode, JobListScope, LeftTab, ReadingPaneMode, TrendCategory, WorkspaceView,
+};
 pub use trends::{
     choose_display_label, compute_trends, normalize_entity_key, CategoryTrend, EntityLine,
     EntityTrendData, IsoWeek,

@@ -81,7 +81,7 @@ fn extract_llm_request_id(effects: &[Effect]) -> u64 {
 
 fn advance_to_triage_article_load(mut state: AppState) -> (AppState, u64) {
     for _ in 0..8 {
-        let (next_state, effects) = update(state, Msg::Tick);
+        let (next_state, effects) = update(state, Msg::tick_at(chrono::Utc::now()));
         state = next_state;
         if effects
             .iter()
@@ -183,7 +183,7 @@ fn shared_state_with_ready_pre_triage_review() -> Arc<Mutex<SharedState>> {
             },
         );
         for _ in 0..8 {
-            let (next_state, effects) = update(state, Msg::Tick);
+            let (next_state, effects) = update(state, Msg::tick_at(chrono::Utc::now()));
             if let Some(request_id) = effects.iter().find_map(|effect| match effect {
                 Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
                 _ => None,

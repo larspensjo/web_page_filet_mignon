@@ -61,7 +61,7 @@ fn completed_state_with_jobs(urls: &[&str]) -> (AppState, Vec<u64>) {
 /// Panics if no dispatch occurs within 200 ticks.
 fn tick_until_triage_dispatch(mut state: AppState) -> (AppState, u64) {
     for _ in 0..200 {
-        let (next, effects) = update(state, Msg::Tick);
+        let (next, effects) = update(state, Msg::tick_at(chrono::Utc::now()));
         state = next;
         if let Some(request_id) = effects.iter().find_map(|e| match e {
             Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),

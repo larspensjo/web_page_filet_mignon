@@ -256,20 +256,19 @@ pub fn hydrate_state_from_disk(
 
 /// Emits the reducer-owned pre-triage refresh evaluation when the state asks
 /// the host loop to perform it.
-pub fn pump_pre_triage_refresh(state: &mut AppState) -> (Vec<Effect>, bool) {
+pub fn pump_pre_triage_refresh(mut state: AppState) -> (AppState, Vec<Effect>, bool) {
     let Some(triggered_by_job_done) = state.take_pre_triage_refresh_evaluation_request() else {
-        return (Vec::new(), false);
+        return (state, Vec::new(), false);
     };
     let ordered_urls = state.ordered_completed_job_urls_snapshot();
     let (next_state, effects) = update(
-        std::mem::take(state),
+        state,
         Msg::EvaluatePreTriageRefresh {
             ordered_urls,
             triggered_by_job_done,
         },
     );
-    *state = next_state;
-    (effects, true)
+    (next_state, effects, true)
 }
 
 #[cfg(test)]

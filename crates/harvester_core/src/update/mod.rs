@@ -211,6 +211,32 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 Vec::new()
             }
         }
+        Msg::WorkspaceViewSet { view } => {
+            state.set_workspace_view(view);
+            Vec::new()
+        }
+        Msg::JobListModeSet { mode } => {
+            state.set_job_list_mode(mode);
+            Vec::new()
+        }
+        Msg::JobsSearchRevealRequested => {
+            state.set_workspace_view(crate::WorkspaceView::Review);
+            Vec::new()
+        }
+        Msg::TrendsViewOpened => {
+            state.set_workspace_view(crate::WorkspaceView::Trends);
+            vec![Effect::LoadEntityIndex]
+        }
+        Msg::PipelineRunRequested | Msg::RunFinishedNoticeDismissed => Vec::new(),
+        Msg::ReadingPaneModeSet { mode } => {
+            state.set_reading_pane_mode(mode);
+            Vec::new()
+        }
+        Msg::ExtractedLinkOpenRequested { job_id, link_index } => state
+            .job_extracted_link_url(job_id, link_index)
+            .map(|url| Effect::OpenUrlInBrowser { url })
+            .into_iter()
+            .collect(),
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
             state.request_pre_triage_refresh_evaluation(false);
@@ -774,7 +800,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
 
-        Msg::Tick => {
+        Msg::Tick { now } => {
+            state.observe_utc(now);
             state.advance_tick();
             let tick = state.current_tick();
             let has_in_flight_jobs = state.batch_observation().jobs_in_flight > 0;
@@ -788,3 +815,85 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod desktop_contract_tests {
+    use chrono::{DateTime, Utc};
+
+    use super::update;
+    use crate::{AppState, Effect, Msg, WorkspaceView};
+
+    #[test]
+    fn trends_view_opened_loads_the_entity_index() {
+        let (state, effects) = update(AppState::default(), Msg::TrendsViewOpened);
+        assert_eq!(state.workspace_view(), WorkspaceView::Trends);
+        assert_eq!(effects, vec![Effect::LoadEntityIndex]);
+    }
+
+    #[test]
+    fn jobs_search_reveal_changes_only_the_desktop_workspace() {
+        let initial = AppState::default();
+        let initial_left_tab = initial.left_tab();
+        let initial_active_tab = initial.active_tab();
+        let (state, effects) = update(initial, Msg::JobsSearchRevealRequested);
+        assert_eq!(state.workspace_view(), WorkspaceView::Review);
+        assert_eq!(state.job_list_mode(), crate::JobListMode::SinceCheckpoint);
+        assert_eq!(state.left_tab(), initial_left_tab);
+        assert_eq!(state.active_tab(), initial_active_tab);
+        assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn tick_observes_time_and_makes_view_deterministic() {
+        let now = DateTime::parse_from_rfc3339("2026-09-03T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let (state, _) = update(AppState::default(), Msg::tick_at(now));
+        assert_eq!(state.last_observed_utc(), Some(now));
+        assert_eq!(state.view(), state.view());
+    }
+
+    #[test]
+    fn extracted_link_opening_is_resolved_by_core_index() {
+        let (state, _) = update(
+            AppState::default(),
+            Msg::InputChanged("https://article.example".into()),
+        );
+        let (state, _) = update(state, Msg::UrlsSubmitted);
+        let (state, _) = update(
+            state,
+            Msg::JobDone {
+                job_id: 1,
+                result: crate::JobResultKind::Success,
+                content_preview: None,
+                extracted_links: vec![harvester_engine::ExtractedLink {
+                    url: "https://linked.example".into(),
+                    text: None,
+                    kind: harvester_engine::LinkKind::Hyperlink,
+                }],
+                fetched_utc: None,
+            },
+        );
+        let (_, effects) = update(
+            state.clone(),
+            Msg::ExtractedLinkOpenRequested {
+                job_id: 1,
+                link_index: 0,
+            },
+        );
+        assert_eq!(
+            effects,
+            vec![Effect::OpenUrlInBrowser {
+                url: "https://linked.example/".into()
+            }]
+        );
+        let (_, effects) = update(
+            state,
+            Msg::ExtractedLinkOpenRequested {
+                job_id: 1,
+                link_index: 1,
+            },
+        );
+        assert!(effects.is_empty());
+    }
+}

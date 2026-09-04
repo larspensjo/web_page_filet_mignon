@@ -69,6 +69,7 @@ Key rules:
 - **harvester_core:** domain state, update logic, and view-friendly snapshots.
 - **harvester_engine:** content processing pipeline, persistence, and LLM-related workflows.
 - **harvester_io:** shared runtime paths, persistence, and effect execution. `harvester_io::host_bootstrap` is the shared home for executable-host startup and state hydration. `harvester_io::run_lock` provides the parameterized single-instance lock shared by the batch and GUI hosts.
+- **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset confinement, and the core-thread boundary for the future desktop host. `ShowArchiveDialog` is intercepted for the host and never reaches the effect runner.
 - **engine_logging:** shared logging setup used across the workspace.
 - **commanductui:** UI framework dependency used for the Windows interface.
 

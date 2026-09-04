@@ -7,10 +7,12 @@ use commanductui::types::MessageSeverity;
 use commanductui::{AppEvent, ControlId, PlatformCommand, PlatformEventHandler, WindowId};
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{
-    update, AppTab, AppViewModel, Effect, JobListScope, JobResultKind, LayoutViewModel, LeftTab,
-    Msg, PromptLabStage, SignalCandidateState, TrendCategory,
+    update, AppTab, AppViewModel, Effect, JobListScope, LayoutViewModel, LeftTab, Msg,
+    PromptLabStage, SignalCandidateState, TrendCategory,
 };
-use harvester_io::{host_bootstrap::pump_pre_triage_refresh, PersistenceSnapshot};
+use harvester_io::{
+    host_bootstrap::pump_pre_triage_refresh, requires_persistence_snapshot, PersistenceSnapshot,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_ESCAPE, VK_RETURN};
 
 use super::archive_dialog::{
@@ -70,9 +72,7 @@ impl AppEventHandler {
         let geometry_only_batch = inbox.iter().all(is_geometry_only_message);
 
         let mut clear_input_needed = false;
-        let mut persist_completed_needed = false;
-        let mut persist_overrides_needed = false;
-        let mut persist_blacklist_needed = false;
+        let mut persistence_needed = false;
         let mut archive_failure_notice: Option<(String, String)> = None;
         let refresh_evaluation_dispatched;
         let mut persistence_enqueued = false;
@@ -86,25 +86,7 @@ impl AppEventHandler {
                 let msg_for_flags = msg.clone();
                 let (next_state, effects) = update(state, msg);
                 state = next_state;
-                persist_completed_needed |= matches!(
-                    msg_for_flags,
-                    Msg::JobDone {
-                        result: JobResultKind::Success,
-                        ..
-                    }
-                );
-                persist_overrides_needed |= matches!(
-                    msg_for_flags,
-                    Msg::PreTriageDecisionSet { .. } | Msg::PreTriageResetClicked
-                );
-                persist_blacklist_needed |= matches!(
-                    msg_for_flags,
-                    Msg::FetchOutcomeClassified {
-                        class: harvester_engine::FetchOutcomeClass::PermanentBlock
-                            | harvester_engine::FetchOutcomeClass::Success,
-                        ..
-                    }
-                );
+                persistence_needed |= requires_persistence_snapshot(&msg_for_flags);
                 if let Msg::ArchiveExportFailed {
                     basename, reason, ..
                 } = msg_for_flags
@@ -119,18 +101,17 @@ impl AppEventHandler {
                 any_dirty |= state.consume_dirty();
             }
 
-            let (effects, dispatched) = pump_pre_triage_refresh(&mut state);
+            let (next_state, effects, dispatched) = pump_pre_triage_refresh(state);
+            state = next_state;
             refresh_evaluation_dispatched = dispatched;
             queued_effects.extend(effects);
             any_dirty |= state.consume_dirty();
 
-            let persistence_snapshot =
-                if persist_completed_needed || persist_overrides_needed || persist_blacklist_needed
-                {
-                    Some(PersistenceSnapshot::capture(&state))
-                } else {
-                    None
-                };
+            let persistence_snapshot = if persistence_needed {
+                Some(PersistenceSnapshot::capture(&state))
+            } else {
+                None
+            };
             let render_mode = select_render_mode(
                 any_dirty,
                 geometry_only_batch,
@@ -376,7 +357,7 @@ impl PlatformEventHandler for AppEventHandler {
 
         match event {
             AppEvent::MainWindowUISetupComplete { .. } => {
-                let _ = self.msg_tx.send(Msg::Tick);
+                let _ = self.msg_tx.send(Msg::tick_at(chrono::Utc::now()));
             }
             AppEvent::TabBarSelectionChanged {
                 control_id,

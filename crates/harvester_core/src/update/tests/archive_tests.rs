@@ -10,7 +10,7 @@ fn pre_triage_refresh_dispatch_includes_briefing_checkpoint_since_utc() {
     state.set_briefing_since_utc(Some(since));
 
     for _ in 0..200 {
-        let (next, effects) = update(state, Msg::Tick);
+        let (next, effects) = update(state, Msg::tick_at(chrono::Utc::now()));
         state = next;
         if let Some(effect_since_utc) = effects.iter().find_map(|e| match e {
             Effect::LoadArticlesForTriage { since_utc, .. } => *since_utc,

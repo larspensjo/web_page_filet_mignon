@@ -290,7 +290,7 @@ pub(super) fn prompt_lab_status_text(prompt_lab: &harvester_core::PromptLabView)
     if prompt_lab.is_in_flight {
         return "Prompt Lab: Running...".to_string();
     }
-    if let Some(reason) = prompt_lab.run_disabled_reason {
+    if let Some(reason) = &prompt_lab.run_disabled_reason {
         if !prompt_lab.can_run {
             return format!("Prompt Lab: {reason}");
         }

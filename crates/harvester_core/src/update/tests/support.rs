@@ -415,7 +415,7 @@ pub(super) fn prime_llm_metadata(state: AppState) -> AppState {
 
 pub(super) fn tick_until_dispatch(mut state: AppState) -> (AppState, u64) {
     for _ in 0..200 {
-        let (next, effects) = update(state, Msg::Tick);
+        let (next, effects) = update(state, Msg::tick_at(chrono::Utc::now()));
         state = next;
         if let Some(request_id) = effects.iter().find_map(|e| match e {
             Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),

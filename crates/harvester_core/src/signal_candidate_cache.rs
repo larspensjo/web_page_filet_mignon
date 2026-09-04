@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use harvester_engine::llm::dto::SignalCandidateResult;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cache_utils::hex_digest;
 use crate::summary_cache::context_hash;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SignalCandidateCacheKey {
     pub signal_input_hash: String,
     /// Carried for the persisted cache-key shape; always `ArticleSignalCandidate`.
@@ -88,13 +88,13 @@ impl SignalCandidateCacheKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalCandidateCacheEntry {
     pub result: SignalCandidateResult,
     pub created_at_utc: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalCandidateCache {
     pub entries: HashMap<SignalCandidateCacheKey, SignalCandidateCacheEntry>,
 }

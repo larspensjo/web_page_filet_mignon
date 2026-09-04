@@ -1,5 +1,6 @@
 use engine_logging::engine_info;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
@@ -12,7 +13,7 @@ pub const DEFAULT_CACHE_CAPACITY: usize = 10_000;
 
 /// Cache key for article summary results.
 /// Includes all dimensions that could affect the summary output.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SummaryCacheKey {
     pub content_hash: String,
     pub prompt_id: PromptId,
@@ -64,7 +65,7 @@ pub enum SummaryCacheKeyError {
 }
 
 /// Cached entry for an article summary result.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SummaryCacheEntry {
     pub result: ArticleSummaryResult,
     pub created_at_utc: String,
@@ -72,7 +73,7 @@ pub struct SummaryCacheEntry {
 
 /// In-memory cache for article summary results.
 /// Provides lookup and insertion with optional eviction by size limit.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SummaryCache {
     entries: HashMap<SummaryCacheKey, SummaryCacheEntry>,
 }

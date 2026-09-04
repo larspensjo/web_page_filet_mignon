@@ -7,9 +7,10 @@
 use crate::briefing::ArticleSummaryResult;
 use crate::pre_triage_filter::{ArticleFilterEntry, AutoVerdict, FilterReason};
 use crate::triage::ArticleTriageResult;
+use serde::{Deserialize, Serialize};
 
 /// Indicates the source/type of content displayed in the preview pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PreviewContentKind {
     /// Full summary from the briefing stage.
     Summary,

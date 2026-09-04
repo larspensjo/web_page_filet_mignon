@@ -14,13 +14,14 @@ use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
 use harvester_engine::llm::types::ModelId;
 use harvester_engine::LinkKind;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // This token limit is the recommended limit to be used when creating an archive.
 pub const TOKEN_LIMIT: u64 = 100_000;
 
 /// Per-model LLM token usage snapshot for rendering.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmModelUsageView {
     pub model: String,
     pub input_tokens: u64,
@@ -32,35 +33,35 @@ pub use crate::llm_quota_view::LlmQuotaView;
 pub const INPUT_PANEL_FIXED_WIDTH: i32 = 500;
 pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct LastPasteStats {
     pub enqueued: usize,
     pub skipped: usize,
 }
 
 /// Progress for the single active operation shown in the footer bar.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationProgress {
     pub label: String,
     pub completed: u32,
     pub total: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ScoreBand {
     High,
     Mid,
     Low,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignalCandidateRowState {
     Scoring,
     Scored,
     Failed { reason: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignalCandidateOutcome {
     /// >= threshold AND the cluster representative -> goes to the archive.
     Selected,
@@ -72,7 +73,7 @@ pub enum SignalCandidateOutcome {
     Excluded,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalCandidateRow {
     pub job_id: JobId,
     pub url: String,
@@ -88,7 +89,7 @@ pub struct SignalCandidateRow {
     pub outcome: Option<SignalCandidateOutcome>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalCandidatePreviewView {
     pub signal_key: String,
     pub duplicate_urls: Vec<String>,
@@ -96,7 +97,7 @@ pub struct SignalCandidatePreviewView {
     pub state_label: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum StopFinishButtonState {
     #[default]
     Disabled,
@@ -118,7 +119,7 @@ impl StopFinishButtonState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreviewHeaderView {
     pub domain: String,
     pub tokens: Option<u32>,
@@ -130,7 +131,7 @@ pub struct PreviewHeaderView {
     pub nav_heavy: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LeftPaneHeaderView {
     pub title: String,
     pub scope_label: Option<String>,
@@ -138,33 +139,33 @@ pub struct LeftPaneHeaderView {
     pub state_label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IndirectLinkPhase {
     Collecting,
     Ready,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndirectLinkSummary {
     pub count: usize,
     pub phase: IndirectLinkPhase,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewContextView {
     pub source_label: String,
     pub status_label: String,
     pub attention_label: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InlineWarningView {
     pub title: String,
     pub body: String,
 }
 
 /// View data for one entity in the trends tab.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntityLineView {
     pub label: String,
     pub weekly_counts: Vec<u32>,
@@ -172,7 +173,7 @@ pub struct EntityLineView {
 }
 
 /// View data for one category in the trends tab.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CategoryTrendView {
     /// Week display labels (oldest first).
     pub weeks: Vec<String>,
@@ -183,7 +184,7 @@ pub struct CategoryTrendView {
 }
 
 /// View state for the Trends tab.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrendsTabView {
     /// True when entity index has not yet loaded or been rebuilt.
     pub is_loading: bool,
@@ -204,7 +205,7 @@ impl Default for TrendsTabView {
 }
 
 /// View state for the right-pane tab content area.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RightPaneView {
     /// Which tab is currently active.
     pub active_tab: AppTab,
@@ -269,7 +270,7 @@ pub const DEFAULT_JOBS_PANEL_WIDTH: i32 = DEFAULT_LEFT_PANEL_WIDTH - INPUT_PANEL
 pub const DEFAULT_WINDOW_WIDTH: i32 = 960;
 
 /// View state for the left-pane tab bar and its content.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LeftPaneView {
     /// Which left-pane tab is currently active.
     pub left_tab: LeftTab,
@@ -308,14 +309,17 @@ pub struct LayoutViewModel {
     pub prompt_lab_template_editor_open: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArchivePartialCoverageView {
     pub triaged: usize,
     pub actionable_total: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppViewModel {
+    pub workspace_view: crate::WorkspaceView,
+    pub job_list_mode: crate::JobListMode,
+    pub reading_pane_mode: crate::ReadingPaneMode,
     pub session: SessionState,
     pub queued_urls: Vec<String>,
     pub job_count: usize,
@@ -383,6 +387,9 @@ pub struct AppViewModel {
 impl Default for AppViewModel {
     fn default() -> Self {
         Self {
+            workspace_view: crate::WorkspaceView::default(),
+            job_list_mode: crate::JobListMode::default(),
+            reading_pane_mode: crate::ReadingPaneMode::default(),
             session: SessionState::Idle,
             queued_urls: Vec::new(),
             job_count: 0,
@@ -444,7 +451,7 @@ impl Default for AppViewModel {
 // Blacklist tab view types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlacklistRowView {
     pub domain: String,
     pub strikes: u32,
@@ -453,7 +460,7 @@ pub struct BlacklistRowView {
     pub next_retry: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BlacklistTabView {
     pub rows: Vec<BlacklistRowView>,
     pub blacklisted_count: usize,
@@ -505,11 +512,11 @@ impl BlacklistTabView {
 // Prompt Lab view types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptLabRunSummaryView {
     pub run_id: PromptLabRunId,
     pub stage: PromptLabStage,
-    pub status_label: &'static str,
+    pub status_label: String,
     pub output_json: Option<String>,
     pub failure_reason: Option<String>,
     pub input_tokens: Option<u32>,
@@ -526,7 +533,7 @@ pub struct PromptLabRunSummaryView {
     pub cache_status: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptLabView {
     pub visible: bool,
     pub advanced_mode: bool,
@@ -543,7 +550,7 @@ pub struct PromptLabView {
     pub url_input: String,
     pub can_run: bool,
     pub can_rerun: bool,
-    pub run_disabled_reason: Option<&'static str>,
+    pub run_disabled_reason: Option<String>,
     pub resolve_pending: bool,
     pub url_resolve_failed: bool,
     pub latest_validation_error: Option<String>,
@@ -577,7 +584,7 @@ pub struct PromptLabView {
     pub model_catalog_source: ModelCatalogSource,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptLabCompareCandidateView {
     pub candidate_id: u64,
     pub label: String,
@@ -588,7 +595,7 @@ pub struct PromptLabCompareCandidateView {
     pub has_template_override: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptLabCompareRowView {
     pub candidate_id: u64,
     pub label: String,
@@ -605,7 +612,7 @@ pub struct PromptLabCompareRowView {
     pub rank: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptLabComparePolicyView {
     pub require_parse_ok: bool,
     pub max_cost_label: String,
@@ -613,7 +620,7 @@ pub struct PromptLabComparePolicyView {
     pub rating_beats_cost: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptLabCompareBatchView {
     pub batch_id_label: String,
     pub status_label: String,
@@ -741,7 +748,7 @@ impl PromptLabView {
             PromptLabRunSummaryView {
                 run_id: r.run_id,
                 stage: r.stage,
-                status_label,
+                status_label: status_label.to_string(),
                 output_json,
                 failure_reason,
                 input_tokens,
@@ -767,7 +774,8 @@ impl PromptLabView {
             Some("Running…")
         } else {
             source_reason
-        };
+        }
+        .map(str::to_string);
         let can_rerun = !is_in_flight
             && latest_run_record
                 .map(|run| !matches!(run.status, PromptLabRunStatus::Pending { .. }))
@@ -1230,7 +1238,7 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobRowView {
     pub job_id: JobId,
     pub url: String,
@@ -1251,7 +1259,7 @@ pub struct JobRowView {
     pub is_since_checkpoint: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JobFilterStatus {
     HardExcluded { reasons: Vec<FilterReason> },
     ReviewNeeded { reasons: Vec<FilterReason> },
@@ -1260,7 +1268,7 @@ pub enum JobFilterStatus {
     AutoIncluded,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkRowView {
     pub index: u32,
     pub url: String,
@@ -1270,7 +1278,7 @@ pub struct LinkRowView {
     pub age_suspect: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriageAnnotationView {
     pub priority: u8,
     pub category: String,

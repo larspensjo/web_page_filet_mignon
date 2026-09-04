@@ -10,7 +10,9 @@ use crate::prompt_lab::{
 };
 use crate::source_state::SourceStateIndex;
 use crate::summary_cache::SummaryCache;
-use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
+use crate::tabs::{
+    AppTab, JobListMode, JobListScope, LeftTab, ReadingPaneMode, TrendCategory, WorkspaceView,
+};
 use crate::triage::{ArticleTriageResult, TriagePhase, TriageSession};
 use crate::triage_cache::TriageCache;
 use crate::url_age::AgeEstimate;
@@ -22,6 +24,7 @@ use crate::view_model::OperationProgress;
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
 use harvester_engine::LinkKind;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -118,13 +121,13 @@ struct PollPipelineProgressState {
     job_ids: BTreeSet<JobId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AiAvailability {
     Available,
     Unavailable { reason: AiUnavailableReason },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AiUnavailableReason {
     MissingApiKey,
     NoTriageModel,
@@ -146,7 +149,7 @@ pub(crate) enum TriageCacheLookupResult<'a> {
 
 /// Represents the download status for a specific link.
 #[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LinkDownloadState {
     NotDownloaded,
     Downloading,
@@ -165,7 +168,7 @@ pub struct LinkRecord {
     pub age_estimate: Option<AgeEstimate>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum JobOrigin {
     #[default]
     Direct,
@@ -174,13 +177,13 @@ pub enum JobOrigin {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LinkSnapshotRecord {
     pub url: String,
     pub downloaded_path: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CompletedJobSnapshot {
     pub url: String,
     pub tokens: Option<u32>,
@@ -283,7 +286,7 @@ pub struct BatchObservation {
 /// **Limitation:** `full_tokens` is summed from `AppState::jobs`. Articles whose
 /// `JobState` has been pruned, or imported articles without a job, contribute 0.
 /// The dialog may therefore show a smaller archive size than the file produces.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ArchiveTokenEstimates {
     /// Sum of article token counts from job state in full-article mode.
     pub full_tokens: u64,
@@ -396,6 +399,12 @@ pub struct AppState {
     job_list_scope: JobListScope,
     /// Currently active trend category in the Trends tab.
     active_trend_category: TrendCategory,
+    workspace_view: WorkspaceView,
+    job_list_mode: JobListMode,
+    reading_pane_mode: ReadingPaneMode,
+    /// Host-observed time used by deterministic view projection. Hosts must
+    /// reduce a `Msg::Tick` before constructing the first view.
+    last_observed_utc: Option<chrono::DateTime<chrono::Utc>>,
     /// Persisted entity index loaded from disk (or rebuilt from caches).
     entity_index: Option<crate::entity_index::EntityIndex>,
     /// Pre-computed trend data derived from `entity_index`.
@@ -506,6 +515,10 @@ impl Default for AppState {
             left_tab: LeftTab::default(),
             job_list_scope: JobListScope::default(),
             active_trend_category: TrendCategory::default(),
+            workspace_view: WorkspaceView::default(),
+            job_list_mode: JobListMode::default(),
+            reading_pane_mode: ReadingPaneMode::default(),
+            last_observed_utc: None,
             entity_index: None,
             entity_trend_data: None,
             #[cfg(test)]
@@ -542,7 +555,7 @@ impl AppState {
 /// Re-exported from `harvester_engine` so both layers share the same canonical implementation.
 pub use harvester_engine::normalize_url_for_dedupe;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum SessionState {
     #[default]
     Idle,
@@ -573,7 +586,7 @@ pub enum LlmRequestState {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Stage {
     #[default]
     Queued,
@@ -585,7 +598,7 @@ pub enum Stage {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JobResultKind {
     Success,
     Failed { reason: String },

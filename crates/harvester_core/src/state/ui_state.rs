@@ -187,6 +187,32 @@ impl UiState {
 }
 
 impl AppState {
+    pub fn last_observed_utc(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.last_observed_utc
+    }
+
+    pub(crate) fn observe_utc(&mut self, now: chrono::DateTime<chrono::Utc>) {
+        self.last_observed_utc = Some(now);
+    }
+
+    pub fn workspace_view(&self) -> crate::WorkspaceView {
+        self.workspace_view
+    }
+    pub fn job_list_mode(&self) -> crate::JobListMode {
+        self.job_list_mode
+    }
+    pub fn reading_pane_mode(&self) -> crate::ReadingPaneMode {
+        self.reading_pane_mode
+    }
+    pub(crate) fn set_workspace_view(&mut self, view: crate::WorkspaceView) {
+        self.workspace_view = view;
+    }
+    pub(crate) fn set_job_list_mode(&mut self, mode: crate::JobListMode) {
+        self.job_list_mode = mode;
+    }
+    pub(crate) fn set_reading_pane_mode(&mut self, mode: crate::ReadingPaneMode) {
+        self.reading_pane_mode = mode;
+    }
     pub fn consume_dirty(&mut self) -> bool {
         let was_dirty = self.dirty;
         self.dirty = false;

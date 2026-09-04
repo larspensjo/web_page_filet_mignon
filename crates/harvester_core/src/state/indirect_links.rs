@@ -86,7 +86,7 @@ impl IndirectLinkPool {
     }
 
     pub(super) fn draining_links(&mut self) -> Vec<IndirectLink> {
-        let drained = self.links.drain(..).collect();
+        let drained = std::mem::take(&mut self.links);
         self.seen_urls.clear();
         drained
     }

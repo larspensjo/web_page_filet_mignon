@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::blacklist::BlacklistState;
-use harvester_core::{AppState, ArticleFilterKey, CompletedJobSnapshot, ManualDecision};
+use harvester_core::{
+    AppState, ArticleFilterKey, CompletedJobSnapshot, JobResultKind, ManualDecision, Msg,
+};
 
 use crate::{persist_runtime_state, save_blacklist};
 
@@ -28,6 +30,23 @@ impl PersistenceSnapshot {
             blacklist: state.blacklist().clone(),
         }
     }
+}
+
+/// Whether reducing a message changes one of the persisted runtime projections.
+pub fn requires_persistence_snapshot(message: &Msg) -> bool {
+    matches!(
+        message,
+        Msg::JobDone {
+            result: JobResultKind::Success,
+            ..
+        } | Msg::PreTriageDecisionSet { .. }
+            | Msg::PreTriageResetClicked
+            | Msg::FetchOutcomeClassified {
+                class: harvester_engine::FetchOutcomeClass::PermanentBlock
+                    | harvester_engine::FetchOutcomeClass::Success,
+                ..
+            }
+    )
 }
 
 #[derive(Debug)]

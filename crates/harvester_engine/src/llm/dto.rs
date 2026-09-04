@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Typed outputs for LLM prompts.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TriageResult {
     pub category: String,
     pub priority: TriagePriority,
@@ -9,7 +9,8 @@ pub struct TriageResult {
     pub rationale: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "u8")]
 pub struct TriagePriority(u8);
 
 impl TriagePriority {
@@ -26,6 +27,14 @@ impl TriagePriority {
     }
 }
 
+impl TryFrom<u8> for TriagePriority {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or("triage priority must be in 1..=5")
+    }
+}
+
 /// Structured entity lists extracted from an article summary.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SummaryEntities {
@@ -34,7 +43,7 @@ pub struct SummaryEntities {
     pub products: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArticleSummary {
     pub title: String,
     pub summary: String,
@@ -43,13 +52,13 @@ pub struct ArticleSummary {
     pub entities: SummaryEntities,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingStory {
     pub headline: String,
     pub body: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AggregateBriefing {
     pub executive_summary: String,
     pub top_stories: Vec<BriefingStory>,
@@ -57,13 +66,13 @@ pub struct AggregateBriefing {
 }
 
 /// Executive-summary-only result for the first step of the briefing stream.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingExecutiveSummaryResult {
     pub executive_summary: String,
 }
 
 /// One step of the briefing stream: either a new item, or the exhaustion sentinel.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BriefingNextItem {
     Item { headline: String, body: String },
     Exhausted,
@@ -72,21 +81,21 @@ pub enum BriefingNextItem {
 /// Outlet authority tier. Lower variant = higher authority. `Tier1` is best.
 /// Ord/PartialOrd derive ordering by variant position, so `Tier1 < Tier2 < Tier3`,
 /// which matches the selection tie-breaker rule ("best `source_tier` wins").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum SourceTier {
     Tier1,
     Tier2,
     Tier3,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Confidence {
     High,
     Medium,
     Low,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalCandidateResult {
     pub signal_score: u8,
     pub signal_key: String,
@@ -123,6 +132,21 @@ mod signal_candidate_dto_tests {
             output_tokens: 80,
         };
         assert_eq!(r.signal_score, 75);
+    }
+}
+
+#[cfg(test)]
+mod triage_priority_dto_tests {
+    use super::TriagePriority;
+
+    #[test]
+    fn deserialization_validates_the_priority_range() {
+        assert!(serde_json::from_str::<TriagePriority>("0").is_err());
+        assert!(serde_json::from_str::<TriagePriority>("6").is_err());
+        assert_eq!(
+            serde_json::from_str::<TriagePriority>("3").unwrap(),
+            TriagePriority::new(3).unwrap()
+        );
     }
 }
 

@@ -474,7 +474,7 @@ pub fn llm_quota_limits_from_engine(quotas: &LlmQuotas) -> LlmQuotaLimits;
 pub fn build_effect_runner(...) -> Result<(EffectRunner, Option<..>), String>;
 pub fn hydrate_state_from_disk(state: AppState, paths: &RuntimePaths)
     -> (AppState, Vec<Effect>);
-pub fn pump_pre_triage_refresh(state: AppState) -> (AppState, Vec<Effect>);
+pub fn pump_pre_triage_refresh(state: AppState) -> (AppState, Vec<Effect>, bool);
 ```
 
 `effective_model_map` is today duplicated verbatim at
@@ -1349,6 +1349,56 @@ and after introducing `default-members` and confirm it is unchanged**; a silentl
 dropped crate is exactly the failure this key can cause. Then root clippy and
 `cargo fmt`. No human testing needed.
 
+**Status: complete, 2026-09-04**, on `feature/tauri-desktop-UI`. All six items
+landed. Verified with `cargo build`, `cargo test` (all suites ok, 0 failed),
+`cargo clippy --all-targets -- -D warnings` and `cargo fmt --check`. The
+before-and-after test-count check reduces to a list comparison: `default-members`
+as landed names every entry in `members`, so root `cargo test` builds the same
+set it built before the key existed, plus `harvester_ui_bridge`. No human
+testing was needed.
+
+What the implementation changed about this document's assumptions:
+
+- **The `default-members` list in *Workspace layout* omits a member.** The root
+  manifest has an implicit member that its `members` key never named:
+  `src/CommanDuctUI`, pulled in as a path dependency of `harvester_app`
+  (`crates/harvester_app/Cargo.toml:12`). Cargo treats in-tree path dependencies
+  as workspace members, so the "all seven members" in *Findings from the code*
+  item 10 was really eight, and copying the list above verbatim would have
+  silently dropped the submodule's own tests from root `cargo test` — exactly the
+  failure that item's warning describes. Both keys now name it explicitly.
+  `crates/harvester_ui` is in neither list yet; 1c adds it to `members` only.
+- **The intent inventory is 22, not "about 30".** The list under *Intent
+  inventory* was already exact — nine navigation and selection, four run, three
+  reading, four archive, two URL input — and `UiIntent` landed with those 22
+  variants and no others. The "~30" was a stale estimate; the final list did not
+  grow in 1b.
+- **The driver description omitted the persistence obligation.** *The core thread
+  may read state* describes the thread as owning `AppState`, running `update()`,
+  partitioning effects and emitting snapshots, but says nothing about persistence.
+  The Win32 host captures a `PersistenceSnapshot` after every message that
+  `requires_persistence_snapshot` names and hands it to `PersistenceWorker`
+  (`harvester_app/src/platform/app/event_handler.rs:89-111`); without the same
+  step the desktop host would never write state to disk. The bridge driver takes
+  a persistence sink and captures after those messages, and a test asserts that a
+  completed job persists and a tick does not. That out-of-band capture is what
+  phase 7 item 11, added in this checkpoint, retires by moving persistence onto
+  an `Effect`.
+- **serde derives were needed in `harvester_engine`, not only in `harvester_core`.**
+  *IPC decoding is fail-closed* places the derives in core, but the transitive
+  closure of `Msg` and `AppViewModel` crosses the crate boundary: `llm/dto.rs`,
+  `llm/prompt.rs`, `import.rs` and `links.rs` in `harvester_engine` gained
+  `Serialize`/`Deserialize`, and the crate gained `chrono`'s `serde` feature. One
+  of those types, `TriagePriority(u8)`, is a validated newtype; a plain derive
+  would have let IPC construct an out-of-range priority, so it deserializes through
+  `#[serde(try_from = "u8")]` and the existing checked constructor.
+- **The `pump_pre_triage_refresh` signature in *Shared host bootstrap* changed to
+  owned state.** 1a landed it as `&mut AppState -> (Vec<Effect>, bool)`, which
+  fits the Win32 event handler but not a driver that threads `AppState` by value
+  through `update()`. 1b changed it to
+  `AppState -> (AppState, Vec<Effect>, bool)`, both hosts were updated, and the
+  signature block in that section now shows the landed form.
+
 #### 1c — Vertical slice, launcher, and the throughput gate
 
 16. `crates/harvester_ui`: `main.rs` (one flag, `--probe-ipc`), `build.rs`
@@ -1646,6 +1696,9 @@ index does not name.
     (`src\CommanDuctUI\src`) and reports it at line 334; both go, along with any
     assertions in `scripts/tests/project-stats.Tests.ps1` that depend on them.
     Left alone, the script fails or miscounts after the submodule is removed.
+11. Move host persistence (`PersistenceSnapshot` capture + `PersistenceWorker`)
+    onto an `Effect` serviced by the `EffectRunner`; remove the desktop driver's
+    out-of-band capture and delete `requires_persistence_snapshot` with it.
 
 **Verify.** `cargo build`; `cargo test`;
 `cargo clippy --all-targets -- -D warnings`; `cargo fmt`;

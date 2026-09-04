@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 url = "2"
 harvester_engine = { path = "../harvester_engine" }
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 engine_logging = { path = "../engine_logging" }
 sha2 = "0.11.0"
 log.workspace = true

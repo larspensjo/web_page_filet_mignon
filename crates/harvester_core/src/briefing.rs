@@ -1,6 +1,7 @@
 use crate::summary_cache::SummaryCacheKey;
 use crate::triage::{ArticleTriageState, TriageSession};
 use harvester_engine::llm::SummaryEntities;
+use serde::{Deserialize, Serialize};
 use std::fmt::Write;
 
 pub type BriefingArticleId = usize;
@@ -19,7 +20,7 @@ pub enum BriefingPhase {
     Failed { reason: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ArticleSummaryState {
     Pending,
     InProgress { request_id: u64 },
@@ -28,7 +29,7 @@ pub enum ArticleSummaryState {
     Failed { reason: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArticleSummaryResult {
     pub title: String,
     pub summary: String,
@@ -39,7 +40,7 @@ pub struct ArticleSummaryResult {
     pub entities: SummaryEntities,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingArticle {
     pub url: String,
     pub source_title: Option<String>,
@@ -50,19 +51,19 @@ pub struct BriefingArticle {
     pub cache_key_snapshot: Option<SummaryCacheKey>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingStoryResult {
     pub headline: String,
     pub body: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingItem {
     pub headline: String,
     pub body: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingResult {
     pub executive_summary: String,
     pub top_stories: Vec<BriefingStoryResult>,
@@ -83,7 +84,7 @@ impl BriefingResult {
 
 /// A single entry in the persisted briefing history.
 /// Distinct from `BriefingResult` — this is the persisted/history version.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingHistoryEntry {
     pub generated_at_utc: String, // RFC3339, UTC
     pub executive_summary: String,
@@ -91,7 +92,7 @@ pub struct BriefingHistoryEntry {
     pub article_count: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BriefingHistoryStory {
     pub headline: String,
     pub body: String,
@@ -198,7 +199,7 @@ pub struct BriefingSession {
     exec_dispatch_deferred: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoadedArticle {
     pub url: String,
     pub source_title: Option<String>,

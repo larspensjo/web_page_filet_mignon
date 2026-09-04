@@ -1,7 +1,34 @@
 use engine_logging::engine_warn;
+use serde::{Deserialize, Serialize};
+
+/// The new desktop workspace; retained alongside the Win32 tabs until phase 7.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum WorkspaceView {
+    #[default]
+    Review,
+    Trends,
+    PollStats,
+    Blacklist,
+}
+
+/// Reducer-owned selection for the desktop job list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum JobListMode {
+    All,
+    Results,
+    #[default]
+    SinceCheckpoint,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ReadingPaneMode {
+    #[default]
+    Summary,
+    RawText,
+}
 
 /// The active content tab in the right pane.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum AppTab {
     Triage,
     #[default]
@@ -40,7 +67,7 @@ impl AppTab {
 }
 
 /// The active left-pane tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LeftTab {
     #[default]
     Jobs,
@@ -79,7 +106,7 @@ impl LeftTab {
 }
 
 /// Scope filter for job-oriented left-pane tabs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum JobListScope {
     All,
     #[default]
@@ -87,7 +114,7 @@ pub enum JobListScope {
 }
 
 /// The active trend category in the Trends tab.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum TrendCategory {
     #[default]
     Companies,

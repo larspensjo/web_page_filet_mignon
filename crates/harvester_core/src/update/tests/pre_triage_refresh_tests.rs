@@ -18,7 +18,7 @@ fn extract_triage_load_request_id(effects: &[Effect]) -> Option<u64> {
 fn advance_ticks(mut state: AppState, n: usize) -> (AppState, Vec<Effect>) {
     let mut all_effects = Vec::new();
     for _ in 0..n {
-        let (next, effects) = update(state, Msg::Tick);
+        let (next, effects) = update(state, Msg::tick_at(chrono::Utc::now()));
         state = next;
         all_effects.extend(effects);
     }

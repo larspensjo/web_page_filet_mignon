@@ -1009,6 +1009,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "harvester_ui_bridge"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "engine_logging",
+ "harvester_core",
+ "harvester_engine",
+ "harvester_io",
+ "hex",
+ "log",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

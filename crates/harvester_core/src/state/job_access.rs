@@ -263,6 +263,15 @@ impl AppState {
         self.jobs.get(&job_id).map(|job| job.url.as_str())
     }
 
+    pub(crate) fn job_extracted_link_url(&self, job_id: JobId, link_index: u32) -> Option<String> {
+        self.jobs
+            .get(&job_id)?
+            .links
+            .iter()
+            .find(|link| link.index == link_index)
+            .map(|link| link.url.clone())
+    }
+
     pub(crate) fn link_metadata(
         &self,
         job_id: JobId,

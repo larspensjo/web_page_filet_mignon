@@ -1,10 +1,11 @@
 use crate::SourcePollStat;
+use serde::{Deserialize, Serialize};
 
 pub const WARNING_PERCENT: u8 = 70;
 pub const DANGER_PERCENT: u8 = 90;
 pub const POLL_WARNING_REMAINING_PERCENT: u8 = 80;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmQuotaLimits {
     pub max_calls_per_session: Option<u64>,
     pub max_input_tokens_per_session: Option<u64>,
@@ -12,7 +13,7 @@ pub struct LlmQuotaLimits {
     pub max_cost_microdollars_per_session: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct LlmQuotaUsage {
     pub calls: u64,
     pub input_tokens: u64,
@@ -27,7 +28,7 @@ pub struct LlmQuotaState {
     pub ai_available: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmQuotaView {
     pub label: String,
     pub used: u64,
@@ -36,7 +37,7 @@ pub struct LlmQuotaView {
     pub severity: LlmQuotaSeverity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LlmQuotaSeverity {
     Normal,
     Warning,

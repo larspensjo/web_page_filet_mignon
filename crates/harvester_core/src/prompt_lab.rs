@@ -4,6 +4,7 @@
 //! It is intentionally self-contained — it does not reference `BriefingSession`
 //! or `TriageSession` directly.
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -21,7 +22,7 @@ use crate::context_draft::{parse_draft_text, serialize_pairs, ContextValidationE
 // ---------------------------------------------------------------------------
 
 /// Which workflow stage's prompt the lab targets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PromptLabStage {
     #[default]
     Triage,
@@ -42,11 +43,11 @@ pub(crate) fn prompt_id_for_stage(stage: PromptLabStage) -> PromptId {
 // ---------------------------------------------------------------------------
 
 /// Identifies a single Prompt Lab run (user-visible; distinct from `request_id`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PromptLabRunId(pub u64);
 
 /// Identifies a compare batch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PromptLabCompareBatchId(pub u64);
 
 // ---------------------------------------------------------------------------
@@ -72,7 +73,7 @@ pub enum PromptLabRunStatus {
 // Input source
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PromptLabInputSource {
     #[default]
     FromTriageArticles,
@@ -84,7 +85,7 @@ pub enum PromptLabInputSource {
 // ---------------------------------------------------------------------------
 
 /// Source of the model catalog for Prompt Lab model selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ModelCatalogSource {
     #[default]
     NotLoaded,
@@ -195,7 +196,7 @@ impl PromptLabCompareBatchRecord {
 }
 
 /// Snapshot of an effective template for UI consumption.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptLabTemplateSnapshot {
     pub template: PromptTemplateOwned,
     pub source: TemplateSource,

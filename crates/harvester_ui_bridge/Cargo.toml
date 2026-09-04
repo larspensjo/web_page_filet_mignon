@@ -1,0 +1,21 @@
+[package]
+name = "harvester_ui_bridge"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+harvester_core = { path = "../harvester_core" }
+harvester_io = { path = "../harvester_io" }
+harvester_engine = { path = "../harvester_engine" }
+engine_logging = { path = "../engine_logging" }
+chrono = { version = "0.4", features = ["clock", "serde"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.11.0"
+hex = "0.4"
+log.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

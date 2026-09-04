@@ -76,7 +76,7 @@ pub fn is_draft_version(version: PromptVersion) -> bool {
     version == PROMPT_VERSION_DRAFT
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PromptTemplateOwned {
     pub id: PromptId,
     pub version: PromptVersion,
@@ -99,7 +99,7 @@ impl From<&PromptTemplate> for PromptTemplateOwned {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TemplateSource {
     Static,
     Overlay,

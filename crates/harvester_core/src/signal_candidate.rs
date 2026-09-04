@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 use harvester_engine::llm::dto::SignalCandidateResult;
@@ -18,7 +19,7 @@ pub enum SignalCandidateState {
 }
 
 /// Current-epoch signal-candidate state counts for batch observation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalCandidateObservationCounts {
     pub total: usize,
     pub pending_or_in_flight: usize,
@@ -27,7 +28,7 @@ pub struct SignalCandidateObservationCounts {
     pub failed: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SignalCandidateDialogDefault {
     OnAllSettled,
     OffPartial,
@@ -37,7 +38,7 @@ pub enum SignalCandidateDialogDefault {
 
 /// Manual exclusion key. Versioned so a stale exclusion never silently drops a
 /// future unrelated cluster that reused the same slug.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OverrideKey {
     pub signal_key: String,
     pub prompt_id: String,

@@ -239,7 +239,9 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
                     }
                 }
 
-                let (effects, _) = pump_pre_triage_refresh(state);
+                let current_state = std::mem::take(state);
+                let (next_state, effects, _) = pump_pre_triage_refresh(current_state);
+                *state = next_state;
                 queued_effects.extend(effects);
 
                 if !queued_effects.is_empty() {
@@ -264,7 +266,7 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
         }
 
         if options.enable_ai_orchestration && last_tick.elapsed() >= options.tick_interval {
-            let (new_state, tick_effects) = update(state.clone(), Msg::Tick);
+            let (new_state, tick_effects) = update(state.clone(), Msg::tick_at(Utc::now()));
             *state = new_state;
             if !tick_effects.is_empty() {
                 let tick_effects = if let Some(batch) = batch_runtime.as_deref_mut() {

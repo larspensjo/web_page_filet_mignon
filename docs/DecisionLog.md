@@ -33,3 +33,9 @@ Decision: Pre-triage manual overrides are retired because their only producer be
 Context: Invisible, uneditable persisted decisions would be worse than removing a mechanism that no remaining host can create or inspect.
 Consequences: Shared startup hydration does not load manual overrides; persistence continues to round-trip the existing field until its planned phase-7 removal; future manual curation is a re-implementation item.
 Refs: docs/plans/Plan.TauriDesktopUi.md (Retiring pre-triage manual overrides; Phase 1a)
+
+## 2026-09-03 - Enumerated root desktop build surface
+Decision: The workspace enumerates root build targets through `default-members`; the future `harvester_ui` window crate is a workspace member but never a default member.
+Context: Root Cargo commands must keep their existing Rust-only surface while allowing the window host to require its independently built frontend and WebView2.
+Consequences: `cargo build`, `cargo test`, and root clippy do not require Node or WebView2; the Tauri-free bridge remains in the root surface.
+Refs: Cargo.toml, docs/plans/Plan.TauriDesktopUi.md

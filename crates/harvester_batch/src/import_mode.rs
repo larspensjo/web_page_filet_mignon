@@ -5,6 +5,7 @@ use crate::runner::{
     summarize_batch_msg, CycleOutcome, DispatchLoopOptions, BATCH_EMPTY_API_KEY_WARNING,
     BATCH_MISSING_API_KEY_WARNING, MAX_DISPATCH_INBOX_BATCH,
 };
+use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, CompletedJobSnapshot, ImportPhase, Msg};
 use harvester_io::{
@@ -276,7 +277,9 @@ fn run_import_dispatch_loop(
                     }
                 }
 
-                let (effects, _) = pump_pre_triage_refresh(state);
+                let current_state = std::mem::take(state);
+                let (next_state, effects, _) = pump_pre_triage_refresh(current_state);
+                *state = next_state;
                 queued_effects.extend(effects);
 
                 if !queued_effects.is_empty() {
@@ -290,7 +293,7 @@ fn run_import_dispatch_loop(
         }
 
         if options.enable_ai_orchestration && last_tick.elapsed() >= options.tick_interval {
-            let (new_state, tick_effects) = update(state.clone(), Msg::Tick);
+            let (new_state, tick_effects) = update(state.clone(), Msg::tick_at(Utc::now()));
             *state = new_state;
             if !tick_effects.is_empty() {
                 effect_runner.enqueue(tick_effects);

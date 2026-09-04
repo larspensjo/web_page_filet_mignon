@@ -1,5 +1,6 @@
 use scraper::node::Node;
 use scraper::{ElementRef, Html};
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 const DEFAULT_MAX_LINKS: usize = 5_000;
@@ -10,14 +11,14 @@ pub struct PruneStats {
     pub total_pruned: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LinkKind {
     Hyperlink,
     Image,
     Email,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtractedLink {
     pub url: String,
     pub text: Option<String>,

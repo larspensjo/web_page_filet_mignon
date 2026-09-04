@@ -10,7 +10,7 @@ use commanductui::{
 };
 
 use harvester_core::{
-    AiAvailability, AiUnavailableReason, AppState, JobFilterStatus, ManualDecision, Msg,
+    update, AiAvailability, AiUnavailableReason, AppState, JobFilterStatus, ManualDecision, Msg,
 };
 
 use engine_logging::engine_info;
@@ -130,7 +130,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     {
         let mut guard = shared_state.lock().expect("lock shared state");
         let state = std::mem::take(&mut guard.state);
-        let (prepared_state, startup_effects) = prepare_startup_state(
+        let (prepared_state, mut startup_effects) = prepare_startup_state(
             state,
             &paths,
             initial_width,
@@ -138,6 +138,9 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
             startup_ai_availability,
             startup_llm_quota_limits,
         );
+        let (prepared_state, initial_tick_effects) =
+            update(prepared_state, Msg::tick_at(chrono::Utc::now()));
+        startup_effects.extend(initial_tick_effects);
         if !startup_effects.is_empty() {
             effect_runner.enqueue(startup_effects);
         }
@@ -168,7 +171,7 @@ pub fn run_app() -> commanductui::PlatformResult<()> {
     // Background tick to throttle rendering and UI updates.
     thread::spawn(move || {
         let interval = Duration::from_millis(75);
-        while msg_tx.send(Msg::Tick).is_ok() {
+        while msg_tx.send(Msg::tick_at(chrono::Utc::now())).is_ok() {
             thread::sleep(interval);
         }
     });

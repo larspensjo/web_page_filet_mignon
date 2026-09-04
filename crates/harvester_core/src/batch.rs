@@ -25,7 +25,7 @@ pub struct FrozenBatchKey {
     pub rendered_user: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CollectedOutcome {
     Success {
         raw_output_json: String,
@@ -37,7 +37,7 @@ pub enum CollectedOutcome {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollectedEntry {
     pub batch_id: String,
     pub custom_id: String,

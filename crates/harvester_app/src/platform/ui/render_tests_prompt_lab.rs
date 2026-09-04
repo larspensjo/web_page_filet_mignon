@@ -8,7 +8,7 @@ fn completed_prompt_lab_view() -> PromptLabView {
         latest_run: Some(PromptLabRunSummaryView {
             run_id: PromptLabRunId(1),
             stage: PromptLabStage::Summary,
-            status_label: "completed",
+            status_label: "completed".to_string(),
             output_json: Some("{\"ok\":true}".to_string()),
             failure_reason: None,
             input_tokens: Some(10),

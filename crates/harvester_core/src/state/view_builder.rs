@@ -228,6 +228,9 @@ impl AppState {
                 (archive_estimates.summary_tokens, full_filtered_count)
             };
         AppViewModel {
+            workspace_view: self.workspace_view(),
+            job_list_mode: self.job_list_mode(),
+            reading_pane_mode: self.reading_pane_mode(),
             session: self.session,
             queued_urls: self.ui.urls.clone(),
             job_count: self.jobs.len(),
@@ -300,7 +303,8 @@ impl AppState {
             right_pane: self.build_right_pane_view(selected_triage_article_available),
             blacklist: crate::view_model::BlacklistTabView::from_state(
                 self.blacklist(),
-                chrono::Utc::now(),
+                self.last_observed_utc()
+                    .unwrap_or(chrono::DateTime::UNIX_EPOCH),
             ),
         }
     }
