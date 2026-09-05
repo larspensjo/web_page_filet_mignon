@@ -277,6 +277,16 @@ renders, during the whole coexistence period: `left_pane.prompt_lab`
 history) and the briefing bodies `briefing_preview` and
 `right_pane.briefing_markdown`.
 
+**`jobs` is stripped too, from phase 1d onward, and the desktop list view rides
+instead.** `view.jobs` is the whole corpus — 9 475 rows against the ~110 the page
+shows — and it stays in the view model only for the frozen Win32 renderer. Core
+builds a second, desktop-specific projection (`desktop_job_list`: the scoped,
+searched, capped rows plus one selected-job record with its links), and the
+bridge strips `/jobs` and the Win32-only id list
+`/left_pane/visible_jobs_after_filter`. Phase 7 deletes both from core and the
+strip list shrinks accordingly. Details, constants and tests:
+`docs/plans/Plan.TauriDesktopJobListProjection.md`.
+
 Briefing has **no `BodyKey` variants**. They would be dead on arrival, since the
 new UI never renders a briefing, and doubly dead after phase 7 deletes those
 fields from core.
@@ -853,8 +863,13 @@ The new IA is a new reducer-owned concept added alongside the Win32 one:
 
 ```rust
 pub enum WorkspaceView { Review, Trends, PollStats, Blacklist }
-pub enum JobListMode  { All, Results, SinceCheckpoint }
+pub enum JobListMode  { Results, SinceCheckpoint }   // default SinceCheckpoint
 ```
+
+`JobListMode` landed in 1b with a third `All` variant. **Phase 1d retires it**:
+the user never used it, and it is the mode that makes the list unbounded at
+corpus scale. The frozen Win32 `JobListScope::All` is a different type and is
+untouched until phase 7. See `docs/plans/Plan.TauriDesktopJobListProjection.md`.
 
 `AppTab` and `LeftTab` remain until phase 7 because the frozen Win32 renderer
 reads them. This is a **time-boxed duplication with a named end**: they are not
@@ -1034,9 +1049,10 @@ the app.
 One primary workspace, three occasional pages, two modals. No native menu.
 
 **Review workspace** (default)
-- Left: job list — search box, mode selector (All / Results / Since checkpoint),
-  rows per the spec's *Lists and Triage Rows* section (priority badge, category
-  label, short title, restrained metadata).
+- Left: job list — search box, mode selector (Since checkpoint / Results — two
+  modes; *All* was retired in phase 1d), rows per the spec's *Lists and Triage
+  Rows* section (priority badge, category label, short title, restrained
+  metadata), plus a truncation hint when the scope exceeds the row cap.
 - Right: reading pane on Surface Raised — document header (title, domain as an
   Accent Primary link-styled source line, tokens, fetched time), then a **triage
   annotation band** (priority, category, tags) folded in as a band rather than a
@@ -1129,11 +1145,16 @@ Biome, all through `npm run check`.
 
 **(e) Host-side cost measurement.** The throughput probe measures the *channel*.
 It does not exercise the real per-drain cost on the core thread: `state.view()`
-rebuild, the `view != last` deep comparison over ~300 jobs, and `project()`
-hashing every extracted body on every emission. A slow host side would show up in
-production and not in the gate. Phase 2 therefore adds a cheap timing test (or
-criterion benchmark) covering view-build + comparison + projection at the target
-corpus size, so the gate is not the only measurement.
+rebuild, the `view != last` deep comparison, and `project()` hashing every
+extracted body on every emission. A slow host side would show up in production
+and not in the gate. So a `cargo test` timing test in `harvester_ui_bridge`
+covers view-build + comparison + projection **at the real corpus size of 9 475
+jobs, against a named budget** — `HOST_DRAIN_BUDGET_MS = 20`, a fraction of the
+75 ms tick, in the dev profile the launcher builds — including a search-driven
+rebuild. It lands in phase 1d (the phase that changes the projection cost) and
+phase 2 re-runs it once the activity feed is in the payload. The budget is a
+pass/fail gate that can go red; the remedies are named in
+`docs/plans/Plan.TauriDesktopJobListProjection.md`.
 
 ## Decision records
 
@@ -1201,9 +1222,11 @@ The first entry in `DecisionLog.md` is the convention change itself.
 
 ## Phases
 
-Seven phases. Phase 1 is split into three internally verified checkpoints because
-it is by far the largest and its three parts fail in different ways; the phase
-count is unchanged.
+Seven phases. Phase 1 is split into four internally verified checkpoints because
+it is by far the largest and its parts fail in different ways; the phase count is
+unchanged. 1a, 1b and 1c are complete. **1d — the desktop job-list projection —
+is planned separately in `docs/plans/Plan.TauriDesktopJobListProjection.md`**; it
+settles Open Question 6 and must land before phase 2 begins.
 
 Unless stated otherwise, Rust commands run from the repository root
 `c:\Users\larsp\src\web_page_filet_mignon` and npm commands from `frontend/`.
@@ -1586,7 +1609,8 @@ supersedes the fallback choice above — raising the floor does not rescue a
 3.4 MB payload — and must be settled before phase 2 is planned: project only
 the active scope's rows, page the list, or give the job list its own on-change
 channel. Phase 2's host-side cost test must run at the real corpus size. Filed
-as Open Question 6.
+as Open Question 6 and **settled in phase 1d** — see
+`docs/plans/Plan.TauriDesktopJobListProjection.md`.
 
 What the implementation changed about this document's assumptions:
 
@@ -1649,11 +1673,24 @@ Observations for later phases, deliberately not acted on:
   open a WebView2 window; dependencies were pre-installed by the dispatcher and
   the probe was run outside the sandbox.
 
+#### 1d — The desktop job-list projection
+
+Settles Open Question 6: the snapshot carries only the rows the page can show
+plus one selected-job record, `JobListMode::All` is retired, the probe is rebuilt
+at the real corpus shape, and the host-side cost test gets a named budget.
+Planned in full in `docs/plans/Plan.TauriDesktopJobListProjection.md`. **Phase 2
+does not start until 1d lands.**
+
 ---
 
 ### Phase 2 — Core: run progress, activity, driver, completion query
 
-Pure reducer work, verifiable entirely by `cargo test`. No UI required.
+Items 1–5 are pure reducer work, verifiable by `cargo test` with no UI. **Item 6
+is not**: since phase 1d, closing this phase requires re-measuring both the
+host-side drain cost and the throughput probe, and the probe needs the built
+frontend bundle, the `harvester_ui` host binary and a display. It is keyless and
+therefore agent-visible, but it is not `cargo test`. Do not treat the reducer
+suite alone as the completion gate.
 
 1. `PipelineStage`, `StageStatus`, `StageRecord`, `RunProgress` and the full
    accumulator with its reset / activation / accumulation / terminal / failure /
@@ -1669,13 +1706,31 @@ Pure reducer work, verifiable entirely by `cargo test`. No UI required.
    wrapper; signal scoring included; deferred counts excluded.
 5. `RunCompletionNotice` with its defined `new_result_count`, set on reaching
    `Idle` from `AwaitingSettle`, cleared by `DismissRunFinishedNotice`.
-6. The host-side cost measurement from *Testing strategy (e)*.
+6. Re-run the host-side cost measurement from *Testing strategy (e)* — the
+   `HOST_DRAIN_BUDGET_MS = 20` timing test at 9 475 jobs, which phase 1d landed
+   — now with `RunProgress` and the 200-entry activity feed in the payload, and
+   record the new number. Re-run the throughput probe across **all four** cases
+   phase 1d established: the two gated corpus shapes and the two measured
+   scenarios (populated Results, maximum-link selection).
+   **The synthetic views must be updated first.** A re-run against
+   default-empty new fields measures nothing: extend `synthetic_view` so every
+   case carries a populated `RunProgress` with six stage records *and a full
+   `ACTIVITY_FEED_CAPACITY`-entry activity feed with realistic reason strings*,
+   which is the payload this phase adds and the input to Open Question 2's
+   decision about the capacity. Update the payload inventory in
+   `docs/plans/Plan.TauriDesktopJobListProjection.md` with the new field's
+   realistic and maximum sizes.
 
 **Verify.** `cargo test` — the seven run-progress walks, the four run-driver
 tests, the deferred-only-settles regression test, the notice-count assertion, and
 the GUI/batch terminal-state parity test. Then root clippy and `cargo fmt`.
+Then, for item 6: `npm run build` from `frontend/`,
+`cargo build -p harvester_ui` with its clippy, and
+`cargo run -p harvester_ui -- --probe-ipc` (keyless, display-bound, ~150 s,
+exits non-zero on a failed gate). Record all four cases' numbers and the drain
+cost.
 
-No human testing needed.
+No human testing needed beyond running the probe, which holds no secret.
 
 **Docs.** `docs/Architecture.md` — the three new reducer-owned concepts (run
 progress accumulator, run driver state machine, `pipeline_activity()`) change the
@@ -1692,7 +1747,8 @@ its regression test named, per the repo's bug-fix rule.
 
 ### Phase 3 — Review workspace
 
-1. Job list: rows per the spec, search, `JobListMode` selector, selection.
+1. Job list: rows per the spec, search, the two-mode `JobListMode` selector
+   (Since checkpoint / Results), selection.
 2. Reading pane: header, source line, triage annotation band, Markdown rendering
    with raw HTML disabled, raw-text toggle, body fetched via `fetch_body` on hash
    change.
@@ -1961,17 +2017,23 @@ batch-versus-GUI lock.
    *and* that `invoke` still works. If `invoke` works without the directive,
    narrow it and record why.
 
-6. **What rides the snapshot at corpus scale?** The 1c human test showed the
-   real corpus is 9 475 jobs, and `view.jobs` carries all of them in every
-   snapshot (~3.4 MB per envelope at the measured ~358 bytes per row), while the
-   page shows 110. *What rides the snapshot* assumed ~300 jobs. Candidates:
-   project only the rows of the active `JobListMode` (and search filter) with
-   the counts the header needs; page or window the list; or move the job list
-   to its own on-change channel and keep the snapshot small. Decide before
-   phase 2 is planned; the phase-2 host-side cost test must use the real size.
-
 ### Resolved since earlier revisions
 
+- *What rides the snapshot at corpus scale?* (was Open Question 6) — resolved:
+  core builds a desktop-specific job-list view containing only the rows the page
+  can show (mode, then search, then a cap of the newest rows) plus one
+  selected-job record with its links, and the bridge strips `/jobs` and
+  `/left_pane/visible_jobs_after_filter` from the envelope. `JobListMode::All`
+  is retired, so the desktop list has two modes. A separate on-change channel
+  for the list was rejected; a `fetch_job_rows` pull command is recorded as the
+  upgrade path, adopted only if the scoped list regularly exceeds the cap. The
+  probe is rebuilt on typed view models and runs four cases in per-case page
+  sessions — two gated corpus shapes with a named envelope-byte target for
+  representative workloads, and two measured-only worst shapes (a populated
+  Results list, a 5 000-link selection) covering the arrays that remain
+  unbounded — and the host-side cost test gets `HOST_DRAIN_BUDGET_MS = 20` at
+  9 475 jobs. Planned in full in
+  `docs/plans/Plan.TauriDesktopJobListProjection.md` (phase 1d).
 - *Pre-triage override hydration* — resolved by retiring the mechanism entirely.
 - *Prompt Lab deletion* — resolved: deleted in full, machinery included.
 - *Was `Effect::LoadLlmMetadata` missing from the app's startup?* — resolved by
