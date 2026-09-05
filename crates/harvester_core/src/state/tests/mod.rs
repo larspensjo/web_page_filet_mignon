@@ -4,8 +4,9 @@ use super::*;
 mod app_state_tests {
     use super::*;
     use crate::{
-        update, BatchNextAction, BatchStatus, ManualDecision, Msg, PreTriageActionability,
-        PreTriagePolicy, PreTriageSession, SignalCandidateOutcome, SignalCandidateRow,
+        update, BatchNextAction, BatchStatus, JobListMode, ManualDecision, Msg,
+        PreTriageActionability, PreTriagePolicy, PreTriageSession, SelectedJobVisibility,
+        SignalCandidateOutcome, SignalCandidateRow, DESKTOP_JOB_LIST_MAX_ROWS,
     };
     use harvester_engine::{ExtractedLink, LinkKind};
 
@@ -1707,6 +1708,412 @@ mod app_state_tests {
             );
         }
         state.set_briefing(briefing);
+    }
+
+    fn set_fetched_utc(
+        state: &mut AppState,
+        fetched: &[(JobId, Option<chrono::DateTime<chrono::Utc>>)],
+    ) {
+        for (job_id, timestamp) in fetched {
+            state.jobs.get_mut(job_id).expect("job exists").fetched_utc = *timestamp;
+        }
+    }
+
+    #[test]
+    fn desktop_list_scopes_to_since_checkpoint_by_default() {
+        let mut state = AppState::new();
+        state.briefing_since_utc = Some(utc("2026-05-01T00:00:00Z"));
+        insert_done_job(&mut state, 1, "https://example.com/new");
+        insert_done_job(&mut state, 2, "https://example.com/old");
+        set_fetched_utc(
+            &mut state,
+            &[
+                (1, Some(utc("2026-05-02T00:00:00Z"))),
+                (2, Some(utc("2026-04-30T00:00:00Z"))),
+            ],
+        );
+
+        let view = state.view();
+
+        assert_eq!(view.desktop_job_list.mode, JobListMode::SinceCheckpoint);
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn desktop_list_is_empty_in_results_mode_but_keeps_the_selected_job() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/selected");
+        state.job_list_mode = JobListMode::Results;
+        state.select_job(1);
+
+        let view = state.view();
+
+        assert!(view.desktop_job_list.rows.is_empty());
+        assert_eq!(view.desktop_job_list.scoped_count, 0);
+        assert_eq!(view.desktop_job_list.visible_count, 0);
+        assert!(!view.desktop_job_list.truncated);
+        assert_eq!(view.selected_job_id, Some(1));
+        assert_eq!(
+            view.desktop_job_list
+                .selected_job
+                .as_ref()
+                .map(|job| job.list_visibility),
+            Some(SelectedJobVisibility::OutsideScope)
+        );
+    }
+
+    #[test]
+    fn desktop_list_search_narrows_the_scope_case_insensitively() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/plain");
+        insert_done_job(&mut state, 2, "https://github.com/example/project");
+        insert_done_job(&mut state, 3, "https://example.com/other");
+        set_summary_titles(
+            &mut state,
+            &[
+                ("https://example.com/plain", "A quiet article"),
+                ("https://github.com/example/project", "Release notes"),
+                ("https://example.com/other", "Another article"),
+            ],
+        );
+
+        state.set_jobs_search_query("RELEASE".to_string());
+        let title_view = state.view();
+        assert_eq!(
+            title_view
+                .desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+
+        state.set_jobs_search_query("GITHUB".to_string());
+        let url_view = state.view();
+        assert_eq!(
+            url_view
+                .desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+    }
+
+    #[test]
+    fn desktop_list_cap_applies_after_search() {
+        let mut state = AppState::new();
+        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
+            let url = format!("https://example.com/{job_id}");
+            insert_done_job(&mut state, job_id as JobId, &url);
+            set_fetched_utc(
+                &mut state,
+                &[(
+                    job_id as JobId,
+                    Some(utc("2025-01-01T00:00:00Z") + chrono::Duration::days(job_id as i64)),
+                )],
+            );
+        }
+        set_summary_titles(&mut state, &[("https://example.com/1", "Reachable Needle")]);
+
+        let capped_view = state.view();
+        assert_eq!(
+            capped_view.desktop_job_list.scoped_count,
+            DESKTOP_JOB_LIST_MAX_ROWS + 1
+        );
+        assert!(!capped_view
+            .desktop_job_list
+            .rows
+            .iter()
+            .any(|row| row.job_id == 1));
+
+        state.set_jobs_search_query("reachable needle".to_string());
+        let searched_view = state.view();
+        assert_eq!(
+            searched_view
+                .desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn desktop_list_cap_keeps_the_newest_by_fetch_time_and_emits_ascending_job_id() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/none");
+        insert_done_job(&mut state, 2, "https://example.com/old");
+        let newest_job_id = DESKTOP_JOB_LIST_MAX_ROWS as JobId + 4;
+        for job_id in 3..=newest_job_id {
+            insert_done_job(&mut state, job_id, &format!("https://example.com/{job_id}"));
+        }
+        set_fetched_utc(
+            &mut state,
+            &[(1, None), (2, Some(utc("2026-05-01T00:00:00Z")))],
+        );
+        for job_id in 3..=newest_job_id {
+            set_fetched_utc(&mut state, &[(job_id, Some(utc("2026-05-02T00:00:00Z")))]);
+        }
+
+        let view = state.view();
+        let ids = view
+            .desktop_job_list
+            .rows
+            .iter()
+            .map(|row| row.job_id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids.len(), DESKTOP_JOB_LIST_MAX_ROWS);
+        assert_eq!(ids, (5..=newest_job_id).collect::<Vec<_>>());
+        assert!(!ids.contains(&1));
+        assert!(!ids.contains(&2));
+    }
+
+    #[test]
+    fn desktop_list_reports_truncation_counts() {
+        let mut state = AppState::new();
+        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
+            insert_done_job(
+                &mut state,
+                job_id as JobId,
+                &format!("https://example.com/{job_id}"),
+            );
+        }
+
+        let view = state.view();
+
+        assert_eq!(
+            view.desktop_job_list.scoped_count,
+            DESKTOP_JOB_LIST_MAX_ROWS + 1
+        );
+        assert_eq!(
+            view.desktop_job_list.visible_count,
+            DESKTOP_JOB_LIST_MAX_ROWS
+        );
+        assert!(view.desktop_job_list.truncated);
+    }
+
+    #[test]
+    fn desktop_list_counts_jobs_hidden_for_missing_fetch_time() {
+        let mut state = AppState::new();
+        state.briefing_since_utc = Some(utc("2026-05-01T00:00:00Z"));
+        insert_done_job(&mut state, 1, "https://example.com/new");
+        insert_done_job(&mut state, 2, "https://example.com/missing");
+        set_fetched_utc(
+            &mut state,
+            &[(1, Some(utc("2026-05-02T00:00:00Z"))), (2, None)],
+        );
+
+        let checkpoint_view = state.view();
+        assert_eq!(
+            checkpoint_view.desktop_job_list.hidden_without_fetch_time,
+            1
+        );
+        assert_eq!(checkpoint_view.desktop_job_list.rows.len(), 1);
+
+        state.briefing_since_utc = None;
+        let no_checkpoint_view = state.view();
+        assert_eq!(
+            no_checkpoint_view
+                .desktop_job_list
+                .hidden_without_fetch_time,
+            0
+        );
+        assert_eq!(no_checkpoint_view.desktop_job_list.rows.len(), 2);
+    }
+
+    #[test]
+    fn desktop_list_rows_carry_no_links_and_the_selected_job_does() {
+        let (mut state, _) = update(
+            AppState::new(),
+            Msg::RestoreCompletedJobs(vec![CompletedJobSnapshot {
+                url: "https://example.com/selected".to_string(),
+                tokens: Some(10),
+                bytes: Some(100),
+                links: vec![LinkSnapshotRecord {
+                    url: "https://example.com/link".to_string(),
+                    downloaded_path: None,
+                }],
+                fetched_utc: Some("2026-05-02T00:00:00Z".to_string()),
+            }]),
+        );
+        state.select_job(1);
+
+        let view = state.view();
+
+        assert_eq!(view.desktop_job_list.rows[0].link_count, 1);
+        assert_eq!(
+            view.desktop_job_list
+                .selected_job
+                .as_ref()
+                .expect("selected job")
+                .links
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn selected_job_visibility_reports_exactly_one_reason() {
+        let mut outside = AppState::new();
+        outside.briefing_since_utc = Some(utc("2026-05-01T00:00:00Z"));
+        insert_done_job(&mut outside, 1, "https://example.com/old");
+        set_fetched_utc(&mut outside, &[(1, Some(utc("2026-04-30T00:00:00Z")))]);
+        outside.select_job(1);
+        let outside_view = outside.view();
+        assert_eq!(outside_view.selected_job_id, Some(1));
+        assert_eq!(
+            outside_view
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .expect("selected job remains present")
+                .list_visibility,
+            SelectedJobVisibility::OutsideScope
+        );
+
+        let mut mismatch = AppState::new();
+        insert_done_job(&mut mismatch, 1, "https://example.com/selected");
+        insert_done_job(&mut mismatch, 2, "https://example.com/other");
+        mismatch.select_job(1);
+        mismatch.set_jobs_search_query("other".to_string());
+        let mismatch_view = mismatch.view();
+        assert_eq!(mismatch_view.selected_job_id, Some(1));
+        assert_eq!(
+            mismatch_view
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .expect("selected job remains present")
+                .list_visibility,
+            SelectedJobVisibility::QueryMismatch
+        );
+
+        let mut capped = AppState::new();
+        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
+            insert_done_job(
+                &mut capped,
+                job_id as JobId,
+                &format!("https://example.com/{job_id}"),
+            );
+            set_fetched_utc(
+                &mut capped,
+                &[(
+                    job_id as JobId,
+                    Some(utc("2025-01-01T00:00:00Z") + chrono::Duration::days(job_id as i64)),
+                )],
+            );
+        }
+        capped.select_job(1);
+        let capped_view = capped.view();
+        assert_eq!(capped_view.selected_job_id, Some(1));
+        assert_eq!(
+            capped_view
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .expect("selected job remains present")
+                .list_visibility,
+            SelectedJobVisibility::Capped
+        );
+
+        let mut visible = AppState::new();
+        insert_done_job(&mut visible, 1, "https://example.com/visible");
+        visible.select_job(1);
+        let visible_view = visible.view();
+        assert_eq!(visible_view.selected_job_id, Some(1));
+        assert_eq!(
+            visible_view
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .expect("selected job remains present")
+                .list_visibility,
+            SelectedJobVisibility::Visible
+        );
+    }
+
+    #[test]
+    fn selected_job_visible_from_results_candidates() {
+        use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+        let candidate_url = "https://example.com/candidate";
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, candidate_url);
+        insert_done_job(&mut state, 2, "https://example.com/not-a-candidate");
+        state
+            .signal_candidate_mut()
+            .enqueue(candidate_url.to_string());
+        state.signal_candidate_mut().mark_scoring(candidate_url, 1);
+        state.signal_candidate_mut().complete(
+            candidate_url,
+            SignalCandidateResult {
+                signal_score: 90,
+                signal_key: "candidate".to_string(),
+                themes: vec![],
+                draft_gist: "gist".to_string(),
+                source_tier: SourceTier::Tier1,
+                confidence: Confidence::High,
+                reasoning: "reason".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+        state.job_list_mode = JobListMode::Results;
+        state.select_job(1);
+        assert_eq!(
+            state
+                .view()
+                .desktop_job_list
+                .selected_job
+                .unwrap()
+                .list_visibility,
+            SelectedJobVisibility::Visible
+        );
+
+        state.select_job(2);
+        assert_eq!(
+            state
+                .view()
+                .desktop_job_list
+                .selected_job
+                .unwrap()
+                .list_visibility,
+            SelectedJobVisibility::OutsideScope
+        );
+    }
+
+    #[test]
+    fn view_jobs_still_carries_the_full_corpus_for_the_frozen_renderer() {
+        let mut state = AppState::new();
+        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
+            insert_done_job(
+                &mut state,
+                job_id as JobId,
+                &format!("https://example.com/{job_id}"),
+            );
+        }
+
+        let view = state.view();
+
+        assert_eq!(view.jobs.len(), DESKTOP_JOB_LIST_MAX_ROWS + 1);
+        assert_eq!(view.job_count, view.jobs.len());
+        assert_eq!(
+            view.left_pane.visible_jobs_after_filter,
+            view.jobs.iter().map(|job| job.job_id).collect::<Vec<_>>()
+        );
+        assert_eq!(view.left_pane.job_list_scope, JobListScope::SinceCheckpoint);
     }
 
     #[test]

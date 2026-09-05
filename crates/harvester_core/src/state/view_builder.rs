@@ -11,13 +11,14 @@ use crate::signal_candidate::{
     canonical_signal_key, is_signal_key_excluded, ScoredCandidate, SelectionPolicy,
     SignalCandidateSelection, SignalCandidateState,
 };
-use crate::tabs::{AppTab, JobListScope, LeftTab};
+use crate::tabs::{AppTab, JobListMode, JobListScope, LeftTab};
 use crate::triage::{ArticleTriageState, TriagePhase};
 use crate::view_model::{
-    AppViewModel, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus, JobRowView,
-    LayoutViewModel, LeftPaneHeaderView, OperationProgress, PreviewContextView, PreviewHeaderView,
-    RightPaneView, ScoreBand, SignalCandidateOutcome, SignalCandidatePreviewView,
-    SignalCandidateRow, SignalCandidateRowState, TriageAnnotationView, TOKEN_LIMIT,
+    AppViewModel, DesktopJobListView, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus,
+    JobListRowView, JobRowView, LayoutViewModel, LeftPaneHeaderView, OperationProgress,
+    PreviewContextView, PreviewHeaderView, RightPaneView, ScoreBand, SelectedJobView,
+    SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView, SignalCandidateRow,
+    SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS, TOKEN_LIMIT,
 };
 use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::normalize_url_for_dedupe;
@@ -91,6 +92,11 @@ impl AppState {
             .and_then(|job_id| self.jobs.get(&job_id))
             .map(|job| job.url.clone());
         let signal_candidate_rows = self.build_signal_candidate_rows();
+        let desktop_job_list = self.build_desktop_job_list_view(
+            &jobs,
+            &signal_candidate_rows,
+            self.jobs_search_query(),
+        );
         let signal_candidate_preview =
             self.signal_candidate_preview_for_selected_job(selected_job_id);
         let briefing_preview = self.briefing.format_preview();
@@ -235,6 +241,7 @@ impl AppState {
             queued_urls: self.ui.urls.clone(),
             job_count: self.jobs.len(),
             jobs,
+            desktop_job_list,
             last_paste_stats: self.last_paste_stats.clone(),
             dirty: self.dirty,
             total_tokens: self.metrics.total_tokens,
@@ -306,6 +313,130 @@ impl AppState {
                 self.last_observed_utc()
                     .unwrap_or(chrono::DateTime::UNIX_EPOCH),
             ),
+        }
+    }
+
+    fn build_desktop_job_list_view(
+        &self,
+        jobs: &[JobRowView],
+        signal_candidate_rows: &[SignalCandidateRow],
+        query: &str,
+    ) -> DesktopJobListView {
+        let mode = self.job_list_mode();
+        let query = query.to_string();
+        let query_lower = query.to_lowercase();
+        let fetched_utc_for =
+            |row: &JobRowView| self.jobs.get(&row.job_id).and_then(|job| job.fetched_utc);
+
+        let (scoped_rows, searched_rows, emitted_rows, emitted_ids, hidden_without_fetch_time) =
+            match mode {
+                JobListMode::Results => (Vec::new(), Vec::new(), Vec::new(), HashSet::new(), 0),
+                JobListMode::SinceCheckpoint => {
+                    let scoped_rows: Vec<&JobRowView> =
+                        jobs.iter().filter(|job| job.is_since_checkpoint).collect();
+                    let searched_rows: Vec<&JobRowView> = scoped_rows
+                        .iter()
+                        .copied()
+                        .filter(|job| job_row_matches_search_query(job, &query_lower))
+                        .collect();
+                    let (emitted_rows, emitted_ids) = if searched_rows.len()
+                        > DESKTOP_JOB_LIST_MAX_ROWS
+                    {
+                        let mut newest_rows: Vec<_> = searched_rows
+                            .iter()
+                            .map(|row| (fetched_utc_for(row), *row))
+                            .collect();
+                        newest_rows.sort_unstable_by(
+                            |(left_fetched, left), (right_fetched, right)| {
+                                let ordering = match (left_fetched, right_fetched) {
+                                    (Some(left), Some(right)) => right.cmp(left),
+                                    (Some(_), None) => std::cmp::Ordering::Less,
+                                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                                    (None, None) => std::cmp::Ordering::Equal,
+                                };
+                                ordering.then_with(|| right.job_id.cmp(&left.job_id))
+                            },
+                        );
+                        newest_rows.truncate(DESKTOP_JOB_LIST_MAX_ROWS);
+                        newest_rows.sort_unstable_by_key(|(_, row)| row.job_id);
+                        let emitted_ids = newest_rows.iter().map(|(_, row)| row.job_id).collect();
+                        (newest_rows, emitted_ids)
+                    } else {
+                        let emitted_ids = searched_rows.iter().map(|job| job.job_id).collect();
+                        let emitted_rows = searched_rows
+                            .iter()
+                            .map(|row| (fetched_utc_for(row), *row))
+                            .collect();
+                        (emitted_rows, emitted_ids)
+                    };
+                    let hidden_without_fetch_time = if self.briefing_since_utc().is_some() {
+                        self.jobs
+                            .values()
+                            .filter(|job| job.fetched_utc.is_none())
+                            .count()
+                    } else {
+                        0
+                    };
+                    (
+                        scoped_rows,
+                        searched_rows,
+                        emitted_rows,
+                        emitted_ids,
+                        hidden_without_fetch_time,
+                    )
+                }
+            };
+
+        let rows = emitted_rows
+            .iter()
+            .map(|(fetched_utc, job)| JobListRowView::from_row(job, *fetched_utc))
+            .collect::<Vec<_>>();
+        let scoped_count = searched_rows.len();
+        let visible_count = rows.len();
+        let selected_job = self.ui.selected_job_id().and_then(|selected_job_id| {
+            let row = jobs.iter().find(|job| job.job_id == selected_job_id)?;
+            let list_visibility = match mode {
+                JobListMode::Results => {
+                    if signal_candidate_rows
+                        .iter()
+                        .any(|candidate| candidate.job_id == selected_job_id)
+                    {
+                        SelectedJobVisibility::Visible
+                    } else {
+                        SelectedJobVisibility::OutsideScope
+                    }
+                }
+                JobListMode::SinceCheckpoint => {
+                    if !scoped_rows.iter().any(|job| job.job_id == selected_job_id) {
+                        SelectedJobVisibility::OutsideScope
+                    } else if !searched_rows
+                        .iter()
+                        .any(|job| job.job_id == selected_job_id)
+                    {
+                        SelectedJobVisibility::QueryMismatch
+                    } else if !emitted_ids.contains(&selected_job_id) {
+                        SelectedJobVisibility::Capped
+                    } else {
+                        SelectedJobVisibility::Visible
+                    }
+                }
+            };
+            Some(SelectedJobView::from_row(
+                row,
+                fetched_utc_for(row),
+                list_visibility,
+            ))
+        });
+
+        DesktopJobListView {
+            mode,
+            query,
+            rows,
+            selected_job,
+            scoped_count,
+            visible_count,
+            truncated: scoped_count > visible_count,
+            hidden_without_fetch_time,
         }
     }
 
@@ -899,16 +1030,18 @@ fn compute_visible_jobs_for_jobs_tab(
     let query_lower = query.to_lowercase();
     scoped_jobs
         .iter()
-        .filter(|job| {
-            query_lower.is_empty()
-                || job
-                    .summary_title
-                    .as_ref()
-                    .is_some_and(|title| title.to_lowercase().contains(&query_lower))
-                || job.url.to_lowercase().contains(&query_lower)
-        })
+        .filter(|job| job_row_matches_search_query(job, &query_lower))
         .map(|job| job.job_id)
         .collect()
+}
+
+fn job_row_matches_search_query(job: &JobRowView, query_lower: &str) -> bool {
+    query_lower.is_empty()
+        || job
+            .summary_title
+            .as_ref()
+            .is_some_and(|title| title.to_lowercase().contains(query_lower))
+        || job.url.to_lowercase().contains(query_lower)
 }
 
 fn build_preview_context_view(header: &PreviewHeaderView) -> PreviewContextView {

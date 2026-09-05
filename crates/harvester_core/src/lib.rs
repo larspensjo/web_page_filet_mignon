@@ -99,15 +99,16 @@ pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCach
 pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
-    AppViewModel, ArchivePartialCoverageView, CategoryTrendView, EntityLineView, IndirectLinkPhase,
-    IndirectLinkSummary, InlineWarningView, JobFilterStatus, JobRowView, LayoutViewModel,
-    LeftPaneHeaderView, LeftPaneView, LinkRowView, LlmModelUsageView, OperationProgress,
-    PreviewContextView, PreviewHeaderView, PromptLabCompareBatchView,
-    PromptLabCompareCandidateView, PromptLabComparePolicyView, PromptLabCompareRowView,
-    PromptLabRunSummaryView, PromptLabView, RightPaneView, ScoreBand, SignalCandidateOutcome,
-    SignalCandidatePreviewView, SignalCandidateRow, SignalCandidateRowState, StopFinishButtonState,
-    TrendsTabView, TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH,
-    DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
-    TOKEN_LIMIT,
+    AppViewModel, ArchivePartialCoverageView, CategoryTrendView, DesktopJobListView,
+    EntityLineView, IndirectLinkPhase, IndirectLinkSummary, InlineWarningView, JobFilterStatus,
+    JobListRowView, JobRowView, LayoutViewModel, LeftPaneHeaderView, LeftPaneView, LinkRowView,
+    LlmModelUsageView, OperationProgress, PreviewContextView, PreviewHeaderView,
+    PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
+    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, RightPaneView, ScoreBand,
+    SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView,
+    SignalCandidateRow, SignalCandidateRowState, StopFinishButtonState, TrendsTabView,
+    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH,
+    DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS,
+    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};

@@ -14,7 +14,6 @@ import type { JobListMode } from "./ipc/types";
 
 const listeners = new Map<string, (event: { payload: unknown }) => void>();
 const jobListModes = [
-	"All",
 	"Results",
 	"SinceCheckpoint",
 ] as const satisfies readonly JobListMode[];
@@ -76,8 +75,8 @@ describe("job list", () => {
 		).toBeInTheDocument();
 	});
 
-	it("renders the snapshot rows according to its job list mode", async () => {
-		const sinceCheckpointSnapshot = {
+	it("renders the snapshot rows in its SinceCheckpoint job list mode", async () => {
+		snapshot = {
 			...withCorpus,
 			view: {
 				...withCorpus.view,
@@ -92,25 +91,10 @@ describe("job list", () => {
 				],
 			},
 		};
-		snapshot = sinceCheckpointSnapshot;
 		render(<App />);
 
 		expect(await screen.findByText(fixtureUrl)).toBeInTheDocument();
 		expect(screen.queryByText(outsideCheckpointUrl)).not.toBeInTheDocument();
-
-		listeners.get("harvester://snapshot")?.({
-			payload: {
-				...sinceCheckpointSnapshot,
-				generation: sinceCheckpointSnapshot.generation + 1,
-				view: {
-					...sinceCheckpointSnapshot.view,
-					job_list_mode: "All",
-				},
-			},
-		});
-
-		expect(await screen.findByText(outsideCheckpointUrl)).toBeInTheDocument();
-		expect(screen.getByText(fixtureUrl)).toBeInTheDocument();
 	});
 
 	it.each([undefined, "Results"] as const)(

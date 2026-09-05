@@ -14,7 +14,6 @@ pub enum WorkspaceView {
 /// Reducer-owned selection for the desktop job list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum JobListMode {
-    All,
     Results,
     #[default]
     SinceCheckpoint,
@@ -200,6 +199,11 @@ mod tests {
     #[test]
     fn job_list_scope_default_is_since_checkpoint() {
         assert_eq!(JobListScope::default(), JobListScope::SinceCheckpoint);
+    }
+
+    #[test]
+    fn job_list_mode_default_is_since_checkpoint() {
+        assert_eq!(JobListMode::default(), JobListMode::SinceCheckpoint);
     }
 
     #[test]

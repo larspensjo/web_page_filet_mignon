@@ -1,4 +1,4 @@
-export type JobListMode = "All" | "Results" | "SinceCheckpoint";
+export type JobListMode = "Results" | "SinceCheckpoint";
 
 export type SnapshotEnvelope = {
 	generation: number;

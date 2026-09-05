@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 2,
+  "schema_version": 3,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -14,6 +14,16 @@
     "briefing_blocked_reason": null,
     "briefing_generate_enabled": false,
     "checkpoint_status_message": null,
+    "desktop_job_list": {
+      "hidden_without_fetch_time": 0,
+      "mode": "SinceCheckpoint",
+      "query": "",
+      "rows": [],
+      "scoped_count": 0,
+      "selected_job": null,
+      "truncated": false,
+      "visible_count": 0
+    },
     "dirty": false,
     "indirect_link_summary": null,
     "input_panel_visible": false,

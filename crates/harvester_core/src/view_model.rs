@@ -7,9 +7,10 @@ use crate::prompt_lab::{
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::{JobOrigin, LinkDownloadState};
-use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
+use crate::tabs::{AppTab, JobListMode, JobListScope, LeftTab, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
+use chrono::{DateTime, Utc};
 use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
 use harvester_engine::llm::types::ModelId;
@@ -32,6 +33,9 @@ pub use crate::llm_quota_view::LlmQuotaView;
 
 pub const INPUT_PANEL_FIXED_WIDTH: i32 = 500;
 pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
+
+/// Maximum desktop job-list rows in one snapshot.
+pub const DESKTOP_JOB_LIST_MAX_ROWS: usize = 400;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct LastPasteStats {
@@ -326,6 +330,7 @@ pub struct AppViewModel {
     pub queued_urls: Vec<String>,
     pub job_count: usize,
     pub jobs: Vec<JobRowView>,
+    pub desktop_job_list: DesktopJobListView,
     pub last_paste_stats: Option<LastPasteStats>,
     pub dirty: bool,
     pub total_tokens: u64,
@@ -396,6 +401,7 @@ impl Default for AppViewModel {
             queued_urls: Vec::new(),
             job_count: 0,
             jobs: Vec::new(),
+            desktop_job_list: DesktopJobListView::default(),
             last_paste_stats: None,
             dirty: false,
             total_tokens: 0,
@@ -1259,6 +1265,132 @@ pub struct JobRowView {
     pub filter_status: Option<JobFilterStatus>,
     pub has_analysis: bool,
     pub is_since_checkpoint: bool,
+}
+
+/// The rows the desktop page can actually show, plus the selected job.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DesktopJobListView {
+    pub mode: JobListMode,
+    pub query: String,
+    pub rows: Vec<JobListRowView>,
+    pub selected_job: Option<SelectedJobView>,
+    /// Rows in scope after mode and search, before the cap.
+    pub scoped_count: usize,
+    /// `rows.len()`.
+    pub visible_count: usize,
+    /// `scoped_count > visible_count`.
+    pub truncated: bool,
+    /// Jobs excluded from the SinceCheckpoint scope only because they carry no
+    /// `fetched_utc`. Zero when no checkpoint is set and in Results mode.
+    pub hidden_without_fetch_time: usize,
+}
+
+/// A list row: `JobRowView` without `links`, plus the fetch time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobListRowView {
+    pub job_id: JobId,
+    pub url: String,
+    pub stage: Stage,
+    pub outcome: Option<JobResultKind>,
+    pub tokens: Option<u32>,
+    pub bytes: Option<u64>,
+    pub link_count: usize,
+    pub downloaded_link_count: usize,
+    pub origin: JobOrigin,
+    pub triage_annotation: Option<TriageAnnotationView>,
+    pub has_summary: bool,
+    pub summary_title: Option<String>,
+    pub summary_tokens: Option<u32>,
+    pub filter_status: Option<JobFilterStatus>,
+    pub has_analysis: bool,
+    pub is_since_checkpoint: bool,
+    pub fetched_utc: Option<DateTime<Utc>>,
+}
+
+impl JobListRowView {
+    pub fn from_row(row: &JobRowView, fetched_utc: Option<DateTime<Utc>>) -> Self {
+        Self {
+            job_id: row.job_id,
+            url: row.url.clone(),
+            stage: row.stage,
+            outcome: row.outcome.clone(),
+            tokens: row.tokens,
+            bytes: row.bytes,
+            link_count: row.link_count,
+            downloaded_link_count: row.downloaded_link_count,
+            origin: row.origin.clone(),
+            triage_annotation: row.triage_annotation.clone(),
+            has_summary: row.has_summary,
+            summary_title: row.summary_title.clone(),
+            summary_tokens: row.summary_tokens,
+            filter_status: row.filter_status.clone(),
+            has_analysis: row.has_analysis,
+            is_since_checkpoint: row.is_since_checkpoint,
+            fetched_utc,
+        }
+    }
+}
+
+/// Why the selected job is, or is not, in the rendered list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SelectedJobVisibility {
+    /// Rendered in the current list — a job row, or (in Results mode) a
+    /// candidate row in `signal_candidate_rows`.
+    Visible,
+    /// Excluded by the mode's scope: before the checkpoint, or, in Results
+    /// mode, not a signal candidate at all.
+    OutsideScope,
+    /// In scope, but excluded by the active search query.
+    QueryMismatch,
+    /// In scope and matching the query, but not among the newest rows the cap kept.
+    Capped,
+}
+
+/// Everything the reading pane needs for one job, in or out of scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectedJobView {
+    pub job_id: JobId,
+    pub url: String,
+    pub summary_title: Option<String>,
+    pub stage: Stage,
+    pub outcome: Option<JobResultKind>,
+    pub tokens: Option<u32>,
+    pub bytes: Option<u64>,
+    pub origin: JobOrigin,
+    pub triage_annotation: Option<TriageAnnotationView>,
+    pub has_summary: bool,
+    pub summary_tokens: Option<u32>,
+    pub filter_status: Option<JobFilterStatus>,
+    pub fetched_utc: Option<DateTime<Utc>>,
+    /// Why the selection is, or is not, in the rendered list.
+    pub list_visibility: SelectedJobVisibility,
+    pub links: Vec<LinkRowView>,
+}
+
+impl SelectedJobView {
+    pub fn from_row(
+        row: &JobRowView,
+        fetched_utc: Option<DateTime<Utc>>,
+        list_visibility: SelectedJobVisibility,
+    ) -> Self {
+        Self {
+            job_id: row.job_id,
+            url: row.url.clone(),
+            summary_title: row.summary_title.clone(),
+            stage: row.stage,
+            outcome: row.outcome.clone(),
+            tokens: row.tokens,
+            bytes: row.bytes,
+            origin: row.origin.clone(),
+            triage_annotation: row.triage_annotation.clone(),
+            has_summary: row.has_summary,
+            summary_tokens: row.summary_tokens,
+            filter_status: row.filter_status.clone(),
+            fetched_utc,
+            list_visibility,
+            links: row.links.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
