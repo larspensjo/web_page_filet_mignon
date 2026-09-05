@@ -1,7 +1,12 @@
+export type JobListMode = "All" | "Results" | "SinceCheckpoint";
+
 export type SnapshotEnvelope = {
 	generation: number;
 	schema_version: number;
-	view: { jobs: JobRowView[] } & Record<string, unknown>;
+	view: {
+		jobs: JobRowView[];
+		job_list_mode?: JobListMode;
+	} & Record<string, unknown>;
 	fatal_message: string | null;
 };
 export type JobRowView = {
@@ -13,4 +18,5 @@ export type JobRowView = {
 	bytes: number | null;
 	has_summary: boolean;
 	summary_title: string | null;
+	is_since_checkpoint: boolean;
 };

@@ -5,6 +5,7 @@
 - Frontend commands run from `frontend/`: `npm run check`, `npm run build`, and `npm run fmt`.
 - Root Cargo commands remain Node-free because `harvester_ui` is not a default member; changes to that host additionally require `cargo clippy -p harvester_ui --all-targets -- -D warnings`.
 - When a task is completed with Rust changes, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
+- A running `harvester_batch.exe` locks `target/debug/harvester_batch.exe`, so any change under a shared crate fails root `cargo build` at the link step; use `cargo build --workspace --exclude harvester_batch` while a batch runs.
 - The launch scripts encode a fixed launch policy and change only when that policy changes, not when a CLI flag is added.
 - When changing the public output corpus layout, update `docs/CorpusFormat.md`, bump `CORPUS_SCHEMA_VERSION` if compatibility changes, and keep `harvester-corpus.json` generation/tests in sync.
 - When creating complex plans, they should be divided into incremental phases that can be tested.
@@ -17,7 +18,8 @@
 
 ## Secrets
 - Agents must not attempt to obtain API keys, run the Harvester launchers, or iterate against live LLM APIs.
-- The keyless paths (`cargo build`, `cargo test`, and the Pester suites) are the agent-visible surface.
+- The keyless paths (`cargo build`, `cargo test`, the Pester suites, and the `harvester_ui` IPC probe) are the agent-visible surface.
+- The probe is `cargo run -p harvester_ui -- --probe-ipc`: it holds no secret, needs a display and the GUI lock, takes about 65 seconds, writes `.local/probe/ipc-report.json`, and exits non-zero on a failed gate.
 
 ## Planning & Documentation
 - When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.

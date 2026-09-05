@@ -1541,17 +1541,39 @@ it. Per this document, a red gate is raised, not routed around: none of the
 named fallbacks (raise `SNAPSHOT_MIN_INTERVAL_MS`, lower
 `ACTIVITY_FEED_CAPACITY`, a separate append-only feed channel) has been applied;
 the choice is the user's.
+
+**Re-measured 2026-09-05, and the gate is now green with a wide margin.** After
+the job-list scope filter landed, three further consecutive runs measured p95/max
+latency 17/22, 19/24 and 18/30 ms against the same <100/<400 ms limits, backlog
+p95/max 1/1 in all three (was 2/3), slow frames 0.028/0.000/0.028 %, cross-origin
+fetch rejected and `invoke` round trip succeeded in all three, envelope p50/p95
+107 244 bytes — 300 bytes below the earlier figure, which is exactly 300 rows
+times the one character between `false` and `true`, confirming the synthetic
+payload still carries and renders all 300 rows.
+
+**The 5–6x improvement is not explained, and is not claimed for the scope
+filter.** The rendering work is unchanged: the probe's synthetic rows are all
+`is_since_checkpoint: true` under the default `SinceCheckpoint` mode, so the same
+300 rows are rebuilt per frame as before. Two candidates, neither confirmed: the
+earlier runs were taken while the machine was busy with concurrent agent tasks
+and cargo builds, and the WebView2 runtime auto-updates (these runs report
+152.0.4191.62; the earlier runs' runtime version was not recorded). **No fallback
+was applied, and none is now needed at this payload size** — but the margin was
+not bought by any change in this branch, so phase 2 must re-measure rather than
+assume the headroom persists, and must do so at the real corpus size per Open
+Question 6. Record `webview2_runtime_version` alongside any future baseline.
 **Human tests, run by the user 2026-09-04:** launching `harvester_ui` and
 `harvester_app` against the same output directory refuses the second with a
 native dialog naming the first's pid — passed. The job-list comparison against
-the old app was run and found two things: the phase-1c page renders the full
-`jobs` array and ignores `job_list_mode`, so it shows all 9 475 jobs in stored
-order while the old app shows its default *Since checkpoint* scope (110 jobs,
-filtered on `is_since_checkpoint` and sorted, `render_list_box.rs:141`) — **an open 1c
-item**, a small page-side fix; and the row content differs because titles,
-host, size, triage badges, search and the button row are phase 3, 4 and 6 work,
-which is expected. Whether the `Start-HarvesterUi.ps1` build-then-launch path was
-exercised is not recorded.
+the old app was run and found two things: the phase-1c page rendered the full
+`jobs` array and ignored `job_list_mode`, so it showed all 9 475 jobs while the
+old app showed its default *Since checkpoint* scope (110 jobs). **This 1c item is
+resolved:** the page-side filter now honours `job_list_mode` and
+`is_since_checkpoint` while preserving `view.jobs` order, matching the old Jobs
+tab's `visible_jobs_after_filter` order; that path does not sort. The row content
+still differs because titles, host, size, triage badges, search and the button
+row are phase 3, 4 and 6 work, which is expected. Whether the
+`Start-HarvesterUi.ps1` build-then-launch path was exercised is not recorded.
 
 **Open finding, plan-level: the snapshot carries the entire corpus.** Every
 snapshot serialises all 9 475 jobs, not the 110 on screen, because `view.jobs`

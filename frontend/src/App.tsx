@@ -1,9 +1,20 @@
 import { dispatchIntent } from "./ipc/intent";
 import { IPC_SCHEMA_VERSION } from "./ipc/schemaVersion";
+import type { JobListMode, JobRowView } from "./ipc/types";
 import { useProbe } from "./ipc/useProbe";
 import { useSnapshot } from "./ipc/useSnapshot";
 import "./styles/base.css";
 import "./styles/tokens.css";
+
+function jobsForList(
+	jobs: JobRowView[],
+	mode: JobListMode | undefined,
+): JobRowView[] {
+	// Results remains provisionally unfiltered pending Open Question 1 in Plan.TauriDesktopUi.md.
+	return mode === "SinceCheckpoint"
+		? jobs.filter((job) => job.is_since_checkpoint)
+		: jobs;
+}
 
 export function App() {
 	const snapshot = useSnapshot();
@@ -21,7 +32,13 @@ export function App() {
 				frontend bundle is out of date — run <code>npm run build</code>
 			</main>
 		);
-	const jobs = snapshot?.view.jobs ?? [];
+	const allJobs = snapshot?.view.jobs ?? [];
+	const jobListMode = snapshot?.view.job_list_mode;
+	const jobs = jobsForList(allJobs, jobListMode);
+	const scopedListIsEmpty =
+		jobListMode === "SinceCheckpoint" &&
+		allJobs.length > 0 &&
+		jobs.length === 0;
 	return (
 		<main>
 			<header>
@@ -36,7 +53,9 @@ export function App() {
 			<section aria-label="Jobs">
 				<h2>Jobs</h2>
 				{jobs.length === 0 ? (
-					<p>No jobs yet.</p>
+					<p>
+						{scopedListIsEmpty ? "No jobs since checkpoint." : "No jobs yet."}
+					</p>
 				) : (
 					<ul>
 						{jobs.map((job) => (

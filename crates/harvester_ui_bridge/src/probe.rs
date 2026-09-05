@@ -64,7 +64,7 @@ pub fn synthetic_snapshot(generation: u64) -> ProjectedSnapshot {
                 "summary_tokens": null,
                 "filter_status": null,
                 "has_analysis": false,
-                "is_since_checkpoint": false
+                "is_since_checkpoint": true
             })
         })
         .collect::<Vec<_>>();
