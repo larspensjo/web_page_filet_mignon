@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 3,
+  "schema_version": 4,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -30,15 +30,13 @@
     "is_pre_triage_reviewing": false,
     "job_count": 0,
     "job_list_mode": "SinceCheckpoint",
-    "jobs": [],
     "last_paste_stats": null,
     "left_pane": {
       "first_visible_job_id": null,
       "job_list_scope": "SinceCheckpoint",
       "jobs_search_query": "",
       "left_tab": "Jobs",
-      "selected_jobs_visible_in_filter": false,
-      "visible_jobs_after_filter": []
+      "selected_jobs_visible_in_filter": false
     },
     "left_pane_header": {
       "count_label": "0 jobs",

@@ -4,13 +4,17 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use engine_logging::engine_error;
-use harvester_core::{AppState, ArchiveTokenEstimates, Effect, Msg, SignalCandidateDialogDefault};
+use harvester_core::{
+    AppState, AppViewModel, ArchiveTokenEstimates, Effect, Msg, SignalCandidateDialogDefault,
+};
 use harvester_io::{
     host_bootstrap::pump_pre_triage_refresh, requires_persistence_snapshot, PersistenceSnapshot,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::snapshot::{project, BodyTable, ProjectedSnapshot, SnapshotEnvelope};
+#[cfg(test)]
+use crate::snapshot::ProjectedSnapshot;
+use crate::snapshot::{project, BodyTable, SnapshotEnvelope};
 
 pub const SNAPSHOT_MIN_INTERVAL_MS: u64 = 50;
 
@@ -88,15 +92,14 @@ pub fn partition_effects(effects: Vec<Effect>) -> (Vec<Effect>, Vec<UiCommand>) 
     (runner, commands)
 }
 
-struct PendingSnapshot {
-    snapshot: ProjectedSnapshot,
-    bodies: BodyTable,
-}
+type PendingSnapshot = Arc<AppViewModel>;
 
 pub struct SnapshotCoalescer {
     last_emitted_at: Option<Duration>,
     next_generation: u64,
     pending: Option<PendingSnapshot>,
+    #[cfg(test)]
+    projector: fn(&AppViewModel) -> (ProjectedSnapshot, BodyTable),
 }
 
 impl Default for SnapshotCoalescer {
@@ -105,6 +108,8 @@ impl Default for SnapshotCoalescer {
             last_emitted_at: None,
             next_generation: 1,
             pending: None,
+            #[cfg(test)]
+            projector: project,
         }
     }
 }
@@ -112,14 +117,13 @@ impl Default for SnapshotCoalescer {
 impl SnapshotCoalescer {
     pub fn push(
         &mut self,
-        snapshot: ProjectedSnapshot,
-        bodies: BodyTable,
+        view: Arc<AppViewModel>,
         now: Duration,
     ) -> Option<(SnapshotEnvelope, BodyTable)> {
         if self.is_due(now) {
-            Some(self.assign(snapshot, bodies, now))
+            Some(self.assign(view, now))
         } else {
-            self.pending = Some(PendingSnapshot { snapshot, bodies });
+            self.pending = Some(view);
             None
         }
     }
@@ -129,7 +133,7 @@ impl SnapshotCoalescer {
             return None;
         }
         let pending = self.pending.take()?;
-        Some(self.assign(pending.snapshot, pending.bodies, now))
+        Some(self.assign(pending, now))
     }
 
     fn is_due(&self, now: Duration) -> bool {
@@ -149,17 +153,24 @@ impl SnapshotCoalescer {
         })
     }
 
-    fn assign(
-        &mut self,
-        snapshot: ProjectedSnapshot,
-        bodies: BodyTable,
-        now: Duration,
-    ) -> (SnapshotEnvelope, BodyTable) {
+    fn assign(&mut self, view: Arc<AppViewModel>, now: Duration) -> (SnapshotEnvelope, BodyTable) {
         self.pending = None;
         let generation = self.next_generation;
         self.next_generation = self.next_generation.saturating_add(1);
         self.last_emitted_at = Some(now);
+        #[cfg(not(test))]
+        let (snapshot, bodies) = project(view.as_ref());
+        #[cfg(test)]
+        let (snapshot, bodies) = (self.projector)(view.as_ref());
         (snapshot.with_generation(generation), bodies)
+    }
+
+    #[cfg(test)]
+    fn with_projector(projector: fn(&AppViewModel) -> (ProjectedSnapshot, BodyTable)) -> Self {
+        Self {
+            projector,
+            ..Self::default()
+        }
     }
 }
 
@@ -186,7 +197,7 @@ where
     let mut last_message_kind = "startup".to_string();
     let body = AssertUnwindSafe(|| {
         let mut coalescer = SnapshotCoalescer::default();
-        let mut last_view = None;
+        let mut last_view: Option<Arc<AppViewModel>> = None;
         loop {
             let first = if coalescer.has_pending() {
                 match receiver.recv_timeout(coalescer.remaining_until_due(now())) {
@@ -218,10 +229,9 @@ where
             let (next, effects, _) = pump_pre_triage_refresh(state);
             state = next;
             dispatch_effects(effects, &mut effect_sink, &mut command_sink);
-            let view = state.view();
-            if last_view.as_ref() != Some(&view) {
-                let (snapshot, table) = project(&view);
-                if let Some((snapshot, table)) = coalescer.push(snapshot, table, now()) {
+            let view = Arc::new(state.view());
+            if last_view.as_deref() != Some(view.as_ref()) {
+                if let Some((snapshot, table)) = coalescer.push(Arc::clone(&view), now()) {
                     *bodies.write().expect("body table lock") = table;
                     snapshot_sink(SnapshotSignal::Snapshot(snapshot));
                 }
@@ -287,11 +297,11 @@ mod tests {
 
     use super::*;
 
-    fn projected(value: u64) -> ProjectedSnapshot {
-        ProjectedSnapshot {
-            schema_version: crate::IPC_SCHEMA_VERSION,
-            view: serde_json::json!({ "value": value }),
-        }
+    fn view(value: u64) -> Arc<AppViewModel> {
+        Arc::new(AppViewModel {
+            window_width: value as i32,
+            ..Default::default()
+        })
     }
 
     #[test]
@@ -321,41 +331,47 @@ mod tests {
     #[test]
     fn coalescing_keeps_the_last_burst_state_and_monotonic_generation() {
         let mut coalescer = SnapshotCoalescer::default();
-        let first = coalescer
-            .push(projected(1), BodyTable::new(), Duration::ZERO)
-            .unwrap()
-            .0;
+        let first = coalescer.push(view(1), Duration::ZERO).unwrap().0;
         assert_eq!(first.generation, 1);
-        assert!(coalescer
-            .push(projected(2), BodyTable::new(), Duration::from_millis(1))
-            .is_none());
-        assert!(coalescer
-            .push(projected(3), BodyTable::new(), Duration::from_millis(2))
-            .is_none());
+        assert!(coalescer.push(view(2), Duration::from_millis(1)).is_none());
+        assert!(coalescer.push(view(3), Duration::from_millis(2)).is_none());
         assert!(coalescer.flush_due(Duration::from_millis(49)).is_none());
         let last = coalescer.flush_due(Duration::from_millis(50)).unwrap().0;
         assert_eq!(last.generation, 2);
-        assert_eq!(last.view["value"], 3);
+        assert_eq!(last.view["window_width"], 3);
+    }
+
+    #[test]
+    fn bursts_project_once_per_emitted_envelope() {
+        static PROJECTED: AtomicUsize = AtomicUsize::new(0);
+        fn counting_project(view: &AppViewModel) -> (ProjectedSnapshot, BodyTable) {
+            PROJECTED.fetch_add(1, Ordering::SeqCst);
+            project(view)
+        }
+
+        PROJECTED.store(0, Ordering::SeqCst);
+        let mut coalescer = SnapshotCoalescer::with_projector(counting_project);
+        assert!(coalescer.push(view(1), Duration::ZERO).is_some());
+        assert!(coalescer.push(view(2), Duration::from_millis(1)).is_none());
+        assert!(coalescer.push(view(3), Duration::from_millis(2)).is_none());
+        assert_eq!(PROJECTED.load(Ordering::SeqCst), 1);
+        assert!(coalescer.flush_due(Duration::from_millis(50)).is_some());
+        assert_eq!(PROJECTED.load(Ordering::SeqCst), 2);
     }
 
     #[test]
     fn direct_emission_discards_an_older_deferred_snapshot() {
         let mut coalescer = SnapshotCoalescer::default();
-        let first = coalescer
-            .push(projected(1), BodyTable::new(), Duration::ZERO)
-            .unwrap()
-            .0;
+        let first = coalescer.push(view(1), Duration::ZERO).unwrap().0;
         assert_eq!(first.generation, 1);
-        assert!(coalescer
-            .push(projected(2), BodyTable::new(), Duration::from_millis(10))
-            .is_none());
+        assert!(coalescer.push(view(2), Duration::from_millis(10)).is_none());
 
         let latest = coalescer
-            .push(projected(3), BodyTable::new(), Duration::from_millis(60))
+            .push(view(3), Duration::from_millis(60))
             .unwrap()
             .0;
         assert_eq!(latest.generation, 2);
-        assert_eq!(latest.view["value"], 3);
+        assert_eq!(latest.view["window_width"], 3);
         assert!(coalescer.flush_due(Duration::from_millis(120)).is_none());
     }
 

@@ -1,0 +1,1 @@
+export const JOBS_SEARCH_DEBOUNCE_MS = 150;

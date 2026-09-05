@@ -1,6 +1,8 @@
 //! Tauri-free throughput-probe construction, statistics, and thresholds.
 
-use harvester_core::AppViewModel;
+use harvester_core::{
+    AppViewModel, DesktopJobListView, JobListRowView, JobOrigin, JobResultKind, Stage,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{project, ProjectedSnapshot, SNAPSHOT_MIN_INTERVAL_MS};
@@ -42,36 +44,44 @@ pub struct ProbeReport {
     pub webview2_runtime_version: Option<String>,
 }
 
-/// Make a deterministic, non-state-owned view, then project it through production IPC projection.
-pub fn synthetic_snapshot(generation: u64) -> ProjectedSnapshot {
-    let mut json = serde_json::to_value(AppViewModel::default()).expect("view serializes");
-    let jobs = (0..PROBE_JOB_COUNT)
-        .map(|index| {
-            serde_json::json!({
-                "job_id": index as u64 + 1,
-                "url": format!("https://probe.invalid/{index}?generation={generation}"),
-                "stage": "Done",
-                "outcome": "Success",
-                "tokens": generation as u32,
-                "bytes": 1024_u64 + index as u64,
-                "link_count": 0,
-                "downloaded_link_count": 0,
-                "links": [],
-                "origin": "Direct",
-                "triage_annotation": null,
-                "has_summary": false,
-                "summary_title": null,
-                "summary_tokens": null,
-                "filter_status": null,
-                "has_analysis": false,
-                "is_since_checkpoint": true
-            })
+/// Make a deterministic, non-state-owned view at the desktop projection shape.
+pub fn synthetic_view(generation: u64) -> AppViewModel {
+    let rows = (0..PROBE_JOB_COUNT)
+        .map(|index| JobListRowView {
+            job_id: index as u64 + 1,
+            url: format!("https://probe.invalid/{index}?generation={generation}"),
+            stage: Stage::Done,
+            outcome: Some(JobResultKind::Success),
+            tokens: Some(generation as u32),
+            bytes: Some(1024_u64 + index as u64),
+            link_count: 0,
+            downloaded_link_count: 0,
+            origin: JobOrigin::Direct,
+            triage_annotation: None,
+            has_summary: false,
+            summary_title: None,
+            summary_tokens: None,
+            filter_status: None,
+            has_analysis: false,
+            is_since_checkpoint: true,
+            fetched_utc: None,
         })
         .collect::<Vec<_>>();
-    json["jobs"] = serde_json::Value::Array(jobs);
-    let view: AppViewModel =
-        serde_json::from_value(json).expect("probe job rows match AppViewModel");
-    project(&view).0
+    AppViewModel {
+        job_count: rows.len(),
+        desktop_job_list: DesktopJobListView {
+            rows,
+            scoped_count: PROBE_JOB_COUNT,
+            visible_count: PROBE_JOB_COUNT,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// Project the deterministic probe view through production IPC projection.
+pub fn synthetic_snapshot(generation: u64) -> ProjectedSnapshot {
+    project(&synthetic_view(generation)).0
 }
 
 pub fn percentile(sorted: &mut [u64], numerator: usize, denominator: usize) -> u64 {
@@ -129,10 +139,16 @@ mod tests {
         let first = synthetic_snapshot(1);
         let second = synthetic_snapshot(2);
         assert_eq!(
-            first.view["jobs"].as_array().unwrap().len(),
+            first.view["desktop_job_list"]["rows"]
+                .as_array()
+                .unwrap()
+                .len(),
             PROBE_JOB_COUNT
         );
-        assert_ne!(first.view["jobs"][0]["url"], second.view["jobs"][0]["url"]);
+        assert_ne!(
+            first.view["desktop_job_list"]["rows"][0]["url"],
+            second.view["desktop_job_list"]["rows"][0]["url"]
+        );
     }
     #[test]
     fn thresholds_and_percentiles_are_exact() {
