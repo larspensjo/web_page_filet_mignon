@@ -19,7 +19,7 @@
 ## Secrets
 - Agents must not attempt to obtain API keys, run the Harvester launchers, or iterate against live LLM APIs.
 - The keyless paths (`cargo build`, `cargo test`, the Pester suites, and the `harvester_ui` IPC probe) are the agent-visible surface.
-- The probe is `cargo run -p harvester_ui -- --probe-ipc`: it holds no secret, needs a display and the GUI lock, takes about 65 seconds, writes `.local/probe/ipc-report.json`, and exits non-zero on a failed gate.
+- The probe is `cargo run -p harvester_ui -- --probe-ipc`: it holds no secret, needs a display and the GUI lock, takes about 150 seconds, writes `.local/probe/ipc-report.json`, and exits non-zero on a failed gate.
 
 ## Planning & Documentation
 - When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.

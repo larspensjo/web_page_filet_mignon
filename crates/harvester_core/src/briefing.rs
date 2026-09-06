@@ -660,6 +660,19 @@ impl BriefingSession {
             })
     }
 
+    /// Completed per-article summaries, keyed by their source URL.
+    pub fn completed_summaries(&self) -> impl Iterator<Item = (&str, &ArticleSummaryResult)> {
+        self.articles
+            .iter()
+            .filter_map(|article| match &article.summary_state {
+                ArticleSummaryState::Completed { result } => Some((article.url.as_str(), result)),
+                ArticleSummaryState::Pending
+                | ArticleSummaryState::InProgress { .. }
+                | ArticleSummaryState::Deferred
+                | ArticleSummaryState::Failed { .. } => None,
+            })
+    }
+
     /// Returns true when the briefing session has recorded a terminal failure
     /// for the given article URL.
     pub fn summary_failed_for_url(&self, url: &str) -> bool {

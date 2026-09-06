@@ -77,7 +77,7 @@ pub use state::{
     normalize_url_for_dedupe, AiAvailability, AiUnavailableReason, AppState, ArchiveTokenEstimates,
     BatchNextAction, BatchObservation, BatchStatus, CompletedJobSnapshot, JobId, JobOrigin,
     JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
-    PreTriageActionability, ProviderAlert, SessionState, Stage,
+    PreTriageActionability, ProviderAlert, SessionState, Stage, MAX_EXTRACTED_LINKS,
 };
 pub use ui_intent::{HostAction, IntentContext, IntentEffect, UiIntent};
 // ImportPhase is re-exported from import_session above; BatchObservation uses it.

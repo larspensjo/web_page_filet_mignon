@@ -2117,6 +2117,188 @@ mod app_state_tests {
     }
 
     #[test]
+    fn desktop_view_omits_frozen_renderer_job_arrays() {
+        let mut state = AppState::new();
+        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
+            insert_done_job(
+                &mut state,
+                job_id as JobId,
+                &format!("https://example.com/{job_id}"),
+            );
+        }
+
+        let frozen = state.view();
+        let desktop = state.desktop_view();
+
+        assert_eq!(frozen.jobs.len(), DESKTOP_JOB_LIST_MAX_ROWS + 1);
+        assert!(desktop.jobs.is_empty());
+        assert!(desktop.left_pane.visible_jobs_after_filter.is_empty());
+        assert_eq!(desktop.desktop_job_list, frozen.desktop_job_list);
+        assert_eq!(desktop.left_pane.first_visible_job_id, Some(1));
+        assert!(!desktop.left_pane.selected_jobs_visible_in_filter);
+    }
+
+    #[test]
+    fn desktop_and_frozen_views_match_outside_frozen_only_arrays_for_rich_state() {
+        use crate::briefing::LoadedArticle;
+        use crate::triage::{ArticleTriageResult, TriageSession};
+
+        let urls = [
+            "https://example.com/rich-new",
+            "https://example.com/rich-second",
+            "https://example.com/rich-old",
+        ];
+        let mut state = AppState::new();
+        for (index, url) in urls.iter().enumerate() {
+            insert_done_job(&mut state, index as JobId + 1, url);
+        }
+        set_fetched_utc(
+            &mut state,
+            &[
+                (1, Some(utc("2026-05-02T00:00:00Z"))),
+                (2, Some(utc("2026-05-03T00:00:00Z"))),
+                (3, Some(utc("2026-04-30T00:00:00Z"))),
+            ],
+        );
+        state.briefing_since_utc = Some(utc("2026-05-01T00:00:00Z"));
+        set_summary_titles(
+            &mut state,
+            &[
+                (urls[0], "Needle-rich summary"),
+                (urls[1], "Second summary"),
+            ],
+        );
+
+        let loaded = urls
+            .iter()
+            .map(|url| LoadedArticle {
+                url: (*url).to_string(),
+                source_title: Some(format!("Source for {url}")),
+                prepared_text: std::iter::repeat_n("substantial", 220)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                content_hash: format!("rich-hash-{url}"),
+                fetched_utc: None,
+            })
+            .collect::<Vec<_>>();
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(loaded.clone());
+        triage.transition_to_triaging();
+        for index in 0..loaded.len() {
+            triage.complete_article(
+                index,
+                ArticleTriageResult {
+                    category: format!("Category {index}"),
+                    priority: index as u8 + 1,
+                    tags: vec![format!("tag-{index}")],
+                    rationale: "Rich-state annotation".into(),
+                    input_tokens: 10,
+                    output_tokens: 5,
+                },
+            );
+        }
+        triage.complete();
+        state.set_triage(triage);
+
+        let mut pre_triage = PreTriageSession::load_articles(loaded, &PreTriagePolicy::default());
+        let decision_key = pre_triage
+            .entry_for_url(urls[1])
+            .expect("pre-triage entry")
+            .key
+            .clone();
+        pre_triage
+            .set_manual_decision(&decision_key, ManualDecision::Exclude)
+            .expect("manual decision applies");
+        state.set_pre_triage(pre_triage);
+        state.select_job(1);
+        let (state, _) = update(state, Msg::JobsSearchQueryChanged("needle".into()));
+
+        let frozen_view = state.view();
+        let desktop_view = state.desktop_view();
+        assert_eq!(desktop_view.desktop_job_list.query, "needle");
+        assert_eq!(desktop_view.desktop_job_list.rows.len(), 1);
+        assert!(desktop_view.desktop_job_list.rows[0]
+            .summary_title
+            .is_some());
+        assert!(desktop_view.desktop_job_list.rows[0]
+            .triage_annotation
+            .is_some());
+        assert!(desktop_view.desktop_job_list.rows[0]
+            .filter_status
+            .is_some());
+        assert!(desktop_view.desktop_job_list.selected_job.is_some());
+        assert_eq!(desktop_view.desktop_job_list.scoped_count, 1);
+        assert!(
+            frozen_view
+                .jobs
+                .iter()
+                .find(|job| job.job_id == 1)
+                .expect("recent job")
+                .is_since_checkpoint
+        );
+        assert!(
+            !frozen_view
+                .jobs
+                .iter()
+                .find(|job| job.job_id == 3)
+                .expect("old job")
+                .is_since_checkpoint
+        );
+
+        let mut frozen = serde_json::to_value(frozen_view).expect("frozen view serializes");
+        let mut desktop = serde_json::to_value(desktop_view).expect("desktop view serializes");
+        for view in [&mut frozen, &mut desktop] {
+            view.as_object_mut().expect("view object").remove("jobs");
+            view["left_pane"]
+                .as_object_mut()
+                .expect("left pane object")
+                .remove("visible_jobs_after_filter");
+        }
+
+        assert_eq!(desktop, frozen);
+    }
+
+    #[test]
+    fn desktop_view_caps_rows_and_preserves_newest_order_from_a_large_corpus() {
+        let mut state = AppState::new();
+        let corpus_size = DESKTOP_JOB_LIST_MAX_ROWS * 2 + 7;
+        for job_id in 1..=corpus_size {
+            insert_done_job(
+                &mut state,
+                job_id as JobId,
+                &format!("https://example.com/{job_id}"),
+            );
+        }
+
+        let frozen = state.view();
+        let desktop = state.desktop_view();
+
+        assert_eq!(frozen.jobs.len(), corpus_size);
+        assert_eq!(desktop.desktop_job_list.scoped_count, corpus_size);
+        assert_eq!(
+            desktop.desktop_job_list.rows.len(),
+            DESKTOP_JOB_LIST_MAX_ROWS
+        );
+        assert!(desktop.jobs.is_empty());
+        assert_eq!(
+            desktop
+                .desktop_job_list
+                .rows
+                .first()
+                .map(|row| row.url.as_str()),
+            Some("https://example.com/408")
+        );
+        assert_eq!(
+            desktop
+                .desktop_job_list
+                .rows
+                .last()
+                .map(|row| row.url.as_str()),
+            Some("https://example.com/807")
+        );
+    }
+
+    #[test]
     fn visible_jobs_match_scope_when_query_empty() {
         let mut state = AppState::new();
         state.job_list_scope = JobListScope::SinceCheckpoint;

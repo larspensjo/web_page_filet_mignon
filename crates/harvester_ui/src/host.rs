@@ -25,11 +25,12 @@ use harvester_ui_bridge::{
     decode_intent, fetch_body as bridge_fetch_body, run_driver, BodyKey, BodyResponse, BodyTable,
     DriverTermination, SnapshotEnvelope, SnapshotSignal, CSP,
 };
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 use crate::probe::report;
 
 const RESIZE_DEBOUNCE: Duration = Duration::from_millis(350);
+const PROBE_WINDOW_TITLE: &str = "Harvester IPC probe";
 
 #[derive(Default)]
 struct ResizeDebounceState {
@@ -127,6 +128,7 @@ struct HostState {
     bodies: Arc<RwLock<BodyTable>>,
     highest_emitted: Arc<AtomicU64>,
     highest_acked: Arc<AtomicU64>,
+    snapshot_reads: Arc<AtomicU64>,
     running: Arc<AtomicBool>,
     probe_data: Option<Arc<ProbeData>>,
 }
@@ -146,8 +148,24 @@ struct ProbeMeasurements {
     page: Option<harvester_ui_bridge::probe::ProbePageReport>,
 }
 
+impl ProbeMeasurements {
+    fn reset_for_case(&mut self) {
+        self.emitted_at.clear();
+        self.latency_ms.clear();
+        self.backlog.clear();
+        self.bytes.clear();
+        self.page = None;
+    }
+}
+
 #[tauri::command]
 fn get_snapshot(state: tauri::State<'_, HostState>) -> Option<SnapshotEnvelope> {
+    if let Some(probe) = &state.probe_data {
+        let _measurements = probe.measurements.lock().expect("probe measurements lock");
+        // This counter is the probe's predicate for detecting a newly created page's first read.
+        state.snapshot_reads.fetch_add(1, Ordering::Relaxed);
+        probe.changed.notify_all();
+    }
     state.snapshot.read().expect("snapshot lock").clone()
 }
 
@@ -229,6 +247,7 @@ pub fn run(probe: bool) -> Result<(), String> {
         bodies: Arc::new(RwLock::new(BodyTable::new())),
         highest_emitted: Arc::new(AtomicU64::new(0)),
         highest_acked: Arc::new(AtomicU64::new(0)),
+        snapshot_reads: Arc::new(AtomicU64::new(0)),
         running: Arc::new(AtomicBool::new(true)),
         probe_data: None,
     };
@@ -285,6 +304,7 @@ fn run_probe(root: PathBuf) -> Result<(), String> {
         bodies: Arc::new(RwLock::new(BodyTable::new())),
         highest_emitted: Arc::new(AtomicU64::new(0)),
         highest_acked: Arc::new(AtomicU64::new(0)),
+        snapshot_reads: Arc::new(AtomicU64::new(0)),
         running: Arc::new(AtomicBool::new(true)),
         probe_data: Some(Arc::new(ProbeData::default())),
     };
@@ -292,22 +312,24 @@ fn run_probe(root: PathBuf) -> Result<(), String> {
     let builder = tauri::Builder::default()
         .manage(state.clone())
         .register_uri_scheme_protocol("harvester", move |_context, request| {
+            engine_info!("[ui-probe] asset request uri={}", request.uri());
             serve_asset(&asset_root, request.uri().path())
         })
         .setup(move |app| {
-            let url = format!(
-                "harvester://localhost/index.html?probe=1&durationMs={}",
-                harvester_ui_bridge::probe::PROBE_DURATION.as_millis()
-            )
-            .parse()
-            .map_err(|error| format!("invalid harvester URL: {error}"))?;
-            tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::CustomProtocol(url))
-                .title("Harvester IPC probe")
-                .inner_size(
-                    f64::from(DEFAULT_WINDOW_WIDTH),
-                    f64::from(DEFAULT_WINDOW_HEIGHT),
-                )
-                .build()?;
+            let case = harvester_ui_bridge::probe::ProbeCase::TypicalScope;
+            let label = probe_window_label(case);
+            let url = probe_url(case)?;
+            engine_info!(
+                "[ui-probe] case={} initial window create target label={label} url={url}",
+                case.slug()
+            );
+            let result = build_probe_window(app, &label, url);
+            engine_info!(
+                "[ui-probe] case={} initial window create returned result={:?}",
+                case.slug(),
+                result.as_ref().map(|_| ())
+            );
+            result?;
             emit_probe_snapshots(app.handle().clone(), state.clone());
             Ok(())
         });
@@ -326,130 +348,409 @@ fn run_probe(root: PathBuf) -> Result<(), String> {
 fn emit_probe_snapshots(app: tauri::AppHandle, host: HostState) {
     thread::spawn(move || {
         let interval = Duration::from_millis(1_000 / harvester_ui_bridge::probe::PROBE_RATE_HZ);
-        let readiness = harvester_ui_bridge::probe::synthetic_snapshot(1).with_generation(1);
-        host.highest_emitted.store(1, Ordering::Relaxed);
-        *host.snapshot.write().expect("snapshot lock") = Some(readiness.clone());
-        let _ = app.emit("harvester://snapshot", readiness);
-
-        let probe = host.probe_data.as_ref().expect("probe state");
-        let readiness_deadline = Instant::now() + harvester_ui_bridge::probe::PROBE_HOST_WATCHDOG;
-        let mut measurements = probe.measurements.lock().expect("probe measurements lock");
-        while host.highest_acked.load(Ordering::Relaxed) < 1 {
-            let now = Instant::now();
-            if now >= readiness_deadline {
-                drop(measurements);
-                engine_error!("[ui-probe] page readiness acknowledgement timed out");
-                finish_probe(&host);
-                return;
-            }
-            let (next, _) = probe
-                .changed
-                .wait_timeout(
-                    measurements,
-                    readiness_deadline.saturating_duration_since(now),
-                )
-                .expect("probe readiness wait");
-            measurements = next;
-        }
-        drop(measurements);
-
-        let case_started = Instant::now();
-        let case_timeout = harvester_ui_bridge::probe::PROBE_DURATION
-            .min(harvester_ui_bridge::probe::PROBE_CASE_TIMEOUT);
-        let mut next_backlog_sample = Duration::from_millis(250);
-        let mut generation: u64 = 1;
-        while case_started.elapsed() < case_timeout {
-            generation = generation.saturating_add(1);
-            let envelope = harvester_ui_bridge::probe::synthetic_snapshot(generation)
-                .with_generation(generation);
-            let bytes = serde_json::to_vec(&envelope)
-                .expect("envelope serializes")
-                .len() as u64;
-            host.highest_emitted.store(generation, Ordering::Relaxed);
-            if let Some(probe) = &host.probe_data {
-                let mut measurements = probe.measurements.lock().expect("probe measurements lock");
-                measurements.emitted_at.insert(generation, Instant::now());
-                measurements.bytes.push(bytes);
-            }
-            *host.snapshot.write().expect("snapshot lock") = Some(envelope.clone());
-            let _ = app.emit("harvester://snapshot", envelope);
-            if case_started.elapsed() >= next_backlog_sample {
-                probe
-                    .measurements
-                    .lock()
-                    .expect("probe measurements lock")
-                    .backlog
-                    .push(
-                        host.highest_emitted
-                            .load(Ordering::Relaxed)
-                            .saturating_sub(host.highest_acked.load(Ordering::Relaxed)),
-                    );
-                next_backlog_sample += Duration::from_millis(250);
-            }
-            thread::sleep(interval);
-        }
-        let _ = app.emit(
-            "harvester://probe-finished",
-            serde_json::json!({ "finalGeneration": generation }),
-        );
-
-        let report_deadline = Instant::now() + harvester_ui_bridge::probe::PROBE_HOST_WATCHDOG;
-        let mut measurements = probe.measurements.lock().expect("probe measurements lock");
-        while measurements.page.is_none() {
-            let now = Instant::now();
-            if now >= report_deadline {
+        let mut generation = 0;
+        let mut samples = Vec::new();
+        let watchdog_deadline = Instant::now() + harvester_ui_bridge::probe::PROBE_HOST_WATCHDOG;
+        for (index, case) in harvester_ui_bridge::probe::ProbeCase::ALL
+            .into_iter()
+            .enumerate()
+        {
+            if Instant::now() >= watchdog_deadline {
                 engine_error!(
-                    "[ui-probe] page report timed out after final generation={generation}"
+                    "[ui-probe] overall watchdog expired before case={}",
+                    case.slug()
                 );
                 break;
             }
-            let (next, _) = probe
-                .changed
-                .wait_timeout(measurements, report_deadline.saturating_duration_since(now))
-                .expect("probe report wait");
-            measurements = next;
+            engine_info!(
+                "[ui-probe] case={} starting gated={} duration_ms={}",
+                case.slug(),
+                case.is_gated(),
+                case.duration().as_millis()
+            );
+            if index > 0 {
+                let snapshot_reads_before = host.snapshot_reads.load(Ordering::Relaxed);
+                *host.snapshot.write().expect("snapshot lock") = None;
+                engine_info!(
+                    "[ui-probe] case={} creating fresh page window snapshot_reads_before={snapshot_reads_before}",
+                    case.slug()
+                );
+                let previous_case = harvester_ui_bridge::probe::ProbeCase::ALL[index - 1];
+                if let Err(error) =
+                    replace_probe_window(&app, previous_case, case, watchdog_deadline)
+                {
+                    engine_error!(
+                        "[ui-probe] case={} window replacement failed: {error}",
+                        case.slug()
+                    );
+                    break;
+                }
+                if !wait_for_probe_page_mount(&host, case, snapshot_reads_before, watchdog_deadline)
+                {
+                    break;
+                }
+                engine_info!(
+                    "[ui-probe] case={} page mounted snapshot_reads={}",
+                    case.slug(),
+                    host.snapshot_reads.load(Ordering::Relaxed)
+                );
+            }
+            let (case_samples, final_generation, page_report_received) =
+                run_probe_case(&app, &host, case, generation, interval, watchdog_deadline);
+            generation = final_generation;
+            samples.push(case_samples);
+            if !page_report_received {
+                engine_error!(
+                    "[ui-probe] case={} aborting remaining cases because no page report arrived",
+                    case.slug()
+                );
+                break;
+            }
         }
-        drop(measurements);
-        finish_probe(&host);
+        finish_probe(&host, samples);
     });
 }
 
-fn finish_probe(host: &HostState) {
+fn wait_for_probe_page_mount(
+    host: &HostState,
+    case: harvester_ui_bridge::probe::ProbeCase,
+    snapshot_reads_before: u64,
+    watchdog_deadline: Instant,
+) -> bool {
+    let probe = host.probe_data.as_ref().expect("probe state");
+    let mount_deadline = probe_page_deadline(Instant::now(), watchdog_deadline);
+    let mut measurements = probe.measurements.lock().expect("probe measurements lock");
+    while host.snapshot_reads.load(Ordering::Relaxed) <= snapshot_reads_before {
+        let now = Instant::now();
+        if now >= mount_deadline {
+            engine_error!(
+                "[ui-probe] case={} new page did not request its initial snapshot after window creation",
+                case.slug()
+            );
+            return false;
+        }
+        let (next, _) = probe
+            .changed
+            .wait_timeout(measurements, mount_deadline.saturating_duration_since(now))
+            .expect("probe page-mount wait");
+        measurements = next;
+    }
+    true
+}
+
+fn run_probe_case(
+    app: &tauri::AppHandle,
+    host: &HostState,
+    case: harvester_ui_bridge::probe::ProbeCase,
+    previous_generation: u64,
+    interval: Duration,
+    watchdog_deadline: Instant,
+) -> (harvester_ui_bridge::probe::ProbeCaseSamples, u64, bool) {
+    let probe = host.probe_data.as_ref().expect("probe state");
+    {
+        let mut measurements = probe.measurements.lock().expect("probe measurements lock");
+        measurements.reset_for_case();
+    }
+    let readiness_generation = previous_generation.saturating_add(1);
+    let readiness = harvester_ui_bridge::probe::synthetic_snapshot(case, readiness_generation)
+        .with_generation(readiness_generation);
+    host.highest_emitted
+        .store(readiness_generation, Ordering::Relaxed);
+    *host.snapshot.write().expect("snapshot lock") = Some(readiness.clone());
+    let _ = app.emit("harvester://snapshot", readiness);
+
+    let readiness_deadline = probe_page_deadline(Instant::now(), watchdog_deadline);
+    let mut measurements = probe.measurements.lock().expect("probe measurements lock");
+    while host.highest_acked.load(Ordering::Relaxed) < readiness_generation {
+        let now = Instant::now();
+        if now >= readiness_deadline {
+            engine_error!(
+                "[ui-probe] case={} page readiness acknowledgement timed out generation={readiness_generation}",
+                case.slug()
+            );
+            let page_report_received = measurements.page.is_some();
+            return (
+                samples_for_case(case, &measurements, false),
+                readiness_generation,
+                page_report_received,
+            );
+        }
+        let (next, _) = probe
+            .changed
+            .wait_timeout(
+                measurements,
+                readiness_deadline.saturating_duration_since(now),
+            )
+            .expect("probe readiness wait");
+        measurements = next;
+    }
+    drop(measurements);
+    engine_info!(
+        "[ui-probe] case={} readiness acknowledged generation={readiness_generation}",
+        case.slug()
+    );
+
+    let case_started = Instant::now();
+    let mut next_backlog_sample = Duration::from_millis(250);
+    let mut generation = readiness_generation;
+    while case_started.elapsed() < case.duration() {
+        generation = generation.saturating_add(1);
+        let envelope = harvester_ui_bridge::probe::synthetic_snapshot(case, generation)
+            .with_generation(generation);
+        let bytes = serde_json::to_vec(&envelope)
+            .expect("envelope serializes")
+            .len() as u64;
+        host.highest_emitted.store(generation, Ordering::Relaxed);
+        {
+            let mut measurements = probe.measurements.lock().expect("probe measurements lock");
+            measurements.emitted_at.insert(generation, Instant::now());
+            measurements.bytes.push(bytes);
+        }
+        *host.snapshot.write().expect("snapshot lock") = Some(envelope.clone());
+        let _ = app.emit("harvester://snapshot", envelope);
+        if case_started.elapsed() >= next_backlog_sample {
+            probe
+                .measurements
+                .lock()
+                .expect("probe measurements lock")
+                .backlog
+                .push(
+                    host.highest_emitted
+                        .load(Ordering::Relaxed)
+                        .saturating_sub(host.highest_acked.load(Ordering::Relaxed)),
+                );
+            next_backlog_sample += Duration::from_millis(250);
+        }
+        thread::sleep(interval);
+    }
+    engine_info!(
+        "[ui-probe] case={} emission complete final_generation={generation} highest_acked={} elapsed_ms={}",
+        case.slug(),
+        host.highest_acked.load(Ordering::Relaxed),
+        case_started.elapsed().as_millis()
+    );
+    let _ = app.emit(
+        "harvester://probe-finished",
+        serde_json::json!({ "finalGeneration": generation }),
+    );
+
+    let report_deadline = probe_page_deadline(Instant::now(), watchdog_deadline);
+    let mut measurements = probe.measurements.lock().expect("probe measurements lock");
+    while measurements.page.is_none() {
+        let now = Instant::now();
+        if now >= report_deadline {
+            engine_error!(
+                "[ui-probe] case={} page report timed out after final generation={generation} highest_acked={}",
+                case.slug(),
+                host.highest_acked.load(Ordering::Relaxed)
+            );
+            let page_report_received = measurements.page.is_some();
+            return (
+                samples_for_case(case, &measurements, false),
+                generation,
+                page_report_received,
+            );
+        }
+        let (next, _) = probe
+            .changed
+            .wait_timeout(measurements, report_deadline.saturating_duration_since(now))
+            .expect("probe report wait");
+        measurements = next;
+    }
+    engine_info!(
+        "[ui-probe] case={} page report received frames={} slow_frames={}",
+        case.slug(),
+        measurements
+            .page
+            .map(|page| page.frames)
+            .unwrap_or_default(),
+        measurements
+            .page
+            .map(|page| page.slow_frames)
+            .unwrap_or_default()
+    );
+    let invoke_succeeded = host.highest_acked.load(Ordering::Relaxed) >= generation;
+    let page_report_received = measurements.page.is_some();
+    (
+        samples_for_case(case, &measurements, invoke_succeeded),
+        generation,
+        page_report_received,
+    )
+}
+
+fn samples_for_case(
+    case: harvester_ui_bridge::probe::ProbeCase,
+    measurements: &ProbeMeasurements,
+    invoke_succeeded: bool,
+) -> harvester_ui_bridge::probe::ProbeCaseSamples {
+    harvester_ui_bridge::probe::ProbeCaseSamples {
+        case,
+        latency_ms: measurements.latency_ms.clone(),
+        backlog: measurements.backlog.clone(),
+        envelope_bytes: measurements.bytes.clone(),
+        page: measurements.page.unwrap_or_default(),
+        invoke_succeeded,
+    }
+}
+
+fn probe_url(case: harvester_ui_bridge::probe::ProbeCase) -> Result<tauri::Url, String> {
+    format!(
+        "harvester://localhost/index.html?probe=1&case={}&durationMs={}",
+        case.slug(),
+        case.duration().as_millis()
+    )
+    .parse()
+    .map_err(|error| format!("invalid harvester probe URL: {error}"))
+}
+
+fn probe_window_label(case: harvester_ui_bridge::probe::ProbeCase) -> String {
+    format!("probe-{}", case.slug())
+}
+
+fn probe_page_deadline(now: Instant, watchdog_deadline: Instant) -> Instant {
+    watchdog_deadline.min(now + harvester_ui_bridge::probe::PROBE_PAGE_RESPONSE_TIMEOUT)
+}
+
+fn build_probe_window<R: tauri::Runtime, M: tauri::Manager<R>>(
+    manager: &M,
+    label: &str,
+    url: tauri::Url,
+) -> Result<tauri::WebviewWindow<R>, String> {
+    tauri::WebviewWindowBuilder::new(manager, label, tauri::WebviewUrl::CustomProtocol(url))
+        .title(PROBE_WINDOW_TITLE)
+        .inner_size(
+            f64::from(DEFAULT_WINDOW_WIDTH),
+            f64::from(DEFAULT_WINDOW_HEIGHT),
+        )
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+fn replace_probe_window(
+    app: &tauri::AppHandle,
+    previous_case: harvester_ui_bridge::probe::ProbeCase,
+    next_case: harvester_ui_bridge::probe::ProbeCase,
+    watchdog_deadline: Instant,
+) -> Result<(), String> {
+    let previous_label = probe_window_label(previous_case);
+    let next_label = probe_window_label(next_case);
+    let url = probe_url(next_case)?;
+    engine_info!(
+        "[ui-probe] case={} window replacement target previous_label={previous_label} next_label={next_label} url={url}",
+        next_case.slug()
+    );
+    let window_app = app.clone();
+    let (result_sender, result_receiver) = mpsc::sync_channel(1);
+    let queued = app
+        .run_on_main_thread(move || {
+            engine_info!(
+                "[ui-probe] case={} issuing window creation on main thread label={next_label} url={url}",
+                next_case.slug()
+            );
+            let create_result = build_probe_window(&window_app, &next_label, url);
+            engine_info!(
+                "[ui-probe] case={} window creation returned result={:?}",
+                next_case.slug(),
+                create_result.as_ref().map(|_| ())
+            );
+            let result = create_result.and_then(|_| {
+                let previous_window = window_app
+                    .get_webview_window(&previous_label)
+                    .ok_or_else(|| format!("previous probe window label={previous_label} is unavailable"))?;
+                engine_info!(
+                    "[ui-probe] case={} issuing previous window close on main thread label={previous_label}",
+                    next_case.slug()
+                );
+                let close_result = previous_window.close().map_err(|error| {
+                    format!("failed to close previous probe window label={previous_label}: {error}")
+                });
+                engine_info!(
+                    "[ui-probe] case={} previous window close returned result={close_result:?}",
+                    next_case.slug()
+                );
+                close_result
+            });
+            engine_info!(
+                "[ui-probe] case={} window replacement returned result={result:?}",
+                next_case.slug()
+            );
+            let _ = result_sender.send(result);
+        })
+        .map_err(|error| format!("failed to queue window replacement on the main thread: {error}"));
+    await_main_thread_result(
+        queued,
+        result_receiver,
+        next_case,
+        "window replacement",
+        watchdog_deadline,
+    )
+}
+
+fn await_main_thread_result<T>(
+    queued: Result<(), String>,
+    result_receiver: mpsc::Receiver<Result<T, String>>,
+    case: harvester_ui_bridge::probe::ProbeCase,
+    operation: &str,
+    watchdog_deadline: Instant,
+) -> Result<T, String> {
+    queued?;
+    let now = Instant::now();
+    let timeout = probe_page_deadline(now, watchdog_deadline).saturating_duration_since(now);
+    match result_receiver.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            engine_error!(
+                "[ui-probe] case={} main-thread step={operation} timed out after {} ms",
+                case.slug(),
+                timeout.as_millis()
+            );
+            Err(format!(
+                "main-thread {operation} timed out after {} ms",
+                timeout.as_millis()
+            ))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(format!(
+            "main-thread {operation} did not return a result: channel disconnected"
+        )),
+    }
+}
+
+fn finish_probe(host: &HostState, samples: Vec<harvester_ui_bridge::probe::ProbeCaseSamples>) {
     if !host.running.swap(false, Ordering::Relaxed) {
         return;
     }
-    let measurements = host
-        .probe_data
-        .as_ref()
-        .expect("probe state")
-        .measurements
-        .lock()
-        .expect("probe measurements lock");
-    let page = measurements.page.unwrap_or_default();
-    let mut report = harvester_ui_bridge::probe::evaluate(
-        measurements.latency_ms.clone(),
-        measurements.backlog.clone(),
-        page,
-        measurements.bytes.clone(),
-    );
-    report.invoke_succeeded =
-        host.highest_acked.load(Ordering::Relaxed) > 0 && measurements.page.is_some();
-    report.passed &= report.invoke_succeeded;
+    let mut report = harvester_ui_bridge::probe::evaluate(samples);
     report.tauri_version = Some(tauri::VERSION.into());
     report.wry_version = Some(env!("HARVESTER_UI_WRY_VERSION").into());
     report.webview2_com_version = Some(env!("HARVESTER_UI_WEBVIEW2_COM_VERSION").into());
     report.webview2_runtime_version = tauri::webview_version().ok();
-    engine_info!(
-        "[ui-probe] case=ipc passed={} latency_p95_ms={} latency_max_ms={} backlog_p95={} backlog_max={} slow_frame_percent={} csp_fetch_rejected={} invoke_succeeded={}",
-        report.passed,
-        report.latency_ms_p95,
-        report.latency_ms_max,
-        report.backlog_p95,
-        report.backlog_max,
-        report.slow_frame_percent,
-        report.csp_fetch_rejected,
-        report.invoke_succeeded
-    );
+    for required in harvester_ui_bridge::probe::ProbeCase::ALL
+        .into_iter()
+        .filter(|case| case.is_gated())
+    {
+        if !report.cases.iter().any(|case| case.case == required.slug()) {
+            engine_error!(
+                "[ui-probe] incomplete run missing gated case={}",
+                required.slug()
+            );
+        }
+    }
+    for case in &report.cases {
+        engine_info!(
+            "[ui-probe] case={} gated={} passed={} envelope_bytes_p95={} latency_p95_ms={} latency_max_ms={} backlog_p95={} backlog_max={} slow_frame_percent={} csp_fetch_rejected={} invoke_succeeded={}",
+            case.case,
+            case.gated,
+            case.passed,
+            case.envelope_bytes_p95,
+            case.latency_ms_p95,
+            case.latency_ms_max,
+            case.backlog_p95,
+            case.backlog_max,
+            case.slow_frame_percent,
+            case.csp_fetch_rejected,
+            case.invoke_succeeded
+        );
+    }
     if let Err(error) = report::write(&repository_root(), &report) {
         engine_error!("[ui-probe] report write failed: {error}");
         std::process::exit(1);
@@ -607,4 +908,135 @@ fn initialize_logging(root: &Path) {
         engine_logging::initialize_file_only_at(path);
     }
     engine_info!("[ui-host] logging initialized");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn main_thread_result_deadline() -> Instant {
+        Instant::now() + Duration::from_secs(1)
+    }
+
+    #[test]
+    fn main_thread_result_returns_the_inner_operation_result() {
+        let (sender, receiver) = mpsc::sync_channel::<Result<(), String>>(1);
+        sender
+            .send(Err("webview operation failed".to_string()))
+            .unwrap();
+
+        assert_eq!(
+            await_main_thread_result(
+                Ok(()),
+                receiver,
+                harvester_ui_bridge::probe::ProbeCase::TypicalScope,
+                "window replacement",
+                main_thread_result_deadline(),
+            ),
+            Err("webview operation failed".to_string())
+        );
+    }
+
+    #[test]
+    fn main_thread_result_returns_successful_operation_value() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender.send(Ok(42)).unwrap();
+
+        assert_eq!(
+            await_main_thread_result(
+                Ok(()),
+                receiver,
+                harvester_ui_bridge::probe::ProbeCase::TypicalScope,
+                "window replacement",
+                main_thread_result_deadline(),
+            ),
+            Ok(42)
+        );
+    }
+
+    #[test]
+    fn main_thread_result_propagates_queue_failure() {
+        let (_sender, receiver) = mpsc::sync_channel::<Result<(), String>>(1);
+
+        assert_eq!(
+            await_main_thread_result(
+                Err("main-thread queue unavailable".to_string()),
+                receiver,
+                harvester_ui_bridge::probe::ProbeCase::TypicalScope,
+                "window replacement",
+                main_thread_result_deadline(),
+            ),
+            Err("main-thread queue unavailable".to_string())
+        );
+    }
+
+    #[test]
+    fn main_thread_result_reports_a_disconnected_result_channel() {
+        let (sender, receiver) = mpsc::sync_channel::<Result<(), String>>(1);
+        drop(sender);
+
+        let error = await_main_thread_result(
+            Ok(()),
+            receiver,
+            harvester_ui_bridge::probe::ProbeCase::TypicalScope,
+            "window replacement",
+            main_thread_result_deadline(),
+        )
+        .expect_err("a disconnected main-thread result channel must fail");
+
+        assert!(error.starts_with("main-thread window replacement did not return a result:"));
+    }
+
+    #[test]
+    fn main_thread_result_times_out_at_the_page_deadline() {
+        let (_sender, receiver) = mpsc::sync_channel::<Result<(), String>>(1);
+
+        let error = await_main_thread_result(
+            Ok(()),
+            receiver,
+            harvester_ui_bridge::probe::ProbeCase::TypicalScope,
+            "window replacement",
+            Instant::now(),
+        )
+        .expect_err("a stalled main-thread operation must time out");
+
+        assert!(error.starts_with("main-thread window replacement timed out after"));
+    }
+
+    #[test]
+    fn probe_window_labels_are_distinct_and_derived_from_case_slugs() {
+        let labels = harvester_ui_bridge::probe::ProbeCase::ALL.map(probe_window_label);
+
+        for (case, label) in harvester_ui_bridge::probe::ProbeCase::ALL
+            .into_iter()
+            .zip(&labels)
+        {
+            assert_eq!(label, &format!("probe-{}", case.slug()));
+        }
+        for (index, label) in labels.iter().enumerate() {
+            assert!(!labels[..index].contains(label));
+        }
+    }
+
+    #[test]
+    fn probe_page_deadline_uses_the_per_step_timeout_when_it_expires_first() {
+        let now = Instant::now();
+        let watchdog_deadline = now + harvester_ui_bridge::probe::PROBE_HOST_WATCHDOG;
+
+        assert_eq!(
+            probe_page_deadline(now, watchdog_deadline),
+            now + harvester_ui_bridge::probe::PROBE_PAGE_RESPONSE_TIMEOUT
+        );
+    }
+
+    #[test]
+    fn probe_page_deadline_uses_the_overall_watchdog_when_it_expires_first() {
+        let now = Instant::now();
+        let watchdog_deadline = now + Duration::from_secs(1);
+
+        assert_eq!(
+            probe_page_deadline(now, watchdog_deadline),
+            watchdog_deadline
+        );
+    }
 }

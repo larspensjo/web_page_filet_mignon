@@ -48,7 +48,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
         Msg::BriefingCheckpointSet(Some("1970-01-01T00:00:01Z".into())),
     );
     let (with_selection, _) = update(with_selection, Msg::JobSelected { job_id: 1 });
-    let selected_view = with_selection.view();
+    let selected_view = with_selection.desktop_view();
     assert_eq!(selected_view.desktop_job_list.rows.len(), 1);
     assert!(matches!(
         selected_view
@@ -61,11 +61,11 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     vec![
         (
             "idle_empty_corpus",
-            project(&empty.view()).0.with_generation(1),
+            project(&empty.desktop_view()).0.with_generation(1),
         ),
         (
             "idle_with_corpus",
-            project(&with_corpus.view()).0.with_generation(1),
+            project(&with_corpus.desktop_view()).0.with_generation(1),
         ),
         (
             "idle_with_selection",

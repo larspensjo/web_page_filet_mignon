@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Grant the local desktop page Tauri core APIs.",
-  "windows": ["main"],
+  "description": "Grant the local desktop page Tauri core APIs; probe-* labels exist only under --probe-ipc.",
+  "windows": ["main", "probe-*"],
   "permissions": ["core:default"]
 }

@@ -1,10 +1,11 @@
+use super::batch::archive_token_estimates_from_parts;
 use super::{
     domain_from_url, format_lab_briefing_markdown, format_lab_summary_markdown,
-    format_lab_triage_markdown, map_job_filter_status, AppState, JobResultKind, PreviewMode,
-    SessionState, Stage,
+    format_lab_triage_markdown, map_job_filter_status, AppState, JobResultKind, JobState,
+    PreviewMode, SessionState, Stage,
 };
 use crate::archive_display::ArchiveCoverage;
-use crate::briefing::BriefingPhase;
+use crate::briefing::{ArticleSummaryResult, BriefingPhase};
 use crate::pre_triage_filter::PreTriagePhase;
 use crate::preview::format_summary_for_preview;
 use crate::signal_candidate::{
@@ -21,71 +22,36 @@ use crate::view_model::{
     SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS, TOKEN_LIMIT,
 };
 use harvester_engine::llm::dto::SourceTier;
+use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::normalize_url_for_dedupe;
 use std::collections::{HashMap, HashSet};
 
 impl AppState {
     pub fn view(&self) -> AppViewModel {
-        let since = self.briefing_since_utc();
-        let mut jobs: Vec<JobRowView> = self
-            .jobs
-            .iter()
-            .map(|(id, job)| {
-                let is_since = match (job.fetched_utc, since) {
-                    (_, None) => true,
-                    (None, Some(_)) => false,
-                    (Some(t), Some(s)) => t >= s,
-                };
-                job.to_view(*id, is_since)
-            })
-            .collect();
-        for job_view in &mut jobs {
-            if let Some(result) = self.triage.result_for_url(&job_view.url) {
-                job_view.triage_annotation = Some(TriageAnnotationView {
-                    priority: result.priority,
-                    category: result.category.clone(),
-                    tags: result.tags.clone(),
-                });
-            }
-        }
-        for job_view in &mut jobs {
-            let cached_summary_tokens = self.summary_output_tokens_for_url(&job_view.url);
-            if let Some(summary) = self.summary_result_for_url(&job_view.url) {
-                job_view.has_summary = true;
-                job_view.summary_title = Some(summary.title.clone());
-                job_view.summary_tokens = Some(summary.output_tokens);
-            } else if let Some(tokens) = cached_summary_tokens {
-                job_view.has_summary = true;
-                job_view.summary_title = None;
-                job_view.summary_tokens = Some(tokens);
-            } else {
-                job_view.has_summary = false;
-                job_view.summary_title = None;
-                job_view.summary_tokens = None;
-            }
-        }
-        if matches!(
-            self.pre_triage.phase(),
-            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
-        ) {
-            for job_view in &mut jobs {
-                job_view.filter_status = self
-                    .pre_triage
-                    .entry_for_url(&job_view.url)
-                    .map(map_job_filter_status);
-            }
-        }
+        self.build_view(true)
+    }
 
-        for job_view in &mut jobs {
-            job_view.has_analysis = job_view.has_summary
-                || job_view.triage_annotation.is_some()
-                || matches!(
-                    job_view.filter_status,
-                    Some(JobFilterStatus::HardExcluded { .. })
-                        | Some(JobFilterStatus::ReviewNeeded { .. })
-                        | Some(JobFilterStatus::ManuallyExcluded)
-                );
-        }
+    /// Builds the desktop-facing view without materializing frozen-renderer arrays.
+    pub fn desktop_view(&self) -> AppViewModel {
+        self.build_view(false)
+    }
+
+    fn build_view(&self, materialize_frozen_jobs: bool) -> AppViewModel {
+        let since = self.briefing_since_utc();
+        let summary_lookup = self.build_summary_lookup();
+        let job_metadata = if materialize_frozen_jobs {
+            self.build_job_view_metadata(since, &summary_lookup)
+        } else {
+            Vec::new()
+        };
+        let jobs = if materialize_frozen_jobs {
+            job_metadata
+                .iter()
+                .map(|metadata| self.materialize_job_row(metadata))
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let selected_job_id = self.ui.selected_job_id();
         let selected_url = selected_job_id
@@ -93,9 +59,9 @@ impl AppState {
             .map(|job| job.url.clone());
         let signal_candidate_rows = self.build_signal_candidate_rows();
         let desktop_job_list = self.build_desktop_job_list_view(
-            &jobs,
             &signal_candidate_rows,
             self.jobs_search_query(),
+            &summary_lookup,
         );
         let signal_candidate_preview =
             self.signal_candidate_preview_for_selected_job(selected_job_id);
@@ -123,21 +89,27 @@ impl AppState {
                     nav_heavy: quality.nav_heavy(),
                 }
             });
-        let scoped_jobs = scoped_jobs_for_job_list(&jobs, self.job_list_scope);
         let jobs_search_query = self.jobs_search_query().to_string();
-        let visible_jobs_after_filter = if self.left_tab == LeftTab::Jobs {
-            compute_visible_jobs_for_jobs_tab(&scoped_jobs, &jobs_search_query)
+        let legacy_job_list = self.build_legacy_job_list_metrics(
+            &jobs_search_query,
+            &summary_lookup,
+            selected_job_id,
+            materialize_frozen_jobs,
+        );
+        let visible_jobs_after_filter = if materialize_frozen_jobs {
+            legacy_job_list.visible_job_ids.clone()
         } else {
             Vec::new()
         };
-        let first_visible_job_id = visible_jobs_after_filter.first().copied();
-        let selected_jobs_visible_in_filter =
-            selected_job_id.is_some_and(|job_id| visible_jobs_after_filter.contains(&job_id));
+        let first_visible_job_id = legacy_job_list.first_visible_job_id;
+        let selected_jobs_visible_in_filter = legacy_job_list.selected_job_visible;
         let left_pane_header = build_left_pane_header_view(LeftPaneHeaderInputs {
             left_tab: self.left_tab,
             job_list_scope: self.job_list_scope,
-            scoped_jobs: &scoped_jobs,
-            visible_jobs_after_filter: &visible_jobs_after_filter,
+            scoped_count: legacy_job_list.scoped_count,
+            review_needed_count: legacy_job_list.review_needed_count,
+            triage_result_count: legacy_job_list.triage_result_count,
+            visible_job_count: legacy_job_list.visible_job_count,
             jobs_search_query: &jobs_search_query,
             ai_unavailable_message: self.ai_unavailable_message().as_deref(),
         });
@@ -175,7 +147,12 @@ impl AppState {
         let stop_finish_button = self.stop_finish_button_state();
         let archive_display = self.archive_display_counts();
         let full_filtered_count = archive_display.filtered_count();
-        let archive_estimates = self.archive_token_estimates(archive_display.ordered_urls());
+        let mut archive_url_tokens = None;
+        let archive_estimates = self.archive_token_estimates_for_view(
+            archive_display.ordered_urls(),
+            &mut archive_url_tokens,
+            &summary_lookup,
+        );
 
         let archive_partial_coverage = match archive_display.coverage() {
             ArchiveCoverage::CacheDerived {
@@ -227,7 +204,11 @@ impl AppState {
                 if selection.selected_urls.is_empty() {
                     (archive_estimates.summary_tokens, full_filtered_count)
                 } else {
-                    let sc_estimates = self.archive_token_estimates(&selection.selected_urls);
+                    let sc_estimates = self.archive_token_estimates_for_view(
+                        &selection.selected_urls,
+                        &mut archive_url_tokens,
+                        &summary_lookup,
+                    );
                     (sc_estimates.summary_tokens, selection.selected_urls.len())
                 }
             } else {
@@ -316,85 +297,287 @@ impl AppState {
         }
     }
 
+    fn build_job_view_metadata(
+        &self,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+        summary_lookup: &SummaryLookup,
+    ) -> Vec<JobViewMetadata> {
+        let show_filter_status = self.show_filter_status();
+        self.jobs
+            .iter()
+            .map(|(job_id, job)| {
+                self.enrich_job_view_metadata(
+                    *job_id,
+                    job,
+                    since,
+                    show_filter_status,
+                    summary_lookup,
+                )
+            })
+            .collect()
+    }
+
+    fn enrich_job_view_metadata(
+        &self,
+        job_id: crate::JobId,
+        job: &JobState,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+        show_filter_status: bool,
+        summary_lookup: &SummaryLookup,
+    ) -> JobViewMetadata {
+        let is_since_checkpoint = is_since_checkpoint(job, since);
+        let triage_annotation =
+            self.triage
+                .result_for_url(&job.url)
+                .map(|result| TriageAnnotationView {
+                    priority: result.priority,
+                    category: result.category.clone(),
+                    tags: result.tags.clone(),
+                });
+        let (has_summary, summary_title, summary_tokens) = summary_lookup
+            .summary_for_job(self, job)
+            .map(|summary| {
+                (
+                    true,
+                    Some(summary.title.clone()),
+                    Some(summary.output_tokens),
+                )
+            })
+            .unwrap_or((false, None, None));
+        let filter_status = show_filter_status
+            .then(|| {
+                self.pre_triage
+                    .entry_for_url(&job.url)
+                    .map(map_job_filter_status)
+            })
+            .flatten();
+        let has_analysis = has_summary
+            || triage_annotation.is_some()
+            || matches!(
+                filter_status,
+                Some(JobFilterStatus::HardExcluded { .. })
+                    | Some(JobFilterStatus::ReviewNeeded { .. })
+                    | Some(JobFilterStatus::ManuallyExcluded)
+            );
+        JobViewMetadata {
+            job_id,
+            is_since_checkpoint,
+            triage_annotation,
+            has_summary,
+            summary_title,
+            summary_tokens,
+            filter_status,
+            has_analysis,
+        }
+    }
+
+    fn materialize_job_row(&self, metadata: &JobViewMetadata) -> JobRowView {
+        let job = self
+            .jobs
+            .get(&metadata.job_id)
+            .expect("job metadata derives from the current state");
+        let mut row = job.to_view(metadata.job_id, metadata.is_since_checkpoint);
+        metadata.apply_to(&mut row);
+        row
+    }
+
+    fn build_summary_lookup(&self) -> SummaryLookup<'_> {
+        let mut lookup = SummaryLookup::default();
+        for (url, summary) in self.briefing.completed_summaries() {
+            lookup.briefing_by_url.entry(url).or_insert(summary);
+        }
+        for (key, entry) in self.summary_cache().iter() {
+            if key.prompt_id != PromptId::ArticleSummary {
+                continue;
+            }
+            let tie_break_key = (
+                key.prompt_version,
+                key.model_id.as_str(),
+                key.context_hash.as_str(),
+            );
+            let replace = lookup
+                .cache_by_content_hash
+                .get(key.content_hash.as_str())
+                .is_none_or(|cached| {
+                    (entry.created_at_utc.as_str(), tie_break_key)
+                        > (cached.created_at_utc, cached.tie_break_key)
+                });
+            if replace {
+                lookup.cache_by_content_hash.insert(
+                    key.content_hash.as_str(),
+                    CachedSummary {
+                        created_at_utc: entry.created_at_utc.as_str(),
+                        tie_break_key,
+                        summary: &entry.result,
+                    },
+                );
+            }
+        }
+        lookup
+    }
+
+    fn archive_token_estimates_for_view(
+        &self,
+        urls: &[String],
+        archive_url_tokens: &mut Option<HashMap<String, u64>>,
+        summary_lookup: &SummaryLookup,
+    ) -> crate::ArchiveTokenEstimates {
+        if urls.is_empty() {
+            return crate::ArchiveTokenEstimates::default();
+        }
+        let archive_url_tokens =
+            archive_url_tokens.get_or_insert_with(|| self.archive_article_token_lookup());
+        archive_token_estimates_from_parts(urls, archive_url_tokens, |url| {
+            self.content_hash_for_url(url)
+                .and_then(|content_hash| summary_lookup.summary_for_content_hash(content_hash))
+                .map(|summary| summary.output_tokens)
+        })
+    }
+
+    fn select_desktop_job_rows(
+        &self,
+        query_lower: &str,
+        summary_lookup: &SummaryLookup,
+    ) -> DesktopJobSelection {
+        if self.job_list_mode() == JobListMode::Results {
+            return DesktopJobSelection::default();
+        }
+        let since = self.briefing_since_utc();
+        let mut selection = DesktopJobSelection {
+            hidden_without_fetch_time: if since.is_some() {
+                self.jobs
+                    .values()
+                    .filter(|job| job.fetched_utc.is_none())
+                    .count()
+            } else {
+                0
+            },
+            ..Default::default()
+        };
+        for (job_id, job) in &self.jobs {
+            let is_since_checkpoint = is_since_checkpoint(job, since);
+            if !is_since_checkpoint {
+                continue;
+            }
+            selection.scoped_ids.insert(*job_id);
+            if !job_matches_search_query(
+                &job.url,
+                summary_lookup
+                    .summary_for_job(self, job)
+                    .map(|summary| summary.title.as_str()),
+                query_lower,
+            ) {
+                continue;
+            }
+            selection.searched_ids.insert(*job_id);
+            selection.emitted.push(DesktopJobSelectionRow {
+                job_id: *job_id,
+                fetched_utc: job.fetched_utc,
+            });
+        }
+        selection.searched_count = selection.emitted.len();
+        if selection.emitted.len() > DESKTOP_JOB_LIST_MAX_ROWS {
+            selection.emitted.sort_unstable_by(|left, right| {
+                fetched_descending(left.fetched_utc, right.fetched_utc)
+                    .then_with(|| right.job_id.cmp(&left.job_id))
+            });
+            selection.emitted.truncate(DESKTOP_JOB_LIST_MAX_ROWS);
+            selection.emitted.sort_unstable_by_key(|row| row.job_id);
+        }
+        selection.emitted_ids = selection.emitted.iter().map(|row| row.job_id).collect();
+        selection
+    }
+
+    fn build_legacy_job_list_metrics(
+        &self,
+        query: &str,
+        summary_lookup: &SummaryLookup,
+        selected_job_id: Option<crate::JobId>,
+        materialize_visible_job_ids: bool,
+    ) -> LegacyJobListMetrics {
+        let since = self.briefing_since_utc();
+        let show_filter_status = self.show_filter_status();
+        let query_lower = query.to_lowercase();
+        let mut metrics = LegacyJobListMetrics::default();
+        for (job_id, job) in &self.jobs {
+            if self.job_list_scope == JobListScope::SinceCheckpoint
+                && !is_since_checkpoint(job, since)
+            {
+                continue;
+            }
+            metrics.scoped_count += 1;
+            if show_filter_status
+                && matches!(
+                    self.pre_triage
+                        .entry_for_url(&job.url)
+                        .map(map_job_filter_status),
+                    Some(JobFilterStatus::ReviewNeeded { .. })
+                )
+            {
+                metrics.review_needed_count += 1;
+            }
+            if self.triage.result_for_url(&job.url).is_some() {
+                metrics.triage_result_count += 1;
+            }
+            if self.left_tab == LeftTab::Jobs
+                && job_matches_search_query(
+                    &job.url,
+                    summary_lookup
+                        .summary_for_job(self, job)
+                        .map(|summary| summary.title.as_str()),
+                    &query_lower,
+                )
+            {
+                metrics.visible_job_count += 1;
+                metrics.first_visible_job_id.get_or_insert(*job_id);
+                metrics.selected_job_visible |= Some(*job_id) == selected_job_id;
+                if materialize_visible_job_ids {
+                    metrics.visible_job_ids.push(*job_id);
+                }
+            }
+        }
+        metrics
+    }
+
+    fn show_filter_status(&self) -> bool {
+        matches!(
+            self.pre_triage.phase(),
+            PreTriagePhase::Reviewing | PreTriagePhase::ReadyToTriage
+        )
+    }
+
     fn build_desktop_job_list_view(
         &self,
-        jobs: &[JobRowView],
         signal_candidate_rows: &[SignalCandidateRow],
         query: &str,
+        summary_lookup: &SummaryLookup,
     ) -> DesktopJobListView {
         let mode = self.job_list_mode();
         let query = query.to_string();
         let query_lower = query.to_lowercase();
-        let fetched_utc_for =
-            |row: &JobRowView| self.jobs.get(&row.job_id).and_then(|job| job.fetched_utc);
-
-        let (scoped_rows, searched_rows, emitted_rows, emitted_ids, hidden_without_fetch_time) =
-            match mode {
-                JobListMode::Results => (Vec::new(), Vec::new(), Vec::new(), HashSet::new(), 0),
-                JobListMode::SinceCheckpoint => {
-                    let scoped_rows: Vec<&JobRowView> =
-                        jobs.iter().filter(|job| job.is_since_checkpoint).collect();
-                    let searched_rows: Vec<&JobRowView> = scoped_rows
-                        .iter()
-                        .copied()
-                        .filter(|job| job_row_matches_search_query(job, &query_lower))
-                        .collect();
-                    let (emitted_rows, emitted_ids) = if searched_rows.len()
-                        > DESKTOP_JOB_LIST_MAX_ROWS
-                    {
-                        let mut newest_rows: Vec<_> = searched_rows
-                            .iter()
-                            .map(|row| (fetched_utc_for(row), *row))
-                            .collect();
-                        newest_rows.sort_unstable_by(
-                            |(left_fetched, left), (right_fetched, right)| {
-                                let ordering = match (left_fetched, right_fetched) {
-                                    (Some(left), Some(right)) => right.cmp(left),
-                                    (Some(_), None) => std::cmp::Ordering::Less,
-                                    (None, Some(_)) => std::cmp::Ordering::Greater,
-                                    (None, None) => std::cmp::Ordering::Equal,
-                                };
-                                ordering.then_with(|| right.job_id.cmp(&left.job_id))
-                            },
-                        );
-                        newest_rows.truncate(DESKTOP_JOB_LIST_MAX_ROWS);
-                        newest_rows.sort_unstable_by_key(|(_, row)| row.job_id);
-                        let emitted_ids = newest_rows.iter().map(|(_, row)| row.job_id).collect();
-                        (newest_rows, emitted_ids)
-                    } else {
-                        let emitted_ids = searched_rows.iter().map(|job| job.job_id).collect();
-                        let emitted_rows = searched_rows
-                            .iter()
-                            .map(|row| (fetched_utc_for(row), *row))
-                            .collect();
-                        (emitted_rows, emitted_ids)
-                    };
-                    let hidden_without_fetch_time = if self.briefing_since_utc().is_some() {
-                        self.jobs
-                            .values()
-                            .filter(|job| job.fetched_utc.is_none())
-                            .count()
-                    } else {
-                        0
-                    };
-                    (
-                        scoped_rows,
-                        searched_rows,
-                        emitted_rows,
-                        emitted_ids,
-                        hidden_without_fetch_time,
-                    )
-                }
-            };
-
-        let rows = emitted_rows
+        let selection = self.select_desktop_job_rows(&query_lower, summary_lookup);
+        let rows = selection
+            .emitted
             .iter()
-            .map(|(fetched_utc, job)| JobListRowView::from_row(job, *fetched_utc))
+            .map(|selected| {
+                let job = self
+                    .jobs
+                    .get(&selected.job_id)
+                    .expect("selection derives from the current state");
+                let metadata = self.enrich_job_view_metadata(
+                    selected.job_id,
+                    job,
+                    self.briefing_since_utc(),
+                    self.show_filter_status(),
+                    summary_lookup,
+                );
+                JobListRowView::from_row(&self.materialize_job_row(&metadata), selected.fetched_utc)
+            })
             .collect::<Vec<_>>();
-        let scoped_count = searched_rows.len();
+        let scoped_count = selection.searched_count;
         let visible_count = rows.len();
         let selected_job = self.ui.selected_job_id().and_then(|selected_job_id| {
-            let row = jobs.iter().find(|job| job.job_id == selected_job_id)?;
+            let job = self.jobs.get(&selected_job_id)?;
             let list_visibility = match mode {
                 JobListMode::Results => {
                     if signal_candidate_rows
@@ -407,23 +590,27 @@ impl AppState {
                     }
                 }
                 JobListMode::SinceCheckpoint => {
-                    if !scoped_rows.iter().any(|job| job.job_id == selected_job_id) {
+                    if !selection.scoped_ids.contains(&selected_job_id) {
                         SelectedJobVisibility::OutsideScope
-                    } else if !searched_rows
-                        .iter()
-                        .any(|job| job.job_id == selected_job_id)
-                    {
+                    } else if !selection.searched_ids.contains(&selected_job_id) {
                         SelectedJobVisibility::QueryMismatch
-                    } else if !emitted_ids.contains(&selected_job_id) {
+                    } else if !selection.emitted_ids.contains(&selected_job_id) {
                         SelectedJobVisibility::Capped
                     } else {
                         SelectedJobVisibility::Visible
                     }
                 }
             };
+            let metadata = self.enrich_job_view_metadata(
+                selected_job_id,
+                job,
+                self.briefing_since_utc(),
+                self.show_filter_status(),
+                summary_lookup,
+            );
             Some(SelectedJobView::from_row(
-                row,
-                fetched_utc_for(row),
+                &self.materialize_job_row(&metadata),
+                job.fetched_utc,
                 list_visibility,
             ))
         });
@@ -436,7 +623,7 @@ impl AppState {
             scoped_count,
             visible_count,
             truncated: scoped_count > visible_count,
-            hidden_without_fetch_time,
+            hidden_without_fetch_time: selection.hidden_without_fetch_time,
         }
     }
 
@@ -894,11 +1081,124 @@ impl AppState {
     }
 }
 
+#[derive(Clone)]
+struct JobViewMetadata {
+    job_id: crate::JobId,
+    is_since_checkpoint: bool,
+    triage_annotation: Option<TriageAnnotationView>,
+    has_summary: bool,
+    summary_title: Option<String>,
+    summary_tokens: Option<u32>,
+    filter_status: Option<JobFilterStatus>,
+    has_analysis: bool,
+}
+
+struct CachedSummary<'a> {
+    created_at_utc: &'a str,
+    tie_break_key: (u32, &'a str, &'a str),
+    summary: &'a ArticleSummaryResult,
+}
+
+/// Per-view summary index with deterministic duplicate resolution.
+///
+/// Briefing summaries preserve `BriefingSession::summary_for_url`: the first completed article in
+/// session order wins. Cache summaries prefer the newest timestamp, then the lexicographically
+/// greatest `(prompt_version, model_id, context_hash)` tuple when timestamps tie so `HashMap`
+/// iteration order cannot affect views.
+#[derive(Default)]
+struct SummaryLookup<'a> {
+    briefing_by_url: HashMap<&'a str, &'a ArticleSummaryResult>,
+    cache_by_content_hash: HashMap<&'a str, CachedSummary<'a>>,
+}
+
+impl<'a> SummaryLookup<'a> {
+    fn summary_for_job(
+        &self,
+        state: &AppState,
+        job: &JobState,
+    ) -> Option<&'a ArticleSummaryResult> {
+        self.briefing_by_url
+            .get(job.url.as_str())
+            .copied()
+            .or_else(|| {
+                state
+                    .content_hash_for_url(&job.url)
+                    .and_then(|hash| self.cache_by_content_hash.get(hash))
+                    .map(|cached| cached.summary)
+            })
+    }
+
+    fn summary_for_content_hash(&self, content_hash: &str) -> Option<&'a ArticleSummaryResult> {
+        self.cache_by_content_hash
+            .get(content_hash)
+            .map(|cached| cached.summary)
+    }
+}
+
+#[derive(Default)]
+struct DesktopJobSelection {
+    scoped_ids: HashSet<crate::JobId>,
+    searched_ids: HashSet<crate::JobId>,
+    emitted_ids: HashSet<crate::JobId>,
+    emitted: Vec<DesktopJobSelectionRow>,
+    searched_count: usize,
+    hidden_without_fetch_time: usize,
+}
+
+struct DesktopJobSelectionRow {
+    job_id: crate::JobId,
+    fetched_utc: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Default)]
+struct LegacyJobListMetrics {
+    scoped_count: usize,
+    visible_job_ids: Vec<crate::JobId>,
+    visible_job_count: usize,
+    first_visible_job_id: Option<crate::JobId>,
+    selected_job_visible: bool,
+    review_needed_count: usize,
+    triage_result_count: usize,
+}
+
+fn is_since_checkpoint(job: &JobState, since: Option<chrono::DateTime<chrono::Utc>>) -> bool {
+    match (job.fetched_utc, since) {
+        (_, None) => true,
+        (None, Some(_)) => false,
+        (Some(fetched), Some(checkpoint)) => fetched >= checkpoint,
+    }
+}
+
+fn fetched_descending(
+    left: Option<chrono::DateTime<chrono::Utc>>,
+    right: Option<chrono::DateTime<chrono::Utc>>,
+) -> std::cmp::Ordering {
+    match (left, right) {
+        (Some(left), Some(right)) => right.cmp(&left),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+}
+
+impl JobViewMetadata {
+    fn apply_to(&self, row: &mut JobRowView) {
+        row.triage_annotation = self.triage_annotation.clone();
+        row.has_summary = self.has_summary;
+        row.summary_title = self.summary_title.clone();
+        row.summary_tokens = self.summary_tokens;
+        row.filter_status = self.filter_status.clone();
+        row.has_analysis = self.has_analysis;
+    }
+}
+
 struct LeftPaneHeaderInputs<'a> {
     left_tab: LeftTab,
     job_list_scope: JobListScope,
-    scoped_jobs: &'a [&'a JobRowView],
-    visible_jobs_after_filter: &'a [crate::JobId],
+    scoped_count: usize,
+    review_needed_count: usize,
+    triage_result_count: usize,
+    visible_job_count: usize,
     jobs_search_query: &'a str,
     ai_unavailable_message: Option<&'a str>,
 }
@@ -907,8 +1207,10 @@ fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHead
     let LeftPaneHeaderInputs {
         left_tab,
         job_list_scope,
-        scoped_jobs,
-        visible_jobs_after_filter,
+        scoped_count,
+        review_needed_count,
+        triage_result_count,
+        visible_job_count,
         jobs_search_query,
         ai_unavailable_message,
     } = inputs;
@@ -920,8 +1222,8 @@ fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHead
 
     match left_tab {
         LeftTab::Jobs => {
-            let scope_count = scoped_jobs.len();
-            let visible_count = visible_jobs_after_filter.len();
+            let scope_count = scoped_count;
+            let visible_count = visible_job_count;
             let search_active = !jobs_search_query.is_empty();
             LeftPaneHeaderView {
                 title: "Jobs".to_string(),
@@ -938,43 +1240,26 @@ fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHead
                 },
             }
         }
-        LeftTab::TriageReview => {
-            let review_needed_count = scoped_jobs
-                .iter()
-                .filter(|job| {
-                    matches!(
-                        job.filter_status,
-                        Some(JobFilterStatus::ReviewNeeded { .. })
-                    )
-                })
-                .count();
-            LeftPaneHeaderView {
-                title: "Triage Review".to_string(),
-                scope_label,
-                count_label: Some(if review_needed_count == 0 {
-                    "no review-needed items".to_string()
-                } else {
-                    format!("{review_needed_count} review-needed")
-                }),
-                state_label: None,
-            }
-        }
-        LeftTab::TriageResults => {
-            let triage_result_count = scoped_jobs
-                .iter()
-                .filter(|job| job.triage_annotation.is_some())
-                .count();
-            LeftPaneHeaderView {
-                title: "Results".to_string(),
-                scope_label,
-                count_label: Some(if triage_result_count == 0 {
-                    "no triage results yet".to_string()
-                } else {
-                    format!("{triage_result_count} with triage")
-                }),
-                state_label: ai_unavailable_message.map(|_| "AI unavailable".to_string()),
-            }
-        }
+        LeftTab::TriageReview => LeftPaneHeaderView {
+            title: "Triage Review".to_string(),
+            scope_label,
+            count_label: Some(if review_needed_count == 0 {
+                "no review-needed items".to_string()
+            } else {
+                format!("{review_needed_count} review-needed")
+            }),
+            state_label: None,
+        },
+        LeftTab::TriageResults => LeftPaneHeaderView {
+            title: "Results".to_string(),
+            scope_label,
+            count_label: Some(if triage_result_count == 0 {
+                "no triage results yet".to_string()
+            } else {
+                format!("{triage_result_count} with triage")
+            }),
+            state_label: ai_unavailable_message.map(|_| "AI unavailable".to_string()),
+        },
         LeftTab::PromptLab => LeftPaneHeaderView {
             title: "Job List".to_string(),
             scope_label: None,
@@ -1015,33 +1300,10 @@ fn truncate_signal_candidate_gist(text: &str) -> String {
     out
 }
 
-fn scoped_jobs_for_job_list(jobs: &[JobRowView], job_list_scope: JobListScope) -> Vec<&JobRowView> {
-    if job_list_scope == JobListScope::SinceCheckpoint {
-        jobs.iter().filter(|job| job.is_since_checkpoint).collect()
-    } else {
-        jobs.iter().collect()
-    }
-}
-
-fn compute_visible_jobs_for_jobs_tab(
-    scoped_jobs: &[&JobRowView],
-    query: &str,
-) -> Vec<crate::JobId> {
-    let query_lower = query.to_lowercase();
-    scoped_jobs
-        .iter()
-        .filter(|job| job_row_matches_search_query(job, &query_lower))
-        .map(|job| job.job_id)
-        .collect()
-}
-
-fn job_row_matches_search_query(job: &JobRowView, query_lower: &str) -> bool {
+fn job_matches_search_query(url: &str, summary_title: Option<&str>, query_lower: &str) -> bool {
     query_lower.is_empty()
-        || job
-            .summary_title
-            .as_ref()
-            .is_some_and(|title| title.to_lowercase().contains(query_lower))
-        || job.url.to_lowercase().contains(query_lower)
+        || summary_title.is_some_and(|title| title.to_lowercase().contains(query_lower))
+        || url.to_lowercase().contains(query_lower)
 }
 
 fn build_preview_context_view(header: &PreviewHeaderView) -> PreviewContextView {

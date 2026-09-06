@@ -1,6 +1,7 @@
 //! Tauri-free IPC bridge between the desktop host and Harvester's core reducer.
 
 pub mod assets;
+pub mod cost;
 pub mod driver;
 #[cfg(test)]
 pub mod fixtures;
@@ -10,6 +11,7 @@ pub mod snapshot;
 pub mod window;
 
 pub use assets::{resolve, ResolvedAsset, CSP};
+pub use cost::HOST_DRAIN_BUDGET_MS;
 pub use driver::{
     partition_effects, run_driver, DriverTermination, SnapshotCoalescer, SnapshotSignal, UiCommand,
     SNAPSHOT_MIN_INTERVAL_MS,

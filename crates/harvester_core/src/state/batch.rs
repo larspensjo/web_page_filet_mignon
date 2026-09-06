@@ -6,6 +6,7 @@ use crate::archive_display::{ArchiveDisplayCounts, CacheDerivedArchive};
 use crate::working_corpus::CurrentWorkingCorpus;
 use crate::{FrozenBatchKey, StageKind};
 use harvester_engine::llm::PromptId;
+use std::collections::HashMap;
 
 impl AppState {
     /// Returns the immutable cache identity captured by an in-flight
@@ -270,49 +271,27 @@ impl AppState {
     /// underreported. Summary coverage uses the same live-triage-first,
     /// pre-triage-fallback content-hash resolver as cached summary rows.
     pub(crate) fn archive_token_estimates(&self, urls: &[String]) -> ArchiveTokenEstimates {
+        if urls.is_empty() {
+            return ArchiveTokenEstimates::default();
+        }
+        let url_tokens = self.archive_article_token_lookup();
+        archive_token_estimates_from_parts(urls, &url_tokens, |url| {
+            self.content_hash_for_url(url)
+                .and_then(|hash| self.summary_cache().lookup_any_by_content_hash(hash))
+                .map(|entry| entry.result.output_tokens)
+        })
+    }
+
+    pub(in crate::state) fn archive_article_token_lookup(&self) -> HashMap<String, u64> {
         use harvester_engine::archive_url_key;
 
-        let url_tokens: std::collections::HashMap<String, u64> = self
-            .jobs
+        self.jobs
             .values()
             .filter_map(|job| {
                 job.tokens
                     .map(|tokens| (archive_url_key(&job.url), tokens as u64))
             })
-            .collect();
-
-        let mut full_tokens = 0u64;
-        let mut summary_tokens = 0u64;
-        let mut summary_coverage = 0usize;
-
-        for url in urls {
-            let article_tokens = url_tokens.get(&archive_url_key(url)).copied().unwrap_or(0);
-            full_tokens = full_tokens.saturating_add(article_tokens);
-
-            let maybe_summary = self
-                .content_hash_for_url(url)
-                .and_then(|hash| self.summary_cache().lookup_any_by_content_hash(hash));
-
-            if let Some(entry) = maybe_summary {
-                summary_tokens = summary_tokens.saturating_add(entry.result.output_tokens as u64);
-                summary_coverage += 1;
-            } else {
-                summary_tokens = summary_tokens.saturating_add(article_tokens);
-            }
-        }
-
-        ArchiveTokenEstimates {
-            full_tokens,
-            summary_tokens,
-            summary_coverage,
-        }
-    }
-
-    pub(crate) fn summary_output_tokens_for_url(&self, url: &str) -> Option<u32> {
-        let hash = self.content_hash_for_url(url)?;
-        self.summary_cache()
-            .lookup_any_by_content_hash(hash)
-            .map(|entry| entry.result.output_tokens)
+            .collect()
     }
 
     pub(crate) fn content_hash_for_url(&self, url: &str) -> Option<&str> {
@@ -351,6 +330,39 @@ impl AppState {
     /// A subsequent `ArchiveClicked` will naturally overwrite the pin.
     pub fn clear_pinned_archive_corpus(&mut self) {
         self.pinned_archive_corpus = None;
+    }
+}
+
+pub(in crate::state) fn archive_token_estimates_from_parts<F>(
+    urls: &[String],
+    url_tokens: &HashMap<String, u64>,
+    summary_tokens_for_url: F,
+) -> ArchiveTokenEstimates
+where
+    F: Fn(&str) -> Option<u32>,
+{
+    use harvester_engine::archive_url_key;
+
+    let mut full_tokens = 0u64;
+    let mut summary_tokens = 0u64;
+    let mut summary_coverage = 0usize;
+
+    for url in urls {
+        let article_tokens = url_tokens.get(&archive_url_key(url)).copied().unwrap_or(0);
+        full_tokens = full_tokens.saturating_add(article_tokens);
+
+        if let Some(tokens) = summary_tokens_for_url(url) {
+            summary_tokens = summary_tokens.saturating_add(tokens as u64);
+            summary_coverage += 1;
+        } else {
+            summary_tokens = summary_tokens.saturating_add(article_tokens);
+        }
+    }
+
+    ArchiveTokenEstimates {
+        full_tokens,
+        summary_tokens,
+        summary_coverage,
     }
 }
 

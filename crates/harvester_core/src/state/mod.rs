@@ -69,7 +69,8 @@ pub(crate) use signal_candidate_access::BriefingGenerateReadiness;
 
 pub type JobId = u64;
 
-const MAX_EXTRACTED_LINKS: usize = 5_000;
+/// Maximum extracted links retained for one job.
+pub const MAX_EXTRACTED_LINKS: usize = 5_000;
 const CHECKPOINT_SAVING_STATUS_MESSAGE: &str = "Checkpoint saving...";
 
 fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSnapshot> {
