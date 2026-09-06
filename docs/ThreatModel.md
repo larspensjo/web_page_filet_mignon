@@ -29,7 +29,7 @@ Structured threat model covering:
    - Vault secrets are scoped per launched process; the rule applies to every vault secret, not only Harvester keys
    - Side effects require passing through `EffectRunner` policy checks
    - All resource consumption is bounded
-   - Probe mode is a scoped diagnostic exemption: it constructs no `AppState`, `RuntimePaths`, effects, or secrets, and only adds its acknowledgement/report IPC commands in that mode.
+   - Probe mode is a scoped diagnostic exemption: it constructs no `AppState`, `RuntimePaths`, effects, or secrets, and only adds its acknowledgement/report IPC commands in that mode. It also ships the permanently embedded `probe-*` capability window-label glob in `crates/harvester_ui/capabilities/default.json`; this does not widen page authority because `core:default` grants no window creation, closing, or destruction, the only labels created in code are production `main` and `probe-<slug>` inside `run_probe`, and embedded capabilities cannot be conditional on `--probe-ipc`.
 5. **Lessons learned** (from review):
    - Duplicate IO paths create policy drift; centralize enforcement
    - Generic failure collapsing removes traceability

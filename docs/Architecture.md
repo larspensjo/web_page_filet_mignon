@@ -66,10 +66,10 @@ Key rules:
 ## Crates and purposes
 - **harvester_app:** UI, event loop, effect execution, and platform integration.
 - **harvester_batch:** command-line and scheduled batch host orchestration.
-- **harvester_core:** domain state, update logic, and view-friendly snapshots.
+- **harvester_core:** domain state, update logic, and view-friendly snapshots. During host coexistence, `view()` builds the full Win32 job list while `desktop_view()` builds the desktop projection without it; both share one enrichment implementation, and this duplication ends in phase 7.
 - **harvester_engine:** content processing pipeline, persistence, and LLM-related workflows.
 - **harvester_io:** shared runtime paths, persistence, and effect execution. `harvester_io::host_bootstrap` is the shared home for executable-host startup and state hydration. `harvester_io::run_lock` provides the parameterized single-instance lock shared by the batch and GUI hosts.
-- **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset confinement, and the core-thread boundary for the future desktop host. `ShowArchiveDialog` is intercepted for the host and never reaches the effect runner.
+- **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset confinement, and the core-thread boundary for the future desktop host. Its snapshot projection strips the full job list and the Win32-only visible-id list, so the envelope carries only rows the page can render. `ShowArchiveDialog` is intercepted for the host and never reaches the effect runner.
 - **harvester_ui:** non-default Tauri desktop host. It serves only the built frontend bundle through the confined `harvester://` scheme, sends restricted `UiIntent` values to the core-thread driver, and services effects only through `harvester_io::EffectRunner`. The bridge's snapshot projection and host-serviced `ShowArchiveDialog` boundary keep Tauri out of core/reducer logic.
 - **engine_logging:** shared logging setup used across the workspace.
 - **commanductui:** UI framework dependency used for the Windows interface.

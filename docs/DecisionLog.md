@@ -63,3 +63,27 @@ Decision: The Tauri desktop host persists logical inner dimensions in its own op
 Context: Sharing one pair of dimensions made DPI conversion compound across Tauri launches and gave the two hosts incompatible meanings for the same persisted values.
 Consequences: Existing state files remain compatible, each host restores only its own geometry, and the separate Tauri fields remain until phase 7 removes the legacy window-size contract.
 Refs: crates/harvester_core/src/msg.rs, crates/harvester_io/src/persistence.rs, crates/harvester_ui/src/host.rs
+
+## 2026-09-06 - Desktop job list has two modes
+Decision: The desktop job list offers SinceCheckpoint by default and Results; it offers no unbounded All mode.
+Context: All was unused and makes the desktop list unbounded at corpus scale.
+Consequences: `JobListMode::All` is removed from the desktop wire vocabulary. The frozen Win32 `JobListScope::All` remains until phase 7, and older articles are reached through archived output files.
+Refs: commits 5335ee1, e8b8da8; crates/harvester_core/src/tabs.rs
+
+## 2026-09-06 - Desktop IPC carries only renderable job rows
+Decision: The desktop snapshot carries only scoped, searched, capped job rows and one selected-job record; the filter lives in core, not in the page.
+Context: The previous full view carried all 9,475 jobs (about 3.4 MB) to render about 110 rows.
+Consequences: Scope and search have one reducer-owned definition, the page cannot render a row core did not send, and the cap selects the newest rows after search. If scoped lists regularly exceed the cap, `fetch_job_rows` is the upgrade path rather than a larger cap.
+Refs: commits 5335ee1, e8b8da8; `DESKTOP_JOB_LIST_MAX_ROWS`; docs/EngineeringDiary.md (2026-09-06 desktop job-list projection entry)
+
+## 2026-09-06 - An empty desktop job list after archive is correct
+Decision: An archive that sets the checkpoint leaves the desktop job list empty until new articles arrive; older articles are reached through the archived output files.
+Context: This matches the user's archive workflow and makes the scoped, capped projection safe.
+Consequences: The UI treats this as a distinct correct state, not an error, and distinguishes no jobs yet, nothing since checkpoint, and no search matches.
+Refs: commits 5335ee1, e8b8da8; frontend/src/App.tsx
+
+## 2026-09-06 - IPC probe isolates each measurement case in its own window
+Decision: The IPC probe runs each measurement case in a freshly created webview window, closing the previous window only after the next exists, so frame health is gated per case.
+Context: Per-case isolation is required because averaging a healthy case with a failing case hides regressions: equal frame counts with 0% and 3% slow frames produce a passing 1.5% average. Navigating the existing window was implemented and found not to work: WebView2 returned success from `navigate()` and silently discarded it, confirmed when the custom-protocol handler served seven asset requests for the initial load and zero after navigation.
+Consequences: `crates/harvester_ui/capabilities/default.json` permanently carries a `probe-*` window-label glob so probe windows can receive events. Its permission set remains `core:default`, which grants no window creation, closing, or destruction; no production window uses that label; and capabilities cannot be conditional because they are embedded at build time. Because Tauri exits when the last window closes, create-before-close is required.
+Refs: commit 77cba9a; crates/harvester_ui/src/probe/, crates/harvester_ui/capabilities/default.json, docs/ThreatModel.md
