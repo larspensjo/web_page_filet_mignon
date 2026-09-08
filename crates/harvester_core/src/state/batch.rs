@@ -1,9 +1,11 @@
 use super::{
     AppState, ArchiveTokenEstimates, BatchNextAction, BatchObservation, BatchStatus, JobResultKind,
-    PreTriagePhase, TriagePhase,
+    TriagePhase,
 };
 use crate::archive_display::{ArchiveDisplayCounts, CacheDerivedArchive};
 use crate::working_corpus::CurrentWorkingCorpus;
+#[cfg(test)]
+use crate::PreTriagePhase;
 use crate::{FrozenBatchKey, StageKind};
 use harvester_engine::llm::PromptId;
 use std::collections::HashMap;
@@ -166,24 +168,10 @@ impl AppState {
     }
 
     pub fn batch_status(&self) -> BatchStatus {
-        let batch = self.batch_observation();
-        let has_active_work = batch.poll_in_progress
-            || matches!(batch.pre_triage_phase, PreTriagePhase::LoadingArticles)
-            || matches!(
-                batch.triage_phase,
-                TriagePhase::LoadingArticles | TriagePhase::Triaging
-            )
-            || batch.jobs_in_flight > 0
-            || batch.triage_in_flight > 0
-            || batch.summary_in_flight > 0
-            || batch.summary_pending > 0
-            || self.briefing.is_active()
-            || batch.import_in_flight;
-
-        if has_active_work {
-            BatchStatus::Running
-        } else {
+        if self.pipeline_activity().is_settled() {
             BatchStatus::Settled
+        } else {
+            BatchStatus::Running
         }
     }
 

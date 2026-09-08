@@ -42,6 +42,8 @@ mod llm;
 mod pre_triage_access;
 mod prompt;
 mod provider_alert;
+mod run_progress;
+pub(crate) use run_progress::PollPipelineJobSnapshot;
 mod signal_candidate_access;
 mod source_poll;
 mod ui_state;
@@ -406,6 +408,11 @@ pub struct AppState {
     /// Host-observed time used by deterministic view projection. Hosts must
     /// reduce a `Msg::Tick` before constructing the first view.
     last_observed_utc: Option<chrono::DateTime<chrono::Utc>>,
+    run_progress: Option<crate::RunProgress>,
+    next_run_id: u64,
+    pipeline_run_phase: crate::PipelineRunPhase,
+    reduced_message_seq: u64,
+    run_completion_notice: Option<crate::RunCompletionNotice>,
     /// Persisted entity index loaded from disk (or rebuilt from caches).
     entity_index: Option<crate::entity_index::EntityIndex>,
     /// Pre-computed trend data derived from `entity_index`.
@@ -520,6 +527,11 @@ impl Default for AppState {
             job_list_mode: JobListMode::default(),
             reading_pane_mode: ReadingPaneMode::default(),
             last_observed_utc: None,
+            run_progress: None,
+            next_run_id: 1,
+            pipeline_run_phase: crate::PipelineRunPhase::Idle,
+            reduced_message_seq: 0,
+            run_completion_notice: None,
             entity_index: None,
             entity_trend_data: None,
             #[cfg(test)]

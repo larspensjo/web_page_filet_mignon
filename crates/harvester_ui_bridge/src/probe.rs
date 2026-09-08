@@ -4,10 +4,11 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use harvester_core::{
-    AppViewModel, DesktopJobListView, JobFilterStatus, JobListMode, JobListRowView, JobOrigin,
-    JobResultKind, LinkDownloadState, LinkRowView, ScoreBand, SelectedJobView,
-    SelectedJobVisibility, SignalCandidateOutcome, SignalCandidateRow, SignalCandidateRowState,
-    Stage, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS, MAX_EXTRACTED_LINKS,
+    ActivityEntry, ActivityOutcome, AppViewModel, DesktopJobListView, JobFilterStatus, JobListMode,
+    JobListRowView, JobOrigin, JobResultKind, LinkDownloadState, LinkRowView, PipelineStage,
+    RunProgressView, ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome,
+    SignalCandidateRow, SignalCandidateRowState, Stage, StageProgress, StageStatus,
+    TriageAnnotationView, ACTIVITY_FEED_CAPACITY, DESKTOP_JOB_LIST_MAX_ROWS, MAX_EXTRACTED_LINKS,
 };
 use harvester_engine::{llm::dto::SourceTier, LinkKind};
 use serde::{Deserialize, Serialize};
@@ -170,7 +171,45 @@ pub fn synthetic_view(case: ProbeCase, generation: u64) -> AppViewModel {
             ..Default::default()
         },
         signal_candidate_rows,
+        run_progress: synthetic_run_progress(generation),
         ..Default::default()
+    }
+}
+
+fn synthetic_run_progress(generation: u64) -> RunProgressView {
+    let stages = PipelineStage::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(index, stage)| StageProgress {
+            stage,
+            status: if index < 4 {
+                StageStatus::Done
+            } else {
+                StageStatus::Active
+            },
+            completed: (24 + index * 7) as u32,
+            failed: u32::from(index == 1),
+            total: (30 + index * 8) as u32,
+            started_at_utc: Some(probe_time(index as i64)),
+            ended_at_utc: (index < 4).then(|| probe_time(index as i64 + 8)),
+        })
+        .collect();
+    let activity = (0..ACTIVITY_FEED_CAPACITY).map(|index| ActivityEntry {
+        seq: index as u64,
+        url: format!("https://probe.invalid/activity/{index}?generation={generation}"),
+        title: Some(format!("Probe activity {index} validates the bounded desktop history payload")),
+        stage: PipelineStage::ALL[index % PipelineStage::ALL.len()],
+        outcome: match index % 4 {
+            0 => ActivityOutcome::Started,
+            1 => ActivityOutcome::Succeeded,
+            2 => ActivityOutcome::Failed { reason: format!("Source returned a realistic transient response for probe activity {index}; retry exhaustion recorded safely.") },
+            _ => ActivityOutcome::Skipped { reason: format!("Article was deferred to the next batch cycle after policy evaluation {index}.") },
+        },
+    }).collect();
+    RunProgressView {
+        stages,
+        run_active: true,
+        activity,
     }
 }
 
@@ -310,7 +349,7 @@ pub fn evaluate(cases: Vec<ProbeCaseSamples>) -> ProbeReport {
         });
     ProbeReport {
         snapshot_min_interval_ms: SNAPSHOT_MIN_INTERVAL_MS,
-        activity_feed_capacity: None,
+        activity_feed_capacity: Some(ACTIVITY_FEED_CAPACITY),
         cases,
         passed,
         tauri_version: None,
@@ -417,6 +456,11 @@ mod tests {
         assert_ne!(
             first.view["desktop_job_list"]["rows"][0]["url"],
             second.view["desktop_job_list"]["rows"][0]["url"]
+        );
+        let progress = synthetic_view(ProbeCase::TypicalScope, 1).run_progress;
+        assert_eq!(
+            (progress.stages.len(), progress.activity.len()),
+            (6, ACTIVITY_FEED_CAPACITY)
         );
         assert_eq!(
             synthetic_view(ProbeCase::SelectedJobMaxLinks, 1)

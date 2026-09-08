@@ -709,14 +709,15 @@ user asked for. `failed` is always reported, in every status.
 `RunPipeline` with no new articles never activates `DownloadingArticles`, and
 that is information, not an error.
 
-**Stop.** `Msg::StopFinishClicked` freezes counts, marks every non-terminal stage
-`Done`, and marks the run terminal. It never leaves a stage `Active` forever.
+**Stop.** An accepted `Msg::StopFinishClicked` freezes counts, marks every `Active`
+stage `Done`, leaves skipped `Pending` stages muted, and marks the run terminal. It
+never leaves a stage `Active` forever. A disabled stop intent changes nothing.
 
 **Timestamps** come only from `last_observed_utc`, so the accumulator never calls
 a clock.
 
-`RunProgressView { stages: Vec<StageProgress>, run_active: bool }` is the
-projection into `AppViewModel`. `OperationProgress` (the single-winner struct at
+`RunProgressView` is the three-field projection `{ stages, run_active, activity }`
+in `AppViewModel`. `OperationProgress` (the single-winner struct at
 `view_model.rs:41-47`) stays until phase 7 because the Win32 renderer needs it;
 the new field is purely additive.
 
@@ -742,7 +743,7 @@ ETA is computed in the frontend from `completed`, `total` and `started_at_utc`
 ### The bounded activity feed
 
 ```rust
-pub const ACTIVITY_FEED_CAPACITY: usize = 200;
+pub const ACTIVITY_FEED_CAPACITY: usize = 50;   // measured in phase 2; was 200
 
 pub struct ActivityEntry {
     pub seq: u64,
@@ -762,12 +763,21 @@ repo's char-boundary-safe helpers (ThreatModel lesson: "Byte slicing of
 user/content strings is brittle"). `seq` is monotonic within a run so the
 frontend can key rows and detect gaps.
 
-**Why 200.** It is roughly two screens of scrollback at the spec's row density,
-so the feed is useful as history rather than only as a ticker; and at ~150 bytes
-per entry it bounds the feed's contribution to a snapshot at ~30 KB, which the
-phase-1c throughput probe measures directly. If the probe shows the snapshot cost
-is dominated by the feed, lower it to 50 and record the measurement — do not
-raise it.
+Article downloads use a per-item lifecycle: the first `JobProgress` for a tracked
+job adds one `Started` row, later chunk progress adds no rows, and `JobDone` adds
+one terminal `Succeeded` or `Failed` row.
+
+**Why 50 — settled by measurement in phase 2.** 200 was proposed as roughly two
+screens of scrollback at ~150 bytes per entry, bounding the feed's contribution
+to a snapshot at ~30 KB. The probe measured otherwise: real entries average ~245
+bytes, so 200 of them added ~49 KB to every envelope at 20 emissions/s and held
+the page two generations behind, failing the `latency_ms_p95 < 100` gate on two
+consecutive runs (125/319 and 115/290 ms on typical-scope, against a phase-1d
+baseline of 10/16 ms on the same WebView2 runtime). At 50 the gate passes with
+margin — 13/17 and 14/20 ms, backlog back to 1/1. The cost is scrollback depth:
+the feed is a live ticker plus a short history rather than a several-minute
+record. Raising it again requires new evidence that the payload got cheaper, not
+a preference for more history.
 
 ### The merged run driver
 
@@ -1480,8 +1490,8 @@ What the implementation changed about this document's assumptions:
 real scheme and drives the real channel.
 
 - The host emits synthetic snapshots at a configured rate representing a live
-  activity feed (default: 20 changes/s for 60 s, ~300 jobs, a full 200-entry
-  feed), each carrying a `generation`. **The synthetic envelopes are produced
+  activity feed (default: 20 changes/s for 60 s, ~300 jobs, a feed filled to
+  `ACTIVITY_FEED_CAPACITY`), each carrying a `generation`. **The synthetic envelopes are produced
   through the real `project()`**, so they carry the same shape and size as
   production envelopes — otherwise the measurement that decides
   `ACTIVITY_FEED_CAPACITY` would be taken against a fiction.
@@ -1703,8 +1713,9 @@ suite alone as the completion gate.
 
 1. `PipelineStage`, `StageStatus`, `StageRecord`, `RunProgress` and the full
    accumulator with its reset / activation / accumulation / terminal / failure /
-   skip / stop / timestamp rules exactly as specified. `RunProgressView` projected
-   into `AppViewModel`. `OperationProgress` retained for the frozen Win32
+   skip / stop / timestamp rules exactly as specified. The three-field
+   `RunProgressView { stages, run_active, activity }` projected into `AppViewModel`.
+   `OperationProgress` retained for the frozen Win32
    renderer.
 2. `ActivityEntry`, `ActivityOutcome`, `ACTIVITY_FEED_CAPACITY = 200`, bounded
    `VecDeque` inside `RunProgress`, reason truncation via char-boundary-safe
@@ -1713,8 +1724,9 @@ suite alone as the completion gate.
    `Msg::PipelineRunRequested` and `Msg::PipelineRunAdvance`.
 4. `PipelineActivity` / `pipeline_activity()`; `batch_status()` rewritten as a
    wrapper; signal scoring included; deferred counts excluded.
-5. `RunCompletionNotice` with its defined `new_result_count`, set on reaching
-   `Idle` from `AwaitingSettle`, cleared by `DismissRunFinishedNotice`.
+5. `RunCompletionNotice` with its defined `new_result_count` and
+   `completed_at_utc`, set on reaching `Idle` from `AwaitingSettle`, cleared by
+   `DismissRunFinishedNotice`.
 6. Re-run the host-side cost measurement from *Testing strategy (e)* — the
    `HOST_DRAIN_BUDGET_MS = 40` timing test at 9 475 jobs, which phase 1d landed
    — now with `RunProgress` and the 200-entry activity feed in the payload, and
@@ -2004,10 +2016,9 @@ batch-versus-GUI lock.
    the end of phase 3: either it stays a mode, or Results becomes a fourth
    full-width page. Decide it from the rendered rows, not from this plan.
 
-2. **`ACTIVITY_FEED_CAPACITY = 200` is a proposal, not a measurement.** The
-   phase-1c probe reports envelope byte size, now measured through the real
-   `project()`. If the feed dominates, lower it to 50 and record the number. Do
-   not raise it.
+2. **`ACTIVITY_FEED_CAPACITY`** — **resolved in phase 2: 50, measured.** See
+   *Resolved since earlier revisions* below. Numbering is kept stable because
+   other sections cite these questions by number.
 
 3. **Charting library.** `lightweight-charts` is recommended for stack
    consistency, but it is a financial time-series library and Trends is weekly
@@ -2045,6 +2056,21 @@ batch-versus-GUI lock.
 
 ### Resolved since earlier revisions
 
+- *`ACTIVITY_FEED_CAPACITY` is a proposal, not a measurement* (Open Question 2) —
+  resolved in phase 2 by measurement: **50, lowered from the proposed 200.** The
+  proposal assumed ~150 bytes per entry and ~30 KB of snapshot contribution. Real
+  entries average ~245 bytes, so 200 of them added ~49 KB to every envelope at 20
+  emissions/s and held the page a steady two generations behind, failing the
+  probe's `latency_ms_p95 < 100` gate on two consecutive runs — typical-scope
+  125/319 then 115/290 ms, capped-no-checkpoint 160/340 then 148/263 ms, backlog
+  p95 2 in all four, against a phase-1d baseline of 10/16 and 26/31 ms on the same
+  WebView2 runtime (152.0.4191.66). Every case gained the same ~105 ms including
+  the 1.2 MB link case, which identified backlog rather than serialization as the
+  mechanism. At 50 the envelope falls from 124 KB to 88 KB and two consecutive
+  runs pass at 13/17 and 14/20 ms with backlog back to 1/1. The plan's "lower it
+  to 50, do not raise it" instruction was followed literally; raising it again
+  requires evidence the payload got cheaper. Refs: docs/DecisionLog.md
+  (2026-09-08); docs/EngineeringDiary.md (2026-09-08 phase 2 entry).
 - *What rides the snapshot at corpus scale?* (was Open Question 6) — resolved:
   core builds a desktop-specific job-list view containing only the rows the page
   can show (mode, then search, then a cap of the newest rows) plus one

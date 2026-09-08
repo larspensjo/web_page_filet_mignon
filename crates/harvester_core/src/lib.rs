@@ -16,6 +16,7 @@ mod pre_triage_coordinator;
 mod pre_triage_filter;
 mod preview;
 mod prompt_lab;
+mod run_progress;
 pub mod signal_candidate;
 pub mod signal_candidate_cache;
 mod source_state;
@@ -61,6 +62,11 @@ pub use preview::PreviewContentKind;
 pub use prompt_lab::{
     ModelCatalogSource, PromptLabInputSource, PromptLabRunId, PromptLabRunRecord,
     PromptLabRunStatus, PromptLabStage, PromptLabTemplateSnapshot,
+};
+pub use run_progress::{
+    ActivityEntry, ActivityOutcome, PipelineActivity, PipelineRunPhase, PipelineStage,
+    RunCompletionNotice, RunProgress, RunProgressView, StageProgress, StageRecord, StageStatus,
+    ACTIVITY_FEED_CAPACITY,
 };
 pub use signal_candidate::{
     compute_dialog_default, ArchiveFinalSelection, ArchiveSelectionSource, OverrideKey,

@@ -9,7 +9,10 @@ use crate::prompt_lab::{
 use crate::state::{JobOrigin, LinkDownloadState};
 use crate::tabs::{AppTab, JobListMode, JobListScope, LeftTab, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
-use crate::{serialize_pairs, JobId, JobResultKind, SessionState, Stage};
+use crate::{
+    serialize_pairs, JobId, JobResultKind, RunCompletionNotice, RunProgressView, SessionState,
+    Stage,
+};
 use chrono::{DateTime, Utc};
 use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion, TemplateSource};
@@ -366,6 +369,9 @@ pub struct AppViewModel {
     pub triage_blocked_reason: Option<String>,
     pub briefing_blocked_reason: Option<String>,
     pub operation_progress: Option<OperationProgress>,
+    /// Reducer-owned cumulative timeline for the desktop pipeline experience.
+    pub run_progress: RunProgressView,
+    pub run_completion_notice: Option<RunCompletionNotice>,
     pub poll_sources_enabled: bool,
     pub poll_indirect_links_enabled: bool,
     pub operation_progress_visible: bool,
@@ -436,6 +442,8 @@ impl Default for AppViewModel {
             triage_blocked_reason: None,
             briefing_blocked_reason: None,
             operation_progress: None,
+            run_progress: RunProgressView::default(),
+            run_completion_notice: None,
             poll_sources_enabled: false,
             poll_indirect_links_enabled: false,
             operation_progress_visible: false,

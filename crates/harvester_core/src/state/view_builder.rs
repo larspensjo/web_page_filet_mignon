@@ -259,6 +259,11 @@ impl AppState {
             briefing_blocked_reason,
             operation_progress_visible: operation_progress.is_some(),
             operation_progress,
+            run_progress: self
+                .run_progress
+                .as_ref()
+                .map_or_else(Default::default, crate::RunProgress::view),
+            run_completion_notice: self.run_completion_notice.clone(),
             poll_sources_enabled: matches!(
                 self.session,
                 SessionState::Idle | SessionState::Running

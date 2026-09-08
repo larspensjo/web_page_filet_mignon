@@ -106,9 +106,11 @@ pub enum Msg {
     JobsSearchRevealRequested,
     /// Open desktop Trends and request its index.
     TrendsViewOpened,
-    /// Desktop run request; a no-op until the phase-2 driver lands.
+    /// Desktop request to run the merged triage + summary pipeline.
     PipelineRunRequested,
-    /// Dismissal is a no-op until phase 2 adds the notice state.
+    /// Reducer-owned orchestration pulse, sent by the desktop host while active.
+    PipelineRunAdvance,
+    /// Dismiss the desktop completion notice.
     RunFinishedNoticeDismissed,
     /// Resolve an extracted link by its core-owned job/index pair.
     ExtractedLinkOpenRequested {

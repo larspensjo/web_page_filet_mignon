@@ -4,10 +4,21 @@
 This document describes the overall system shape, centered on a unidirectional data flow. It focuses on responsibilities and boundaries that should remain stable as features evolve.
 
 ## Unidirectional data flow (UDF)
+
 1. Inputs create intent messages.
 2. A pure update step derives the next state and emits effect requests.
 3. Effects perform all I/O and return results as new messages.
 4. Views render read-only snapshots of state.
+
+### Reducer-owned pipeline lifecycle
+
+The desktop pipeline has three reducer-owned concepts. `RunProgress` is an accumulator
+that retains completed stage counts and bounded activity after live poll and load sessions
+are cleared. `PipelineRunPhase` drives the merged triage-and-summary action through
+reducer messages; the desktop core thread only reads the phase to decide whether to send
+an advance message. `AppState::pipeline_activity()` is the single pure completion query
+used by both desktop and batch hosts. It counts pending and in-flight work (never deferred
+Batch API work), and deliberately includes signal scoring so neither host settles early.
 
 ### Briefing runtime diagram
 ```mermaid

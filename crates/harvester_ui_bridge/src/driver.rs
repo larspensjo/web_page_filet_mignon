@@ -229,6 +229,15 @@ where
             let (next, effects, _) = pump_pre_triage_refresh(state);
             state = next;
             dispatch_effects(effects, &mut effect_sink, &mut command_sink);
+            if !matches!(
+                state.pipeline_run_phase(),
+                harvester_core::PipelineRunPhase::Idle
+            ) {
+                last_message_kind = "PipelineRunAdvance".to_string();
+                let (next, effects) = reducer(state, Msg::PipelineRunAdvance);
+                state = next;
+                dispatch_effects(effects, &mut effect_sink, &mut command_sink);
+            }
             let view = Arc::new(state.desktop_view());
             if last_view.as_deref() != Some(view.as_ref()) {
                 if let Some((snapshot, table)) = coalescer.push(Arc::clone(&view), now()) {

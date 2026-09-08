@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 4,
+  "schema_version": 5,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -96,6 +96,12 @@
         "is_loading": true
       },
       "triage_markdown": null
+    },
+    "run_completion_notice": null,
+    "run_progress": {
+      "activity": [],
+      "run_active": false,
+      "stages": []
     },
     "selected_job_id": null,
     "selected_url": null,

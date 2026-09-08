@@ -1,8 +1,9 @@
 use std::time::Instant;
 
 use harvester_core::{
-    update, AppState, ArticleSummaryResult, CompletedJobSnapshot, Effect, LinkSnapshotRecord,
-    LoadedArticle, Msg, SummaryCache, SummaryCacheEntry, SummaryCacheKey, MAX_EXTRACTED_LINKS,
+    update, AppState, ArticleSummaryResult, CompletedJobSnapshot, Effect, JobResultKind,
+    LinkSnapshotRecord, LoadedArticle, Msg, Stage, SummaryCache, SummaryCacheEntry,
+    SummaryCacheKey, ACTIVITY_FEED_CAPACITY, MAX_EXTRACTED_LINKS,
 };
 use harvester_engine::llm::{prompt::PromptId, SummaryEntities};
 use harvester_ui_bridge::{
@@ -87,12 +88,68 @@ fn drain_cost_state() -> (AppState, usize) {
             }
         })
         .collect();
-    let (state, _) = update(AppState::new(), Msg::RestoreCompletedJobs(snapshots));
+    let state = seed_populated_run_progress();
+    let (state, _) = update(state, Msg::RestoreCompletedJobs(snapshots));
     let (state, _) = update(
         state,
         Msg::BriefingCheckpointSet(Some("2026-09-05T12:00:00Z".into())),
     );
     seed_summary_titles_through_cache(state)
+}
+
+fn seed_populated_run_progress() -> AppState {
+    const ACTIVITY_JOBS: usize = ACTIVITY_FEED_CAPACITY / 2;
+    let (state, _) = update(AppState::new(), Msg::PollSourcesClicked);
+    let (state, _) = update(state, Msg::PollStarted { total: 1 });
+    let urls = (0..ACTIVITY_JOBS).map(job_url).collect::<Vec<_>>();
+    let (mut state, effects) = update(
+        state,
+        Msg::SourcePollCompleted {
+            source_id: harvester_engine::SourceId::new("drain-progress").expect("valid source id"),
+            urls,
+            kind: harvester_engine::SourceKind::Rss,
+            parsed: ACTIVITY_JOBS,
+            dedup_filtered: 0,
+        },
+    );
+    let job_ids = effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::EnqueueUrl { job_id, .. } => Some(*job_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(job_ids.len(), ACTIVITY_JOBS);
+    state = update(state, Msg::AllSourcesPollEnded).0;
+    for job_id in job_ids {
+        state = update(
+            state,
+            Msg::JobProgress {
+                job_id,
+                stage: Stage::Downloading,
+                tokens: None,
+                bytes: Some(32_768),
+                content_preview: None,
+            },
+        )
+        .0;
+        state = update(
+            state,
+            Msg::JobDone {
+                job_id,
+                result: JobResultKind::Success,
+                content_preview: None,
+                extracted_links: Vec::new(),
+                fetched_utc: Some("2026-09-05T12:00:00Z".into()),
+            },
+        )
+        .0;
+    }
+    assert_eq!(
+        state.desktop_view().run_progress.activity.len(),
+        ACTIVITY_FEED_CAPACITY
+    );
+    state
 }
 
 fn link_snapshots(index: usize) -> Vec<LinkSnapshotRecord> {
@@ -135,7 +192,7 @@ fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
         },
     );
     state = next_state;
-    let request_id = (0..10)
+    let request_id = (0..20)
         .find_map(|tick| {
             let (next_state, effects) = update(
                 std::mem::take(&mut state),
@@ -254,6 +311,9 @@ fn assert_representative_shape(
             .count()
     });
     assert_eq!(view.job_count, PROBE_CORPUS_JOBS);
+    assert_eq!(view.run_progress.stages.len(), 6);
+    assert_eq!(view.run_progress.activity.len(), ACTIVITY_FEED_CAPACITY);
+    assert!(view.run_progress.run_active);
     assert_eq!(summary_cache_entries, PROBE_CORPUS_JOBS);
     if query.is_none() {
         assert_eq!(view.desktop_job_list.scoped_count, PROBE_TYPICAL_LIST_ROWS);

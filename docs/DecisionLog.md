@@ -87,3 +87,21 @@ Decision: The IPC probe runs each measurement case in a freshly created webview 
 Context: Per-case isolation is required because averaging a healthy case with a failing case hides regressions: equal frame counts with 0% and 3% slow frames produce a passing 1.5% average. Navigating the existing window was implemented and found not to work: WebView2 returned success from `navigate()` and silently discarded it, confirmed when the custom-protocol handler served seven asset requests for the initial load and zero after navigation.
 Consequences: `crates/harvester_ui/capabilities/default.json` permanently carries a `probe-*` window-label glob so probe windows can receive events. Its permission set remains `core:default`, which grants no window creation, closing, or destruction; no production window uses that label; and capabilities cannot be conditional because they are embedded at build time. Because Tauri exits when the last window closes, create-before-close is required.
 Refs: commit 77cba9a; crates/harvester_ui/src/probe/, crates/harvester_ui/capabilities/default.json, docs/ThreatModel.md
+
+## 2026-09-07 - Run progress is accumulated in the reducer
+Decision: Run progress is a reducer-owned accumulator rather than a derivation of live session state.
+Context: Poll, download, and pre-triage state is intentionally discarded at stage boundaries, so a derived timeline would erase completed stages.
+Consequences: A run reset occurs only at a new accepted run, progress timestamps use host-observed time, and the bounded activity feed is retained in the desktop snapshot.
+Refs: crates/harvester_core/src/run_progress.rs, docs/plans/Plan.TauriDesktopUi.md
+
+## 2026-09-07 - One completion query serves both hosts
+Decision: `pipeline_activity()` decides pipeline settlement for both GUI and batch hosts, and signal scoring is part of that query.
+Context: The previous batch-only status omitted asynchronous signal scoring and could settle while Results was still changing.
+Consequences: Deferred work remains non-blocking, while pending and in-flight signal work blocks completion consistently in both hosts.
+Refs: crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_core/src/state/run_progress.rs, crates/harvester_core/src/state/batch.rs
+
+## 2026-09-08 - Desktop activity feed holds 50 entries
+Decision: `ACTIVITY_FEED_CAPACITY` is 50, lowered from the proposed 200 on measurement; raising it again requires evidence that the per-envelope payload got cheaper, not a preference for more scrollback.
+Context: The plan proposed 200 assuming ~150 bytes per entry. Real entries average ~245 bytes, so a full feed added ~49 KB to every envelope at 20 emissions/s and held the desktop page a steady two generations behind, failing the probe's `latency_ms_p95 < 100` gate on two consecutive runs (typical-scope 125/319 then 115/290 ms against a phase-1d baseline of 10/16 ms on the same WebView2 runtime 152.0.4191.66). Every case gained the same ~105 ms, including the 1.2 MB selected-links case, which identified queue backlog rather than serialization cost as the mechanism. Open Question 2 pre-authorized exactly this response.
+Consequences: The activity feed is a live ticker with short history rather than a several-minute record; the gated envelope falls from 124 KB to 88 KB and the gate passes at 13/17 and 14/20 ms with backlog back to 1/1. Every code reference to the cap is symbolic, so the capacity is a one-constant change. If a later phase wants deeper history it needs a different delivery shape - the feed not re-sent in full on every snapshot - not a larger constant.
+Refs: crates/harvester_core/src/run_progress.rs; docs/plans/Plan.TauriDesktopUi.md (The bounded activity feed; Open Question 2); docs/EngineeringDiary.md (2026-09-08 phase 2 entry)

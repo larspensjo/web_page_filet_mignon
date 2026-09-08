@@ -68,6 +68,35 @@ export type SignalCandidateRow = {
 	outcome: unknown | null;
 };
 
+export type StageProgress = {
+	stage: string;
+	status: string;
+	completed: number;
+	failed: number;
+	total: number;
+	started_at_utc: string | null;
+	ended_at_utc: string | null;
+};
+
+export type ActivityEntry = {
+	seq: number;
+	url: string;
+	title: string | null;
+	stage: string;
+	outcome: unknown;
+};
+
+export type RunProgressView = {
+	stages: StageProgress[];
+	run_active: boolean;
+	activity: ActivityEntry[];
+};
+
+export type RunCompletionNotice = {
+	new_result_count: number;
+	completed_at_utc: string;
+};
+
 export type SnapshotEnvelope = {
 	generation: number;
 	schema_version: number;
@@ -75,6 +104,8 @@ export type SnapshotEnvelope = {
 		job_count: number;
 		desktop_job_list: DesktopJobListView;
 		signal_candidate_rows: SignalCandidateRow[];
+		run_progress: RunProgressView;
+		run_completion_notice: RunCompletionNotice | null;
 	} & Record<string, unknown>;
 	fatal_message: string | null;
 };

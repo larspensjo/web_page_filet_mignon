@@ -11,6 +11,7 @@ mod batch_results;
 mod briefing;
 mod import;
 mod llm_completed;
+mod pipeline_run;
 mod polling;
 mod prompt_lab;
 pub(crate) mod signal_candidate;
@@ -28,6 +29,7 @@ const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    let progress_before = pipeline_run::progress_before(&state, &msg);
     let effects = match msg {
         Msg::InputChanged(text) => {
             state.set_input_buffer(text);
@@ -77,6 +79,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::StopFinishClicked => {
             if let Some(policy) = state.stop_finish_button_state().policy() {
+                pipeline_run::handle_stop_for_pipeline(&mut state);
                 state.finish_session();
                 vec![Effect::StopFinish { policy }]
             } else {
@@ -227,7 +230,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.set_workspace_view(crate::WorkspaceView::Trends);
             vec![Effect::LoadEntityIndex]
         }
-        Msg::PipelineRunRequested | Msg::RunFinishedNoticeDismissed => Vec::new(),
+        Msg::PipelineRunRequested => {
+            pipeline_run::handle_pipeline_requested(&mut state);
+            Vec::new()
+        }
+        Msg::PipelineRunAdvance => pipeline_run::handle_pipeline_advance(&mut state),
+        Msg::RunFinishedNoticeDismissed => {
+            pipeline_run::dismiss_run_notice(&mut state);
+            Vec::new()
+        }
         Msg::ReadingPaneModeSet { mode } => {
             state.set_reading_pane_mode(mode);
             Vec::new()
@@ -559,7 +570,13 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
             None => Vec::new(),
         },
-        Msg::PollSourcesClicked => polling::handle_poll_sources_clicked(&mut state),
+        Msg::PollSourcesClicked => {
+            let effects = polling::handle_poll_sources_clicked(&mut state);
+            if !effects.is_empty() {
+                pipeline_run::begin_run_if_needed(&mut state);
+            }
+            effects
+        }
         Msg::PollIndirectLinks => polling::handle_poll_indirect_links(&mut state),
         Msg::PollStarted { total } => polling::handle_poll_started(&mut state, total),
         Msg::SourcePollCompleted {
@@ -819,6 +836,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::NoOp => Vec::new(),
     };
 
+    pipeline_run::record_progress_after(&mut state, progress_before);
     (state, effects)
 }
 
