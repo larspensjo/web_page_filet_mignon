@@ -1,52 +1,79 @@
-# Repo Instructions
+# Repository Instructions
 
-## Workflow
-- Build with `cargo build`.
-- Frontend commands run from `frontend/`: `npm run check`, `npm run build`, and `npm run fmt`.
-- Root Cargo commands remain Node-free because `harvester_ui` is not a default member; changes to that host additionally require `cargo clippy -p harvester_ui --all-targets -- -D warnings`.
-- When a task is completed with Rust changes, run `cargo clippy --all-targets -- -D warnings` and then `cargo fmt`.
-- A running `harvester_batch.exe` locks `target/debug/harvester_batch.exe`, so any change under a shared crate fails root `cargo build` at the link step; use `cargo build --workspace --exclude harvester_batch` while a batch runs.
-- The launch scripts encode a fixed launch policy and change only when that policy changes, not when a CLI flag is added.
-- When changing the public output corpus layout, update `docs/CorpusFormat.md`, bump `CORPUS_SCHEMA_VERSION` if compatibility changes, and keep `harvester-corpus.json` generation/tests in sync.
-- When creating complex plans, they should be divided into incremental phases that can be tested.
-- When implementing a plan, don't commit the changes; they shall first be reviewed.
+Keep guidance focused on durable project constraints and user preferences. Trust
+agents to choose implementation details and follow existing conventions.
 
-## Corpus
-- Answer research questions about harvested articles by reading the corpus files directly; there is no corpus server.
-- Start by grepping `output/*.md` for relevant articles. Each article's title is in its filename, and each file starts with `---` frontmatter containing `url`, `title`, and `fetched_utc`.
-- Also search `output/linked/*.md` if that directory is present. `output/harvester-corpus.json` records the corpus layout and schema version; it is not an article index.
+## Working with the user
 
-## Secrets
-- Agents must not attempt to obtain API keys, run the Harvester launchers, or iterate against live LLM APIs.
-- The keyless paths (`cargo build`, `cargo test`, the Pester suites, and the `harvester_ui` IPC probe) are the agent-visible surface.
-- The probe is `cargo run -p harvester_ui -- --probe-ipc`: it holds no secret, needs a display and the GUI lock, takes about 150 seconds, writes `.local/probe/ipc-report.json`, and exits non-zero on a failed gate.
+The user works across many projects and treats code as a black box. Own the
+technical investigation, implementation, and verification; explain progress in
+terms of observable outcomes.
 
-## Planning & Documentation
-- When creating or saving plan documents, always save them to the `docs/plans/` folder unless explicitly told otherwise.
-- Prefer plans with proper long term solutions, even if more work or refactoring are required.
-- Consult `docs/Architecture.md` for the current system shape when planning or reviewing changes.
-- UI-surface work must follow `docs/visual_design/VisualDesignSpec.md` (the warm dark-theme TUI rendered through CommanDuctUI).
+- At task start, during meaningful progress updates, and at completion, give a
+  brief status: **Harvester — [task]: [current state]. Next: [next step or none].**
+  Keep this to one or two plain-language sentences so the user can quickly regain
+  context when switching projects. Avoid narrating tool calls and file edits.
+- Final status states what changed, whether it was verified, and any remaining
+  blocker or user decision. Distinguish implemented from verified; do not infer
+  overall project health from checks of one change.
+- Keep implementation details out of routine summaries unless requested or needed
+  to explain a material risk or decision. Be explicit about uncertainty.
+- Make routine, reversible implementation decisions independently. Ask when missing
+  information materially changes the intended outcome; explain the user-facing
+  tradeoff and recommend an option without requiring the user to inspect code.
+- Leave changes uncommitted for review unless the user authorizes committing.
 
-## Architecture
-- Preserve the unidirectional data flow: input -> action -> reducer -> state -> render, with side effects isolated and fed back as actions.
-- Reducers must stay pure and unit-testable.
-- Keep entry points (`app.rs`, `main.rs`, `mod.rs` and `lib.rs`) files as thin wrappers only.
-- Keep shared constants and behavior DRY; prefer one source of truth over duplicated definitions.
+## Project boundaries
 
-## CommanDuctUI Boundary
-- Treat `CommanDuctUI` as generic infrastructure, not Harvester domain code.
-- Do not add Harvester-specific terminology or behavior to `CommanDuctUI`.
-- If `CommanDuctUI` changes, update its version and changelog, and preserve dark-theme support.
+- Preserve input -> action -> reducer -> state -> render. Reducers are pure;
+  side effects return through actions. Keep entry points and orchestration thin.
+- `CommanDuctUI` is generic infrastructure: keep Harvester-specific terminology
+  and behavior out. Changes require a version and changelog update and must
+  preserve dark-theme support.
+- Runtime logging uses `engine_logging`, with enough context to identify the
+  failing job, URL, or operation.
+- Launch scripts encode a fixed launch policy; change them when that policy
+  changes, not merely when adding a CLI flag.
+- For public corpus-layout changes, update `docs/CorpusFormat.md`, bump
+  `CORPUS_SCHEMA_VERSION` when compatibility changes, and synchronize
+  `harvester-corpus.json` generation and tests.
+- UI work follows `docs/visual_design/VisualDesignSpec.md`: the warm dark-theme
+  Tauri desktop UI. The legacy Win32 host remains frozen until phase 7.
 
-## Testing
-- Bug fixes should include a regression test when practical.
-- Prefer tests of reducer behavior, emitted effects, and public contracts over internal details.
-- `use super::*;` is acceptable inside an inline `#[cfg(test)]` block and extracted test files. Otherwise, prefer specific naming.
+## Secrets and verification
 
-## Logging
-- Use `engine_logging` for runtime logging.
-- Include enough context in error logs to identify the failing job, URL, or operation.
+- Do not obtain API keys, run Harvester launchers, or iterate against live LLM
+  APIs. Use the keyless build, test, Pester, and IPC-probe paths.
+- Select checks appropriate to the change. Documentation-only edits do not need
+  application builds or tests. Report checks that could not be completed.
+- For Rust changes, build with `cargo build`, run relevant tests, and finish with
+  `cargo clippy --all-targets -- -D warnings` and `cargo fmt`.
+- Root Cargo commands stay Node-free: `harvester_ui` is not a default member.
+  Changes to that host additionally require
+  `cargo clippy -p harvester_ui --all-targets -- -D warnings`.
+- Frontend checks run from `frontend/`: `npm run check`, `npm run build`, and
+  `npm run fmt`.
+- A running batch locks `target/debug/harvester_batch.exe`. While it runs, build
+  shared-crate changes with `cargo build --workspace --exclude harvester_batch`.
+- The keyless IPC probe is `cargo run -p harvester_ui -- --probe-ipc`. It needs a
+  display and the GUI lock, takes about 150 seconds, writes
+  `.local/probe/ipc-report.json`, and exits non-zero on a failed gate.
+- Cover behavior fixes with practical regression tests. Focus on reducer behavior,
+  emitted effects, and public contracts rather than implementation details.
 
-## Diary
-- Use `docs/DecisionLog.md` as append-only memory for settled architecture, API, product, technology, workflow, safety, or scope commitments. Consult relevant entries before planning; record reversals as new entries rather than editing old ones.
-- Keep `docs/EngineeringDiary.md` up to date for noteworthy implementations and bug fixes with reusable lessons. See its "How to use" section.
+## Corpus research
+
+Read harvested articles directly; there is no corpus server. Search `output/*.md`
+and, when present, `output/linked/*.md`. Article filenames contain titles;
+frontmatter contains `url`, `title`, and `fetched_utc`.
+`output/harvester-corpus.json` describes layout and schema, not an article index.
+
+## Planning and project memory
+
+- Consult relevant architecture and decision-log entries before planning changes.
+  Favor durable solutions; divide complex work into independently testable phases.
+  Save plans under `docs/plans/` unless instructed otherwise.
+- Keep affected documentation accurate. `docs/DecisionLog.md` is append-only
+  memory for settled commitments; record reversals as new entries.
+- Update `docs/EngineeringDiary.md` for noteworthy implementations and bug fixes
+  with reusable lessons, following its "How to use" section.
