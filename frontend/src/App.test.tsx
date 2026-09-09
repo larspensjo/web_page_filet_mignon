@@ -1,6 +1,9 @@
+import aiUnavailable from "@fixtures/snapshots/ai_unavailable.json";
 import emptyCorpus from "@fixtures/snapshots/idle_empty_corpus.json";
 import withCorpus from "@fixtures/snapshots/idle_with_corpus.json";
 import withSelection from "@fixtures/snapshots/idle_with_selection.json";
+import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
+import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
 import { invoke } from "@tauri-apps/api/core";
 import {
 	act,
@@ -13,13 +16,26 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { JOBS_SEARCH_DEBOUNCE_MS } from "./constants";
-import type { SelectedJobVisibility, SnapshotEnvelope } from "./ipc/types";
+import type {
+	BodyResponse,
+	SelectedJobVisibility,
+	SnapshotEnvelope,
+} from "./ipc/types";
 
 const listeners = new Map<string, (event: { payload: unknown }) => void>();
 const corpus = withCorpus as unknown as SnapshotEnvelope;
 const empty = emptyCorpus as unknown as SnapshotEnvelope;
 const selected = withSelection as unknown as SnapshotEnvelope;
+const reviewFixtures = [
+	["idle empty corpus", emptyCorpus],
+	["idle with corpus", withCorpus],
+	["run in progress with failures", runInProgressWithFailures],
+	["run finished with notice", runFinishedWithNotice],
+	["AI unavailable", aiUnavailable],
+	["idle with selection", withSelection],
+] as const;
 let snapshot: SnapshotEnvelope | null = corpus;
+let bodyResponses = new Map<string, BodyResponse | null>();
 
 vi.mock("@tauri-apps/api/event", () => ({
 	listen: vi.fn(
@@ -30,9 +46,11 @@ vi.mock("@tauri-apps/api/event", () => ({
 	),
 }));
 vi.mock("@tauri-apps/api/core", () => ({
-	invoke: vi.fn(async (name: string) =>
-		name === "get_snapshot" ? snapshot : undefined,
-	),
+	invoke: vi.fn(async (name: string, payload?: { key?: string }) => {
+		if (name === "get_snapshot") return snapshot;
+		if (name === "fetch_body") return bodyResponses.get(payload?.key ?? "");
+		return undefined;
+	}),
 }));
 
 async function renderLoaded() {
@@ -61,11 +79,12 @@ describe("job list", () => {
 	beforeEach(() => {
 		listeners.clear();
 		snapshot = corpus;
+		bodyResponses = new Map();
 		vi.mocked(invoke).mockClear();
 	});
 
 	it("pins the desktop job-list contract in every bridge fixture", () => {
-		for (const fixture of [emptyCorpus, withCorpus, withSelection]) {
+		for (const fixture of reviewFixtures.map(([, fixture]) => fixture)) {
 			expect(fixture.view).not.toHaveProperty("jobs");
 			expect(fixture.view.desktop_job_list).toMatchObject({
 				mode: expect.any(String),
@@ -139,7 +158,7 @@ describe("job list", () => {
 						url: "https://example.invalid/candidate",
 						score: 90,
 						score_band: "High",
-						source_tier: "Unknown",
+						source_tier: "Tier3",
 						gist_truncated: "Candidate gist",
 						themes: [],
 						dupes_count: 0,
@@ -375,6 +394,48 @@ describe("job list", () => {
 		]);
 	});
 
+	it("renders failed job outcomes without passing an object to React", async () => {
+		snapshot = {
+			...corpus,
+			view: {
+				...corpus.view,
+				desktop_job_list: {
+					...corpus.view.desktop_job_list,
+					rows: [
+						{
+							...corpus.view.desktop_job_list.rows[0],
+							outcome: { Failed: { reason: "http 503" } },
+						},
+					],
+				},
+			},
+		};
+		await renderLoaded();
+		expect(screen.getByText("Failed")).toBeInTheDocument();
+	});
+
+	it("formats fetched timestamps as readable metadata", async () => {
+		const timestamp = "2023-11-14T22:13:20Z";
+		snapshot = {
+			...corpus,
+			view: {
+				...corpus.view,
+				desktop_job_list: {
+					...corpus.view.desktop_job_list,
+					rows: [
+						{
+							...corpus.view.desktop_job_list.rows[0],
+							fetched_utc: timestamp,
+						},
+					],
+				},
+			},
+		};
+		await renderLoaded();
+		expect(screen.queryByText(timestamp)).not.toBeInTheDocument();
+		expect(screen.getByText(/2023/)).toBeInTheDocument();
+	});
+
 	it("dispatches SelectJob when a Results candidate row is clicked", async () => {
 		snapshot = {
 			...corpus,
@@ -391,7 +452,7 @@ describe("job list", () => {
 						url: "https://example.invalid/candidate",
 						score: 90,
 						score_band: "High",
-						source_tier: "Unknown",
+						source_tier: "Tier3",
 						gist_truncated: "Candidate gist",
 						themes: [],
 						dupes_count: 0,
@@ -414,7 +475,7 @@ describe("job list", () => {
 		]);
 	});
 
-	it("renders the selected job when it is outside the list scope", async () => {
+	it("renders the selected job in the reading pane when it is outside the list scope", async () => {
 		snapshot = selected;
 		await renderLoaded();
 		const selectedJob = selected.view.desktop_job_list.selected_job;
@@ -424,17 +485,36 @@ describe("job list", () => {
 			selected.view.desktop_job_list.rows.map((row) => row.url),
 		).not.toContain(selectedJob.url);
 		expect(
-			screen.getByRole("link", { name: selectedJob.url }),
+			screen.getByRole("heading", { name: selectedJob.url }),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("button", {
+				name: "Open example.invalid in browser",
+			}),
 		).toBeInTheDocument();
 		expect(
 			screen.getByText("Selected job is outside this list's scope."),
 		).toBeInTheDocument();
 	});
 
+	it("opens the selected source through the payload-free core intent", async () => {
+		snapshot = selected;
+		await renderLoaded();
+		fireEvent.click(
+			screen.getByRole("button", {
+				name: "Open example.invalid in browser",
+			}),
+		);
+		expect(intents()).toContainEqual([
+			"dispatch_intent",
+			{ payload: { type: "OpenSelectedInBrowser" } },
+		]);
+	});
+
 	it("explains each selected-job visibility reason", async () => {
 		const selectedJob = selected.view.desktop_job_list.selected_job;
 		if (!selectedJob) throw new Error("selection fixture must select a job");
-		for (const [visibility, text] of Object.entries({
+		for (const [visibility, message] of Object.entries({
 			Visible: "Selected job is visible in this list.",
 			OutsideScope: "Selected job is outside this list's scope.",
 			QueryMismatch: "Selected job does not match this search.",
@@ -451,9 +531,136 @@ describe("job list", () => {
 				},
 			};
 			const rendered = render(<App />);
-			expect(await screen.findByText(text)).toBeInTheDocument();
+			expect(await screen.findByText(message)).toBeInTheDocument();
 			rendered.unmount();
 		}
+	});
+
+	it("marks a row as selected only when core sends the selected job id", async () => {
+		const selectedJob = selected.view.desktop_job_list.selected_job;
+		if (!selectedJob) throw new Error("selection fixture must select a job");
+		snapshot = {
+			...corpus,
+			view: {
+				...corpus.view,
+				desktop_job_list: {
+					...corpus.view.desktop_job_list,
+					selected_job: {
+						...selectedJob,
+						job_id: corpus.view.desktop_job_list.rows[0].job_id,
+					},
+				},
+			},
+		};
+		await renderLoaded();
+		expect(
+			screen
+				.getAllByText("https://example.invalid/fixture")[0]
+				.closest("button"),
+		).toHaveAttribute("aria-pressed", "true");
+	});
+
+	it.each(reviewFixtures)(
+		"renders the review workspace for the %s fixture",
+		async (_, fixture) => {
+			snapshot = fixture as unknown as SnapshotEnvelope;
+			await renderLoaded();
+			expect(screen.getByRole("heading", { name: "Jobs" })).toBeInTheDocument();
+			expect(document.querySelector(".reading-pane")).not.toBeNull();
+		},
+	);
+
+	it("renders only body text from a matching body response and opens extracted links by index", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		bodyResponses.set(reference.key, {
+			content_hash: reference.content_hash,
+			text: "<span>untrusted markup</span> **Rendered summary** [Fixture link](https://fixture.invalid/link)",
+		});
+		await renderLoaded();
+		expect(await screen.findByText("Rendered summary")).toBeInTheDocument();
+		expect(document.querySelector(".markdown-body span")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Fixture link" }));
+		expect(intents()).toContainEqual([
+			"dispatch_intent",
+			{
+				payload: {
+					type: "OpenExtractedLink",
+					payload: { job_id: 1, link_index: 0 },
+				},
+			},
+		]);
+	});
+
+	it("never renders remote Markdown images", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		bodyResponses.set(reference.key, {
+			content_hash: reference.content_hash,
+			text: "![Remote image](https://fixture.invalid/image.png)",
+		});
+		await renderLoaded();
+		expect(await screen.findByText("Remote image")).toBeInTheDocument();
+		expect(document.querySelector(".markdown-body img")).toBeNull();
+	});
+
+	it("keeps a mismatched body response visibly stale until the next snapshot", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		bodyResponses.set(reference.key, {
+			content_hash: "different-body-hash",
+			text: "stale content",
+		});
+		await renderLoaded();
+		expect(
+			await screen.findByText("Article content changed; refreshing…"),
+		).toBeInTheDocument();
+		expect(screen.queryByText("stale content")).not.toBeInTheDocument();
+	});
+
+	it("treats a null response for a live body reference as unavailable", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		bodyResponses.set(reference.key, null);
+		await renderLoaded();
+		expect(
+			await screen.findByText("Article content is unavailable."),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByText("Article content changed; refreshing…"),
+		).not.toBeInTheDocument();
+	});
+
+	it("fetches only the summary and offers no raw-text mode", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		bodyResponses.set(reference.key, {
+			content_hash: reference.content_hash,
+			text: "Summary only",
+		});
+		await renderLoaded();
+		await screen.findByText("Summary only");
+		expect(
+			vi.mocked(invoke).mock.calls.filter(([name]) => name === "fetch_body"),
+		).toEqual([["fetch_body", { key: "SummaryMarkdown" }]]);
+		expect(
+			screen.queryByRole("button", { name: "Raw text" }),
+		).not.toBeInTheDocument();
 	});
 
 	it("distinguishes an empty corpus, an empty scope and an empty search result", async () => {

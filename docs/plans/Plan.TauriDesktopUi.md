@@ -267,9 +267,12 @@ pub struct BodyRef { pub key: BodyKey, pub content_hash: String, pub byte_len: u
 pub fn project(view: &AppViewModel) -> (SnapshotEnvelope, BodyTable);
 ```
 
-**Extracted** into the `BodyTable` and replaced by a `BodyRef` — four fields the
-web renders on demand: `preview_text`, `right_pane.triage_markdown`,
-`right_pane.summary_markdown`, `right_pane.poll_stats_markdown`.
+**Extracted** into the `BodyTable` and replaced by a `BodyRef` — four fields in
+the coexistence protocol: `preview_text`, `right_pane.triage_markdown`,
+`right_pane.summary_markdown`, `right_pane.poll_stats_markdown`. The desktop
+review workspace consumes only `summary_markdown`; `BodyKey::Preview` remains in
+the bridge protocol for compatibility until phase 7 rather than changing the
+body protocol during phase 3.
 
 **Stripped** from the envelope entirely — large fields for surfaces the web never
 renders, during the whole coexistence period: `left_pane.prompt_lab`
@@ -310,8 +313,12 @@ list shrinks to empty as those fields leave core, and the test shrinks with it.
 `{ content_hash, text }`. **It never reads disk.** A disk read there would be a
 second I/O path outside `EffectRunner`, contradicting `docs/Architecture.md` and
 the ThreatModel's own recorded lesson ("Duplicate IO paths create policy drift;
-centralize enforcement"). `preview_text` already comes from state
-(`view_builder.rs:97`), so nothing is lost.
+centralize enforcement"). No article-text body is added for the desktop review
+workspace: `preview_text` is the best-available analysis assembled through
+`view_builder.rs:69` and `job_access.rs:155`'s `resolve_best_preview`, not the
+extracted article text. The actual `JobState::content_preview` never reaches the
+view model and is session-only; every job restored from persistence has it set
+to `None`.
 
 **`BodyTable` is shared as `Arc<RwLock<BodyTable>>`, not round-tripped to the
 core thread.** The choice is justified on what the table *is*: a derived
@@ -1070,9 +1077,11 @@ One primary workspace, three occasional pages, two modals. No native menu.
   Rows* section (priority badge, category label, short title, restrained
   metadata), plus a truncation hint when the scope exceeds the row cap.
 - Right: reading pane on Surface Raised — document header (title, domain as an
-  Accent Primary link-styled source line, tokens, fetched time), then a **triage
-  annotation band** (priority, category, tags) folded in as a band rather than a
-  sibling tab, then the rendered summary. A toggle switches to raw extracted text.
+  Accent Primary link-styled source line that opens the original article in the
+  external browser, tokens, fetched time), then a **triage annotation band**
+  (priority, category, tags) folded in as a band rather than a sibling tab, then
+  the rendered summary. Extracted article text is not rendered in the desktop
+  window.
 - Results is a **mode of the job list**, not its own page. See *Open Questions*.
 
 **Run surface** — a collapsed single line when idle, expanding when running into
@@ -1144,9 +1153,13 @@ states to `crates/harvester_ui_bridge/fixtures/snapshots/*.json` and asserts the
 still match what core produces. The frontend's Vitest tests render against those
 same checked-in files through a Vite path alias.
 
-Fixture states: `idle_empty_corpus`, `idle_with_corpus`,
-`run_in_progress_with_failures`, `run_finished_with_notice`, `ai_unavailable`,
-`archive_dialog_open`.
+Fixture states: `idle_empty_corpus`, `idle_with_corpus`, `idle_with_selection`,
+`run_in_progress_with_failures`, `run_finished_with_notice`, `ai_unavailable`.
+The originally named `archive_dialog_open` state is not expressible in a
+snapshot: archive dialog data rides `Effect::OpenArchiveDialog` and channel 2's
+`UiCommand::ShowArchiveDialog`, while the resulting state mutations are not
+projected. Phase 6 revisits archive-modal coverage when the modal and its
+channel-2 payload exist.
 
 Regeneration is explicit: `UPDATE_UI_FIXTURES=1 cargo test -p harvester_ui_bridge`.
 Determinism depends on `view()` no longer calling `Utc::now()`.
@@ -1775,11 +1788,16 @@ its regression test named, per the repo's bug-fix rule.
    rendering-only; mark the row from `selected_job.job_id`, which renders core's
    selection rather than inferring one locally.
 2. Reading pane: header, source line, triage annotation band, Markdown rendering
-   with raw HTML disabled, raw-text toggle, body fetched via `fetch_body` on hash
-   change.
+   with raw HTML disabled, and summary fetched via `fetch_body` on hash change.
+   The source line dispatches payload-free `OpenSelectedInBrowser` to open the
+   original externally. There is no raw-text toggle: `preview_text` is core's
+   best-available analysis, not extracted article text, while the real
+   `JobState::content_preview` is absent from the view model and persistence.
 3. Design tokens applied throughout; typography, spacing and surfaces per spec.
 4. Contract fixture set **extended** from the phase-1c minimum to the full six
-   states, with component tests for each.
+   snapshot-expressible states, with component tests for each. The proposed
+   archive-dialog fixture is deferred to phase 6 because the dialog exists only
+   as an effect/channel-2 command payload, not snapshot state.
 
 **Verify.** `cargo test` (fixture match test); `npm run check`; `npm run build`;
 `cargo build -p harvester_ui` + its clippy; root clippy + fmt.
@@ -1858,9 +1876,9 @@ resolves.
    guidance.
 6. Exclude-from-archive (`ToggleSignalCandidateExclusion`).
 
-**Verify.** `cargo test`; `npm run check` (component tests against the
-`archive_dialog_open` fixture); `npm run build`; `cargo build -p harvester_ui` +
-clippy; root clippy + fmt.
+**Verify.** `cargo test`; `npm run check` (component tests against the archive
+modal's channel-2 `UiCommand::ShowArchiveDialog` payload); `npm run build`;
+`cargo build -p harvester_ui` + clippy; root clippy + fmt.
 **Human testing recommended:** produce a real archive and diff it against one
 produced by the old app from the same state; confirm open-in-browser opens the
 right URL and that a link inside article text cannot open anything the extracted
@@ -1892,7 +1910,9 @@ index does not name.
    tolerate-on-read regression test and the batch same-article-set regression
    test.
 8. Shrink the `project()` strip list to empty as `PromptLabView` and the briefing
-   bodies leave core, and shrink its exact-key-set test with it.
+   bodies leave core, and shrink its exact-key-set test with it. Revisit the
+   desktop-dead `ReadingPaneMode` and `UiIntent::SetReadingPaneMode` surface here;
+   phase 3 deliberately leaves it untouched while the Win32 host is frozen.
 9. **Launch policy, removal only** — the `Ui` policy landed in phase 1c:
    - Remove the `App` policy entry and `scripts/Start-HarvesterApp.ps1`.
    - Narrow `Get-HarvesterLaunchSpec`'s `[ValidateSet('App', 'Batch', 'Ui')]` to
@@ -2053,6 +2073,12 @@ batch-versus-GUI lock.
    and collect about 100 scripted keystroke-to-repaint pairs, including input
    arriving while an envelope is pending. See docs/EngineeringDiary.md
    (2026-09-06 desktop job-list projection entry).
+
+8. **Which phase owns the AI-unavailable banner?** The `ai_unavailable` fixture
+   currently has no rendering to assert against, and no phase assigns the
+   existing `ai_warning_banner` / `ai_unavailable_message` fields to a desktop
+   surface. Assign the banner to a phase before implementing it; phase 3 does not
+   add an unplanned warning surface.
 
 ### Resolved since earlier revisions
 

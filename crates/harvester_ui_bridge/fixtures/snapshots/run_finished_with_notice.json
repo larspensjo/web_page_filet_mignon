@@ -1,0 +1,310 @@
+{
+  "generation": 1,
+  "schema_version": 5,
+  "view": {
+    "ai_unavailable_message": null,
+    "ai_warning_banner": null,
+    "archive_filtered_count": 1,
+    "archive_partial_coverage": null,
+    "archive_token_estimate": 5,
+    "blacklist": {
+      "blacklisted_count": 0,
+      "rows": []
+    },
+    "briefing_blocked_reason": null,
+    "briefing_generate_enabled": true,
+    "checkpoint_status_message": null,
+    "desktop_job_list": {
+      "hidden_without_fetch_time": 0,
+      "mode": "SinceCheckpoint",
+      "query": "",
+      "rows": [
+        {
+          "bytes": 1024,
+          "downloaded_link_count": 0,
+          "fetched_utc": "2023-11-14T22:13:20Z",
+          "filter_status": null,
+          "has_analysis": true,
+          "has_summary": true,
+          "is_since_checkpoint": true,
+          "job_id": 1,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": "Fixture summary",
+          "summary_tokens": 5,
+          "tokens": null,
+          "triage_annotation": {
+            "category": "news",
+            "priority": 4,
+            "tags": [
+              "fixture",
+              "review"
+            ]
+          },
+          "url": "https://fixture.invalid/article"
+        }
+      ],
+      "scoped_count": 1,
+      "selected_job": {
+        "bytes": 1024,
+        "fetched_utc": "2023-11-14T22:13:20Z",
+        "filter_status": null,
+        "has_summary": true,
+        "job_id": 1,
+        "links": [
+          {
+            "age_suspect": false,
+            "download_state": "NotDownloaded",
+            "index": 0,
+            "kind": "Hyperlink",
+            "label": "Fixture link",
+            "url": "https://fixture.invalid/link"
+          }
+        ],
+        "list_visibility": "Visible",
+        "origin": "Direct",
+        "outcome": "Success",
+        "stage": "Done",
+        "summary_title": "Fixture summary",
+        "summary_tokens": 5,
+        "tokens": null,
+        "triage_annotation": {
+          "category": "news",
+          "priority": 4,
+          "tags": [
+            "fixture",
+            "review"
+          ]
+        },
+        "url": "https://fixture.invalid/article"
+      },
+      "truncated": false,
+      "visible_count": 1
+    },
+    "dirty": true,
+    "indirect_link_summary": {
+      "count": 0,
+      "phase": "Ready"
+    },
+    "input_panel_visible": false,
+    "is_pre_triage_reviewing": false,
+    "job_count": 1,
+    "job_list_mode": "SinceCheckpoint",
+    "last_paste_stats": null,
+    "left_pane": {
+      "first_visible_job_id": null,
+      "job_list_scope": "SinceCheckpoint",
+      "jobs_search_query": "",
+      "left_tab": "TriageResults",
+      "selected_jobs_visible_in_filter": false
+    },
+    "left_pane_header": {
+      "count_label": "1 with triage",
+      "scope_label": "Since checkpoint",
+      "state_label": null,
+      "title": "Results"
+    },
+    "left_panel_width": 180,
+    "llm_quota": {
+      "label": "LLM calls 0 / unlimited",
+      "limit": null,
+      "percent": null,
+      "severity": "Normal",
+      "used": 0
+    },
+    "llm_usage_by_model": [],
+    "next_item_enabled": false,
+    "operation_progress": null,
+    "operation_progress_visible": false,
+    "poll_indirect_links_enabled": false,
+    "poll_sources_enabled": true,
+    "preview_context": {
+      "attention_label": null,
+      "source_label": "fixture.invalid",
+      "status_label": "Done"
+    },
+    "preview_header": {
+      "bytes": 1024,
+      "domain": "fixture.invalid",
+      "heading_count": 1,
+      "link_density": 0.16666666666666666,
+      "nav_heavy": false,
+      "outcome": "Success",
+      "stage": "Done",
+      "tokens": null
+    },
+    "preview_header_text": null,
+    "preview_source": "Summary",
+    "preview_text": {
+      "byte_len": 128,
+      "content_hash": "70b91697cb25aeeb75e906bf00dff259b454e0349591f58a3f1f1a58ee80ab54",
+      "key": "Preview"
+    },
+    "queued_urls": [],
+    "raw_unprocessed_count": 0,
+    "reading_pane_mode": "Summary",
+    "right_pane": {
+      "active_tab": "Summary",
+      "poll_stats_markdown": {
+        "byte_len": 114,
+        "content_hash": "5df8e15f29950fa6c26a7ac96260b59a0feabed3c984dd96f888858d6f43ce3f",
+        "key": "PollStatsMarkdown"
+      },
+      "summary_markdown": {
+        "byte_len": 128,
+        "content_hash": "70b91697cb25aeeb75e906bf00dff259b454e0349591f58a3f1f1a58ee80ab54",
+        "key": "SummaryMarkdown"
+      },
+      "trends": {
+        "active_category": "Companies",
+        "category_data": null,
+        "is_loading": true
+      },
+      "triage_markdown": {
+        "byte_len": 93,
+        "content_hash": "674fddedc1dd16ab8dd8f7040e9484d58c3662a388db959cf77a7140adc4e676",
+        "key": "TriageMarkdown"
+      }
+    },
+    "run_completion_notice": {
+      "completed_at_utc": "2023-11-14T22:13:36Z",
+      "new_result_count": 1
+    },
+    "run_progress": {
+      "activity": [
+        {
+          "outcome": "Started",
+          "seq": 0,
+          "stage": "DownloadingArticles",
+          "title": null,
+          "url": "https://fixture.invalid/article"
+        },
+        {
+          "outcome": "Succeeded",
+          "seq": 1,
+          "stage": "DownloadingArticles",
+          "title": null,
+          "url": "https://fixture.invalid/article"
+        },
+        {
+          "outcome": "Succeeded",
+          "seq": 2,
+          "stage": "Triaging",
+          "title": "Fixture article",
+          "url": "https://fixture.invalid/article"
+        },
+        {
+          "outcome": "Succeeded",
+          "seq": 3,
+          "stage": "Summarizing",
+          "title": "Fixture article",
+          "url": "https://fixture.invalid/article"
+        },
+        {
+          "outcome": "Succeeded",
+          "seq": 4,
+          "stage": "ScoringSignals",
+          "title": "Fixture article",
+          "url": "https://fixture.invalid/article"
+        }
+      ],
+      "run_active": false,
+      "stages": [
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:20Z",
+          "failed": 0,
+          "stage": "ScanningSources",
+          "started_at_utc": "2023-11-14T22:13:20Z",
+          "status": "Done",
+          "total": 1
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:20Z",
+          "failed": 0,
+          "stage": "DownloadingArticles",
+          "started_at_utc": "2023-11-14T22:13:20Z",
+          "status": "Done",
+          "total": 1
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:36Z",
+          "failed": 0,
+          "stage": "LoadingArticles",
+          "started_at_utc": "2023-11-14T22:13:36Z",
+          "status": "Done",
+          "total": 1
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:36Z",
+          "failed": 0,
+          "stage": "Triaging",
+          "started_at_utc": "2023-11-14T22:13:36Z",
+          "status": "Done",
+          "total": 1
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:36Z",
+          "failed": 0,
+          "stage": "Summarizing",
+          "started_at_utc": "2023-11-14T22:13:36Z",
+          "status": "Done",
+          "total": 1
+        },
+        {
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:36Z",
+          "failed": 0,
+          "stage": "ScoringSignals",
+          "started_at_utc": "2023-11-14T22:13:36Z",
+          "status": "Done",
+          "total": 1
+        }
+      ]
+    },
+    "selected_job_id": 1,
+    "selected_url": "https://fixture.invalid/article",
+    "session": "Running",
+    "signal_candidate_preview": {
+      "duplicate_urls": [
+        "https://fixture.invalid/article"
+      ],
+      "exclude_checked": false,
+      "signal_key": "fixture-signal",
+      "state_label": "Scored"
+    },
+    "signal_candidate_rows": [
+      {
+        "dupes_count": 0,
+        "gist_truncated": "Fixture outlet reports a concrete event with enough detail for review.",
+        "job_id": 1,
+        "outcome": "Selected",
+        "score": 84,
+        "score_band": "High",
+        "signal_key": "fixture-signal",
+        "source_tier": "Tier1",
+        "state_label": "Scored",
+        "themes": [
+          "fixture-theme"
+        ],
+        "url": "https://fixture.invalid/article"
+      }
+    ],
+    "stop_finish_button": "Disabled",
+    "summaries_can_start": true,
+    "token_limit": 100000,
+    "total_tokens": 0,
+    "triage_blocked_reason": null,
+    "triage_can_start": false,
+    "triage_results_reorder_suppressed": false,
+    "window_width": 960,
+    "workspace_view": "Review"
+  },
+  "fatal_message": null
+}

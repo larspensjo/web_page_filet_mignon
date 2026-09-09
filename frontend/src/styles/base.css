@@ -33,7 +33,10 @@ button:focus-visible {
 	box-shadow: var(--ring-focus-shadow);
 }
 main {
-	min-height: 100vh;
+	display: flex;
+	height: 100vh;
+	min-height: 0;
+	flex-direction: column;
 	padding: var(--space-major);
 }
 header {
@@ -61,40 +64,6 @@ h2 {
 }
 p {
 	color: var(--text-secondary);
-}
-ul {
-	margin: 0;
-	padding: 0;
-	list-style: none;
-	border: var(--border-contained);
-	border-radius: var(--radius-panel);
-	overflow: hidden;
-	background: var(--surface);
-}
-li {
-	display: flex;
-	justify-content: space-between;
-	gap: var(--space-control);
-	padding: var(--space-control);
-	border-bottom: var(--border-contained);
-	border-color: var(--border-subtle);
-}
-li:last-child {
-	border-bottom: 0;
-}
-li strong {
-	color: var(--text-primary);
-	font-size: var(--row-title-size);
-	font-weight: var(--weight-medium);
-	line-height: var(--row-title-line-height);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-li span {
-	color: var(--text-tertiary);
-	font-size: var(--metadata-size);
-	line-height: var(--metadata-line-height);
 }
 .blocking {
 	display: grid;

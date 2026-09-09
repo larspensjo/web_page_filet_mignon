@@ -2,6 +2,9 @@
 
 This document defines the target visual system for the Harvester desktop UI. It is the single authoritative reference for both design principles and concrete implementation values.
 
+The design tokens are implemented as CSS custom properties in
+`frontend/src/styles/tokens.css`, and the UI is rendered in a Tauri window.
+
 The target aesthetic is a contemporary, dense expert-tool: calm, restrained, highly scannable, and optimized for long working sessions on a warm dark theme.
 
 ## Design Intent

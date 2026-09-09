@@ -1,25 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { JobList } from "./components/JobList";
+import { ReadingPane } from "./components/ReadingPane";
 import { JOBS_SEARCH_DEBOUNCE_MS } from "./constants";
 import { dispatchIntent } from "./ipc/intent";
 import { IPC_SCHEMA_VERSION } from "./ipc/schemaVersion";
-import type { JobListMode, SelectedJobVisibility } from "./ipc/types";
+import type { JobListMode } from "./ipc/types";
 import { useProbe } from "./ipc/useProbe";
 import { useSnapshot } from "./ipc/useSnapshot";
 import "./styles/base.css";
 import "./styles/tokens.css";
-
-function visibilityExplanation(visibility: SelectedJobVisibility): string {
-	switch (visibility) {
-		case "Visible":
-			return "Selected job is visible in this list.";
-		case "OutsideScope":
-			return "Selected job is outside this list's scope.";
-		case "QueryMismatch":
-			return "Selected job does not match this search.";
-		case "Capped":
-			return "Selected job is outside the displayed row limit.";
-	}
-}
+import "./styles/workspace.css";
 
 export function App() {
 	const snapshot = useSnapshot();
@@ -81,14 +71,7 @@ export function App() {
 			void dispatchIntent({ type: "SetJobsSearchQuery", payload: { text } });
 		}, JOBS_SEARCH_DEBOUNCE_MS);
 	};
-	const rows = list?.rows ?? [];
 	const candidates = snapshot?.view.signal_candidate_rows ?? [];
-	const emptyMessage =
-		snapshot?.view.job_count === 0
-			? "No jobs yet."
-			: query
-				? "No matches."
-				: "No jobs since checkpoint.";
 
 	return (
 		<main>
@@ -101,97 +84,28 @@ export function App() {
 					Poll Sources
 				</button>
 			</header>
-			<section aria-label="Jobs">
-				<h2>Jobs</h2>
-				<fieldset>
-					<legend>Job list mode</legend>
-					<button
-						type="button"
-						aria-pressed={mode === "SinceCheckpoint"}
-						onClick={() => changeMode("SinceCheckpoint")}
-					>
-						Since checkpoint
-					</button>
-					<button
-						type="button"
-						aria-pressed={mode === "Results"}
-						onClick={() => changeMode("Results")}
-					>
-						Results
-					</button>
-				</fieldset>
-				{mode === "SinceCheckpoint" && (
-					<input
-						aria-label="Search jobs"
-						value={searchText}
-						onChange={(event) => changeSearch(event.target.value)}
-						onKeyDown={(event) => event.key === "Escape" && clearSearch()}
-					/>
-				)}
-				{list?.truncated && (
-					<p>
-						Showing {list.visible_count} of {list.scoped_count} jobs.
-					</p>
-				)}
-				{list && list.hidden_without_fetch_time > 0 && (
-					<p>
-						{list.hidden_without_fetch_time} jobs are hidden because their fetch
-						time is missing.
-					</p>
-				)}
-				{mode === "Results" ? (
-					candidates.length === 0 ? (
-						<p>No result candidates.</p>
-					) : (
-						candidates.map((candidate) => (
-							<button
-								type="button"
-								key={candidate.job_id}
-								onClick={() =>
-									void dispatchIntent({
-										type: "SelectJob",
-										payload: { job_id: candidate.job_id },
-									})
-								}
-							>
-								{candidate.gist_truncated || candidate.url}
-							</button>
-						))
-					)
-				) : list === undefined ? (
-					<p>Loading jobs…</p>
-				) : rows.length === 0 ? (
-					<p>{emptyMessage}</p>
-				) : (
-					<ul>
-						{rows.map((job) => (
-							<li key={job.job_id}>
-								<button
-									type="button"
-									onClick={() =>
-										void dispatchIntent({
-											type: "SelectJob",
-											payload: { job_id: job.job_id },
-										})
-									}
-								>
-									<strong>{job.summary_title ?? job.url}</strong>
-									<span>{job.stage}</span>
-								</button>
-							</li>
-						))}
-					</ul>
-				)}
-				{list?.selected_job && (
-					<section aria-label="Selected job">
-						<strong>
-							{list.selected_job.summary_title ?? list.selected_job.url}
-						</strong>
-						<a href={list.selected_job.url}>{list.selected_job.url}</a>
-						<p>{visibilityExplanation(list.selected_job.list_visibility)}</p>
-					</section>
-				)}
-			</section>
+			<div className="workspace">
+				<JobList
+					list={list}
+					candidates={candidates}
+					searchText={searchText}
+					onSearchChange={changeSearch}
+					onSearchKeyDown={(event) => event.key === "Escape" && clearSearch()}
+					onClearSearch={clearSearch}
+					onChangeMode={changeMode}
+					onSelectJob={(jobId) =>
+						void dispatchIntent({
+							type: "SelectJob",
+							payload: { job_id: jobId },
+						})
+					}
+					jobCount={snapshot?.view.job_count}
+				/>
+				<ReadingPane
+					selected={list?.selected_job}
+					summary={snapshot?.view.right_pane.summary_markdown}
+				/>
+			</div>
 		</main>
 	);
 }
