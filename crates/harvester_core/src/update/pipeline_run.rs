@@ -189,11 +189,10 @@ pub(super) fn handle_pipeline_advance(state: &mut AppState) -> Vec<Effect> {
             Vec::new()
         }
         PipelineRunPhase::AwaitingSettle => {
-            if !matches!(state.batch_next_action(), BatchNextAction::None) {
-                return dispatch_or_await(state);
-            }
-            if state.pipeline_activity().is_settled() {
+            if pipeline_run_is_settled(state) {
                 settle_run(state);
+            } else if !matches!(state.batch_next_action(), BatchNextAction::None) {
+                return dispatch_or_await(state);
             }
             Vec::new()
         }
@@ -228,13 +227,14 @@ fn dispatch_or_await(state: &mut AppState) -> Vec<Effect> {
 }
 
 fn settle_run(state: &mut AppState) {
-    let completed_at_utc = state.last_observed_utc().unwrap_or_default();
+    let now = state.last_observed_utc();
+    let completed_at_utc = now.unwrap_or_default();
     let completed_count = state.signal_candidate().completed_count() as usize;
     let Some(run) = state.run_progress_mut() else {
         return;
     };
     let new_result_count = completed_count.saturating_sub(run.signal_completed_at_reset);
-    run.terminal = true;
+    run.stop(now);
     state.set_run_completion_notice(RunCompletionNotice {
         new_result_count,
         completed_at_utc,
@@ -471,7 +471,6 @@ fn record_signal_scoring(state: &mut AppState) {
     let enqueued = state.signal_candidate().enqueued_count();
     let completed = state.signal_candidate().completed_count();
     let failed = state.signal_candidate().failed_count();
-    let in_flight = state.signal_candidate().in_flight_count();
     let now = state.last_observed_utc();
     let run = state.run_progress_mut().expect("active run");
     let total = enqueued.saturating_sub(run.signal_enqueued_at_reset);
@@ -485,9 +484,14 @@ fn record_signal_scoring(state: &mut AppState) {
         total,
         now,
     );
-    if in_flight == 0 {
-        run.finish(PipelineStage::ScoringSignals, now);
-    }
+    // Triage, summaries, and deferred batch rearming can enqueue signal work in
+    // waves. Only settle_run terminalizes this stage, after the run driver has
+    // applied its full completion rule; until then counts continue accumulating.
+}
+
+fn pipeline_run_is_settled(state: &AppState) -> bool {
+    matches!(state.batch_next_action(), BatchNextAction::None)
+        && state.pipeline_activity().is_settled()
 }
 
 fn stage_is_active(state: &AppState, stage: PipelineStage) -> bool {

@@ -702,7 +702,12 @@ gone — the accumulator already holds them.
 - `LoadingArticles` ← `Msg::TriageArticlesLoaded`
 - `Triaging` ← `TriagePhase::Complete`
 - `Summarizing` ← last summary settling
-- `ScoringSignals` ← `in_flight_count() == 0` with `enqueued_count() > 0`
+- `ScoringSignals` ← `settle_run`, after the run driver's completion rule
+  holds: `batch_next_action() == BatchNextAction::None` and the shared
+  `pipeline_activity().is_settled()` query is true. The stage remains `Active`
+  until that reducer transition so dispatchable triage/summary work and deferred
+  batch rearming cannot enqueue into a prematurely `Done` stage. A stopped or
+  settled run terminalizes every still-active stage.
 
 A `Done` stage never returns to `Active` within the same `run_id`.
 
@@ -933,7 +938,7 @@ pub struct RunCompletionNotice { pub new_result_count: usize, pub completed_at_u
 signal candidates this run actually scored. The reducer test asserts the *number*,
 not merely the notice's presence.
 
-Rendered as a persistent, dismissible banner ("Run finished — 14 new results"),
+Rendered as a persistent, dismissible banner ("Run finished - 14 articles scored"),
 cleared by `UiIntent::DismissRunFinishedNotice`. The old forced jumps stay on the
 old `AppTab`/`LeftTab` path until phase 7 so the frozen app keeps working.
 
@@ -1102,10 +1107,11 @@ One primary workspace, three occasional pages, two modals. No native menu.
 - Results is a **mode of the job list**, not its own page. See *Open Questions*.
 
 **Run surface** — a collapsed single line when idle, expanding when running into
-the six-stage list (each with status, counts, failures and its own bar) plus the
-live activity feed and a frontend-computed estimate for each active stage,
-labelled with that stage. The run-finished banner appears here and persists until
-dismissed.
+six compact one-line stage rows aligned on shared name, count, bar and status
+columns (each with status, counts, failures and a bounded bar) plus the live
+activity feed. The frontend-computed estimate for an active stage appears in that
+row's right-hand status column; there is no separate ETA line. The run-finished
+banner appears here and persists until dismissed.
 
 The idle line reads **"Idle · 312 articles · 47 ready to archive"**, drawn from
 `job_count` and `archive_filtered_count`, which the view model already carries.
@@ -1846,8 +1852,9 @@ therefore the edit that carries it, and it is updated in the same commit.
 ### Phase 4 — Run experience
 
 1. Collapsed idle line ("Idle · 312 articles · 47 ready to archive"); expanded
-   stage list with six stages, per-stage counts, failure counts, muted skipped
-   stages and bars.
+   six-row stage list sharing aligned name, count, bar and status columns, with
+   failure counts, muted skipped stages, bounded bars and the active-stage
+   estimate in the row's right-hand status column.
 2. Live activity feed with the outcome vocabulary and stable `seq` keys.
 3. Frontend per-active-stage ETA from that stage's counts and `started_at_utc`;
    completed and future stages are not aggregated.

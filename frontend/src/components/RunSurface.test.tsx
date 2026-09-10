@@ -30,8 +30,11 @@ describe("RunSurface", () => {
 		expect(screen.getByText("Scanning sources")).toBeInTheDocument();
 		expect(screen.getByText("Triaging")).toBeInTheDocument();
 		expect(screen.getAllByText("Done")).toHaveLength(3);
-		expect(screen.getByText("In progress")).toBeInTheDocument();
+		expect(screen.getByText("Estimating…")).toBeInTheDocument();
 		expect(screen.getByText(/1 done, 1 failed/)).toBeInTheDocument();
+		expect(document.querySelectorAll(".stage-row")).toHaveLength(6);
+		expect(document.querySelectorAll(".stage-row .stage-bar")).toHaveLength(6);
+		expect(document.querySelector(".run-eta")).toBeNull();
 		expect(document.querySelector(".stage-row--muted")).not.toBeNull();
 	});
 
@@ -104,7 +107,9 @@ describe("RunSurface", () => {
 	it("renders the persistent completion notice from the finished fixture", () => {
 		render(<RunSurface view={finished.view} />);
 
-		expect(screen.getByText("Run finished - 1 new result")).toBeInTheDocument();
+		expect(
+			screen.getByText("Run finished - 1 article scored"),
+		).toBeInTheDocument();
 		expect(
 			screen.getByRole("button", { name: "Run triage + summaries" }),
 		).not.toBeDisabled();
@@ -185,20 +190,42 @@ describe("RunSurface", () => {
 		};
 		render(<RunSurface view={view} />);
 		expect(
-			screen.getByText("Triaging — about 10 sec left"),
-		).toBeInTheDocument();
+			document.querySelector('[data-stage="Triaging"] .stage-status'),
+		).toHaveTextContent("about 10 sec left");
 
 		act(() => vi.advanceTimersByTime(5_000));
 
 		expect(
-			screen.getByText("Triaging — about 15 sec left"),
-		).toBeInTheDocument();
+			document.querySelector('[data-stage="Triaging"] .stage-status'),
+		).toHaveTextContent("about 15 sec left");
 	});
 
-	it("reports finishing instead of calculating when all known work is settled", () => {
+	it("reports an active zero-total stage as in progress", () => {
 		const stages = inProgress.view.run_progress.stages.map((stage) => ({
 			...stage,
-			status: "Done" as const,
+			status:
+				stage.stage === "Triaging" ? ("Active" as const) : ("Done" as const),
+			completed: stage.stage === "Triaging" ? 0 : stage.total,
+			failed: 0,
+			total: stage.stage === "Triaging" ? 0 : stage.total,
+		}));
+		const view = {
+			...inProgress.view,
+			run_progress: { ...inProgress.view.run_progress, stages },
+		};
+
+		render(<RunSurface view={view} />);
+
+		expect(
+			document.querySelector('[data-stage="Triaging"] .stage-status'),
+		).toHaveTextContent("In progress");
+	});
+
+	it("keeps the finishing fallback on an active stage with no remaining work", () => {
+		const stages = inProgress.view.run_progress.stages.map((stage) => ({
+			...stage,
+			status:
+				stage.stage === "Triaging" ? ("Active" as const) : ("Done" as const),
 			completed: stage.total,
 		}));
 		const view = {

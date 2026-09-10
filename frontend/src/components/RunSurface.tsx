@@ -57,7 +57,7 @@ function formatStageEta(eta: ActiveStageEta): string {
 		eta.seconds < 60
 			? `${eta.seconds} sec`
 			: `${Math.ceil(eta.seconds / 60)} min`;
-	return `${stageLabel(eta.stage)} — about ${duration} left`;
+	return `about ${duration} left`;
 }
 
 function stageLabel(stage: StageName): string {
@@ -79,13 +79,6 @@ function statusLabel(status: StageProgress["status"]): string {
 		Done: "Done",
 		Failed: "Failed",
 	}[status];
-}
-
-function hasUnsettledActiveStage(stages: StageProgress[]): boolean {
-	return stages.some(
-		(stage) =>
-			stage.status === "Active" && stage.completed + stage.failed < stage.total,
-	);
 }
 
 function useEtaNow(runActive: boolean): Date {
@@ -141,7 +134,27 @@ function ActivityFeed({ activity }: { activity: ActivityEntry[] }) {
 	);
 }
 
-function StageList({ stages }: { stages: StageProgress[] }) {
+function stageStatus(
+	stage: StageProgress,
+	eta: ActiveStageEta | undefined,
+): string {
+	if (stage.status !== "Active") return statusLabel(stage.status);
+	if (eta) return formatStageEta(eta);
+	if (stage.total === 0) return statusLabel(stage.status);
+	return stage.completed + stage.failed < stage.total
+		? "Estimating…"
+		: "Finishing…";
+}
+
+function StageList({
+	stages,
+	stageEtas,
+}: {
+	stages: StageProgress[];
+	stageEtas: ActiveStageEta[];
+}) {
+	const etaByStage = new Map(stageEtas.map((eta) => [eta.stage, eta]));
+
 	return (
 		<ol className="stage-list" aria-label="Pipeline stages">
 			{stages.map((stage) => {
@@ -157,10 +170,7 @@ function StageList({ stages }: { stages: StageProgress[] }) {
 						data-stage={stage.stage}
 						key={stage.stage}
 					>
-						<div className="stage-heading">
-							<span className="stage-name">{stageLabel(stage.stage)}</span>
-							<span className="stage-status">{statusLabel(stage.status)}</span>
-						</div>
+						<span className="stage-name">{stageLabel(stage.stage)}</span>
 						<div className="stage-count">{stageCount(stage)}</div>
 						<div
 							className="stage-bar"
@@ -174,6 +184,9 @@ function StageList({ stages }: { stages: StageProgress[] }) {
 							)}
 							style={{ "--stage-progress": `${percent}%` } as CSSProperties}
 						/>
+						<span className="stage-status">
+							{stageStatus(stage, etaByStage.get(stage.stage))}
+						</span>
 					</li>
 				);
 			})}
@@ -233,10 +246,9 @@ export function RunSurface({ view }: { view: RunView }) {
 
 			{notice && (
 				<div className="run-notice" role="status">
-					<span>
-						Run finished - {notice.new_result_count} new result
-						{notice.new_result_count === 1 ? "" : "s"}
-					</span>
+					<span>{`Run finished - ${notice.new_result_count} article${
+						notice.new_result_count === 1 ? "" : "s"
+					} scored`}</span>
 					<button
 						className="ghost-button"
 						type="button"
@@ -251,20 +263,7 @@ export function RunSurface({ view }: { view: RunView }) {
 
 			{progress.run_active && (
 				<div className="run-details">
-					<StageList stages={progress.stages} />
-					<div className="run-eta">
-						{stageEtas.length > 0 ? (
-							stageEtas.map((eta) => (
-								<span key={eta.stage}>{formatStageEta(eta)}</span>
-							))
-						) : (
-							<span>
-								{hasUnsettledActiveStage(progress.stages)
-									? "Calculating stage estimate…"
-									: "Finishing…"}
-							</span>
-						)}
-					</div>
+					<StageList stages={progress.stages} stageEtas={stageEtas} />
 					<ActivityFeed activity={progress.activity} />
 				</div>
 			)}

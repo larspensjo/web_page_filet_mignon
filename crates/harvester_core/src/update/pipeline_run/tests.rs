@@ -1,6 +1,6 @@
 use super::*;
-use crate::briefing::LoadedArticle;
-use crate::{ActivityEntry, BatchStatus, Stage, ACTIVITY_FEED_CAPACITY};
+use crate::briefing::{ArticleSummaryResult, LoadedArticle};
+use crate::{ActivityEntry, BatchStatus, Stage, SummaryCacheKey, ACTIVITY_FEED_CAPACITY};
 use chrono::{DateTime, Utc};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::{SourceId, SourceKind};
@@ -41,6 +41,28 @@ fn loaded_article(index: usize) -> LoadedArticle {
         content_hash: format!("progress-hash-{index}"),
         fetched_utc: Some("2026-09-07T12:00:00Z".into()),
     }
+}
+
+fn seed_cached_summary(state: &mut AppState, article: &LoadedArticle) {
+    state.store_summary_result(
+        SummaryCacheKey::try_new(
+            &article.content_hash,
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("test-summary-model"),
+            &[],
+        )
+        .expect("summary cache key"),
+        ArticleSummaryResult {
+            title: article.source_title.clone().expect("article title"),
+            summary: "Cached summary".into(),
+            key_points: vec!["cached point".into()],
+            input_tokens: 10,
+            output_tokens: 5,
+            entities: Default::default(),
+        },
+        "2026-09-07T12:00:00Z".into(),
+    );
 }
 
 fn add_metadata(state: AppState) -> AppState {
@@ -142,6 +164,14 @@ fn signal_success(request_id: u64) -> Msg {
             prompt_version: 1,
             resolved_model: "test-signal-model".into(),
         },
+        metadata: None,
+    }
+}
+
+fn signal_deferred(request_id: u64) -> Msg {
+    Msg::LlmCompleted {
+        request_id,
+        result: LlmResultKind::DeferredToBatch,
         metadata: None,
     }
 }
@@ -470,6 +500,178 @@ fn full_run_progress_walk_preserves_every_stage_and_counts() {
         1,
         "each download must produce one terminal row"
     );
+}
+
+#[test]
+fn scoring_stays_active_from_triage_cache_hit_through_the_last_summary_wave() {
+    let (mut state, articles) = prepare_pipeline(2, 0);
+    seed_cached_summary(&mut state, &articles[0]);
+    let mut previous = progress_snapshot(&state);
+    let (state, triage_effects) = dispatch_triage(state);
+    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+
+    let first_triage_id =
+        request_id(&triage_effects, PromptId::ArticleTriage).expect("first triage request");
+    let (state, effects) = crate::update(state, triage_success(first_triage_id));
+    let first_signal_id = request_id(&effects, PromptId::ArticleSignalCandidate)
+        .expect("cached summary should enqueue scoring during triage");
+    let second_triage_id =
+        request_id(&effects, PromptId::ArticleTriage).expect("second triage request");
+    let (state, _) = crate::update(state, triage_success(second_triage_id));
+    assert_eq!(
+        state.batch_next_action(),
+        BatchNextAction::DispatchSummaries
+    );
+
+    let state = crate::update(state, signal_success(first_signal_id)).0;
+    assert_progress_does_not_regress(&mut previous, &state);
+    let scoring =
+        &state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()];
+    assert_eq!(scoring.status, StageStatus::Active);
+    assert_eq!((scoring.completed, scoring.total), (1, 1));
+
+    let (state, _) = dispatch_summaries(state);
+    let state = add_metadata(state);
+    let (state, summary_effects) = crate::update(
+        state,
+        Msg::ArticlesLoaded {
+            articles,
+            collection_text: "progress collection".into(),
+        },
+    );
+    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let second_summary_id = request_id(&summary_effects, PromptId::ArticleSummary)
+        .expect("uncached article summary request");
+    let progress = state.run_progress().expect("run progress");
+    assert_eq!(
+        progress.stages[PipelineStage::ScoringSignals.index()].status,
+        StageStatus::Active,
+        "scoring stays active while the uncached summary can enqueue more work"
+    );
+
+    let (state, effects) = crate::update(state, summary_result(second_summary_id, true));
+    let second_signal_id =
+        request_id(&effects, PromptId::ArticleSignalCandidate).expect("second signal request");
+    let state = crate::update(state, signal_success(second_signal_id)).0;
+    let scoring =
+        &state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()];
+    assert_eq!(scoring.status, StageStatus::Active);
+    assert_eq!((scoring.completed, scoring.total), (2, 2));
+    let state = crate::update(state, Msg::PipelineRunAdvance).0;
+    let progress = state.run_progress().expect("run progress");
+    assert_eq!(
+        progress.stages[PipelineStage::Summarizing.index()].status,
+        StageStatus::Done
+    );
+    assert_eq!(
+        progress.stages[PipelineStage::ScoringSignals.index()].status,
+        StageStatus::Done,
+        "scoring is terminal once summaries and the scoring queue are terminal"
+    );
+    assert_eq!(
+        (
+            progress.stages[PipelineStage::ScoringSignals.index()].completed,
+            progress.stages[PipelineStage::ScoringSignals.index()].total,
+        ),
+        (2, 2),
+        "the later wave remains accumulated after the stage finishes"
+    );
+}
+
+#[test]
+fn deferred_signal_rearm_does_not_enqueue_into_a_done_stage() {
+    let (state, articles) = prepare_pipeline(1, 0);
+    let (state, triage_effects) = dispatch_triage(state);
+    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = complete_triage(state, triage_effects);
+    let (state, _) = dispatch_summaries(state);
+    let state = add_metadata(state);
+    let (state, summary_effects) = crate::update(
+        state,
+        Msg::ArticlesLoaded {
+            articles,
+            collection_text: "progress collection".into(),
+        },
+    );
+    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let summary_id =
+        request_id(&summary_effects, PromptId::ArticleSummary).expect("summary request");
+    let (state, effects) = crate::update(state, summary_result(summary_id, true));
+    let signal_id = request_id(&effects, PromptId::ArticleSignalCandidate).expect("signal request");
+
+    let state = crate::update(state, signal_deferred(signal_id)).0;
+    assert_eq!(state.batch_next_action(), BatchNextAction::None);
+    assert!(state.pipeline_activity().is_settled());
+    assert_eq!(
+        state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()]
+            .status,
+        StageStatus::Active,
+        "deferred work may be rearmed before the run driver settles"
+    );
+
+    let (state, effects) = crate::update(state, Msg::RearmDeferredBatchStages);
+
+    assert!(request_id(&effects, PromptId::ArticleSignalCandidate).is_some());
+    assert_eq!(
+        state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()]
+            .status,
+        StageStatus::Active
+    );
+}
+
+#[test]
+fn accepted_stop_while_scoring_is_active_leaves_no_stage_active() {
+    let (mut state, articles) = prepare_pipeline(2, 0);
+    seed_cached_summary(&mut state, &articles[0]);
+    let (state, triage_effects) = dispatch_triage(state);
+    let first_triage_id =
+        request_id(&triage_effects, PromptId::ArticleTriage).expect("first triage request");
+    let (state, effects) = crate::update(state, triage_success(first_triage_id));
+    assert!(request_id(&effects, PromptId::ArticleSignalCandidate).is_some());
+    assert!(request_id(&effects, PromptId::ArticleTriage).is_some());
+    assert_eq!(
+        state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()]
+            .status,
+        StageStatus::Active
+    );
+
+    let (state, effects) = crate::update(state, Msg::StopFinishClicked);
+
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    let progress = state.run_progress().expect("stopped run");
+    assert!(progress.terminal);
+    assert!(progress
+        .stages
+        .iter()
+        .all(|stage| stage.status != StageStatus::Active));
+    assert_eq!(
+        progress.stages[PipelineStage::ScoringSignals.index()].status,
+        StageStatus::Done
+    );
+}
+
+#[test]
+fn settle_run_terminalizes_any_residual_active_stage() {
+    let mut state = tick(AppState::new(), 0);
+    begin_run_if_needed(&mut state);
+    let now = state.last_observed_utc();
+    state
+        .run_progress_mut()
+        .expect("run progress")
+        .activate(PipelineStage::ScoringSignals, 1, now);
+
+    settle_run(&mut state);
+
+    let progress = state.run_progress().expect("settled run");
+    assert!(progress.terminal);
+    assert!(progress
+        .stages
+        .iter()
+        .all(|stage| stage.status != StageStatus::Active));
 }
 
 #[test]

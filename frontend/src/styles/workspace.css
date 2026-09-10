@@ -37,7 +37,6 @@
 .run-surface-header,
 .run-summary,
 .run-actions,
-.stage-heading,
 .run-notice {
 	display: flex;
 	align-items: center;
@@ -61,7 +60,6 @@
 .run-state,
 .stage-status,
 .stage-count,
-.run-eta,
 .activity-stage,
 .activity-outcome {
 	color: var(--text-tertiary);
@@ -126,7 +124,21 @@
 	list-style: none;
 }
 
+.stage-list {
+	display: grid;
+	grid-template-columns: minmax(6rem, 1fr) 9rem minmax(
+			var(--space-major),
+			10rem
+		) 9rem;
+	column-gap: var(--space-control);
+	overflow-x: auto;
+}
+
 .stage-row {
+	display: grid;
+	grid-column: 1 / -1;
+	grid-template-columns: subgrid;
+	align-items: center;
 	padding: var(--space-control) 0;
 	border-top: var(--border-contained);
 	border-color: var(--border-subtle);
@@ -136,13 +148,28 @@
 	border-top: 0;
 }
 
-.stage-heading {
-	justify-content: space-between;
+.stage-name {
+	min-width: 0;
+	overflow: hidden;
+	color: var(--text-secondary);
+	text-overflow: ellipsis;
+	font-weight: var(--weight-medium);
+	white-space: nowrap;
 }
 
-.stage-name {
-	color: var(--text-secondary);
-	font-weight: var(--weight-medium);
+.stage-status {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.stage-count {
+	white-space: nowrap;
+}
+
+.stage-status {
+	text-align: right;
 }
 
 .stage-row--muted .stage-name,
@@ -151,15 +178,14 @@
 	color: var(--text-disabled);
 }
 
-.stage-row--warning .stage-status,
 .stage-row--warning .stage-count {
 	color: var(--accent-warning);
 }
 
 .stage-bar {
 	position: relative;
+	width: 100%;
 	height: var(--space-compact);
-	margin-top: var(--space-tight);
 	border-radius: var(--radius-inline);
 	background: var(--surface-overlay);
 	overflow: hidden;
@@ -180,13 +206,6 @@
 
 .stage-row--warning .stage-bar::before {
 	background: var(--accent-warning);
-}
-
-.run-eta {
-	display: flex;
-	flex-direction: column;
-	gap: var(--space-tight);
-	margin-top: var(--space-control);
 }
 
 .activity-feed {
@@ -549,6 +568,13 @@
 
 	.run-actions {
 		justify-content: flex-start;
+	}
+
+	.stage-list {
+		grid-template-columns:
+			minmax(6rem, 1fr) 7rem minmax(var(--space-major), 6rem)
+			minmax(5rem, 7rem);
+		column-gap: var(--space-compact);
 	}
 
 	.activity-entry {
