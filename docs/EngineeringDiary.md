@@ -2285,3 +2285,11 @@ Change: Kept scoring counts reducer-accumulated while the stage is Active and mo
 Lessons Learned: A stage fed in waves by upstream stages cannot treat an empty queue or `pipeline_activity().is_settled()` alone as completion. The activity query describes current non-deferred work; the run driver's separate `batch_next_action() == BatchNextAction::None` guard and terminal settlement transition establish that no planned upstream dispatch remains. Deferring the stage transition until settlement also preserves the deferred-rearm exception without a Done-to-Active regression.
 Prevention: Keep reducer tests that complete cached-summary scoring before summaries are dispatched, require ScoringSignals to remain Active through later summary and deferred-rearm waves, verify its final accumulated counts, and assert all stages are non-Active after both settlement and a midway scoring stop.
 Refs: crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_core/src/update/pipeline_run/tests.rs, frontend/src/components/RunSurface.tsx, docs/plans/Plan.TauriDesktopUi.md
+
+## 2026-09-10 - Preserve UTF-8 output from Harvester launchers
+Type: Bug Fix
+Context: Starting the desktop UI through its launcher rendered Vite's UTF-8 build symbols as mojibake because the PowerShell host console used an OEM code page.
+Change: Added a private, non-exported UTF-8 process-encoding helper to the shared Harvester launcher path, before build and child-process execution, with a non-fatal guard for redirected or non-console hosts. Added regression coverage for invocation and continued launch after an encoding failure.
+Lessons Learned: A PowerShell host that is not in UTF-8 mangles child-process output; the fix belongs at the launcher rather than in each tool.
+Prevention: Keep console encoding initialization at the common launcher boundary and test that cosmetic setup failures do not block the requested build and launch.
+Refs: scripts/lib/HarvesterLaunch.psm1, scripts/tests/HarvesterLaunch.Tests.ps1

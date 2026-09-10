@@ -129,6 +129,13 @@ function Test-HarvesterCommandAvailable {
     $null -ne (Get-Command -Name $Name -ErrorAction SilentlyContinue)
 }
 
+function Set-HarvesterLaunchUtf8ProcessEncoding {
+    $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [Console]::InputEncoding = $utf8NoBom
+    [Console]::OutputEncoding = $utf8NoBom
+    $global:OutputEncoding = $utf8NoBom
+}
+
 function Invoke-HarvesterLaunch {
     [CmdletBinding()]
     param(
@@ -152,6 +159,13 @@ function Invoke-HarvesterLaunch {
     )
 
     $ExitCode.Value = 1
+
+    try {
+        Set-HarvesterLaunchUtf8ProcessEncoding
+    }
+    catch {
+        Write-Verbose "Unable to set UTF-8 console encoding: $($_.Exception.Message)"
+    }
 
     if (-not (Test-HarvesterCommandAvailable -Name 'Invoke-WithSecretMap')) {
         throw "Invoke-WithSecretMap is unavailable; load your PowerShell profile; this launcher does not dot-source it."

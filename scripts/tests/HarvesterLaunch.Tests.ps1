@@ -135,6 +135,26 @@ Describe 'Harvester launch policy' {
         $calls.SecretInvocations | Should -Be 1
     }
 
+    It 'continues launching when UTF-8 process encoding setup fails' {
+        Mock -ModuleName HarvesterLaunch Set-HarvesterLaunchUtf8ProcessEncoding {
+            throw 'encoding setup unavailable in this host'
+        }
+
+        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $calls = New-Calls
+        $code = 1
+
+        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
+            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
+            -SecretInvoker (New-SecretFake -Calls $calls) `
+            -PromptCheck { $true } `
+            -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
+
+        Assert-MockCalled -ModuleName HarvesterLaunch -CommandName Set-HarvesterLaunchUtf8ProcessEncoding -Times 1
+        $calls.SecretInvocations | Should -Be 1
+        $code | Should -Be 0
+    }
+
     It 'returns the batch policy with exactly its fixed runtime arguments' {
         $spec = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
         @($spec.RuntimeArguments) | Should -Be @('--single-shot', '--batch-api')
