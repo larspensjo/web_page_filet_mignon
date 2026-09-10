@@ -1719,6 +1719,164 @@ mod app_state_tests {
         }
     }
 
+    fn set_triage_annotations(state: &mut AppState, annotations: &[(JobId, u8)]) {
+        use crate::briefing::LoadedArticle;
+        use crate::triage::{ArticleTriageResult, TriageSession};
+
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(
+            annotations
+                .iter()
+                .map(|(job_id, _)| LoadedArticle {
+                    url: state.jobs.get(job_id).expect("job exists").url.clone(),
+                    source_title: None,
+                    prepared_text: "test article".to_string(),
+                    content_hash: format!("test-hash-{job_id}"),
+                    fetched_utc: None,
+                })
+                .collect(),
+        );
+        triage.transition_to_triaging();
+        for (article_id, (_, priority)) in annotations.iter().enumerate() {
+            triage.complete_article(
+                article_id,
+                ArticleTriageResult {
+                    category: "test".to_string(),
+                    priority: *priority,
+                    tags: Vec::new(),
+                    rationale: "test".to_string(),
+                    input_tokens: 1,
+                    output_tokens: 1,
+                },
+            );
+        }
+        triage.complete();
+        state.set_triage(triage);
+    }
+
+    #[test]
+    fn desktop_list_orders_rows_by_priority_descending_with_p5_first() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/low");
+        insert_done_job(&mut state, 2, "https://example.com/high");
+        insert_done_job(&mut state, 3, "https://example.com/mid");
+        set_triage_annotations(&mut state, &[(1, 2), (2, 5), (3, 3)]);
+
+        let view = state.desktop_view();
+
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![2, 3, 1]
+        );
+    }
+
+    #[test]
+    fn desktop_list_places_unannotated_rows_last() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/annotated");
+        insert_done_job(&mut state, 2, "https://example.com/unannotated");
+        insert_done_job(&mut state, 3, "https://example.com/lower");
+        set_triage_annotations(&mut state, &[(1, 2), (3, 1)]);
+
+        let view = state.desktop_view();
+
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1, 3, 2]
+        );
+        assert!(view
+            .desktop_job_list
+            .rows
+            .last()
+            .unwrap()
+            .triage_annotation
+            .is_none());
+    }
+
+    #[test]
+    fn desktop_list_breaks_priority_ties_by_job_id() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 9, "https://example.com/nine");
+        insert_done_job(&mut state, 4, "https://example.com/four");
+        set_triage_annotations(&mut state, &[(9, 4), (4, 4)]);
+
+        let view = state.desktop_view();
+
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![4, 9]
+        );
+    }
+
+    #[test]
+    fn desktop_list_falls_back_to_selection_order_while_triage_is_running() {
+        use crate::briefing::LoadedArticle;
+        use crate::triage::{ArticleTriageResult, TriageSession};
+
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/first");
+        insert_done_job(&mut state, 2, "https://example.com/high");
+
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: "https://example.com/high".to_string(),
+            source_title: None,
+            prepared_text: "test article".to_string(),
+            content_hash: "test-hash-high".to_string(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "test".to_string(),
+                priority: 5,
+                tags: Vec::new(),
+                rationale: "test".to_string(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+        state.set_triage(triage);
+
+        let view = state.desktop_view();
+
+        assert!(view.triage_results_reorder_suppressed);
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+
+        state.triage_mut().complete();
+        let settled_view = state.desktop_view();
+        assert!(!settled_view.triage_results_reorder_suppressed);
+        assert_eq!(
+            settled_view
+                .desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![2, 1]
+        );
+    }
+
     #[test]
     fn desktop_list_scopes_to_since_checkpoint_by_default() {
         let mut state = AppState::new();
@@ -2259,7 +2417,7 @@ mod app_state_tests {
     }
 
     #[test]
-    fn desktop_view_caps_rows_and_preserves_newest_order_from_a_large_corpus() {
+    fn desktop_view_caps_recent_rows_before_priority_ordering_from_a_large_corpus() {
         let mut state = AppState::new();
         let corpus_size = DESKTOP_JOB_LIST_MAX_ROWS * 2 + 7;
         for job_id in 1..=corpus_size {
@@ -2268,7 +2426,10 @@ mod app_state_tests {
                 job_id as JobId,
                 &format!("https://example.com/{job_id}"),
             );
+            state.jobs.get_mut(&(job_id as JobId)).unwrap().fetched_utc =
+                chrono::DateTime::from_timestamp(job_id as i64, 0);
         }
+        set_triage_annotations(&mut state, &[(1, 5)]);
 
         let frozen = state.view();
         let desktop = state.desktop_view();
@@ -2280,6 +2441,11 @@ mod app_state_tests {
             DESKTOP_JOB_LIST_MAX_ROWS
         );
         assert!(desktop.jobs.is_empty());
+        assert!(!desktop
+            .desktop_job_list
+            .rows
+            .iter()
+            .any(|row| row.job_id == 1));
         assert_eq!(
             desktop
                 .desktop_job_list

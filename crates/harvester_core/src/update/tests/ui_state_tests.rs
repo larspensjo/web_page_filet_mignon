@@ -1,4 +1,5 @@
 use super::*;
+use crate::WorkspaceView;
 use harvester_engine::llm::prompt::PromptId;
 
 #[test]
@@ -195,6 +196,70 @@ fn triage_clicked_switches_to_triage_results_tab_when_triage_can_start() {
     let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
     let (state, _) = update(state, Msg::TriageClicked);
     assert_eq!(state.left_tab(), LeftTab::TriageResults);
+}
+
+#[test]
+fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigation() {
+    init_logging();
+    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+    let (state, request_id) = tick_until_dispatch(state);
+    let state = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            articles: loaded_triage_articles(1),
+        },
+    )
+    .0;
+    let state = prime_llm_metadata(state);
+    let state = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs }).0;
+    let state = update(
+        state,
+        Msg::WorkspaceViewSet {
+            view: WorkspaceView::Trends,
+        },
+    )
+    .0;
+    let state = update(state, Msg::PipelineRunRequested).0;
+
+    let (state, effects) = update(state, Msg::TriageClicked);
+
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleTriage,
+            ..
+        }
+    )));
+    assert_eq!(state.left_tab(), LeftTab::TriageResults);
+    assert_eq!(state.workspace_view(), WorkspaceView::Trends);
+}
+
+#[test]
+fn job_selected_during_run_keeps_desktop_workspace_stable_after_legacy_navigation() {
+    init_logging();
+    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
+    let job_id = state.view().jobs.first().expect("prepared job").job_id;
+    let state = update(
+        state,
+        Msg::TabSelected {
+            tab: AppTab::Trends,
+        },
+    )
+    .0;
+    let state = update(
+        state,
+        Msg::WorkspaceViewSet {
+            view: WorkspaceView::Trends,
+        },
+    )
+    .0;
+    let state = update(state, Msg::PipelineRunRequested).0;
+
+    let (state, _) = update(state, Msg::JobSelected { job_id });
+
+    assert_eq!(state.active_tab(), AppTab::Triage);
+    assert_eq!(state.workspace_view(), WorkspaceView::Trends);
 }
 
 #[test]

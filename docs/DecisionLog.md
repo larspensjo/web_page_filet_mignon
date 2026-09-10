@@ -111,3 +111,15 @@ Decision: The desktop reading pane presents the selected article's summary only;
 Context: The desktop snapshot has no article-text field. Its `preview_text` is a best-available analysis string, while the actual extracted text is session-only and absent for jobs restored from persistence. Adding article text would require a new persisted IO path that the desktop plan deliberately avoids.
 Consequences: The body protocol gains no new `BodyKey`, `ReadingPaneMode` and `UiIntent::SetReadingPaneMode` are unused by the desktop page pending phase-7 cleanup, and article text is never rendered inside the key-holding window, narrowing its untrusted-content surface.
 Refs: docs/plans/Plan.TauriDesktopUi.md (Information architecture; Phase 3; Phase 7), docs/ThreatModel.md (boundary 2)
+
+## 2026-09-09 - Desktop runs never navigate the user
+Decision: The desktop UI never navigates the user during a run; completion is surfaced as a dismissible notice in the run surface.
+Context: Triage and job selection still serve the frozen Win32 host's tab model, but the new desktop workspace is a reading surface that must remain stable while background work changes the corpus.
+Consequences: The Tauri frontend renders projected run progress and `run_completion_notice` without shadow navigation state, and dismisses completion through `UiIntent::DismissRunFinishedNotice`; the legacy `AppTab`/`LeftTab` jumps remain until phase 7.
+Refs: docs/plans/Plan.TauriDesktopUi.md (Navigation, and the Trends trap; Phase 4)
+
+## 2026-09-09 - Desktop job list triage ordering
+Decision: The desktop job list is ordered by triage priority descending with unrated rows last; while triage is running it falls back to stable selection order (`job_id` ascending), then re-sorts by priority once triage settles. The row cap still selects by recency, so ordering never changes which rows are visible.
+Context: Priority is the user's triage signal, but result completion can arrive incrementally while the reader is scanning. The cap must remain a delivery bound and cannot let an old high-priority job displace a more recent row.
+Consequences: Core owns the display order after scope/search/cap selection, and the frontend renders the supplied array without sorting, re-ranking, or holding a shadow order. Active triage uses selection order until the priority re-sort at settlement. Because the cap is applied first, a high-priority article older than the 400 most recent in-scope rows can be absent entirely while newer lower-priority rows are shown.
+Refs: docs/plans/Plan.TauriDesktopUi.md (Information architecture; Phase 3), docs/visual_design/VisualDesignSpec.md (Lists and Triage Rows), crates/harvester_core/src/state/view_builder.rs

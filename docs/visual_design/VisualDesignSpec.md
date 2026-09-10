@@ -202,16 +202,18 @@ Lists are scan surfaces, not paragraph surfaces.
 
 Use:
 
-- Slightly increased row padding for readability.
+- Compact row padding using `--space-compact` to keep the review list dense.
 - Clear separation between row title and supporting metadata.
-- Distinct visual treatment for priority, category, and tags.
+- Distinct visual treatment for priority and failure markers.
 - Strong selected-state styling using Accent Primary.
 
 Recommended row structure:
 
-- Priority badge with semantic color.
-- Category label.
-- Short title.
+- Priority badge with semantic color, followed by the title in the common title
+  column.
+- Title on its own line, wrapping to at most two lines.
+- Fetched time on one quiet, muted line beneath the title, with a failure-only
+  marker when needed.
 - Secondary metadata or tags only if they do not overwhelm scanning.
 
 Guidance:

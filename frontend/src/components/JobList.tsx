@@ -7,8 +7,8 @@ import type {
 } from "../ipc/types";
 import {
 	formatFetchedTime,
+	isFailureOutcome,
 	jobTitle,
-	outcomeLabel,
 	priorityClass,
 } from "./jobPresentation";
 
@@ -24,15 +24,18 @@ type JobListProps = {
 	jobCount: number | undefined;
 };
 
-function MetadataPills({ job }: { job: JobListRowView }) {
+function JobRowMetadata({ job }: { job: JobListRowView }) {
+	const failed = job.outcome ? isFailureOutcome(job.outcome) : false;
+	if (!job.fetched_utc && !failed) return null;
+
 	return (
-		<div className="row-metadata">
-			{job.tokens !== null && <span className="pill">{job.tokens} tokens</span>}
+		<div className="row-metadata job-row-metadata">
 			{job.fetched_utc && (
-				<span className="pill">{formatFetchedTime(job.fetched_utc)}</span>
+				<span className="fetched-time">
+					{formatFetchedTime(job.fetched_utc)}
+				</span>
 			)}
-			{job.has_summary && <span className="pill">Summary</span>}
-			{job.outcome && <span className="pill">{outcomeLabel(job.outcome)}</span>}
+			{failed && <span className="pill failure-marker">Failed</span>}
 		</div>
 	);
 }
@@ -65,11 +68,8 @@ function JobRow({
 					<span className="priority-placeholder" aria-hidden="true" />
 				)}
 				<span className="row-content">
-					<span className="category-label">
-						{annotation?.category ?? job.stage}
-					</span>
 					<span className="row-title">{jobTitle(job)}</span>
-					<MetadataPills job={job} />
+					<JobRowMetadata job={job} />
 				</span>
 			</button>
 		</li>

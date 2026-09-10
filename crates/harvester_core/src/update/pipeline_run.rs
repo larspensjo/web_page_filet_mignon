@@ -244,10 +244,9 @@ fn settle_run(state: &mut AppState) {
 }
 
 pub(super) fn handle_stop_for_pipeline(state: &mut AppState) {
-    if matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle) {
-        return;
+    if !matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle) {
+        state.set_pipeline_run_phase(PipelineRunPhase::Stopping);
     }
-    state.set_pipeline_run_phase(PipelineRunPhase::Stopping);
     let now = state.last_observed_utc();
     if let Some(run) = state.run_progress_mut() {
         run.stop(now);
@@ -268,6 +267,10 @@ pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore
     if !state.run_progress_is_active() {
         return;
     }
+    let may_settle_poll_only_run = matches!(
+        &before.event,
+        ProgressEvent::AllSourcesPollEnded | ProgressEvent::JobDone { .. }
+    );
     let now = state.last_observed_utc();
 
     match before.event {
@@ -400,6 +403,13 @@ pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore
         || stage_is_active(state, PipelineStage::ScoringSignals)
     {
         record_signal_scoring(state);
+    }
+
+    if may_settle_poll_only_run
+        && matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle)
+        && state.pipeline_activity().is_settled()
+    {
+        settle_run(state);
     }
 }
 

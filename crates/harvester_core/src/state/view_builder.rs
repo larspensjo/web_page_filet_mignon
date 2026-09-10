@@ -24,7 +24,20 @@ use crate::view_model::{
 use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::normalize_url_for_dedupe;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+
+fn compare_desktop_job_rows(left: &JobListRowView, right: &JobListRowView) -> Ordering {
+    match (&left.triage_annotation, &right.triage_annotation) {
+        (Some(left_annotation), Some(right_annotation)) => right_annotation
+            .priority
+            .cmp(&left_annotation.priority)
+            .then_with(|| left.job_id.cmp(&right.job_id)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => left.job_id.cmp(&right.job_id),
+    }
+}
 
 impl AppState {
     pub fn view(&self) -> AppViewModel {
@@ -251,7 +264,7 @@ impl AppState {
             triage_can_start: self.triage_ai_available()
                 && self.triage.can_start()
                 && self.can_start_triage_from_pre_triage(),
-            triage_results_reorder_suppressed: matches!(self.triage.phase(), TriagePhase::Triaging),
+            triage_results_reorder_suppressed: self.triage_reorder_suppressed(),
             signal_candidate_rows,
             signal_candidate_preview,
             ai_unavailable_message,
@@ -551,6 +564,10 @@ impl AppState {
         )
     }
 
+    fn triage_reorder_suppressed(&self) -> bool {
+        matches!(self.triage.phase(), TriagePhase::Triaging)
+    }
+
     fn build_desktop_job_list_view(
         &self,
         signal_candidate_rows: &[SignalCandidateRow],
@@ -561,7 +578,7 @@ impl AppState {
         let query = query.to_string();
         let query_lower = query.to_lowercase();
         let selection = self.select_desktop_job_rows(&query_lower, summary_lookup);
-        let rows = selection
+        let mut rows = selection
             .emitted
             .iter()
             .map(|selected| {
@@ -579,6 +596,9 @@ impl AppState {
                 JobListRowView::from_row(&self.materialize_job_row(&metadata), selected.fetched_utc)
             })
             .collect::<Vec<_>>();
+        if !self.triage_reorder_suppressed() {
+            rows.sort_unstable_by(compare_desktop_job_rows);
+        }
         let scoped_count = selection.searched_count;
         let visible_count = rows.len();
         let selected_job = self.ui.selected_job_id().and_then(|selected_job_id| {

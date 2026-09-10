@@ -12,6 +12,7 @@ import {
 	render,
 	screen,
 	waitFor,
+	within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
@@ -129,6 +130,20 @@ describe("job list", () => {
 		expect(
 			screen.queryByText("https://example.invalid/fixture"),
 		).not.toBeInTheDocument();
+	});
+
+	it("renders the idle corpus fixture in core priority order", async () => {
+		snapshot = corpus;
+		await renderLoaded();
+
+		const renderedRows = Array.from(
+			document.querySelectorAll(".job-list .job-row"),
+		).map((row) => row.textContent);
+		expect(renderedRows).toHaveLength(2);
+		expect(renderedRows[0]).toContain(
+			"https://example.invalid/higher-priority",
+		);
+		expect(renderedRows[1]).toContain("https://example.invalid/lower-priority");
 	});
 
 	it("shows a neutral state before the first snapshot arrives", async () => {
@@ -381,15 +396,19 @@ describe("job list", () => {
 
 	it("dispatches SelectJob when a job row is clicked", async () => {
 		await renderLoaded();
-		const rowButton = screen
-			.getByText("https://example.invalid/fixture")
-			.closest("button");
+		const firstRow = corpus.view.desktop_job_list.rows[0];
+		const rowButton = screen.getByText(firstRow.url).closest("button");
 		if (!rowButton) throw new Error("fixture job must render as a button");
 		fireEvent.click(rowButton);
 		expect(intents()).toEqual([
 			[
 				"dispatch_intent",
-				{ payload: { type: "SelectJob", payload: { job_id: 1 } } },
+				{
+					payload: {
+						type: "SelectJob",
+						payload: { job_id: firstRow.job_id },
+					},
+				},
 			],
 		]);
 	});
@@ -404,6 +423,7 @@ describe("job list", () => {
 					rows: [
 						{
 							...corpus.view.desktop_job_list.rows[0],
+							has_summary: true,
 							outcome: { Failed: { reason: "http 503" } },
 						},
 					],
@@ -411,7 +431,38 @@ describe("job list", () => {
 			},
 		};
 		await renderLoaded();
-		expect(screen.getByText("Failed")).toBeInTheDocument();
+		const row = screen.getByText("Failed").closest("button");
+		if (!row) throw new Error("failed fixture must render as a button");
+		expect(within(row).getByText("Failed")).toBeInTheDocument();
+		expect(within(row).queryByText("news")).not.toBeInTheDocument();
+		expect(within(row).queryByText("42 tokens")).not.toBeInTheDocument();
+		expect(screen.queryByText("Summary")).not.toBeInTheDocument();
+		expect(screen.queryByText("Success")).not.toBeInTheDocument();
+	});
+
+	it("keeps a long row title available for the two-line CSS clamp", async () => {
+		const longTitle =
+			"A deliberately long fixture title that should wrap across two lines before it is ellipsised";
+		snapshot = {
+			...corpus,
+			view: {
+				...corpus.view,
+				desktop_job_list: {
+					...corpus.view.desktop_job_list,
+					rows: [
+						{
+							...corpus.view.desktop_job_list.rows[0],
+							summary_title: longTitle,
+						},
+					],
+				},
+			},
+		};
+		await renderLoaded();
+
+		const title = screen.getByText(longTitle);
+		expect(title).toHaveClass("row-title");
+		expect(title.textContent).toBe(longTitle);
 	});
 
 	it("formats fetched timestamps as readable metadata", async () => {
@@ -433,7 +484,38 @@ describe("job list", () => {
 		};
 		await renderLoaded();
 		expect(screen.queryByText(timestamp)).not.toBeInTheDocument();
-		expect(screen.getByText(/2023/)).toBeInTheDocument();
+		const row = screen
+			.getByText(corpus.view.desktop_job_list.rows[0].url)
+			.closest("button");
+		if (!row) throw new Error("timestamp fixture must render as a button");
+		expect(within(row).getByText(/2023/)).toBeInTheDocument();
+		expect(within(row).queryByText("news")).not.toBeInTheDocument();
+		expect(within(row).queryByText("42 tokens")).not.toBeInTheDocument();
+	});
+
+	it("omits job-row metadata when no fetched time or failure exists", async () => {
+		snapshot = {
+			...corpus,
+			view: {
+				...corpus.view,
+				desktop_job_list: {
+					...corpus.view.desktop_job_list,
+					rows: [
+						{
+							...corpus.view.desktop_job_list.rows[0],
+							fetched_utc: null,
+							outcome: "Success",
+						},
+					],
+				},
+			},
+		};
+		await renderLoaded();
+		const row = screen
+			.getByText(corpus.view.desktop_job_list.rows[0].url)
+			.closest("button");
+		if (!row) throw new Error("metadata fixture must render as a button");
+		expect(row.querySelector(".job-row-metadata")).toBeNull();
 	});
 
 	it("dispatches SelectJob when a Results candidate row is clicked", async () => {
@@ -531,7 +613,12 @@ describe("job list", () => {
 				},
 			};
 			const rendered = render(<App />);
-			expect(await screen.findByText(message)).toBeInTheDocument();
+			if (visibility === "Visible") {
+				expect(screen.queryByText(message)).not.toBeInTheDocument();
+				expect(document.querySelector(".selection-visibility")).toBeNull();
+			} else {
+				expect(await screen.findByText(message)).toBeInTheDocument();
+			}
 			rendered.unmount();
 		}
 	});
@@ -555,7 +642,7 @@ describe("job list", () => {
 		await renderLoaded();
 		expect(
 			screen
-				.getAllByText("https://example.invalid/fixture")[0]
+				.getByText(corpus.view.desktop_job_list.rows[0].url)
 				.closest("button"),
 		).toHaveAttribute("aria-pressed", "true");
 	});
@@ -593,6 +680,89 @@ describe("job list", () => {
 				},
 			},
 		]);
+	});
+
+	it("suppresses a matching leading summary heading only in the rendered body", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		const fetchedBody = Object.freeze<BodyResponse>({
+			content_hash: reference.content_hash,
+			text: "# Fixture summary\n\nSummary body",
+		});
+		bodyResponses.set(reference.key, fetchedBody);
+		await renderLoaded();
+		expect(await screen.findByText("Summary body")).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Fixture summary", level: 2 }),
+		).toBeInTheDocument();
+		expect(
+			screen.queryByRole("heading", { name: "Fixture summary", level: 1 }),
+		).not.toBeInTheDocument();
+		expect(bodyResponses.get(reference.key)).toEqual({
+			content_hash: reference.content_hash,
+			text: "# Fixture summary\n\nSummary body",
+		});
+		expect(
+			vi.mocked(invoke).mock.calls.filter(([name]) => name === "fetch_body"),
+		).toEqual([["fetch_body", { key: reference.key }]]);
+	});
+
+	it("keeps a non-matching leading summary heading", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		bodyResponses.set(reference.key, {
+			content_hash: reference.content_hash,
+			text: "# A different summary\n\nSummary body",
+		});
+		await renderLoaded();
+		expect(
+			await screen.findByRole("heading", {
+				name: "A different summary",
+				level: 1,
+			}),
+		).toBeInTheDocument();
+	});
+
+	it("leaves a summary without a leading heading untouched", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		bodyResponses.set(reference.key, {
+			content_hash: reference.content_hash,
+			text: "Summary body without a heading\n\n# Fixture summary",
+		});
+		await renderLoaded();
+		expect(
+			await screen.findByText("Summary body without a heading"),
+		).toBeInTheDocument();
+		expect(
+			screen.getByRole("heading", { name: "Fixture summary", level: 1 }),
+		).toBeInTheDocument();
+	});
+
+	it("renders an empty summary body without crashing", async () => {
+		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
+		const reference = rich.view.right_pane.summary_markdown;
+		if (!reference)
+			throw new Error("finished-run fixture must contain a summary body ref");
+		snapshot = rich;
+		bodyResponses.set(reference.key, {
+			content_hash: reference.content_hash,
+			text: "",
+		});
+		await renderLoaded();
+		await waitFor(() =>
+			expect(document.querySelector(".markdown-body")).not.toBeNull(),
+		);
+		expect(document.querySelector(".markdown-body h1")).toBeNull();
 	});
 
 	it("never renders remote Markdown images", async () => {

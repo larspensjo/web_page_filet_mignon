@@ -176,6 +176,7 @@ fn prepare_pipeline(
         })
         .collect::<Vec<_>>();
     assert_eq!(job_ids.len(), total);
+    state = crate::update(state, Msg::PipelineRunRequested).0;
     state = crate::update(state, Msg::AllSourcesPollEnded).0;
 
     for (index, job_id) in job_ids.into_iter().enumerate() {
@@ -510,6 +511,66 @@ fn total_source_failure_marks_scanning_failed() {
         (scan.status, scan.completed, scan.failed),
         (StageStatus::Failed, 0, 2)
     );
+}
+
+#[test]
+fn poll_only_run_becomes_terminal_when_source_poll_settles() {
+    let state = tick(AppState::new(), 0);
+    let (state, effects) = crate::update(state, Msg::PollSourcesClicked);
+    assert_eq!(effects, vec![Effect::PollAllSources]);
+    let state = crate::update(state, Msg::PollStarted { total: 1 }).0;
+    let state = crate::update(
+        state,
+        Msg::SourcePollCompleted {
+            source_id: SourceId::new("poll-only-source").expect("valid source id"),
+            urls: Vec::new(),
+            kind: SourceKind::Rss,
+            parsed: 0,
+            dedup_filtered: 0,
+        },
+    )
+    .0;
+    let state = crate::update(state, Msg::AllSourcesPollEnded).0;
+
+    assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
+    assert!(state.run_progress().expect("poll run").terminal);
+    assert!(!state.view().run_progress.run_active);
+}
+
+#[test]
+fn accepted_stop_freezes_poll_run_while_pipeline_driver_is_idle() {
+    let state = tick(AppState::new(), 0);
+    let state = crate::update(state, Msg::PollSourcesClicked).0;
+    let state = crate::update(state, Msg::PollStarted { total: 1 }).0;
+    let (state, effects) = crate::update(
+        state,
+        Msg::SourcePollCompleted {
+            source_id: SourceId::new("stoppable-poll-source").expect("valid source id"),
+            urls: vec!["https://progress.invalid/stoppable".into()],
+            kind: SourceKind::Rss,
+            parsed: 1,
+            dedup_filtered: 0,
+        },
+    );
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::EnqueueUrl { .. })));
+    assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
+    assert!(state.stop_finish_button_state().is_enabled());
+
+    let (state, effects) = crate::update(state, Msg::StopFinishClicked);
+
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    let progress = state.run_progress().expect("stopped poll run");
+    assert!(progress.terminal);
+    assert!(progress
+        .stages
+        .iter()
+        .all(|stage| stage.status != StageStatus::Active));
+    assert!(!state.view().run_progress.run_active);
+    assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
 }
 
 #[test]

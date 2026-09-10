@@ -120,6 +120,7 @@ fn seed_populated_run_progress() -> AppState {
         })
         .collect::<Vec<_>>();
     assert_eq!(job_ids.len(), ACTIVITY_JOBS);
+    state = update(state, Msg::PipelineRunRequested).0;
     state = update(state, Msg::AllSourcesPollEnded).0;
     for job_id in job_ids {
         state = update(

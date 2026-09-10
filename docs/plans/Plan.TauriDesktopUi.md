@@ -451,7 +451,7 @@ panic, no partial application, no default-substitution.
    `last_observed_utc`. This is a hard prerequisite: contract fixtures are
    impossible without it.
 2. **Stage start timestamps** for the run progress accumulator, so the frontend
-   can compute ETA (settled decision 15) without core holding a clock.
+   can compute a per-active-stage ETA without core holding a clock.
 
 **What this does not buy, stated plainly.** It does *not* make the reducer
 clock-free and it does *not* establish a single clock entry point. Roughly
@@ -706,6 +706,13 @@ gone — the accumulator already holds them.
 
 A `Done` stage never returns to `Active` within the same `run_id`.
 
+**Poll-only settlement correction (phase 4).** A run started by
+`Msg::PollSourcesClicked` and never joined by `Msg::PipelineRunRequested` becomes
+terminal as soon as the source scan and every tracked download settle while the
+driver remains `Idle`. An accepted `Msg::StopFinishClicked` likewise freezes
+`RunProgress` even when the driver is `Idle`; the driver phase cannot be the only
+path to the accumulator's terminal state.
+
 **Failure.** A stage is `Failed` only when it produced no successful output *and*
 had at least one failure — every source failed, or triage was aborted by
 `RateLimited`. **Partial failure keeps the stage `Done` with `failed > 0`**, so
@@ -728,8 +735,10 @@ in `AppViewModel`. `OperationProgress` (the single-winner struct at
 `view_model.rs:41-47`) stays until phase 7 because the Win32 renderer needs it;
 the new field is purely additive.
 
-ETA is computed in the frontend from `completed`, `total` and `started_at_utc`
-(settled decision 15).
+ETA is computed in the frontend independently for each active stage from that
+stage's `completed`, `failed`, `total` and `started_at_utc`. Completed and future
+stages are never combined because their work units have different costs and
+future totals may still be unknown.
 
 **Required reducer tests** (phase 2), each walking a message sequence:
 
@@ -1074,20 +1083,29 @@ One primary workspace, three occasional pages, two modals. No native menu.
 **Review workspace** (default)
 - Left: job list — search box, mode selector (Since checkpoint / Results — two
   modes; *All* was retired in phase 1d), rows per the spec's *Lists and Triage
-  Rows* section (priority badge, category label, short title, restrained
-  metadata), plus a truncation hint when the scope exceeds the row cap.
+  Rows* section (priority badge, title, then fetched time and any failure-only
+  marker),
+  ordered by triage priority descending with unannotated rows last. While triage
+  is running, the list falls back to stable selection order (`job_id` ascending),
+  then re-sorts by priority once triage settles. The cap selects by recency before
+  display ordering, so an older high-priority article can be absent entirely;
+  a truncation hint appears whenever the scope exceeds the cap.
 - Right: reading pane on Surface Raised — document header (title, domain as an
   Accent Primary link-styled source line that opens the original article in the
-  external browser, tokens, fetched time), then a **triage annotation band**
-  (priority, category, tags) folded in as a band rather than a sibling tab, then
-  the rendered summary. Extracted article text is not rendered in the desktop
-  window.
+  external browser, tokens, fetched time), then a conditional selection-
+  visibility explanation when the selected article is not visible in the list,
+  then a **triage annotation band** (priority, category, tags) folded in as a
+  band rather than a sibling tab, then the rendered summary. A leading summary
+  heading that duplicates the document title is suppressed at render time only;
+  the body protocol and corpus text remain unchanged. Extracted article text is
+  not rendered in the desktop window.
 - Results is a **mode of the job list**, not its own page. See *Open Questions*.
 
 **Run surface** — a collapsed single line when idle, expanding when running into
 the six-stage list (each with status, counts, failures and its own bar) plus the
-live activity feed and a frontend-computed ETA. The run-finished banner appears
-here and persists until dismissed.
+live activity feed and a frontend-computed estimate for each active stage,
+labelled with that stage. The run-finished banner appears here and persists until
+dismissed.
 
 The idle line reads **"Idle · 312 articles · 47 ready to archive"**, drawn from
 `job_count` and `archive_filtered_count`, which the view model already carries.
@@ -1781,18 +1799,28 @@ its regression test named, per the repo's bug-fix rule.
 
 ### Phase 3 — Review workspace
 
-1. Job list: rows per the spec, search, the two-mode `JobListMode` selector
-   (Since checkpoint / Results), selection. Move the selected-article panel out
-   of the scrolling job-list flow: today it renders after the rows, so a full
-   list leaves it off-screen and does not mark the clicked row. Both changes are
-   rendering-only; mark the row from `selected_job.job_id`, which renders core's
-   selection rather than inferring one locally.
-2. Reading pane: header, source line, triage annotation band, Markdown rendering
-   with raw HTML disabled, and summary fetched via `fetch_body` on hash change.
-   The source line dispatches payload-free `OpenSelectedInBrowser` to open the
-   original externally. There is no raw-text toggle: `preview_text` is core's
-   best-available analysis, not extracted article text, while the real
-   `JobState::content_preview` is absent from the view model and persistence.
+1. Job list: rows per the spec, ordered by triage priority descending with
+   unannotated rows last, search, the two-mode `JobListMode` selector (Since
+   checkpoint / Results), selection. Fall back to stable selection order
+   (`job_id` ascending) while `TriagePhase::Triaging` is active so incremental
+   results do not move rows, then re-sort by priority once triage settles. Select
+   the newest rows for the cap before applying display order; this can exclude an
+   older high-priority article entirely while newer lower-priority rows remain.
+   Move the selected-article panel out of the scrolling job-list flow: today it
+   renders after the rows, so a full list leaves it off-screen and does not mark
+   the clicked row. Both changes are rendering-only; mark the row from
+   `selected_job.job_id`, which renders core's selection rather than inferring
+   one locally.
+2. Reading pane: header, source line, conditional selection-visibility
+   explanation, triage annotation band, Markdown rendering with raw HTML
+   disabled, and summary fetched via `fetch_body` on hash change. The header
+   keeps its document title, and a leading rendered summary heading is omitted
+   only when it matches that title; the body reference, hash, protocol response,
+   and corpus text are untouched. The source line dispatches payload-free
+   `OpenSelectedInBrowser` to open the original externally. There is no raw-text
+   toggle: `preview_text` is core's best-available analysis, not extracted
+   article text, while the real `JobState::content_preview` is absent from the
+   view model and persistence.
 3. Design tokens applied throughout; typography, spacing and surfaces per spec.
 4. Contract fixture set **extended** from the phase-1c minimum to the full six
    snapshot-expressible states, with component tests for each. The proposed
@@ -1821,7 +1849,8 @@ therefore the edit that carries it, and it is updated in the same commit.
    stage list with six stages, per-stage counts, failure counts, muted skipped
    stages and bars.
 2. Live activity feed with the outcome vocabulary and stable `seq` keys.
-3. Frontend ETA from counts and `started_at_utc`.
+3. Frontend per-active-stage ETA from that stage's counts and `started_at_utc`;
+   completed and future stages are not aggregated.
 4. `Poll sources`, `Run triage + summaries` (the merged action), `Stop`; the core
    thread sending `Msg::PipelineRunAdvance` while the phase is not `Idle`.
 5. The run-finished banner with its count, and confirmation that **no** navigation
@@ -1829,12 +1858,13 @@ therefore the edit that carries it, and it is updated in the same commit.
 
 **Verify.** `cargo test`; `npm run check` — component tests drive the
 `run_in_progress_with_failures` and `run_finished_with_notice` fixtures and assert
-stage statuses, feed bounding and ETA arithmetic; `npm run build`;
+stage statuses, feed replacement and per-active-stage ETA arithmetic;
+`npm run build`;
 `cargo build -p harvester_ui` + clippy; root clippy + fmt.
 **Human testing recommended, and this is the phase where it matters most:** a real
 poll + merged run against live sources via `Start-HarvesterUi.ps1`, watching for
-stage transitions that lie, a stage that regresses to Pending, an ETA that
-oscillates, a feed that stutters, and — specifically — that the run is not
+stage transitions that lie, a stage that regresses to Pending, an active-stage
+ETA that oscillates, a feed that stutters, and — specifically — that the run is not
 reported complete before Results finishes filling in. Agents must not run this.
 
 **Records.** `DecisionLog.md`: the UI never navigates the user during a run;
@@ -1913,6 +1943,9 @@ index does not name.
    bodies leave core, and shrink its exact-key-set test with it. Revisit the
    desktop-dead `ReadingPaneMode` and `UiIntent::SetReadingPaneMode` surface here;
    phase 3 deliberately leaves it untouched while the Win32 host is frozen.
+   Once the frozen Win32 preview pane is gone, stop prepending `# {title}` in
+   `format_summary_for_preview` and delete the frontend's duplicate-heading
+   suppression.
 9. **Launch policy, removal only** — the `Ui` policy landed in phase 1c:
    - Remove the `App` policy entry and `scripts/Start-HarvesterApp.ps1`.
    - Narrow `Get-HarvesterLaunchSpec`'s `[ValidateSet('App', 'Batch', 'Ui')]` to

@@ -16,8 +16,10 @@ export function priorityClass(priority: number): string {
 	return priority >= 4 ? "priority-high" : "priority-normal";
 }
 
-export function outcomeLabel(outcome: JobResultKind): string {
-	return typeof outcome === "string" ? outcome : "Failed";
+export function isFailureOutcome(
+	outcome: JobResultKind,
+): outcome is Extract<JobResultKind, { Failed: { reason: string } }> {
+	return typeof outcome !== "string";
 }
 
 export function formatFetchedTime(timestamp: string): string {

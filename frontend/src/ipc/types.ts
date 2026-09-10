@@ -172,11 +172,16 @@ export type RunCompletionNotice = {
 	completed_at_utc: string;
 };
 
+export type StopFinishButtonState =
+	| "Disabled"
+	| { Enabled: { policy: "Finish" | "Immediate" } };
+
 export type SnapshotEnvelope = {
 	generation: number;
 	schema_version: number;
 	view: {
 		job_count: number;
+		archive_filtered_count: number;
 		reading_pane_mode: "RawText" | "Summary";
 		preview_text: BodyRef | null;
 		right_pane: {
@@ -188,6 +193,10 @@ export type SnapshotEnvelope = {
 		signal_candidate_rows: SignalCandidateRow[];
 		run_progress: RunProgressView;
 		run_completion_notice: RunCompletionNotice | null;
+		poll_sources_enabled: boolean;
+		triage_can_start: boolean;
+		summaries_can_start: boolean;
+		stop_finish_button: StopFinishButtonState;
 	} & Record<string, unknown>;
 	fatal_message: string | null;
 };

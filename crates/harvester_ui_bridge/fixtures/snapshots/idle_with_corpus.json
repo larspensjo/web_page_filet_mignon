@@ -4,9 +4,9 @@
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
-    "archive_filtered_count": 0,
+    "archive_filtered_count": 2,
     "archive_partial_coverage": null,
-    "archive_token_estimate": 0,
+    "archive_token_estimate": 84,
     "blacklist": {
       "blacklisted_count": 0,
       "rows": []
@@ -22,9 +22,35 @@
         {
           "bytes": 1024,
           "downloaded_link_count": 0,
+          "fetched_utc": "1970-01-01T00:00:01Z",
+          "filter_status": null,
+          "has_analysis": true,
+          "has_summary": false,
+          "is_since_checkpoint": true,
+          "job_id": 2,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": null,
+          "summary_tokens": null,
+          "tokens": 42,
+          "triage_annotation": {
+            "category": "news",
+            "priority": 5,
+            "tags": [
+              "fixture",
+              "review"
+            ]
+          },
+          "url": "https://example.invalid/higher-priority"
+        },
+        {
+          "bytes": 1024,
+          "downloaded_link_count": 0,
           "fetched_utc": "1970-01-01T00:00:00Z",
           "filter_status": null,
-          "has_analysis": false,
+          "has_analysis": true,
           "has_summary": false,
           "is_since_checkpoint": true,
           "job_id": 1,
@@ -35,41 +61,48 @@
           "summary_title": null,
           "summary_tokens": null,
           "tokens": 42,
-          "triage_annotation": null,
-          "url": "https://example.invalid/fixture"
+          "triage_annotation": {
+            "category": "news",
+            "priority": 2,
+            "tags": [
+              "fixture",
+              "review"
+            ]
+          },
+          "url": "https://example.invalid/lower-priority"
         }
       ],
-      "scoped_count": 1,
+      "scoped_count": 2,
       "selected_job": null,
       "truncated": false,
-      "visible_count": 1
+      "visible_count": 2
     },
     "dirty": true,
     "indirect_link_summary": null,
     "input_panel_visible": false,
     "is_pre_triage_reviewing": false,
-    "job_count": 1,
+    "job_count": 2,
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
     "left_pane": {
-      "first_visible_job_id": 1,
+      "first_visible_job_id": null,
       "job_list_scope": "SinceCheckpoint",
       "jobs_search_query": "",
-      "left_tab": "Jobs",
+      "left_tab": "TriageResults",
       "selected_jobs_visible_in_filter": false
     },
     "left_pane_header": {
-      "count_label": "1 jobs",
+      "count_label": "2 with triage",
       "scope_label": "Since checkpoint",
       "state_label": null,
-      "title": "Jobs"
+      "title": "Results"
     },
     "left_panel_width": 180,
     "llm_quota": {
-      "label": "LLM calls unavailable",
+      "label": "LLM calls 0 / unlimited",
       "limit": null,
       "percent": null,
-      "severity": "Unavailable",
+      "severity": "Normal",
       "used": 0
     },
     "llm_usage_by_model": [],
@@ -84,7 +117,7 @@
     "preview_source": null,
     "preview_text": null,
     "queued_urls": [],
-    "raw_unprocessed_count": 0,
+    "raw_unprocessed_count": 2,
     "reading_pane_mode": "Summary",
     "right_pane": {
       "active_tab": "Summary",
@@ -109,9 +142,9 @@
     "signal_candidate_preview": null,
     "signal_candidate_rows": [],
     "stop_finish_button": "Disabled",
-    "summaries_can_start": false,
+    "summaries_can_start": true,
     "token_limit": 100000,
-    "total_tokens": 42,
+    "total_tokens": 84,
     "triage_blocked_reason": null,
     "triage_can_start": false,
     "triage_results_reorder_suppressed": false,

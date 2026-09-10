@@ -13,10 +13,7 @@ const FIXTURE_TIME: i64 = 1_700_000_000;
 
 pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     let empty = reduce(AppState::new(), Msg::tick_at(time(0)));
-    let with_corpus = reduce(
-        empty.clone(),
-        Msg::RestoreCompletedJobs(vec![completed_job(0)]),
-    );
+    let with_corpus = idle_with_corpus(&empty);
     let with_selection = selected_fixture_state(&empty);
     let run_in_progress = run_in_progress_with_failures();
     let run_finished = completed_run_state();
@@ -40,6 +37,64 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
         .into_iter()
         .map(|(name, state)| (name, project(&state.desktop_view()).0.with_generation(1)))
         .collect()
+}
+
+fn idle_with_corpus(empty: &AppState) -> AppState {
+    let articles = vec![
+        harvester_core::LoadedArticle {
+            url: "https://example.invalid/lower-priority".into(),
+            source_title: Some("Lower-priority fixture".into()),
+            prepared_text: "lower-priority fixture article text ".repeat(200),
+            content_hash: "fixture-content-hash-lower".into(),
+            fetched_utc: Some("1970-01-01T00:00:00Z".into()),
+        },
+        harvester_core::LoadedArticle {
+            url: "https://example.invalid/higher-priority".into(),
+            source_title: Some("Higher-priority fixture".into()),
+            prepared_text: "higher-priority fixture article text ".repeat(200),
+            content_hash: "fixture-content-hash-higher".into(),
+            fetched_utc: Some("1970-01-01T00:00:01Z".into()),
+        },
+    ];
+    let state = reduce(
+        empty.clone(),
+        Msg::RestoreCompletedJobs(vec![
+            completed_job(&articles[0].url, 0),
+            completed_job(&articles[1].url, 1),
+        ]),
+    );
+    let state = reduce(
+        state,
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls: articles.iter().map(|article| article.url.clone()).collect(),
+            triggered_by_job_done: false,
+        },
+    );
+    let (state, load_request_id) = triage_load_request(state);
+    let state = reduce(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_request_id,
+            articles,
+        },
+    );
+    let state = add_llm_metadata(state);
+    let (state, first_effects) = update(state, Msg::TriageClicked);
+    let first_request_id = request_id(&first_effects, PromptId::ArticleTriage, "first triage");
+    let (state, second_effects) = update(state, triage_success(first_request_id, 2));
+    let second_request_id = request_id(&second_effects, PromptId::ArticleTriage, "second triage");
+    let state = reduce(state, triage_success(second_request_id, 5));
+
+    let view = state.desktop_view();
+    assert_eq!(
+        view.desktop_job_list
+            .rows
+            .iter()
+            .map(|row| row.job_id)
+            .collect::<Vec<_>>(),
+        vec![2, 1]
+    );
+    state
 }
 
 fn selected_fixture_state(empty: &AppState) -> AppState {
@@ -84,27 +139,12 @@ fn selected_fixture_state(empty: &AppState) -> AppState {
 }
 
 fn run_in_progress_with_failures() -> AppState {
-    let state = reduce(AppState::new(), Msg::tick_at(time(0)));
-    let state = reduce(state, Msg::PollSourcesClicked);
-    let state = reduce(state, Msg::PollStarted { total: 2 });
-    let state = reduce(
-        state,
-        Msg::SourcePollFailed {
-            source_id: SourceId::new("fixture-failed-source").expect("fixture source id"),
-            error: "fixture source failure".into(),
-        },
-    );
-    let state = reduce(
-        state,
-        Msg::SourcePollCompleted {
-            source_id: SourceId::new("fixture-success-source").expect("fixture source id"),
-            urls: Vec::new(),
-            kind: SourceKind::Rss,
-            parsed: 0,
-            dedup_filtered: 0,
-        },
-    );
-    reduce(state, Msg::AllSourcesPollEnded)
+    let (state, _, _) = prepared_article_state_with_source_failure(true);
+    let state = add_llm_metadata(state);
+    let state = reduce(state, Msg::PipelineRunRequested);
+    let state = reduce(state, Msg::PipelineRunAdvance);
+    assert!(state.desktop_view().run_progress.run_active);
+    state
 }
 
 fn completed_run_state() -> AppState {
@@ -115,7 +155,7 @@ fn completed_run_state() -> AppState {
     let (next, triage_effects) = update(state, Msg::PipelineRunAdvance);
     state = next;
     let triage_request_id = request_id(&triage_effects, PromptId::ArticleTriage, "triage");
-    state = reduce(state, triage_success(triage_request_id));
+    state = reduce(state, triage_success(triage_request_id, 4));
 
     state = reduce(state, Msg::PipelineRunAdvance);
     let (next, summary_load_effects) = update(state, Msg::PipelineRunAdvance);
@@ -150,6 +190,12 @@ fn completed_run_state() -> AppState {
 }
 
 fn prepared_article_state() -> (AppState, harvester_core::LoadedArticle, u64) {
+    prepared_article_state_with_source_failure(false)
+}
+
+fn prepared_article_state_with_source_failure(
+    with_source_failure: bool,
+) -> (AppState, harvester_core::LoadedArticle, u64) {
     let article = harvester_core::LoadedArticle {
         url: "https://fixture.invalid/article".into(),
         source_title: Some("Fixture article".into()),
@@ -159,7 +205,23 @@ fn prepared_article_state() -> (AppState, harvester_core::LoadedArticle, u64) {
     };
     let state = reduce(AppState::new(), Msg::tick_at(time(0)));
     let state = reduce(state, Msg::PollSourcesClicked);
-    let state = reduce(state, Msg::PollStarted { total: 1 });
+    let state = reduce(
+        state,
+        Msg::PollStarted {
+            total: if with_source_failure { 2 } else { 1 },
+        },
+    );
+    let state = if with_source_failure {
+        reduce(
+            state,
+            Msg::SourcePollFailed {
+                source_id: SourceId::new("fixture-failed-source").expect("fixture source id"),
+                error: "fixture source failure".into(),
+            },
+        )
+    } else {
+        state
+    };
     let (state, effects) = update(
         state,
         Msg::SourcePollCompleted {
@@ -177,6 +239,7 @@ fn prepared_article_state() -> (AppState, harvester_core::LoadedArticle, u64) {
             _ => None,
         })
         .expect("fixture job is enqueued");
+    let state = reduce(state, Msg::PipelineRunRequested);
     let state = reduce(state, Msg::AllSourcesPollEnded);
     let state = reduce(
         state,
@@ -292,11 +355,13 @@ fn request_id(effects: &[Effect], prompt_id: PromptId, stage: &str) -> u64 {
         .unwrap_or_else(|| panic!("fixture {stage} LLM request: {effects:?}"))
 }
 
-fn triage_success(request_id: u64) -> Msg {
+fn triage_success(request_id: u64, priority: u8) -> Msg {
     Msg::LlmCompleted {
         request_id,
         result: LlmResultKind::Success {
-            output_json: r#"{"category":"news","priority":4,"tags":["fixture","review"],"rationale":"fixture"}"#.into(),
+            output_json: format!(
+                r#"{{"category":"news","priority":{priority},"tags":["fixture","review"],"rationale":"fixture"}}"#
+            ),
             input_tokens: 10,
             output_tokens: 5,
             prompt_version: 1,
@@ -334,9 +399,9 @@ fn signal_success(request_id: u64) -> Msg {
     }
 }
 
-fn completed_job(seconds: i64) -> CompletedJobSnapshot {
+fn completed_job(url: &str, seconds: i64) -> CompletedJobSnapshot {
     CompletedJobSnapshot {
-        url: "https://example.invalid/fixture".into(),
+        url: url.into(),
         tokens: Some(42),
         bytes: Some(1024),
         links: vec![LinkSnapshotRecord {

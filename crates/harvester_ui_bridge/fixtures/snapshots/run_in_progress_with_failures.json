@@ -18,11 +18,31 @@
       "hidden_without_fetch_time": 0,
       "mode": "SinceCheckpoint",
       "query": "",
-      "rows": [],
-      "scoped_count": 0,
+      "rows": [
+        {
+          "bytes": 1024,
+          "downloaded_link_count": 0,
+          "fetched_utc": "2023-11-14T22:13:20Z",
+          "filter_status": null,
+          "has_analysis": false,
+          "has_summary": false,
+          "is_since_checkpoint": true,
+          "job_id": 1,
+          "link_count": 1,
+          "origin": "Direct",
+          "outcome": "Success",
+          "stage": "Done",
+          "summary_title": null,
+          "summary_tokens": null,
+          "tokens": null,
+          "triage_annotation": null,
+          "url": "https://fixture.invalid/article"
+        }
+      ],
+      "scoped_count": 1,
       "selected_job": null,
       "truncated": false,
-      "visible_count": 0
+      "visible_count": 1
     },
     "dirty": true,
     "indirect_link_summary": {
@@ -31,34 +51,38 @@
     },
     "input_panel_visible": false,
     "is_pre_triage_reviewing": false,
-    "job_count": 0,
+    "job_count": 1,
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
     "left_pane": {
       "first_visible_job_id": null,
       "job_list_scope": "SinceCheckpoint",
       "jobs_search_query": "",
-      "left_tab": "Jobs",
+      "left_tab": "TriageResults",
       "selected_jobs_visible_in_filter": false
     },
     "left_pane_header": {
-      "count_label": "0 jobs",
+      "count_label": "no triage results yet",
       "scope_label": "Since checkpoint",
-      "state_label": "no jobs in scope",
-      "title": "Jobs"
+      "state_label": null,
+      "title": "Results"
     },
     "left_panel_width": 180,
     "llm_quota": {
-      "label": "LLM calls unavailable",
+      "label": "LLM calls 0 / unlimited",
       "limit": null,
       "percent": null,
-      "severity": "Unavailable",
+      "severity": "Normal",
       "used": 0
     },
     "llm_usage_by_model": [],
     "next_item_enabled": false,
-    "operation_progress": null,
-    "operation_progress_visible": false,
+    "operation_progress": {
+      "completed": 0,
+      "label": "Triaging",
+      "total": 1
+    },
+    "operation_progress_visible": true,
     "poll_indirect_links_enabled": false,
     "poll_sources_enabled": true,
     "preview_context": null,
@@ -72,8 +96,8 @@
     "right_pane": {
       "active_tab": "PollStats",
       "poll_stats_markdown": {
-        "byte_len": 89,
-        "content_hash": "41a652e3562a3f5e5cd5673f5c786cd04b0d814a90a10b72da38743222365006",
+        "byte_len": 114,
+        "content_hash": "5df8e15f29950fa6c26a7ac96260b59a0feabed3c984dd96f888858d6f43ce3f",
         "key": "PollStatsMarkdown"
       },
       "summary_markdown": null,
@@ -86,7 +110,22 @@
     },
     "run_completion_notice": null,
     "run_progress": {
-      "activity": [],
+      "activity": [
+        {
+          "outcome": "Started",
+          "seq": 0,
+          "stage": "DownloadingArticles",
+          "title": null,
+          "url": "https://fixture.invalid/article"
+        },
+        {
+          "outcome": "Succeeded",
+          "seq": 1,
+          "stage": "DownloadingArticles",
+          "title": null,
+          "url": "https://fixture.invalid/article"
+        }
+      ],
       "run_active": true,
       "stages": [
         {
@@ -99,31 +138,31 @@
           "total": 2
         },
         {
-          "completed": 0,
-          "ended_at_utc": null,
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:20Z",
           "failed": 0,
           "stage": "DownloadingArticles",
-          "started_at_utc": null,
-          "status": "Pending",
-          "total": 0
+          "started_at_utc": "2023-11-14T22:13:20Z",
+          "status": "Done",
+          "total": 1
         },
         {
-          "completed": 0,
-          "ended_at_utc": null,
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:36Z",
           "failed": 0,
           "stage": "LoadingArticles",
-          "started_at_utc": null,
-          "status": "Pending",
-          "total": 0
+          "started_at_utc": "2023-11-14T22:13:36Z",
+          "status": "Done",
+          "total": 1
         },
         {
           "completed": 0,
           "ended_at_utc": null,
           "failed": 0,
           "stage": "Triaging",
-          "started_at_utc": null,
-          "status": "Pending",
-          "total": 0
+          "started_at_utc": "2023-11-14T22:13:36Z",
+          "status": "Active",
+          "total": 1
         },
         {
           "completed": 0,
@@ -147,16 +186,20 @@
     },
     "selected_job_id": null,
     "selected_url": null,
-    "session": "Idle",
+    "session": "Running",
     "signal_candidate_preview": null,
     "signal_candidate_rows": [],
-    "stop_finish_button": "Disabled",
+    "stop_finish_button": {
+      "Enabled": {
+        "policy": "Finish"
+      }
+    },
     "summaries_can_start": false,
     "token_limit": 100000,
     "total_tokens": 0,
     "triage_blocked_reason": null,
     "triage_can_start": false,
-    "triage_results_reorder_suppressed": false,
+    "triage_results_reorder_suppressed": true,
     "window_width": 960,
     "workspace_view": "Review"
   },

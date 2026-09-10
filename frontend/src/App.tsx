@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { JobList } from "./components/JobList";
 import { ReadingPane } from "./components/ReadingPane";
+import { RunSurface } from "./components/RunSurface";
 import { JOBS_SEARCH_DEBOUNCE_MS } from "./constants";
 import { dispatchIntent } from "./ipc/intent";
 import { IPC_SCHEMA_VERSION } from "./ipc/schemaVersion";
@@ -77,13 +78,8 @@ export function App() {
 		<main>
 			<header>
 				<h1>Harvester</h1>
-				<button
-					type="button"
-					onClick={() => void dispatchIntent({ type: "PollSources" })}
-				>
-					Poll Sources
-				</button>
 			</header>
+			{snapshot && <RunSurface view={snapshot.view} />}
 			<div className="workspace">
 				<JobList
 					list={list}

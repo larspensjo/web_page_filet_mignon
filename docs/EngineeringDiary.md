@@ -2251,3 +2251,23 @@ Type: Implementation
 Context: The desktop slice had a functional job list, but its selected article lived after all list rows and body text was not yet rendered through the snapshot body protocol.
 Change: Split the React review workspace into job-list and reading-pane components. Rows render core-owned selection, triage labels and restrained metadata; the summary-only reading pane fetches one summary by `BodyRef` hash, exposes distinct body-race and unavailable states, disables raw Markdown HTML and remote images, and resolves body links exclusively by core-owned job/link indices. Its source line opens the selected article externally through the payload-free core intent. Extended reducer-driven bridge fixtures to the six snapshot-expressible review states; archive-modal coverage remains for phase 6's channel-2 `UiCommand` payload because dialog visibility is not snapshot state.
 Refs: frontend/src/components/JobList.tsx, frontend/src/components/ReadingPane.tsx, frontend/src/ipc/body.ts, crates/harvester_ui_bridge/src/fixtures.rs, crates/harvester_ui_bridge/fixtures/snapshots/
+
+## 2026-09-09 - Desktop run surface renders reducer-owned progress
+Type: Bug Fix
+Context: Phase 4 adds the user-facing run experience on top of the reducer-owned six-stage progress accumulator, bounded activity feed, merged run driver, and completion notice.
+Change: Added the Tauri run surface with idle summary, stage bars and failure counts, live bounded activity rendering, per-active-stage frontend ETA arithmetic, projected-state action gating, and dismissible completion banner. Corrected poll-only runs so settled source and download work make their reducer-owned progress terminal, and made an accepted stop freeze progress even when the merged pipeline driver is idle. Extended the mid-run bridge fixture and added reducer coverage proving triage and selection execute their legacy navigation while leaving the new desktop workspace view unchanged.
+Lessons Learned: A run created by one entry point but only ever settled by another never reaches its terminal state; accumulator completion must cover every accepted entry point independently of an optional orchestration driver.
+Prevention: Reducer walks now pin both a poll-only run through `AllSourcesPollEnded` and an accepted stop while `PipelineRunPhase::Idle`, while navigation regressions assert both that the legacy jump happened and the desktop workspace stayed fixed.
+Refs: frontend/src/components/RunSurface.tsx, frontend/src/App.tsx, crates/harvester_ui_bridge/src/fixtures.rs, crates/harvester_core/src/update/pipeline_run.rs, crates/harvester_core/src/update/tests/ui_state_tests.rs, docs/DecisionLog.md
+
+## 2026-09-09 - Desktop job rows prioritize triage signals
+Type: Implementation
+Context: Review of the phase-4 desktop workspace found that job rows followed selection order, consumed too much vertical space, and hid most titles behind one-line truncation.
+Change: Ordered the capped core-owned desktop projection by triage priority with unrated rows last while preserving its recency-based membership and triage-time stable order. Condensed each row to a two-line title plus one quiet metadata line, removed routine Summary/Success markers while retaining a failure marker, widened the list pane, and enabled two-line title clamping.
+Refs: crates/harvester_core/src/state/view_builder.rs, crates/harvester_core/src/state/tests/mod.rs, frontend/src/components/JobList.tsx, frontend/src/styles/workspace.css, frontend/src/App.test.tsx
+
+## 2026-09-09 - Desktop review workspace removes redundant display content
+Type: Implementation
+Context: A review of the phase-4 desktop workspace found that the reading pane repeated the document title, common-case list visibility was self-evident, and job rows repeated metadata that remains available in the reading pane.
+Change: Suppressed only a matching first summary heading at the Markdown parser-node level, without rewriting body text, and kept the summary body protocol and corpus content unchanged. Rendered selection visibility explanations only for non-visible selections and reduced job-row metadata to the fetched time plus the existing failure-only marker, omitting the metadata wrapper when neither exists. Preserved the priority badge, two-line title, Results candidate metadata and selected-state contrast, including the warning-colored failure marker, and reading-pane annotation details.
+Refs: frontend/src/components/ReadingPane.tsx, frontend/src/components/JobList.tsx, frontend/src/components/jobPresentation.ts, frontend/src/App.test.tsx, docs/visual_design/VisualDesignSpec.md, docs/plans/Plan.TauriDesktopUi.md
