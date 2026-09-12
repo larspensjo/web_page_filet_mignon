@@ -2,7 +2,11 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { type BodyState, useBody } from "../ipc/body";
 import { dispatchIntent } from "../ipc/intent";
-import type { BodyRef, SelectedJobView } from "../ipc/types";
+import type {
+	BodyRef,
+	SelectedJobView,
+	SignalCandidateRow,
+} from "../ipc/types";
 import {
 	formatFetchedTime,
 	jobTitle,
@@ -13,6 +17,9 @@ import {
 type ReadingPaneProps = {
 	selected: SelectedJobView | null | undefined;
 	summary: BodyRef | null | undefined;
+	/** The selected job's scored signal candidate, when it has one. */
+	candidate: SignalCandidateRow | null;
+	onToggleExclusion: (signalKey: string) => void;
 };
 
 function BodyContent({
@@ -132,7 +139,32 @@ function AnnotationBand({ selected }: { selected: SelectedJobView }) {
 	);
 }
 
-export function ReadingPane({ selected, summary }: ReadingPaneProps) {
+function ExclusionToggle({
+	candidate,
+	onToggle,
+}: {
+	candidate: SignalCandidateRow;
+	onToggle: (signalKey: string) => void;
+}) {
+	const excluded = candidate.outcome === "Excluded";
+	return (
+		<button
+			className="exclusion-toggle"
+			type="button"
+			aria-pressed={excluded}
+			onClick={() => onToggle(candidate.signal_key)}
+		>
+			{excluded ? "Excluded from archive" : "Exclude from archive"}
+		</button>
+	);
+}
+
+export function ReadingPane({
+	selected,
+	summary,
+	candidate,
+	onToggleExclusion,
+}: ReadingPaneProps) {
 	const summaryBody = useBody(summary);
 	if (!selected)
 		return (
@@ -164,6 +196,12 @@ export function ReadingPane({ selected, summary }: ReadingPaneProps) {
 					)}
 				</div>
 				<div className="document-meta">
+					{candidate && (
+						<ExclusionToggle
+							candidate={candidate}
+							onToggle={onToggleExclusion}
+						/>
+					)}
 					{selected.tokens !== null && (
 						<span className="pill">{selected.tokens} tokens</span>
 					)}

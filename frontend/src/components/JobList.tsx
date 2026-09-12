@@ -1,4 +1,4 @@
-import type { ChangeEvent, KeyboardEvent } from "react";
+import type { ChangeEvent, RefObject } from "react";
 import type {
 	DesktopJobListView,
 	JobListMode,
@@ -16,8 +16,8 @@ type JobListProps = {
 	list: DesktopJobListView | undefined;
 	candidates: SignalCandidateRow[];
 	searchText: string;
+	searchInputRef: RefObject<HTMLInputElement | null>;
 	onSearchChange: (text: string) => void;
-	onSearchKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
 	onClearSearch: () => void;
 	onChangeMode: (mode: JobListMode) => void;
 	onSelectJob: (jobId: number) => void;
@@ -103,6 +103,9 @@ function CandidateRow({
 						{candidate.gist_truncated || candidate.url}
 					</span>
 					<span className="row-metadata">
+						{candidate.outcome === "Excluded" && (
+							<span className="pill excluded-marker">Excluded</span>
+						)}
 						<span className="pill">{candidate.score_band}</span>
 						{candidate.themes.map((theme) => (
 							<span className="pill" key={theme}>
@@ -129,8 +132,8 @@ export function JobList({
 	list,
 	candidates,
 	searchText,
+	searchInputRef,
 	onSearchChange,
-	onSearchKeyDown,
 	onClearSearch,
 	onChangeMode,
 	onSelectJob,
@@ -165,11 +168,11 @@ export function JobList({
 			{mode === "SinceCheckpoint" && (
 				<div className="search-control">
 					<input
+						ref={searchInputRef}
 						aria-label="Search jobs"
 						placeholder="Search jobs"
 						value={searchText}
 						onChange={onChange}
-						onKeyDown={onSearchKeyDown}
 					/>
 					{searchText && (
 						<button

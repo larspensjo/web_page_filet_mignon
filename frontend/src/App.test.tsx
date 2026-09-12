@@ -4,6 +4,7 @@ import withCorpus from "@fixtures/snapshots/idle_with_corpus.json";
 import withSelection from "@fixtures/snapshots/idle_with_selection.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
 import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
+import showArchiveDialog from "@fixtures/ui_commands/show_archive_dialog.json";
 import { invoke } from "@tauri-apps/api/core";
 import {
 	act,
@@ -20,6 +21,7 @@ import { JOBS_SEARCH_DEBOUNCE_MS } from "./constants";
 import type {
 	BodyResponse,
 	SelectedJobVisibility,
+	SignalCandidateRow,
 	SnapshotEnvelope,
 } from "./ipc/types";
 
@@ -878,5 +880,234 @@ describe("job list", () => {
 				payload: { type: "PollSources" },
 			}),
 		);
+	});
+});
+
+describe("modals and chrome", () => {
+	afterEach(() => {
+		cleanup();
+		vi.useRealTimers();
+	});
+	beforeEach(() => {
+		listeners.clear();
+		snapshot = corpus;
+		bodyResponses = new Map();
+		vi.mocked(invoke).mockClear();
+	});
+
+	async function renderWithCommands() {
+		await renderLoaded();
+		await waitFor(() =>
+			expect(listeners.has("harvester://ui-command")).toBe(true),
+		);
+	}
+
+	function emitUiCommand(payload: unknown) {
+		const listener = listeners.get("harvester://ui-command");
+		if (!listener) throw new Error("ui-command listener must be registered");
+		act(() => listener({ payload }));
+	}
+
+	function candidateRow(
+		overrides: Partial<SignalCandidateRow>,
+	): SignalCandidateRow {
+		return {
+			job_id: 1,
+			url: "https://example.invalid/candidate",
+			score: 88,
+			score_band: "High",
+			source_tier: "Tier1",
+			gist_truncated: "Candidate gist",
+			themes: [],
+			dupes_count: 0,
+			state_label: "Scored",
+			signal_key: "signal-key",
+			outcome: "Selected",
+			...overrides,
+		};
+	}
+
+	it("opens the archive modal from the channel-2 command and cancels on Escape", async () => {
+		await renderWithCommands();
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		emitUiCommand(showArchiveDialog);
+		const dialog = screen.getByRole("dialog", { name: "Archive export" });
+		expect(within(dialog).getByText("2 in total")).toBeInTheDocument();
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		expect(intents()).toEqual([
+			["dispatch_intent", { payload: { type: "CancelArchiveDialog" } }],
+		]);
+	});
+
+	it("drops a malformed channel-2 payload without opening anything", async () => {
+		await renderWithCommands();
+		emitUiCommand({ Unknown: {} });
+		emitUiCommand({ ShowArchiveDialog: { request_id: "nope" } });
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+	});
+
+	it("submits the archive modal with the request id from the command", async () => {
+		await renderWithCommands();
+		emitUiCommand(showArchiveDialog);
+		fireEvent.click(screen.getByRole("button", { name: "Export 2 articles" }));
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+		expect(intents()).toEqual([
+			[
+				"dispatch_intent",
+				{
+					payload: {
+						type: "SubmitArchiveDialog",
+						payload: {
+							request_id: 1,
+							basename: "archive.md",
+							set_checkpoint: true,
+							use_summaries: true,
+							use_signal_candidates: false,
+						},
+					},
+				},
+			],
+		]);
+	});
+
+	it("asks core to open the archive dialog from the header button", async () => {
+		await renderWithCommands();
+		fireEvent.click(screen.getByRole("button", { name: "Archive…" }));
+		expect(intents()).toEqual([
+			["dispatch_intent", { payload: { type: "OpenArchiveDialog" } }],
+		]);
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+	});
+
+	it("Ctrl+L opens Add URLs, paste submits, Escape closes", async () => {
+		await renderWithCommands();
+		fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+		const dialog = screen.getByRole("dialog", { name: "Add URLs" });
+		fireEvent.paste(within(dialog).getByRole("textbox"), {
+			clipboardData: { getData: () => "https://pasted.invalid" },
+		});
+		expect(intents()).toEqual([
+			[
+				"dispatch_intent",
+				{
+					payload: {
+						type: "SetUrlInput",
+						payload: { text: "https://pasted.invalid" },
+					},
+				},
+			],
+			["dispatch_intent", { payload: { type: "SubmitUrls" } }],
+		]);
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+	});
+
+	it("Ctrl+F dispatches RevealJobsSearch and focuses the search box locally", async () => {
+		await renderWithCommands();
+		const input = screen.getByRole("textbox", { name: "Search jobs" });
+		expect(document.activeElement).not.toBe(input);
+		fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+		expect(intents()).toEqual([
+			["dispatch_intent", { payload: { type: "RevealJobsSearch" } }],
+		]);
+		expect(document.activeElement).toBe(input);
+	});
+
+	it("ignores shortcuts while a modal is open", async () => {
+		await renderWithCommands();
+		fireEvent.keyDown(window, { key: "l", ctrlKey: true });
+		fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+		expect(intents()).toEqual([]);
+		expect(screen.getByRole("dialog", { name: "Add URLs" })).toBeVisible();
+	});
+
+	it("Escape outside a modal clears an active search", async () => {
+		await renderWithCommands();
+		vi.useFakeTimers();
+		const input = screen.getByRole("textbox", { name: "Search jobs" });
+		fireEvent.change(input, { target: { value: "rust" } });
+		act(() => vi.advanceTimersByTime(JOBS_SEARCH_DEBOUNCE_MS));
+		fireEvent.keyDown(window, { key: "Escape" });
+		expect(input).toHaveValue("");
+		expect(intents()).toEqual([
+			[
+				"dispatch_intent",
+				{ payload: { type: "SetJobsSearchQuery", payload: { text: "rust" } } },
+			],
+			["dispatch_intent", { payload: { type: "ClearJobsSearch" } }],
+		]);
+	});
+
+	it("renders the archive token meter, quota meter and checkpoint status in the header", async () => {
+		snapshot = {
+			...corpus,
+			view: { ...corpus.view, checkpoint_status_message: "Saving checkpoint…" },
+		};
+		await renderWithCommands();
+		const header = document.querySelector("header") as HTMLElement;
+		expect(
+			within(header).getByText("Archive 84 / 100k tokens"),
+		).toBeInTheDocument();
+		expect(
+			within(header).getByText("LLM calls 0 / unlimited"),
+		).toBeInTheDocument();
+		expect(within(header).getByRole("status")).toHaveTextContent(
+			"Saving checkpoint…",
+		);
+	});
+
+	it("toggles archive exclusion for the signal candidate of the selected job", async () => {
+		const selectedJobId = selected.view.desktop_job_list.selected_job
+			?.job_id as number;
+		snapshot = {
+			...selected,
+			view: {
+				...selected.view,
+				signal_candidate_rows: [candidateRow({ job_id: selectedJobId })],
+			},
+		};
+		await renderWithCommands();
+		const toggle = screen.getByRole("button", { name: "Exclude from archive" });
+		expect(toggle).toHaveAttribute("aria-pressed", "false");
+		fireEvent.click(toggle);
+		expect(intents()).toEqual([
+			[
+				"dispatch_intent",
+				{
+					payload: {
+						type: "ToggleSignalCandidateExclusion",
+						payload: { signal_key: "signal-key" },
+					},
+				},
+			],
+		]);
+		emitSnapshot({
+			...snapshot,
+			generation: snapshot.generation + 1,
+			view: {
+				...snapshot.view,
+				signal_candidate_rows: [
+					candidateRow({ job_id: selectedJobId, outcome: "Excluded" }),
+				],
+			},
+		});
+		expect(
+			screen.getByRole("button", { name: "Excluded from archive" }),
+		).toHaveAttribute("aria-pressed", "true");
+	});
+
+	it("offers no exclusion toggle for a job without a scored candidate", async () => {
+		snapshot = {
+			...selected,
+			view: {
+				...selected.view,
+				signal_candidate_rows: [candidateRow({ job_id: 999, signal_key: "" })],
+			},
+		};
+		await renderWithCommands();
+		expect(
+			screen.queryByRole("button", { name: /from archive/ }),
+		).not.toBeInTheDocument();
 	});
 });

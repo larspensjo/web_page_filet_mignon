@@ -7,7 +7,7 @@ use harvester_core::{
 };
 use harvester_engine::{llm::prompt::PromptId, SourceId, SourceKind};
 
-use crate::{project, SnapshotEnvelope};
+use crate::{partition_effects, project, SnapshotEnvelope, UiCommand};
 
 const FIXTURE_TIME: i64 = 1_700_000_000;
 
@@ -37,6 +37,59 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
         .into_iter()
         .map(|(name, state)| (name, project(&state.desktop_view()).0.with_generation(1)))
         .collect()
+}
+
+/// Channel-2 payloads the frontend renders without a snapshot: the archive dialog
+/// rides `UiCommand::ShowArchiveDialog`, never the envelope.
+pub fn named_ui_commands() -> Vec<(&'static str, UiCommand)> {
+    let empty = reduce(AppState::new(), Msg::tick_at(time(0)));
+    vec![("show_archive_dialog", show_archive_dialog(&empty))]
+}
+
+fn show_archive_dialog(empty: &AppState) -> UiCommand {
+    let state = idle_with_corpus(empty);
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    let ready = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog {
+                request_id,
+                article_count,
+                since_utc,
+                default_basename,
+                pending_pre_triage_count,
+                token_estimates,
+                signal_candidate_default,
+                signal_candidate_count,
+                signal_candidate_scoring_done,
+                signal_candidate_scoring_total,
+                signal_candidate_token_estimates,
+            } => Some(Msg::ArchiveDialogReady {
+                request_id,
+                article_count,
+                since_utc,
+                default_basename,
+                default_file_exists: true,
+                export_dir: std::path::PathBuf::from("output"),
+                pending_pre_triage_count,
+                token_estimates,
+                signal_candidate_default,
+                signal_candidate_count,
+                signal_candidate_scoring_done,
+                signal_candidate_scoring_total,
+                signal_candidate_token_estimates,
+            }),
+            _ => None,
+        })
+        .expect("ArchiveClicked opens the archive dialog");
+    let (_, effects) = update(state, ready);
+    let (runner, mut commands) = partition_effects(effects);
+    assert!(
+        runner.is_empty(),
+        "ArchiveDialogReady must produce only the channel-2 command"
+    );
+    assert_eq!(commands.len(), 1);
+    commands.remove(0)
 }
 
 fn idle_with_corpus(empty: &AppState) -> AppState {
@@ -443,5 +496,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn checked_in_ui_command_fixtures_match_core_effects() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/ui_commands");
+        for (name, command) in named_ui_commands() {
+            let path = root.join(format!("{name}.json"));
+            let actual = serde_json::to_string_pretty(&command).unwrap()
+                + "
+";
+            if std::env::var_os("UPDATE_UI_FIXTURES").is_some() {
+                std::fs::create_dir_all(&root).unwrap();
+                std::fs::write(&path, actual).unwrap();
+            } else {
+                assert_eq!(
+                    std::fs::read_to_string(&path).expect("checked-in UI command fixture"),
+                    actual,
+                    "regenerate with UPDATE_UI_FIXTURES=1 cargo test -p harvester_ui_bridge"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn archive_dialog_fixture_carries_a_populated_corpus() {
+        let UiCommand::ShowArchiveDialog(request) = named_ui_commands()
+            .into_iter()
+            .find(|(name, _)| *name == "show_archive_dialog")
+            .map(|(_, command)| command)
+            .expect("archive dialog fixture");
+        assert_eq!(request.article_count, 2);
+        assert!(request.token_estimates.full_tokens > 0);
+        assert!(request.default_file_exists);
+        assert_eq!(request.default_basename, "archive.md");
     }
 }

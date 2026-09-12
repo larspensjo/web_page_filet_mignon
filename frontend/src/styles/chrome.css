@@ -1,0 +1,233 @@
+.header-chrome {
+	display: flex;
+	min-width: 0;
+	flex: 1;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--space-pane);
+	flex-wrap: wrap;
+}
+
+.header-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--space-compact);
+}
+
+.checkpoint-status {
+	color: var(--text-tertiary);
+	font-size: var(--metadata-size);
+	line-height: var(--metadata-line-height);
+}
+
+.status-meters {
+	display: flex;
+	min-width: 0;
+	gap: var(--space-pane);
+}
+
+.meter {
+	display: flex;
+	min-width: 12rem;
+	flex-direction: column;
+	gap: var(--space-tight);
+}
+
+.meter-text {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--space-compact);
+	color: var(--text-tertiary);
+	font-size: var(--metadata-size);
+	line-height: var(--metadata-line-height);
+	white-space: nowrap;
+}
+
+.meter-detail {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.meter-bar {
+	position: relative;
+	height: var(--space-tight);
+	overflow: hidden;
+	border-radius: var(--radius-inline);
+	background: var(--surface-overlay);
+}
+
+.meter-bar::before {
+	position: absolute;
+	inset: 0 auto 0 0;
+	width: var(--meter-fill);
+	border-radius: inherit;
+	background: var(--text-tertiary);
+	content: "";
+}
+
+.meter--attention .meter-label {
+	color: var(--text-secondary);
+}
+
+.meter--attention .meter-bar::before {
+	background: var(--accent-primary);
+}
+
+.meter--warning .meter-label {
+	color: var(--accent-warning);
+}
+
+.meter--warning .meter-bar::before {
+	background: var(--accent-warning);
+}
+
+.modal-backdrop {
+	position: fixed;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	padding: var(--space-major);
+	background: rgba(20, 20, 19, 0.7);
+	z-index: 10;
+}
+
+.modal {
+	width: min(100%, 36rem);
+	max-height: 100%;
+	overflow-y: auto;
+	padding: var(--space-major);
+	border: var(--border-contained);
+	border-radius: var(--radius-panel);
+	background: var(--surface-raised);
+	box-shadow: var(--shadow-whisper);
+}
+
+.modal:focus {
+	outline: none;
+}
+
+.modal-title {
+	margin: 0 0 var(--space-pane);
+}
+
+.modal-form {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-control);
+}
+
+.modal-facts {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	margin: 0;
+	column-gap: var(--space-pane);
+	row-gap: var(--space-tight);
+}
+
+.modal-facts dt {
+	color: var(--text-tertiary);
+	font-size: var(--metadata-size);
+	line-height: var(--body-line-height);
+}
+
+.modal-facts dd {
+	margin: 0;
+	color: var(--text-secondary);
+}
+
+.modal-note {
+	margin: 0;
+	color: var(--text-tertiary);
+	font-size: var(--metadata-size);
+	line-height: var(--metadata-line-height);
+}
+
+.modal-note--warning {
+	color: var(--accent-hover);
+}
+
+.modal-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-tight);
+	color: var(--text-secondary);
+	font-size: var(--metadata-size);
+}
+
+.modal-field input,
+.modal-field textarea {
+	width: 100%;
+	border: var(--border-contained);
+	border-radius: var(--radius-standard);
+	background: var(--base-dark);
+	color: var(--text-primary);
+	font: inherit;
+	font-size: var(--body-size);
+	padding: var(--space-compact) var(--space-control);
+	resize: vertical;
+}
+
+.modal-field input:focus-visible,
+.modal-field textarea:focus-visible {
+	outline: none;
+	box-shadow: var(--ring-focus-shadow);
+}
+
+.modal-field input[aria-invalid="true"] {
+	border-color: var(--accent-warning);
+}
+
+.modal-check {
+	display: flex;
+	align-items: center;
+	gap: var(--space-compact);
+	color: var(--text-secondary);
+}
+
+.modal-check input {
+	accent-color: var(--accent-primary);
+}
+
+.modal-check input:disabled + span {
+	color: var(--text-disabled);
+}
+
+.modal-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--space-compact);
+	margin-top: var(--space-compact);
+}
+
+.modal-actions button:disabled {
+	background: var(--surface-overlay);
+	color: var(--text-disabled);
+	cursor: not-allowed;
+}
+
+.exclusion-toggle {
+	border: var(--border-contained);
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: var(--metadata-size);
+	padding: var(--space-tight) var(--space-compact);
+}
+
+.exclusion-toggle:hover {
+	background: var(--surface-overlay);
+}
+
+.exclusion-toggle[aria-pressed="true"] {
+	border-color: var(--accent-warning);
+	color: var(--accent-warning);
+}
+
+.excluded-marker {
+	color: var(--accent-warning);
+}
+
+@media (max-width: 50rem) {
+	.header-chrome {
+		justify-content: flex-start;
+	}
+}

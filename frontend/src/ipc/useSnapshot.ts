@@ -27,11 +27,7 @@ export function useSnapshot() {
 			}
 		};
 		let unlistenSnapshot: (() => void) | undefined;
-		let unlistenCommand: (() => void) | undefined;
 		void (async () => {
-			unlistenCommand = await listen("harvester://ui-command", (event) =>
-				console.info("Harvester UI command", event.payload),
-			);
 			unlistenSnapshot = await listen<SnapshotEnvelope>(
 				"harvester://snapshot",
 				(event) => apply(event.payload),
@@ -40,7 +36,6 @@ export function useSnapshot() {
 		})();
 		return () => {
 			unlistenSnapshot?.();
-			unlistenCommand?.();
 		};
 	}, []);
 	return snapshot;

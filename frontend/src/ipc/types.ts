@@ -176,12 +176,78 @@ export type StopFinishButtonState =
 	| "Disabled"
 	| { Enabled: { policy: "Finish" | "Immediate" } };
 
+export type WorkspaceView = "Review" | "Trends" | "PollStats" | "Blacklist";
+
+export type ArchivePartialCoverageView = {
+	triaged: number;
+	actionable_total: number;
+};
+
+export type LlmQuotaSeverity =
+	| "Normal"
+	| "Warning"
+	| "Danger"
+	| "Exhausted"
+	| "Unavailable";
+
+export type LlmQuotaView = {
+	label: string;
+	used: number;
+	limit: number | null;
+	percent: number | null;
+	severity: LlmQuotaSeverity;
+};
+
+export type LastPasteStats = {
+	enqueued: number;
+	skipped: number;
+};
+
+export type ArchiveTokenEstimates = {
+	full_tokens: number;
+	summary_tokens: number;
+	summary_coverage: number;
+};
+
+export type SignalCandidateDialogDefault =
+	| "OnAllSettled"
+	| "OffPartial"
+	| "OffDisabled"
+	| "OffEmpty";
+
+/** Channel-2 payload of `UiCommand::ShowArchiveDialog`; never part of a snapshot. */
+export type ArchiveDialogRequest = {
+	request_id: number;
+	article_count: number;
+	since_utc: string | null;
+	default_basename: string;
+	default_file_exists: boolean;
+	export_dir: string;
+	pending_pre_triage_count: number;
+	token_estimates: ArchiveTokenEstimates;
+	signal_candidate_default: SignalCandidateDialogDefault;
+	signal_candidate_count: number;
+	signal_candidate_scoring_done: number;
+	signal_candidate_scoring_total: number;
+	signal_candidate_token_estimates: ArchiveTokenEstimates;
+};
+
+export type UiCommand = { ShowArchiveDialog: ArchiveDialogRequest };
+
 export type SnapshotEnvelope = {
 	generation: number;
 	schema_version: number;
 	view: {
+		workspace_view: WorkspaceView;
 		job_count: number;
 		archive_filtered_count: number;
+		archive_token_estimate: number;
+		token_limit: number;
+		archive_partial_coverage: ArchivePartialCoverageView | null;
+		raw_unprocessed_count: number;
+		llm_quota: LlmQuotaView;
+		last_paste_stats: LastPasteStats | null;
+		checkpoint_status_message: string | null;
 		reading_pane_mode: "RawText" | "Summary";
 		preview_text: BodyRef | null;
 		right_pane: {

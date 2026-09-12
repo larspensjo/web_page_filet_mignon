@@ -43,3 +43,9 @@ export function visibilityExplanation(
 			return "Selected job is outside the displayed row limit.";
 	}
 }
+
+export function formatCompactTokens(tokens: number): string {
+	if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+	if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}k`;
+	return String(tokens);
+}

@@ -1,0 +1,25 @@
+{
+  "ShowArchiveDialog": {
+    "request_id": 1,
+    "article_count": 2,
+    "since_utc": null,
+    "default_basename": "archive.md",
+    "default_file_exists": true,
+    "export_dir": "output",
+    "pending_pre_triage_count": 0,
+    "token_estimates": {
+      "full_tokens": 84,
+      "summary_tokens": 84,
+      "summary_coverage": 0
+    },
+    "signal_candidate_default": "OffDisabled",
+    "signal_candidate_count": 0,
+    "signal_candidate_scoring_done": 0,
+    "signal_candidate_scoring_total": 0,
+    "signal_candidate_token_estimates": {
+      "full_tokens": 0,
+      "summary_tokens": 0,
+      "summary_coverage": 0
+    }
+  }
+}
