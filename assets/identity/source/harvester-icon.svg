@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Harvester app icon: mark on the warm dark Surface token. -->
+  <rect width="64" height="64" rx="12" fill="#1e1e1c"/>
+  <g transform="translate(3.5 3) scale(0.89)">
+  <rect x="14" y="8" width="12" height="15" rx="1.5" fill="#b0aea5" transform="rotate(-14 20.0 15.5)"/>
+  <rect x="26" y="6" width="12" height="15" rx="1.5" fill="#faf9f5" transform="rotate(0 32.0 13.5)"/>
+  <rect x="38" y="8" width="12" height="15" rx="1.5" fill="#b0aea5" transform="rotate(14 44.0 15.5)"/>
+  <path d="M10 28 H54 L37 44 V56 H27 V44 Z" fill="#c96442" stroke="#c96442" stroke-width="3" stroke-linejoin="round"/>
+  </g>
+</svg>

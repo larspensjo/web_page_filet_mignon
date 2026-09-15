@@ -1,5 +1,17 @@
 # Harvester Visual Identity Asset System - Plan
 
+## Status (2026-09-15)
+
+Phases 0 to 2 are done for the Tauri desktop host: the funnel-and-pages mark
+was drafted directly as SVG (no image-generation round trip), rendered to a
+multi-size `.ico` and PNG ladder, and wired in through the Tauri bundle icon.
+Sources and rules live in `assets/identity/source/`; see `identity-sheet.md`
+there. The wiring checklists below reference the legacy Win32 host and
+`CommanDuctUI`; for the Tauri host the icon is embedded by `tauri-build` from
+`crates/harvester_ui/tauri.conf.json`. Splash (Phase 3) is dropped: the Tauri
+window appears fast enough that a splash would add lifecycle without benefit.
+Phase 4 (in-app mark, empty states) remains open.
+
 ## Overview
 
 Create a durable visual identity for Harvester that can support the desktop app icon, small UI imagery, splash/startup artwork, documentation graphics, and future release assets.

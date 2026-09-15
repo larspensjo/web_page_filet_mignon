@@ -1,6 +1,8 @@
 fn main() {
     let lockfile = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock");
     println!("cargo:rerun-if-changed={}", lockfile.display());
+    // The window and taskbar icon is embedded from this file; a new render must relink.
+    println!("cargo:rerun-if-changed=icons/icon.ico");
     let source = std::fs::read_to_string(lockfile).expect("workspace Cargo.lock");
     for package in ["wry", "webview2-com"] {
         println!(

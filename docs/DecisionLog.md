@@ -129,3 +129,9 @@ Decision: Every `UiCommand` payload the frontend renders is pinned by a reducer-
 Context: The archive dialog is not snapshot state; its data rides `UiCommand::ShowArchiveDialog`. A hand-written payload in a component test would drift from core silently, which is the failure the snapshot fixtures already guard against.
 Consequences: Adding a `UiCommand` variant or changing a payload field fails a Rust test until the fixture is regenerated and a frontend test until the component is updated. The desktop frontend never opens the archive modal on its own; it only renders what channel 2 delivers, and cancelling stays a host no-op through `HostAction::CancelArchiveDialog`.
 Refs: crates/harvester_ui_bridge/src/fixtures.rs (named_ui_commands), frontend/src/components/ArchiveModal.test.tsx, docs/plans/Plan.TauriDesktopUi.md (Testing strategy)
+
+## 2026-09-15 - Harvester mark is pages into a solid funnel; no splash
+Decision: The Harvester identity is three pages flowing into a solid terracotta funnel on a warm dark tile, drawn as SVG under `assets/identity/source/` with generated PNG and `.ico` outputs committed. The splash screen proposed in the identity plan is dropped.
+Context: Three SVG candidates were compared at 16 to 256 px. The solid funnel kept its silhouette at 16 px where the outlined variant thinned out; the filled-funnel-with-output-bar variant read as a cocktail glass. The Tauri window appears quickly enough that a splash would add a second window and lifecycle without user benefit.
+Consequences: Any icon change edits the SVG and re-runs `render.py`; raster outputs are never hand-edited. Colours are the existing design tokens, so the mark follows the visual spec rather than a separate brand palette. Remaining identity work is the small in-app mark and empty-state imagery.
+Refs: assets/identity/source/identity-sheet.md, docs/visual_design/Plan.VisualIdentityAssetSystem.md (Status), crates/harvester_ui/tauri.conf.json
