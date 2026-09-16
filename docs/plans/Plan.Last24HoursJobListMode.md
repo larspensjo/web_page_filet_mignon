@@ -99,6 +99,9 @@ From the user's answers during plan review:
 
 ## Phase 1: Core mode, filter and IPC contract
 
+**Status: complete, 2026-09-16**, on `feature/tauri-desktop-UI`. This slice is
+implemented and verified; the mode is not yet selectable in the UI (Phase 2).
+
 Smallest end-to-end slice: the reducer accepts the new mode, the view builder
 filters by the window, the wire vocabulary carries it, and the frontend type
 union compiles. The mode is not yet selectable in the UI.

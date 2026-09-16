@@ -115,6 +115,7 @@ pub use view_model::{
     SignalCandidateRow, SignalCandidateRowState, StopFinishButtonState, TrendsTabView,
     TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH,
     DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS,
-    INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH, TOKEN_LIMIT,
+    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
+    TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};

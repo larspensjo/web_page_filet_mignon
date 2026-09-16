@@ -160,6 +160,14 @@ mod tests {
                 }),
             ),
             (
+                UiIntent::SetJobListMode {
+                    mode: JobListMode::Last24Hours,
+                },
+                IntentEffect::Dispatch(Msg::JobListModeSet {
+                    mode: JobListMode::Last24Hours,
+                }),
+            ),
+            (
                 UiIntent::SetJobsSearchQuery {
                     text: "query".into(),
                 },

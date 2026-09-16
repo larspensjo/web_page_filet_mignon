@@ -1905,6 +1905,333 @@ mod app_state_tests {
     }
 
     #[test]
+    fn desktop_list_last_24_hours_includes_window_boundary_and_future_jobs() {
+        let now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        for (job_id, url) in [
+            (1, "https://example.com/boundary"),
+            (2, "https://example.com/outside"),
+            (3, "https://example.com/exactly-now"),
+            (4, "https://example.com/future"),
+        ] {
+            insert_done_job(&mut state, job_id, url);
+        }
+        set_fetched_utc(
+            &mut state,
+            &[
+                (1, Some(now - chrono::Duration::hours(24))),
+                (
+                    2,
+                    Some(now - chrono::Duration::hours(24) - chrono::Duration::seconds(1)),
+                ),
+                (3, Some(now)),
+                (4, Some(now + chrono::Duration::hours(1))),
+            ],
+        );
+        state.job_list_mode = JobListMode::Last24Hours;
+        state = update(state, Msg::tick_at(now)).0;
+
+        assert_eq!(
+            state
+                .desktop_view()
+                .desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1, 3, 4]
+        );
+    }
+
+    #[test]
+    fn desktop_list_last_24_hours_ignores_checkpoint() {
+        let now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        insert_done_job(
+            &mut state,
+            1,
+            "https://example.com/recent-before-checkpoint",
+        );
+        insert_done_job(&mut state, 2, "https://example.com/old-after-checkpoint");
+        set_fetched_utc(
+            &mut state,
+            &[
+                (1, Some(now - chrono::Duration::hours(2))),
+                (2, Some(now - chrono::Duration::hours(25))),
+            ],
+        );
+        state.briefing_since_utc = Some(now - chrono::Duration::hours(1));
+
+        let since_view = state.view();
+        assert_eq!(
+            since_view
+                .desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            Vec::<JobId>::new()
+        );
+
+        state.job_list_mode = JobListMode::Last24Hours;
+        state = update(state, Msg::tick_at(now)).0;
+        assert_eq!(
+            state
+                .desktop_view()
+                .desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
+
+        let mut old_state = AppState::new();
+        insert_done_job(
+            &mut old_state,
+            1,
+            "https://example.com/old-after-checkpoint",
+        );
+        set_fetched_utc(
+            &mut old_state,
+            &[(1, Some(now - chrono::Duration::hours(25)))],
+        );
+        old_state.briefing_since_utc = Some(now - chrono::Duration::hours(26));
+        old_state.job_list_mode = JobListMode::SinceCheckpoint;
+        assert_eq!(old_state.view().desktop_job_list.rows.len(), 1);
+        old_state.job_list_mode = JobListMode::Last24Hours;
+        old_state = update(old_state, Msg::tick_at(now)).0;
+        assert!(old_state.desktop_view().desktop_job_list.rows.is_empty());
+    }
+
+    #[test]
+    fn desktop_list_last_24_hours_excludes_and_counts_jobs_without_fetch_time() {
+        let now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/fetched");
+        insert_done_job(&mut state, 2, "https://example.com/missing");
+        set_fetched_utc(&mut state, &[(1, Some(now)), (2, None)]);
+        state.job_list_mode = JobListMode::Last24Hours;
+        state = update(state, Msg::tick_at(now)).0;
+
+        let view = state.desktop_view();
+        assert_eq!(view.desktop_job_list.rows.len(), 1);
+        assert_eq!(view.desktop_job_list.rows[0].job_id, 1);
+        assert_eq!(view.desktop_job_list.hidden_without_fetch_time, 1);
+    }
+
+    #[test]
+    fn desktop_list_last_24_hours_is_empty_before_first_tick() {
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/fetched");
+        insert_done_job(&mut state, 2, "https://example.com/missing");
+        set_fetched_utc(
+            &mut state,
+            &[(1, Some(utc("2026-05-02T12:00:00Z"))), (2, None)],
+        );
+        state.job_list_mode = JobListMode::Last24Hours;
+
+        let view = state.desktop_view();
+        assert!(view.desktop_job_list.rows.is_empty());
+        assert_eq!(view.desktop_job_list.scoped_count, 0);
+        assert_eq!(view.desktop_job_list.hidden_without_fetch_time, 0);
+    }
+
+    #[test]
+    fn desktop_list_last_24_hours_searches_within_mode() {
+        let now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/selected");
+        insert_done_job(&mut state, 2, "https://example.com/match");
+        set_fetched_utc(&mut state, &[(1, Some(now)), (2, Some(now))]);
+        set_summary_titles(
+            &mut state,
+            &[
+                ("https://example.com/selected", "Other article"),
+                ("https://example.com/match", "Needle article"),
+            ],
+        );
+        state.select_job(1);
+        state.set_jobs_search_query("needle".to_string());
+        state.job_list_mode = JobListMode::Last24Hours;
+        state = update(state, Msg::tick_at(now)).0;
+
+        let view = state.desktop_view();
+        assert_eq!(view.desktop_job_list.scoped_count, 1);
+        assert_eq!(view.desktop_job_list.rows[0].job_id, 2);
+        assert_eq!(
+            view.desktop_job_list
+                .selected_job
+                .as_ref()
+                .expect("selected job")
+                .list_visibility,
+            SelectedJobVisibility::QueryMismatch
+        );
+    }
+
+    #[test]
+    fn desktop_list_last_24_hours_cap_keeps_newest_rows() {
+        let now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
+            insert_done_job(
+                &mut state,
+                job_id as JobId,
+                &format!("https://example.com/{job_id}"),
+            );
+            set_fetched_utc(
+                &mut state,
+                &[(
+                    job_id as JobId,
+                    Some(
+                        now - chrono::Duration::seconds(
+                            (DESKTOP_JOB_LIST_MAX_ROWS + 1 - job_id) as i64,
+                        ),
+                    ),
+                )],
+            );
+        }
+        state.job_list_mode = JobListMode::Last24Hours;
+        state = update(state, Msg::tick_at(now)).0;
+
+        let view = state.desktop_view();
+        let ids = view
+            .desktop_job_list
+            .rows
+            .iter()
+            .map(|row| row.job_id)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            view.desktop_job_list.scoped_count,
+            DESKTOP_JOB_LIST_MAX_ROWS + 1
+        );
+        assert!(view.desktop_job_list.truncated);
+        assert_eq!(
+            ids,
+            (2..=DESKTOP_JOB_LIST_MAX_ROWS + 1)
+                .map(|id| id as JobId)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn desktop_list_last_24_hours_searches_before_cap() {
+        let now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
+            let url = if job_id == 1 {
+                "https://example.com/needle".to_string()
+            } else {
+                format!("https://example.com/{job_id}")
+            };
+            insert_done_job(&mut state, job_id as JobId, &url);
+            set_fetched_utc(
+                &mut state,
+                &[(
+                    job_id as JobId,
+                    Some(
+                        now - chrono::Duration::seconds(
+                            (DESKTOP_JOB_LIST_MAX_ROWS + 1 - job_id) as i64,
+                        ),
+                    ),
+                )],
+            );
+        }
+        state.job_list_mode = JobListMode::Last24Hours;
+        state = update(state, Msg::tick_at(now)).0;
+        assert!(!state
+            .desktop_view()
+            .desktop_job_list
+            .rows
+            .iter()
+            .any(|row| row.job_id == 1));
+
+        state.set_jobs_search_query("needle".to_string());
+        let view = state.desktop_view();
+        assert_eq!(view.desktop_job_list.scoped_count, 1);
+        assert!(!view.desktop_job_list.truncated);
+        assert_eq!(view.desktop_job_list.rows[0].job_id, 1);
+    }
+
+    #[test]
+    fn desktop_list_search_survives_last_24_hours_mode_switch() {
+        let now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/needle");
+        insert_done_job(&mut state, 2, "https://example.com/other");
+        set_fetched_utc(
+            &mut state,
+            &[(1, Some(now - chrono::Duration::hours(2))), (2, Some(now))],
+        );
+        state.briefing_since_utc = Some(now - chrono::Duration::hours(1));
+        state.set_jobs_search_query("needle".to_string());
+        state = update(state, Msg::tick_at(now)).0;
+
+        let since_view = state.desktop_view();
+        assert!(since_view.desktop_job_list.rows.is_empty());
+        state = update(
+            state,
+            Msg::JobListModeSet {
+                mode: JobListMode::Last24Hours,
+            },
+        )
+        .0;
+        let recent_view = state.desktop_view();
+        assert_eq!(recent_view.desktop_job_list.query, "needle");
+        assert_eq!(recent_view.desktop_job_list.rows[0].job_id, 1);
+
+        state = update(
+            state,
+            Msg::JobListModeSet {
+                mode: JobListMode::SinceCheckpoint,
+            },
+        )
+        .0;
+        let restored_view = state.desktop_view();
+        assert_eq!(restored_view.desktop_job_list.query, "needle");
+        assert!(restored_view.desktop_job_list.rows.is_empty());
+    }
+
+    #[test]
+    fn desktop_list_last_24_hours_slides_on_tick() {
+        let first_now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/aging");
+        set_fetched_utc(
+            &mut state,
+            &[(1, Some(first_now - chrono::Duration::hours(23)))],
+        );
+        state.job_list_mode = JobListMode::Last24Hours;
+        state = update(state, Msg::tick_at(first_now)).0;
+        assert_eq!(state.desktop_view().desktop_job_list.rows.len(), 1);
+
+        state = update(state, Msg::tick_at(first_now + chrono::Duration::hours(2))).0;
+        assert!(state.desktop_view().desktop_job_list.rows.is_empty());
+    }
+
+    #[test]
+    fn selected_job_outside_last_24_hours_reports_outside_scope() {
+        let now = utc("2026-05-02T12:00:00Z");
+        let mut state = AppState::new();
+        insert_done_job(&mut state, 1, "https://example.com/old");
+        set_fetched_utc(&mut state, &[(1, Some(now - chrono::Duration::hours(25)))]);
+        state.job_list_mode = JobListMode::Last24Hours;
+        state.select_job(1);
+        state = update(state, Msg::tick_at(now)).0;
+
+        assert_eq!(
+            state
+                .desktop_view()
+                .desktop_job_list
+                .selected_job
+                .as_ref()
+                .expect("selected job")
+                .list_visibility,
+            SelectedJobVisibility::OutsideScope
+        );
+    }
+
+    #[test]
     fn desktop_list_is_empty_in_results_mode_but_keeps_the_selected_job() {
         let mut state = AppState::new();
         insert_done_job(&mut state, 1, "https://example.com/selected");

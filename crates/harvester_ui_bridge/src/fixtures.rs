@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use harvester_core::{
     update, AiAvailability, AiUnavailableReason, AppState, CompletedJobSnapshot, Effect,
-    LinkSnapshotRecord, LlmResultKind, Msg, SelectedJobVisibility,
+    JobListMode, LinkSnapshotRecord, LlmResultKind, Msg, SelectedJobVisibility,
 };
 use harvester_engine::{llm::prompt::PromptId, SourceId, SourceKind};
 
@@ -14,6 +14,7 @@ const FIXTURE_TIME: i64 = 1_700_000_000;
 pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     let empty = reduce(AppState::new(), Msg::tick_at(time(0)));
     let with_corpus = idle_with_corpus(&empty);
+    let last_24_hours = idle_last_24_hours(&empty);
     let with_selection = selected_fixture_state(&empty);
     let run_in_progress = run_in_progress_with_failures();
     let run_finished = completed_run_state();
@@ -28,6 +29,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     let states = [
         ("idle_empty_corpus", empty),
         ("idle_with_corpus", with_corpus),
+        ("idle_last_24_hours", last_24_hours),
         ("idle_with_selection", with_selection),
         ("run_in_progress_with_failures", run_in_progress),
         ("run_finished_with_notice", run_finished),
@@ -146,6 +148,46 @@ fn idle_with_corpus(empty: &AppState) -> AppState {
             .map(|row| row.job_id)
             .collect::<Vec<_>>(),
         vec![2, 1]
+    );
+    state
+}
+
+fn idle_last_24_hours(empty: &AppState) -> AppState {
+    let now = time(0);
+    let state = reduce(
+        empty.clone(),
+        Msg::RestoreCompletedJobs(vec![
+            completed_job_with_fetch("https://example.invalid/recent", Some(now)),
+            completed_job_with_fetch(
+                "https://example.invalid/outside-window",
+                Some(now - chrono::Duration::hours(24) - chrono::Duration::seconds(1)),
+            ),
+            completed_job_with_fetch(
+                "https://example.invalid/before-checkpoint",
+                Some(now - chrono::Duration::hours(2)),
+            ),
+            completed_job_with_fetch("https://example.invalid/missing-fetch-time", None),
+        ]),
+    );
+    let state = reduce(
+        state,
+        Msg::BriefingCheckpointSet(Some((now - chrono::Duration::hours(1)).to_rfc3339())),
+    );
+    let state = reduce(
+        state,
+        Msg::JobListModeSet {
+            mode: JobListMode::Last24Hours,
+        },
+    );
+    let view = state.desktop_view();
+    assert_eq!(view.desktop_job_list.mode, JobListMode::Last24Hours);
+    assert_eq!(
+        view.desktop_job_list
+            .rows
+            .iter()
+            .map(|row| row.job_id)
+            .collect::<Vec<_>>(),
+        vec![1, 3]
     );
     state
 }
@@ -465,6 +507,16 @@ fn completed_job(url: &str, seconds: i64) -> CompletedJobSnapshot {
     }
 }
 
+fn completed_job_with_fetch(url: &str, fetched_utc: Option<DateTime<Utc>>) -> CompletedJobSnapshot {
+    CompletedJobSnapshot {
+        url: url.into(),
+        tokens: Some(42),
+        bytes: Some(1024),
+        links: Vec::new(),
+        fetched_utc: fetched_utc.map(|timestamp| timestamp.to_rfc3339()),
+    }
+}
+
 fn reduce(state: AppState, msg: Msg) -> AppState {
     update(state, msg).0
 }
@@ -530,5 +582,25 @@ mod tests {
         assert!(request.token_estimates.full_tokens > 0);
         assert!(request.default_file_exists);
         assert_eq!(request.default_basename, "archive.md");
+    }
+
+    #[test]
+    fn last_24_hours_fixture_has_expected_mode_and_rows() {
+        let (_, envelope) = named_snapshots()
+            .into_iter()
+            .find(|(name, _)| *name == "idle_last_24_hours")
+            .expect("last 24 hours fixture");
+        assert_eq!(envelope.view["desktop_job_list"]["mode"], "Last24Hours");
+        let row_ids = envelope.view["desktop_job_list"]["rows"]
+            .as_array()
+            .expect("desktop rows")
+            .iter()
+            .map(|row| row["job_id"].as_u64().expect("job id"))
+            .collect::<Vec<_>>();
+        assert_eq!(row_ids, vec![1, 3]);
+        assert_eq!(
+            envelope.view["desktop_job_list"]["hidden_without_fetch_time"],
+            1
+        );
     }
 }

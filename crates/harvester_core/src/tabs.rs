@@ -17,6 +17,7 @@ pub enum JobListMode {
     Results,
     #[default]
     SinceCheckpoint,
+    Last24Hours,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

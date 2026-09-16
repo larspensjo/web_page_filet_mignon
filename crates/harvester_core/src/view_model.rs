@@ -40,6 +40,9 @@ pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
 /// Maximum desktop job-list rows in one snapshot.
 pub const DESKTOP_JOB_LIST_MAX_ROWS: usize = 400;
 
+/// Rolling window size for the Last24Hours desktop job-list mode.
+pub const DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS: i64 = 24;
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct LastPasteStats {
     pub enqueued: usize,
@@ -1288,8 +1291,9 @@ pub struct DesktopJobListView {
     pub visible_count: usize,
     /// `scoped_count > visible_count`.
     pub truncated: bool,
-    /// Jobs excluded from the SinceCheckpoint scope only because they carry no
-    /// `fetched_utc`. Zero when no checkpoint is set and in Results mode.
+    /// Jobs excluded from a time-based scope only because they carry no
+    /// `fetched_utc`. Zero when the relevant time reference is unavailable and
+    /// in Results mode.
     pub hidden_without_fetch_time: usize,
 }
 

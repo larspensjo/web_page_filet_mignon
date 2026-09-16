@@ -19,8 +19,10 @@ use crate::view_model::{
     JobListRowView, JobRowView, LayoutViewModel, LeftPaneHeaderView, OperationProgress,
     PreviewContextView, PreviewHeaderView, RightPaneView, ScoreBand, SelectedJobView,
     SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView, SignalCandidateRow,
-    SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS, TOKEN_LIMIT,
+    SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS,
+    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
 };
+use chrono::{DateTime, Duration, Utc};
 use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::normalize_url_for_dedupe;
@@ -457,12 +459,21 @@ impl AppState {
         query_lower: &str,
         summary_lookup: &SummaryLookup,
     ) -> DesktopJobSelection {
-        if self.job_list_mode() == JobListMode::Results {
+        let mode = self.job_list_mode();
+        if mode == JobListMode::Results {
             return DesktopJobSelection::default();
         }
         let since = self.briefing_since_utc();
+        let window_start = self
+            .last_observed_utc()
+            .map(|now| now - Duration::hours(DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS));
+        let time_reference_known = match mode {
+            JobListMode::SinceCheckpoint => since.is_some(),
+            JobListMode::Last24Hours => window_start.is_some(),
+            JobListMode::Results => false,
+        };
         let mut selection = DesktopJobSelection {
-            hidden_without_fetch_time: if since.is_some() {
+            hidden_without_fetch_time: if time_reference_known {
                 self.jobs
                     .values()
                     .filter(|job| job.fetched_utc.is_none())
@@ -473,8 +484,12 @@ impl AppState {
             ..Default::default()
         };
         for (job_id, job) in &self.jobs {
-            let is_since_checkpoint = is_since_checkpoint(job, since);
-            if !is_since_checkpoint {
+            let in_scope = match mode {
+                JobListMode::SinceCheckpoint => is_since_checkpoint(job, since),
+                JobListMode::Last24Hours => is_within_recent_window(job, window_start),
+                JobListMode::Results => false,
+            };
+            if !in_scope {
                 continue;
             }
             selection.scoped_ids.insert(*job_id);
@@ -614,7 +629,7 @@ impl AppState {
                         SelectedJobVisibility::OutsideScope
                     }
                 }
-                JobListMode::SinceCheckpoint => {
+                JobListMode::SinceCheckpoint | JobListMode::Last24Hours => {
                     if !selection.scoped_ids.contains(&selected_job_id) {
                         SelectedJobVisibility::OutsideScope
                     } else if !selection.searched_ids.contains(&selected_job_id) {
@@ -1186,11 +1201,18 @@ struct LegacyJobListMetrics {
     triage_result_count: usize,
 }
 
-fn is_since_checkpoint(job: &JobState, since: Option<chrono::DateTime<chrono::Utc>>) -> bool {
+fn is_since_checkpoint(job: &JobState, since: Option<DateTime<Utc>>) -> bool {
     match (job.fetched_utc, since) {
         (_, None) => true,
         (None, Some(_)) => false,
         (Some(fetched), Some(checkpoint)) => fetched >= checkpoint,
+    }
+}
+
+fn is_within_recent_window(job: &JobState, window_start: Option<DateTime<Utc>>) -> bool {
+    match (job.fetched_utc, window_start) {
+        (Some(fetched), Some(window_start)) => fetched >= window_start,
+        _ => false,
     }
 }
 

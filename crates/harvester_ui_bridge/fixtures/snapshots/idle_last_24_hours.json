@@ -4,72 +4,58 @@
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
-    "archive_filtered_count": 2,
+    "archive_filtered_count": 0,
     "archive_partial_coverage": null,
-    "archive_token_estimate": 84,
+    "archive_token_estimate": 0,
     "blacklist": {
       "blacklisted_count": 0,
       "rows": []
     },
     "briefing_blocked_reason": null,
     "briefing_generate_enabled": false,
-    "checkpoint_status_message": null,
+    "checkpoint_status_message": "Checkpoint saving...",
     "desktop_job_list": {
-      "hidden_without_fetch_time": 0,
-      "mode": "SinceCheckpoint",
+      "hidden_without_fetch_time": 1,
+      "mode": "Last24Hours",
       "query": "",
       "rows": [
         {
           "bytes": 1024,
           "downloaded_link_count": 0,
-          "fetched_utc": "1970-01-01T00:00:01Z",
+          "fetched_utc": "2023-11-14T22:13:20Z",
           "filter_status": null,
-          "has_analysis": true,
+          "has_analysis": false,
           "has_summary": false,
           "is_since_checkpoint": true,
-          "job_id": 2,
-          "link_count": 1,
+          "job_id": 1,
+          "link_count": 0,
           "origin": "Direct",
           "outcome": "Success",
           "stage": "Done",
           "summary_title": null,
           "summary_tokens": null,
           "tokens": 42,
-          "triage_annotation": {
-            "category": "news",
-            "priority": 5,
-            "tags": [
-              "fixture",
-              "review"
-            ]
-          },
-          "url": "https://example.invalid/higher-priority"
+          "triage_annotation": null,
+          "url": "https://example.invalid/recent"
         },
         {
           "bytes": 1024,
           "downloaded_link_count": 0,
-          "fetched_utc": "1970-01-01T00:00:00Z",
+          "fetched_utc": "2023-11-14T20:13:20Z",
           "filter_status": null,
-          "has_analysis": true,
+          "has_analysis": false,
           "has_summary": false,
-          "is_since_checkpoint": true,
-          "job_id": 1,
-          "link_count": 1,
+          "is_since_checkpoint": false,
+          "job_id": 3,
+          "link_count": 0,
           "origin": "Direct",
           "outcome": "Success",
           "stage": "Done",
           "summary_title": null,
           "summary_tokens": null,
           "tokens": 42,
-          "triage_annotation": {
-            "category": "news",
-            "priority": 2,
-            "tags": [
-              "fixture",
-              "review"
-            ]
-          },
-          "url": "https://example.invalid/lower-priority"
+          "triage_annotation": null,
+          "url": "https://example.invalid/before-checkpoint"
         }
       ],
       "scoped_count": 2,
@@ -81,28 +67,28 @@
     "indirect_link_summary": null,
     "input_panel_visible": false,
     "is_pre_triage_reviewing": false,
-    "job_count": 2,
-    "job_list_mode": "SinceCheckpoint",
+    "job_count": 4,
+    "job_list_mode": "Last24Hours",
     "last_paste_stats": null,
     "left_pane": {
-      "first_visible_job_id": null,
+      "first_visible_job_id": 1,
       "job_list_scope": "SinceCheckpoint",
       "jobs_search_query": "",
-      "left_tab": "TriageResults",
+      "left_tab": "Jobs",
       "selected_jobs_visible_in_filter": false
     },
     "left_pane_header": {
-      "count_label": "2 with triage",
+      "count_label": "1 jobs",
       "scope_label": "Since checkpoint",
       "state_label": null,
-      "title": "Results"
+      "title": "Jobs"
     },
     "left_panel_width": 180,
     "llm_quota": {
-      "label": "LLM calls 0 / unlimited",
+      "label": "LLM calls unavailable",
       "limit": null,
       "percent": null,
-      "severity": "Normal",
+      "severity": "Unavailable",
       "used": 0
     },
     "llm_usage_by_model": [],
@@ -117,7 +103,7 @@
     "preview_source": null,
     "preview_text": null,
     "queued_urls": [],
-    "raw_unprocessed_count": 2,
+    "raw_unprocessed_count": 0,
     "reading_pane_mode": "Summary",
     "right_pane": {
       "active_tab": "Summary",
@@ -142,9 +128,9 @@
     "signal_candidate_preview": null,
     "signal_candidate_rows": [],
     "stop_finish_button": "Disabled",
-    "summaries_can_start": true,
+    "summaries_can_start": false,
     "token_limit": 100000,
-    "total_tokens": 84,
+    "total_tokens": 168,
     "triage_blocked_reason": null,
     "triage_can_start": false,
     "triage_results_reorder_suppressed": false,

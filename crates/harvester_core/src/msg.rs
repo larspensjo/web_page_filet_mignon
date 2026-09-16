@@ -98,7 +98,7 @@ pub enum Msg {
     WorkspaceViewSet {
         view: crate::WorkspaceView,
     },
-    /// Desktop job-list mode. Filtering is wired in phase 3.
+    /// Desktop job-list mode.
     JobListModeSet {
         mode: crate::JobListMode,
     },

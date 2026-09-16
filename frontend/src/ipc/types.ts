@@ -1,4 +1,4 @@
-export type JobListMode = "Results" | "SinceCheckpoint";
+export type JobListMode = "Results" | "SinceCheckpoint" | "Last24Hours";
 export type Stage =
 	| "Queued"
 	| "Downloading"
