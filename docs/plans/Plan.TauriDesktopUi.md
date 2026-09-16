@@ -899,14 +899,15 @@ The new IA is a new reducer-owned concept added alongside the Win32 one:
 
 ```rust
 pub enum WorkspaceView { Review, Trends, PollStats, Blacklist }
-pub enum JobListMode  { Results, SinceCheckpoint }   // default SinceCheckpoint
+pub enum JobListMode  { Results, SinceCheckpoint, Last24Hours }   // default SinceCheckpoint
 ```
 
 `JobListMode` landed in 1b with a third `All` variant. **Phase 1d retires it**:
 the user never used it, and it is the mode that makes the list unbounded at
 corpus scale. The frozen Win32 `JobListScope::All` is a different type and is
 untouched until phase 7. See Decision Log (2026-09-06, "Desktop job list has two
-modes") and commit 5335ee1.
+modes"; and 2026-09-16, "Desktop job list adds a Last 24h mode") and commit
+5335ee1.
 
 `AppTab` and `LeftTab` remain until phase 7 because the frozen Win32 renderer
 reads them. This is a **time-boxed duplication with a named end**: they are not
@@ -1086,8 +1087,10 @@ the app.
 One primary workspace, three occasional pages, two modals. No native menu.
 
 **Review workspace** (default)
-- Left: job list — search box, mode selector (Since checkpoint / Results — two
-  modes; *All* was retired in phase 1d), rows per the spec's *Lists and Triage
+- Left: job list — search box, mode selector (Since checkpoint / Last 24h /
+  Results; *All* was retired in phase 1d). Last 24h is a rolling 24-hour
+  window based on host-observed time, ignores the archive checkpoint, and
+  shares the search box with Since checkpoint. Rows follow the spec's *Lists and Triage
   Rows* section (priority badge, title, then fetched time and any failure-only
   marker),
   ordered by triage priority descending with unannotated rows last. While triage
@@ -1810,8 +1813,8 @@ its regression test named, per the repo's bug-fix rule.
 ### Phase 3 — Review workspace
 
 1. Job list: rows per the spec, ordered by triage priority descending with
-   unannotated rows last, search, the two-mode `JobListMode` selector (Since
-   checkpoint / Results), selection. Fall back to stable selection order
+   unannotated rows last, search, the three-mode `JobListMode` selector (Since
+   checkpoint / Last 24h / Results), selection. Fall back to stable selection order
    (`job_id` ascending) while `TriagePhase::Triaging` is active so incremental
    results do not move rows, then re-sort by priority once triage settles. Select
    the newest rows for the cap before applying display order; this can exclude an
@@ -2177,7 +2180,9 @@ batch-versus-GUI lock.
   can show (mode, then search, then a cap of the newest rows) plus one
   selected-job record with its links, and the bridge strips `/jobs` and
   `/left_pane/visible_jobs_after_filter` from the envelope. `JobListMode::All`
-  is retired, so the desktop list has two modes. A separate on-change channel
+  is retired, so the desktop list has two modes: Since checkpoint and Results
+  (a third, Last 24h, was added later; see Decision Log 2026-09-16). A separate
+  on-change channel
   for the list was rejected; a `fetch_job_rows` pull command is recorded as the
   upgrade path, adopted only if the scoped list regularly exceeds the cap. The
   probe is rebuilt on typed view models and runs four cases in per-case page

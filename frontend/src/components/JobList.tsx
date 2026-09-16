@@ -122,10 +122,23 @@ function CandidateRow({
 function emptyMessage(
 	list: DesktopJobListView | undefined,
 	jobCount: number | undefined,
+	mode: JobListMode,
 ) {
 	if (!list) return "Loading jobs…";
 	if (jobCount === 0) return "No jobs yet.";
-	return list.query ? "No matches." : "No jobs since checkpoint.";
+	if (list.query) return "No matches.";
+	switch (mode) {
+		case "SinceCheckpoint":
+			return "No jobs since checkpoint.";
+		case "Last24Hours":
+			return "Nothing fetched in the last 24 hours.";
+		case "Results":
+			return "No result candidates.";
+		default: {
+			const exhaustiveMode: never = mode;
+			return exhaustiveMode;
+		}
+	}
 }
 
 export function JobList({
@@ -158,6 +171,13 @@ export function JobList({
 					</button>
 					<button
 						type="button"
+						aria-pressed={mode === "Last24Hours"}
+						onClick={() => onChangeMode("Last24Hours")}
+					>
+						Last 24h
+					</button>
+					<button
+						type="button"
 						aria-pressed={mode === "Results"}
 						onClick={() => onChangeMode("Results")}
 					>
@@ -165,7 +185,7 @@ export function JobList({
 					</button>
 				</fieldset>
 			</div>
-			{mode === "SinceCheckpoint" && (
+			{mode !== "Results" && (
 				<div className="search-control">
 					<input
 						ref={searchInputRef}
@@ -212,7 +232,7 @@ export function JobList({
 					</ul>
 				)
 			) : list === undefined || list.rows.length === 0 ? (
-				<p className="empty-state">{emptyMessage(list, jobCount)}</p>
+				<p className="empty-state">{emptyMessage(list, jobCount, mode)}</p>
 			) : (
 				<ul className="job-list">
 					{list.rows.map((job) => (

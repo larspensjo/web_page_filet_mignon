@@ -1,5 +1,6 @@
 import aiUnavailable from "@fixtures/snapshots/ai_unavailable.json";
 import emptyCorpus from "@fixtures/snapshots/idle_empty_corpus.json";
+import last24Hours from "@fixtures/snapshots/idle_last_24_hours.json";
 import withCorpus from "@fixtures/snapshots/idle_with_corpus.json";
 import withSelection from "@fixtures/snapshots/idle_with_selection.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
@@ -28,9 +29,11 @@ import type {
 const listeners = new Map<string, (event: { payload: unknown }) => void>();
 const corpus = withCorpus as unknown as SnapshotEnvelope;
 const empty = emptyCorpus as unknown as SnapshotEnvelope;
+const last24 = last24Hours as unknown as SnapshotEnvelope;
 const selected = withSelection as unknown as SnapshotEnvelope;
 const reviewFixtures = [
 	["idle empty corpus", emptyCorpus],
+	["idle last 24 hours", last24Hours],
 	["idle with corpus", withCorpus],
 	["run in progress with failures", runInProgressWithFailures],
 	["run finished with notice", runFinishedWithNotice],
@@ -215,6 +218,116 @@ describe("job list", () => {
 		expect(screen.getByText("No result candidates.")).toBeInTheDocument();
 	});
 
+	it("renders the Last 24h fixture and its missing-fetch-time hint", async () => {
+		snapshot = last24;
+		await renderLoaded();
+
+		expect(screen.getByRole("button", { name: "Last 24h" })).toHaveAttribute(
+			"aria-pressed",
+			"true",
+		);
+		expect(
+			screen.getByRole("textbox", { name: "Search jobs" }),
+		).toBeInTheDocument();
+		expect(
+			Array.from(document.querySelectorAll(".job-list .job-row")).map(
+				(row) => row.textContent,
+			),
+		).toEqual(
+			last24.view.desktop_job_list.rows.map(({ url }) =>
+				expect.stringContaining(url),
+			),
+		);
+		expect(
+			screen.getByText(
+				"1 jobs are hidden because their fetch time is missing.",
+			),
+		).toBeInTheDocument();
+	});
+
+	it("uses the Last 24h empty state and preserves match precedence", async () => {
+		snapshot = {
+			...last24,
+			view: {
+				...last24.view,
+				job_count: 1,
+				desktop_job_list: {
+					...last24.view.desktop_job_list,
+					rows: [],
+					query: "rust",
+				},
+			},
+		};
+		await renderLoaded();
+		expect(screen.getByText("No matches.")).toBeInTheDocument();
+
+		emitSnapshot({
+			...snapshot,
+			generation: snapshot.generation + 1,
+			view: {
+				...snapshot.view,
+				desktop_job_list: {
+					...snapshot.view.desktop_job_list,
+					query: "",
+				},
+			},
+		});
+		expect(
+			screen.getByText("Nothing fetched in the last 24 hours."),
+		).toBeInTheDocument();
+	});
+
+	it("carries the search text between Since checkpoint and Last 24h", async () => {
+		snapshot = {
+			...corpus,
+			view: {
+				...corpus.view,
+				desktop_job_list: {
+					...corpus.view.desktop_job_list,
+					query: "rust",
+				},
+			},
+		};
+		await renderLoaded();
+		await waitFor(() =>
+			expect(screen.getByRole("textbox", { name: "Search jobs" })).toHaveValue(
+				"rust",
+			),
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Last 24h" }));
+		emitSnapshot({
+			...snapshot,
+			generation: snapshot.generation + 1,
+			view: {
+				...snapshot.view,
+				desktop_job_list: {
+					...snapshot.view.desktop_job_list,
+					mode: "Last24Hours",
+				},
+			},
+		});
+		expect(screen.getByRole("textbox", { name: "Search jobs" })).toHaveValue(
+			"rust",
+		);
+
+		fireEvent.click(screen.getByRole("button", { name: "Since checkpoint" }));
+		emitSnapshot({
+			...snapshot,
+			generation: snapshot.generation + 2,
+			view: {
+				...snapshot.view,
+				desktop_job_list: {
+					...snapshot.view.desktop_job_list,
+					mode: "SinceCheckpoint",
+				},
+			},
+		});
+		expect(screen.getByRole("textbox", { name: "Search jobs" })).toHaveValue(
+			"rust",
+		);
+	});
+
 	it("shows the truncation hint with both counts", async () => {
 		snapshot = {
 			...corpus,
@@ -385,10 +498,30 @@ describe("job list", () => {
 		expect(intents()).toEqual([]);
 	});
 
-	it("dispatches SetJobListMode from the two-mode selector", async () => {
+	it("dispatches SetJobListMode from the three-mode selector", async () => {
 		await renderLoaded();
+		fireEvent.click(screen.getByRole("button", { name: "Last 24h" }));
+		fireEvent.click(screen.getByRole("button", { name: "Since checkpoint" }));
 		fireEvent.click(screen.getByRole("button", { name: "Results" }));
 		expect(intents()).toEqual([
+			[
+				"dispatch_intent",
+				{
+					payload: {
+						type: "SetJobListMode",
+						payload: { mode: "Last24Hours" },
+					},
+				},
+			],
+			[
+				"dispatch_intent",
+				{
+					payload: {
+						type: "SetJobListMode",
+						payload: { mode: "SinceCheckpoint" },
+					},
+				},
+			],
 			[
 				"dispatch_intent",
 				{ payload: { type: "SetJobListMode", payload: { mode: "Results" } } },

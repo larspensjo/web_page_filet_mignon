@@ -135,3 +135,13 @@ Decision: The Harvester identity is three pages flowing into a solid terracotta 
 Context: Three SVG candidates were compared at 16 to 256 px. The solid funnel kept its silhouette at 16 px where the outlined variant thinned out; the filled-funnel-with-output-bar variant read as a cocktail glass. The Tauri window appears quickly enough that a splash would add a second window and lifecycle without user benefit.
 Consequences: Any icon change edits the SVG and re-runs `render.py`; raster outputs are never hand-edited. Colours are the existing design tokens, so the mark follows the visual spec rather than a separate brand palette. Remaining identity work is the small in-app mark and empty-state imagery.
 Refs: assets/identity/source/identity-sheet.md, docs/visual_design/Plan.VisualIdentityAssetSystem.md (Status), crates/harvester_ui/tauri.conf.json
+
+## 2026-09-16 - Desktop job list adds a Last 24h mode
+Decision: The desktop job list offers Since checkpoint (default), Last 24h and Results. Last 24h shows jobs whose fetch time is within 24 hours of host-observed time, regardless of the archive checkpoint, and excludes jobs without a fetch time.
+Context: The user collects over several days before archiving, and needs to see what recent downloads added. A "latest run" cutoff would need persisted run timing and batch wiring. A rolling window needs no new persisted data.
+Consequences:
+- Refines "Desktop job list has two modes". There is still no unbounded All mode: the new scope is bounded by time and by `DESKTOP_JOB_LIST_MAX_ROWS`.
+- Scope and search remain core-owned, and one search query is shared by both list modes.
+- The window slides by tick-driven view rebuilds, not a timer, and the view shows no window-start caption.
+- The UI distinguishes a fourth empty state, "nothing fetched in the last 24 hours".
+Refs: `crates/harvester_core/src/tabs.rs`, `crates/harvester_core/src/state/view_builder.rs`, `DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS`.

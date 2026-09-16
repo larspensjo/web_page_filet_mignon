@@ -50,7 +50,7 @@ export function App() {
 	const query = list?.query ?? "";
 	useEffect(() => {
 		cancelPendingSearchDispatch();
-		setSearchText(mode === "SinceCheckpoint" ? query : "");
+		setSearchText(mode !== "Results" ? query : "");
 		return cancelPendingSearchDispatch;
 	}, [mode, query, cancelPendingSearchDispatch]);
 

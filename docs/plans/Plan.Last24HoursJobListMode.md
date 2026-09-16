@@ -99,7 +99,7 @@ From the user's answers during plan review:
 
 ## Phase 1: Core mode, filter and IPC contract
 
-**Status: complete, 2026-09-16**, on `feature/tauri-desktop-UI`. This slice is
+**Status: complete, 2026-09-16**, on `main`. This slice is
 implemented and verified; the mode is not yet selectable in the UI (Phase 2).
 
 Smallest end-to-end slice: the reducer accepts the new mode, the view builder
@@ -218,6 +218,8 @@ From `frontend/`: `npm run check` (the type union and schema constant),
 `npm run build`, `npm run fmt`. No human testing yet: nothing is user-visible.
 
 ## Phase 2: Mode switch, search, empty state and documents
+
+**Status: complete, 2026-09-16**, on `main`.
 
 ### Changes
 
