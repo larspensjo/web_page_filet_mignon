@@ -1,7 +1,7 @@
 use crate::briefing::ArticleSummaryResult;
 use chrono::{DateTime, Utc};
 
-/// Mirrors the engine's default `max_input_bytes` (see harvester_app/runner config).
+/// Mirrors the engine's default `max_input_bytes` (see the host runner config).
 pub const BRIEFING_SNAPSHOT_BUDGET_BYTES: usize = 100_000;
 
 /// One candidate article for the snapshot, in corpus order.

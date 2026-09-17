@@ -6,14 +6,6 @@ $script:HarvesterSecretEnvironmentMap = [ordered]@{
 }
 
 $script:HarvesterLaunchPolicies = [ordered]@{
-    App = [pscustomobject]@{
-        Package              = 'harvester_app'
-        BinaryName           = 'harvester_app.exe'
-        RuntimeArguments     = [string[]]@()
-        FrontendDirectory    = $null
-        FrontendBuildCommand = $null
-        SecretEnvironmentMap = $script:HarvesterSecretEnvironmentMap
-    }
     Batch = [pscustomobject]@{
         Package              = 'harvester_batch'
         BinaryName           = 'harvester_batch.exe'
@@ -36,7 +28,7 @@ function Get-HarvesterLaunchSpec {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('App', 'Batch', 'Ui')]
+        [ValidateSet('Batch', 'Ui')]
         [string]$Name,
 
         [Parameter(Mandatory)]

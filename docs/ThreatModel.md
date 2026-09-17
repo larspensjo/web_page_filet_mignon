@@ -1,4 +1,7 @@
-Structured threat model covering:
+The supported desktop system has one Tauri host; the retired native desktop host
+is no longer part of the build or runtime.
+
+Structured threat model for the batch host and the Tauri desktop host, covering:
 
 1. **Assets**: downloaded content, output files, persisted state, LLM API keys (sensitive credentials that must never be committed), the encrypted SecretStore vault and its password, user's system
 2. **Trust boundaries**:
@@ -19,8 +22,8 @@ Structured threat model covering:
    - Agent-modified launcher, helper, or application code → accepted residual risk: an agent can change source that the user subsequently runs with real keys. The user accepts this because code changes are reviewable and reviewed before they are run, whereas environment inheritance is invisible and automatic.
    - Persistent parent key variables → accepted residual risk: Windows User-scope or Machine-scope values defeat the inheritance guarantee entirely. This user deliberately keeps `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` at User scope because other applications depend on them; the launchers therefore warn rather than refuse and pass those inherited values to `cargo build` and the child process.
    - Long-lived key-bearing research service → the corpus MCP server is gone, so no long-lived key-bearing process answers agent questions.
-   - Desktop IPC → the Tauri page is an untrusted boundary despite being shipped locally. It may send only `UiIntent`, decoded fail-closed; it cannot name reducer result messages or arbitrary URLs. Snapshot bodies are served only from the last derived `BodyTable`.
-   - Desktop assets → the window never starts a dev server or loads remote content. `harvester://` resolves only confined files beneath the built bundle and carries the bridge CSP.
+   - Desktop IPC → the shipped Tauri page is an untrusted boundary. It may send only `UiIntent`, decoded fail-closed; it cannot name reducer result messages or arbitrary URLs. Snapshot bodies are served only from the last derived `BodyTable`.
+   - Desktop assets → the desktop window never starts a dev server or loads remote content. `harvester://` resolves only confined files beneath the built bundle and carries the bridge CSP.
 4. **System invariants**:
    - Untrusted content is never interpolated into structured formats without sanitization
    - Persisted data is untrusted input for side effects

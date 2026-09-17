@@ -20,24 +20,24 @@ an advance message. `AppState::pipeline_activity()` is the single pure completio
 used by both desktop and batch hosts. It counts pending and in-flight work (never deferred
 Batch API work), and deliberately includes signal scoring so neither host settles early.
 
-### Briefing runtime diagram
+### Desktop intent runtime diagram
 ```mermaid
 flowchart LR
-    UI[UI Button: Generate Briefing]
+    UI[UI Action: Poll Sources or Run Pipeline]
+    I[Restricted UiIntent]
     U[Core Update/Reducer]
     E[Effect Runner]
-    L[Engine Loader: load_and_prepare_articles]
-    W[LLM Worker]
-    S[Core BriefingSession State]
+    P[Source and Pipeline Effects]
+    M[Core Result Messages]
+    S[Core AppState]
     R[UI Render]
 
-    UI -->|Msg GenerateBriefingClicked| U
-    U -->|Effect LoadArticlesForBriefing| E
-    E --> L
-    L -->|Msg ArticlesLoaded or ArticlesLoadFailed| U
-    U -->|Effect RequestLlmCompletion summary+briefing| E
-    E --> W
-    W -->|Msg LlmCompleted| U
+    UI -->|UiIntent::PollSources / RunPipeline| I
+    I --> U
+    U -->|Effect requests| E
+    E --> P
+    P -->|result messages| M
+    M --> U
     U --> S --> R
 ```
 
@@ -75,15 +75,13 @@ Key rules:
 - **Batch API drain path:** `harvester_batch --drain` implies the Batch API runtime and reconnects to work an earlier run already submitted. It never polls sources, so its first cycle is already collect-only, and it exits after one collection pass rather than waiting for batches that are still running. Because deferred state is reducer-owned and in-memory, a fresh drain has no deferred counters to settle: `.batch_manifest.ron` is the durable record that decides what remains outstanding. Batches that end cancelled, expired, or failed are downloaded before their entries are released, so output the provider already produced and billed is salvaged; requests the provider never returned become line errors and are released for a later attempt.
 
 ## Crates and purposes
-- **harvester_app:** UI, event loop, effect execution, and platform integration.
 - **harvester_batch:** command-line and scheduled batch host orchestration.
-- **harvester_core:** domain state, update logic, and view-friendly snapshots. During host coexistence, `view()` builds the full Win32 job list while `desktop_view()` builds the desktop projection without it; both share one enrichment implementation, and this duplication ends in phase 7.
+- **harvester_core:** domain state, update logic, and view-friendly snapshots. `AppState::view()` still materializes the full frozen-renderer job and visible-ID arrays, while `desktop_view()` omits them; the bridge projection also strips those arrays from the IPC payload. Removing that transitional compatibility path belongs to later phase 7 work.
 - **harvester_engine:** content processing pipeline, persistence, and LLM-related workflows.
 - **harvester_io:** shared runtime paths, persistence, and effect execution. `harvester_io::host_bootstrap` is the shared home for executable-host startup and state hydration. `harvester_io::run_lock` provides the parameterized single-instance lock shared by the batch and GUI hosts.
-- **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset confinement, and the core-thread boundary for the future desktop host. Its snapshot projection strips the full job list and the Win32-only visible-id list, so the envelope carries only rows the page can render. `ShowArchiveDialog` is intercepted for the host and never reaches the effect runner.
+- **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset confinement, and the core-thread boundary for the desktop host. Its snapshot projection carries only rows the page can render. `ShowArchiveDialog` is intercepted for the host and never reaches the effect runner.
 - **harvester_ui:** non-default Tauri desktop host. It serves only the built frontend bundle through the confined `harvester://` scheme, sends restricted `UiIntent` values to the core-thread driver, and services effects only through `harvester_io::EffectRunner`. The bridge's snapshot projection and host-serviced `ShowArchiveDialog` boundary keep Tauri out of core/reducer logic.
 - **engine_logging:** shared logging setup used across the workspace.
-- **commanductui:** UI framework dependency used for the Windows interface.
 
 ## External dependencies (selected)
 - **reqwest:** HTTP fetching with TLS.

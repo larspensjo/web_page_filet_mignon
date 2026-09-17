@@ -14,16 +14,6 @@
       ]
     },
     {
-      "label": "Run app",
-      "type": "shell",
-      "command": "cargo run --package harvester_app",
-      "group": "none",
-      "problemMatcher": [
-        "$rustc"
-      ],
-      "dependsOn": "Build workspace"
-    },
-    {
       "label": "Test workspace",
       "type": "shell",
       "command": "cargo nextest run",

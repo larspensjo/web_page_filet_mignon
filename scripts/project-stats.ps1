@@ -155,32 +155,6 @@ function Get-RustStats {
     return $stats
 }
 
-function Get-SubmoduleStats {
-    $submodulePath = Join-Path $projectRoot "src\CommanDuctUI\src"
-    $allFiles = @()
-
-    # Collect source files from submodule
-    if (Test-Path $submodulePath) {
-        $allFiles += Get-ChildItem -Path $submodulePath -Filter "*.rs" -Recurse -File
-    }
-
-    if ($allFiles.Count -gt 0) {
-        $lineCount = Count-Lines -Files $allFiles
-        $testCount = Count-RustTests -Files $allFiles
-        return @{
-            Lines = $lineCount
-            Files = $allFiles.Count
-            Tests = $testCount
-        }
-    } else {
-        return @{
-            Lines = 0
-            Files = 0
-            Tests = 0
-        }
-    }
-}
-
 function Get-DocumentationStats {
     param(
         [string]$RootPath = $projectRoot
@@ -278,7 +252,6 @@ function Get-DependencyCount {
 function Show-StatisticsReport {
     param(
         [hashtable]$RustStats,
-        [hashtable]$SubmoduleStats,
         [hashtable]$PowerShellStats,
         [hashtable]$DocStats,
         [int]$DependencyCount
@@ -323,20 +296,6 @@ function Show-StatisticsReport {
     Write-Host " lines" -ForegroundColor Yellow -NoNewline
     Write-Host $(" {0,5:N0} unit tests" -f $totalRustTests) -ForegroundColor Yellow
     Write-Host ""
-
-    # Submodule Section
-    if ($SubmoduleStats.Lines -gt 0) {
-        Write-Host "---------------------------------------------------------------" -ForegroundColor Cyan
-        Write-Host "  GIT SUBMODULES" -ForegroundColor Cyan
-        Write-Host "---------------------------------------------------------------" -ForegroundColor Cyan
-        Write-Host ""
-
-        Write-Host "  CommanDuctUI (submodule) ....." -NoNewline
-        Write-Host $("{0,10:N0}" -f $SubmoduleStats.Lines) -ForegroundColor Green -NoNewline
-        Write-Host " lines" -NoNewline
-        Write-Host $(" {0,5:N0} unit tests" -f $SubmoduleStats.Tests) -ForegroundColor DarkGreen
-        Write-Host ""
-    }
 
     # Scripts Section
     Write-Host "---------------------------------------------------------------" -ForegroundColor Cyan
@@ -415,7 +374,6 @@ function Invoke-ProjectStatsReport {
         Write-Host "Collecting project statistics..." -ForegroundColor Yellow
 
         $rustStats = Get-RustStats
-        $submoduleStats = Get-SubmoduleStats
         $powerShellStats = Get-PowerShellStats
         $docStats = Get-DocumentationStats
         $dependencyCount = Get-DependencyCount
@@ -423,7 +381,6 @@ function Invoke-ProjectStatsReport {
         # Display formatted report
         Show-StatisticsReport `
             -RustStats $rustStats `
-            -SubmoduleStats $submoduleStats `
             -PowerShellStats $powerShellStats `
             -DocStats $docStats `
             -DependencyCount $dependencyCount

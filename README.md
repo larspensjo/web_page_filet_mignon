@@ -1,27 +1,47 @@
 # web_page_filet_mignon
-<p align="left">
-  <img src="resources/app-image.jpg" alt="web_page_filet_mignon application screenshot" width="400" />
-</p>
-
-Serve your LLM the premium cut. `web_page_filet_mignon` is a Rust workspace for collecting web pages, extracting clean text, triaging and summarizing articles, and exposing the resulting corpus.
+Serve your LLM the premium cut. `web_page_filet_mignon` is a Rust workspace
+for collecting web pages, extracting clean text, triaging and summarizing
+articles, and exposing the resulting corpus through batch and desktop tools.
 
 You need an OpenAI API key, but the costs are intentionally kept low by pushing as much work as possible into deterministic processing.
 
-## What Is In This Repo
+The supported desktop experience is a Tauri window backed by the Rust core and
+the built frontend. Deterministic processing keeps API use and costs bounded.
 
-- `harvester_app` — the native desktop application
-- `harvester_batch` — batch-oriented ingestion/export pipeline
-- `scripts/` — the two launchers and supporting PowerShell utilities
-- `docs/` — architecture notes, plans, prompt context, and engineering diary
+## Repository tour
+
+- `crates/harvester_core` — domain state, reducer/update logic, pipeline
+  messages, and view snapshots
+- `crates/harvester_engine` — fetching, extraction, persistence, and LLM
+  workflows
+- `crates/harvester_io` — runtime paths, host bootstrap, run locking, and
+  effect execution
+- `crates/harvester_ui_bridge` — the restricted desktop IPC contract and
+  snapshot projection
+- `crates/harvester_ui` — the non-default Tauri desktop host
+- `crates/harvester_batch` — batch-oriented ingestion and export host
+- `crates/engine_logging` and `crates/openai_provider_kit` — shared workspace
+  support crates
+- `frontend/` — the separately built desktop frontend
+- `scripts/` — launchers and supporting PowerShell utilities
+- `docs/` — architecture, security, corpus format, plans, and engineering
+  history
 
 ## Prerequisites
 
 - Rust toolchain with `cargo`
-- Node.js/npm for the separately built desktop frontend
+- Node.js/npm for the desktop frontend
 - Microsoft Edge WebView2 Evergreen Runtime for the Tauri desktop window
-- PowerShell 7 for the two launchers and supporting scripts
-- A PowerShell profile that loads the external `SecretLaunch` module and provides `Invoke-WithSecretMap` and `Test-SecretStorePromptAvailable`, plus SecretStore vault entries named `BraveSearchApiKey` and `OpenAIProductionKey`. Run the launchers from a session with that profile loaded; the launchers do not load it themselves.
-- The launchers retrieve `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` from encrypted SecretStore vault entries and inject them into the launched process. If either variable already has a non-empty value in the parent shell, the launcher warns rather than refuses; that value is inherited by both `cargo build` and the child process.
+- PowerShell 7
+- A PowerShell profile that loads the external `SecretLaunch` module and
+  provides `Invoke-WithSecretMap` and `Test-SecretStorePromptAvailable`, plus
+  SecretStore vault entries named `BraveSearchApiKey` and
+  `OpenAIProductionKey`. Run launchers from a session with that profile loaded;
+  they do not load it themselves.
+- The launchers retrieve `BRAVE_SEARCH_API_KEY` and `OPENAI_API_KEY` from
+  encrypted SecretStore entries and inject them into the launched process. If
+  either variable already has a non-empty parent value, the launcher warns
+  rather than refuses; that value is inherited by Cargo and the child process.
 
 Each Brave source names its own key environment variable with `api_key_env` in
 `output/.sources.ron`; the name in use is `BRAVE_SEARCH_API_KEY`, so a Brave
@@ -34,12 +54,6 @@ Build the workspace:
 
 ```powershell
 cargo build
-```
-
-Run the desktop app:
-
-```powershell
-.\scripts\Start-HarvesterApp.ps1
 ```
 
 Run the Tauri desktop UI:

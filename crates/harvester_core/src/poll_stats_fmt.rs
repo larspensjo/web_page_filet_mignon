@@ -80,7 +80,7 @@ fn format_poll_quota_warning(warning: &PollQuotaWarning) -> String {
         }
     };
     format!(
-        "## LLM quota warning\n\nThe latest poll emitted {} URLs. This is an upper-bound estimate and may require up to {} triage LLM calls before summaries or briefing generation.\n\nLLM calls remaining this session: {} / {}.\nSummary and briefing calls use the same internal quota.\nRestart harvester_app to reset the internal session quota, or reduce the batch before running AI workflows.\n\nSeverity: {}.",
+        "## LLM quota warning\n\nThe latest poll emitted {} URLs. This is an upper-bound estimate and may require up to {} triage LLM calls before summaries or briefing generation.\n\nLLM calls remaining this session: {} / {}.\nSummary and briefing calls use the same internal quota.\nRestart the Harvester session to reset the internal session quota, or reduce the batch before running AI workflows.\n\nSeverity: {}.",
         warning.estimated_triage_calls,
         warning.estimated_triage_calls,
         warning.remaining_calls,

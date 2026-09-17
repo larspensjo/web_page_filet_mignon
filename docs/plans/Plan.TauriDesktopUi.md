@@ -1962,6 +1962,9 @@ reducer-generated contract fixtures. Implementation entry in
 
 ### Phase 7 — Retirement
 
+**Run 1 progress.** Run 1 landed items 1, 2, 9, 10, and the run-1 documentation
+updates. The submodule is removed from both Cargo and git.
+
 1. **Delete `crates/harvester_app` and remove it from BOTH `[workspace] members`
    and `[workspace] default-members` in the root `Cargo.toml`.** Both, in the same
    edit — leaving it in either list makes every root cargo command fail

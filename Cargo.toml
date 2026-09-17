@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/openai_provider_kit",
-    "crates/harvester_app",
     "crates/harvester_core",
     "crates/harvester_engine",
     "crates/harvester_io",
@@ -9,18 +8,15 @@ members = [
     "crates/engine_logging",
     "crates/harvester_ui_bridge",
     "crates/harvester_ui",
-    "src/CommanDuctUI",
 ]
 default-members = [
     "crates/openai_provider_kit",
-    "crates/harvester_app",
     "crates/harvester_core",
     "crates/harvester_engine",
     "crates/harvester_io",
     "crates/harvester_batch",
     "crates/engine_logging",
     "crates/harvester_ui_bridge",
-    "src/CommanDuctUI",
 ]
 resolver = "2"
 

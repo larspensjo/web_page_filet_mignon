@@ -2,17 +2,6 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug harvester_app",
-      "type": "cppvsdbg",
-      "request": "launch",
-      "program": "${workspaceFolder}/target/debug/harvester_app.exe",
-      "args": [],
-      "cwd": "${workspaceFolder}",
-      "console": "integratedTerminal",
-      "stopAtEntry": false,
-      "preLaunchTask": "Build workspace"
-    },
-    {
       "name": "Debug scripts/debug.ps1",
       "type": "PowerShell",
       "request": "launch",

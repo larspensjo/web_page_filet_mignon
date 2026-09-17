@@ -119,20 +119,9 @@ Describe 'Harvester launch policy' {
         $script:CommandsAvailable = $true
     }
 
-    It 'returns the app policy and launches its debug binary' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
-        $calls = New-Calls
-        $code = 1
-
-        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
-            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
-            -SecretInvoker (New-SecretFake -Calls $calls) `
-            -PromptCheck { $true } `
-            -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
-
-        @($calls.BuildPackages) | Should -Be @('harvester_app')
-        $calls.Executable | Should -Be (Join-Path $script:TestRoot 'target\debug\harvester_app.exe')
-        $calls.SecretInvocations | Should -Be 1
+    It 'rejects the retired desktop launch policy' {
+        { Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot } |
+            Should -Throw -ExceptionType ([System.Management.Automation.ParameterBindingException])
     }
 
     It 'continues launching when UTF-8 process encoding setup fails' {
@@ -140,7 +129,7 @@ Describe 'Harvester launch policy' {
             throw 'encoding setup unavailable in this host'
         }
 
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = New-Calls
         $code = 1
 
@@ -278,10 +267,10 @@ Describe 'Harvester launch policy' {
     }
 
     It 'keeps the repository root on the spec as the launch location source of truth' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
 
         $spec.RepositoryRoot | Should -Be ([System.IO.Path]::GetFullPath($script:TestRoot))
-        $spec.ExecutablePath | Should -Be (Join-Path $spec.RepositoryRoot 'target\debug\harvester_app.exe')
+        $spec.ExecutablePath | Should -Be (Join-Path $spec.RepositoryRoot 'target\debug\harvester_ui.exe')
         (Get-Command Invoke-HarvesterLaunch).Parameters.Keys | Should -Not -Contain 'RepositoryRoot'
     }
 
@@ -329,8 +318,8 @@ Describe 'Harvester launch policy' {
         }
     }
 
-    It 'uses exactly the two app secret mappings and no runtime arguments' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+    It 'uses exactly the two UI secret mappings and no runtime arguments' {
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = New-Calls
         $code = 1
 
@@ -340,7 +329,7 @@ Describe 'Harvester launch policy' {
             -PromptCheck { $true } `
             -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
 
-        @($calls.BuildPackages) | Should -Be @('harvester_app')
+        @($calls.BuildPackages) | Should -Be @('harvester_ui')
         @($calls.SecretMap.Keys) | Should -Be @('BraveSearchApiKey', 'OpenAIProductionKey')
         @($calls.SecretMap.Values) | Should -Be @('BRAVE_SEARCH_API_KEY', 'OPENAI_API_KEY')
         @($calls.Arguments).Count | Should -Be 0
@@ -364,7 +353,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'does not select forbidden secrets or inject any other environment variable' {
-        foreach ($name in @('App', 'Batch')) {
+        foreach ($name in @('Ui', 'Batch')) {
             $spec = Get-HarvesterLaunchSpec -Name $name -RepositoryRoot $script:TestRoot
             @($spec.SecretEnvironmentMap.Keys) | Should -Not -Contain 'DeepSeekProductionKey'
             @($spec.SecretEnvironmentMap.Keys) | Should -Not -Contain 'MoonshotApiKey'
@@ -374,7 +363,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'stops after a build failure without invoking secrets' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = New-Calls
         $code = 1
 
@@ -390,7 +379,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'warns and continues for a key set persistently for the Windows user account' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $spec.SecretEnvironmentMap = [ordered]@{ DummySecret = 'HARVESTER_TEST_PARENT_KEY' }
         $calls = New-Calls
         $probe = New-EnvironmentVariableProbe -Values @{
@@ -413,7 +402,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'warns and continues for a key set only in the current session' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $spec.SecretEnvironmentMap = [ordered]@{ DummySecret = 'HARVESTER_TEST_PARENT_KEY' }
         $calls = New-Calls
         $probe = New-EnvironmentVariableProbe -Values @{
@@ -435,7 +424,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'does not warn or block for a blank parent variable' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $spec.SecretEnvironmentMap = [ordered]@{ DummySecret = 'HARVESTER_TEST_PARENT_KEY' }
         $calls = New-Calls
         $probe = New-EnvironmentVariableProbe -Values @{
@@ -457,7 +446,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'puts the child exit code in the ref and emits no success-stream output' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = New-Calls
         $code = 1
         $output = @(
@@ -490,7 +479,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'restores the working directory after a successful launch' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = New-Calls
         $before = (Get-Location).Path
         $code = 1
@@ -505,7 +494,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'restores the working directory after a failed launch' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = New-Calls
         $before = (Get-Location).Path
         $code = 1
@@ -522,7 +511,7 @@ Describe 'Harvester launch policy' {
     }
 
     It 'fails fast in a non-interactive session before building' {
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = New-Calls
         $code = 1
 
@@ -539,7 +528,7 @@ Describe 'Harvester launch policy' {
 
     It 'reports the missing secret helper and does not build' {
         $script:CommandsAvailable = $false
-        $spec = Get-HarvesterLaunchSpec -Name App -RepositoryRoot $script:TestRoot
+        $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = New-Calls
         $code = 1
 
@@ -557,7 +546,6 @@ Describe 'Harvester launch policy' {
 
 Describe 'Harvester launcher script contracts' {
     It '<file> parses, has no parameter block, and gets a launch spec' -ForEach @(
-        @{ file = 'Start-HarvesterApp.ps1' }
         @{ file = 'Start-HarvesterBatch.ps1' }
         @{ file = 'Start-HarvesterUi.ps1' }
     ) {

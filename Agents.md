@@ -27,9 +27,6 @@ terms of observable outcomes.
 
 - Preserve input -> action -> reducer -> state -> render. Reducers are pure;
   side effects return through actions. Keep entry points and orchestration thin.
-- `CommanDuctUI` is generic infrastructure: keep Harvester-specific terminology
-  and behavior out. Changes require a version and changelog update and must
-  preserve dark-theme support.
 - Runtime logging uses `engine_logging`, with enough context to identify the
   failing job, URL, or operation.
 - Launch scripts encode a fixed launch policy; change them when that policy
@@ -38,7 +35,7 @@ terms of observable outcomes.
   `CORPUS_SCHEMA_VERSION` when compatibility changes, and synchronize
   `harvester-corpus.json` generation and tests.
 - UI work follows `docs/visual_design/VisualDesignSpec.md`: the warm dark-theme
-  Tauri desktop UI. The legacy Win32 host remains frozen until phase 7.
+  Tauri desktop UI is the supported desktop host.
 
 ## Secrets and verification
 

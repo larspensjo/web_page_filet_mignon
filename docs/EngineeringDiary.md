@@ -2308,3 +2308,10 @@ Change: Drew the mark directly as SVG (`harvester-mark.svg`, a `currentColor` mo
 Lessons Learned: A build script that prints any `rerun-if-changed` makes Cargo watch only those paths. The host's script watched the lockfile alone, so a replaced `icon.ico` produced a "Finished" build with the old executable and old icon. Check the output timestamp before trusting a resource change.
 Prevention: `build.rs` now declares `icons/icon.ico` as a rerun trigger.
 Refs: assets/identity/source/render.py, assets/identity/source/identity-sheet.md, crates/harvester_ui/build.rs, crates/harvester_ui/icons/icon.ico
+
+## 2026-09-16 - Phase 7 retirement run 1
+Type: Implementation
+Context: The Tauri desktop host had replaced the legacy desktop host, but the old host, its UI submodule, and its launch/statistics surfaces were still part of the repository's build and launch contracts.
+Change: Removed the retired host from the workspace and VS Code configurations, removed its launch policy and script, narrowed launcher tests to Batch and Ui, removed submodule accounting from project statistics, and updated the architecture, threat model, README, and agent guidance for the supported Tauri host. The submodule directory remains until the user removes its git index entry.
+Lessons Learned: A host retirement must be checked across workspace membership, default membership, launch policy, editor tasks, and reporting code; removing only the source crate leaves stale operational contracts behind.
+Refs: Cargo.toml, scripts/lib/HarvesterLaunch.psm1, scripts/project-stats.ps1, docs/plans/Plan.TauriDesktopUi.md
