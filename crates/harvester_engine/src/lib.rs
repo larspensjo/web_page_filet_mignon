@@ -11,6 +11,8 @@ mod corpus_manifest;
 mod decode;
 mod domain;
 mod engine;
+#[cfg(feature = "eval-support")]
+pub mod eval_support;
 mod export;
 mod extract;
 mod fetch;

@@ -49,7 +49,8 @@ Done means:
   with the rendered messages, raw response, usage, cost and wall time. Zero
   OpenAI spend and byte-identical article text for both arms.
   *Rejected:* re-running OpenAI (cost, and unnecessary).
-- **Selection = most recent N (default 200) distinct articles whose recording
+- **Selection = most recent N (default 800, settled by the Phase 1 dry-run)
+  distinct articles whose recording
   matches today's prompt identity**: `ArticleTriage` v4 rendered with the
   current `contexts/article_triage.toml` rubric (meta version 3). Matching is by
   comparing the recorded `rendered_system_message` with what the current
@@ -404,7 +405,7 @@ design holds. Entirely keyless.
    `--experiment-dir <path>` (default `.local/experiments/jev-triage`), and the
    subcommands `freeze` and `report`. Logging is initialised through
    `engine_logging::initialize_at(<experiment-dir>/harvester_eval.log)`.
-   - `freeze --output-dir <dir> [--linked-dir <dir>] [--limit 200]
+   - `freeze --output-dir <dir> [--linked-dir <dir>] [--limit 800]
      [--prompt-version 4] [--context-file contexts/article_triage.toml]
      [--dev-share 0.5] [--split-seed <u64>] [--min-priority-5 16]
      [--dry-run] [--precondition-report <path>]`
@@ -1217,10 +1218,9 @@ gains a regression test built from the real response bytes.
    never set or adjusted after seeing the held-out results**; a later change
    starts a new round with a fresh held-out sample. Cost is recorded in the
    report and is deliberately not a threshold.
-3. **Held-out run**: roughly 200 articles minus the development share (the
-   Phase 1 dry-run decides whether that sample size and its priority-5 support
-   are adequate, or whether the selection must stratify), concurrency 1,
-   frozen configuration.
+3. **Held-out run**: the held-out half of the 800-article freeze (roughly 400
+   articles; see Open Question 2, now settled), concurrency 1, frozen
+   configuration.
 4. **Optional stability run**: a fixed 20-article subset with `repeat = 3`,
    reported separately.
 5. **Optional bounded-concurrency run**: reported separately and never mixed
@@ -1371,12 +1371,14 @@ new tool. It stays a sketch until the triage verdict is in.
 1. **Acceptance thresholds.** Deliberately open at planning time. They must be
    agreed and written into `[acceptance]` before the held-out run, and the
    runner refuses to send any held-out article without them.
-2. **Whether "most recent 200" stands.** The Phase 1 dry-run against the real
-   corpus decides this. At the measured 8% priority-5 rate, 200 articles give
-   roughly 16 priority-5 examples, which is too few for a precise recall figure.
-   If the mapping coverage or the priority-5 support is poor, the user chooses
-   between a larger N, stratified sampling, or oversampling priorities 4–5 with
-   the resulting class-balance caveat stated in the report.
+2. **Settled 2026-09-17: most recent 800, not 200.** The Phase 1 dry-run
+   against the real corpus (7,141 matching recordings, 99% hash-mapped, none
+   truncated) measured priority 5 at 4.5%, not 8%. Most recent 200 gave 9
+   priority-5 and 82 priority-4+5 articles; 400 gave 23 and 164; 800 (about 18
+   days) gave 54 and 331, roughly 27 and 165 in the held-out half. The user
+   chose 800 over 400, 200 or oversampling priorities 4–5: quality first, and
+   only 800 gives usable priority-5 support. The natural priority mix is kept, so
+   no class-balance caveat applies. `--limit` defaults to 800.
 3. **Live-only facts that can change the design.** Whether the shared request
    budget accommodates the priority, relevance, five category and roughly thirty
    tag questions alongside a long article in one call; whether question text is

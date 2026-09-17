@@ -8,6 +8,7 @@ members = [
     "crates/engine_logging",
     "crates/harvester_ui_bridge",
     "crates/harvester_ui",
+    "crates/harvester_eval",
 ]
 default-members = [
     "crates/openai_provider_kit",

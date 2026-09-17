@@ -85,7 +85,7 @@ fn article_header_length(idx: usize, article: &ArticlePackage) -> usize {
     format!("--- Article {}: {} ---", idx + 1, article.title()).len()
 }
 
-fn build_content_prep_config() -> ContentPrepConfig {
+pub(crate) fn build_content_prep_config() -> ContentPrepConfig {
     ContentPrepConfig {
         normalization: NormalizationPolicy::default(),
         boilerplate: BoilerplatePolicy::default(),

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+eval-support = []
+
 [dependencies]
 engine_logging = { path = "../engine_logging" }
 openai_provider_kit = { path = "../openai_provider_kit", features = ["test-support"] }

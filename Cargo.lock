@@ -1775,6 +1775,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "harvester_eval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "engine_logging",
+ "harvester_engine",
+ "hex",
+ "log",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml 1.1.6+spec-1.1.0",
+]
+
+[[package]]
 name = "harvester_io"
 version = "0.1.0"
 dependencies = [
