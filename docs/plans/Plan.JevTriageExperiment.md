@@ -88,7 +88,7 @@ Done means:
 - **The Jev HTTP adapter lives in the experiment crate**, not in
   `openai_provider_kit`: its request/response shape (state + questions →
   answers with probabilities/confidence/usage) is not a chat completion. It uses
-  `reqwest` directly, reads `TYPESAFE_API_KEY` from the environment, never logs
+  `reqwest` directly, reads `TYPESAFE_AI_API_KEY` from the environment, never logs
   the key or headers, treats 401/422 as terminal, retries 429/529 and transport
   failures with bounded exponential backoff plus jitter, and records attempt
   count, HTTP status, model-only latency and total elapsed.
@@ -147,11 +147,14 @@ Done means:
   check TypeSafe's data-retention and training-on-input terms before the first
   live call. A `Start-HarvesterEval.ps1` launcher injects the TypeSafe key from
   the vault exactly as the existing launchers do, so no loose key sits in the
-  session; the tool still reads `TYPESAFE_API_KEY` from its environment.
-- **Vault secret name** (user decision): `TypeSafeApiKey -> TYPESAFE_API_KEY`,
+  session; the tool still reads `TYPESAFE_AI_API_KEY` from its environment.
+- **Vault secret name** (user decision): `TypesafeAiApiKey -> TYPESAFE_AI_API_KEY`,
   alongside the existing `BraveSearchApiKey` and `OpenAIProductionKey` entries
-  in `scripts/lib/HarvesterLaunch.psm1`. The runbook tells the user to store the
-  key in the SecretStore vault under that name. Whether the profile's
+  in `scripts/lib/HarvesterLaunch.psm1`. Updated 2026-09-17: the user has stored
+  the key under this name (replacing the earlier `TypeSafeApiKey ->
+  TYPESAFE_API_KEY`), so the runbook confirms the entry rather than creating it.
+  The vendor SDK reads `TYPESAFE_API_KEY`, but this tool uses no SDK and reads
+  only `TYPESAFE_AI_API_KEY`. Whether the profile's
   `Invoke-WithSecretMap` accepts a name it has not seen before is an
   investigation item inside Phase 5, with a documented manual-vault-entry
   fallback — not an open question for the plan.
@@ -734,7 +737,7 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
 - **Precedence**: a CLI `--transport fake` overrides `transport = "live"` in the
   configuration, and the resolved value is what `run.json` records.
 - **Secret hygiene**: the `Debug` and `Display` renderings of the request, the
-  config and every error type contain no `TYPESAFE_API_KEY` value when one is
+  config and every error type contain no `TYPESAFE_AI_API_KEY` value when one is
   set in the process environment during the test.
 
 ### Verification (from the repository root)
@@ -754,7 +757,7 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
 2. **`src/jev/transport.rs`**: a `JevTransport` trait
    (`async fn send(&self, request: &JevRequest) -> TransportOutcome`) with two
    implementations:
-   - `HttpTransport`: bearer auth from `TYPESAFE_API_KEY`, per-request timeout,
+   - `HttpTransport`: bearer auth from `TYPESAFE_AI_API_KEY`, per-request timeout,
      returns status, body bytes and the model-only elapsed time. The key is read
      once at construction; it never appears in a log line, an error, a record or
      a report. A missing or empty key is a clear startup error naming the
@@ -904,7 +907,7 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
   that contains held-out articles does the same**; `split = "all"` over a
   dev-only manifest proceeds; the gate fires identically when the split comes
   from the configuration with no CLI flag.
-- **Key hygiene**: with a dummy `TYPESAFE_API_KEY` set, no artefact written by a
+- **Key hygiene**: with a dummy `TYPESAFE_AI_API_KEY` set, no artefact written by a
   fake-transport run (records, raw files, `run.json`, log) contains the value.
 
 ### Verification (from the repository root)
@@ -1085,7 +1088,7 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
 1. **`scripts/lib/HarvesterLaunch.psm1`**: add an `Eval` launch policy.
    - `Package = 'harvester_eval'`, `BinaryName = 'harvester_eval.exe'`,
      `FrontendDirectory = $null`, `FrontendBuildCommand = $null`.
-   - `SecretEnvironmentMap = [ordered]@{ TypeSafeApiKey = 'TYPESAFE_API_KEY' }`
+   - `SecretEnvironmentMap = [ordered]@{ TypesafeAiApiKey = 'TYPESAFE_AI_API_KEY' }`
      — **only** the TypeSafe key. The experiment tool never calls OpenAI or
      Brave, so those secrets are not injected.
    - `RuntimeArguments = @('run', '--config',
@@ -1106,24 +1109,24 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
    launcher at all.
 3. **Vault-name investigation** (Phase 5 work item, not an open question): check
    that the profile's `Invoke-WithSecretMap` resolves a vault secret named
-   `TypeSafeApiKey` that it has not seen before. If it only accepts a known set,
+   `TypesafeAiApiKey` that it has not seen before. If it only accepts a known set,
    the runbook documents the manual fallback — create the vault entry under the
    name the profile expects and record that name in the runbook and in the
    policy table. The code path does not change either way: the tool reads
-   `TYPESAFE_API_KEY` from its environment.
+   `TYPESAFE_AI_API_KEY` from its environment.
 4. **`scripts/tests/HarvesterLaunch.Tests.ps1`**: add cases, all keyless and all
    using the existing mocked `BuildInvoker`/`SecretInvoker` seams.
    - The `Eval` spec returns the `harvester_eval` package, the
      `target\debug\harvester_eval.exe` path, no frontend fields, and exactly the
      fixed runtime arguments (`run --config …\active-run.toml`).
-   - The `Eval` secret map is exactly `TypeSafeApiKey -> TYPESAFE_API_KEY`, and
+   - The `Eval` secret map is exactly `TypesafeAiApiKey -> TYPESAFE_AI_API_KEY`, and
      contains neither `OpenAIProductionKey` nor `BraveSearchApiKey`.
    - `Get-HarvesterLaunchSpec -Name Eval` returns an independent copy of the
      runtime-argument array (the existing mutation test, extended).
    - `Invoke-HarvesterLaunch` with the `Eval` spec builds `harvester_eval` once,
      with no npm step, and invokes the secret wrapper once with the fixed
      arguments.
-   - The inherited-key warning fires for `TYPESAFE_API_KEY` when the probe
+   - The inherited-key warning fires for `TYPESAFE_AI_API_KEY` when the probe
      reports it set in the parent process.
    - Add `Start-HarvesterEval.ps1` to the launcher-script contract `-ForEach`
      list (parses, no parameter block, calls `Get-HarvesterLaunchSpec`).
@@ -1131,7 +1134,7 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
    - Step 0: check TypeSafe's data-retention and training-on-input terms before
      any live call; the experiment sends full article text.
    - Step 1: store the TypeSafe key in the SecretStore vault as
-     **`TypeSafeApiKey`**, and confirm `TYPESAFE_API_KEY` is **not** set
+     **`TypesafeAiApiKey`**, and confirm `TYPESAFE_AI_API_KEY` is **not** set
      persistently in the session (the launcher warns if it is).
    - Step 2: keyless preparation — `freeze --dry-run`, review the preconditions,
      then `freeze`, then `report --baseline-only`.
