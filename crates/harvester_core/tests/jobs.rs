@@ -61,7 +61,8 @@ fn job_progress_updates_stage_tokens_and_bytes() {
     );
     let job1 = next
         .view()
-        .jobs
+        .desktop_job_list
+        .rows
         .iter()
         .find(|j| j.job_id == 1)
         .unwrap()
@@ -89,7 +90,8 @@ fn job_done_transitions_to_done() {
     );
     let job1 = next
         .view()
-        .jobs
+        .desktop_job_list
+        .rows
         .iter()
         .find(|j| j.job_id == 1)
         .unwrap()
@@ -105,7 +107,13 @@ fn jobs_are_ordered_by_btree_key() {
     let (mut state, _effects) = submit_urls(state, "b.com\na.com\n");
 
     // BTreeMap iteration should yield deterministic ascending JobId order (1,2,...)
-    let ids: Vec<_> = state.view().jobs.iter().map(|j| j.job_id).collect();
+    let ids: Vec<_> = state
+        .view()
+        .desktop_job_list
+        .rows
+        .iter()
+        .map(|j| j.job_id)
+        .collect();
     assert_eq!(ids, vec![1, 2]);
     assert!(state.consume_dirty());
 }

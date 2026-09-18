@@ -2315,3 +2315,9 @@ Context: The Tauri desktop host had replaced the legacy desktop host, but the ol
 Change: Removed the retired host from the workspace and VS Code configurations, removed its launch policy and script, narrowed launcher tests to Batch and Ui, removed submodule accounting from project statistics, and updated the architecture, threat model, README, and agent guidance for the supported Tauri host. The submodule directory remains until the user removes its git index entry.
 Lessons Learned: A host retirement must be checked across workspace membership, default membership, launch policy, editor tasks, and reporting code; removing only the source crate leaves stale operational contracts behind.
 Refs: Cargo.toml, scripts/lib/HarvesterLaunch.psm1, scripts/project-stats.ps1, docs/plans/Plan.TauriDesktopUi.md
+
+## 2026-09-17 - Phase 7 retirement run 2
+Type: Implementation
+Context: The Tauri desktop host no longer needed the Win32 layout, tab navigation, full-corpus job view, or briefing body UI surfaces retained during coexistence.
+Change: Removed those Win32-only core and IPC fields, retained the compiled briefing domain workflow, made the desktop job list the sole projection, removed summary-heading compensation, and regenerated the versioned snapshot fixtures.
+Refs: crates/harvester_core/src/view_model.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_ui_bridge/src/snapshot.rs, frontend/src/components/ReadingPane.tsx

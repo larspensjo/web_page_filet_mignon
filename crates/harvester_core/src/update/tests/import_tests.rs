@@ -345,9 +345,9 @@ fn poll_failed_increments_progress() {
 }
 
 #[test]
-fn poll_ended_auto_switches_to_poll_stats_tab() {
+fn poll_ended_preserves_the_current_desktop_workspace() {
     let state = AppState::new();
     let (state, _) = update(state, Msg::PollSourcesClicked);
     let (state, _) = update(state, Msg::AllSourcesPollEnded);
-    assert_eq!(state.active_tab(), AppTab::PollStats);
+    assert_eq!(state.workspace_view(), crate::WorkspaceView::Review);
 }

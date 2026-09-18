@@ -2,25 +2,17 @@ use crate::briefing::BriefingSession;
 use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
 };
-#[cfg(test)]
-use crate::preview::{self, PreviewContentKind};
 use crate::prompt_lab::{
     PromptLabRunId, PromptLabRunOverrides, PromptLabStage, PromptLabState,
     PromptLabTemplateSnapshot,
 };
 use crate::source_state::SourceStateIndex;
 use crate::summary_cache::SummaryCache;
-use crate::tabs::{
-    AppTab, JobListMode, JobListScope, LeftTab, ReadingPaneMode, TrendCategory, WorkspaceView,
-};
+use crate::tabs::{JobListMode, TrendCategory, WorkspaceView};
 use crate::triage::{ArticleTriageResult, TriagePhase, TriageSession};
 use crate::triage_cache::TriageCache;
 use crate::url_age::AgeEstimate;
-#[cfg(test)]
-use crate::view_model::JobFilterStatus;
 use crate::view_model::LastPasteStats;
-#[cfg(test)]
-use crate::view_model::OperationProgress;
 use crate::Effect;
 use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
 use harvester_engine::LinkKind;
@@ -49,22 +41,29 @@ mod source_poll;
 mod ui_state;
 mod view_builder;
 
+#[cfg(test)]
+mod tests;
+
 use briefing_orchestration::BriefingOrchestration;
 use cache_state::{
     MetadataLoadState, SummaryCacheMetadataSnapshot, SummaryCacheMetrics,
     TriageCacheMetadataSnapshot, TriageCacheRunMetrics,
 };
-#[cfg(test)]
-use indirect_links::IndirectLink;
 use indirect_links::IndirectLinkPool;
 use job_state::JobState;
+use link_helpers::{
+    build_link_rows, domain_from_url, map_job_filter_status, normalize_extracted_link,
+};
+use ui_state::{MetricsState, PreviewState, UiState};
+
+#[cfg(test)]
+use crate::preview::{self, PreviewContentKind};
+#[cfg(test)]
+use crate::view_model::JobFilterStatus;
+#[cfg(test)]
+use indirect_links::IndirectLink;
 #[cfg(test)]
 use job_state::PreviewQuality;
-use link_helpers::{
-    build_link_rows, domain_from_url, format_lab_briefing_markdown, format_lab_summary_markdown,
-    format_lab_triage_markdown, map_job_filter_status, normalize_extracted_link,
-};
-use ui_state::{MetricsState, PreviewMode, PreviewState, UiState};
 
 pub use provider_alert::ProviderAlert;
 pub(crate) use signal_candidate_access::BriefingGenerateReadiness;
@@ -394,17 +393,10 @@ pub struct AppState {
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
     /// Authoritative session-scoped quota usage and configured limits.
     llm_quota: crate::LlmQuotaState,
-    /// Currently active right-pane tab.
-    active_tab: AppTab,
-    /// Currently active left-pane tab.
-    left_tab: LeftTab,
-    /// Scope filter for job-oriented tabs (All vs SinceCheckpoint).
-    job_list_scope: JobListScope,
     /// Currently active trend category in the Trends tab.
     active_trend_category: TrendCategory,
     workspace_view: WorkspaceView,
     job_list_mode: JobListMode,
-    reading_pane_mode: ReadingPaneMode,
     /// Host-observed time used by deterministic view projection. Hosts must
     /// reduce a `Msg::Tick` before constructing the first view.
     last_observed_utc: Option<chrono::DateTime<chrono::Utc>>,
@@ -519,13 +511,9 @@ impl Default for AppState {
             prompt_lab_templates: default_prompt_template_snapshots(),
             llm_usage_by_model: BTreeMap::new(),
             llm_quota: crate::LlmQuotaState::default(),
-            active_tab: AppTab::default(),
-            left_tab: LeftTab::default(),
-            job_list_scope: JobListScope::default(),
             active_trend_category: TrendCategory::default(),
             workspace_view: WorkspaceView::default(),
             job_list_mode: JobListMode::default(),
-            reading_pane_mode: ReadingPaneMode::default(),
             last_observed_utc: None,
             run_progress: None,
             next_run_id: 1,
@@ -616,6 +604,3 @@ pub enum JobResultKind {
     Success,
     Failed { reason: String },
 }
-
-#[cfg(test)]
-mod tests;

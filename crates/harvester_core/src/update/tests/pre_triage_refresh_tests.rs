@@ -170,14 +170,7 @@ fn triage_articles_load_progress_updates_matching_request() {
         },
     );
 
-    assert_eq!(
-        state.view().operation_progress,
-        Some(crate::view_model::OperationProgress {
-            label: "Updating triage candidates".to_string(),
-            completed: 25,
-            total: 80,
-        })
-    );
+    assert_eq!(state.pre_triage_load_progress(), Some((25, 80, request_id)));
 }
 
 #[test]
@@ -195,14 +188,7 @@ fn triage_articles_load_progress_ignores_stale_request() {
         },
     );
 
-    assert_eq!(
-        state.view().operation_progress,
-        Some(crate::view_model::OperationProgress {
-            label: "Updating triage candidates".to_string(),
-            completed: 0,
-            total: 1,
-        })
-    );
+    assert_eq!(state.pre_triage_load_progress(), None);
 }
 
 #[test]
@@ -227,7 +213,7 @@ fn triage_articles_load_progress_cleared_on_success() {
         },
     );
 
-    assert!(state.view().operation_progress.is_none());
+    assert_eq!(state.pre_triage_load_progress(), None);
 }
 
 #[test]
@@ -252,7 +238,7 @@ fn triage_articles_load_progress_cleared_on_failure() {
         },
     );
 
-    assert!(state.view().operation_progress.is_none());
+    assert_eq!(state.pre_triage_load_progress(), None);
 }
 
 #[test]
@@ -318,7 +304,7 @@ fn restore_completed_jobs_schedules_and_dispatches_after_quiet_window() {
 }
 
 #[test]
-fn restore_completed_jobs_loading_text_explains_startup_preparation() {
+fn restore_completed_jobs_blocks_triage_during_startup_preparation() {
     init_logging();
     let snapshot = vec![crate::CompletedJobSnapshot {
         url: "https://example.com/restored".to_string(),
@@ -333,32 +319,8 @@ fn restore_completed_jobs_loading_text_explains_startup_preparation() {
 
     let view = state.view();
     assert_eq!(
-        view.operation_progress,
-        Some(crate::view_model::OperationProgress {
-            label: "Preparing triage list".to_string(),
-            completed: 0,
-            total: 1,
-        })
-    );
-    assert_eq!(
         view.triage_blocked_reason,
         Some("Triage is unavailable while startup prepares the article set".to_string())
-    );
-}
-
-#[test]
-fn job_done_loading_text_explains_refresh_preparation() {
-    init_logging();
-    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
-
-    let view = state.view();
-    assert_eq!(
-        view.operation_progress,
-        Some(crate::view_model::OperationProgress {
-            label: "Updating triage candidates".to_string(),
-            completed: 0,
-            total: 1,
-        })
     );
 }
 

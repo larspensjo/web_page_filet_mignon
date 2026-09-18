@@ -817,34 +817,6 @@ describe("job list", () => {
 		]);
 	});
 
-	it("suppresses a matching leading summary heading only in the rendered body", async () => {
-		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
-		const reference = rich.view.right_pane.summary_markdown;
-		if (!reference)
-			throw new Error("finished-run fixture must contain a summary body ref");
-		snapshot = rich;
-		const fetchedBody = Object.freeze<BodyResponse>({
-			content_hash: reference.content_hash,
-			text: "# Fixture summary\n\nSummary body",
-		});
-		bodyResponses.set(reference.key, fetchedBody);
-		await renderLoaded();
-		expect(await screen.findByText("Summary body")).toBeInTheDocument();
-		expect(
-			screen.getByRole("heading", { name: "Fixture summary", level: 2 }),
-		).toBeInTheDocument();
-		expect(
-			screen.queryByRole("heading", { name: "Fixture summary", level: 1 }),
-		).not.toBeInTheDocument();
-		expect(bodyResponses.get(reference.key)).toEqual({
-			content_hash: reference.content_hash,
-			text: "# Fixture summary\n\nSummary body",
-		});
-		expect(
-			vi.mocked(invoke).mock.calls.filter(([name]) => name === "fetch_body"),
-		).toEqual([["fetch_body", { key: reference.key }]]);
-	});
-
 	it("keeps a non-matching leading summary heading", async () => {
 		const rich = runFinishedWithNotice as unknown as SnapshotEnvelope;
 		const reference = rich.view.right_pane.summary_markdown;

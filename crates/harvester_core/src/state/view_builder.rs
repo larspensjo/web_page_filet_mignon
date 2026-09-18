@@ -1,26 +1,23 @@
 use super::batch::archive_token_estimates_from_parts;
 use super::{
-    domain_from_url, format_lab_briefing_markdown, format_lab_summary_markdown,
-    format_lab_triage_markdown, map_job_filter_status, AppState, JobResultKind, JobState,
-    PreviewMode, SessionState, Stage,
+    domain_from_url, map_job_filter_status, AppState, JobResultKind, JobState, SessionState, Stage,
 };
 use crate::archive_display::ArchiveCoverage;
-use crate::briefing::{ArticleSummaryResult, BriefingPhase};
+use crate::briefing::ArticleSummaryResult;
 use crate::pre_triage_filter::PreTriagePhase;
 use crate::preview::format_summary_for_preview;
 use crate::signal_candidate::{
     canonical_signal_key, is_signal_key_excluded, ScoredCandidate, SelectionPolicy,
     SignalCandidateSelection, SignalCandidateState,
 };
-use crate::tabs::{AppTab, JobListMode, JobListScope, LeftTab};
+use crate::tabs::JobListMode;
 use crate::triage::{ArticleTriageState, TriagePhase};
 use crate::view_model::{
     AppViewModel, DesktopJobListView, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus,
-    JobListRowView, JobRowView, LayoutViewModel, LeftPaneHeaderView, OperationProgress,
-    PreviewContextView, PreviewHeaderView, RightPaneView, ScoreBand, SelectedJobView,
-    SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView, SignalCandidateRow,
-    SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS,
-    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
+    JobListRowView, JobRowView, LeftPaneHeaderView, PreviewContextView, PreviewHeaderView,
+    RightPaneView, ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome,
+    SignalCandidatePreviewView, SignalCandidateRow, SignalCandidateRowState, TriageAnnotationView,
+    DESKTOP_JOB_LIST_MAX_ROWS, DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
 };
 use chrono::{DateTime, Duration, Utc};
 use harvester_engine::llm::dto::SourceTier;
@@ -43,30 +40,16 @@ fn compare_desktop_job_rows(left: &JobListRowView, right: &JobListRowView) -> Or
 
 impl AppState {
     pub fn view(&self) -> AppViewModel {
-        self.build_view(true)
+        self.build_view()
     }
 
-    /// Builds the desktop-facing view without materializing frozen-renderer arrays.
+    /// Builds the desktop-facing view.
     pub fn desktop_view(&self) -> AppViewModel {
-        self.build_view(false)
+        self.build_view()
     }
 
-    fn build_view(&self, materialize_frozen_jobs: bool) -> AppViewModel {
-        let since = self.briefing_since_utc();
+    fn build_view(&self) -> AppViewModel {
         let summary_lookup = self.build_summary_lookup();
-        let job_metadata = if materialize_frozen_jobs {
-            self.build_job_view_metadata(since, &summary_lookup)
-        } else {
-            Vec::new()
-        };
-        let jobs = if materialize_frozen_jobs {
-            job_metadata
-                .iter()
-                .map(|metadata| self.materialize_job_row(metadata))
-                .collect()
-        } else {
-            Vec::new()
-        };
 
         let selected_job_id = self.ui.selected_job_id();
         let selected_url = selected_job_id
@@ -80,13 +63,7 @@ impl AppState {
         );
         let signal_candidate_preview =
             self.signal_candidate_preview_for_selected_job(selected_job_id);
-        let briefing_preview = self.briefing.format_preview();
-        let preview_text = match self.ui.preview_mode() {
-            PreviewMode::SelectedJob => self.ui.preview_content().map(ToOwned::to_owned),
-            PreviewMode::Briefing => briefing_preview
-                .clone()
-                .or_else(|| self.ui.preview_content().map(ToOwned::to_owned)),
-        };
+        let preview_text = self.ui.preview_content().map(ToOwned::to_owned);
         let preview_header = self
             .ui
             .selected_job_id()
@@ -105,35 +82,28 @@ impl AppState {
                 }
             });
         let jobs_search_query = self.jobs_search_query().to_string();
-        let legacy_job_list = self.build_legacy_job_list_metrics(
-            &jobs_search_query,
-            &summary_lookup,
-            selected_job_id,
-            materialize_frozen_jobs,
-        );
-        let visible_jobs_after_filter = if materialize_frozen_jobs {
-            legacy_job_list.visible_job_ids.clone()
-        } else {
-            Vec::new()
+        let first_visible_job_id = desktop_job_list.rows.first().map(|row| row.job_id);
+        let selected_jobs_visible_in_filter = selected_job_id
+            .is_some_and(|job_id| desktop_job_list.rows.iter().any(|row| row.job_id == job_id));
+        let left_pane_header = LeftPaneHeaderView {
+            title: "Jobs".to_string(),
+            scope_label: Some(
+                match desktop_job_list.mode {
+                    JobListMode::Results => "Results",
+                    JobListMode::SinceCheckpoint => "Since checkpoint",
+                    JobListMode::Last24Hours => "Last 24 hours",
+                }
+                .to_string(),
+            ),
+            count_label: Some(format!("{} jobs", desktop_job_list.scoped_count)),
+            state_label: (desktop_job_list.scoped_count == 0)
+                .then_some("no jobs in scope".to_string()),
         };
-        let first_visible_job_id = legacy_job_list.first_visible_job_id;
-        let selected_jobs_visible_in_filter = legacy_job_list.selected_job_visible;
-        let left_pane_header = build_left_pane_header_view(LeftPaneHeaderInputs {
-            left_tab: self.left_tab,
-            job_list_scope: self.job_list_scope,
-            scoped_count: legacy_job_list.scoped_count,
-            review_needed_count: legacy_job_list.review_needed_count,
-            triage_result_count: legacy_job_list.triage_result_count,
-            visible_job_count: legacy_job_list.visible_job_count,
-            jobs_search_query: &jobs_search_query,
-            ai_unavailable_message: self.ai_unavailable_message().as_deref(),
-        });
         let preview_context = preview_header.as_ref().map(build_preview_context_view);
-        let preview_header_text = match self.active_tab() {
-            AppTab::Briefing => Some(self.format_briefing_preview_header()),
-            AppTab::Trends => Some(self.format_trends_preview_header()),
-            AppTab::PollStats => Some("Poll Stats | last poll".to_string()),
-            AppTab::Triage | AppTab::Summary => None,
+        let preview_header_text = match self.workspace_view() {
+            crate::WorkspaceView::Trends => Some(self.format_trends_preview_header()),
+            crate::WorkspaceView::PollStats => Some("Poll Stats | last poll".to_string()),
+            crate::WorkspaceView::Review | crate::WorkspaceView::Blacklist => None,
         };
         let selected_triage_article_available = self
             .ui
@@ -152,7 +122,6 @@ impl AppState {
             })
             .is_some();
         let preview_source = self.ui.preview.content_kind();
-        let operation_progress = self.build_operation_progress();
         let ai_warning_banner = self
             .ai_warning_banner()
             .or_else(|| self.provider_alert_banner());
@@ -232,11 +201,9 @@ impl AppState {
         AppViewModel {
             workspace_view: self.workspace_view(),
             job_list_mode: self.job_list_mode(),
-            reading_pane_mode: self.reading_pane_mode(),
             session: self.session,
             queued_urls: self.ui.urls.clone(),
             job_count: self.jobs.len(),
-            jobs,
             desktop_job_list,
             last_paste_stats: self.last_paste_stats.clone(),
             dirty: self.dirty,
@@ -261,7 +228,6 @@ impl AppState {
                 && self.briefing_ai_available(),
             next_item_enabled: self.briefing.next_item_enabled() && self.briefing_ai_available(),
             summaries_can_start: self.summaries_can_start() && self.briefing_ai_available(),
-            briefing_preview,
             stop_finish_button,
             triage_can_start: self.triage_ai_available()
                 && self.triage.can_start()
@@ -272,8 +238,6 @@ impl AppState {
             ai_unavailable_message,
             triage_blocked_reason,
             briefing_blocked_reason,
-            operation_progress_visible: operation_progress.is_some(),
-            operation_progress,
             run_progress: self
                 .run_progress
                 .as_ref()
@@ -286,15 +250,9 @@ impl AppState {
             poll_indirect_links_enabled: !self.indirect_link_pool.is_empty()
                 && !self.indirect_poll_in_progress(),
             checkpoint_status_message: self.briefing_checkpoint_status_message.clone(),
-            left_panel_width: self.ui.left_panel_width(),
-            input_panel_visible: self.ui.input_panel_visible(),
-            window_width: self.ui.window_width(),
             selected_url,
             left_pane: crate::view_model::LeftPaneView {
-                left_tab: self.left_tab,
-                job_list_scope: self.job_list_scope,
                 jobs_search_query,
-                visible_jobs_after_filter,
                 first_visible_job_id,
                 selected_jobs_visible_in_filter,
                 prompt_lab: crate::view_model::PromptLabView::from_state(
@@ -308,33 +266,13 @@ impl AppState {
             indirect_link_summary: self.build_indirect_link_summary(),
             llm_usage_by_model: self.llm_usage_rows(),
             llm_quota: crate::build_llm_quota_view(self.llm_quota()),
-            right_pane: self.build_right_pane_view(selected_triage_article_available),
+            right_pane: self.build_right_pane_view(),
             blacklist: crate::view_model::BlacklistTabView::from_state(
                 self.blacklist(),
                 self.last_observed_utc()
                     .unwrap_or(chrono::DateTime::UNIX_EPOCH),
             ),
         }
-    }
-
-    fn build_job_view_metadata(
-        &self,
-        since: Option<chrono::DateTime<chrono::Utc>>,
-        summary_lookup: &SummaryLookup,
-    ) -> Vec<JobViewMetadata> {
-        let show_filter_status = self.show_filter_status();
-        self.jobs
-            .iter()
-            .map(|(job_id, job)| {
-                self.enrich_job_view_metadata(
-                    *job_id,
-                    job,
-                    since,
-                    show_filter_status,
-                    summary_lookup,
-                )
-            })
-            .collect()
     }
 
     fn enrich_job_view_metadata(
@@ -521,57 +459,6 @@ impl AppState {
         selection
     }
 
-    fn build_legacy_job_list_metrics(
-        &self,
-        query: &str,
-        summary_lookup: &SummaryLookup,
-        selected_job_id: Option<crate::JobId>,
-        materialize_visible_job_ids: bool,
-    ) -> LegacyJobListMetrics {
-        let since = self.briefing_since_utc();
-        let show_filter_status = self.show_filter_status();
-        let query_lower = query.to_lowercase();
-        let mut metrics = LegacyJobListMetrics::default();
-        for (job_id, job) in &self.jobs {
-            if self.job_list_scope == JobListScope::SinceCheckpoint
-                && !is_since_checkpoint(job, since)
-            {
-                continue;
-            }
-            metrics.scoped_count += 1;
-            if show_filter_status
-                && matches!(
-                    self.pre_triage
-                        .entry_for_url(&job.url)
-                        .map(map_job_filter_status),
-                    Some(JobFilterStatus::ReviewNeeded { .. })
-                )
-            {
-                metrics.review_needed_count += 1;
-            }
-            if self.triage.result_for_url(&job.url).is_some() {
-                metrics.triage_result_count += 1;
-            }
-            if self.left_tab == LeftTab::Jobs
-                && job_matches_search_query(
-                    &job.url,
-                    summary_lookup
-                        .summary_for_job(self, job)
-                        .map(|summary| summary.title.as_str()),
-                    &query_lower,
-                )
-            {
-                metrics.visible_job_count += 1;
-                metrics.first_visible_job_id.get_or_insert(*job_id);
-                metrics.selected_job_visible |= Some(*job_id) == selected_job_id;
-                if materialize_visible_job_ids {
-                    metrics.visible_job_ids.push(*job_id);
-                }
-            }
-        }
-        metrics
-    }
-
     fn show_filter_status(&self) -> bool {
         matches!(
             self.pre_triage.phase(),
@@ -665,72 +552,6 @@ impl AppState {
             truncated: scoped_count > visible_count,
             hidden_without_fetch_time: selection.hidden_without_fetch_time,
         }
-    }
-
-    fn build_operation_progress(&self) -> Option<OperationProgress> {
-        if let Some((completed, total)) = self.source_states.poll_progress() {
-            return Some(OperationProgress {
-                label: "Scanning sources".to_string(),
-                completed: completed as u32,
-                total: total as u32,
-            });
-        }
-
-        if matches!(self.triage.phase(), TriagePhase::Triaging) {
-            let completed = self.triage.completed_count() + self.triage.failed_count();
-            return Some(OperationProgress {
-                label: "Triaging".to_string(),
-                completed: completed as u32,
-                total: self.triage.total() as u32,
-            });
-        }
-
-        if matches!(self.briefing.phase(), BriefingPhase::Summarizing) {
-            let completed =
-                self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
-            return Some(OperationProgress {
-                label: "Summarizing".to_string(),
-                completed: completed as u32,
-                total: self.briefing.total() as u32,
-            });
-        }
-
-        {
-            let session = &self.signal_candidate;
-            let completed = session.completed_count() + session.failed_count();
-            let total = session.enqueued_count();
-            if total > completed {
-                return Some(OperationProgress {
-                    label: "Scoring signals".to_string(),
-                    completed,
-                    total,
-                });
-            }
-        }
-
-        if let Some((completed, total)) = self.poll_pipeline_article_progress() {
-            return Some(OperationProgress {
-                label: "Downloading articles".to_string(),
-                completed: completed as u32,
-                total: total as u32,
-            });
-        }
-
-        if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
-            let (completed, total) = self
-                .pre_triage_load_progress()
-                .and_then(|(files_scanned, files_total, _)| {
-                    (files_total > 0).then_some((files_scanned as u32, files_total as u32))
-                })
-                .unwrap_or((0, 1));
-            return Some(OperationProgress {
-                label: self.pre_triage_loading_operation_label(),
-                completed,
-                total,
-            });
-        }
-
-        None
     }
 
     pub fn build_signal_candidate_rows(&self) -> Vec<SignalCandidateRow> {
@@ -908,86 +729,11 @@ impl AppState {
         })
     }
 
-    fn format_briefing_preview_header(&self) -> String {
-        let total = self.briefing.articles().len();
-        let scope = if self.briefing_since_utc().is_some() {
-            "Since checkpoint"
-        } else {
-            "All articles"
-        };
-        let status = match self.briefing.phase() {
-            BriefingPhase::Idle => "Idle".to_string(),
-            BriefingPhase::LoadingArticles => "Loading articles".to_string(),
-            BriefingPhase::Summarizing => {
-                let settled =
-                    self.briefing.completed_summary_count() + self.briefing.failed_summary_count();
-                format!("Summaries {settled}/{total}")
-            }
-            BriefingPhase::AwaitingBatch => "Awaiting batch".to_string(),
-            BriefingPhase::GeneratingBriefing => "Generating briefing".to_string(),
-            BriefingPhase::Streaming => {
-                if self.briefing.next_item_in_flight() {
-                    "Fetching next item".to_string()
-                } else {
-                    "Streaming".to_string()
-                }
-            }
-            BriefingPhase::Complete => "Done".to_string(),
-            BriefingPhase::Failed { .. } => "Failed".to_string(),
-        };
-
-        if total == 0 {
-            format!("Executive Briefing | {scope} | {status}")
-        } else {
-            format!("Executive Briefing | {total} articles | {scope} | {status}")
-        }
-    }
-
     fn format_trends_preview_header(&self) -> String {
         "Trends | recent activity".to_string()
     }
 
-    pub fn layout_view(&self) -> LayoutViewModel {
-        let selected_job = self
-            .ui
-            .selected_job_id()
-            .and_then(|job_id| self.jobs.get(&job_id));
-        let preview_header_override_visible = matches!(
-            self.active_tab(),
-            AppTab::Briefing | AppTab::Trends | AppTab::PollStats
-        );
-        LayoutViewModel {
-            left_panel_width: self.ui.left_panel_width(),
-            input_panel_visible: self.ui.input_panel_visible(),
-            operation_progress_visible: self.build_operation_progress().is_some(),
-            active_tab: self.active_tab(),
-            left_tab: self.left_tab(),
-            left_header_meta_visible: matches!(
-                self.left_tab(),
-                LeftTab::Jobs | LeftTab::TriageReview | LeftTab::TriageResults
-            ),
-            ai_warning_banner_visible: self.ai_warning_banner().is_some()
-                || self.provider_alert_banner().is_some(),
-            preview_header_override_visible,
-            preview_context_visible: selected_job.is_some() && !preview_header_override_visible,
-            preview_attention_visible: selected_job
-                .and_then(|job| job.preview_quality.as_ref())
-                .map(|quality| quality.nav_heavy())
-                .unwrap_or(false)
-                && !preview_header_override_visible,
-            signal_candidate_preview_visible: selected_job
-                .and_then(|job| self.signal_candidate.state_for(&job.url))
-                .is_some_and(|state| matches!(state, SignalCandidateState::Completed { .. })),
-            prompt_lab_advanced_mode: self.prompt_lab.advanced_mode(),
-            prompt_lab_compare_section_open: self.prompt_lab.compare_section_open(),
-            prompt_lab_context_section_open: self.prompt_lab.context_section_open(),
-            prompt_lab_template_section_open: self.prompt_lab.template_section_open(),
-            prompt_lab_run_details_section_open: self.prompt_lab.run_details_section_open(),
-            prompt_lab_template_editor_open: self.prompt_lab.template_editor_open(),
-        }
-    }
-
-    fn build_right_pane_view(&self, selected_triage_article_available: bool) -> RightPaneView {
+    fn build_right_pane_view(&self) -> RightPaneView {
         let selected_url = self
             .ui
             .selected_job_id()
@@ -1008,7 +754,6 @@ impl AppState {
             .and_then(|url| self.briefing.summary_for_url(url))
             .map(format_summary_for_preview);
 
-        let briefing_markdown = self.briefing.format_preview();
         let triage_placeholder = if triage_markdown.is_none() {
             match self.ai_unavailable_reason() {
                 Some(crate::AiUnavailableReason::MissingApiKey) => Some(
@@ -1021,64 +766,6 @@ impl AppState {
         } else {
             None
         };
-        let briefing_placeholder = if briefing_markdown.is_none() {
-            match self.ai_unavailable_reason() {
-                Some(crate::AiUnavailableReason::MissingApiKey) => Some(
-                    "AI setup required\n\nBriefing is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable briefing generation.".to_string(),
-                ),
-                _ => self
-                    .briefing_blocked_reason()
-                    .map(|reason| format!("Briefing is unavailable because {reason}.")),
-            }
-        } else {
-            None
-        };
-
-        let prompt_lab = crate::view_model::PromptLabView::from_state(
-            &self.prompt_lab,
-            &self.prompt_contexts,
-            &self.prompt_lab_templates,
-            selected_triage_article_available,
-        );
-
-        let (effective_triage_markdown, effective_summary_markdown, effective_briefing_markdown) =
-            if self.left_tab == LeftTab::PromptLab {
-                let lab_triage = prompt_lab.latest_run.as_ref().and_then(|run| {
-                    if run.stage == crate::prompt_lab::PromptLabStage::Triage {
-                        run.output_json.as_deref().map(format_lab_triage_markdown)
-                    } else {
-                        None
-                    }
-                });
-                let lab_summary = prompt_lab.latest_run.as_ref().and_then(|run| {
-                    if run.stage == crate::prompt_lab::PromptLabStage::Summary {
-                        run.output_json.as_deref().map(format_lab_summary_markdown)
-                    } else {
-                        None
-                    }
-                });
-                let lab_briefing = prompt_lab.latest_run.as_ref().and_then(|run| {
-                    if run.stage == crate::prompt_lab::PromptLabStage::Briefing {
-                        run.output_json.as_deref().map(format_lab_briefing_markdown)
-                    } else {
-                        None
-                    }
-                });
-                (
-                    lab_triage.or(triage_markdown).or(triage_placeholder),
-                    lab_summary.or(summary_markdown),
-                    lab_briefing.or(briefing_markdown).or(briefing_placeholder),
-                )
-            } else {
-                (
-                    triage_markdown.or(triage_placeholder),
-                    summary_markdown,
-                    briefing_markdown.or(briefing_placeholder),
-                )
-            };
-
-        let _ = prompt_lab;
-
         let trends = crate::view_model::build_trends_tab_view(
             self.entity_trend_data.as_ref(),
             self.active_trend_category,
@@ -1098,10 +785,8 @@ impl AppState {
         };
 
         RightPaneView {
-            active_tab: self.active_tab,
-            triage_markdown: effective_triage_markdown,
-            summary_markdown: effective_summary_markdown,
-            briefing_markdown: effective_briefing_markdown,
+            triage_markdown: triage_markdown.or(triage_placeholder),
+            summary_markdown,
             trends,
             poll_stats_markdown,
         }
@@ -1190,17 +875,6 @@ struct DesktopJobSelectionRow {
     fetched_utc: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-#[derive(Default)]
-struct LegacyJobListMetrics {
-    scoped_count: usize,
-    visible_job_ids: Vec<crate::JobId>,
-    visible_job_count: usize,
-    first_visible_job_id: Option<crate::JobId>,
-    selected_job_visible: bool,
-    review_needed_count: usize,
-    triage_result_count: usize,
-}
-
 fn is_since_checkpoint(job: &JobState, since: Option<DateTime<Utc>>) -> bool {
     match (job.fetched_utc, since) {
         (_, None) => true,
@@ -1236,89 +910,6 @@ impl JobViewMetadata {
         row.summary_tokens = self.summary_tokens;
         row.filter_status = self.filter_status.clone();
         row.has_analysis = self.has_analysis;
-    }
-}
-
-struct LeftPaneHeaderInputs<'a> {
-    left_tab: LeftTab,
-    job_list_scope: JobListScope,
-    scoped_count: usize,
-    review_needed_count: usize,
-    triage_result_count: usize,
-    visible_job_count: usize,
-    jobs_search_query: &'a str,
-    ai_unavailable_message: Option<&'a str>,
-}
-
-fn build_left_pane_header_view(inputs: LeftPaneHeaderInputs<'_>) -> LeftPaneHeaderView {
-    let LeftPaneHeaderInputs {
-        left_tab,
-        job_list_scope,
-        scoped_count,
-        review_needed_count,
-        triage_result_count,
-        visible_job_count,
-        jobs_search_query,
-        ai_unavailable_message,
-    } = inputs;
-    let scope_label = if job_list_scope == JobListScope::SinceCheckpoint {
-        Some("Since checkpoint".to_string())
-    } else {
-        None
-    };
-
-    match left_tab {
-        LeftTab::Jobs => {
-            let scope_count = scoped_count;
-            let visible_count = visible_job_count;
-            let search_active = !jobs_search_query.is_empty();
-            LeftPaneHeaderView {
-                title: "Jobs".to_string(),
-                scope_label,
-                count_label: Some(if search_active {
-                    format!("{visible_count} of {scope_count} jobs")
-                } else {
-                    format!("{scope_count} jobs")
-                }),
-                state_label: if scope_count == 0 {
-                    Some("no jobs in scope".to_string())
-                } else {
-                    None
-                },
-            }
-        }
-        LeftTab::TriageReview => LeftPaneHeaderView {
-            title: "Triage Review".to_string(),
-            scope_label,
-            count_label: Some(if review_needed_count == 0 {
-                "no review-needed items".to_string()
-            } else {
-                format!("{review_needed_count} review-needed")
-            }),
-            state_label: None,
-        },
-        LeftTab::TriageResults => LeftPaneHeaderView {
-            title: "Results".to_string(),
-            scope_label,
-            count_label: Some(if triage_result_count == 0 {
-                "no triage results yet".to_string()
-            } else {
-                format!("{triage_result_count} with triage")
-            }),
-            state_label: ai_unavailable_message.map(|_| "AI unavailable".to_string()),
-        },
-        LeftTab::PromptLab => LeftPaneHeaderView {
-            title: "Job List".to_string(),
-            scope_label: None,
-            count_label: None,
-            state_label: None,
-        },
-        LeftTab::Blacklist => LeftPaneHeaderView {
-            title: "Blacklist".to_string(),
-            scope_label: None,
-            count_label: None,
-            state_label: None,
-        },
     }
 }
 

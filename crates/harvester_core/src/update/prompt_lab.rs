@@ -1,6 +1,5 @@
 use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage};
 use crate::state::PromptLabPendingRunRegistration;
-use crate::tabs::LeftTab;
 use crate::{AppState, Effect};
 use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
@@ -14,7 +13,6 @@ pub(super) fn handle_open_requested(state: &mut AppState) -> Vec<Effect> {
 
 pub(super) fn handle_close_requested(state: &mut AppState) -> Vec<Effect> {
     state.close_prompt_lab_internals();
-    state.set_left_tab(LeftTab::Jobs);
     Vec::new()
 }
 

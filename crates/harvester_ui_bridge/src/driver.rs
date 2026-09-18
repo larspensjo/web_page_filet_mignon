@@ -308,7 +308,7 @@ mod tests {
 
     fn view(value: u64) -> Arc<AppViewModel> {
         Arc::new(AppViewModel {
-            window_width: value as i32,
+            job_count: value as usize,
             ..Default::default()
         })
     }
@@ -347,7 +347,7 @@ mod tests {
         assert!(coalescer.flush_due(Duration::from_millis(49)).is_none());
         let last = coalescer.flush_due(Duration::from_millis(50)).unwrap().0;
         assert_eq!(last.generation, 2);
-        assert_eq!(last.view["window_width"], 3);
+        assert_eq!(last.view["job_count"], 3);
     }
 
     #[test]
@@ -380,7 +380,7 @@ mod tests {
             .unwrap()
             .0;
         assert_eq!(latest.generation, 2);
-        assert_eq!(latest.view["window_width"], 3);
+        assert_eq!(latest.view["job_count"], 3);
         assert!(coalescer.flush_due(Duration::from_millis(120)).is_none());
     }
 

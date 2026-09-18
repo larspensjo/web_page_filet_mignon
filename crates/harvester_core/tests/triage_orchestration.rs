@@ -327,7 +327,9 @@ fn triage_all_failed_transitions_to_failed() {
     // Pre-triage was consumed when TriageClicked started the session; it is now
     // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
     assert!(!state.view().triage_can_start);
-    assert!(state.view().jobs[0].triage_annotation.is_none());
+    assert!(state.view().desktop_job_list.rows[0]
+        .triage_annotation
+        .is_none());
 }
 
 #[test]
@@ -354,7 +356,9 @@ fn triage_partial_failure_still_completes() {
     // Pre-triage was consumed when TriageClicked started the session; it is now
     // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
     assert!(!state.view().triage_can_start);
-    assert!(state.view().jobs[0].triage_annotation.is_some());
+    assert!(state.view().desktop_job_list.rows[0]
+        .triage_annotation
+        .is_some());
 }
 
 #[test]
@@ -441,46 +445,7 @@ fn view_model_annotates_jobs_with_triage() {
         },
     );
     let view = state.view();
-    assert!(view.jobs[0].triage_annotation.is_some());
-}
-
-#[test]
-fn view_model_jobs_stable_order_after_triage() {
-    // The view model's `jobs` list must remain in stable job_id order regardless of
-    // triage results.  Priority-based ordering is applied by the TriageResults render
-    // layer, not here, so the Jobs tab is never reordered by triage.
-    init_logging();
-    let (state, job_ids) =
-        completed_state_with_jobs(&["https://low.example", "https://high.example"]);
-    let state = with_triage_metadata_ready(state);
-    let state = simulate_triage_loaded(
-        state,
-        sample_articles(&["https://low.example", "https://high.example"]),
-    );
-    let (state, _) = update(state, Msg::TriageClicked);
-    let (state, _) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: 1,
-            result: triage_success(2), // low priority for job 0
-            metadata: None,
-        },
-    );
-    let (state, _) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id: 2,
-            result: triage_success(5), // high priority for job 1
-            metadata: None,
-        },
-    );
-    let view = state.view();
-    // Both jobs have annotations.
-    assert!(view.jobs[0].triage_annotation.is_some());
-    assert!(view.jobs[1].triage_annotation.is_some());
-    // Order is stable by job_id — NOT reordered by triage priority.
-    assert_eq!(view.jobs[0].job_id, job_ids[0]);
-    assert_eq!(view.jobs[1].job_id, job_ids[1]);
+    assert!(view.desktop_job_list.rows[0].triage_annotation.is_some());
 }
 
 #[test]
@@ -511,8 +476,8 @@ fn view_model_equal_priority_sorted_by_job_id() {
         },
     );
     let view = state.view();
-    assert_eq!(view.jobs[0].job_id, job_ids[0]);
-    assert_eq!(view.jobs[1].job_id, job_ids[1]);
+    assert_eq!(view.desktop_job_list.rows[0].job_id, job_ids[0]);
+    assert_eq!(view.desktop_job_list.rows[1].job_id, job_ids[1]);
 }
 
 #[test]
@@ -542,7 +507,7 @@ fn view_model_stale_triage_url_ignored() {
         },
     );
     let view = state.view();
-    assert!(view.jobs[0].triage_annotation.is_some());
+    assert!(view.desktop_job_list.rows[0].triage_annotation.is_some());
 }
 
 #[test]

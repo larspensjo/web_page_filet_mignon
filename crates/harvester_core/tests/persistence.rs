@@ -55,8 +55,11 @@ fn completed_jobs_can_be_restored_for_resume() {
     let view = restored.view();
     assert_eq!(view.job_count, 1);
     assert_eq!(view.total_tokens, 42);
-    assert_eq!(view.jobs[0].outcome, Some(JobResultKind::Success));
-    assert_eq!(view.jobs[0].stage, Stage::Done);
+    assert_eq!(
+        view.desktop_job_list.rows[0].outcome,
+        Some(JobResultKind::Success)
+    );
+    assert_eq!(view.desktop_job_list.rows[0].stage, Stage::Done);
 }
 
 #[test]

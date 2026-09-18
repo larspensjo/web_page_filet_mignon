@@ -5,7 +5,6 @@ use super::*;
 use crate::briefing::LoadedArticle;
 use crate::briefing::{ArticleSummaryResult, BriefingSession};
 use crate::summary_cache::SummaryCacheKey;
-use crate::tabs::AppTab;
 use crate::LlmResultKind;
 use harvester_engine::llm::dto::SummaryEntities;
 use harvester_engine::llm::prompt::PromptId;
@@ -261,7 +260,6 @@ pub(super) fn start_briefing_after_triage(
     }
     triage.complete();
     state.set_triage(triage);
-    state.select_tab(AppTab::Briefing);
     state.request_briefing_orchestration();
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
@@ -305,7 +303,13 @@ pub(super) fn make_state_with_summarized_job_for_update() -> AppState {
         },
     );
     state.set_briefing(briefing);
-    let job_id = state.view().jobs.first().map(|j| j.job_id).unwrap_or(1);
+    let job_id = state
+        .view()
+        .desktop_job_list
+        .rows
+        .first()
+        .map(|j| j.job_id)
+        .unwrap_or(1);
     state.select_job(job_id);
     state
 }

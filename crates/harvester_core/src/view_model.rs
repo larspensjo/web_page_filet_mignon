@@ -7,7 +7,7 @@ use crate::prompt_lab::{
     PromptLabStage, PromptLabState, PromptLabTemplateSnapshot,
 };
 use crate::state::{JobOrigin, LinkDownloadState};
-use crate::tabs::{AppTab, JobListMode, JobListScope, LeftTab, TrendCategory};
+use crate::tabs::{JobListMode, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{
     serialize_pairs, JobId, JobResultKind, RunCompletionNotice, RunProgressView, SessionState,
@@ -34,9 +34,6 @@ pub struct LlmModelUsageView {
 
 pub use crate::llm_quota_view::LlmQuotaView;
 
-pub const INPUT_PANEL_FIXED_WIDTH: i32 = 500;
-pub const MIN_JOBS_PANEL_WIDTH: i32 = 200;
-
 /// Maximum desktop job-list rows in one snapshot.
 pub const DESKTOP_JOB_LIST_MAX_ROWS: usize = 400;
 
@@ -47,14 +44,6 @@ pub const DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS: i64 = 24;
 pub struct LastPasteStats {
     pub enqueued: usize,
     pub skipped: usize,
-}
-
-/// Progress for the single active operation shown in the footer bar.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OperationProgress {
-    pub label: String,
-    pub completed: u32,
-    pub total: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -217,14 +206,10 @@ impl Default for TrendsTabView {
 /// View state for the right-pane tab content area.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct RightPaneView {
-    /// Which tab is currently active.
-    pub active_tab: AppTab,
     /// Markdown content for the Triage tab (formatted triage result).
     pub triage_markdown: Option<String>,
     /// Markdown content for the Summary tab.
     pub summary_markdown: Option<String>,
-    /// Markdown content for the Briefing tab.
-    pub briefing_markdown: Option<String>,
     /// Trends tab view data.
     pub trends: TrendsTabView,
     /// Formatted text for the Poll Stats tab. None until the first poll completes.
@@ -273,52 +258,21 @@ pub(crate) fn build_trends_tab_view(
     }
 }
 
-// Default left panel width when the input panel is shown (PANEL_INPUT + PANEL_JOBS = 240 + 440)
-pub const DEFAULT_LEFT_PANEL_WIDTH: i32 = 680;
-pub const DEFAULT_JOBS_PANEL_WIDTH: i32 = DEFAULT_LEFT_PANEL_WIDTH - INPUT_PANEL_FIXED_WIDTH;
-// Default window width
+/// Default desktop window dimensions.
 pub const DEFAULT_WINDOW_WIDTH: i32 = 960;
-/// Default desktop window height.
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 720;
 
-/// View state for the left-pane tab bar and its content.
+/// View state for the desktop job-list controls and Prompt Lab state.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct LeftPaneView {
-    /// Which left-pane tab is currently active.
-    pub left_tab: LeftTab,
-    /// Scope filter applied to job-oriented tabs.
-    pub job_list_scope: JobListScope,
     /// Current Jobs-tab search query.
     pub jobs_search_query: String,
-    /// Job IDs visible on the Jobs tab after scope and search filtering.
-    pub visible_jobs_after_filter: Vec<JobId>,
-    /// First entry in `visible_jobs_after_filter`.
+    /// First job visible in the desktop job list.
     pub first_visible_job_id: Option<JobId>,
     /// Whether the selected job remains visible under the Jobs-tab filter.
     pub selected_jobs_visible_in_filter: bool,
-    /// Prompt Lab controls (shown when left_tab == PromptLab).
+    /// Prompt Lab controls retained for its later retirement slice.
     pub prompt_lab: PromptLabView,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LayoutViewModel {
-    pub left_panel_width: i32,
-    pub input_panel_visible: bool,
-    pub operation_progress_visible: bool,
-    pub active_tab: AppTab,
-    pub left_tab: LeftTab,
-    pub left_header_meta_visible: bool,
-    pub ai_warning_banner_visible: bool,
-    pub preview_header_override_visible: bool,
-    pub preview_context_visible: bool,
-    pub preview_attention_visible: bool,
-    pub signal_candidate_preview_visible: bool,
-    pub prompt_lab_advanced_mode: bool,
-    pub prompt_lab_compare_section_open: bool,
-    pub prompt_lab_context_section_open: bool,
-    pub prompt_lab_template_section_open: bool,
-    pub prompt_lab_run_details_section_open: bool,
-    pub prompt_lab_template_editor_open: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -331,11 +285,9 @@ pub struct ArchivePartialCoverageView {
 pub struct AppViewModel {
     pub workspace_view: crate::WorkspaceView,
     pub job_list_mode: crate::JobListMode,
-    pub reading_pane_mode: crate::ReadingPaneMode,
     pub session: SessionState,
     pub queued_urls: Vec<String>,
     pub job_count: usize,
-    pub jobs: Vec<JobRowView>,
     pub desktop_job_list: DesktopJobListView,
     pub last_paste_stats: Option<LastPasteStats>,
     pub dirty: bool,
@@ -362,7 +314,6 @@ pub struct AppViewModel {
     pub briefing_generate_enabled: bool,
     pub next_item_enabled: bool,
     pub summaries_can_start: bool,
-    pub briefing_preview: Option<String>,
     pub stop_finish_button: StopFinishButtonState,
     pub triage_can_start: bool,
     pub triage_results_reorder_suppressed: bool,
@@ -371,20 +322,12 @@ pub struct AppViewModel {
     pub ai_unavailable_message: Option<String>,
     pub triage_blocked_reason: Option<String>,
     pub briefing_blocked_reason: Option<String>,
-    pub operation_progress: Option<OperationProgress>,
     /// Reducer-owned cumulative timeline for the desktop pipeline experience.
     pub run_progress: RunProgressView,
     pub run_completion_notice: Option<RunCompletionNotice>,
     pub poll_sources_enabled: bool,
     pub poll_indirect_links_enabled: bool,
-    pub operation_progress_visible: bool,
     pub checkpoint_status_message: Option<String>,
-    /// Width of the left panels region (PANEL_INPUT + PANEL_JOBS).
-    pub left_panel_width: i32,
-    /// Whether the dropbox/input panel is currently visible.
-    pub input_panel_visible: bool,
-    /// Current window width.
-    pub window_width: i32,
     /// URL of the currently selected job, only when it has a completed summary.
     pub selected_url: Option<String>,
     pub left_pane: LeftPaneView,
@@ -405,11 +348,9 @@ impl Default for AppViewModel {
         Self {
             workspace_view: crate::WorkspaceView::default(),
             job_list_mode: crate::JobListMode::default(),
-            reading_pane_mode: crate::ReadingPaneMode::default(),
             session: SessionState::Idle,
             queued_urls: Vec::new(),
             job_count: 0,
-            jobs: Vec::new(),
             desktop_job_list: DesktopJobListView::default(),
             last_paste_stats: None,
             dirty: false,
@@ -435,7 +376,6 @@ impl Default for AppViewModel {
             briefing_generate_enabled: false,
             next_item_enabled: false,
             summaries_can_start: false,
-            briefing_preview: None,
             stop_finish_button: StopFinishButtonState::Disabled,
             triage_can_start: false,
             triage_results_reorder_suppressed: false,
@@ -444,16 +384,11 @@ impl Default for AppViewModel {
             ai_unavailable_message: None,
             triage_blocked_reason: None,
             briefing_blocked_reason: None,
-            operation_progress: None,
             run_progress: RunProgressView::default(),
             run_completion_notice: None,
             poll_sources_enabled: false,
             poll_indirect_links_enabled: false,
-            operation_progress_visible: false,
             checkpoint_status_message: None,
-            left_panel_width: DEFAULT_LEFT_PANEL_WIDTH,
-            input_panel_visible: false,
-            window_width: DEFAULT_WINDOW_WIDTH,
             selected_url: None,
             left_pane: LeftPaneView::default(),
             is_pre_triage_reviewing: false,

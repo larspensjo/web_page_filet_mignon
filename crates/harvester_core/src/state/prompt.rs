@@ -100,13 +100,14 @@ impl AppState {
     }
 
     pub(crate) fn open_prompt_lab(&mut self) {
-        self.select_left_tab(crate::tabs::LeftTab::PromptLab);
         self.prompt_lab.open();
+        self.dirty = true;
     }
 
-    /// Close Prompt Lab internal state (panel state, etc.) without changing `left_tab`.
+    /// Close Prompt Lab internal state without changing the desktop workspace.
     pub(crate) fn close_prompt_lab_internals(&mut self) {
         self.prompt_lab.close();
+        self.dirty = true;
     }
 
     pub(crate) fn select_prompt_lab_stage(&mut self, stage: PromptLabStage) {

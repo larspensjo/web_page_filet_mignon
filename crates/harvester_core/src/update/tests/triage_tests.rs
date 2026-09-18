@@ -35,7 +35,6 @@ fn briefing_blocked_when_triage_in_progress() {
         crate::briefing::BriefingPhase::Failed { reason }
             if reason == "No completed triage. Run triage before generating a briefing."
     ));
-    assert_eq!(next_state.active_tab(), AppTab::Briefing);
 }
 
 #[test]

@@ -61,11 +61,7 @@ pub fn project(view: &AppViewModel) -> (ProjectedSnapshot, BodyTable) {
     let mut value = serde_json::to_value(view)
         .expect("AppViewModel serialization is an IPC contract and must not fail");
     let mut bodies = BodyTable::new();
-    remove_pointer(&mut value, "/jobs");
     remove_pointer(&mut value, "/left_pane/prompt_lab");
-    remove_pointer(&mut value, "/left_pane/visible_jobs_after_filter");
-    remove_pointer(&mut value, "/briefing_preview");
-    remove_pointer(&mut value, "/right_pane/briefing_markdown");
     replace_body(&mut value, &mut bodies, "/preview_text", BodyKey::Preview);
     replace_body(
         &mut value,
@@ -145,35 +141,12 @@ pub(crate) fn hash(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use harvester_core::{AppViewModel, JobOrigin, JobResultKind, JobRowView, Stage};
+    use harvester_core::AppViewModel;
     use std::collections::BTreeSet;
 
     #[test]
     fn project_preserves_the_full_view_except_for_the_explicit_contract_paths() {
         let view = AppViewModel {
-            jobs: vec![JobRowView {
-                job_id: 1,
-                url: "https://example.invalid/job".to_string(),
-                stage: Stage::Done,
-                outcome: Some(JobResultKind::Success),
-                tokens: None,
-                bytes: None,
-                link_count: 0,
-                downloaded_link_count: 0,
-                links: Vec::new(),
-                origin: JobOrigin::Direct,
-                triage_annotation: None,
-                has_summary: false,
-                summary_title: None,
-                summary_tokens: None,
-                filter_status: None,
-                has_analysis: false,
-                is_since_checkpoint: true,
-            }],
-            left_pane: harvester_core::LeftPaneView {
-                visible_jobs_after_filter: vec![1],
-                ..Default::default()
-            },
             preview_text: Some("preview".to_string()),
             right_pane: harvester_core::RightPaneView {
                 triage_markdown: Some("triage".to_string()),
@@ -197,13 +170,7 @@ mod tests {
         );
         let raw_paths = value_paths(&raw);
         let envelope_paths = value_paths(&envelope.view);
-        let stripped_roots = [
-            "/jobs",
-            "/left_pane/prompt_lab",
-            "/left_pane/visible_jobs_after_filter",
-            "/briefing_preview",
-            "/right_pane/briefing_markdown",
-        ];
+        let stripped_roots = ["/left_pane/prompt_lab"];
         let expected_removed = raw_paths
             .iter()
             .filter(|path| {

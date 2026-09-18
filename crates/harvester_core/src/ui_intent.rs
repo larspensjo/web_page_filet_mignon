@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{JobId, JobListMode, Msg, ReadingPaneMode, TrendCategory, WorkspaceView};
+use crate::{JobId, JobListMode, Msg, TrendCategory, WorkspaceView};
 
 /// The deliberately restricted frontend vocabulary.
 ///
@@ -38,9 +38,6 @@ pub enum UiIntent {
     OpenExtractedLink {
         job_id: JobId,
         link_index: u32,
-    },
-    SetReadingPaneMode {
-        mode: ReadingPaneMode,
     },
     OpenArchiveDialog,
     SubmitArchiveDialog {
@@ -98,7 +95,6 @@ impl UiIntent {
             OpenExtractedLink { job_id, link_index } => {
                 Msg::ExtractedLinkOpenRequested { job_id, link_index }
             }
-            SetReadingPaneMode { mode } => Msg::ReadingPaneModeSet { mode },
             OpenArchiveDialog => Msg::ArchiveClicked,
             SubmitArchiveDialog {
                 request_id,
@@ -130,7 +126,7 @@ mod tests {
     use chrono::{DateTime, Utc};
 
     use super::{HostAction, IntentContext, IntentEffect, UiIntent};
-    use crate::{JobListMode, Msg, ReadingPaneMode, TrendCategory, WorkspaceView};
+    use crate::{JobListMode, Msg, TrendCategory, WorkspaceView};
 
     #[test]
     fn every_ui_intent_maps_to_its_exact_effect() {
@@ -225,14 +221,6 @@ mod tests {
                 IntentEffect::Dispatch(Msg::ExtractedLinkOpenRequested {
                     job_id: 9,
                     link_index: 3,
-                }),
-            ),
-            (
-                UiIntent::SetReadingPaneMode {
-                    mode: ReadingPaneMode::RawText,
-                },
-                IntentEffect::Dispatch(Msg::ReadingPaneModeSet {
-                    mode: ReadingPaneMode::RawText,
                 }),
             ),
             (

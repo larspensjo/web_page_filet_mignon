@@ -406,7 +406,7 @@ fn signal_candidate_cache_loaded_reconstructs_from_cached_summary_without_briefi
         state.signal_candidate().state_for("https://example.com/a"),
         Some(crate::signal_candidate::SignalCandidateState::Completed { .. })
     ));
-    assert!(!state.selected_job_has_summary());
+    assert!(state.selected_article_url().is_none());
 }
 
 #[test]

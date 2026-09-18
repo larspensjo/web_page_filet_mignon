@@ -111,6 +111,7 @@ impl AppState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn pre_triage_load_progress(&self) -> Option<(usize, usize, u64)> {
         self.pre_triage_load_progress.map(
             |PreTriageLoadProgress {

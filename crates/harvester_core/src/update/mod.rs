@@ -1,10 +1,6 @@
 use engine_logging::{engine_info, engine_warn};
 
-use crate::tabs::{AppTab, JobListScope, LeftTab};
-use crate::{
-    calc_left_width, AppState, Effect, Msg, SessionState, INPUT_PANEL_FIXED_WIDTH,
-    MIN_JOBS_PANEL_WIDTH,
-};
+use crate::{AppState, Effect, Msg, SessionState};
 
 mod archive;
 mod batch_results;
@@ -19,13 +15,8 @@ mod summary_cache_support;
 mod triage;
 mod url_input;
 
-// Left side is split into a fixed-width input panel plus a resizable jobs panel.
-// Minimum width for the left region (PANEL_INPUT + PANEL_JOBS).
-const MIN_LEFT_WIDTH: i32 = INPUT_PANEL_FIXED_WIDTH + MIN_JOBS_PANEL_WIDTH;
-// Minimum width for the preview panel
-const MIN_PREVIEW_WIDTH: i32 = 200;
-// Total width occupied by splitter (width + margins)
-const SPLITTER_TOTAL_WIDTH: i32 = 16; // 4px bar + 6px margin each side
+#[cfg(test)]
+mod tests;
 
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
@@ -41,10 +32,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::JobsSearchCleared => {
             state.clear_jobs_search_query();
-            Vec::new()
-        }
-        Msg::FocusJobsSearchRequested => {
-            state.set_left_tab(LeftTab::Jobs);
             Vec::new()
         }
         Msg::StartupHydrationRequested => {
@@ -87,30 +74,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             }
         }
         Msg::ArchiveClicked => archive::handle_archive_clicked(&mut state),
-        Msg::ToggleInputPanel => {
-            let opening = !state.input_panel_visible();
-            let desired_left_width_px = if opening {
-                state.left_panel_width() + INPUT_PANEL_FIXED_WIDTH
-            } else {
-                state.left_panel_width() - INPUT_PANEL_FIXED_WIDTH
-            };
-            state.set_input_panel_visible(opening);
-            let min_left = if opening {
-                MIN_LEFT_WIDTH
-            } else {
-                MIN_JOBS_PANEL_WIDTH
-            };
-            let clamped = calc_left_width(
-                desired_left_width_px,
-                state.window_width(),
-                min_left,
-                MIN_PREVIEW_WIDTH,
-                SPLITTER_TOTAL_WIDTH,
-            );
-            state.set_left_panel_width(clamped);
-            state.mark_dirty();
-            Vec::new()
-        }
         Msg::JobProgress {
             job_id,
             stage,
@@ -192,12 +155,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             let Some(url) = state.selected_job_url() else {
                 return (state, Vec::new());
             };
-            let selected_tab = if state.selected_job_has_summary() {
-                crate::tabs::AppTab::Summary
-            } else {
-                crate::tabs::AppTab::Triage
-            };
-            state.select_tab(selected_tab);
             let url_changed = state.prompt_lab().url_input() != url;
             if url_changed {
                 state.prompt_lab_mut().set_url_input(url.clone());
@@ -239,10 +196,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             pipeline_run::dismiss_run_notice(&mut state);
             Vec::new()
         }
-        Msg::ReadingPaneModeSet { mode } => {
-            state.set_reading_pane_mode(mode);
-            Vec::new()
-        }
         Msg::ExtractedLinkOpenRequested { job_id, link_index } => state
             .job_extracted_link_url(job_id, link_index)
             .map(|url| Effect::OpenUrlInBrowser { url })
@@ -261,34 +214,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             ordered_urls,
             triggered_by_job_done,
         ),
-        Msg::SplitterMoved {
-            desired_left_width_px,
-        } => {
-            let clamped = calc_left_width(
-                desired_left_width_px,
-                state.window_width(),
-                MIN_LEFT_WIDTH,
-                MIN_PREVIEW_WIDTH,
-                SPLITTER_TOTAL_WIDTH,
-            );
-            state.set_left_panel_width(clamped);
-            state.mark_dirty();
-            Vec::new()
-        }
-        Msg::WindowResized { window_width } => {
-            state.set_window_width(window_width);
-            // Re-clamp the left panel width based on new window width
-            let clamped = calc_left_width(
-                state.left_panel_width(),
-                window_width,
-                MIN_LEFT_WIDTH,
-                MIN_PREVIEW_WIDTH,
-                SPLITTER_TOTAL_WIDTH,
-            );
-            state.set_left_panel_width(clamped);
-            state.mark_dirty();
-            Vec::new()
-        }
         Msg::WindowResizeCompleted {
             outer_width,
             outer_height,
@@ -597,42 +522,12 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             polling::handle_source_poll_failed(&mut state, source_id, error)
         }
         Msg::AllSourcesPollEnded => polling::handle_all_sources_poll_ended(&mut state),
-        Msg::TabSelected { tab } => {
-            state.select_tab(tab);
-            if tab == AppTab::Trends {
-                // Stub in Slice 1; full entity index loading in Slice 3.
-                vec![Effect::LoadEntityIndex]
-            } else {
-                Vec::new()
-            }
-        }
-        Msg::LeftTabSelected { tab } => {
-            engine_info!("[jobs-ui] left tab selected: {:?}", tab);
-            if tab == LeftTab::PromptLab {
-                state.open_prompt_lab();
-            } else {
-                state.close_prompt_lab_internals();
-                state.set_left_tab(tab);
-            }
-            Vec::new()
-        }
         Msg::TrendCategorySelected { category } => {
             state.set_active_trend_category(category);
             Vec::new()
         }
         Msg::PromptLabOpenRequested => prompt_lab::handle_open_requested(&mut state),
         Msg::PromptLabCloseRequested => prompt_lab::handle_close_requested(&mut state),
-        Msg::JobListScopeSet { scope } => {
-            engine_info!(
-                "[jobs-ui] scope set: {}",
-                match scope {
-                    JobListScope::All => "all",
-                    JobListScope::SinceCheckpoint => "since-checkpoint",
-                }
-            );
-            state.set_job_list_scope(scope);
-            Vec::new()
-        }
         Msg::PromptLabStageSelected { stage } => {
             prompt_lab::handle_stage_selected(&mut state, stage)
         }
@@ -841,9 +736,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
 }
 
 #[cfg(test)]
-mod tests;
-
-#[cfg(test)]
 mod desktop_contract_tests {
     use chrono::{DateTime, Utc};
 
@@ -860,13 +752,9 @@ mod desktop_contract_tests {
     #[test]
     fn jobs_search_reveal_changes_only_the_desktop_workspace() {
         let initial = AppState::default();
-        let initial_left_tab = initial.left_tab();
-        let initial_active_tab = initial.active_tab();
         let (state, effects) = update(initial, Msg::JobsSearchRevealRequested);
         assert_eq!(state.workspace_view(), WorkspaceView::Review);
         assert_eq!(state.job_list_mode(), crate::JobListMode::SinceCheckpoint);
-        assert_eq!(state.left_tab(), initial_left_tab);
-        assert_eq!(state.active_tab(), initial_active_tab);
         assert!(effects.is_empty());
     }
 

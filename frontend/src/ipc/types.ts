@@ -248,7 +248,6 @@ export type SnapshotEnvelope = {
 		llm_quota: LlmQuotaView;
 		last_paste_stats: LastPasteStats | null;
 		checkpoint_status_message: string | null;
-		reading_pane_mode: "RawText" | "Summary";
 		preview_text: BodyRef | null;
 		right_pane: {
 			triage_markdown: BodyRef | null;

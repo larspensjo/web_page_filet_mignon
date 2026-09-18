@@ -84,6 +84,32 @@ mod app_state_tests {
         assert_eq!(obs.jobs_failed, 1);
     }
 
+    #[test]
+    fn settled_poll_article_jobs_clear_pipeline_tracker() {
+        let mut state = AppState::new();
+        assert!(state.start_poll());
+        for job_id in [1, 2] {
+            state.jobs.insert(
+                job_id,
+                JobState {
+                    url: format!("https://example.com/{job_id}"),
+                    stage: Stage::Queued,
+                    outcome: None,
+                    ..Default::default()
+                },
+            );
+        }
+        state.record_poll_pipeline_jobs(&[1, 2]);
+        state.end_poll();
+        assert_eq!(state.poll_pipeline_job_total(), Some(2));
+
+        state.apply_done(1, JobResultKind::Success, None, Vec::new(), None);
+        assert_eq!(state.poll_pipeline_job_total(), Some(2));
+
+        state.apply_done(2, JobResultKind::Success, None, Vec::new(), None);
+        assert_eq!(state.poll_pipeline_job_total(), None);
+    }
+
     fn article_with_words(url: &str, word_count: usize) -> crate::LoadedArticle {
         crate::LoadedArticle {
             url: url.to_string(),
@@ -552,82 +578,7 @@ mod app_state_tests {
     }
 
     #[test]
-    fn briefing_complete_then_job_selected_shows_summary_not_briefing() {
-        use crate::briefing::{ArticleSummaryResult, BriefingItem, LoadedArticle};
-
-        let mut state = AppState::new();
-        state.jobs.insert(
-            1,
-            JobState {
-                url: "https://example.com/article".to_string(),
-                stage: Stage::Done,
-                outcome: Some(JobResultKind::Success),
-                ..Default::default()
-            },
-        );
-
-        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
-        briefing.set_articles(
-            vec![LoadedArticle {
-                url: "https://example.com/article".to_string(),
-                source_title: None,
-                prepared_text: "text".to_string(),
-                content_hash: "hash".to_string(),
-                fetched_utc: None,
-            }],
-            "collection".to_string(),
-        );
-        briefing.transition_to_summarizing();
-        briefing.start_article(0, 1);
-        briefing.complete_article(
-            0,
-            ArticleSummaryResult {
-                title: "Article Title".to_string(),
-                summary: "Article summary text".to_string(),
-                key_points: vec![],
-                input_tokens: 10,
-                output_tokens: 5,
-                entities: Default::default(),
-            },
-        );
-        briefing.start_stream(
-            "[A1] Article Title\nArticle summary text".to_string(),
-            "win".to_string(),
-            1,
-            0,
-            0,
-            false,
-        );
-        briefing.enter_streaming("Executive summary".to_string());
-        briefing.append_stream_item(BriefingItem {
-            headline: "Story 1".to_string(),
-            body: "desc".to_string(),
-        });
-        state.set_briefing(briefing);
-
-        let view = state.view();
-        assert!(view
-            .preview_text
-            .as_deref()
-            .unwrap_or("")
-            .contains("Executive Briefing"));
-
-        state.select_job(1);
-        let view = state.view();
-        assert!(view
-            .preview_text
-            .as_deref()
-            .unwrap_or("")
-            .contains("Article Title"));
-        assert!(!view
-            .preview_text
-            .as_deref()
-            .unwrap_or("")
-            .contains("Executive Briefing"));
-    }
-
-    #[test]
-    fn job_selected_then_briefing_completes_shows_briefing() {
+    fn briefing_complete_then_job_selected_shows_the_selected_summary() {
         use crate::briefing::{ArticleSummaryResult, BriefingItem, LoadedArticle};
 
         let mut state = AppState::new();
@@ -686,45 +637,7 @@ mod app_state_tests {
             .preview_text
             .as_deref()
             .unwrap_or("")
-            .contains("Article Title"));
-
-        state.revert_preview_to_briefing();
-        let view = state.view();
-        assert!(view
-            .preview_text
-            .as_deref()
-            .unwrap_or("")
-            .contains("Executive Briefing"));
-    }
-
-    #[test]
-    fn no_selection_shows_briefing_when_complete() {
-        use crate::briefing::BriefingItem;
-
-        let mut state = AppState::new();
-        let mut briefing = crate::briefing::BriefingSession::new_loading(None);
-        briefing.set_articles(vec![], "collection".to_string());
-        briefing.start_stream(
-            "[A1] Story\ndesc".to_string(),
-            "win".to_string(),
-            1,
-            0,
-            0,
-            false,
-        );
-        briefing.enter_streaming("Executive summary text".to_string());
-        briefing.append_stream_item(BriefingItem {
-            headline: "Story".to_string(),
-            body: "desc".to_string(),
-        });
-        state.set_briefing(briefing);
-
-        let view = state.view();
-        assert!(view
-            .preview_text
-            .as_deref()
-            .unwrap_or("")
-            .contains("Executive Briefing"));
+            .contains("Article summary text"));
     }
 
     #[test]
@@ -907,7 +820,6 @@ mod app_state_tests {
         state.select_job(10);
         let view = state.view();
         let text = view.preview_text.unwrap_or_default();
-        assert!(text.contains("My Title"));
         assert!(text.contains("My summary"));
         assert!(text.contains("Point A"));
         assert!(text.contains("## Key Points"));
@@ -949,15 +861,11 @@ mod app_state_tests {
         s2.select_job(10);
         let view = s2.view();
         let text = view.preview_text.unwrap_or_default();
-        assert!(
-            !text.contains("Exec summary"),
-            "should not show briefing text when job selected"
-        );
-        assert!(text.contains("My Title"), "should show summary");
+        assert!(text.contains("My summary"), "should show summary");
     }
 
     #[test]
-    fn format_summary_includes_title_summary_and_key_points() {
+    fn format_summary_omits_title_heading_and_includes_summary_and_key_points() {
         use crate::briefing::ArticleSummaryResult;
         let result = ArticleSummaryResult {
             title: "Test Title".to_string(),
@@ -968,7 +876,7 @@ mod app_state_tests {
             entities: Default::default(),
         };
         let formatted = preview::format_summary_for_preview(&result);
-        assert!(formatted.contains("Test Title"));
+        assert!(!formatted.starts_with("# "));
         assert!(formatted.contains("Test summary body"));
         assert!(formatted.contains("KP1"));
         assert!(formatted.contains("KP2"));
@@ -987,7 +895,6 @@ mod app_state_tests {
             entities: Default::default(),
         };
         let formatted = preview::format_summary_for_preview(&result);
-        assert!(formatted.contains("Title Only"));
         assert!(formatted.contains("Summary only"));
         assert!(!formatted.contains("Key Points"));
     }
@@ -1026,7 +933,8 @@ mod app_state_tests {
         let state = make_state_with_summarized_job();
         let view = state.view();
         let job = view
-            .jobs
+            .desktop_job_list
+            .rows
             .iter()
             .find(|j| j.job_id == 10)
             .expect("job 10 exists");
@@ -1047,7 +955,8 @@ mod app_state_tests {
         );
         let view = state.view();
         let job = view
-            .jobs
+            .desktop_job_list
+            .rows
             .iter()
             .find(|j| j.job_id == 13)
             .expect("job 13 exists");
@@ -1060,7 +969,8 @@ mod app_state_tests {
         let state = make_state_with_cached_summary_job();
         let view = state.view();
         let job = view
-            .jobs
+            .desktop_job_list
+            .rows
             .iter()
             .find(|j| j.job_id == 11)
             .expect("job 11 exists");
@@ -1087,7 +997,9 @@ mod app_state_tests {
             state.selected_article_url(),
             Some("https://cached-summary.example/article".to_string())
         );
-        assert!(state.selected_job_has_summary());
+        assert!(state
+            .summary_result_for_url("https://cached-summary.example/article")
+            .is_some());
     }
 
     #[test]
@@ -1114,15 +1026,6 @@ mod app_state_tests {
         let state = make_state_with_summarized_job();
         let view = state.view();
         assert!(view.selected_url.is_none());
-    }
-
-    fn startup_pre_triage_loading_state() -> AppState {
-        let mut state = AppState::new();
-        state.set_pre_triage_load_context(
-            crate::pre_triage_coordinator::PreTriageRefreshReason::RestoreCompletedJobs,
-        );
-        state.set_pre_triage(PreTriageSession::new_loading());
-        state
     }
 
     #[test]
@@ -1152,12 +1055,6 @@ mod app_state_tests {
             view.right_pane.triage_markdown,
             Some(
                 "AI setup required\n\nTriage is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable article triage.".to_string()
-            )
-        );
-        assert_eq!(
-            view.right_pane.briefing_markdown,
-            Some(
-                "AI setup required\n\nBriefing is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable briefing generation.".to_string()
             )
         );
     }
@@ -1205,21 +1102,6 @@ mod app_state_tests {
         assert_eq!(
             view.right_pane.triage_markdown,
             Some("Article triage is unavailable because no triage model is available.".to_string())
-        );
-        assert_eq!(
-            view.right_pane.briefing_markdown,
-            Some("Briefing is unavailable because no triage model is available.".to_string())
-        );
-    }
-
-    #[test]
-    fn layout_view_shows_operation_progress_during_pre_triage_loading() {
-        let state = startup_pre_triage_loading_state();
-
-        let layout = state.layout_view();
-        assert!(
-            layout.operation_progress_visible,
-            "pre-triage loading must show footer progress controls"
         );
     }
 
@@ -1436,7 +1318,7 @@ mod app_state_tests {
 
         let (kind, content) = state.resolve_best_preview(url);
         assert_eq!(kind, PreviewContentKind::Summary);
-        assert!(content.contains("Test Summary"));
+        assert!(content.contains("Summary text"));
     }
 
     #[test]
@@ -1583,13 +1465,11 @@ mod app_state_tests {
     }
 
     #[test]
-    fn left_header_for_triage_results_since_checkpoint_has_stable_title_and_meta() {
+    fn left_header_for_desktop_jobs_has_stable_title_and_meta() {
         use crate::briefing::LoadedArticle;
         use crate::triage::ArticleTriageResult;
 
         let mut state = AppState::new();
-        state.job_list_scope = JobListScope::SinceCheckpoint;
-        state.left_tab = LeftTab::TriageResults;
         state.jobs.insert(
             1,
             JobState {
@@ -1624,38 +1504,31 @@ mod app_state_tests {
 
         let view = state.view();
 
-        assert_eq!(view.left_pane_header.title, "Results");
+        assert_eq!(view.left_pane_header.title, "Jobs");
         assert_eq!(
             view.left_pane_header.scope_label.as_deref(),
             Some("Since checkpoint")
         );
-        assert_eq!(
-            view.left_pane_header.count_label.as_deref(),
-            Some("1 with triage")
-        );
+        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 jobs"));
         assert_eq!(view.left_pane_header.state_label.as_deref(), None);
     }
 
     #[test]
-    fn left_header_shows_empty_state_in_meta_not_title() {
-        let mut state = AppState::new();
-        state.left_tab = LeftTab::TriageResults;
+    fn left_header_shows_desktop_empty_state_in_meta() {
+        let state = AppState::new();
 
         let view = state.view();
 
-        assert_eq!(view.left_pane_header.title, "Results");
+        assert_eq!(view.left_pane_header.title, "Jobs");
+        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("0 jobs"));
         assert_eq!(
-            view.left_pane_header.count_label.as_deref(),
-            Some("no triage results yet")
+            view.left_pane_header.state_label.as_deref(),
+            Some("no jobs in scope")
         );
-        assert_eq!(view.left_pane_header.state_label.as_deref(), None);
     }
 
     #[path = "../signal_candidate_tests.rs"]
     mod signal_candidate_tests;
-
-    #[path = "../operation_progress_tests.rs"]
-    mod operation_progress_tests;
 
     fn insert_done_job(state: &mut AppState, job_id: JobId, url: &str) {
         state.jobs.insert(
@@ -2016,7 +1889,14 @@ mod app_state_tests {
 
         let view = state.desktop_view();
         assert_eq!(view.desktop_job_list.rows.len(), 1);
-        assert_eq!(view.desktop_job_list.rows[0].job_id, 1);
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
         assert_eq!(view.desktop_job_list.hidden_without_fetch_time, 1);
     }
 
@@ -2150,7 +2030,14 @@ mod app_state_tests {
         let view = state.desktop_view();
         assert_eq!(view.desktop_job_list.scoped_count, 1);
         assert!(!view.desktop_job_list.truncated);
-        assert_eq!(view.desktop_job_list.rows[0].job_id, 1);
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]
@@ -2580,51 +2467,7 @@ mod app_state_tests {
     }
 
     #[test]
-    fn view_jobs_still_carries_the_full_corpus_for_the_frozen_renderer() {
-        let mut state = AppState::new();
-        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
-            insert_done_job(
-                &mut state,
-                job_id as JobId,
-                &format!("https://example.com/{job_id}"),
-            );
-        }
-
-        let view = state.view();
-
-        assert_eq!(view.jobs.len(), DESKTOP_JOB_LIST_MAX_ROWS + 1);
-        assert_eq!(view.job_count, view.jobs.len());
-        assert_eq!(
-            view.left_pane.visible_jobs_after_filter,
-            view.jobs.iter().map(|job| job.job_id).collect::<Vec<_>>()
-        );
-        assert_eq!(view.left_pane.job_list_scope, JobListScope::SinceCheckpoint);
-    }
-
-    #[test]
-    fn desktop_view_omits_frozen_renderer_job_arrays() {
-        let mut state = AppState::new();
-        for job_id in 1..=DESKTOP_JOB_LIST_MAX_ROWS + 1 {
-            insert_done_job(
-                &mut state,
-                job_id as JobId,
-                &format!("https://example.com/{job_id}"),
-            );
-        }
-
-        let frozen = state.view();
-        let desktop = state.desktop_view();
-
-        assert_eq!(frozen.jobs.len(), DESKTOP_JOB_LIST_MAX_ROWS + 1);
-        assert!(desktop.jobs.is_empty());
-        assert!(desktop.left_pane.visible_jobs_after_filter.is_empty());
-        assert_eq!(desktop.desktop_job_list, frozen.desktop_job_list);
-        assert_eq!(desktop.left_pane.first_visible_job_id, Some(1));
-        assert!(!desktop.left_pane.selected_jobs_visible_in_filter);
-    }
-
-    #[test]
-    fn desktop_and_frozen_views_match_outside_frozen_only_arrays_for_rich_state() {
+    fn desktop_view_carries_rich_state_for_the_filtered_job_list() {
         use crate::briefing::LoadedArticle;
         use crate::triage::{ArticleTriageResult, TriageSession};
 
@@ -2698,8 +2541,7 @@ mod app_state_tests {
         state.select_job(1);
         let (state, _) = update(state, Msg::JobsSearchQueryChanged("needle".into()));
 
-        let frozen_view = state.view();
-        let desktop_view = state.desktop_view();
+        let desktop_view = state.view();
         assert_eq!(desktop_view.desktop_job_list.query, "needle");
         assert_eq!(desktop_view.desktop_job_list.rows.len(), 1);
         assert!(desktop_view.desktop_job_list.rows[0]
@@ -2713,34 +2555,6 @@ mod app_state_tests {
             .is_some());
         assert!(desktop_view.desktop_job_list.selected_job.is_some());
         assert_eq!(desktop_view.desktop_job_list.scoped_count, 1);
-        assert!(
-            frozen_view
-                .jobs
-                .iter()
-                .find(|job| job.job_id == 1)
-                .expect("recent job")
-                .is_since_checkpoint
-        );
-        assert!(
-            !frozen_view
-                .jobs
-                .iter()
-                .find(|job| job.job_id == 3)
-                .expect("old job")
-                .is_since_checkpoint
-        );
-
-        let mut frozen = serde_json::to_value(frozen_view).expect("frozen view serializes");
-        let mut desktop = serde_json::to_value(desktop_view).expect("desktop view serializes");
-        for view in [&mut frozen, &mut desktop] {
-            view.as_object_mut().expect("view object").remove("jobs");
-            view["left_pane"]
-                .as_object_mut()
-                .expect("left pane object")
-                .remove("visible_jobs_after_filter");
-        }
-
-        assert_eq!(desktop, frozen);
     }
 
     #[test]
@@ -2758,16 +2572,14 @@ mod app_state_tests {
         }
         set_triage_annotations(&mut state, &[(1, 5)]);
 
-        let frozen = state.view();
-        let desktop = state.desktop_view();
+        let desktop = state.view();
 
-        assert_eq!(frozen.jobs.len(), corpus_size);
+        assert_eq!(desktop.job_count, corpus_size);
         assert_eq!(desktop.desktop_job_list.scoped_count, corpus_size);
         assert_eq!(
             desktop.desktop_job_list.rows.len(),
             DESKTOP_JOB_LIST_MAX_ROWS
         );
-        assert!(desktop.jobs.is_empty());
         assert!(!desktop
             .desktop_job_list
             .rows
@@ -2792,9 +2604,9 @@ mod app_state_tests {
     }
 
     #[test]
-    fn visible_jobs_match_scope_when_query_empty() {
+    fn desktop_rows_match_scope_when_query_empty() {
         let mut state = AppState::new();
-        state.job_list_scope = JobListScope::SinceCheckpoint;
+        state.job_list_mode = JobListMode::SinceCheckpoint;
         state.briefing_since_utc = Some(utc("2026-05-01T00:00:00Z"));
         insert_done_job(&mut state, 1, "https://example.com/new");
         insert_done_job(&mut state, 2, "https://example.com/old");
@@ -2804,12 +2616,19 @@ mod app_state_tests {
 
         let view = state.view();
 
-        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![1]);
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
         assert_eq!(view.left_pane.first_visible_job_id, Some(1));
     }
 
     #[test]
-    fn restored_jobs_after_checkpoint_remain_visible_in_jobs_tab() {
+    fn restored_jobs_after_checkpoint_remain_visible_in_desktop_list() {
         let (mut state, _) = update(
             AppState::new(),
             Msg::RestoreCompletedJobs(vec![
@@ -2829,18 +2648,25 @@ mod app_state_tests {
                 },
             ]),
         );
-        state.job_list_scope = JobListScope::SinceCheckpoint;
+        state.job_list_mode = JobListMode::SinceCheckpoint;
         state.briefing_since_utc = Some(utc("2026-05-24T13:07:21.788858700+00:00"));
 
         let view = state.view();
 
         assert_eq!(view.job_count, 2);
-        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![1]);
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
         assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 jobs"));
     }
 
     #[test]
-    fn visible_jobs_substring_case_insensitive() {
+    fn desktop_rows_substring_case_insensitive() {
         let mut state = AppState::new();
         insert_done_job(&mut state, 1, "https://example.com/a");
         insert_done_job(&mut state, 2, "https://example.com/b");
@@ -2857,11 +2683,18 @@ mod app_state_tests {
 
         let view = state.view();
 
-        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![1]);
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]
-    fn visible_jobs_match_url_when_title_lacks_term() {
+    fn desktop_rows_match_url_when_title_lacks_term() {
         let mut state = AppState::new();
         insert_done_job(&mut state, 1, "https://github.com/example/project");
         insert_done_job(&mut state, 2, "https://example.com/plain");
@@ -2876,7 +2709,14 @@ mod app_state_tests {
 
         let view = state.view();
 
-        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![1]);
+        assert_eq!(
+            view.desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]
@@ -2894,31 +2734,39 @@ mod app_state_tests {
         state.set_jobs_search_query("rust".to_string());
         let view = state.view();
         assert_eq!(view.selected_job_id, Some(1));
-        assert_eq!(view.left_pane.visible_jobs_after_filter, vec![2]);
+        assert_eq!(view.desktop_job_list.rows[0].job_id, 2);
         assert_eq!(view.left_pane.first_visible_job_id, Some(2));
         assert_eq!(
             view.left_pane.first_visible_job_id,
-            view.left_pane.visible_jobs_after_filter.first().copied()
+            view.desktop_job_list.rows.first().map(|row| row.job_id)
         );
         assert!(!view.left_pane.selected_jobs_visible_in_filter);
     }
 
     #[test]
-    fn view_jobs_unchanged_by_search_query() {
+    fn desktop_job_list_changes_with_search_query() {
         let mut state = AppState::new();
         insert_done_job(&mut state, 1, "https://example.com/kube");
         insert_done_job(&mut state, 2, "https://example.com/rust");
 
-        let unfiltered_jobs = state.view().jobs;
+        let unfiltered_job_count = state.view().desktop_job_list.rows.len();
         state.set_jobs_search_query("kube".to_string());
         let filtered_view = state.view();
 
-        assert_eq!(filtered_view.jobs, unfiltered_jobs);
-        assert_eq!(filtered_view.left_pane.visible_jobs_after_filter, vec![1]);
+        assert_eq!(unfiltered_job_count, 2);
+        assert_eq!(
+            filtered_view
+                .desktop_job_list
+                .rows
+                .iter()
+                .map(|row| row.job_id)
+                .collect::<Vec<_>>(),
+            vec![1]
+        );
     }
 
     #[test]
-    fn left_pane_header_count_label_reflects_jobs_filter() {
+    fn left_pane_header_count_label_reflects_desktop_scope() {
         let mut state = AppState::new();
         insert_done_job(&mut state, 1, "https://example.com/kube");
         insert_done_job(&mut state, 2, "https://example.com/rust");
@@ -2928,10 +2776,8 @@ mod app_state_tests {
 
         state.set_jobs_search_query("kube".to_string());
         let view = state.view();
-        assert_eq!(
-            view.left_pane_header.count_label.as_deref(),
-            Some("1 of 2 jobs")
-        );
+        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 jobs"));
+        assert_eq!(view.desktop_job_list.rows.len(), 1);
     }
 
     #[test]
@@ -2957,40 +2803,6 @@ mod app_state_tests {
         assert_eq!(preview_context.source_label, "epochai.substack.com");
         assert_eq!(preview_context.status_label, "Done");
         assert_eq!(preview_context.attention_label, None);
-    }
-
-    #[test]
-    fn briefing_tab_still_uses_page_level_header_override() {
-        use crate::briefing::BriefingSession;
-
-        let mut state = AppState::new();
-        let mut briefing = BriefingSession::new_loading(None);
-        briefing.set_articles(vec![], "collection".to_string());
-        briefing.start_stream(
-            "[A1] Summary\nbody".to_string(),
-            "win".to_string(),
-            1,
-            0,
-            0,
-            false,
-        );
-        briefing.enter_streaming("Summary".to_string());
-        state.set_briefing(briefing);
-        state.select_tab(AppTab::Briefing);
-
-        let view = state.view();
-
-        assert!(
-            view.preview_header_text.is_some(),
-            "briefing tab must provide a preview header"
-        );
-        assert!(
-            view.preview_header_text
-                .as_deref()
-                .unwrap()
-                .contains("Briefing"),
-            "briefing tab header must identify the briefing source"
-        );
     }
 }
 
@@ -3048,9 +2860,9 @@ mod poll_stats_view_tests {
     use super::*;
 
     #[test]
-    fn poll_stats_tab_still_uses_page_level_header_override() {
+    fn poll_stats_workspace_uses_page_level_header_override() {
         let mut state = AppState::new();
-        state.select_tab(AppTab::PollStats);
+        state.set_workspace_view(crate::WorkspaceView::PollStats);
         let view = state.view();
         assert!(
             view.preview_header_text.is_some(),
@@ -3066,9 +2878,9 @@ mod poll_stats_view_tests {
     }
 
     #[test]
-    fn poll_stats_header_not_overridden_on_other_tabs() {
+    fn poll_stats_header_not_overridden_outside_its_workspace() {
         let mut state = AppState::new();
-        state.select_tab(AppTab::Triage);
+        state.set_workspace_view(crate::WorkspaceView::Review);
         let view = state.view();
         assert_eq!(view.preview_header_text, None);
     }
@@ -3167,7 +2979,7 @@ mod trends_view_tests {
     use super::*;
 
     #[test]
-    fn trends_tab_uses_page_level_header_override_instead_of_selected_article_context() {
+    fn trends_workspace_uses_page_level_header_override_alongside_selected_article_context() {
         let mut state = AppState::new();
         state.jobs.insert(
             1,
@@ -3179,10 +2991,9 @@ mod trends_view_tests {
             },
         );
         state.select_job(1);
-        state.select_tab(AppTab::Trends);
+        state.set_workspace_view(crate::WorkspaceView::Trends);
 
         let view = state.view();
-        let layout = state.layout_view();
 
         assert!(
             view.preview_header_text
@@ -3196,14 +3007,6 @@ mod trends_view_tests {
                 .as_ref()
                 .is_some_and(|context| context.source_label == "epochai.substack.com"),
             "selected article metadata may still exist in state"
-        );
-        assert!(
-            layout.preview_header_override_visible,
-            "trends tab should render the page-level header row"
-        );
-        assert!(
-            !layout.preview_context_visible,
-            "trends tab should hide the selected article metadata row"
         );
     }
 }

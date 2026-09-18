@@ -17,7 +17,7 @@ use crate::prompt_lab::{
 use crate::briefing::LoadedArticle;
 use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
-use crate::tabs::{AppTab, JobListScope, LeftTab, TrendCategory};
+use crate::tabs::TrendCategory;
 use crate::CollectedEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,8 +28,6 @@ pub enum Msg {
     JobsSearchQueryChanged(String),
     /// User pressed Esc inside the Jobs search box.
     JobsSearchCleared,
-    /// User pressed Ctrl+F to switch to and focus the Jobs search box.
-    FocusJobsSearchRequested,
     /// App startup hook for reducer-owned metadata hydration.
     StartupHydrationRequested,
     /// User submitted the current URL input for ingestion.
@@ -88,8 +86,6 @@ pub enum Msg {
     ToggleSignalCandidateExclusion {
         signal_key: String,
     },
-    /// User toggled visibility of the URL input/dropbox panel.
-    ToggleInputPanel,
     /// UI/render tick to coalesce rendering and observe host time.
     Tick {
         now: DateTime<Utc>,
@@ -116,10 +112,6 @@ pub enum Msg {
     ExtractedLinkOpenRequested {
         job_id: crate::JobId,
         link_index: u32,
-    },
-    /// Desktop reading-pane selection.
-    ReadingPaneModeSet {
-        mode: crate::ReadingPaneMode,
     },
     /// Engine progress for a job.
     JobProgress {
@@ -177,14 +169,6 @@ pub enum Msg {
     /// User selected a job from the tree view.
     JobSelected {
         job_id: crate::JobId,
-    },
-    /// User dragged the splitter to resize the left panels.
-    SplitterMoved {
-        desired_left_width_px: i32,
-    },
-    /// Window was resized.
-    WindowResized {
-        window_width: i32,
     },
     /// Window resize drag completed. Carries outer (frame) dimensions for persistence.
     WindowResizeCompleted {
@@ -494,18 +478,6 @@ pub enum Msg {
     PromptLabCompareBatchSetWarning {
         batch_id: PromptLabCompareBatchId,
         warning: Option<String>,
-    },
-    /// User selected a tab in the right pane.
-    TabSelected {
-        tab: AppTab,
-    },
-    /// User selected a tab in the left pane.
-    LeftTabSelected {
-        tab: LeftTab,
-    },
-    /// User changed the job list scope (All vs SinceCheckpoint).
-    JobListScopeSet {
-        scope: JobListScope,
     },
     /// User selected a trend category in the Trends tab.
     TrendCategorySelected {

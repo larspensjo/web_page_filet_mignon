@@ -46,21 +46,13 @@ pub fn llm_max_concurrency_requests_from_env() -> usize {
 pub fn prepare_desktop_startup_state(
     mut state: AppState,
     paths: &RuntimePaths,
-    initial_width: i32,
     llm_max_concurrent_requests: usize,
     startup_ai_availability: Option<AiAvailability>,
     llm_quota_limits: Option<LlmQuotaLimits>,
 ) -> (AppState, Vec<Effect>) {
     let mut startup_effects = Vec::new();
-    let (mut state_after_width, _) = update(
-        state,
-        Msg::WindowResized {
-            window_width: initial_width,
-        },
-    );
-    state_after_width.set_triage_max_in_flight(llm_max_concurrent_requests);
-    state_after_width.set_summary_max_in_flight(llm_max_concurrent_requests);
-    state = state_after_width;
+    state.set_triage_max_in_flight(llm_max_concurrent_requests);
+    state.set_summary_max_in_flight(llm_max_concurrent_requests);
     for message in [
         startup_ai_availability.map(|availability| Msg::AiAvailabilityDetected { availability }),
         llm_quota_limits.map(|limits| Msg::LlmQuotaConfigured { limits }),

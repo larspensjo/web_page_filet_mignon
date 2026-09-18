@@ -4,8 +4,7 @@ use super::summary_cache_support::{
     summary_cache_key_error_reason,
 };
 use crate::briefing::{ArticleSummaryResult, BriefingItem, BriefingResult, BriefingStoryResult};
-use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus, PromptLabStage};
-use crate::tabs::{AppTab, LeftTab};
+use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus};
 use crate::triage::ArticleTriageResult;
 use crate::update::signal_candidate::{handle_signal_candidate_completion, try_enqueue};
 use crate::{AppState, Effect, LlmRequestState, LlmResultKind};
@@ -369,14 +368,12 @@ fn handle_executive_summary_completion(state: &mut AppState, result: &LlmResultK
             match validate_briefing_executive_summary(output_json) {
                 Ok(exec) => {
                     state.briefing_mut().enter_streaming(exec.executive_summary);
-                    state.revert_preview_to_briefing();
                 }
                 Err(err) => {
                     engine_warn!("[briefing-stream] exec summary validation failed: {err}");
                     state
                         .briefing_mut()
                         .fail(format!("validation failed: {err}"));
-                    state.revert_preview_to_briefing();
                 }
             }
         }
@@ -385,17 +382,14 @@ fn handle_executive_summary_completion(state: &mut AppState, result: &LlmResultK
                 state.note_provider_out_of_credits(reason.clone());
             }
             state.briefing_mut().fail(reason.clone());
-            state.revert_preview_to_briefing();
         }
         LlmResultKind::RateLimited { reason } | LlmResultKind::Failed { reason } => {
             state.briefing_mut().fail(reason.clone());
-            state.revert_preview_to_briefing();
         }
         LlmResultKind::ValidationFailed { reason, .. } => {
             state
                 .briefing_mut()
                 .fail(format!("validation failed: {reason}"));
-            state.revert_preview_to_briefing();
         }
     }
 
@@ -432,7 +426,6 @@ fn handle_aggregate_briefing_completion(
                     output_tokens: *output_tokens,
                 };
                 state.briefing_mut().complete_briefing(result.clone());
-                state.revert_preview_to_briefing();
                 let now = chrono::Utc::now().to_rfc3339();
                 if let Some(entry) =
                     crate::briefing::BriefingHistoryEntry::from_result(&result, &now)
@@ -451,7 +444,6 @@ fn handle_aggregate_briefing_completion(
                 state
                     .briefing_mut()
                     .fail(format!("validation failed: {err}"));
-                state.revert_preview_to_briefing();
                 effects.push(Effect::PersistSummaryCache {
                     cache: state.summary_cache().clone(),
                 });
@@ -461,7 +453,6 @@ fn handle_aggregate_briefing_completion(
         | LlmResultKind::RateLimited { reason }
         | LlmResultKind::Failed { reason } => {
             state.briefing_mut().fail(reason.clone());
-            state.revert_preview_to_briefing();
             effects.push(Effect::PersistSummaryCache {
                 cache: state.summary_cache().clone(),
             });
@@ -470,7 +461,6 @@ fn handle_aggregate_briefing_completion(
             state
                 .briefing_mut()
                 .fail(format!("validation failed: {reason}"));
-            state.revert_preview_to_briefing();
             effects.push(Effect::PersistSummaryCache {
                 cache: state.summary_cache().clone(),
             });
@@ -491,12 +481,10 @@ fn handle_next_item_completion(state: &mut AppState, result: &LlmResultKind) {
                         .briefing_mut()
                         .append_stream_item(BriefingItem { headline, body });
                     state.briefing_mut().clear_next_item_request_id();
-                    state.revert_preview_to_briefing();
                 }
                 Ok(BriefingNextItem::Exhausted) => {
                     state.briefing_mut().set_exhausted();
                     state.briefing_mut().clear_next_item_request_id();
-                    state.revert_preview_to_briefing();
                 }
                 Err(err) => {
                     engine_warn!("[briefing-stream] next item validation failed: {err}");
@@ -582,22 +570,6 @@ fn handle_prompt_lab_completion(
     }
 
     state.consume_prompt_lab_ownership(request_id);
-
-    if state.left_tab() == LeftTab::PromptLab {
-        if let Some(run) = state.prompt_lab().run_by_id(run_id) {
-            let target_tab = match run.stage {
-                PromptLabStage::Triage => AppTab::Triage,
-                PromptLabStage::Summary => AppTab::Summary,
-                PromptLabStage::Briefing => AppTab::Briefing,
-            };
-            engine_info!(
-                "[prompt-lab-auto-tab] lab run {} completed, switching right tab to {:?}",
-                run_id.0,
-                target_tab
-            );
-            state.select_tab(target_tab);
-        }
-    }
 
     let compare_batch_id = state
         .prompt_lab()

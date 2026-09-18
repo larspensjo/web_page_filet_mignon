@@ -81,44 +81,13 @@ function MarkdownBody({
 						</span>
 					),
 				}}
-				remarkPlugins={[
-					remarkGfm,
-					suppressDuplicateLeadingHeading(jobTitle(selected)),
-				]}
+				remarkPlugins={[remarkGfm]}
 				skipHtml
 			>
 				{text}
 			</ReactMarkdown>
 		</div>
 	);
-}
-
-type MarkdownNode = {
-	type: string;
-	value?: string;
-	alt?: string;
-	children?: MarkdownNode[];
-};
-
-type MarkdownRoot = {
-	children: MarkdownNode[];
-};
-
-function markdownText(node: MarkdownNode): string {
-	return (
-		node.value ??
-		node.alt ??
-		node.children?.map((child) => markdownText(child)).join("") ??
-		""
-	);
-}
-
-function suppressDuplicateLeadingHeading(title: string) {
-	return () => (root: MarkdownRoot) => {
-		const first = root.children[0];
-		if (first?.type === "heading" && markdownText(first) === title)
-			root.children.shift();
-	};
 }
 
 function AnnotationBand({ selected }: { selected: SelectedJobView }) {

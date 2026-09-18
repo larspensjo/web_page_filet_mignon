@@ -26,8 +26,6 @@ pub enum PreviewContentKind {
 pub fn format_summary_for_preview(summary: &ArticleSummaryResult) -> String {
     use std::fmt::Write;
     let mut out = String::new();
-    let _ = writeln!(out, "# {}", summary.title);
-    out.push('\n');
     let _ = writeln!(out, "{}", summary.summary);
     if !summary.key_points.is_empty() {
         out.push('\n');

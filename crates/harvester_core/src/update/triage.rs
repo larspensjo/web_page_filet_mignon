@@ -3,7 +3,6 @@ use crate::pre_triage_filter::{
     ArticleFilterKey, ManualDecision, PreTriagePolicy, PreTriageSession,
 };
 use crate::state::TriageCacheLookupResult;
-use crate::tabs::LeftTab;
 use crate::triage::TriageSession;
 use crate::update::signal_candidate::try_enqueue;
 use crate::{AppState, Effect};
@@ -31,7 +30,6 @@ pub(super) fn handle_evaluate_pre_triage_refresh(
 
 pub(super) fn handle_triage_clicked(state: &mut AppState) -> Vec<Effect> {
     if !state.triage_ai_available() {
-        state.set_left_tab(LeftTab::TriageResults);
         state.mark_dirty();
         return Vec::new();
     }
@@ -41,7 +39,6 @@ pub(super) fn handle_triage_clicked(state: &mut AppState) -> Vec<Effect> {
     if !state.can_start_triage_from_pre_triage() {
         return Vec::new();
     }
-    state.set_left_tab(LeftTab::TriageResults);
     if !state.triage_metadata_ready() {
         state.mark_triage_metadata_pending();
         engine_warn!("[triage-cache] metadata not ready; loading metadata before dispatch");
@@ -80,12 +77,7 @@ pub(super) fn handle_articles_loaded(
     state.backfill_jobs_fetched_utc(&url_to_fetched);
     let policy = PreTriagePolicy::default();
     let mut pre_triage = PreTriageSession::load_articles(articles, &policy);
-    let job_url_pairs = state
-        .view()
-        .jobs
-        .iter()
-        .map(|job| (job.job_id, job.url.clone()))
-        .collect::<Vec<_>>();
+    let job_url_pairs = state.job_url_pairs();
     pre_triage.bind_job_ids(&job_url_pairs);
     pre_triage.apply_manual_overrides(state.pre_triage_manual_overrides());
     state.set_pre_triage(pre_triage);

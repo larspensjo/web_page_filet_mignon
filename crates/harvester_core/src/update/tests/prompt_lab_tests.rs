@@ -252,21 +252,14 @@ fn run_requested_uses_resolved_snapshot_after_job_selection() {
 }
 
 #[test]
-fn job_selected_without_summary_selects_triage_tab_and_requests_resolve() {
+fn job_selected_without_summary_updates_prompt_lab_and_requests_resolve() {
     init_logging();
     let (state, _) = update(
         AppState::new(),
         Msg::InputChanged("https://example.com/article".to_string()),
     );
     let (state, _) = update(state, Msg::UrlsSubmitted);
-    let (state, _) = update(
-        state,
-        Msg::LeftTabSelected {
-            tab: crate::tabs::LeftTab::PromptLab,
-        },
-    );
     let (state, effects) = update(state, Msg::JobSelected { job_id: 1 });
-    assert_eq!(state.active_tab(), crate::tabs::AppTab::Triage);
     assert_eq!(
         state.prompt_lab().url_input(),
         "https://example.com/article"
@@ -274,17 +267,6 @@ fn job_selected_without_summary_selects_triage_tab_and_requests_resolve() {
     assert!(effects
         .iter()
         .any(|effect| matches!(effect, Effect::ResolvePromptLabInputFromUrl { .. })));
-}
-
-#[test]
-fn job_selected_with_summary_selects_summary_tab() {
-    init_logging();
-    let mut state = make_state_with_summarized_job_for_update();
-    let job_id = state.view().jobs.first().map(|job| job.job_id).unwrap_or(1);
-    state.select_tab(crate::tabs::AppTab::Triage);
-
-    let (state, _effects) = update(state, Msg::JobSelected { job_id });
-    assert_eq!(state.active_tab(), crate::tabs::AppTab::Summary);
 }
 
 #[test]

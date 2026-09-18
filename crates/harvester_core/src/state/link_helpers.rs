@@ -28,49 +28,6 @@ pub(super) fn normalize_extracted_link(link: &str) -> String {
     }
 }
 
-pub(super) fn format_lab_triage_markdown(output_json: &str) -> String {
-    use harvester_engine::llm::validation::validate_triage;
-
-    match validate_triage(output_json) {
-        Ok(result) => {
-            let triage = crate::triage::ArticleTriageResult {
-                category: result.category,
-                priority: result.priority.value(),
-                tags: result.tags,
-                rationale: result.rationale,
-                input_tokens: 0,
-                output_tokens: 0,
-            };
-            let formatted = crate::preview::format_triage_for_preview(None, &triage);
-            format!("*Prompt Lab preview*\n\n{formatted}")
-        }
-        Err(_) => format!("**\\[Lab Triage\\]**\n\n```json\n{output_json}\n```\n"),
-    }
-}
-
-pub(super) fn format_lab_summary_markdown(output_json: &str) -> String {
-    use harvester_engine::llm::validation::validate_summary;
-
-    match validate_summary(output_json) {
-        Ok(result) => {
-            let kp_lines: String = result
-                .key_points
-                .iter()
-                .map(|kp| format!("- {kp}\n"))
-                .collect();
-            format!(
-                "# \\[Lab\\] {}\n\n{}\n\n**Key Points:**\n\n{}\n",
-                result.title, result.summary, kp_lines
-            )
-        }
-        Err(_) => format!("**\\[Lab Summary\\]**\n\n```json\n{output_json}\n```\n"),
-    }
-}
-
-pub(super) fn format_lab_briefing_markdown(output_json: &str) -> String {
-    format!("**\\[Lab Briefing\\]**\n\n```json\n{output_json}\n```\n")
-}
-
 pub(super) fn domain_from_url(url: &str) -> String {
     let trimmed = url.trim();
     let without_scheme = trimmed

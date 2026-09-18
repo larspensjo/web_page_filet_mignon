@@ -225,7 +225,8 @@ fn view_job_rows_include_cached_summary_tokens() {
 
     let view = state.view();
     let row = view
-        .jobs
+        .desktop_job_list
+        .rows
         .iter()
         .find(|job| job.url == url)
         .expect("expected matching job row");
@@ -281,7 +282,8 @@ fn view_job_rows_use_pre_triage_content_hash_for_cached_summary_tokens() {
 
     let view = state.view();
     let row = view
-        .jobs
+        .desktop_job_list
+        .rows
         .iter()
         .find(|job| job.url == url)
         .expect("expected matching job row");

@@ -1,7 +1,7 @@
 use super::{
     map_job_filter_status, normalize_url_for_dedupe, AppState, CompletedJobSnapshot, JobId,
     JobOrigin, JobResultKind, JobState, LinkDownloadState, LinkRecord, LinkSnapshotRecord,
-    MetricsState, PreviewMode, SessionState, SourceStateIndex, Stage,
+    MetricsState, SessionState, SourceStateIndex, Stage,
 };
 use crate::pre_triage_filter::PreTriagePhase;
 use crate::preview::{self, PreviewContentKind};
@@ -138,11 +138,6 @@ impl AppState {
         self.source_states = SourceStateIndex::default();
     }
 
-    pub(crate) fn revert_preview_to_briefing(&mut self) {
-        self.ui.set_preview_mode(PreviewMode::Briefing);
-        self.dirty = true;
-    }
-
     /// Resolve the best available preview content for a given URL.
     ///
     /// Follows strict priority order:
@@ -224,10 +219,7 @@ impl AppState {
 
         let changed = self.ui.select_job(job_id, Some((&content, kind)));
         if changed {
-            self.ui.set_preview_mode(PreviewMode::SelectedJob);
             self.dirty = true;
-        } else {
-            self.ui.set_preview_mode(PreviewMode::SelectedJob);
         }
     }
 
@@ -244,14 +236,6 @@ impl AppState {
         self.ui.selected_job_id()
     }
 
-    pub(crate) fn selected_job_has_summary(&self) -> bool {
-        self.ui
-            .selected_job_id()
-            .and_then(|job_id| self.jobs.get(&job_id))
-            .and_then(|job| self.summary_result_for_url(&job.url))
-            .is_some()
-    }
-
     /// URL of the currently selected job, regardless of summarization state.
     pub(crate) fn selected_job_url(&self) -> Option<String> {
         let job_id = self.ui.selected_job_id()?;
@@ -261,6 +245,13 @@ impl AppState {
 
     pub fn job_url_for(&self, job_id: JobId) -> Option<&str> {
         self.jobs.get(&job_id).map(|job| job.url.as_str())
+    }
+
+    pub(crate) fn job_url_pairs(&self) -> Vec<(JobId, String)> {
+        self.jobs
+            .iter()
+            .map(|(job_id, job)| (*job_id, job.url.clone()))
+            .collect()
     }
 
     pub(crate) fn job_extracted_link_url(&self, job_id: JobId, link_index: u32) -> Option<String> {

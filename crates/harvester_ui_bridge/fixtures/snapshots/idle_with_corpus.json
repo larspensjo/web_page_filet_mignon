@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 6,
+  "schema_version": 7,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -79,25 +79,21 @@
     },
     "dirty": true,
     "indirect_link_summary": null,
-    "input_panel_visible": false,
     "is_pre_triage_reviewing": false,
     "job_count": 2,
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
     "left_pane": {
-      "first_visible_job_id": null,
-      "job_list_scope": "SinceCheckpoint",
+      "first_visible_job_id": 2,
       "jobs_search_query": "",
-      "left_tab": "TriageResults",
       "selected_jobs_visible_in_filter": false
     },
     "left_pane_header": {
-      "count_label": "2 with triage",
+      "count_label": "2 jobs",
       "scope_label": "Since checkpoint",
       "state_label": null,
-      "title": "Results"
+      "title": "Jobs"
     },
-    "left_panel_width": 180,
     "llm_quota": {
       "label": "LLM calls 0 / unlimited",
       "limit": null,
@@ -107,8 +103,6 @@
     },
     "llm_usage_by_model": [],
     "next_item_enabled": false,
-    "operation_progress": null,
-    "operation_progress_visible": false,
     "poll_indirect_links_enabled": false,
     "poll_sources_enabled": true,
     "preview_context": null,
@@ -118,9 +112,7 @@
     "preview_text": null,
     "queued_urls": [],
     "raw_unprocessed_count": 2,
-    "reading_pane_mode": "Summary",
     "right_pane": {
-      "active_tab": "Summary",
       "poll_stats_markdown": null,
       "summary_markdown": null,
       "trends": {
@@ -148,7 +140,6 @@
     "triage_blocked_reason": null,
     "triage_can_start": false,
     "triage_results_reorder_suppressed": false,
-    "window_width": 960,
     "workspace_view": "Review"
   },
   "fatal_message": null

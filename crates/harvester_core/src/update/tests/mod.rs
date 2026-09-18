@@ -125,7 +125,6 @@ fn generate_briefing_loads_archive_final_selection() {
         state.archive_corpus().ordered_urls().len()
     );
     assert_eq!(state.briefing().phase(), &BriefingPhase::GeneratingBriefing);
-    assert_eq!(state.active_tab(), AppTab::Briefing);
     assert!(effects
         .iter()
         .all(|effect| { !matches!(effect, Effect::LoadArticlesForBriefing { .. }) }));
@@ -222,7 +221,6 @@ fn generate_briefing_defensive_fail_when_summaries_not_settled() {
         BriefingPhase::Failed { reason }
             if reason == "Summarize articles before generating a briefing."
     ));
-    assert_eq!(state.active_tab(), AppTab::Briefing);
 }
 
 #[test]
@@ -572,7 +570,7 @@ fn summary_persisted_with_dated_model_variant_is_cache_hit_after_reload() {
 }
 
 #[test]
-fn aggregate_briefing_failure_surfaces_reason_in_briefing_ui() {
+fn aggregate_briefing_failure_records_reason_in_session_phase() {
     init_logging();
     let state = AppState::new();
     let state = start_briefing_after_triage(state, loaded_single_article().0.clone());
@@ -621,13 +619,6 @@ fn aggregate_briefing_failure_surfaces_reason_in_briefing_ui() {
             reason: "request timed out".to_string()
         }
     );
-    let view = state.view();
-    assert!(view
-        .right_pane
-        .briefing_markdown
-        .as_deref()
-        .unwrap_or("")
-        .contains("request timed out"));
 }
 
 #[test]
@@ -778,25 +769,6 @@ fn second_run_reuses_cached_summary_with_configured_model_key() {
 }
 
 #[test]
-fn splitter_move_preserves_minimum_jobs_width_with_fixed_input_panel() {
-    init_logging();
-    let state = AppState::new();
-
-    let (state, effects) = update(
-        state,
-        Msg::SplitterMoved {
-            desired_left_width_px: 300,
-        },
-    );
-
-    assert!(effects.is_empty());
-    assert_eq!(
-        state.left_panel_width(),
-        INPUT_PANEL_FIXED_WIDTH + MIN_JOBS_PANEL_WIDTH
-    );
-}
-
-#[test]
 fn open_in_browser_with_summarized_job_selected_emits_effect() {
     init_logging();
     let state = make_state_with_summarized_job_for_update();
@@ -819,7 +791,13 @@ fn open_in_browser_with_unsummarized_job_selected_emits_nothing() {
         links: vec![],
         fetched_utc: None,
     }]);
-    let job_id = state.view().jobs.first().map(|j| j.job_id).unwrap_or(1);
+    let job_id = state
+        .view()
+        .desktop_job_list
+        .rows
+        .first()
+        .map(|j| j.job_id)
+        .unwrap_or(1);
     state.select_job(job_id);
     let (_state, effects) = update(state, Msg::OpenInBrowserClicked);
     assert!(effects.is_empty());

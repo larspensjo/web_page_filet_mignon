@@ -251,7 +251,7 @@ pub fn run(probe: bool) -> Result<(), String> {
         running: Arc::new(AtomicBool::new(true)),
         probe_data: None,
     };
-    let (app_state, effect_runner) = prepare_state(&paths, width, &sender)?;
+    let (app_state, effect_runner) = prepare_state(&paths, &sender)?;
     let run_state = state.clone();
     let builder = tauri::Builder::default()
         .manage(state.clone())
@@ -760,7 +760,6 @@ fn finish_probe(host: &HostState, samples: Vec<harvester_ui_bridge::probe::Probe
 
 fn prepare_state(
     paths: &RuntimePaths,
-    width: i32,
     sender: &mpsc::Sender<Msg>,
 ) -> Result<(AppState, EffectRunner), String> {
     let state = AppState::new();
@@ -785,7 +784,7 @@ fn prepare_state(
                 reason: AiUnavailableReason::MissingApiKey,
             });
     let (state, effects) =
-        prepare_desktop_startup_state(state, paths, width, llm_concurrency, availability, limits);
+        prepare_desktop_startup_state(state, paths, llm_concurrency, availability, limits);
     if !effects.is_empty() {
         runner.enqueue(effects);
     }

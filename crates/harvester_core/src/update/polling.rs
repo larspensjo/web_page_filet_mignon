@@ -1,4 +1,3 @@
-use crate::tabs::AppTab;
 use crate::{AppState, Effect, SessionState};
 use engine_logging::{engine_info, engine_warn};
 
@@ -71,6 +70,5 @@ pub(super) fn handle_source_poll_failed(
 pub(super) fn handle_all_sources_poll_ended(state: &mut AppState) -> Vec<Effect> {
     state.end_poll();
     state.pre_triage_coordinator.note_poll_sources_ended();
-    state.select_tab(AppTab::PollStats);
     Vec::new()
 }

@@ -4,7 +4,6 @@ use super::summary_cache_support::{
 };
 use crate::briefing::{BriefingPhase, BriefingSession};
 use crate::state::BriefingGenerateReadiness;
-use crate::tabs::AppTab;
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
@@ -49,7 +48,6 @@ fn begin_briefing_article_load(
     state.start_summary_cache_run();
     state.set_briefing(BriefingSession::new_loading(None));
     snapshot_briefing_coverage_window(state);
-    state.revert_preview_to_briefing();
     let since_utc = state.briefing_since_utc();
     vec![
         Effect::LoadPromptContexts,
@@ -74,7 +72,6 @@ pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
     if !briefing_ready_to_generate(state) {
         return Vec::new();
     }
-    state.select_tab(AppTab::Briefing);
     match state.briefing_generate_readiness() {
         BriefingGenerateReadiness::Ready { .. } => {}
         BriefingGenerateReadiness::TriageOrCorpusNotReady => {
@@ -111,7 +108,6 @@ pub(super) fn handle_generate_clicked(state: &mut AppState) -> Vec<Effect> {
     state
         .briefing_mut()
         .set_phase(BriefingPhase::GeneratingBriefing);
-    state.revert_preview_to_briefing();
     if snapshot.truncated {
         engine_warn!(
             "[briefing-stream] snapshot truncated: dropped={} budget_bytes={}",
@@ -507,7 +503,6 @@ pub(super) fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Ve
 
     if state.briefing_orchestration_skip_aggregate() {
         state.briefing_mut().complete_without_briefing();
-        state.revert_preview_to_briefing();
         state.clear_briefing_orchestration();
         state.mark_dirty();
         log_summary_cache_run_summary(state);

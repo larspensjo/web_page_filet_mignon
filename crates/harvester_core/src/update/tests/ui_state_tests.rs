@@ -3,93 +3,61 @@ use crate::WorkspaceView;
 use harvester_engine::llm::prompt::PromptId;
 
 #[test]
-fn left_tab_selected_jobs_updates_tab_and_dirty() {
+fn job_list_mode_set_updates_state() {
     init_logging();
     let state = AppState::new();
-    assert_eq!(state.left_tab(), LeftTab::Jobs);
+    assert_eq!(state.job_list_mode(), crate::JobListMode::SinceCheckpoint);
     let (state, effects) = update(
         state,
-        Msg::LeftTabSelected {
-            tab: LeftTab::TriageReview,
+        Msg::JobListModeSet {
+            mode: crate::JobListMode::Last24Hours,
         },
     );
     assert!(effects.is_empty());
-    assert_eq!(state.left_tab(), LeftTab::TriageReview);
-    assert!(state.view().dirty);
+    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
 }
 
 #[test]
-fn left_tab_selected_triage_results_updates_tab() {
-    init_logging();
-    let (state, _) = update(
-        AppState::new(),
-        Msg::LeftTabSelected {
-            tab: LeftTab::TriageResults,
-        },
-    );
-    assert_eq!(state.left_tab(), LeftTab::TriageResults);
-}
-
-#[test]
-fn job_list_scope_set_to_since_checkpoint_updates_state() {
-    init_logging();
-    let state = AppState::new();
-    assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
-    let (state, effects) = update(
-        state,
-        Msg::JobListScopeSet {
-            scope: JobListScope::All,
-        },
-    );
-    assert!(effects.is_empty());
-    assert_eq!(state.job_list_scope(), JobListScope::All);
-    assert!(state.view().dirty);
-}
-
-#[test]
-fn job_list_scope_set_same_value_is_noop() {
+fn job_list_mode_set_same_value_is_noop() {
     init_logging();
     let state = AppState::new();
     let view_before = state.view();
     let (state, _) = update(
         state,
-        Msg::JobListScopeSet {
-            scope: JobListScope::SinceCheckpoint,
+        Msg::JobListModeSet {
+            mode: crate::JobListMode::SinceCheckpoint,
         },
     );
-    assert!(
-        !state.view().dirty,
-        "setting same scope must not mark dirty"
-    );
+    assert!(!state.view().dirty, "setting same mode must not mark dirty");
     let _ = view_before;
 }
 
 #[test]
-fn job_list_scope_persists_across_tab_switches() {
+fn job_list_mode_persists_across_workspace_switches() {
     init_logging();
     let state = AppState::new();
     let (state, _) = update(
         state,
-        Msg::JobListScopeSet {
-            scope: JobListScope::SinceCheckpoint,
+        Msg::JobListModeSet {
+            mode: crate::JobListMode::Last24Hours,
         },
     );
     let (state, _) = update(
         state,
-        Msg::LeftTabSelected {
-            tab: LeftTab::TriageReview,
+        Msg::WorkspaceViewSet {
+            view: WorkspaceView::Trends,
         },
     );
-    assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
+    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
     let (state, _) = update(
         state,
-        Msg::LeftTabSelected {
-            tab: LeftTab::TriageResults,
+        Msg::WorkspaceViewSet {
+            view: WorkspaceView::Blacklist,
         },
     );
-    assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
-    let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
-    assert_eq!(state.job_list_scope(), JobListScope::SinceCheckpoint);
+    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
+    let (state, _) = update(state, Msg::JobsSearchRevealRequested);
+    assert_eq!(state.job_list_mode(), crate::JobListMode::Last24Hours);
 }
 
 #[test]
@@ -126,22 +94,7 @@ fn jobs_search_cleared_resets_query() {
 }
 
 #[test]
-fn focus_jobs_search_switches_left_tab() {
-    init_logging();
-    let (state, _) = update(
-        AppState::new(),
-        Msg::LeftTabSelected {
-            tab: LeftTab::TriageResults,
-        },
-    );
-    let (state, effects) = update(state, Msg::FocusJobsSearchRequested);
-
-    assert!(effects.is_empty());
-    assert_eq!(state.left_tab(), LeftTab::Jobs);
-}
-
-#[test]
-fn jobs_search_query_persists_across_tab_switch() {
+fn jobs_search_query_persists_across_workspace_switch() {
     init_logging();
     let (state, _) = update(
         AppState::new(),
@@ -149,11 +102,11 @@ fn jobs_search_query_persists_across_tab_switch() {
     );
     let (state, _) = update(
         state,
-        Msg::LeftTabSelected {
-            tab: LeftTab::TriageReview,
+        Msg::WorkspaceViewSet {
+            view: WorkspaceView::Trends,
         },
     );
-    let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
+    let (state, _) = update(state, Msg::JobsSearchRevealRequested);
 
     assert_eq!(state.jobs_search_query(), "rust");
 }
@@ -168,34 +121,26 @@ fn jobs_search_query_persists_when_jobs_mutate() {
     let state = add_completed_job_for_test(state, "https://example.com/article");
 
     assert_eq!(state.jobs_search_query(), "example");
-    assert_eq!(state.view().left_pane.visible_jobs_after_filter, vec![1]);
+    assert_eq!(
+        state
+            .view()
+            .desktop_job_list
+            .rows
+            .iter()
+            .map(|row| row.job_id)
+            .collect::<Vec<_>>(),
+        vec![1]
+    );
 }
 
 #[test]
-fn prompt_lab_close_restores_jobs_tab() {
+fn prompt_lab_close_clears_visibility() {
     init_logging();
     let mut state = AppState::new();
     state.open_prompt_lab();
-    assert_eq!(state.left_tab(), LeftTab::PromptLab);
+    assert!(state.prompt_lab().is_visible());
     let (state, _) = update(state, Msg::PromptLabCloseRequested);
-    assert_eq!(state.left_tab(), LeftTab::Jobs);
-}
-
-#[test]
-fn triage_clicked_switches_to_triage_results_tab_when_triage_can_start() {
-    init_logging();
-    let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
-    let (state, request_id) = tick_until_dispatch(state);
-    let (state, _) = update(
-        state,
-        Msg::TriageArticlesLoaded {
-            request_id,
-            articles: loaded_triage_articles(1),
-        },
-    );
-    let (state, _) = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs });
-    let (state, _) = update(state, Msg::TriageClicked);
-    assert_eq!(state.left_tab(), LeftTab::TriageResults);
+    assert!(!state.prompt_lab().is_visible());
 }
 
 #[test]
@@ -212,7 +157,6 @@ fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigat
     )
     .0;
     let state = prime_llm_metadata(state);
-    let state = update(state, Msg::LeftTabSelected { tab: LeftTab::Jobs }).0;
     let state = update(
         state,
         Msg::WorkspaceViewSet {
@@ -231,7 +175,6 @@ fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigat
             ..
         }
     )));
-    assert_eq!(state.left_tab(), LeftTab::TriageResults);
     assert_eq!(state.workspace_view(), WorkspaceView::Trends);
 }
 
@@ -239,14 +182,13 @@ fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigat
 fn job_selected_during_run_keeps_desktop_workspace_stable_after_legacy_navigation() {
     init_logging();
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
-    let job_id = state.view().jobs.first().expect("prepared job").job_id;
-    let state = update(
-        state,
-        Msg::TabSelected {
-            tab: AppTab::Trends,
-        },
-    )
-    .0;
+    let job_id = state
+        .view()
+        .desktop_job_list
+        .rows
+        .first()
+        .expect("prepared job")
+        .job_id;
     let state = update(
         state,
         Msg::WorkspaceViewSet {
@@ -258,7 +200,6 @@ fn job_selected_during_run_keeps_desktop_workspace_stable_after_legacy_navigatio
 
     let (state, _) = update(state, Msg::JobSelected { job_id });
 
-    assert_eq!(state.active_tab(), AppTab::Triage);
     assert_eq!(state.workspace_view(), WorkspaceView::Trends);
 }
 
@@ -399,12 +340,6 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
             "AI setup required\n\nTriage is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable article triage."
         )
     );
-    assert_eq!(
-        view.right_pane.briefing_markdown.as_deref(),
-        Some(
-            "AI setup required\n\nBriefing is disabled because `OPENAI_API_KEY` is not set.\n\nSet `OPENAI_API_KEY` in the launch environment and restart the app to enable briefing generation."
-        )
-    );
 
     let pre_triage_before = state.pre_triage().resolved_included_urls().to_vec();
     let (state, triage_effects) = update(state, Msg::TriageClicked);
@@ -412,7 +347,6 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
         triage_effects.is_empty(),
         "blocked triage must dispatch nothing"
     );
-    assert_eq!(state.left_tab(), LeftTab::TriageResults);
     assert_eq!(
         state.pre_triage().resolved_included_urls(),
         pre_triage_before
@@ -423,14 +357,12 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
         briefing_effects.is_empty(),
         "blocked briefing must dispatch nothing"
     );
-    assert_eq!(state.active_tab(), AppTab::Summary);
 
-    let (state, summary_effects) = update(state, Msg::PrepareSummariesClicked);
+    let (_state, summary_effects) = update(state, Msg::PrepareSummariesClicked);
     assert!(
         summary_effects.is_empty(),
         "blocked summary preparation must dispatch nothing"
     );
-    assert_eq!(state.active_tab(), AppTab::Summary);
 }
 
 #[test]

@@ -1965,6 +1965,16 @@ reducer-generated contract fixtures. Implementation entry in
 **Run 1 progress.** Run 1 landed items 1, 2, 9, 10, and the run-1 documentation
 updates. The submodule is removed from both Cargo and git.
 
+**Run 2 progress.** Run 2 removed the frozen Win32 view geometry, navigation,
+full job-list projection, briefing body fields, and operation footer model. The
+IPC envelope now carries the desktop projection directly; Prompt Lab remains
+deferred to Run 3. The `left_pane_header`, `preview_header_text`,
+`left_pane.first_visible_job_id`, and
+`left_pane.selected_jobs_visible_in_filter` payload fields now have no frontend
+reader and are deferred to Run 4, along with deleting
+`pre_triage_load_progress` and `Msg::TriageArticlesLoadProgress` as further
+Win32 residue.
+
 1. **Delete `crates/harvester_app` and remove it from BOTH `[workspace] members`
    and `[workspace] default-members` in the root `Cargo.toml`.** Both, in the same
    edit — leaving it in either list makes every root cargo command fail

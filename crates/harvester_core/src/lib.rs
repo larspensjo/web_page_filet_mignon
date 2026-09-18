@@ -26,7 +26,6 @@ mod tabs;
 pub mod trends;
 mod triage;
 mod triage_cache;
-mod ui_geometry;
 mod ui_intent;
 mod update;
 mod url_age;
@@ -90,9 +89,7 @@ pub use ui_intent::{HostAction, IntentContext, IntentEffect, UiIntent};
 pub use summary_cache::{
     context_hash, SummaryCache, SummaryCacheEntry, SummaryCacheKey, SummaryCacheKeyError,
 };
-pub use tabs::{
-    AppTab, JobListMode, JobListScope, LeftTab, ReadingPaneMode, TrendCategory, WorkspaceView,
-};
+pub use tabs::{JobListMode, TrendCategory, WorkspaceView};
 pub use trends::{
     choose_display_label, compute_trends, normalize_entity_key, CategoryTrend, EntityLine,
     EntityTrendData, IsoWeek,
@@ -102,20 +99,17 @@ pub use triage::{
     TriageSession,
 };
 pub use triage_cache::{TriageCache, TriageCacheEntry, TriageCacheKey, TriageCacheKeyError};
-pub use ui_geometry::calc_left_width;
 pub use update::update;
 pub use view_model::{
     AppViewModel, ArchivePartialCoverageView, CategoryTrendView, DesktopJobListView,
     EntityLineView, IndirectLinkPhase, IndirectLinkSummary, InlineWarningView, JobFilterStatus,
-    JobListRowView, JobRowView, LayoutViewModel, LeftPaneHeaderView, LeftPaneView, LinkRowView,
-    LlmModelUsageView, OperationProgress, PreviewContextView, PreviewHeaderView,
-    PromptLabCompareBatchView, PromptLabCompareCandidateView, PromptLabComparePolicyView,
-    PromptLabCompareRowView, PromptLabRunSummaryView, PromptLabView, RightPaneView, ScoreBand,
-    SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView,
-    SignalCandidateRow, SignalCandidateRowState, StopFinishButtonState, TrendsTabView,
-    TriageAnnotationView, DEFAULT_JOBS_PANEL_WIDTH, DEFAULT_LEFT_PANEL_WIDTH,
+    JobListRowView, JobRowView, LeftPaneHeaderView, LeftPaneView, LinkRowView, LlmModelUsageView,
+    PreviewContextView, PreviewHeaderView, PromptLabCompareBatchView,
+    PromptLabCompareCandidateView, PromptLabComparePolicyView, PromptLabCompareRowView,
+    PromptLabRunSummaryView, PromptLabView, RightPaneView, ScoreBand, SelectedJobView,
+    SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView, SignalCandidateRow,
+    SignalCandidateRowState, StopFinishButtonState, TrendsTabView, TriageAnnotationView,
     DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS,
-    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, INPUT_PANEL_FIXED_WIDTH, MIN_JOBS_PANEL_WIDTH,
-    TOKEN_LIMIT,
+    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
