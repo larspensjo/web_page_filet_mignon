@@ -2323,3 +2323,11 @@ Change: Added the Eval launch policy and launcher, documented the read-only Secr
 Lessons Learned: `input_content_hash` means different things on the sync and batch paths — sent-text hash versus untruncated clean-text hash — so recordings need a separate evidence identity. `ReplayProvider::load_from_dir` keeps the first record in directory order and is therefore unusable for deterministic selection. Batch recordings carry `wall_ms = 0`, so their recorded latency is not a comparable baseline.
 Prevention: Keep regression tests for missing or nonmatching replay inputs and for accepted and hostile endpoint forms so an empty freeze or key-redirection path cannot return.
 Refs: crates/harvester_eval/README.md, docs/JevTriageExperiment.Runbook.md, scripts/lib/HarvesterLaunch.psm1, scripts/tests/HarvesterLaunch.Tests.ps1, docs/plans/Plan.JevTriageExperiment.md
+
+## 2026-09-18 - First live Jev responses rejected by assumed-schema checks
+Type: Bug Fix
+Context: The first live `harvester_eval` call (two development articles) returned HTTP 200 with complete answers, but both records were stored as `invalid` and the run failed with zero successful records.
+Change: Relevance `score` values are now accepted anywhere within the returned legend's index range, because live Jev returns the probability-weighted expected level (1.33) rather than a legend index. Probability-mass validation now allows two-decimal rounding (0.005 per option), because live priority probabilities summed to 0.99. Both raw responses are checked-in regression fixtures.
+Lessons Learned: A strict validator written from vendor documentation turns every undocumented detail into a hard failure; the first live call is the schema test, so keep it tiny and keep the raw bytes. A reported value called `score` next to a `legend` looked like an index but was an expectation over it.
+Prevention: `first_live_responses_validate` parses and validates the real bytes; `rounding_tolerance_and_score_range_still_reject_real_errors` keeps out-of-range scores and genuinely wrong mass failing.
+Refs: crates/harvester_eval/src/jev/response.rs, crates/harvester_eval/tests/phase2.rs, crates/harvester_eval/tests/fixtures/jev_live/, docs/JevTriageExperiment.Runbook.md

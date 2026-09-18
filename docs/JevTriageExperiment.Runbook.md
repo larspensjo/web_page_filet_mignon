@@ -487,3 +487,24 @@ Use a new `run_id` for a changed manifest, rubric, split, repeat, transport,
 or tuning configuration. The old run remains available for comparison.
 
 ## Schema conformance
+
+### 2026-09-18 — first live call (`jev-schema-20260918`)
+
+Two development articles (7,570 and 14,832 text bytes), with priority,
+relevance, five categories and 33 tags in one request each. Both returned
+HTTP 200 on the first attempt in 2.4 s and 3.8 s. Both were recorded as
+`invalid` because two checks were stricter than the real response; the parser
+was fixed and both raw responses are now regression fixtures
+(`crates/harvester_eval/tests/fixtures/jev_live/`). Replaying them offline
+through the fixed tool validates both.
+
+| Question | Observed |
+|---|---|
+| Returned model | `jev-1.13.0` — resolves beyond `jev-latest`. |
+| Answer shape | Each answer carries a `type` field (`choice`, `score`, `noul`); `noul` answers are `{"type":"noul","noul":p}`. |
+| Choice probabilities | Present for `priority`, keyed by option label, with `confidence`. Rounded to two decimals, so the mass can be 0.99; the check now allows up to 0.005 per option. |
+| Score value | **Deviation:** `score` is the probability-weighted expected level (1.33, 1.57), not a legend index. The check now accepts any value within the legend's range. Relevance is shown only in the diagnosis, so no metric changes. |
+| Score legend | Returned as an object keyed `"0"`–`"4"` (0-based) even though the request sends a list; score probabilities are present, keyed the same way. |
+| `usage` shape | `{"input_tokens": n, "output_tokens": n}`. Output tokens were 835 on both calls, so they appear fixed per question set. The cost model bills input only; recheck TypeSafe billing for output tokens. |
+| Question text billed as input | Yes. 5,433 and 7,048 input tokens against 23,236 and 30,491 request bytes imply about 3,750 tokens of fixed rubric and question overhead per call. |
+| Request-size limit | Not reached. The longest frozen article is 97,214 bytes (about 25,000 tokens with the overhead), under the assumed 32k budget but not yet exercised; the smoke run's failures will show whether the long tail fits. |

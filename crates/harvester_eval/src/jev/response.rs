@@ -98,7 +98,7 @@ pub enum JevValidationError {
     ProbabilityMassOutOfTolerance { question: String, sum: f64 },
     #[error("noul probability for {key:?} is outside [0, 1]: {value}")]
     NoulProbabilityOutOfRange { key: String, value: f64 },
-    #[error("score {score} for {key:?} is outside its returned legend")]
+    #[error("score {score} for {key:?} is outside its returned legend range")]
     ScoreOutsideLegend {
         key: String,
         score: f64,
@@ -128,8 +128,9 @@ pub struct ValidatedAnswers {
     pub priority_distribution: ValidatedPriorityDistribution,
     pub confidence: Option<f64>,
     pub p_high: f64,
-    /// The score index returned by Jev. It uses the returned legend's 0- or
-    /// 1-based index and is deliberately not rounded or converted into priority.
+    /// The score returned by Jev: the probability-weighted expected level on
+    /// the returned legend's 0- or 1-based index scale, so it may fall between
+    /// two levels. It is deliberately not rounded or converted into priority.
     pub relevance: Option<f64>,
     pub relevance_legend: Option<BTreeMap<String, String>>,
     pub relevance_probabilities: Option<BTreeMap<String, f64>>,
@@ -138,6 +139,10 @@ pub struct ValidatedAnswers {
     pub selected_categories: Vec<String>,
     pub selected_tags: Vec<String>,
 }
+
+/// Largest rounding error per option when Jev reports probabilities to two
+/// decimals.
+const PROBABILITY_ROUNDING_PER_OPTION: f64 = 0.005;
 
 /// Parses documented response JSON without applying any semantic coercion.
 pub fn parse_jev_response(bytes: &[u8]) -> Result<JevAnswers, JevParseError> {
@@ -534,15 +539,12 @@ fn validate_score(
     {
         return Err(JevValidationError::LegendKeysInvalid { key: key.into() });
     }
-    let score_key = if score.is_finite() && score.fract() == 0.0 && score >= 0.0 {
-        Some(format!("{score:.0}"))
-    } else {
-        None
-    };
-    if score_key
-        .as_ref()
-        .is_none_or(|value| !legend.contains_key(value))
-    {
+    // Live Jev returns the probability-weighted expected level (for example
+    // 1.33 between "1" and "2"), not a legend index, so any value within the
+    // legend's index range is valid.
+    let lowest = base as f64;
+    let highest = (base + legend.len() - 1) as f64;
+    if !score.is_finite() || score < lowest || score > highest {
         return Err(JevValidationError::ScoreOutsideLegend {
             key: key.into(),
             score,
@@ -599,8 +601,11 @@ fn validate_distribution(
             });
         }
     }
+    // Live Jev rounds each probability to two decimals, so the mass may drift
+    // by up to half a hundredth per option (0.99 is a real five-option sum).
     let sum = distribution.values().sum::<f64>();
-    if (sum - 1.0).abs() > 1e-3 {
+    let tolerance = PROBABILITY_ROUNDING_PER_OPTION * distribution.len() as f64 + 1e-9;
+    if (sum - 1.0).abs() > tolerance {
         return Err(JevValidationError::ProbabilityMassOutOfTolerance {
             question: key.into(),
             sum,

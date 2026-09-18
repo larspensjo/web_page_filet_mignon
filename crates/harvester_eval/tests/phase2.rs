@@ -294,6 +294,63 @@ fn documented_response_shapes_parse_and_validate() {
     ));
 }
 
+/// Regression fixtures are the raw bytes of the first live Jev responses
+/// (2026-09-18); both were wrongly rejected by stricter assumed-schema checks.
+#[test]
+fn first_live_responses_validate() {
+    let fractional = parse_jev_response(include_bytes!(
+        "fixtures/jev_live/2026-09-18-fractional-relevance.json"
+    ))
+    .unwrap();
+    let validated = validate_answers(&fractional, &RunConfig::default()).unwrap();
+    assert_eq!(validated.model, "jev-1.13.0");
+    assert_eq!(validated.priority, 2);
+    assert_eq!(validated.relevance, Some(1.33));
+    assert_eq!(validated.usage.input_tokens, 5433);
+    assert_eq!(validated.usage.output_tokens, 835);
+    assert_eq!(
+        validated.tag_probabilities.len(),
+        RunConfig::default().questions.tag_vocabulary.len()
+    );
+
+    let rounded = parse_jev_response(include_bytes!(
+        "fixtures/jev_live/2026-09-18-rounded-mass.json"
+    ))
+    .unwrap();
+    let validated = validate_answers(&rounded, &RunConfig::default()).unwrap();
+    assert_eq!(validated.priority, 2);
+    assert_eq!(validated.relevance, Some(1.57));
+}
+
+#[test]
+fn rounding_tolerance_and_score_range_still_reject_real_errors() {
+    let mut config = RunConfig::default();
+    config.questions.include_categories = false;
+    config.questions.include_tags = false;
+    let mut answers = priority_answers();
+    if let JevAnswer::Choice { probabilities, .. } = answers.answers.get_mut("priority").unwrap() {
+        // Sum 0.97: beyond two-decimal rounding on five options (max 0.025).
+        probabilities.as_mut().unwrap().insert("5".into(), 0.17);
+    }
+    assert!(matches!(
+        validate_answers(&answers, &config),
+        Err(JevValidationError::ProbabilityMassOutOfTolerance { .. })
+    ));
+    let mut answers = priority_answers();
+    if let JevAnswer::Score { score, .. } = answers.answers.get_mut("relevance").unwrap() {
+        *score = 4.01;
+    }
+    assert!(matches!(
+        validate_answers(&answers, &config),
+        Err(JevValidationError::ScoreOutsideLegend { .. })
+    ));
+    let mut answers = priority_answers();
+    if let JevAnswer::Score { score, .. } = answers.answers.get_mut("relevance").unwrap() {
+        *score = 2.5;
+    }
+    assert!(validate_answers(&answers, &config).is_ok());
+}
+
 fn priority_answers() -> JevAnswers {
     JevAnswers {
         model: "jev-latest".into(),
