@@ -364,7 +364,7 @@ taken from the brief.
   runs/<run_id>/results.jsonl             # append-only result records
   runs/<run_id>/results.jsonl.broken-<utc># quarantined partial line, if any
   runs/<run_id>/raw/<article_id>/r<rep>-<attempt_utc>-a<attempt>.json
-  runs/<run_id>/harvester_eval.log
+  harvester_eval.log                       # one log shared by all runs
   reports/<run_id>/metrics.md | metrics.json
   reports/<run_id>/review.csv | review.key.json
   reports/<run_id>/diagnosis.md
@@ -848,10 +848,10 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
      `run_id`, `article_id`, outcome, attempt count and latency; one warn line
      per retry with the classification; one error line per terminal failure; one
      warn line per store recovery. No key, no header, no article text.
-   - Exit code 0 when at least one record was written and no terminal access
-     error occurred; non-zero on a configuration error, an incompatible resume,
-     a missing acceptance table, a 401/422 terminal error, or zero successful
-     records.
+   - Exit code 0 when at least one successful record was written and no terminal
+     access error occurred; non-zero on a configuration error, an incompatible
+     resume, a missing acceptance table, a 401/422 terminal error, or zero
+     successful records.
 7. **`src/main.rs`**: a small tokio runtime; orchestration stays thin, with the
    decisions in the pure modules.
 

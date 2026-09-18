@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use anyhow::bail;
 use clap::{Args, Parser, Subcommand};
 
+use crate::config::{load_config, resolve_config, ConfigOverrides, DatasetSelection, Transport};
 use crate::freeze::{freeze, FreezeOptions};
 use crate::manifest::manifest_path;
 use crate::report::baseline::write_baseline_report;
@@ -25,6 +26,7 @@ pub struct Cli {
 enum Command {
     Freeze(FreezeArgs),
     Report(ReportArgs),
+    Run(RunArgs),
 }
 
 #[derive(Debug, Args)]
@@ -61,8 +63,41 @@ struct ReportArgs {
     out: Option<PathBuf>,
 }
 
+#[derive(Debug, Args)]
+struct RunArgs {
+    #[arg(long)]
+    config: PathBuf,
+    #[arg(long)]
+    split: Option<DatasetSelection>,
+    #[arg(long)]
+    limit: Option<usize>,
+    #[arg(long)]
+    repeat: Option<u32>,
+    #[arg(long)]
+    run_id: Option<String>,
+    #[arg(long)]
+    transport: Option<Transport>,
+    #[arg(long)]
+    fake_dir: Option<String>,
+    #[arg(long)]
+    retry_failed: bool,
+    #[arg(long)]
+    concurrency: Option<u32>,
+    #[arg(long)]
+    dry_run: bool,
+}
+
 /// Dispatches a parsed command.
 pub fn run(cli: Cli) -> anyhow::Result<()> {
+    if tokio::runtime::Handle::try_current().is_ok() {
+        bail!("cli::run cannot execute inside a Tokio runtime; use run_async");
+    }
+    tokio::runtime::Runtime::new()?.block_on(run_async(cli))
+}
+
+/// Async dispatch used by the Tokio binary; the synchronous wrapper remains
+/// available for the existing keyless command tests.
+pub async fn run_async(cli: Cli) -> anyhow::Result<()> {
     fs::create_dir_all(&cli.experiment_dir)?;
     engine_logging::initialize_at(cli.experiment_dir.join("harvester_eval.log"));
     match cli.command {
@@ -97,6 +132,27 @@ pub fn run(cli: Cli) -> anyhow::Result<()> {
                 .unwrap_or_else(|| manifest_path(&cli.experiment_dir));
             let directory = write_baseline_report(&manifest, args.out.as_deref())?;
             println!("baseline report written to {}", directory.display());
+        }
+        Command::Run(args) => {
+            let config = load_config(&args.config)?;
+            let overrides = ConfigOverrides {
+                split: args.split,
+                limit: args.limit,
+                repeat: args.repeat,
+                run_id: args.run_id,
+                transport: args.transport,
+                fake_dir: args.fake_dir,
+                concurrency: args.concurrency,
+                retry_failed: args.retry_failed.then_some(true),
+                ..ConfigOverrides::default()
+            };
+            let resolved = resolve_config(Some(&config), &overrides)?;
+            crate::runner::run(crate::runner::RunOptions {
+                experiment_dir: cli.experiment_dir,
+                config: resolved,
+                dry_run: args.dry_run,
+            })
+            .await?;
         }
     }
     Ok(())

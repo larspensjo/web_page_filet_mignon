@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::Path;
 
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -258,7 +259,7 @@ pub struct ConfigOverrides {
     pub concurrency: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum DatasetSelection {
     Dev,
@@ -266,7 +267,7 @@ pub enum DatasetSelection {
     All,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum Transport {
     Live,
@@ -318,6 +319,8 @@ pub enum ConfigError {
     FakeDirectoryMissing,
     #[error("pricing.input_microdollars_per_million is below 1000 microdollars per million input tokens: {0}")]
     PricingRateTooLow(u64),
+    #[error("{key} must not be empty")]
+    EmptyAcceptanceMetadata { key: &'static str },
 }
 
 impl PartialEq for ConfigError {
@@ -396,6 +399,10 @@ impl PartialEq for ConfigError {
             (Self::MaxAttemptsZero, Self::MaxAttemptsZero)
             | (Self::FakeDirectoryMissing, Self::FakeDirectoryMissing) => true,
             (Self::PricingRateTooLow(left), Self::PricingRateTooLow(right)) => left == right,
+            (
+                Self::EmptyAcceptanceMetadata { key: left },
+                Self::EmptyAcceptanceMetadata { key: right },
+            ) => left == right,
             _ => false,
         }
     }
@@ -471,6 +478,14 @@ impl RunConfig {
                 "acceptance.severe_miss_rate_max",
                 acceptance.severe_miss_rate_max,
             )?;
+            for (key, value) in [
+                ("acceptance.agreed_utc", acceptance.agreed_utc.as_str()),
+                ("acceptance.agreed_note", acceptance.agreed_note.as_str()),
+            ] {
+                if value.trim().is_empty() {
+                    return Err(ConfigError::EmptyAcceptanceMetadata { key });
+                }
+            }
         }
         Ok(())
     }

@@ -132,6 +132,7 @@ pub struct ValidatedAnswers {
     /// 1-based index and is deliberately not rounded or converted into priority.
     pub relevance: Option<f64>,
     pub relevance_legend: Option<BTreeMap<String, String>>,
+    pub relevance_probabilities: Option<BTreeMap<String, f64>>,
     pub category_probabilities: BTreeMap<String, f64>,
     pub tag_probabilities: BTreeMap<String, f64>,
     pub selected_categories: Vec<String>,
@@ -393,29 +394,30 @@ pub fn validate_answers(
         }
     };
 
-    let (relevance, relevance_legend) = match answers.answers.get("relevance") {
-        None => (None, None),
-        Some(JevAnswer::Score {
-            score,
-            legend,
-            probabilities,
-        }) => {
-            validate_score(
-                "relevance",
-                *score,
+    let (relevance, relevance_legend, relevance_probabilities) =
+        match answers.answers.get("relevance") {
+            None => (None, None, None),
+            Some(JevAnswer::Score {
+                score,
                 legend,
-                config.questions.relevance_levels.len(),
-                probabilities.as_ref(),
-            )?;
-            (Some(*score), Some(legend.clone()))
-        }
-        Some(_) => {
-            return Err(JevValidationError::AnswerTypeMismatch {
-                key: "relevance".into(),
-                expected: "score",
-            })
-        }
-    };
+                probabilities,
+            }) => {
+                validate_score(
+                    "relevance",
+                    *score,
+                    legend,
+                    config.questions.relevance_levels.len(),
+                    probabilities.as_ref(),
+                )?;
+                (Some(*score), Some(legend.clone()), probabilities.clone())
+            }
+            Some(_) => {
+                return Err(JevValidationError::AnswerTypeMismatch {
+                    key: "relevance".into(),
+                    expected: "score",
+                })
+            }
+        };
 
     let mut category_probabilities = BTreeMap::new();
     if config.questions.include_categories {
@@ -454,6 +456,7 @@ pub fn validate_answers(
         p_high: high_probability,
         relevance,
         relevance_legend,
+        relevance_probabilities,
         category_probabilities,
         tag_probabilities,
         selected_categories,
