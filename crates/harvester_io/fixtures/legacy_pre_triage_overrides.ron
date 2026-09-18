@@ -1,0 +1,20 @@
+(
+  completed: [
+    (
+      url: "https://example.com/completed",
+      tokens: Some(42u32),
+      bytes: Some(1024u64),
+      links: [],
+      fetched_utc: Some("2026-09-18T08:00:00Z"),
+    ),
+  ],
+  pre_triage_overrides: [
+    (
+      url: "https://example.com/retired-override",
+      content_hash: 42,
+      include: false,
+    ),
+  ],
+  window_width: Some(1200),
+  window_height: Some(900),
+)

@@ -1,7 +1,5 @@
 use super::summary_cache_support::short_hash;
-use crate::pre_triage_filter::{
-    ArticleFilterKey, ManualDecision, PreTriagePolicy, PreTriageSession,
-};
+use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
 use crate::state::TriageCacheLookupResult;
 use crate::triage::TriageSession;
 use crate::update::signal_candidate::try_enqueue;
@@ -79,7 +77,6 @@ pub(super) fn handle_articles_loaded(
     let mut pre_triage = PreTriageSession::load_articles(articles, &policy);
     let job_url_pairs = state.job_url_pairs();
     pre_triage.bind_job_ids(&job_url_pairs);
-    pre_triage.apply_manual_overrides(state.pre_triage_manual_overrides());
     state.set_pre_triage(pre_triage);
     state.refresh_selected_preview();
     state.mark_dirty();
@@ -126,32 +123,9 @@ pub(super) fn handle_articles_load_failed(
     state.clear_pre_triage_load_progress();
     state.clear_triage_in_flight();
     state.pre_triage_coordinator.complete_request(request_id);
-    // Clear manual overrides to avoid stale decisions on the blank pre-triage.
     // Do NOT fail the TriageSession — a background refresh error should not
     // destroy the user's active triage session.
-    state.clear_pre_triage_manual_overrides();
     state.set_pre_triage(PreTriageSession::default());
-    state.mark_dirty();
-    Vec::new()
-}
-
-pub(super) fn handle_pre_triage_decision_set(
-    state: &mut AppState,
-    key: ArticleFilterKey,
-    decision: ManualDecision,
-) -> Vec<Effect> {
-    if state.set_pre_triage_manual_decision(key, decision) {
-        state.mark_dirty();
-    }
-    Vec::new()
-}
-
-pub(super) fn handle_pre_triage_apply_clicked(_state: &mut AppState) -> Vec<Effect> {
-    Vec::new()
-}
-
-pub(super) fn handle_pre_triage_reset_clicked(state: &mut AppState) -> Vec<Effect> {
-    state.clear_pre_triage_manual_overrides();
     state.mark_dirty();
     Vec::new()
 }
@@ -172,11 +146,6 @@ fn schedule_pre_triage_refresh(
     match result {
         crate::pre_triage_coordinator::PreTriageRefreshScheduleResult::ImmediateReset => {
             engine_info!("[pre-triage-refresh-coord] immediate reset (empty corpus)");
-            // Clear overrides BEFORE resetting the session so that
-            // `clear_manual_decisions` (which re-derives phase) runs on the
-            // old session, not the freshly-reset one. The final
-            // `set_pre_triage(default)` then establishes the correct Idle phase.
-            state.clear_pre_triage_manual_overrides();
             state.set_pre_triage(PreTriageSession::default());
             state.clear_triage_in_flight();
             Vec::new()

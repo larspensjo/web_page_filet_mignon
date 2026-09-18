@@ -7,7 +7,6 @@ use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_core::{Effect, JobResultKind, Msg};
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::types::ProviderKind;
 use harvester_engine::llm::{LlmHandle, PromptRegistry};
 use harvester_engine::{
     is_confined_to, EngineConfig, EngineEvent, EngineHandle, FailureKind, FetchSettings, UrlPolicy,
@@ -76,8 +75,6 @@ pub struct EffectRunner {
     llm_max_input_bytes: Option<usize>,
     prompt_registry: Arc<RwLock<PromptRegistry>>,
     llm_metadata_models: HashMap<PromptId, String>,
-    llm_provider: Option<Arc<dyn harvester_engine::llm::provider::LlmProvider>>,
-    llm_default_provider: Option<ProviderKind>,
     platform_handler: Box<dyn PlatformEffectHandler>,
     /// Sender to the serialized entity-index worker. Dropping this closes the channel.
     entity_index_worker_tx: mpsc::SyncSender<EntityIndexWorkerMsg>,
@@ -97,8 +94,6 @@ impl EffectRunner {
             None,
             registry,
             HashMap::new(),
-            None,
-            None,
             platform_handler,
         )
     }
@@ -111,8 +106,6 @@ impl EffectRunner {
         llm_max_input_bytes: usize,
         prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
-        llm_provider: Arc<dyn harvester_engine::llm::provider::LlmProvider>,
-        llm_default_provider: ProviderKind,
         platform_handler: Box<dyn PlatformEffectHandler>,
     ) -> Self {
         Self::with_optional_llm(
@@ -122,8 +115,6 @@ impl EffectRunner {
             Some(llm_max_input_bytes),
             prompt_registry,
             llm_metadata_models,
-            Some(llm_provider),
-            Some(llm_default_provider),
             platform_handler,
         )
     }
@@ -136,8 +127,6 @@ impl EffectRunner {
         llm_max_input_bytes: Option<usize>,
         prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
-        llm_provider: Option<Arc<dyn harvester_engine::llm::provider::LlmProvider>>,
-        llm_default_provider: Option<ProviderKind>,
         platform_handler: Box<dyn PlatformEffectHandler>,
     ) -> Self {
         let mut config = EngineConfig::default_with_output(paths.output_dir.clone());
@@ -166,8 +155,6 @@ impl EffectRunner {
             llm_max_input_bytes,
             prompt_registry,
             llm_metadata_models,
-            llm_provider,
-            llm_default_provider,
             platform_handler,
             entity_index_worker_tx: worker_tx,
         };
@@ -205,8 +192,6 @@ impl EffectRunner {
             llm_max_input_bytes: None,
             prompt_registry: Arc::new(RwLock::new(PromptRegistry::with_defaults())),
             llm_metadata_models: HashMap::new(),
-            llm_provider: None,
-            llm_default_provider: None,
             platform_handler,
             entity_index_worker_tx: worker_tx,
         };

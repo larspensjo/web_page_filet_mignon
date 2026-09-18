@@ -5,15 +5,13 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use harvester_core::{Effect, JobResultKind, LlmResultKind, Msg};
-use harvester_engine::llm::load_context_file;
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::types::ProviderKind;
+use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
 use harvester_engine::llm::{LlmCompletionError, LlmEvent};
-use harvester_engine::llm::{DEFAULT_BRIEFING_MODEL, OPENAI_MODEL_GPT_4O_MINI};
 use harvester_engine::{FailureKind, FetchSettings, Stage, UrlPolicy};
 use tempfile::tempdir;
 
-use crate::effect_helpers::{build_local_model_catalog, download_link_page, map_llm_event};
+use crate::effect_helpers::{download_link_page, map_llm_event};
 use crate::RuntimePaths;
 
 use super::{is_actionable_job_failure, EffectRunner, NoOpPlatformHandler};
@@ -158,45 +156,6 @@ fn load_prompt_contexts_fails_when_required_triage_context_is_invalid() {
 }
 
 #[test]
-fn build_local_model_catalog_uses_effective_models_with_dedup_and_sort() {
-    let mut effective_models = HashMap::new();
-    effective_models.insert(
-        PromptId::ArticleTriage,
-        OPENAI_MODEL_GPT_4O_MINI.to_string(),
-    );
-    effective_models.insert(PromptId::ArticleSummary, "o3-mini".to_string());
-    effective_models.insert(
-        PromptId::AggregateBriefing,
-        DEFAULT_BRIEFING_MODEL.to_string(),
-    );
-
-    let models = build_local_model_catalog(Some(ProviderKind::OpenAi), &effective_models);
-    let names: Vec<_> = models.iter().map(|m| m.model_name().to_string()).collect();
-
-    assert_eq!(
-        names,
-        vec![
-            OPENAI_MODEL_GPT_4O_MINI.to_string(),
-            DEFAULT_BRIEFING_MODEL.to_string(),
-            "o3-mini".to_string()
-        ]
-    );
-}
-
-#[test]
-fn build_local_model_catalog_returns_empty_without_provider_kind() {
-    let mut effective_models = HashMap::new();
-    effective_models.insert(
-        PromptId::ArticleTriage,
-        OPENAI_MODEL_GPT_4O_MINI.to_string(),
-    );
-
-    let models = build_local_model_catalog(None, &effective_models);
-
-    assert!(models.is_empty());
-}
-
-#[test]
 fn download_link_page_rejects_disallowed_scheme_before_request() {
     let temp = tempdir().expect("tempdir");
     let fetch_settings = FetchSettings::default();
@@ -297,63 +256,6 @@ fn delete_linked_page_effect_is_rejected_on_unsafe_path() {
 }
 
 #[test]
-fn save_prompt_context_file_writes_file_and_dispatches_saved_msg() {
-    let temp = tempdir().expect("tempdir");
-    let (runner, rx) = runner_with_receiver(temp.path());
-    let prompt_id = PromptId::ArticleTriage;
-    runner.enqueue(vec![Effect::SavePromptContextFile {
-        prompt_id,
-        context_pairs: vec![("foo".into(), "bar".into())],
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected context saved msg");
-
-    match msg {
-        Msg::PromptLabContextSaved {
-            prompt_id: received,
-            path,
-            version,
-        } => {
-            assert_eq!(received, prompt_id);
-            let saved = load_context_file(&std::path::PathBuf::from(&path)).expect("load saved");
-            assert_eq!(saved.meta.prompt_id, prompt_id.to_string());
-            assert_eq!(saved.meta.schema_version, 1);
-            assert_eq!(version, saved.meta.version as u64);
-            assert_eq!(saved.variables.get("foo").map(String::as_str), Some("bar"));
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
-}
-
-#[test]
-fn save_prompt_context_file_reports_failure_when_existing_file_invalid() {
-    let temp = tempdir().expect("tempdir");
-    let contexts_dir = temp.path().join("contexts");
-    fs::create_dir_all(&contexts_dir).expect("create contexts dir");
-    fs::write(contexts_dir.join("article_triage.toml"), "bad toml").expect("write invalid file");
-
-    let (runner, rx) = runner_with_receiver(temp.path());
-    runner.enqueue(vec![Effect::SavePromptContextFile {
-        prompt_id: PromptId::ArticleTriage,
-        context_pairs: vec![("foo".into(), "bar".into())],
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected save failed msg");
-
-    match msg {
-        Msg::PromptLabContextSaveFailed { prompt_id, reason } => {
-            assert_eq!(prompt_id, PromptId::ArticleTriage);
-            assert!(reason.contains("failed to read existing context"));
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
-}
-
-#[test]
 fn save_briefing_checkpoint_dispatches_success_ack() {
     let temp = tempdir().expect("tempdir");
     let (runner, rx) = runner_with_receiver(temp.path());
@@ -399,58 +301,6 @@ fn save_briefing_checkpoint_dispatches_failure_ack() {
         Msg::BriefingCheckpointSaveFailed { save_id, reason } => {
             assert_eq!(save_id, 9);
             assert!(!reason.is_empty());
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
-}
-
-#[test]
-fn save_prompt_template_file_writes_file_and_dispatches_saved_msg() {
-    let temp = tempdir().expect("tempdir");
-    let (runner, rx) = runner_with_receiver(temp.path());
-    let prompt_id = PromptId::ArticleTriage;
-    let system_template = "system {{context}}".to_string();
-    let user_template = "user {{context}}".to_string();
-    let description = "desc".to_string();
-    let expected_format = "json".to_string();
-    runner.enqueue(vec![Effect::SavePromptTemplateFile {
-        prompt_id,
-        system_template: system_template.clone(),
-        user_template: user_template.clone(),
-        description: description.clone(),
-        expected_format: expected_format.clone(),
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(1))
-        .expect("expected template saved msg");
-
-    match msg {
-        Msg::PromptLabTemplateSaved {
-            prompt_id: received,
-            version,
-            path,
-        } => {
-            assert_eq!(received, prompt_id);
-            let template_path = std::path::PathBuf::from(&path);
-            let prompts_dir = template_path
-                .parent()
-                .and_then(|dir| dir.parent())
-                .expect("template file stored under prompts/<prompt_id>");
-            let loaded = crate::load_prompt_templates(prompts_dir)
-                .into_iter()
-                .collect::<Result<Vec<_>, _>>()
-                .expect("load saved templates");
-            let saved = loaded
-                .into_iter()
-                .find(|template| template.path == template_path)
-                .expect("saved template present");
-            assert_eq!(saved.prompt_id, prompt_id);
-            assert_eq!(saved.template_file.version, version);
-            assert_eq!(saved.template_file.system_template, system_template);
-            assert_eq!(saved.template_file.user_template, user_template);
-            assert_eq!(saved.template_file.description, description);
-            assert_eq!(saved.template_file.expected_format, expected_format);
         }
         other => panic!("unexpected message: {:?}", other),
     }
@@ -766,55 +616,6 @@ fn map_llm_event_usage_updated_dispatches_quota_usage() {
             }
         }
     );
-}
-
-#[test]
-fn resolve_effect_success_emits_ok_msg() {
-    let temp = tempdir().expect("tempdir");
-    write_markdown(temp.path(), "a.md", "https://example.com/a");
-    let (runner, rx) = runner_with_receiver(temp.path());
-    runner.enqueue(vec![Effect::ResolvePromptLabInputFromUrl {
-        resolve_id: 7,
-        url: "https://example.com/a".to_string(),
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("expected prompt lab resolve msg");
-    match msg {
-        Msg::PromptLabInputResolved {
-            resolve_id,
-            result: Ok(snapshot),
-        } => {
-            assert_eq!(resolve_id, 7);
-            assert!(!snapshot.is_empty());
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
-}
-
-#[test]
-fn resolve_effect_failure_emits_err_msg() {
-    let temp = tempdir().expect("tempdir");
-    let (runner, rx) = runner_with_receiver(temp.path());
-    runner.enqueue(vec![Effect::ResolvePromptLabInputFromUrl {
-        resolve_id: 8,
-        url: "https://example.com/missing".to_string(),
-    }]);
-
-    let msg = rx
-        .recv_timeout(Duration::from_secs(2))
-        .expect("expected prompt lab resolve msg");
-    match msg {
-        Msg::PromptLabInputResolved {
-            resolve_id,
-            result: Err(reason),
-        } => {
-            assert_eq!(resolve_id, 8);
-            assert!(!reason.is_empty());
-        }
-        other => panic!("unexpected message: {:?}", other),
-    }
 }
 
 #[test]

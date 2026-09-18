@@ -5,7 +5,6 @@ pub mod blacklist;
 mod briefing;
 pub mod briefing_snapshot;
 mod cache_utils;
-mod context_draft;
 mod effect;
 pub mod entity_index;
 pub mod import_session;
@@ -15,7 +14,6 @@ mod poll_stats_fmt;
 mod pre_triage_coordinator;
 mod pre_triage_filter;
 mod preview;
-mod prompt_lab;
 mod run_progress;
 pub mod signal_candidate;
 pub mod signal_candidate_cache;
@@ -42,7 +40,6 @@ pub use briefing_snapshot::{
     build_briefing_snapshot, BriefingSnapshot, SnapshotArticle, BRIEFING_SNAPSHOT_BUDGET_BYTES,
 };
 pub use cache_utils::model_ids_compatible;
-pub use context_draft::{parse_draft_text, serialize_pairs, ContextValidationError};
 pub use effect::{Effect, StopPolicy};
 pub use entity_index::{EntityIndex, EntityIndexEntry};
 pub use harvester_engine::llm::SummaryEntities;
@@ -58,10 +55,6 @@ pub use pre_triage_filter::{
     PreTriagePhase, PreTriagePolicy, PreTriageSession,
 };
 pub use preview::PreviewContentKind;
-pub use prompt_lab::{
-    ModelCatalogSource, PromptLabInputSource, PromptLabRunId, PromptLabRunRecord,
-    PromptLabRunStatus, PromptLabStage, PromptLabTemplateSnapshot,
-};
 pub use run_progress::{
     ActivityEntry, ActivityOutcome, PipelineActivity, PipelineRunPhase, PipelineStage,
     RunCompletionNotice, RunProgress, RunProgressView, StageProgress, StageRecord, StageStatus,
@@ -104,9 +97,7 @@ pub use view_model::{
     AppViewModel, ArchivePartialCoverageView, CategoryTrendView, DesktopJobListView,
     EntityLineView, IndirectLinkPhase, IndirectLinkSummary, InlineWarningView, JobFilterStatus,
     JobListRowView, JobRowView, LeftPaneHeaderView, LeftPaneView, LinkRowView, LlmModelUsageView,
-    PreviewContextView, PreviewHeaderView, PromptLabCompareBatchView,
-    PromptLabCompareCandidateView, PromptLabComparePolicyView, PromptLabCompareRowView,
-    PromptLabRunSummaryView, PromptLabView, RightPaneView, ScoreBand, SelectedJobView,
+    PreviewContextView, PreviewHeaderView, RightPaneView, ScoreBand, SelectedJobView,
     SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView, SignalCandidateRow,
     SignalCandidateRowState, StopFinishButtonState, TrendsTabView, TriageAnnotationView,
     DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS,

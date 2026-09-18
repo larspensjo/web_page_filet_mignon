@@ -4,7 +4,7 @@ use crate::signal_candidate::{ArchiveSelectionSource, OverrideKey};
 use crate::LlmResultKind;
 use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::{run_metadata::LlmRunMetadata, DEFAULT_BRIEFING_MODEL};
+use harvester_engine::llm::DEFAULT_BRIEFING_MODEL;
 
 mod support;
 use support::*;
@@ -29,7 +29,6 @@ fn prompt_context_load_failure_keeps_triage_metadata_unready() {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: std::collections::HashMap::new(),
         },
     );
     let (state, _) = update(state, Msg::PromptContextsLoaded { contexts });
@@ -52,7 +51,6 @@ fn prompt_context_load_failure_keeps_triage_metadata_unready() {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: std::collections::HashMap::new(),
         },
     );
     assert!(!state.triage_metadata_ready());
@@ -818,7 +816,6 @@ mod briefing_stream_tests;
 mod entity_index_tests;
 mod import_tests;
 mod pre_triage_refresh_tests;
-mod prompt_lab_tests;
 mod provider_alert_tests;
 mod signal_candidate_tests;
 mod triage_tests;

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{
@@ -11,7 +10,6 @@ use chrono::Utc;
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::{LlmQuotaUsage, LlmResultKind, Msg, Stage};
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::types::{ModelId, ProviderKind};
 use harvester_engine::llm::{LlmCompletionError, LlmError, LlmEvent, LlmRunMetadata};
 use harvester_engine::{
     build_markdown_document, decode_html, deterministic_filename, ensure_output_dir,
@@ -27,24 +25,6 @@ use url::Url;
 pub(crate) const MAX_FEED_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub(crate) const FEED_ACCEPT_HEADER: &str =
     "application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml";
-
-pub fn build_local_model_catalog(
-    provider_kind: Option<ProviderKind>,
-    effective_models: &HashMap<PromptId, String>,
-) -> Vec<ModelId> {
-    let Some(provider_kind) = provider_kind else {
-        return Vec::new();
-    };
-
-    let mut names: Vec<String> = effective_models.values().cloned().collect();
-    names.sort();
-    names.dedup();
-
-    names
-        .into_iter()
-        .map(|name| ModelId::new(provider_kind, name))
-        .collect()
-}
 
 pub fn prompt_context_filename(prompt_id: PromptId) -> &'static str {
     match prompt_id {

@@ -11,7 +11,7 @@ use crate::signal_candidate::{
     SignalCandidateSelection, SignalCandidateState,
 };
 use crate::tabs::JobListMode;
-use crate::triage::{ArticleTriageState, TriagePhase};
+use crate::triage::TriagePhase;
 use crate::view_model::{
     AppViewModel, DesktopJobListView, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus,
     JobListRowView, JobRowView, LeftPaneHeaderView, PreviewContextView, PreviewHeaderView,
@@ -22,7 +22,6 @@ use crate::view_model::{
 use chrono::{DateTime, Duration, Utc};
 use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::normalize_url_for_dedupe;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
@@ -105,22 +104,6 @@ impl AppState {
             crate::WorkspaceView::PollStats => Some("Poll Stats | last poll".to_string()),
             crate::WorkspaceView::Review | crate::WorkspaceView::Blacklist => None,
         };
-        let selected_triage_article_available = self
-            .ui
-            .selected_job_id()
-            .and_then(|job_id| self.jobs.get(&job_id))
-            .and_then(|job| {
-                let selected_norm = normalize_url_for_dedupe(&job.url);
-                self.triage()
-                    .articles()
-                    .iter()
-                    .find(|article| {
-                        normalize_url_for_dedupe(&article.url) == selected_norm
-                            && matches!(article.triage_state, ArticleTriageState::Completed { .. })
-                    })
-                    .map(|_| ())
-            })
-            .is_some();
         let preview_source = self.ui.preview.content_kind();
         let ai_warning_banner = self
             .ai_warning_banner()
@@ -255,12 +238,6 @@ impl AppState {
                 jobs_search_query,
                 first_visible_job_id,
                 selected_jobs_visible_in_filter,
-                prompt_lab: crate::view_model::PromptLabView::from_state(
-                    &self.prompt_lab,
-                    &self.prompt_contexts,
-                    &self.prompt_lab_templates,
-                    selected_triage_article_available,
-                ),
             },
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
             indirect_link_summary: self.build_indirect_link_summary(),

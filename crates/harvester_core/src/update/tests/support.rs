@@ -81,7 +81,6 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: HashMap::new(),
         },
     );
     let (state, _) = update(state, Msg::PromptTemplateFilesLoaded);
@@ -125,7 +124,6 @@ pub(super) fn with_signal_candidate_metadata(state: AppState) -> AppState {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: HashMap::new(),
         },
     );
     state
@@ -364,37 +362,6 @@ pub(super) fn start_triage_for_test(
     update(state, Msg::TriageClicked)
 }
 
-pub(super) fn prepare_type_url_snapshot(state: &mut AppState, snapshot: &str) {
-    state
-        .prompt_lab_mut()
-        .select_input_source(crate::prompt_lab::PromptLabInputSource::TypeUrl);
-    state
-        .prompt_lab_mut()
-        .set_url_input("https://example.com".to_string());
-    let resolve_id = state.allocate_next_prompt_lab_resolve_id();
-    state.prompt_lab_mut().begin_url_resolution(resolve_id);
-    state
-        .prompt_lab_mut()
-        .finish_url_resolution(resolve_id, Ok(snapshot.to_string()));
-}
-
-pub(super) fn dispatch_lab_run(state: AppState) -> (AppState, u64) {
-    let mut state = state;
-    prepare_type_url_snapshot(&mut state, "article content");
-    let (state, effects) = update(state, Msg::PromptLabRunRequested);
-    let request_id = effects
-        .iter()
-        .find_map(|e| {
-            if let Effect::RequestLlmCompletion { request_id, .. } = e {
-                Some(*request_id)
-            } else {
-                None
-            }
-        })
-        .expect("expected RequestLlmCompletion effect");
-    (state, request_id)
-}
-
 pub(super) fn prime_llm_metadata(state: AppState) -> AppState {
     let mut active_versions = HashMap::new();
     active_versions.insert(PromptId::ArticleTriage, 1);
@@ -405,7 +372,6 @@ pub(super) fn prime_llm_metadata(state: AppState) -> AppState {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: HashMap::new(),
         },
     );
     let (state, _) = update(

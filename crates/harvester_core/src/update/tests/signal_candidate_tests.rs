@@ -143,7 +143,7 @@ fn set_signal_candidate_metadata_without_sweep(state: &mut AppState) {
         PromptId::ArticleSignalCandidate,
         "test-signal-model".to_string(),
     );
-    state.set_llm_metadata(active_versions, effective_models, HashMap::new());
+    state.set_llm_metadata(active_versions, effective_models);
 }
 
 fn prewarm_signal_candidate_cache(

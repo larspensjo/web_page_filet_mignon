@@ -134,16 +134,6 @@ fn jobs_search_query_persists_when_jobs_mutate() {
 }
 
 #[test]
-fn prompt_lab_close_clears_visibility() {
-    init_logging();
-    let mut state = AppState::new();
-    state.open_prompt_lab();
-    assert!(state.prompt_lab().is_visible());
-    let (state, _) = update(state, Msg::PromptLabCloseRequested);
-    assert!(!state.prompt_lab().is_visible());
-}
-
-#[test]
 fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigation() {
     init_logging();
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
@@ -378,7 +368,6 @@ fn llm_metadata_without_triage_model_sets_ai_unavailable_reason() {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: std::collections::HashMap::new(),
         },
     );
 
@@ -423,7 +412,6 @@ fn missing_api_key_is_not_overwritten_by_weaker_metadata_reason() {
         Msg::LlmMetadataLoaded {
             active_versions: std::collections::HashMap::new(),
             effective_models: std::collections::HashMap::new(),
-            templates: std::collections::HashMap::new(),
         },
     );
 

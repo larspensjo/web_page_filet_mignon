@@ -132,12 +132,10 @@ pub(crate) fn summarize_batch_msg(msg: &Msg) -> String {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates,
         } => format!(
-            "LlmMetadataLoaded {{ active_versions: {}, effective_models: {}, templates: {} }}",
+            "LlmMetadataLoaded {{ active_versions: {}, effective_models: {} }}",
             active_versions.len(),
-            effective_models.len(),
-            templates.len()
+            effective_models.len()
         ),
         _ => truncate_for_log(&format!("{:?}", msg), MAX_BATCH_MSG_LOG_LEN),
     }

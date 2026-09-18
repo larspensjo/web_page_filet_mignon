@@ -2321,3 +2321,14 @@ Type: Implementation
 Context: The Tauri desktop host no longer needed the Win32 layout, tab navigation, full-corpus job view, or briefing body UI surfaces retained during coexistence.
 Change: Removed those Win32-only core and IPC fields, retained the compiled briefing domain workflow, made the desktop job list the sole projection, removed summary-heading compensation, and regenerated the versioned snapshot fixtures.
 Refs: crates/harvester_core/src/view_model.rs, crates/harvester_core/src/state/view_builder.rs, crates/harvester_ui_bridge/src/snapshot.rs, frontend/src/components/ReadingPane.tsx
+
+## 2026-09-18 - Phase 7 retirement run 3
+Type: Implementation
+Context: Prompt Lab and saved manual pre-triage decisions had no remaining UI
+entry point, while prompt/context files and automatic filtering remain runtime
+requirements.
+Change: Deleted Prompt Lab and manual-override persistence, retained runtime
+prompt metadata and context loading, added legacy-state tolerance coverage, and
+removed the final snapshot strip path.
+Refs: crates/harvester_core, crates/harvester_io/src/persistence.rs,
+crates/harvester_ui_bridge/src/snapshot.rs

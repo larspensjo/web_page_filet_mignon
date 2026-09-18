@@ -22,17 +22,6 @@ pub enum Effect {
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
     LoadPromptContexts,
-    SavePromptContextFile {
-        prompt_id: PromptId,
-        context_pairs: Vec<(String, String)>,
-    },
-    SavePromptTemplateFile {
-        prompt_id: PromptId,
-        system_template: String,
-        user_template: String,
-        description: String,
-        expected_format: String,
-    },
     LoadPromptTemplateFiles,
     LoadLlmMetadata,
     PollAllSources,
@@ -49,11 +38,6 @@ pub enum Effect {
         /// NOT concatenated into the {{context}} block.
         extra_template_vars: Vec<(String, String)>,
     },
-    ResolvePromptLabInputFromUrl {
-        resolve_id: u64,
-        url: String,
-    },
-    LoadPromptLabModelCatalog,
     StartSession,
     StopFinish {
         policy: StopPolicy,

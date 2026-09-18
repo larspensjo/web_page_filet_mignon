@@ -1,6 +1,4 @@
-use chrono::Utc;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
-use harvester_engine::AtomicFileWriter;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,38 +30,6 @@ impl PromptTemplateFile {
     fn is_valid_schema(&self) -> bool {
         self.schema_version == PROMPT_TEMPLATE_SCHEMA_VERSION
     }
-}
-
-pub fn save_prompt_template(
-    prompts_dir: &Path,
-    prompt_id: PromptId,
-    system_template: &str,
-    user_template: &str,
-    description: &str,
-    expected_format: &str,
-) -> Result<(PromptVersion, PathBuf), String> {
-    let prompt_dir = prompts_dir.join(prompt_id.to_string());
-    ensure_directory_in_base(prompts_dir, &prompt_dir)?;
-    let version = next_template_version(&prompt_dir)?;
-    let template_file = PromptTemplateFile {
-        schema_version: PROMPT_TEMPLATE_SCHEMA_VERSION,
-        version,
-        updated: Utc::now().to_rfc3339(),
-        prompt_id: prompt_id.to_string(),
-        system_template: system_template.to_string(),
-        user_template: user_template.to_string(),
-        description: description.to_string(),
-        expected_format: expected_format.to_string(),
-    };
-    let mut toml_string = toml::to_string(&template_file)
-        .map_err(|err| format!("failed to serialize template: {}", err))?;
-    toml_string.push('\n');
-    let filename = format!("v{}.toml", version);
-    let writer = AtomicFileWriter::new(prompt_dir.clone());
-    let path = writer
-        .write(&filename, &toml_string)
-        .map_err(|err| format!("failed to write template file: {}", err))?;
-    Ok((version, path))
 }
 
 pub fn load_prompt_templates(base_dir: &Path) -> Vec<Result<LoadedPromptTemplate, String>> {
@@ -172,63 +138,7 @@ pub fn load_prompt_templates(base_dir: &Path) -> Vec<Result<LoadedPromptTemplate
     results
 }
 
-fn ensure_directory_in_base(base: &Path, target: &Path) -> Result<(), String> {
-    fs::create_dir_all(target).map_err(|err| {
-        format!(
-            "failed to create prompt directory '{}': {}",
-            target.display(),
-            err
-        )
-    })?;
-    let canonical_base = canonicalize_path(base)?;
-    let canonical_target = canonicalize_path(target)?;
-    if !canonical_target.starts_with(&canonical_base) {
-        return Err(format!(
-            "prompt directory '{}' is outside base '{}'",
-            canonical_target.display(),
-            canonical_base.display()
-        ));
-    }
-    Ok(())
-}
-
 fn canonicalize_path(path: &Path) -> Result<PathBuf, String> {
     path.canonicalize()
         .map_err(|err| format!("failed to canonicalize '{}': {}", path.display(), err))
-}
-
-fn next_template_version(prompt_dir: &Path) -> Result<PromptVersion, String> {
-    let mut max_version = 0;
-    if prompt_dir.exists() {
-        for entry in fs::read_dir(prompt_dir).map_err(|err| {
-            format!(
-                "failed to list prompt directory '{}': {}",
-                prompt_dir.display(),
-                err
-            )
-        })? {
-            let entry = entry.map_err(|err| {
-                format!(
-                    "failed to inspect entry in '{}': {}",
-                    prompt_dir.display(),
-                    err
-                )
-            })?;
-            let name = entry.file_name();
-            let name = match name.to_str() {
-                Some(name) => name,
-                None => continue,
-            };
-            if let Some(stripped) = name.strip_prefix('v') {
-                if let Some(version_str) = stripped.strip_suffix(".toml") {
-                    if let Ok(parsed) = version_str.parse::<PromptVersion>() {
-                        if parsed > max_version {
-                            max_version = parsed;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(max_version.saturating_add(1))
 }

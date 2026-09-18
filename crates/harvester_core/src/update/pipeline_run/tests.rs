@@ -94,7 +94,6 @@ fn add_metadata(state: AppState) -> AppState {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: HashMap::new(),
         },
     );
     let (state, _) = crate::update(state, Msg::PromptTemplateFilesLoaded);

@@ -145,3 +145,14 @@ Consequences:
 - The window slides by tick-driven view rebuilds, not a timer, and the view shows no window-start caption.
 - The UI distinguishes a fourth empty state, "nothing fetched in the last 24 hours".
 Refs: `crates/harvester_core/src/tabs.rs`, `crates/harvester_core/src/state/view_builder.rs`, `DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS`.
+
+## 2026-09-18 - Prompt Lab is deleted while briefing domain state remains
+Decision: The briefing is dropped as a product deliverable but remains compiled,
+tested domain state; Prompt Lab is deleted outright.
+Context: Briefing capability remains useful for possible re-enablement, whereas
+Prompt Lab was a development editor whose output is independently preserved in
+hand-editable prompt and context files.
+Consequences: The runtime prompt registry, metadata, and file-loading paths stay.
+Prompt tuning would be a fresh implementation against a future UI.
+Refs: docs/plans/Plan.TauriDesktopUi.md (Phase 7); crates/harvester_core;
+crates/harvester_io

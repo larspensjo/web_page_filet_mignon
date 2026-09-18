@@ -108,7 +108,6 @@ fn state_with_triage_metadata() -> AppState {
     state.set_llm_metadata(
         HashMap::from([(PromptId::ArticleTriage, 1)]),
         HashMap::from([(PromptId::ArticleTriage, "test-model".to_string())]),
-        HashMap::new(),
     );
     state
 }

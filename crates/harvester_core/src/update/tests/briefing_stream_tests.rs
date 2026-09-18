@@ -48,7 +48,6 @@ fn llm_metadata_loaded_msg() -> Msg {
     Msg::LlmMetadataLoaded {
         active_versions,
         effective_models,
-        templates: HashMap::new(),
     }
 }
 

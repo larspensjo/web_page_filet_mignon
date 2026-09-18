@@ -71,20 +71,24 @@ impl AppState {
         let (triage_total, triage_pending, triage_in_flight, triage_completed, triage_failed) =
             self.triage.observation_counts();
         let pre_triage_total = self.pre_triage.entries().len();
-        let pre_triage_included = self.pre_triage.resolved_included_articles().len();
-        let pre_triage_review = self
-            .pre_triage
-            .entries()
-            .iter()
-            .filter(|entry| {
-                matches!(
-                    entry.auto_verdict,
-                    crate::pre_triage_filter::AutoVerdict::Review
-                ) && entry.manual_decision.is_none()
-            })
-            .count();
-        let pre_triage_filtered =
-            pre_triage_total.saturating_sub(pre_triage_included + pre_triage_review);
+        let mut pre_triage_included = 0;
+        let mut pre_triage_review = 0;
+        let mut pre_triage_filtered = 0;
+        for entry in self.pre_triage.entries() {
+            match (entry.manual_decision, entry.auto_verdict) {
+                (Some(crate::ManualDecision::Include), _)
+                | (None, crate::pre_triage_filter::AutoVerdict::Include) => {
+                    pre_triage_included += 1;
+                }
+                (Some(crate::ManualDecision::Exclude), _)
+                | (None, crate::pre_triage_filter::AutoVerdict::HardExclude) => {
+                    pre_triage_filtered += 1;
+                }
+                (None, crate::pre_triage_filter::AutoVerdict::Review) => {
+                    pre_triage_review += 1;
+                }
+            }
+        }
         let summary_total = self.briefing.articles().len();
         let summary_pending = self.briefing.pending_count();
         let summary_in_flight = self.briefing.in_progress_count();
@@ -361,7 +365,7 @@ mod tests {
     use crate::briefing::LoadedArticle;
     use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
     use crate::triage::TriageSession;
-    use crate::ArticleTriageResult;
+    use crate::{update, ArticleTriageResult, Msg};
     use harvester_engine::llm::prompt::PromptId;
     use std::collections::HashMap;
 
@@ -423,7 +427,7 @@ mod tests {
 
         let mut state = AppState::new();
         state.set_pre_triage(pre_triage);
-        state.set_llm_metadata(active_versions, effective_models, HashMap::new());
+        state.set_llm_metadata(active_versions, effective_models);
         state.set_prompt_contexts(HashMap::new());
         state.mark_triage_metadata_ready();
 
@@ -431,5 +435,75 @@ mod tests {
 
         assert_eq!(display.coverage(), &ArchiveCoverage::LiveComplete);
         assert_eq!(display.filtered_count(), 0);
+    }
+
+    #[test]
+    fn automatic_pre_triage_preserves_batch_article_set_without_manual_overrides() {
+        let auto_include_url = "https://batch.example/automatic";
+        let hard_exclude_url = "https://batch.example/hard-exclude";
+        let review_url = "https://batch.example/review";
+        let articles = vec![
+            LoadedArticle {
+                url: auto_include_url.to_string(),
+                source_title: None,
+                prepared_text: std::iter::repeat_n("contentword", 220)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                content_hash: "automatic-hash".to_string(),
+                fetched_utc: None,
+            },
+            LoadedArticle {
+                url: hard_exclude_url.to_string(),
+                source_title: None,
+                prepared_text: "too short".to_string(),
+                content_hash: "hard-exclude-hash".to_string(),
+                fetched_utc: None,
+            },
+            LoadedArticle {
+                url: review_url.to_string(),
+                source_title: None,
+                prepared_text: std::iter::repeat_n("contentword", 100)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                content_hash: "review-hash".to_string(),
+                fetched_utc: None,
+            },
+        ];
+
+        let mut state = AppState::new();
+        let request_id = state.alloc_triage_request_id();
+        state.set_triage_in_flight(request_id);
+        let (mut state, effects) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id,
+                articles,
+            },
+        );
+        assert!(effects.is_empty());
+
+        let observation = state.batch_observation();
+        assert_eq!(observation.pre_triage_included, 1);
+        assert_eq!(observation.pre_triage_review, 1);
+        assert_eq!(observation.pre_triage_filtered, 1);
+
+        let mut active_versions = HashMap::new();
+        active_versions.insert(PromptId::ArticleTriage, 1);
+        let mut effective_models = HashMap::new();
+        effective_models.insert(PromptId::ArticleTriage, "test-model".to_string());
+        state.set_llm_metadata(active_versions, effective_models);
+        state.set_prompt_contexts(HashMap::new());
+        state.mark_triage_metadata_ready();
+
+        let (state, _) = update(state, Msg::TriageClicked);
+        assert_eq!(
+            state
+                .triage()
+                .articles()
+                .iter()
+                .map(|article| article.url.as_str())
+                .collect::<Vec<_>>(),
+            vec![auto_include_url, review_url]
+        );
     }
 }

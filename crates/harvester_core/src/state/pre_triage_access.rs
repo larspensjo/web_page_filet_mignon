@@ -1,10 +1,7 @@
 use super::{AppState, JobId, PreTriageActionability, PreTriageLoadContext, PreTriageLoadProgress};
 use crate::pre_triage_coordinator::PreTriageRefreshReason;
-use crate::pre_triage_filter::{
-    ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
-};
+use crate::pre_triage_filter::{ArticleFilterKey, PreTriagePhase, PreTriageSession};
 use crate::triage::TriageSession;
-use std::collections::HashMap;
 
 impl AppState {
     pub(crate) fn triage(&self) -> &TriageSession {
@@ -128,39 +125,6 @@ impl AppState {
 
     pub fn pre_triage_key_for_job(&self, job_id: JobId) -> Option<ArticleFilterKey> {
         self.pre_triage.key_for_job(job_id)
-    }
-
-    pub fn pre_triage_manual_overrides(&self) -> &HashMap<ArticleFilterKey, ManualDecision> {
-        &self.pre_triage_manual_overrides
-    }
-
-    pub(crate) fn set_pre_triage_manual_overrides(
-        &mut self,
-        overrides: HashMap<ArticleFilterKey, ManualDecision>,
-    ) {
-        self.pre_triage_manual_overrides = overrides;
-        self.pre_triage
-            .apply_manual_overrides(&self.pre_triage_manual_overrides);
-        self.dirty = true;
-    }
-
-    pub(crate) fn set_pre_triage_manual_decision(
-        &mut self,
-        key: ArticleFilterKey,
-        decision: ManualDecision,
-    ) -> bool {
-        if self.pre_triage.set_manual_decision(&key, decision).is_err() {
-            return false;
-        }
-        self.pre_triage_manual_overrides.insert(key, decision);
-        self.dirty = true;
-        true
-    }
-
-    pub(crate) fn clear_pre_triage_manual_overrides(&mut self) {
-        self.pre_triage_manual_overrides.clear();
-        self.pre_triage.clear_manual_decisions();
-        self.dirty = true;
     }
 
     /// Allocate the next request ID for a pre-triage load.

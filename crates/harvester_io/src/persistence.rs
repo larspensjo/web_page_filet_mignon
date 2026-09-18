@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::{ArticleFilterKey, CompletedJobSnapshot, LinkSnapshotRecord, ManualDecision};
+use harvester_core::{CompletedJobSnapshot, LinkSnapshotRecord};
 use harvester_engine::{ensure_output_dir, AtomicFileWriter};
 use serde::{Deserialize, Serialize};
 
@@ -27,8 +27,6 @@ struct PersistedLink {
 struct PersistedState {
     completed: Vec<PersistedJob>,
     #[serde(default)]
-    pre_triage_overrides: Vec<PersistedPreTriageOverride>,
-    #[serde(default)]
     window_width: Option<i32>,
     #[serde(default)]
     window_height: Option<i32>,
@@ -36,13 +34,6 @@ struct PersistedState {
     desktop_window_width: Option<i32>,
     #[serde(default)]
     desktop_window_height: Option<i32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersistedPreTriageOverride {
-    url: String,
-    content_hash: u64,
-    include: bool,
 }
 
 pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
@@ -102,53 +93,6 @@ pub fn load_completed_jobs(state_path: &Path) -> Vec<CompletedJobSnapshot> {
         state_path
     );
     completed
-}
-
-pub fn load_pre_triage_overrides(
-    state_path: &Path,
-) -> std::collections::HashMap<ArticleFilterKey, ManualDecision> {
-    let content = match fs::read_to_string(state_path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return std::collections::HashMap::new();
-        }
-        Err(err) => {
-            engine_warn!(
-                "Failed to read persisted state from {:?}: {}",
-                state_path,
-                err
-            );
-            return std::collections::HashMap::new();
-        }
-    };
-    let state: PersistedState = match ron::from_str(&content) {
-        Ok(state) => state,
-        Err(err) => {
-            engine_warn!(
-                "Failed to parse persisted state from {:?}: {}",
-                state_path,
-                err
-            );
-            return std::collections::HashMap::new();
-        }
-    };
-    state
-        .pre_triage_overrides
-        .into_iter()
-        .map(|item| {
-            (
-                ArticleFilterKey {
-                    url: item.url,
-                    content_hash: item.content_hash,
-                },
-                if item.include {
-                    ManualDecision::Include
-                } else {
-                    ManualDecision::Exclude
-                },
-            )
-        })
-        .collect()
 }
 
 pub fn load_window_size(state_path: &Path) -> Option<(i32, i32)> {
@@ -267,14 +211,10 @@ fn is_safe_downloaded_path(value: &str) -> bool {
 }
 
 pub fn persist_completed_jobs(state_path: &Path, completed: &[CompletedJobSnapshot]) {
-    persist_runtime_state(state_path, completed, &std::collections::HashMap::new());
+    persist_runtime_state(state_path, completed);
 }
 
-pub fn persist_runtime_state(
-    state_path: &Path,
-    completed: &[CompletedJobSnapshot],
-    pre_triage_overrides: &std::collections::HashMap<ArticleFilterKey, ManualDecision>,
-) {
+pub fn persist_runtime_state(state_path: &Path, completed: &[CompletedJobSnapshot]) {
     let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
     if let Err(err) = ensure_output_dir(output_dir) {
         engine_error!("Failed to ensure output dir {:?}: {}", output_dir, err);
@@ -303,14 +243,6 @@ pub fn persist_runtime_state(
                     })
                     .collect(),
                 fetched_utc: job.fetched_utc.clone(),
-            })
-            .collect(),
-        pre_triage_overrides: pre_triage_overrides
-            .iter()
-            .map(|(key, decision)| PersistedPreTriageOverride {
-                url: key.url.clone(),
-                content_hash: key.content_hash,
-                include: matches!(decision, ManualDecision::Include),
             })
             .collect(),
         window_width: existing.window_width,
@@ -719,6 +651,21 @@ mod tests {
         assert_eq!(state.window_height, None);
         assert_eq!(state.desktop_window_width, None);
         assert_eq!(state.desktop_window_height, None);
+    }
+
+    #[test]
+    fn legacy_pre_triage_overrides_are_ignored_on_read() {
+        let temp = tempdir().expect("tempdir");
+        write_state(
+            temp.path(),
+            include_str!("../fixtures/legacy_pre_triage_overrides.ron"),
+        );
+        let path = state_path(temp.path());
+
+        let completed = load_completed_jobs(&path);
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].url, "https://example.com/completed");
+        assert_eq!(load_window_size(&path), Some((1200, 900)));
     }
 
     #[test]

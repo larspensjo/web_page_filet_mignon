@@ -15,6 +15,7 @@ Maintained manually in this repository.
 | Architecture | ReducerPurity     | Message-carried timestamps for pure reducers     |
 | Architecture | TrustTypes       | Typed wrappers for trusted/untrusted data        |
 | Architecture | UiFramework      | Reusable UI control primitives and message routing |
+| Architecture | HostConcurrency  | Cross-host execution and locking policy           |
 | Ingestion  | AuthenticatedFetch | Cookie/session-backed authenticated ingestion    |
 | Ingestion  | FeedDiscovery      | Find feed URLs from website pages                |
 | Ingestion  | OpmlImport         | Import feeds from OPML collections               |
@@ -174,6 +175,25 @@ Rationale: Prevents accidental coupling and makes boundary contracts stable.
 SuccessCriteria:
 - DTO conversions are centralized in mapping helpers.
 - Cross-crate boundaries no longer share internal DTO types directly.
+
+### HostConcurrency
+
+#### [FI-Architecture-HostConcurrency-0001] Coordinate batch and GUI host locking
+Status: Deferred
+TopLevel: Architecture
+SubLevel: HostConcurrency
+Priority: P1
+Effort: M
+Risk: M
+Origin:
+- SourceDoc: Plan.TauriDesktopUi.md
+- SourceSection: Phase 7
+- Captured: 2026-09-18
+Tags: [architecture, host-concurrency, out-of-scope]
+Summary: Define the batch-versus-GUI lock policy.
+Rationale: It is explicitly out of scope of this plan.
+SuccessCriteria:
+- Both hosts follow one documented concurrency policy.
 
 ### PersistenceEffects
 
@@ -630,6 +650,23 @@ SuccessCriteria:
 - Briefing preview supports at least two deterministic theme ordering modes.
 - Selected ordering mode is visible in run metadata or UI state.
 - Ordering behavior is covered by unit tests.
+
+#### [FI-LLM-Briefing-0008] Re-enable a briefing surface
+Status: Candidate
+TopLevel: LLM
+SubLevel: Briefing
+Priority: P2
+Effort: M
+Risk: L
+Origin:
+- SourceDoc: Plan.TauriDesktopUi.md
+- SourceSection: Phase 7 retirement
+- Captured: 2026-09-18
+Tags: [LLM, briefing, re-enablement]
+Summary: Re-enable a product briefing surface using the retained compiled domain machinery.
+Rationale: This is re-enablement, not re-implementation.
+SuccessCriteria:
+- A supported host exposes the retained briefing workflow deliberately.
 
 ### Budgeting
 
@@ -1991,6 +2028,24 @@ SuccessCriteria:
 - Users can select multiple prompt versions for a comparison run.
 - UI shows side-by-side outputs with metadata.
 
+#### [FI-UX-PromptComparison-0002] Re-implement prompt comparison tooling
+Status: Candidate
+TopLevel: UX
+SubLevel: PromptComparison
+Priority: P2
+Effort: L
+Risk: M
+Origin:
+- SourceDoc: Plan.TauriDesktopUi.md
+- SourceSection: Phase 7 retirement
+- Captured: 2026-09-18
+Tags: [UX, prompts, re-implementation]
+Summary: Re-implement prompt comparison against the then-current UI.
+Rationale: Prompt Lab state machinery was deleted; prompt and context files remain
+hand-editable under git.
+SuccessCriteria:
+- The new implementation owns fresh state and does not revive retired machinery.
+
 ### SessionControls
 
 #### [FI-UX-SessionControls-0001] Operator controls for active sessions
@@ -2279,9 +2334,10 @@ Summary: Add one-click actions to include all review items or exclude all review
 Rationale: Reduces repetitive checkbox operations when many items share the same decision.
 SuccessCriteria:
 - UI offers explicit bulk actions for unresolved review items.
-- Bulk action results are persisted as manual overrides and are fully reversible.
+- Bulk actions are fully reversible within the supported review workflow.
 - Reducer tests verify deterministic behavior for mixed review sets.
-Notes: Still open. Current implementation keeps per-item review controls and scope filtering but does not add one-click include-all/exclude-all actions.
+Notes: Still open and dependent on FI-UX-TriageUi-0003. The current product has
+no manual pre-triage review controls or persisted manual overrides.
 
 #### [FI-UX-TriageUi-0003] Re-introduce manual pre-triage curation
 Status: Deferred

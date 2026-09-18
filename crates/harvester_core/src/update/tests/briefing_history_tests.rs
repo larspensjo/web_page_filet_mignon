@@ -1,7 +1,6 @@
 use super::*;
 use crate::LlmResultKind;
 use harvester_engine::llm::prompt::PromptId;
-use harvester_engine::llm::run_metadata::LlmRunMetadata;
 
 #[test]
 fn briefing_aggregate_not_dispatched_until_all_articles_settled() {
@@ -184,120 +183,6 @@ fn briefing_completion_appends_history_and_emits_save() {
         has_save,
         "SaveBriefingHistory effect should be emitted after briefing completion"
     );
-}
-
-#[test]
-fn prompt_lab_aggregate_completion_does_not_update_history() {
-    init_logging();
-    use crate::briefing::BriefingHistoryEntry;
-    use crate::prompt_lab::PromptLabStage;
-
-    let mut state = AppState::new();
-    state.push_briefing_history(BriefingHistoryEntry {
-        generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
-        executive_summary: "Old summary content.".to_string(),
-        top_stories: vec![],
-        article_count: 2,
-    });
-    let history_before = state.briefing_history().to_vec();
-    let (state, _) = update(state, Msg::PromptLabOpenRequested);
-    let (state, _) = update(
-        state,
-        Msg::PromptLabStageSelected {
-            stage: PromptLabStage::Briefing,
-        },
-    );
-    let mut state = state;
-    prepare_type_url_snapshot(&mut state, "article text");
-    let (state, effects) = update(state, Msg::PromptLabRunRequested);
-    let request_id = request_id_for_prompt(&effects, PromptId::AggregateBriefing)
-        .expect("expected prompt-lab aggregate briefing request");
-    let (state, completion_effects) = update(
-        state,
-        Msg::LlmCompleted {
-            request_id,
-            result: LlmResultKind::Success {
-                output_json: briefing_json(1),
-                input_tokens: 10,
-                output_tokens: 5,
-                prompt_version: 1,
-                resolved_model: "test-model".to_string(),
-            },
-            metadata: Some(LlmRunMetadata::stub()),
-        },
-    );
-    assert!(
-        completion_effects
-            .iter()
-            .all(|e| !matches!(e, Effect::SaveBriefingHistory { .. })),
-        "Prompt Lab completion must not emit SaveBriefingHistory"
-    );
-    assert_eq!(
-        state.briefing_history(),
-        history_before.as_slice(),
-        "Prompt Lab runs must not mutate briefing history"
-    );
-}
-
-#[test]
-fn prompt_lab_aggregate_request_includes_previous_briefings_extra_var() {
-    init_logging();
-    use crate::briefing::BriefingHistoryEntry;
-    use crate::prompt_lab::PromptLabStage;
-
-    let mut state = AppState::new();
-    state.push_briefing_history(BriefingHistoryEntry {
-        generated_at_utc: "2026-02-20T10:00:00Z".to_string(),
-        executive_summary: "Old summary content.".to_string(),
-        top_stories: vec![],
-        article_count: 2,
-    });
-    let (state, _) = update(state, Msg::PromptLabOpenRequested);
-    let (state, _) = update(
-        state,
-        Msg::PromptLabStageSelected {
-            stage: PromptLabStage::Briefing,
-        },
-    );
-    let mut state = state;
-    prepare_type_url_snapshot(&mut state, "article text");
-    let (_state, effects) = update(state, Msg::PromptLabRunRequested);
-    match effects.into_iter().find(|effect| {
-        matches!(
-            effect,
-            Effect::RequestLlmCompletion {
-                prompt_id: PromptId::AggregateBriefing,
-                ..
-            }
-        )
-    }) {
-        Some(Effect::RequestLlmCompletion {
-            extra_template_vars,
-            ..
-        }) => {
-            let previous = extra_template_vars
-                .iter()
-                .find(|(key, _)| key == "previous_briefings");
-            assert!(
-                previous.is_some(),
-                "missing previous_briefings in Prompt Lab aggregate request"
-            );
-            let (_, value) = previous.unwrap();
-            assert!(
-                value.contains("Old summary content."),
-                "previous_briefings should contain history snapshot: {value}"
-            );
-
-            let window = extra_template_vars
-                .iter()
-                .find(|(key, _)| key == "briefing_time_window");
-            assert!(
-                window.is_some(),
-                "missing briefing_time_window in Prompt Lab aggregate request"
-            );
-        }
-        _ => panic!("no Prompt Lab AggregateBriefing RequestLlmCompletion effect emitted"),
-    }
 }
 
 #[test]

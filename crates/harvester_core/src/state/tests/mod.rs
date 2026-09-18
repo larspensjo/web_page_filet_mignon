@@ -1179,87 +1179,6 @@ mod app_state_tests {
     }
 
     #[test]
-    fn default_app_state_has_closed_empty_prompt_lab() {
-        let state = AppState::new();
-        let lab = state.prompt_lab();
-        assert!(!lab.is_visible());
-        assert_eq!(lab.run_count(), 0);
-        assert!(!lab.has_in_flight_run());
-    }
-
-    #[test]
-    fn allocate_prompt_lab_run_id_is_monotonic() {
-        let mut state = AppState::new();
-        let id1 = state.allocate_next_prompt_lab_run_id();
-        let id2 = state.allocate_next_prompt_lab_run_id();
-        let id3 = state.allocate_next_prompt_lab_run_id();
-        assert!(id2.0 > id1.0, "run IDs must increase");
-        assert!(id3.0 > id2.0, "run IDs must increase");
-    }
-
-    #[test]
-    fn prompt_lab_and_llm_request_id_counters_are_independent() {
-        let mut state = AppState::new();
-        let llm1 = state.allocate_next_llm_request_id();
-        let llm2 = state.allocate_next_llm_request_id();
-        let lab1 = state.allocate_next_prompt_lab_run_id();
-        let lab2 = state.allocate_next_prompt_lab_run_id();
-        assert!(llm2 > llm1, "llm counter must increase");
-        assert!(lab2.0 > lab1.0, "lab counter must increase");
-        let llm3 = state.allocate_next_llm_request_id();
-        let lab3 = state.allocate_next_prompt_lab_run_id();
-        assert!(llm3 > llm2, "llm counter advances after lab allocations");
-        assert!(
-            lab3.0 > lab2.0,
-            "lab counter advances after llm allocations"
-        );
-    }
-
-    #[test]
-    fn clear_prompt_lab_history_preserves_pending_entries() {
-        use harvester_engine::llm::prompt::PromptId;
-        let mut state = AppState::new();
-        state.open_prompt_lab();
-
-        let req_id = state.allocate_next_llm_request_id();
-        let run_id = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(PromptLabPendingRunRegistration {
-            run_id,
-            stage: crate::prompt_lab::PromptLabStage::Triage,
-            prompt_id: PromptId::ArticleTriage,
-            input_snapshot: "input".to_string(),
-            request_id: req_id,
-            overrides: PromptLabRunOverrides::default(),
-            compare_batch_id: None,
-            compare_candidate_id: None,
-        });
-
-        let req_id2 = state.allocate_next_llm_request_id();
-        let run_id2 = state.allocate_next_prompt_lab_run_id();
-        state.add_prompt_lab_pending_run(PromptLabPendingRunRegistration {
-            run_id: run_id2,
-            stage: crate::prompt_lab::PromptLabStage::Triage,
-            prompt_id: PromptId::ArticleTriage,
-            input_snapshot: "input2".to_string(),
-            request_id: req_id2,
-            overrides: PromptLabRunOverrides::default(),
-            compare_batch_id: None,
-            compare_candidate_id: None,
-        });
-        state.complete_prompt_lab_run(
-            run_id2,
-            "{}".to_string(),
-            harvester_engine::llm::run_metadata::LlmRunMetadata::stub(),
-        );
-        state.consume_prompt_lab_ownership(req_id2);
-
-        state.clear_prompt_lab_history();
-
-        assert_eq!(state.prompt_lab().run_count(), 1);
-        assert!(state.prompt_lab().ownership_for(req_id).is_some());
-    }
-
-    #[test]
     fn resolve_preview_prefers_summary_over_triage() {
         use crate::briefing::{ArticleSummaryResult, LoadedArticle};
         use crate::triage::ArticleTriageResult;
@@ -1398,22 +1317,11 @@ mod app_state_tests {
             ],
             &PreTriagePolicy::default(),
         );
-        let key = pre_triage
-            .entry_for_url("https://job.example")
-            .expect("article should produce pre-triage entry")
-            .key
-            .clone();
         state.set_pre_triage(pre_triage);
 
         assert_eq!(
             state.job_filter_status(12),
             Some(JobFilterStatus::AutoIncluded)
-        );
-
-        assert!(state.set_pre_triage_manual_decision(key, ManualDecision::Exclude));
-        assert_eq!(
-            state.job_filter_status(12),
-            Some(JobFilterStatus::ManuallyExcluded)
         );
     }
 

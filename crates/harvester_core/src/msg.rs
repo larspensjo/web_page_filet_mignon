@@ -9,13 +9,7 @@ use harvester_engine::llm::QuotaOrigin;
 use harvester_engine::ExtractedLink;
 use serde::{Deserialize, Serialize};
 
-use crate::prompt_lab::{
-    PromptLabCompareBatchId, PromptLabInputSource, PromptLabRunId, PromptLabStage,
-    PromptLabTemplateSnapshot,
-};
-
 use crate::briefing::LoadedArticle;
-use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
 use crate::state::{AiAvailability, ArchiveTokenEstimates};
 use crate::tabs::TrendCategory;
 use crate::CollectedEntry;
@@ -83,21 +77,13 @@ pub enum Msg {
         reason: String,
     },
     /// Toggle manual exclusion for a signal-candidate cluster.
-    ToggleSignalCandidateExclusion {
-        signal_key: String,
-    },
+    ToggleSignalCandidateExclusion { signal_key: String },
     /// UI/render tick to coalesce rendering and observe host time.
-    Tick {
-        now: DateTime<Utc>,
-    },
+    Tick { now: DateTime<Utc> },
     /// Desktop workspace selection; the legacy tabs remain separately owned.
-    WorkspaceViewSet {
-        view: crate::WorkspaceView,
-    },
+    WorkspaceViewSet { view: crate::WorkspaceView },
     /// Desktop job-list mode.
-    JobListModeSet {
-        mode: crate::JobListMode,
-    },
+    JobListModeSet { mode: crate::JobListMode },
     /// Reveal desktop search by returning to Review. Focus itself is frontend-local.
     JobsSearchRevealRequested,
     /// Open desktop Trends and request its index.
@@ -167,19 +153,11 @@ pub enum Msg {
         link_index: u32,
     },
     /// User selected a job from the tree view.
-    JobSelected {
-        job_id: crate::JobId,
-    },
+    JobSelected { job_id: crate::JobId },
     /// Window resize drag completed. Carries outer (frame) dimensions for persistence.
-    WindowResizeCompleted {
-        outer_width: i32,
-        outer_height: i32,
-    },
+    WindowResizeCompleted { outer_width: i32, outer_height: i32 },
     /// Tauri desktop window resize debounce completed. Carries logical inner dimensions.
-    DesktopWindowResizeCompleted {
-        inner_width: i32,
-        inner_height: i32,
-    },
+    DesktopWindowResizeCompleted { inner_width: i32, inner_height: i32 },
     /// Fallback for placeholder wiring.
     NoOp,
     /// User requested an LLM completion.
@@ -204,17 +182,11 @@ pub enum Msg {
     /// replayed through the normal cache-aware dispatch paths.
     RearmDeferredBatchStages,
     /// Validated batch output supplied by the runner after durable collection.
-    BatchResultsCollected {
-        entries: Vec<CollectedEntry>,
-    },
+    BatchResultsCollected { entries: Vec<CollectedEntry> },
     /// Startup/effect boundary configured session LLM quota limits.
-    LlmQuotaConfigured {
-        limits: crate::LlmQuotaLimits,
-    },
+    LlmQuotaConfigured { limits: crate::LlmQuotaLimits },
     /// Authoritative session LLM quota usage snapshot from the worker.
-    LlmQuotaUsageUpdated {
-        usage: crate::LlmQuotaUsage,
-    },
+    LlmQuotaUsageUpdated { usage: crate::LlmQuotaUsage },
     /// User requested generation of a briefing.
     GenerateBriefingClicked,
     /// User requested the next item in the active briefing stream.
@@ -223,20 +195,12 @@ pub enum Msg {
     PrepareSummariesClicked,
     /// User requested triage.
     TriageClicked,
-    PreTriageDecisionSet {
-        key: ArticleFilterKey,
-        decision: ManualDecision,
-    },
-    PreTriageApplyClicked,
-    PreTriageResetClicked,
     /// User requested polling all configured sources.
     PollSourcesClicked,
     /// User requested polling the indirect-link pool.
     PollIndirectLinks,
     /// Effect runner reports the total number of enabled sources to poll.
-    PollStarted {
-        total: usize,
-    },
+    PollStarted { total: usize },
     /// Polling completed for a source.
     SourcePollCompleted {
         source_id: harvester_engine::SourceId,
@@ -260,9 +224,7 @@ pub enum Msg {
         collection_text: String,
     },
     /// Loader failed.
-    ArticlesLoadFailed {
-        reason: String,
-    },
+    ArticlesLoadFailed { reason: String },
     /// Triage-specific articles prepared by the loader.
     TriageArticlesLoaded {
         request_id: u64,
@@ -275,10 +237,7 @@ pub enum Msg {
         files_total: usize,
     },
     /// Loader failed for triage.
-    TriageArticlesLoadFailed {
-        request_id: u64,
-        reason: String,
-    },
+    TriageArticlesLoadFailed { request_id: u64, reason: String },
     /// Briefing history loaded from disk at startup.
     /// On IO or parse failure, the effect runner sends this with an empty Vec
     /// rather than a separate failure message — keeps the reducer simple and avoids dead variants.
@@ -287,18 +246,11 @@ pub enum Msg {
     },
     /// Briefing time checkpoint loaded from disk at startup.
     /// Raw wire type; the reducer parses the string into `DateTime<Utc>`.
-    BriefingCheckpointLoaded {
-        since_utc: Option<String>,
-    },
+    BriefingCheckpointLoaded { since_utc: Option<String> },
     /// Briefing time checkpoint persisted successfully.
-    BriefingCheckpointSaveSucceeded {
-        save_id: u64,
-    },
+    BriefingCheckpointSaveSucceeded { save_id: u64 },
     /// Briefing time checkpoint persistence failed.
-    BriefingCheckpointSaveFailed {
-        save_id: u64,
-        reason: String,
-    },
+    BriefingCheckpointSaveFailed { save_id: u64, reason: String },
     /// Request to update the in-memory briefing checkpoint (and persist it).
     /// Raw wire type; the reducer validates the string before storing.
     BriefingCheckpointSet(Option<String>),
@@ -307,25 +259,18 @@ pub enum Msg {
         contexts: HashMap<PromptId, Vec<(String, String)>>,
     },
     /// Prompt contexts failed to load.
-    PromptContextsLoadFailed {
-        reason: String,
-    },
+    PromptContextsLoadFailed { reason: String },
     /// Saved prompt template overlays have been loaded into the prompt registry.
     PromptTemplateFilesLoaded,
     /// LLM metadata (active prompt versions and effective models) loaded.
     LlmMetadataLoaded {
         active_versions: std::collections::HashMap<PromptId, PromptVersion>,
         effective_models: std::collections::HashMap<PromptId, String>,
-        templates: std::collections::HashMap<PromptId, PromptLabTemplateSnapshot>,
     },
     /// Startup/effect boundary detected whether AI-backed workflows are available.
-    AiAvailabilityDetected {
-        availability: AiAvailability,
-    },
+    AiAvailabilityDetected { availability: AiAvailability },
     /// Summary cache hydrated from persisted store at startup.
-    SummaryCacheHydrated {
-        cache: crate::SummaryCache,
-    },
+    SummaryCacheHydrated { cache: crate::SummaryCache },
     /// Signal-candidate cache hydrated from persisted store at startup.
     SignalCandidateCacheLoaded {
         cache: crate::signal_candidate_cache::SignalCandidateCache,
@@ -335,186 +280,34 @@ pub enum Msg {
         overrides: std::collections::HashSet<crate::signal_candidate::OverrideKey>,
     },
     /// Triage cache hydrated from persisted store at startup.
-    TriageCacheHydrated {
-        cache: crate::TriageCache,
-    },
-    /// Pre-triage manual overrides hydrated from persisted store at startup.
-    PreTriageOverridesHydrated {
-        overrides: HashMap<ArticleFilterKey, ManualDecision>,
-    },
+    TriageCacheHydrated { cache: crate::TriageCache },
     /// User requested to open the currently selected article URL in the default browser.
     OpenInBrowserClicked,
-    /// User requested to open the Prompt Lab panel.
-    PromptLabOpenRequested,
-    /// User requested to close the Prompt Lab panel.
-    PromptLabCloseRequested,
-    /// User selected a different stage in the Prompt Lab.
-    PromptLabStageSelected {
-        stage: PromptLabStage,
-    },
-    /// User selected a different input source for Prompt Lab.
-    PromptLabInputSourceSelected {
-        source: PromptLabInputSource,
-    },
-    /// User edited the Prompt Lab input text.
-    PromptLabInputChanged {
-        text: String,
-    },
-    /// User edited the URL input used for TypeUrl runs.
-    PromptLabUrlInputChanged {
-        url: String,
-    },
-    /// User requested the TypeUrl resolver to fetch the URL content.
-    PromptLabResolveRequested,
-    /// Background effect finished resolving the URL input.
-    PromptLabInputResolved {
-        resolve_id: u64,
-        result: Result<String, String>,
-    },
-    /// User opened the Prompt Lab context editor.
-    PromptLabContextEditorOpened,
-    /// User changed the context draft text.
-    PromptLabContextDraftChanged {
-        text: String,
-    },
-    /// User requested the draft to be applied.
-    PromptLabContextApplyRequested,
-    /// User requested apply and rerun.
-    PromptLabContextApplyAndRerunRequested,
-    /// User requested to revert draft edits.
-    PromptLabContextRevertRequested,
-    /// User requested saving the applied context to disk.
-    PromptLabContextSaveRequested,
-    /// User requested reloading the context from disk.
-    PromptLabContextReloadRequested,
-    /// Save effect succeeded.
-    PromptLabContextSaved {
-        prompt_id: PromptId,
-        path: String,
-        version: u64,
-    },
-    /// Save effect failed.
-    PromptLabContextSaveFailed {
-        prompt_id: PromptId,
-        reason: String,
-    },
-    /// User toggled the Prompt Lab template editor open/closed.
-    PromptLabTemplateEditorToggled,
-    /// User changed the system template draft text.
-    PromptLabTemplateSystemDraftChanged {
-        text: String,
-    },
-    /// User changed the user template draft text.
-    PromptLabTemplateUserDraftChanged {
-        text: String,
-    },
-    /// User requested the template draft to be validated/applied.
-    PromptLabTemplateApplyRequested,
-    /// User requested to apply the template draft and rerun immediately.
-    PromptLabTemplateApplyAndRerunRequested,
-    /// User requested to revert template edits.
-    PromptLabTemplateRevertRequested,
-    /// User requested saving the applied template to disk.
-    PromptLabTemplateSaveRequested,
-    /// Template save effect succeeded.
-    PromptLabTemplateSaved {
-        prompt_id: PromptId,
-        version: PromptVersion,
-        path: String,
-    },
-    /// Template save effect failed.
-    PromptLabTemplateSaveFailed {
-        prompt_id: PromptId,
-        reason: String,
-    },
-    /// User requested a Prompt Lab LLM run with the current input and stage.
-    PromptLabRunRequested,
-    /// User requested rerunning using the latest completed/final run parameters.
-    PromptLabRerunRequested,
-    /// User requested to clear completed/failed runs from Prompt Lab history.
-    PromptLabHistoryCleared,
-    PromptLabCompareDraftReset,
-    PromptLabCompareCurrentSettingsCaptured,
-    PromptLabCompareBaselineCaptured,
-    PromptLabCompareCandidateRemoved {
-        candidate_id: u64,
-    },
-    PromptLabCompareCandidateLabelChanged {
-        candidate_id: u64,
-        label: String,
-    },
-    PromptLabCompareBatchStartRequested,
-    PromptLabCompareBatchConfirmedStart,
-    PromptLabCompareBatchCancelRequested,
-    PromptLabCompareWinnerSelected {
-        run_id: PromptLabRunId,
-    },
-    PromptLabCompareWinnerCleared,
-    PromptLabCompareRunRated {
-        run_id: PromptLabRunId,
-        rating: u8,
-    },
-    PromptLabAdvancedModeSet {
-        enabled: bool,
-    },
-    PromptLabModelCatalogLoaded {
-        models: Vec<ModelId>,
-        source: crate::prompt_lab::ModelCatalogSource,
-    },
-    PromptLabModelOverrideSet {
-        model: Option<ModelId>,
-    },
-    PromptLabCompareSectionToggled,
-    PromptLabContextSectionToggled,
-    PromptLabTemplateSectionToggled,
-    PromptLabRunDetailsSectionToggled,
-    PromptLabComparePolicyUpdated {
-        require_parse_ok: Option<bool>,
-        max_cost_microdollars: Option<Option<u64>>,
-        max_wall_ms: Option<Option<u64>>,
-        rating_beats_cost: Option<bool>,
-    },
-    PromptLabCompareAutoSelectRequested,
-    PromptLabCompareBatchSetWarning {
-        batch_id: PromptLabCompareBatchId,
-        warning: Option<String>,
-    },
     /// User selected a trend category in the Trends tab.
-    TrendCategorySelected {
-        category: TrendCategory,
-    },
+    TrendCategorySelected { category: TrendCategory },
     /// Entity index successfully loaded from disk.
     EntityIndexLoaded {
         index: crate::entity_index::EntityIndex,
     },
     /// Entity index failed to load from disk (parse error or IO error).
-    EntityIndexLoadFailed {
-        reason: String,
-    },
+    EntityIndexLoadFailed { reason: String },
     /// Entity index successfully rebuilt from the archive.
     EntityIndexRebuilt {
         index: crate::entity_index::EntityIndex,
     },
     /// Entity index rebuild failed.
-    EntityIndexRebuildFailed {
-        reason: String,
-    },
+    EntityIndexRebuildFailed { reason: String },
 
     // --- Import saved webpages ---
     /// Request to import browser-saved .htm/.html files from `dir`.
-    ImportSavedWebpagesRequested {
-        dir: PathBuf,
-    },
+    ImportSavedWebpagesRequested { dir: PathBuf },
     /// Import batch completed (may include per-file failures).
     ImportSavedWebpagesCompleted {
         request_id: u64,
         report: harvester_engine::ImportReport,
     },
     /// Import batch failed at the directory level (scan or setup failure).
-    ImportSavedWebpagesFailed {
-        request_id: u64,
-        reason: String,
-    },
+    ImportSavedWebpagesFailed { request_id: u64, reason: String },
     /// Clear / reset the current imported corpus session.
     ImportedCorpusCleared,
 }

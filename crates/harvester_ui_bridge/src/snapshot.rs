@@ -61,7 +61,6 @@ pub fn project(view: &AppViewModel) -> (ProjectedSnapshot, BodyTable) {
     let mut value = serde_json::to_value(view)
         .expect("AppViewModel serialization is an IPC contract and must not fail");
     let mut bodies = BodyTable::new();
-    remove_pointer(&mut value, "/left_pane/prompt_lab");
     replace_body(&mut value, &mut bodies, "/preview_text", BodyKey::Preview);
     replace_body(
         &mut value,
@@ -88,23 +87,6 @@ pub fn project(view: &AppViewModel) -> (ProjectedSnapshot, BodyTable) {
         },
         bodies,
     )
-}
-
-fn remove_pointer(value: &mut serde_json::Value, pointer: &str) {
-    let (parent, key) = pointer
-        .rsplit_once('/')
-        .expect("projection pointers always name a field");
-    let parent = if parent.is_empty() {
-        value
-    } else {
-        value
-            .pointer_mut(parent)
-            .expect("AppViewModel IPC projection pointer must exist")
-    };
-    parent
-        .as_object_mut()
-        .expect("AppViewModel IPC projection parent must be an object")
-        .remove(key);
 }
 
 fn replace_body(value: &mut serde_json::Value, table: &mut BodyTable, pointer: &str, key: BodyKey) {
@@ -170,7 +152,7 @@ mod tests {
         );
         let raw_paths = value_paths(&raw);
         let envelope_paths = value_paths(&envelope.view);
-        let stripped_roots = ["/left_pane/prompt_lab"];
+        let stripped_roots: [&str; 0] = [];
         let expected_removed = raw_paths
             .iter()
             .filter(|path| {

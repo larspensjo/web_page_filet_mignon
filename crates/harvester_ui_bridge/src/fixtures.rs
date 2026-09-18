@@ -424,7 +424,6 @@ fn add_llm_metadata(state: AppState) -> AppState {
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
-            templates: HashMap::new(),
         },
     );
     let state = reduce(state, Msg::PromptTemplateFilesLoaded);

@@ -157,7 +157,6 @@ pub fn build_effect_runner(
         let host_provider = OpenAiProvider::new(api_key);
         let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
             Arc::new(host_provider.clone());
-        let provider_clone = Arc::clone(&provider);
         let mut registry = PromptRegistry::new();
         register_defaults(&mut registry);
         let registry = Arc::new(RwLock::new(registry));
@@ -198,8 +197,6 @@ pub fn build_effect_runner(
             100_000,
             registry,
             model_map,
-            provider_clone,
-            ProviderKind::OpenAi,
             platform_handler,
         );
         Ok((runner, Some(quota_limits), Some(runtime)))
@@ -319,25 +316,6 @@ pub fn pump_pre_triage_refresh(mut state: AppState) -> (AppState, Vec<Effect>, b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{load_pre_triage_overrides, persist_runtime_state};
-    use harvester_core::{ArticleFilterKey, ManualDecision};
-    use std::collections::HashMap;
-    use tempfile::tempdir;
-
-    fn persisted_state_with_pre_triage_override() -> (tempfile::TempDir, RuntimePaths) {
-        let dir = tempdir().expect("tempdir");
-        let paths = RuntimePaths::with_defaults(dir.path().to_path_buf());
-        let overrides = HashMap::from([(
-            ArticleFilterKey {
-                url: "https://example.com/persisted-decision".to_string(),
-                content_hash: 42,
-            },
-            ManualDecision::Exclude,
-        )]);
-        persist_runtime_state(&paths.state_path, &[], &overrides);
-        assert_eq!(load_pre_triage_overrides(&paths.state_path), overrides);
-        (dir, paths)
-    }
 
     #[test]
     fn parse_llm_max_concurrency_uses_default_when_missing_or_invalid() {
@@ -367,17 +345,9 @@ mod tests {
     }
 
     #[test]
-    fn hydrate_state_ignores_persisted_pre_triage_overrides() {
-        let (_dir, paths) = persisted_state_with_pre_triage_override();
-
-        let (state, _) = hydrate_state_from_disk(AppState::new(), &paths);
-
-        assert!(state.pre_triage_manual_overrides().is_empty());
-    }
-
-    #[test]
     fn hydrate_state_schedules_llm_metadata_load_once() {
-        let (_dir, paths) = persisted_state_with_pre_triage_override();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let paths = RuntimePaths::with_defaults(dir.path().to_path_buf());
 
         let (_, effects) = hydrate_state_from_disk(AppState::new(), &paths);
 

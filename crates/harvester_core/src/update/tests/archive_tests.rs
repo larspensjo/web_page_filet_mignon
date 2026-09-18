@@ -450,14 +450,6 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
             articles,
         },
     );
-    let key = state.pre_triage().entries()[0].key.clone();
-    let (state, _) = update(
-        state,
-        Msg::PreTriageDecisionSet {
-            key,
-            decision: crate::pre_triage_filter::ManualDecision::Exclude,
-        },
-    );
     assert!(
         matches!(
             state.pre_triage().phase(),
@@ -483,10 +475,18 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
     );
     assert_eq!(
         state.triage().articles().len(),
-        1,
-        "only the tentatively included article should be handed to triage"
+        2,
+        "automatic pre-triage includes both review articles without retired overrides"
     );
-    assert_eq!(state.triage().articles()[0].url, url2);
+    assert_eq!(
+        state
+            .triage()
+            .articles()
+            .iter()
+            .map(|article| article.url.as_str())
+            .collect::<Vec<_>>(),
+        vec![url1, url2]
+    );
 }
 
 #[test]
@@ -695,14 +695,6 @@ fn archive_clicked_with_pre_triage_reviewing_has_zero_pending_count() {
             crate::pre_triage_filter::PreTriagePhase::Reviewing
         ),
         "unresolved review articles should derive Reviewing immediately after load"
-    );
-    let key = state.pre_triage().entries()[0].key.clone();
-    let (state, _) = update(
-        state,
-        Msg::PreTriageDecisionSet {
-            key,
-            decision: crate::pre_triage_filter::ManualDecision::Include,
-        },
     );
     assert!(
         matches!(
@@ -2598,23 +2590,15 @@ fn cache_derived_archive_counts_populate_while_pre_triage_is_reviewing() {
             fetched_utc: None,
         },
     ];
-    let (state, _) = update(
+    let (mut state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
             articles,
         },
     );
-    // Resolve one review item, leaving the other unresolved → Reviewing phase, both
-    // articles tentatively included.
-    let key = state.pre_triage().entries()[0].key.clone();
-    let (mut state, _) = update(
-        state,
-        Msg::PreTriageDecisionSet {
-            key,
-            decision: crate::pre_triage_filter::ManualDecision::Include,
-        },
-    );
+    // Manual resolution no longer exists, so both review articles remain
+    // tentatively included and the phase stays Reviewing.
     assert!(
         matches!(
             state.pre_triage().phase(),

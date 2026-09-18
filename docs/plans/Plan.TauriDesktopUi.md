@@ -1975,6 +1975,17 @@ reader and are deferred to Run 4, along with deleting
 `pre_triage_load_progress` and `Msg::TriageArticlesLoadProgress` as further
 Win32 residue.
 
+**Run 3 progress.** Run 3 deleted Prompt Lab, while retaining engine prompt
+loading and context-file runtime paths. Prompt-Lab-only template saving and
+context-draft parsing were also removed. The run completed retirement of
+persisted manual pre-triage overrides with tolerate-on-read compatibility, and
+bumped the IPC schema after the snapshot strip list became empty. The Run 4
+dead-payload sweep must include the now-unreachable
+`JobFilterStatus::ManuallyExcluded` and `JobFilterStatus::ManuallyIncluded`
+variants (mapped in `state/link_helpers.rs` and surfaced in
+`frontend/src/ipc/types.ts`) plus the `Manually excluded` preview label in
+`preview.rs`.
+
 1. **Delete `crates/harvester_app` and remove it from BOTH `[workspace] members`
    and `[workspace] default-members` in the root `Cargo.toml`.** Both, in the same
    edit — leaving it in either list makes every root cargo command fail

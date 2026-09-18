@@ -4,12 +4,13 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_core::{Effect, LlmResultKind, LoadedArticle, Msg, StopPolicy};
 use harvester_engine::llm::load_context_file;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PROMPT_VERSION_DRAFT};
-use harvester_engine::llm::prompt_context::{ContextMeta, PromptContextFile};
+#[cfg(test)]
+use harvester_engine::llm::prompt_context::ContextMeta;
+use harvester_engine::llm::prompt_context::PromptContextFile;
 use harvester_engine::llm::LlmCommand;
 use harvester_engine::{
     build_triage_archive, import_saved_webpages, is_confined_to,
@@ -19,9 +20,7 @@ use harvester_engine::{
 
 use super::worker::{run_triage_refresh_load, EntityIndexWorkerMsg};
 use super::{truncate_url_for_log, EffectRunner};
-use crate::effect_helpers::{
-    build_local_model_catalog, download_link_page, prompt_context_filename,
-};
+use crate::effect_helpers::{download_link_page, prompt_context_filename};
 
 pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = ctx_file
@@ -157,120 +156,6 @@ impl EffectRunner {
             Effect::OpenUrlInBrowser { url } => {
                 self.platform_handler.open_url(&url);
             }
-            Effect::ResolvePromptLabInputFromUrl { resolve_id, url } => {
-                let msg_tx = self.msg_tx.clone();
-                let output_dir = self.paths.output_dir.clone();
-                let registry = self.prompt_registry.clone();
-                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
-                thread::spawn(move || {
-                    engine_info!(
-                        "[prompt-lab] resolve requested resolve_id={} url={}",
-                        resolve_id,
-                        url
-                    );
-                    let guard = registry.read().unwrap();
-                    match load_and_prepare_articles_filtered(
-                        &output_dir,
-                        max_input_bytes,
-                        &guard,
-                        std::slice::from_ref(&url),
-                        None,
-                    ) {
-                        Ok((mut articles, _collection_text)) => {
-                            if let Some(article) = articles.pop() {
-                                let _ = msg_tx.send(Msg::PromptLabInputResolved {
-                                    resolve_id,
-                                    result: Ok(article.prepared_text),
-                                });
-                            } else {
-                                let reason = "article missing after resolution".to_string();
-                                engine_warn!("[prompt-lab] resolve failed: {}", reason);
-                                let _ = msg_tx.send(Msg::PromptLabInputResolved {
-                                    resolve_id,
-                                    result: Err(reason),
-                                });
-                            }
-                        }
-                        Err(reason) => {
-                            engine_warn!("[prompt-lab] resolve failed: {}", reason);
-                            let _ = msg_tx.send(Msg::PromptLabInputResolved {
-                                resolve_id,
-                                result: Err(reason),
-                            });
-                        }
-                    }
-                });
-            }
-            Effect::LoadPromptLabModelCatalog => {
-                let msg_tx = self.msg_tx.clone();
-                let provider = self.llm_provider.clone();
-                let default_provider_kind = self.llm_default_provider;
-                let effective_models = self.llm_metadata_models.clone();
-
-                thread::spawn(move || {
-                    engine_info!("[prompt-lab-model] loading model catalog");
-
-                    let local_fallback_models =
-                        build_local_model_catalog(default_provider_kind, &effective_models);
-
-                    let (models, source) = if let (Some(provider), Some(provider_kind)) =
-                        (provider, default_provider_kind)
-                    {
-                        match tokio::runtime::Runtime::new() {
-                            Ok(runtime) => match runtime.block_on(provider.list_models()) {
-                                Ok(mut model_names) => {
-                                    model_names.sort();
-                                    model_names.dedup();
-
-                                    engine_info!(
-                                        "[prompt-lab-model] remote discovery succeeded: {} models found: {}",
-                                        model_names.len(),
-                                        model_names.join(", ")
-                                    );
-
-                                    let models: Vec<_> = model_names
-                                        .into_iter()
-                                        .map(|name| {
-                                            harvester_engine::llm::types::ModelId::new(
-                                                provider_kind,
-                                                name,
-                                            )
-                                        })
-                                        .collect();
-                                    (models, harvester_core::ModelCatalogSource::Remote)
-                                }
-                                Err(err) => {
-                                    engine_warn!(
-                                        "[prompt-lab-model] remote discovery failed: {}",
-                                        err
-                                    );
-                                    (
-                                        local_fallback_models,
-                                        harvester_core::ModelCatalogSource::LocalFallback,
-                                    )
-                                }
-                            },
-                            Err(err) => {
-                                engine_warn!(
-                                    "[prompt-lab-model] tokio runtime creation failed: {}",
-                                    err
-                                );
-                                (
-                                    local_fallback_models,
-                                    harvester_core::ModelCatalogSource::LocalFallback,
-                                )
-                            }
-                        }
-                    } else {
-                        (
-                            local_fallback_models,
-                            harvester_core::ModelCatalogSource::LocalFallback,
-                        )
-                    };
-
-                    let _ = msg_tx.send(Msg::PromptLabModelCatalogLoaded { models, source });
-                });
-            }
             Effect::DownloadLinkedPage {
                 job_id,
                 link_index,
@@ -333,164 +218,6 @@ impl EffectRunner {
                         );
                     }
                     let _ = msg_tx.send(Msg::LinkDeleted { job_id, link_index });
-                });
-            }
-            Effect::SavePromptContextFile {
-                prompt_id,
-                mut context_pairs,
-            } => {
-                let msg_tx = self.msg_tx.clone();
-                let contexts_dir = self.paths.contexts_dir.clone();
-                thread::spawn(move || {
-                    if let Err(err) = fs::create_dir_all(&contexts_dir) {
-                        let reason = format!("failed to create contexts directory: {}", err);
-                        engine_error!(
-                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                            reason,
-                            prompt_id
-                        );
-                        let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                        return;
-                    }
-
-                    let filename = prompt_context_filename(prompt_id);
-                    let path = contexts_dir.join(filename);
-
-                    let existing_meta = if path.exists() {
-                        match load_context_file(&path) {
-                            Ok(file) => file.meta,
-                            Err(err) => {
-                                let reason = format!("failed to read existing context: {}", err);
-                                engine_error!(
-                                    "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                                    reason,
-                                    prompt_id
-                                );
-                                let _ = msg_tx
-                                    .send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                                return;
-                            }
-                        }
-                    } else {
-                        ContextMeta {
-                            prompt_id: prompt_id.to_string(),
-                            schema_version: 1,
-                            version: 0,
-                            updated: Utc::now().to_rfc3339(),
-                            description: None,
-                            changelog: None,
-                        }
-                    };
-
-                    let mut meta = existing_meta;
-                    meta.schema_version = 1;
-                    meta.prompt_id = prompt_id.to_string();
-                    meta.version = meta.version.saturating_add(1);
-                    meta.updated = Utc::now().to_rfc3339();
-
-                    context_pairs.sort_by(|a, b| a.0.cmp(&b.0));
-                    let variables = context_pairs.into_iter().collect::<HashMap<_, _>>();
-
-                    let ctx_file = PromptContextFile {
-                        meta: meta.clone(),
-                        variables,
-                    };
-
-                    let mut toml_string = match toml::to_string(&ctx_file) {
-                        Ok(serialized) => serialized,
-                        Err(err) => {
-                            let reason = format!("failed to serialize context: {}", err);
-                            engine_error!(
-                                "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                                reason,
-                                prompt_id
-                            );
-                            let _ =
-                                msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                            return;
-                        }
-                    };
-                    toml_string.push('\n');
-
-                    let tmp_path = path.with_extension("toml.tmp");
-                    if let Err(err) = fs::write(&tmp_path, toml_string) {
-                        let reason = format!("failed to write temp file: {}", err);
-                        engine_error!(
-                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                            reason,
-                            prompt_id
-                        );
-                        let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                        return;
-                    }
-
-                    if let Err(err) = fs::rename(&tmp_path, &path) {
-                        let reason = format!("failed to rename temp file: {}", err);
-                        engine_error!(
-                            "[prompt-lab-context] SavePromptContextFile {} prompt_id={:?}",
-                            reason,
-                            prompt_id
-                        );
-                        let _ = msg_tx.send(Msg::PromptLabContextSaveFailed { prompt_id, reason });
-                        return;
-                    }
-
-                    engine_info!(
-                        "[prompt-lab-context] Saved context for {:?} to {:?}",
-                        prompt_id,
-                        path
-                    );
-                    let _ = msg_tx.send(Msg::PromptLabContextSaved {
-                        prompt_id,
-                        path: path.display().to_string(),
-                        version: meta.version as u64,
-                    });
-                });
-            }
-            Effect::SavePromptTemplateFile {
-                prompt_id,
-                system_template,
-                user_template,
-                description,
-                expected_format,
-            } => {
-                let prompts_dir = self.paths.prompts_dir.clone();
-                let registry = self.prompt_registry.clone();
-                let msg_tx = self.msg_tx.clone();
-                thread::spawn(move || {
-                    match crate::save_prompt_template(
-                        &prompts_dir,
-                        prompt_id,
-                        &system_template,
-                        &user_template,
-                        &description,
-                        &expected_format,
-                    ) {
-                        Ok((version, path)) => {
-                            let overlay = PromptTemplateOwned {
-                                id: prompt_id,
-                                version,
-                                system_template: system_template.clone(),
-                                user_template: user_template.clone(),
-                                description: description.clone(),
-                                expected_format: expected_format.clone(),
-                            };
-                            if let Ok(mut reg) = registry.write() {
-                                reg.register_overlay(overlay);
-                            }
-                            engine_info!("[prompt-lab-template] Saved template prompt_id={:?} path={} version={}", prompt_id, path.display(), version);
-                            let _ = msg_tx.send(Msg::PromptLabTemplateSaved {
-                                prompt_id,
-                                version,
-                                path: path.display().to_string(),
-                            });
-                        }
-                        Err(reason) => {
-                            engine_error!("[prompt-lab-template] SavePromptTemplateFile failed prompt_id={:?} reason={}", prompt_id, reason);
-                            let _ =
-                                msg_tx.send(Msg::PromptLabTemplateSaveFailed { prompt_id, reason });
-                        }
-                    }
                 });
             }
             Effect::RequestLlmCompletion {
@@ -744,48 +471,21 @@ impl EffectRunner {
                 let registry = self.prompt_registry.clone();
                 let models = self.llm_metadata_models.clone();
                 thread::spawn(move || {
-                    use harvester_core::PromptLabTemplateSnapshot;
-
-                    let (active_versions, templates) = {
+                    let active_versions = {
                         let guard = registry.read().unwrap();
-                        let versions = guard.active_versions_map();
-                        let prompt_ids = &[
-                            PromptId::ArticleTriage,
-                            PromptId::ArticleSummary,
-                            PromptId::ArticleSignalCandidate,
-                            PromptId::AggregateBriefing,
-                            PromptId::BriefingExecutiveSummary,
-                            PromptId::BriefingNextItem,
-                        ];
-                        let templates = prompt_ids
-                            .iter()
-                            .filter_map(|&prompt_id| {
-                                guard.active_effective(prompt_id).map(|effective| {
-                                    (
-                                        prompt_id,
-                                        PromptLabTemplateSnapshot {
-                                            template: effective.to_owned(),
-                                            source: effective.source(),
-                                        },
-                                    )
-                                })
-                            })
-                            .collect::<HashMap<_, _>>();
-                        (versions, templates)
+                        guard.active_versions_map()
                     };
                     let effective_models = models;
 
                     engine_info!(
-                        "[llm-metadata] metadata prepared (versions={}, models={} templates={})",
+                        "[llm-metadata] metadata prepared (versions={}, models={})",
                         active_versions.len(),
                         effective_models.len(),
-                        templates.len(),
                     );
 
                     let _ = msg_tx.send(Msg::LlmMetadataLoaded {
                         active_versions,
                         effective_models,
-                        templates,
                     });
                 });
             }

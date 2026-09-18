@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -6,9 +5,7 @@ use std::time::{Duration, Instant};
 
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::blacklist::BlacklistState;
-use harvester_core::{
-    AppState, ArticleFilterKey, CompletedJobSnapshot, JobResultKind, ManualDecision, Msg,
-};
+use harvester_core::{AppState, CompletedJobSnapshot, JobResultKind, Msg};
 
 use crate::{persist_runtime_state, save_blacklist};
 
@@ -18,7 +15,6 @@ const MAX_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone)]
 pub struct PersistenceSnapshot {
     pub completed: Vec<CompletedJobSnapshot>,
-    pub pre_triage_overrides: HashMap<ArticleFilterKey, ManualDecision>,
     pub blacklist: BlacklistState,
 }
 
@@ -26,7 +22,6 @@ impl PersistenceSnapshot {
     pub fn capture(state: &AppState) -> Self {
         Self {
             completed: state.completed_jobs_snapshot(),
-            pre_triage_overrides: state.pre_triage_manual_overrides().clone(),
             blacklist: state.blacklist().clone(),
         }
     }
@@ -39,13 +34,11 @@ pub fn requires_persistence_snapshot(message: &Msg) -> bool {
         Msg::JobDone {
             result: JobResultKind::Success,
             ..
-        } | Msg::PreTriageDecisionSet { .. }
-            | Msg::PreTriageResetClicked
-            | Msg::FetchOutcomeClassified {
-                class: harvester_engine::FetchOutcomeClass::PermanentBlock
-                    | harvester_engine::FetchOutcomeClass::Success,
-                ..
-            }
+        } | Msg::FetchOutcomeClassified {
+            class: harvester_engine::FetchOutcomeClass::PermanentBlock
+                | harvester_engine::FetchOutcomeClass::Success,
+            ..
+        }
     )
 }
 
@@ -179,11 +172,7 @@ fn run_worker(
             continue;
         };
         let flush_started = Instant::now();
-        persist_runtime_state(
-            &state_path,
-            &pending.snapshot.completed,
-            &pending.snapshot.pre_triage_overrides,
-        );
+        persist_runtime_state(&state_path, &pending.snapshot.completed);
         if let Err(err) = save_blacklist(&blacklist_path, &pending.snapshot.blacklist) {
             engine_warn!("[persist] failed to save blacklist: {}", err);
         }
@@ -214,11 +203,11 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use harvester_core::{update, ArticleFilterKey, ManualDecision, Msg};
+    use harvester_core::{update, Msg};
     use harvester_engine::FetchOutcomeClass;
 
     use super::*;
-    use crate::{load_blacklist, load_completed_jobs, load_pre_triage_overrides};
+    use crate::{load_blacklist, load_completed_jobs};
 
     fn state_path(dir: &Path) -> PathBuf {
         dir.join(".harvester_state.ron")
@@ -230,28 +219,37 @@ mod tests {
         let path = state_path(temp.path());
         let mut worker =
             PersistenceWorker::new(path.clone(), temp.path().join(".domain_blacklist.ron"));
-
-        let first = PersistenceSnapshot::capture(&harvester_core::AppState::new());
-        let (state_with_overrides, _) = update(
-            harvester_core::AppState::new(),
-            Msg::PreTriageOverridesHydrated {
-                overrides: HashMap::from([(
-                    ArticleFilterKey {
-                        url: "https://example.com/a".to_string(),
-                        content_hash: 1,
-                    },
-                    ManualDecision::Include,
-                )]),
+        let first_jobs = vec![harvester_core::CompletedJobSnapshot {
+            url: "https://example.com/a".to_string(),
+            tokens: Some(1),
+            bytes: Some(1),
+            links: vec![],
+            fetched_utc: None,
+        }];
+        let second_jobs = vec![
+            first_jobs[0].clone(),
+            harvester_core::CompletedJobSnapshot {
+                url: "https://example.com/b".to_string(),
+                tokens: Some(2),
+                bytes: Some(2),
+                links: vec![],
+                fetched_utc: None,
             },
+        ];
+        let (first_state, _) = update(
+            harvester_core::AppState::new(),
+            Msg::RestoreCompletedJobs(first_jobs),
         );
-        let second = PersistenceSnapshot::capture(&state_with_overrides);
+        let (second_state, _) = update(
+            harvester_core::AppState::new(),
+            Msg::RestoreCompletedJobs(second_jobs.clone()),
+        );
 
-        worker.enqueue(first);
-        worker.enqueue(second);
+        worker.enqueue(PersistenceSnapshot::capture(&first_state));
+        worker.enqueue(PersistenceSnapshot::capture(&second_state));
         worker.shutdown();
 
-        let overrides = load_pre_triage_overrides(&path);
-        assert_eq!(overrides.len(), 1);
+        assert_eq!(load_completed_jobs(&path), second_jobs);
     }
 
     #[test]
@@ -291,22 +289,20 @@ mod tests {
                 fetched_utc: None,
             }]),
         );
-        let (state, _) = update(
-            state,
-            Msg::PreTriageOverridesHydrated {
-                overrides: HashMap::from([(
-                    ArticleFilterKey {
-                        url: "https://example.com/x".to_string(),
-                        content_hash: 1,
-                    },
-                    ManualDecision::Exclude,
-                )]),
-            },
+        let t0 = chrono::DateTime::from_timestamp(0, 0).unwrap();
+        let mut blacklist = BlacklistState::default();
+        blacklist.record_outcome(
+            "example.com",
+            FetchOutcomeClass::PermanentBlock,
+            Some("http status 403"),
+            t0,
         );
+        let mut state = state;
+        state.set_blacklist(blacklist.clone());
 
         let snapshot = PersistenceSnapshot::capture(&state);
         assert_eq!(snapshot.completed.len(), 1);
-        assert_eq!(snapshot.pre_triage_overrides.len(), 1);
+        assert_eq!(snapshot.blacklist, blacklist);
     }
 
     #[test]
@@ -328,7 +324,6 @@ mod tests {
         }
         let snapshot = PersistenceSnapshot {
             completed: vec![],
-            pre_triage_overrides: HashMap::new(),
             blacklist,
         };
         worker.enqueue(snapshot);

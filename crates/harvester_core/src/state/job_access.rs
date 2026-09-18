@@ -81,7 +81,6 @@ impl AppState {
         self.pre_triage = crate::pre_triage_filter::PreTriageSession::default();
         self.pre_triage_load_context = None;
         self.pre_triage_load_progress = None;
-        self.pre_triage_manual_overrides.clear();
 
         for entry in entries {
             let CompletedJobSnapshot {
@@ -234,13 +233,6 @@ impl AppState {
 
     pub fn selected_job_id(&self) -> Option<JobId> {
         self.ui.selected_job_id()
-    }
-
-    /// URL of the currently selected job, regardless of summarization state.
-    pub(crate) fn selected_job_url(&self) -> Option<String> {
-        let job_id = self.ui.selected_job_id()?;
-        let job = self.jobs.get(&job_id)?;
-        Some(job.url.clone())
     }
 
     pub fn job_url_for(&self, job_id: JobId) -> Option<&str> {

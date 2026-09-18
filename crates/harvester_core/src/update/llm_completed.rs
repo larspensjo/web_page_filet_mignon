@@ -4,7 +4,6 @@ use super::summary_cache_support::{
     summary_cache_key_error_reason,
 };
 use crate::briefing::{ArticleSummaryResult, BriefingItem, BriefingResult, BriefingStoryResult};
-use crate::prompt_lab::{PromptLabCompareBatchStatus, PromptLabRunStatus};
 use crate::triage::ArticleTriageResult;
 use crate::update::signal_candidate::{handle_signal_candidate_completion, try_enqueue};
 use crate::{AppState, Effect, LlmRequestState, LlmResultKind};
@@ -66,8 +65,6 @@ pub(super) fn handle(
         }
     } else if state.briefing().next_item_request_id() == Some(request_id) {
         handle_next_item_completion(state, &result);
-    } else if let Some(run_id) = state.prompt_lab().ownership_for(request_id) {
-        handle_prompt_lab_completion(state, request_id, run_id, &result, metadata, &mut effects);
     }
 
     effects
@@ -506,128 +503,5 @@ fn handle_next_item_completion(state: &mut AppState, result: &LlmResultKind) {
             state.briefing_mut().clear_next_item_request_id();
         }
     }
-    state.mark_dirty();
-}
-
-fn handle_prompt_lab_completion(
-    state: &mut AppState,
-    request_id: u64,
-    run_id: crate::prompt_lab::PromptLabRunId,
-    result: &LlmResultKind,
-    metadata: Option<LlmRunMetadata>,
-    effects: &mut Vec<Effect>,
-) {
-    let reason_from_result = |r: &LlmResultKind| -> String {
-        match r {
-            LlmResultKind::DeferredToBatch => "deferred to batch".to_string(),
-            LlmResultKind::ValidationFailed {
-                reason,
-                raw_response,
-            } => format!("validation failed: {reason}; response: {raw_response}"),
-            LlmResultKind::QuotaExhausted { reason, .. } => format!("quota exhausted: {reason}"),
-            LlmResultKind::RateLimited { reason } => reason.clone(),
-            LlmResultKind::Failed { reason } => reason.clone(),
-            LlmResultKind::Success { .. } => String::new(),
-        }
-    };
-
-    let metadata_for_failure = metadata.clone();
-    match result {
-        LlmResultKind::Success {
-            output_json,
-            input_tokens,
-            output_tokens,
-            ..
-        } => {
-            engine_info!(
-                "[prompt-lab] run completed run_id={} request_id={} tokens_in={} tokens_out={}",
-                run_id.0,
-                request_id,
-                input_tokens,
-                output_tokens
-            );
-            if let Some(run_metadata) = metadata {
-                state.complete_prompt_lab_run(run_id, output_json.clone(), run_metadata);
-            } else {
-                engine_warn!(
-                    "[prompt-lab] run completed but metadata missing run_id={} request_id={}",
-                    run_id.0,
-                    request_id
-                );
-                state.fail_prompt_lab_run(run_id, "metadata missing".to_string(), None);
-            }
-        }
-        _ => {
-            let reason = reason_from_result(result);
-            engine_warn!(
-                "[prompt-lab] run failed run_id={} request_id={} reason={}",
-                run_id.0,
-                request_id,
-                reason
-            );
-            state.fail_prompt_lab_run(run_id, reason, metadata_for_failure);
-        }
-    }
-
-    state.consume_prompt_lab_ownership(request_id);
-
-    let compare_batch_id = state
-        .prompt_lab()
-        .run_by_id(run_id)
-        .and_then(|run| run.compare_batch_id);
-    if let Some(batch_id) = compare_batch_id {
-        let Some(batch) = state
-            .prompt_lab()
-            .batches()
-            .iter()
-            .find(|batch| batch.batch_id == batch_id)
-            .cloned()
-        else {
-            state.mark_dirty();
-            return;
-        };
-        let all_dispatched = batch.pending_candidate_count() == 0;
-        let all_terminal = batch
-            .candidate_run_ids
-            .iter()
-            .filter_map(|(_, maybe_run)| *maybe_run)
-            .all(|candidate_run_id| {
-                state
-                    .prompt_lab()
-                    .run_by_id(candidate_run_id)
-                    .map(|run| !matches!(run.status, PromptLabRunStatus::Pending { .. }))
-                    .unwrap_or(false)
-            });
-        if all_dispatched && all_terminal {
-            let has_failed = batch
-                .candidate_run_ids
-                .iter()
-                .filter_map(|(_, maybe_run)| *maybe_run)
-                .any(|candidate_run_id| {
-                    state
-                        .prompt_lab()
-                        .run_by_id(candidate_run_id)
-                        .map(|run| matches!(run.status, PromptLabRunStatus::Failed { .. }))
-                        .unwrap_or(false)
-                });
-            let final_status = if has_failed {
-                PromptLabCompareBatchStatus::PartialFailure
-            } else {
-                PromptLabCompareBatchStatus::AllComplete
-            };
-            state
-                .prompt_lab_mut()
-                .set_batch_status(batch_id, final_status);
-            state
-                .prompt_lab_mut()
-                .recompute_auto_select_for_batch(batch_id);
-            state.prompt_lab_mut().clear_active_batch_if(batch_id);
-        } else {
-            effects.extend(super::prompt_lab::dispatch_next_compare_candidate(
-                state, batch_id,
-            ));
-        }
-    }
-
     state.mark_dirty();
 }

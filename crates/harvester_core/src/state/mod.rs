@@ -1,11 +1,5 @@
 use crate::briefing::BriefingSession;
-use crate::pre_triage_filter::{
-    ArticleFilterKey, ManualDecision, PreTriagePhase, PreTriageSession,
-};
-use crate::prompt_lab::{
-    PromptLabRunId, PromptLabRunOverrides, PromptLabStage, PromptLabState,
-    PromptLabTemplateSnapshot,
-};
+use crate::pre_triage_filter::{PreTriagePhase, PreTriageSession};
 use crate::source_state::SourceStateIndex;
 use crate::summary_cache::SummaryCache;
 use crate::tabs::{JobListMode, TrendCategory, WorkspaceView};
@@ -14,7 +8,7 @@ use crate::triage_cache::TriageCache;
 use crate::url_age::AgeEstimate;
 use crate::view_model::LastPasteStats;
 use crate::Effect;
-use harvester_engine::llm::prompt::{PromptId, PromptRegistry, PromptVersion};
+use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::LinkKind;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -73,30 +67,6 @@ pub type JobId = u64;
 /// Maximum extracted links retained for one job.
 pub const MAX_EXTRACTED_LINKS: usize = 5_000;
 const CHECKPOINT_SAVING_STATUS_MESSAGE: &str = "Checkpoint saving...";
-
-fn default_prompt_template_snapshots() -> HashMap<PromptId, PromptLabTemplateSnapshot> {
-    let registry = PromptRegistry::with_defaults();
-    let prompt_ids = [
-        PromptId::ArticleTriage,
-        PromptId::ArticleSummary,
-        PromptId::ArticleSignalCandidate,
-        PromptId::AggregateBriefing,
-    ];
-    prompt_ids
-        .into_iter()
-        .filter_map(|prompt_id| {
-            registry.active_effective(prompt_id).map(|template| {
-                (
-                    prompt_id,
-                    PromptLabTemplateSnapshot {
-                        template: template.to_owned(),
-                        source: template.source(),
-                    },
-                )
-            })
-        })
-        .collect()
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingBriefingCheckpointSave {
@@ -353,7 +323,6 @@ pub struct AppState {
     pre_triage: PreTriageSession,
     pre_triage_load_context: Option<PreTriageLoadContext>,
     pre_triage_load_progress: Option<PreTriageLoadProgress>,
-    pre_triage_manual_overrides: HashMap<ArticleFilterKey, ManualDecision>,
     indirect_link_pool: IndirectLinkPool,
     indirect_poll_in_progress: bool,
     source_states: SourceStateIndex,
@@ -365,7 +334,6 @@ pub struct AppState {
     ai_availability: AiAvailability,
     provider_alert: Option<provider_alert::ProviderAlert>,
     consecutive_rate_limit_failures: u32,
-    prompt_lab_templates: HashMap<PromptId, PromptLabTemplateSnapshot>,
     summary_cache: SummaryCache,
     signal_candidate: crate::signal_candidate::SignalCandidateSession,
     signal_candidate_cache: crate::signal_candidate_cache::SignalCandidateCache,
@@ -386,9 +354,6 @@ pub struct AppState {
     triage_max_in_flight: usize,
     /// Maximum number of concurrent summary LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
     summary_max_in_flight: usize,
-    prompt_lab: PromptLabState,
-    next_prompt_lab_run_id: u64,
-    prompt_lab_next_resolve_id: u64,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
     /// Authoritative session-scoped quota usage and configured limits.
@@ -432,17 +397,6 @@ pub struct AppState {
     pub(crate) blacklist: crate::blacklist::BlacklistState,
 }
 
-pub(crate) struct PromptLabPendingRunRegistration {
-    pub run_id: PromptLabRunId,
-    pub stage: PromptLabStage,
-    pub prompt_id: PromptId,
-    pub input_snapshot: String,
-    pub request_id: u64,
-    pub overrides: PromptLabRunOverrides,
-    pub compare_batch_id: Option<crate::prompt_lab::PromptLabCompareBatchId>,
-    pub compare_candidate_id: Option<u64>,
-}
-
 pub struct IngestResult {
     pub effects: Vec<Effect>,
     pub enqueued: usize,
@@ -476,7 +430,6 @@ impl Default for AppState {
             pre_triage: PreTriageSession::default(),
             pre_triage_load_context: None,
             pre_triage_load_progress: None,
-            pre_triage_manual_overrides: HashMap::new(),
             indirect_link_pool: IndirectLinkPool::new(),
             indirect_poll_in_progress: false,
             source_states: SourceStateIndex::default(),
@@ -505,10 +458,6 @@ impl Default for AppState {
             briefing_orchestration: BriefingOrchestration::default(),
             triage_max_in_flight: 1,
             summary_max_in_flight: 1,
-            prompt_lab: PromptLabState::default(),
-            next_prompt_lab_run_id: 1,
-            prompt_lab_next_resolve_id: 1,
-            prompt_lab_templates: default_prompt_template_snapshots(),
             llm_usage_by_model: BTreeMap::new(),
             llm_quota: crate::LlmQuotaState::default(),
             active_trend_category: TrendCategory::default(),
