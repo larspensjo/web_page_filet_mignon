@@ -145,3 +145,9 @@ Consequences:
 - The window slides by tick-driven view rebuilds, not a timer, and the view shows no window-start caption.
 - The UI distinguishes a fourth empty state, "nothing fetched in the last 24 hours".
 Refs: `crates/harvester_core/src/tabs.rs`, `crates/harvester_core/src/state/view_builder.rs`, `DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS`.
+
+## 2026-09-18 - Experiment harnesses live in `harvester_eval` and never touch production providers
+Decision: Provider and prompt experiments are built in `crates/harvester_eval`, a workspace member that is never a default member. It reads recordings and the corpus read-only, depends only on `harvester_engine` (behind `eval-support`) and `engine_logging` among workspace crates, writes every artefact under the gitignored `.local/experiments/`, and never registers a provider, changes a prompt context or writes into the production output directory.
+Context: Evaluating a candidate provider needs the production preprocessing and recordings, but must not risk production behaviour, must stay out of the Node-free root build surface, and must remain buildable and testable without any API key.
+Consequences: Root Cargo commands keep their current surface; anything the harness needs from `harvester_engine` is exposed behind a feature flag rather than widened permanently; experiment results are never committed; adopting a candidate provider in production requires its own plan and decision entry.
+Refs: Cargo.toml, crates/harvester_eval, docs/JevTriageExperiment.Runbook.md, 2026-09-03 "Enumerated root desktop build surface".

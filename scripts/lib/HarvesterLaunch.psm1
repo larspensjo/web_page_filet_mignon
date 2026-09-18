@@ -22,13 +22,23 @@ $script:HarvesterLaunchPolicies = [ordered]@{
         FrontendBuildCommand = [string[]]@('npm', 'run', 'build')
         SecretEnvironmentMap = $script:HarvesterSecretEnvironmentMap
     }
+    Eval = [pscustomobject]@{
+        Package              = 'harvester_eval'
+        BinaryName           = 'harvester_eval.exe'
+        RuntimeArguments     = [string[]]@('run', '--config', '.local\experiments\jev-triage\configs\active-run.toml')
+        FrontendDirectory    = $null
+        FrontendBuildCommand = $null
+        SecretEnvironmentMap = [ordered]@{
+            TypesafeAiApiKey = 'TYPESAFE_AI_API_KEY'
+        }
+    }
 }
 
 function Get-HarvesterLaunchSpec {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('Batch', 'Ui')]
+        [ValidateSet('Batch', 'Ui', 'Eval')]
         [string]$Name,
 
         [Parameter(Mandatory)]

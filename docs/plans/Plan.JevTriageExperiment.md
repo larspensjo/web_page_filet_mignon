@@ -445,6 +445,9 @@ design holds. Entirely keyless.
    frozen_text, &index) -> MappingOutcome`) is pure over an in-memory index and
    applies the three-rule order from *Investigated code facts*.
 9. **`src/freeze.rs`**: the selection and manifest writer.
+   - Fails before writing when `<output_dir>/llm_results` is missing, contains
+     no JSON records, or has no usable record matching the required prompt
+     identity; an empty source can never replace an existing freeze.
    - Streams `<output_dir>/llm_results/*.json` in sorted file order, loading one
      record at a time (25k+ records exist; nothing is held in memory beyond
      candidate metadata).
@@ -576,6 +579,9 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
   surfaced; the report refuses to print a precise rate when the supporting count
   is below the small-sample floor and prints `n = <count>` instead.
 - **Validation-failure records** are excluded from the selection and counted.
+- **Empty-source refusal**: missing and empty `llm_results` directories and a
+  directory with no matching triage record each fail clearly and write no
+  manifest.
 
 ### Verification (from the repository root)
 
@@ -1087,6 +1093,12 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
 
 ### Changes
 
+**Settled 2026-09-18 — live endpoint lock:** when `transport = "live"`, the
+parsed endpoint must use HTTPS and its host must be exactly `api.typesafe.ai`.
+Validation fails before the environment key is read or a request is sent;
+substring checks are forbidden, fake transport is unaffected, and the allowed
+host lives in one named constant so widening the policy is explicit.
+
 1. **`scripts/lib/HarvesterLaunch.psm1`**: add an `Eval` launch policy.
    - `Package = 'harvester_eval'`, `BinaryName = 'harvester_eval.exe'`,
      `FrontendDirectory = $null`, `FrontendBuildCommand = $null`.
@@ -1114,7 +1126,11 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
    `TypesafeAiApiKey` that it has not seen before. If it only accepts a known set,
    the runbook documents the manual fallback — create the vault entry under the
    name the profile expects and record that name in the runbook and in the
-   policy table. The code path does not change either way: the tool reads
+   policy table. Read-only investigation found that `Invoke-WithSecretMap`
+   accepts the explicit secret-to-environment map without applying a registry
+   allow-list; the profile's registry also currently contains
+   `TypesafeAiApiKey -> TYPESAFE_AI_API_KEY`. No manual fallback is required.
+   The code path does not change either way: the tool reads
    `TYPESAFE_AI_API_KEY` from its environment.
 4. **`scripts/tests/HarvesterLaunch.Tests.ps1`**: add cases, all keyless and all
    using the existing mocked `BuildInvoker`/`SecretInvoker` seams.
@@ -1219,7 +1235,10 @@ gains a regression test built from the real response bytes.
    threshold. Each iteration is a new configuration file with a new
    `config_hash` and a new `run_id`, so every result record says which
    instructions produced it and no resume can mix them. The held-out split is
-   never run during this round.
+   never run during this round. Early rounds use the same fixed 100-article
+   development subset for comparability; the selected configuration is then
+   run over the full development half (`limit = 0`) and saved as
+   `dev-final.toml`.
 2. **Threshold agreement**: before the held-out run, the user and the assistant
    agree acceptance thresholds — high-priority (4+5) recall against the reviewed
    labels, the severe-miss rate, and the p95 latency envelope — and they are
@@ -1229,8 +1248,10 @@ gains a regression test built from the real response bytes.
    starts a new round with a fresh held-out sample. Cost is recorded in the
    report and is deliberately not a threshold.
 3. **Held-out run**: the held-out half of the 800-article freeze (roughly 400
-   articles; see Open Question 2, now settled), concurrency 1, frozen
-   configuration.
+   articles; see Open Question 2, now settled), concurrency 1. Copy the frozen
+   tuned `dev-final.toml`, change only split, limit and run id, then append the
+   agreed `[acceptance]` table; never recreate held-out configuration from the
+   committed defaults.
 4. **Optional stability run**: a fixed 20-article subset with `repeat = 3`,
    reported separately.
 5. **Optional bounded-concurrency run**: reported separately and never mixed
@@ -1340,8 +1361,9 @@ new tool. It stays a sketch until the triage verdict is in.
   > providers**
   > **Decision:** Provider and prompt experiments are built in
   > `crates/harvester_eval`, a workspace member that is never a default member.
-  > It reads recordings and the corpus read-only, depends on `harvester_engine`
-  > only, writes every artefact under the gitignored
+  > It reads recordings and the corpus read-only, depends only on
+  > `harvester_engine` (behind `eval-support`) and `engine_logging` among
+  > workspace crates, writes every artefact under the gitignored
   > `.local/experiments/`, and never registers a provider, changes a prompt
   > context or writes into the production output directory.
   > **Context:** Evaluating a candidate provider needs the production

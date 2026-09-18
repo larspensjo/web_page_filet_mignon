@@ -107,6 +107,65 @@ fn options(output: PathBuf, experiment: PathBuf, context: PathBuf) -> FreezeOpti
 }
 
 #[test]
+fn freeze_refuses_missing_empty_and_nonmatching_replay_inputs() {
+    let (_temp, output, experiment, context) = setup();
+    fs::create_dir_all(&experiment).unwrap();
+    let existing_manifest = experiment.join("manifest.json");
+    fs::write(&existing_manifest, b"existing 800-article freeze").unwrap();
+    fs::remove_dir_all(output.join("llm_results")).unwrap();
+    let error = freeze(&options(
+        output.clone(),
+        experiment.clone(),
+        context.clone(),
+    ))
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("replay directory is missing"), "{error}");
+    assert_eq!(
+        fs::read(&existing_manifest).unwrap(),
+        b"existing 800-article freeze"
+    );
+
+    fs::create_dir_all(output.join("llm_results")).unwrap();
+    let error = freeze(&options(
+        output.clone(),
+        experiment.clone(),
+        context.clone(),
+    ))
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("replay directory contains no JSON records"),
+        "{error}"
+    );
+    assert_eq!(
+        fs::read(&existing_manifest).unwrap(),
+        b"existing 800-article freeze"
+    );
+
+    let mut wrong_prompt = record(
+        &context,
+        "wrong-prompt",
+        "not a triage record",
+        content_hash("not a triage record"),
+        false,
+        "2026-01-01T00:00:00Z",
+        3,
+    );
+    wrong_prompt.prompt_id = PromptId::ArticleSummary;
+    write_record(&output, "wrong-prompt.json", &wrong_prompt);
+    let error = freeze(&options(output, experiment.clone(), context))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no replay records"), "{error}");
+    assert!(error.contains("match ArticleTriage"), "{error}");
+    assert_eq!(
+        fs::read(existing_manifest).unwrap(),
+        b"existing 800-article freeze"
+    );
+}
+
+#[test]
 fn prompt_identity_matches_context_and_detects_changes() {
     let (_temp, _output, _experiment, context) = setup();
     let mut matching = record(

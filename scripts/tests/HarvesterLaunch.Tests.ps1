@@ -177,6 +177,21 @@ Describe 'Harvester launch policy' {
         @(Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot).FrontendBuildCommand | Should -Be @('npm', 'run', 'build')
     }
 
+    It 'returns the Eval policy with exactly its fixed command and secret' {
+        $spec = Get-HarvesterLaunchSpec -Name Eval -RepositoryRoot $script:TestRoot
+
+        $spec.Package | Should -Be 'harvester_eval'
+        $spec.BinaryName | Should -Be 'harvester_eval.exe'
+        $spec.ExecutablePath | Should -Be (Join-Path $script:TestRoot 'target\debug\harvester_eval.exe')
+        $spec.FrontendDirectory | Should -BeNullOrEmpty
+        $spec.FrontendBuildCommand | Should -BeNullOrEmpty
+        @($spec.RuntimeArguments) | Should -Be @('run', '--config', '.local\experiments\jev-triage\configs\active-run.toml')
+        @($spec.SecretEnvironmentMap.Keys) | Should -Be @('TypesafeAiApiKey')
+        @($spec.SecretEnvironmentMap.Values) | Should -Be @('TYPESAFE_AI_API_KEY')
+        @($spec.SecretEnvironmentMap.Keys) | Should -Not -Contain 'OpenAIProductionKey'
+        @($spec.SecretEnvironmentMap.Keys) | Should -Not -Contain 'BraveSearchApiKey'
+    }
+
     It 'runs npm before cargo in the default UI build path' {
         $spec = Get-HarvesterLaunchSpec -Name Ui -RepositoryRoot $script:TestRoot
         $calls = [System.Collections.Generic.List[string]]::new()
@@ -259,11 +274,18 @@ Describe 'Harvester launch policy' {
     }
 
     It 'returns an independent copy of the runtime argument policy' {
-        $first = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
-        $first.RuntimeArguments[0] = '--mutated-by-caller'
-        $second = Get-HarvesterLaunchSpec -Name Batch -RepositoryRoot $script:TestRoot
+        foreach ($name in @('Batch', 'Eval')) {
+            $first = Get-HarvesterLaunchSpec -Name $name -RepositoryRoot $script:TestRoot
+            $first.RuntimeArguments[0] = '--mutated-by-caller'
+            $second = Get-HarvesterLaunchSpec -Name $name -RepositoryRoot $script:TestRoot
 
-        @($second.RuntimeArguments) | Should -Be @('--single-shot', '--batch-api')
+            if ($name -eq 'Batch') {
+                @($second.RuntimeArguments) | Should -Be @('--single-shot', '--batch-api')
+            }
+            else {
+                @($second.RuntimeArguments) | Should -Be @('run', '--config', '.local\experiments\jev-triage\configs\active-run.toml')
+            }
+        }
     }
 
     It 'keeps the repository root on the spec as the launch location source of truth' {
@@ -350,6 +372,45 @@ Describe 'Harvester launch policy' {
         @($calls.SecretMap.Keys) | Should -Be @('BraveSearchApiKey', 'OpenAIProductionKey')
         @($calls.SecretMap.Values) | Should -Be @('BRAVE_SEARCH_API_KEY', 'OPENAI_API_KEY')
         @($calls.Arguments) | Should -Be @('--single-shot', '--batch-api')
+    }
+
+    It 'builds Eval once without npm and invokes only the TypeSafe secret once' {
+        $spec = Get-HarvesterLaunchSpec -Name Eval -RepositoryRoot $script:TestRoot
+        $calls = New-Calls
+        $code = 1
+
+        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
+            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
+            -SecretInvoker (New-SecretFake -Calls $calls) `
+            -PromptCheck { $true } `
+            -EnvironmentVariableProbe (New-EnvironmentVariableProbe -Values @{})
+
+        @($calls.BuildPackages) | Should -Be @('harvester_eval')
+        $calls.SecretInvocations | Should -Be 1
+        @($calls.SecretMap.Keys) | Should -Be @('TypesafeAiApiKey')
+        @($calls.SecretMap.Values) | Should -Be @('TYPESAFE_AI_API_KEY')
+        @($calls.Arguments) | Should -Be @('run', '--config', '.local\experiments\jev-triage\configs\active-run.toml')
+    }
+
+    It 'warns when the Eval TypeSafe key is inherited from the parent process' {
+        $spec = Get-HarvesterLaunchSpec -Name Eval -RepositoryRoot $script:TestRoot
+        $calls = New-Calls
+        $probe = New-EnvironmentVariableProbe -Values @{
+            'TYPESAFE_AI_API_KEY|Process' = 'dummy-typesafe-value'
+        }
+        $code = 1
+
+        Invoke-HarvesterLaunch -Spec $spec -ExitCode ([ref]$code) `
+            -BuildInvoker (New-BuildFake -Spec $spec -Calls $calls) `
+            -SecretInvoker (New-SecretFake -Calls $calls) `
+            -PromptCheck { $true } `
+            -EnvironmentVariableProbe $probe `
+            -WarningVariable warnings
+
+        $calls.BuildPackages.Count | Should -Be 1
+        $calls.SecretInvocations | Should -Be 1
+        @($warnings).Count | Should -Be 1
+        $warnings[0].Message | Should -BeLike '*TYPESAFE_AI_API_KEY*only in the current session*cargo build and the child process will inherit it*Lock-Secrets*NullString*'
     }
 
     It 'does not select forbidden secrets or inject any other environment variable' {
@@ -548,6 +609,7 @@ Describe 'Harvester launcher script contracts' {
     It '<file> parses, has no parameter block, and gets a launch spec' -ForEach @(
         @{ file = 'Start-HarvesterBatch.ps1' }
         @{ file = 'Start-HarvesterUi.ps1' }
+        @{ file = 'Start-HarvesterEval.ps1' }
     ) {
         $path = Join-Path $PSScriptRoot ('..\{0}' -f $file)
         $tokens = $null

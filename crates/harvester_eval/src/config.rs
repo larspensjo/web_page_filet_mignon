@@ -62,6 +62,9 @@ const DEFAULT_TAGS: [&str; 33] = [
     "virginia-grid",
 ];
 
+/// The only host allowed to receive the experiment's live bearer token.
+pub const LIVE_JEV_ALLOWED_HOST: &str = "api.typesafe.ai";
+
 /// Complete configuration for one experiment run.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
@@ -317,6 +320,11 @@ pub enum ConfigError {
     MaxAttemptsZero,
     #[error("run.transport = fake requires run.fake_dir")]
     FakeDirectoryMissing,
+    #[error("live Jev endpoint must use https and host exactly {allowed_host}: {endpoint}")]
+    LiveEndpointNotAllowed {
+        allowed_host: &'static str,
+        endpoint: String,
+    },
     #[error("pricing.input_microdollars_per_million is below 1000 microdollars per million input tokens: {0}")]
     PricingRateTooLow(u64),
     #[error("{key} must not be empty")]
@@ -398,6 +406,16 @@ impl PartialEq for ConfigError {
             }
             (Self::MaxAttemptsZero, Self::MaxAttemptsZero)
             | (Self::FakeDirectoryMissing, Self::FakeDirectoryMissing) => true,
+            (
+                Self::LiveEndpointNotAllowed {
+                    allowed_host: left_host,
+                    endpoint: left_endpoint,
+                },
+                Self::LiveEndpointNotAllowed {
+                    allowed_host: right_host,
+                    endpoint: right_endpoint,
+                },
+            ) => left_host == right_host && left_endpoint == right_endpoint,
             (Self::PricingRateTooLow(left), Self::PricingRateTooLow(right)) => left == right,
             (
                 Self::EmptyAcceptanceMetadata { key: left },
@@ -430,6 +448,9 @@ impl RunConfig {
             && self.run.fake_dir.as_deref().is_none_or(str::is_empty)
         {
             return Err(ConfigError::FakeDirectoryMissing);
+        }
+        if self.run.transport == Transport::Live {
+            validate_live_endpoint(&self.jev.endpoint)?;
         }
         if self.jev.max_attempts == 0 {
             return Err(ConfigError::MaxAttemptsZero);
@@ -502,6 +523,23 @@ impl RunConfig {
         } else {
             Vec::new()
         }
+    }
+}
+
+fn validate_live_endpoint(endpoint: &str) -> Result<(), ConfigError> {
+    let allowed = reqwest::Url::parse(endpoint).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some(LIVE_JEV_ALLOWED_HOST)
+            && url.username().is_empty()
+            && url.password().is_none()
+    });
+    if allowed {
+        Ok(())
+    } else {
+        Err(ConfigError::LiveEndpointNotAllowed {
+            allowed_host: LIVE_JEV_ALLOWED_HOST,
+            endpoint: endpoint.to_string(),
+        })
     }
 }
 

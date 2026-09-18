@@ -4,7 +4,7 @@ use std::fs;
 use harvester_engine::llm::content_hash as sha256;
 use harvester_eval::config::{
     config_hash, load_config, resolve_config, ConfigError, ConfigOverrides, ConfigWarning,
-    RunConfig, Transport,
+    RunConfig, Transport, LIVE_JEV_ALLOWED_HOST,
 };
 use harvester_eval::identity::PathKind;
 use harvester_eval::jev::labels::select_above_threshold;
@@ -824,6 +824,47 @@ fn config_loader_rejects_unknown_keys_and_invalid_enums() {
         fs::write(&path, text).unwrap();
         assert!(matches!(load_config(&path), Err(ConfigError::Parse { .. })));
     }
+}
+
+#[test]
+fn live_endpoint_is_pinned_to_the_exact_typesafe_https_host() {
+    let mut config = RunConfig::default();
+    for endpoint in [
+        "https://api.typesafe.ai/v1/systemone",
+        "https://api.typesafe.ai:443/v1/systemone?mode=test",
+    ] {
+        config.jev.endpoint = endpoint.into();
+        assert_eq!(config.validate(), Ok(()), "{endpoint}");
+    }
+
+    for endpoint in [
+        "http://api.typesafe.ai/v1/systemone",
+        "https://api.typesafe.ai.evil.com/v1/systemone",
+        "https://evil.com/?api.typesafe.ai",
+        "https://api.typesafe.ai@evil.com/v1/systemone",
+        "https://attacker@api.typesafe.ai/v1/systemone",
+        "not a URL",
+    ] {
+        config.jev.endpoint = endpoint.into();
+        assert_eq!(
+            config.validate(),
+            Err(ConfigError::LiveEndpointNotAllowed {
+                allowed_host: LIVE_JEV_ALLOWED_HOST,
+                endpoint: endpoint.into(),
+            }),
+            "{endpoint}"
+        );
+    }
+}
+
+#[test]
+fn fake_transport_is_unaffected_by_the_live_endpoint_lock() {
+    let mut config = RunConfig::default();
+    config.run.transport = Transport::Fake;
+    config.run.fake_dir = Some("fake".into());
+    config.jev.endpoint = "not used by fake transport".into();
+
+    assert_eq!(config.validate(), Ok(()));
 }
 
 #[test]

@@ -72,7 +72,19 @@ pub fn freeze(options: &FreezeOptions) -> anyhow::Result<FreezeResult> {
     let mut counts = ManifestCounts::default();
     let mut candidates: HashMap<String, Candidate> = HashMap::new();
     let replay_dir = options.output_dir.join("llm_results");
+    if !replay_dir.is_dir() {
+        bail!(
+            "replay directory is missing: {}; choose the Harvester output directory that contains llm_results",
+            replay_dir.display()
+        );
+    }
     let mut paths = replay_paths(&replay_dir)?;
+    if paths.is_empty() {
+        bail!(
+            "replay directory contains no JSON records: {}",
+            replay_dir.display()
+        );
+    }
     paths.sort();
     for path in paths {
         counts.records_scanned += 1;
@@ -162,6 +174,19 @@ pub fn freeze(options: &FreezeOptions) -> anyhow::Result<FreezeResult> {
                 }
             })
             .or_insert(candidate);
+    }
+    if counts.identity_matched == 0 {
+        bail!(
+            "no replay records in {} match ArticleTriage prompt version {} and the configured prompt identity",
+            replay_dir.display(),
+            options.prompt_version
+        );
+    }
+    if candidates.is_empty() {
+        bail!(
+            "no usable matching replay records in {}; matching records failed validation or text recovery",
+            replay_dir.display()
+        );
     }
     counts.distinct_articles = candidates.len() as u64;
     let usable_records = counts

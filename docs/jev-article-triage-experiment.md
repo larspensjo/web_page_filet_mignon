@@ -1,5 +1,10 @@
 # Agent handoff: compare Jev with OpenAI for article triage
 
+Repository convention note: where this vendor-facts specification differs from
+this repository, the repository wins. Priority 5 is highest; the primary arm
+sends no title or date; the baseline comes from recordings; categories are
+multi-label `noul` questions; and the runbook is the operational document.
+
 Prepared 16 September 2026. Product details were checked against TypeSafe's documentation on this date. Recheck availability, schemas, pricing, and limits before running. This is an experiment specification, not a completed benchmark; no API calls or quality measurements have been performed.
 
 ## 1. Goal and existing workflow

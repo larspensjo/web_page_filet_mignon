@@ -2315,3 +2315,11 @@ Context: The Tauri desktop host had replaced the legacy desktop host, but the ol
 Change: Removed the retired host from the workspace and VS Code configurations, removed its launch policy and script, narrowed launcher tests to Batch and Ui, removed submodule accounting from project statistics, and updated the architecture, threat model, README, and agent guidance for the supported Tauri host. The submodule directory remains until the user removes its git index entry.
 Lessons Learned: A host retirement must be checked across workspace membership, default membership, launch policy, editor tasks, and reporting code; removing only the source crate leaves stale operational contracts behind.
 Refs: Cargo.toml, scripts/lib/HarvesterLaunch.psm1, scripts/project-stats.ps1, docs/plans/Plan.TauriDesktopUi.md
+
+## 2026-09-18 - Jev triage experiment harness launcher and runbook
+Type: Implementation
+Context: Phase 5 landed the fixed-secret launcher, mocked Pester coverage, and the user-facing operating instructions for the isolated `harvester_eval` experiment.
+Change: Added the Eval launch policy and launcher, documented the read-only SecretLaunch vault investigation, added the crate README and the complete experiment runbook, recorded the repository convention note on the vendor-facts specification, made empty dataset freezes fail closed, and pinned live transport to the parsed TypeSafe HTTPS host before key access.
+Lessons Learned: `input_content_hash` means different things on the sync and batch paths — sent-text hash versus untruncated clean-text hash — so recordings need a separate evidence identity. `ReplayProvider::load_from_dir` keeps the first record in directory order and is therefore unusable for deterministic selection. Batch recordings carry `wall_ms = 0`, so their recorded latency is not a comparable baseline.
+Prevention: Keep regression tests for missing or nonmatching replay inputs and for accepted and hostile endpoint forms so an empty freeze or key-redirection path cannot return.
+Refs: crates/harvester_eval/README.md, docs/JevTriageExperiment.Runbook.md, scripts/lib/HarvesterLaunch.psm1, scripts/tests/HarvesterLaunch.Tests.ps1, docs/plans/Plan.JevTriageExperiment.md
