@@ -8,8 +8,9 @@ use serde::Serialize;
 
 use crate::identity::PathKind;
 use crate::manifest::{load_manifest, Manifest};
+use crate::metrics::small_sample::{rate_label as shared_rate_label, DEFAULT_FLOOR};
 
-const SMALL_SAMPLE_FLOOR: u64 = 30;
+pub use crate::metrics::operational::LatencySummary;
 
 /// Stable, machine-readable baseline figures.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -31,13 +32,6 @@ pub struct BaselineMetrics {
     pub batch_latency_excluded: u64,
     pub sync_zero_latency_excluded: u64,
     pub historical_sync_latency: Option<LatencySummary>,
-}
-
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct LatencySummary {
-    pub count: u64,
-    pub median_ms: u64,
-    pub p95_ms: u64,
 }
 
 /// Computes figures without IO.
@@ -106,7 +100,7 @@ pub fn compute(manifest: &Manifest) -> BaselineMetrics {
         batch_records,
         batch_latency_excluded,
         sync_zero_latency_excluded,
-        historical_sync_latency: latency_summary(&mut sync_latencies),
+        historical_sync_latency: crate::metrics::operational::latency_summary(&mut sync_latencies),
     }
 }
 
@@ -136,20 +130,6 @@ pub fn write_baseline_report(manifest_path: &Path, out: Option<&Path>) -> anyhow
     )?;
     fs::write(directory.join("metrics.md"), render_markdown(&metrics))?;
     Ok(directory)
-}
-
-fn latency_summary(values: &mut [u64]) -> Option<LatencySummary> {
-    if values.is_empty() {
-        return None;
-    }
-    values.sort_unstable();
-    let percentile =
-        |value: f64| values[((values.len() as f64 * value).ceil() as usize).saturating_sub(1)];
-    Some(LatencySummary {
-        count: values.len() as u64,
-        median_ms: percentile(0.50),
-        p95_ms: percentile(0.95),
-    })
 }
 
 fn render_markdown(metrics: &BaselineMetrics) -> String {
@@ -193,10 +173,10 @@ fn render_markdown(metrics: &BaselineMetrics) -> String {
     ));
     markdown.push_str(&format!("Historical, recorded under past conditions: OpenAI latency is calculated only from non-zero sync observations. {} batch rows are excluded; {} sync rows with wall_ms = 0 are also excluded.\n", metrics.batch_latency_excluded, metrics.sync_zero_latency_excluded));
     if let Some(latency) = &metrics.historical_sync_latency {
-        if latency.count < SMALL_SAMPLE_FLOOR {
+        if latency.count < DEFAULT_FLOOR {
             markdown.push_str(&format!(
                 "Sync historical latency: n = {}, percentiles not reported below the small-sample floor of {}.\n",
-                latency.count, SMALL_SAMPLE_FLOOR
+                latency.count, DEFAULT_FLOOR
             ));
         } else {
             markdown.push_str(&format!(
@@ -210,12 +190,5 @@ fn render_markdown(metrics: &BaselineMetrics) -> String {
 
 /// Formats a rate only when it has sufficient support.
 pub fn rate_label(numerator: u64, denominator: u64) -> String {
-    if denominator < SMALL_SAMPLE_FLOOR {
-        format!("n = {denominator}, rate not reported (count {numerator})")
-    } else {
-        format!(
-            "{numerator} ({:.1}%)",
-            numerator as f64 * 100.0 / denominator as f64
-        )
-    }
+    shared_rate_label(numerator, denominator, DEFAULT_FLOOR)
 }

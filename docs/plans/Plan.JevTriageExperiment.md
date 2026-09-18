@@ -964,7 +964,9 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
    - One row per **disagreement** (any distance) between the baseline priority
      and the run's selected Jev priority; rows whose Jev record is a failure are
      listed in a separate failures section of the report, not in the review
-     file.
+     file. Selection is deterministic: the lowest repetition for each article
+     is used, and an article is treated as a review failure when that repetition
+     failed even if a later repetition succeeded.
    - CSV columns: `review_row, article_id, title, text_path, excerpt,
      priority_a, priority_b, your_priority, notes`. `your_priority` and `notes`
      are blank.
@@ -1151,7 +1153,9 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
      limit) in the runbook's "schema conformance" section.
    - Step 5: smoke run, development tuning, held-out run, review, score,
      diagnose — each with the exact command line, the configuration keys to
-     change, and the expected artefacts.
+     change, and the expected artefacts. The review instructions say to leave
+     unreviewed rows in place with a blank `your_priority`; deleting rows is a
+     hard input error.
    - Step 6: interruption handling — the run id is in `active-run.toml` and
      `run.json`; relaunching resumes; the tool refuses to resume into a run whose
      manifest, configuration, rubric, split, repeat or transport changed, and
@@ -1163,6 +1167,9 @@ all four combinations of `{sync, batch} × {truncated, untruncated}`.
 6. **`crates/harvester_eval/README.md`**: the crate-level summary, the
    subcommand list, the artefact layout, the "not a default member" note and the
    keyless verification commands.
+7. **Harness-landed project memory**: make the `docs/EngineeringDiary.md` and
+   `docs/DecisionLog.md` entries specified in the **Documents** section when the
+   Phase 5 harness documentation lands; do not add either entry during Phase 4.
 
 ### Verification (from the repository root)
 

@@ -136,10 +136,7 @@ pub fn load_completed(path: &Path) -> anyhow::Result<CompletionState> {
             state.newest_failures.insert(pair, record.attempt_sequence);
         }
     }
-    state.superseded_records = records
-        .len()
-        .saturating_sub(state.completed.len() + state.newest_failures.len())
-        as u64;
+    state.superseded_records = superseded_record_count(&records);
     Ok(state)
 }
 
@@ -153,6 +150,45 @@ pub fn load_records(path: &Path) -> anyhow::Result<Vec<ResultRecord>> {
         .filter(|line| !line.is_empty())
         .map(|line| Ok(serde_json::from_slice(line)?))
         .collect()
+}
+
+/// Selects one record per article/repetition using append order. The newest
+/// `ok` record is the comparison record when one exists; when a pair has no
+/// successful record, its newest record represents a failure. Older records,
+/// including failures appended after a successful retry, remain available for
+/// audit and are counted as superseded.
+pub fn select_records(records: &[ResultRecord]) -> (Vec<ResultRecord>, u64) {
+    type Candidate = (Option<usize>, usize);
+    let mut candidates: BTreeMap<(String, u32), Candidate> = BTreeMap::new();
+    for (index, record) in records.iter().enumerate() {
+        let entry = candidates.entry(record.pair()).or_insert((None, index));
+        entry.1 = index;
+        if record.outcome == "ok" {
+            entry.0 = Some(index);
+        }
+    }
+    let mut selected: Vec<(usize, ResultRecord)> = candidates
+        .into_values()
+        .map(|(ok_index, newest_index)| {
+            let index = ok_index.unwrap_or(newest_index);
+            (index, records[index].clone())
+        })
+        .collect();
+    selected.sort_by_key(|(index, _)| *index);
+    let superseded = superseded_record_count(records);
+    (
+        selected.into_iter().map(|(_, record)| record).collect(),
+        superseded,
+    )
+}
+
+fn superseded_record_count(records: &[ResultRecord]) -> u64 {
+    let pair_count = records
+        .iter()
+        .map(ResultRecord::pair)
+        .collect::<BTreeSet<_>>()
+        .len();
+    records.len().saturating_sub(pair_count) as u64
 }
 
 /// Writes raw provider bytes under a restart-safe, attempt-specific name.

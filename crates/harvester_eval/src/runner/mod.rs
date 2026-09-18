@@ -36,19 +36,59 @@ pub struct RunOptions {
     pub dry_run: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct RunFile {
-    identity: RunIdentity,
-    resolved_config: RunConfig,
-    acceptance: Option<crate::config::AcceptanceConfig>,
-    transport_kind: Transport,
-    started_utc: String,
-    ended_utc: Option<String>,
-    records_written: u64,
-    superseded_records: u64,
-    recovery_bytes: Option<usize>,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunFile {
+    pub identity: RunIdentity,
+    pub resolved_config: RunConfig,
+    pub acceptance: Option<crate::config::AcceptanceConfig>,
+    pub transport_kind: Transport,
+    pub started_utc: String,
+    pub ended_utc: Option<String>,
+    pub records_written: u64,
+    pub superseded_records: u64,
+    pub recovery_bytes: Option<usize>,
     #[serde(default)]
-    recovery_paths: Vec<String>,
+    pub recovery_paths: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct RunData {
+    pub file: RunFile,
+    pub manifest: Manifest,
+    pub manifest_path: PathBuf,
+    pub records: Vec<ResultRecord>,
+}
+
+/// Loads the durable run contract and the exact frozen manifest recorded by it.
+/// Reporting commands must not silently follow a subsequently re-frozen manifest.
+pub fn load_run_data(experiment_dir: &Path, run_id: &str) -> anyhow::Result<RunData> {
+    let run_dir = experiment_dir.join("runs").join(run_id);
+    let run_path = run_dir.join("run.json");
+    let file: RunFile = serde_json::from_slice(&fs::read(&run_path)?)
+        .with_context(|| format!("parsing run file {}", run_path.display()))?;
+    if file.identity.run_id != run_id {
+        bail!(
+            "run id mismatch: requested {run_id}, run.json records {}",
+            file.identity.run_id
+        );
+    }
+    let manifest_path = PathBuf::from(&file.resolved_config.dataset.manifest);
+    let manifest = load_manifest(&manifest_path)?;
+    if manifest.manifest_hash != file.identity.manifest_hash {
+        bail!(
+            "run manifest hash mismatch: run recorded {}, resolved manifest {} at {}",
+            file.identity.manifest_hash,
+            manifest.manifest_hash,
+            manifest_path.display()
+        );
+    }
+    let records = load_records(&run_dir.join("results.jsonl"))?;
+    Ok(RunData {
+        file,
+        manifest,
+        manifest_path,
+        records,
+    })
 }
 
 /// Resolves frozen inputs and executes the selected work.  It is deliberately
