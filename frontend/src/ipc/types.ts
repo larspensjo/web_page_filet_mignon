@@ -25,8 +25,6 @@ export type FilterReason =
 export type JobFilterStatus =
 	| { HardExcluded: { reasons: FilterReason[] } }
 	| { ReviewNeeded: { reasons: FilterReason[] } }
-	| "ManuallyExcluded"
-	| "ManuallyIncluded"
 	| "AutoIncluded";
 
 export type BodyKey =

@@ -412,7 +412,9 @@ pub fn run(args: Args) -> Result<i32, String> {
             progress.resume(&state, current_cost);
         }
 
-        // Persist state
+        // The reducer loop is the sole state owner. This cycle checkpoint may
+        // briefly race the runner's debounced writer, so the shutdown path must
+        // drop the runner before writing the authoritative final snapshot.
         engine_info!("[batch] Persisting state");
         progress.set_phase(BatchDisplayPhase::Persisting);
         progress.paint(&state, current_cost, true);
@@ -493,6 +495,8 @@ pub fn run(args: Args) -> Result<i32, String> {
 
     // Graceful shutdown
     engine_info!("[batch] Graceful shutdown: draining effects and persisting final state");
+    // Ordering contract: flush and stop the runner's persistence sink before
+    // the batch host performs its final synchronous writes below.
     drop(effect_runner);
     drop(msg_rx);
 

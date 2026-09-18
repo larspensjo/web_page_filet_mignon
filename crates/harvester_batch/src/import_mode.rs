@@ -11,7 +11,8 @@ use harvester_core::{update, AppState, BatchObservation, CompletedJobSnapshot, I
 use harvester_io::{
     host_bootstrap::{build_effect_runner, pump_pre_triage_refresh},
     load_completed_jobs, load_signal_candidate_cache, load_signal_candidate_overrides,
-    load_summary_cache, persist_completed_jobs, EffectRunner, NoOpPlatformHandler, RuntimePaths,
+    load_summary_cache, persist_completed_jobs, EffectRunner, NoOpPlatformHandler,
+    PersistenceWorker, RuntimePaths,
 };
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -80,6 +81,10 @@ pub(crate) fn run_import_mode(
         args.llm_concurrency,
         &defaults,
         platform_handler,
+        Box::new(PersistenceWorker::new(
+            paths.state_path.clone(),
+            paths.blacklist_path.clone(),
+        )),
         BATCH_MISSING_API_KEY_WARNING,
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
@@ -185,6 +190,8 @@ pub(crate) fn run_import_mode(
     let cost_display = "unavailable".to_string();
     progress.finish(&cost_display, &mut std::io::stdout());
 
+    // Ordering contract: flush and stop the runner's persistence sink before
+    // this import-only path writes its authoritative merged job snapshot.
     drop(effect_runner);
     let imported_completed_jobs = state.completed_jobs_snapshot();
     let merged_completed_jobs =

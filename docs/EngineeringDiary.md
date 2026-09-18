@@ -2332,3 +2332,19 @@ prompt metadata and context loading, added legacy-state tolerance coverage, and
 removed the final snapshot strip path.
 Refs: crates/harvester_core, crates/harvester_io/src/persistence.rs,
 crates/harvester_ui_bridge/src/snapshot.rs
+
+## 2026-09-18 - Phase 7 retirement run 4
+Type: Implementation
+Context: Desktop persistence still bypassed the shared effect boundary, and the
+final desktop payload retained fields with no frontend consumer.
+Change: Moved runtime snapshots into reducer-emitted effects serviced by the
+runner's injected persistence sink, preserving newest-wins coalescing and
+shutdown flush where the runner is dropped. Dry-run injects a no-op sink and
+remains write-free. Removed the driver capture path, dead reducer-side loader
+progress state, unused desktop headers and list metadata, unreachable manual
+filter statuses and label, and the duplicate desktop view entry point. Retained
+the throttled loader-progress message that drives the Loading articles progress
+bar and ETA. Bumped IPC schema version and regenerated snapshot fixtures.
+Refs: crates/harvester_core/src/effect.rs,
+crates/harvester_io/src/effect_runner/, crates/harvester_ui_bridge/src/driver.rs,
+docs/plans/Plan.TauriDesktopUi.md

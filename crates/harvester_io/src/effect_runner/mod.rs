@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use engine_logging::{engine_error, engine_info, engine_warn};
-use harvester_core::{Effect, JobResultKind, Msg};
+use harvester_core::{Effect, JobResultKind, Msg, PersistenceSnapshot};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{LlmHandle, PromptRegistry};
 use harvester_engine::{
@@ -59,6 +59,24 @@ impl PlatformEffectHandler for NoOpPlatformHandler {
     }
 }
 
+/// Sink for reducer-emitted runtime persistence snapshots.
+pub trait RuntimePersistenceSink: Send + Sync {
+    fn enqueue(&self, snapshot: PersistenceSnapshot);
+}
+
+impl RuntimePersistenceSink for crate::PersistenceWorker {
+    fn enqueue(&self, snapshot: PersistenceSnapshot) {
+        crate::PersistenceWorker::enqueue(self, snapshot);
+    }
+}
+
+/// No-op sink for modes whose contract forbids runtime-state writes.
+pub struct NoOpRuntimePersistenceSink;
+
+impl RuntimePersistenceSink for NoOpRuntimePersistenceSink {
+    fn enqueue(&self, _snapshot: PersistenceSnapshot) {}
+}
+
 /// Effect runner that orchestrates IO effects.
 ///
 /// # Entity index worker lifecycle
@@ -78,6 +96,8 @@ pub struct EffectRunner {
     platform_handler: Box<dyn PlatformEffectHandler>,
     /// Sender to the serialized entity-index worker. Dropping this closes the channel.
     entity_index_worker_tx: mpsc::SyncSender<EntityIndexWorkerMsg>,
+    /// Host-selected sink for reducer-emitted runtime persistence snapshots.
+    persistence_sink: Box<dyn RuntimePersistenceSink>,
 }
 
 impl EffectRunner {
@@ -85,6 +105,7 @@ impl EffectRunner {
         paths: RuntimePaths,
         msg_tx: mpsc::Sender<Msg>,
         platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
     ) -> Self {
         let registry = Arc::new(RwLock::new(PromptRegistry::with_defaults()));
         Self::with_optional_llm(
@@ -95,6 +116,7 @@ impl EffectRunner {
             registry,
             HashMap::new(),
             platform_handler,
+            persistence_sink,
         )
     }
 
@@ -107,6 +129,7 @@ impl EffectRunner {
         prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
         platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
     ) -> Self {
         Self::with_optional_llm(
             paths,
@@ -116,6 +139,7 @@ impl EffectRunner {
             prompt_registry,
             llm_metadata_models,
             platform_handler,
+            persistence_sink,
         )
     }
 
@@ -128,6 +152,7 @@ impl EffectRunner {
         prompt_registry: Arc<RwLock<PromptRegistry>>,
         llm_metadata_models: HashMap<PromptId, String>,
         platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
     ) -> Self {
         let mut config = EngineConfig::default_with_output(paths.output_dir.clone());
         config.fetched_utc = Arc::new(|| Utc::now().to_rfc3339());
@@ -157,6 +182,7 @@ impl EffectRunner {
             llm_metadata_models,
             platform_handler,
             entity_index_worker_tx: worker_tx,
+            persistence_sink,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -171,6 +197,7 @@ impl EffectRunner {
         msg_tx: mpsc::Sender<Msg>,
         engine_config: EngineConfig,
         platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
     ) -> Self {
         let url_policy = engine_config.url_policy.clone();
         let fetch_settings = engine_config.fetch_settings.clone();
@@ -194,6 +221,7 @@ impl EffectRunner {
             llm_metadata_models: HashMap::new(),
             platform_handler,
             entity_index_worker_tx: worker_tx,
+            persistence_sink,
         };
         runner.spawn_event_loop(msg_tx);
         runner

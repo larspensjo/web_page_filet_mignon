@@ -66,7 +66,11 @@ fn fetch_outcome_classified_records_strike_for_job_domain() {
                 recorded_at,
             },
         );
-        assert!(effects.is_empty(), "classification emits no effects");
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::PersistRuntimeState { snapshot }]
+                if snapshot.blacklist.rows().iter().any(|(domain, _)| *domain == "bloomberg.com")
+        ));
         state = next;
     }
     assert!(state.blacklist().is_blocked("bloomberg.com", recorded_at));

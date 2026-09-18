@@ -44,6 +44,11 @@ flowchart LR
 Key rules:
 - The update step is deterministic and free of side effects.
 - Effects are isolated and the only place where I/O happens.
+- Runtime-state persistence is a reducer-emitted `PersistRuntimeState` effect:
+  its snapshot is captured from the post-update state and the `EffectRunner`
+  hands it to a host-selected sink. Normal hosts inject the debounced worker;
+  dry-run injects a no-op sink. Hosts never schedule or capture persistence
+  snapshots themselves.
 - State is the single source of truth and is not mutated outside the update step.
 - Rendering never mutates state and never triggers I/O directly.
 
@@ -76,10 +81,22 @@ Key rules:
 
 ## Crates and purposes
 - **harvester_batch:** command-line and scheduled batch host orchestration.
-- **harvester_core:** domain state, update logic, and view-friendly snapshots. `AppState::view()` builds the bounded desktop job-list projection directly; the retired frozen-renderer job and visible-ID arrays are no longer part of core or IPC.
-- **harvester_engine:** content processing pipeline, persistence, and LLM-related workflows.
-- **harvester_io:** shared runtime paths, persistence, and effect execution. `harvester_io::host_bootstrap` is the shared home for executable-host startup and state hydration. `harvester_io::run_lock` provides the parameterized single-instance lock shared by the batch and GUI hosts.
-- **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset confinement, and the core-thread boundary for the desktop host. Its snapshot projection carries only rows the page can render. `ShowArchiveDialog` is intercepted for the host and never reaches the effect runner.
+- **harvester_core:** domain state, update logic, and the single desktop view
+  projection. `AppState::view()` builds the bounded desktop job list directly;
+  retired frozen-renderer geometry, headers, visible-ID arrays, and manual
+  pre-triage filter statuses are absent from core and IPC.
+- **harvester_engine:** content processing pipeline and LLM-related workflows.
+- **harvester_io:** shared runtime paths, effect execution, and persistence. Its
+  `EffectRunner` owns an injected runtime-persistence sink, so the same effect
+  boundary services both hosts while write-free modes can choose a no-op sink.
+  `harvester_io::host_bootstrap` is the shared home for executable-host startup
+  and state hydration. `harvester_io::run_lock` provides the parameterized
+  single-instance lock shared by the batch and GUI hosts.
+- **harvester_ui_bridge:** Tauri-free IPC projection, intent decoding, asset
+  confinement, and the core-thread boundary for the desktop host. Its snapshot
+  projection carries only rows the page can render; the driver does not capture
+  state for I/O. `ShowArchiveDialog` is intercepted for the host and never
+  reaches the effect runner.
 - **harvester_ui:** non-default Tauri desktop host. It serves only the built frontend bundle through the confined `harvester://` scheme, sends restricted `UiIntent` values to the core-thread driver, and services effects only through `harvester_io::EffectRunner`. The bridge's snapshot projection and host-serviced `ShowArchiveDialog` boundary keep Tauri out of core/reducer logic.
 - **engine_logging:** shared logging setup used across the workspace.
 

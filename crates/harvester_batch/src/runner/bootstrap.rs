@@ -7,7 +7,7 @@ use harvester_core::{AppState, Msg};
 use harvester_engine::llm::LlmQuotas;
 use harvester_io::{
     host_bootstrap::{build_effect_runner, hydrate_state_from_disk},
-    EffectRunner, NoOpPlatformHandler, RuntimePaths,
+    EffectRunner, NoOpPlatformHandler, PersistenceWorker, RuntimePaths,
 };
 use std::sync::mpsc;
 
@@ -70,6 +70,10 @@ pub(crate) fn prepare_runtime(
         args.llm_concurrency,
         &defaults,
         platform_handler,
+        Box::new(PersistenceWorker::new(
+            paths.state_path.clone(),
+            paths.blacklist_path.clone(),
+        )),
         BATCH_MISSING_API_KEY_WARNING,
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;

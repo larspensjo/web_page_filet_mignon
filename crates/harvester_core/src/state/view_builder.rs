@@ -14,10 +14,10 @@ use crate::tabs::JobListMode;
 use crate::triage::TriagePhase;
 use crate::view_model::{
     AppViewModel, DesktopJobListView, IndirectLinkPhase, IndirectLinkSummary, JobFilterStatus,
-    JobListRowView, JobRowView, LeftPaneHeaderView, PreviewContextView, PreviewHeaderView,
-    RightPaneView, ScoreBand, SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome,
-    SignalCandidatePreviewView, SignalCandidateRow, SignalCandidateRowState, TriageAnnotationView,
-    DESKTOP_JOB_LIST_MAX_ROWS, DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
+    JobListRowView, JobRowView, PreviewContextView, PreviewHeaderView, RightPaneView, ScoreBand,
+    SelectedJobView, SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView,
+    SignalCandidateRow, SignalCandidateRowState, TriageAnnotationView, DESKTOP_JOB_LIST_MAX_ROWS,
+    DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
 };
 use chrono::{DateTime, Duration, Utc};
 use harvester_engine::llm::dto::SourceTier;
@@ -39,11 +39,6 @@ fn compare_desktop_job_rows(left: &JobListRowView, right: &JobListRowView) -> Or
 
 impl AppState {
     pub fn view(&self) -> AppViewModel {
-        self.build_view()
-    }
-
-    /// Builds the desktop-facing view.
-    pub fn desktop_view(&self) -> AppViewModel {
         self.build_view()
     }
 
@@ -81,29 +76,7 @@ impl AppState {
                 }
             });
         let jobs_search_query = self.jobs_search_query().to_string();
-        let first_visible_job_id = desktop_job_list.rows.first().map(|row| row.job_id);
-        let selected_jobs_visible_in_filter = selected_job_id
-            .is_some_and(|job_id| desktop_job_list.rows.iter().any(|row| row.job_id == job_id));
-        let left_pane_header = LeftPaneHeaderView {
-            title: "Jobs".to_string(),
-            scope_label: Some(
-                match desktop_job_list.mode {
-                    JobListMode::Results => "Results",
-                    JobListMode::SinceCheckpoint => "Since checkpoint",
-                    JobListMode::Last24Hours => "Last 24 hours",
-                }
-                .to_string(),
-            ),
-            count_label: Some(format!("{} jobs", desktop_job_list.scoped_count)),
-            state_label: (desktop_job_list.scoped_count == 0)
-                .then_some("no jobs in scope".to_string()),
-        };
         let preview_context = preview_header.as_ref().map(build_preview_context_view);
-        let preview_header_text = match self.workspace_view() {
-            crate::WorkspaceView::Trends => Some(self.format_trends_preview_header()),
-            crate::WorkspaceView::PollStats => Some("Poll Stats | last poll".to_string()),
-            crate::WorkspaceView::Review | crate::WorkspaceView::Blacklist => None,
-        };
         let preview_source = self.ui.preview.content_kind();
         let ai_warning_banner = self
             .ai_warning_banner()
@@ -198,11 +171,9 @@ impl AppState {
             raw_unprocessed_count,
             preview_text,
             selected_job_id,
-            left_pane_header,
             preview_header,
             preview_context,
             ai_warning_banner,
-            preview_header_text,
             preview_source,
             briefing_generate_enabled: matches!(
                 self.briefing_generate_readiness(),
@@ -234,11 +205,7 @@ impl AppState {
                 && !self.indirect_poll_in_progress(),
             checkpoint_status_message: self.briefing_checkpoint_status_message.clone(),
             selected_url,
-            left_pane: crate::view_model::LeftPaneView {
-                jobs_search_query,
-                first_visible_job_id,
-                selected_jobs_visible_in_filter,
-            },
+            left_pane: crate::view_model::LeftPaneView { jobs_search_query },
             is_pre_triage_reviewing: self.pre_triage.is_interactive(),
             indirect_link_summary: self.build_indirect_link_summary(),
             llm_usage_by_model: self.llm_usage_rows(),
@@ -292,7 +259,6 @@ impl AppState {
                 filter_status,
                 Some(JobFilterStatus::HardExcluded { .. })
                     | Some(JobFilterStatus::ReviewNeeded { .. })
-                    | Some(JobFilterStatus::ManuallyExcluded)
             );
         JobViewMetadata {
             job_id,
@@ -704,10 +670,6 @@ impl AppState {
             exclude_checked,
             state_label: String::from("Scored"),
         })
-    }
-
-    fn format_trends_preview_header(&self) -> String {
-        "Trends | recent activity".to_string()
     }
 
     fn build_right_pane_view(&self) -> RightPaneView {

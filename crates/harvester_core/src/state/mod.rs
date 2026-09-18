@@ -80,13 +80,6 @@ struct PreTriageLoadContext {
     reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PreTriageLoadProgress {
-    request_id: u64,
-    files_scanned: usize,
-    files_total: usize,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct PollPipelineProgressState {
     source_scan_done: bool,
@@ -322,7 +315,6 @@ pub struct AppState {
     triage: TriageSession,
     pre_triage: PreTriageSession,
     pre_triage_load_context: Option<PreTriageLoadContext>,
-    pre_triage_load_progress: Option<PreTriageLoadProgress>,
     indirect_link_pool: IndirectLinkPool,
     indirect_poll_in_progress: bool,
     source_states: SourceStateIndex,
@@ -429,7 +421,6 @@ impl Default for AppState {
             triage: TriageSession::default(),
             pre_triage: PreTriageSession::default(),
             pre_triage_load_context: None,
-            pre_triage_load_progress: None,
             indirect_link_pool: IndirectLinkPool::new(),
             indirect_poll_in_progress: false,
             source_states: SourceStateIndex::default(),

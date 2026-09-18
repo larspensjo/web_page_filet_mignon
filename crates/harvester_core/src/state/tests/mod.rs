@@ -1372,69 +1372,6 @@ mod app_state_tests {
         assert_eq!(kind, PreviewContentKind::Summary);
     }
 
-    #[test]
-    fn left_header_for_desktop_jobs_has_stable_title_and_meta() {
-        use crate::briefing::LoadedArticle;
-        use crate::triage::ArticleTriageResult;
-
-        let mut state = AppState::new();
-        state.jobs.insert(
-            1,
-            JobState {
-                url: "https://example.com/article".to_string(),
-                stage: Stage::Done,
-                outcome: Some(JobResultKind::Success),
-                ..Default::default()
-            },
-        );
-        let mut triage = crate::triage::TriageSession::new_loading(None);
-        triage.set_articles(vec![LoadedArticle {
-            url: "https://example.com/article".to_string(),
-            source_title: None,
-            prepared_text: "text".to_string(),
-            content_hash: "hash".to_string(),
-            fetched_utc: None,
-        }]);
-        triage.transition_to_triaging();
-        triage.start_article(0, 1);
-        triage.complete_article(
-            0,
-            ArticleTriageResult {
-                category: "Keep".to_string(),
-                priority: 1,
-                tags: vec![],
-                rationale: "ok".to_string(),
-                input_tokens: 1,
-                output_tokens: 1,
-            },
-        );
-        state.set_triage(triage);
-
-        let view = state.view();
-
-        assert_eq!(view.left_pane_header.title, "Jobs");
-        assert_eq!(
-            view.left_pane_header.scope_label.as_deref(),
-            Some("Since checkpoint")
-        );
-        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 jobs"));
-        assert_eq!(view.left_pane_header.state_label.as_deref(), None);
-    }
-
-    #[test]
-    fn left_header_shows_desktop_empty_state_in_meta() {
-        let state = AppState::new();
-
-        let view = state.view();
-
-        assert_eq!(view.left_pane_header.title, "Jobs");
-        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("0 jobs"));
-        assert_eq!(
-            view.left_pane_header.state_label.as_deref(),
-            Some("no jobs in scope")
-        );
-    }
-
     #[path = "../signal_candidate_tests.rs"]
     mod signal_candidate_tests;
 
@@ -1543,7 +1480,7 @@ mod app_state_tests {
         insert_done_job(&mut state, 3, "https://example.com/mid");
         set_triage_annotations(&mut state, &[(1, 2), (2, 5), (3, 3)]);
 
-        let view = state.desktop_view();
+        let view = state.view();
 
         assert_eq!(
             view.desktop_job_list
@@ -1563,7 +1500,7 @@ mod app_state_tests {
         insert_done_job(&mut state, 3, "https://example.com/lower");
         set_triage_annotations(&mut state, &[(1, 2), (3, 1)]);
 
-        let view = state.desktop_view();
+        let view = state.view();
 
         assert_eq!(
             view.desktop_job_list
@@ -1589,7 +1526,7 @@ mod app_state_tests {
         insert_done_job(&mut state, 4, "https://example.com/four");
         set_triage_annotations(&mut state, &[(9, 4), (4, 4)]);
 
-        let view = state.desktop_view();
+        let view = state.view();
 
         assert_eq!(
             view.desktop_job_list
@@ -1632,7 +1569,7 @@ mod app_state_tests {
         );
         state.set_triage(triage);
 
-        let view = state.desktop_view();
+        let view = state.view();
 
         assert!(view.triage_results_reorder_suppressed);
         assert_eq!(
@@ -1645,7 +1582,7 @@ mod app_state_tests {
         );
 
         state.triage_mut().complete();
-        let settled_view = state.desktop_view();
+        let settled_view = state.view();
         assert!(!settled_view.triage_results_reorder_suppressed);
         assert_eq!(
             settled_view
@@ -1714,7 +1651,7 @@ mod app_state_tests {
 
         assert_eq!(
             state
-                .desktop_view()
+                .view()
                 .desktop_job_list
                 .rows
                 .iter()
@@ -1758,7 +1695,7 @@ mod app_state_tests {
         state = update(state, Msg::tick_at(now)).0;
         assert_eq!(
             state
-                .desktop_view()
+                .view()
                 .desktop_job_list
                 .rows
                 .iter()
@@ -1782,7 +1719,7 @@ mod app_state_tests {
         assert_eq!(old_state.view().desktop_job_list.rows.len(), 1);
         old_state.job_list_mode = JobListMode::Last24Hours;
         old_state = update(old_state, Msg::tick_at(now)).0;
-        assert!(old_state.desktop_view().desktop_job_list.rows.is_empty());
+        assert!(old_state.view().desktop_job_list.rows.is_empty());
     }
 
     #[test]
@@ -1795,7 +1732,7 @@ mod app_state_tests {
         state.job_list_mode = JobListMode::Last24Hours;
         state = update(state, Msg::tick_at(now)).0;
 
-        let view = state.desktop_view();
+        let view = state.view();
         assert_eq!(view.desktop_job_list.rows.len(), 1);
         assert_eq!(
             view.desktop_job_list
@@ -1819,7 +1756,7 @@ mod app_state_tests {
         );
         state.job_list_mode = JobListMode::Last24Hours;
 
-        let view = state.desktop_view();
+        let view = state.view();
         assert!(view.desktop_job_list.rows.is_empty());
         assert_eq!(view.desktop_job_list.scoped_count, 0);
         assert_eq!(view.desktop_job_list.hidden_without_fetch_time, 0);
@@ -1844,7 +1781,7 @@ mod app_state_tests {
         state.job_list_mode = JobListMode::Last24Hours;
         state = update(state, Msg::tick_at(now)).0;
 
-        let view = state.desktop_view();
+        let view = state.view();
         assert_eq!(view.desktop_job_list.scoped_count, 1);
         assert_eq!(view.desktop_job_list.rows[0].job_id, 2);
         assert_eq!(
@@ -1882,7 +1819,7 @@ mod app_state_tests {
         state.job_list_mode = JobListMode::Last24Hours;
         state = update(state, Msg::tick_at(now)).0;
 
-        let view = state.desktop_view();
+        let view = state.view();
         let ids = view
             .desktop_job_list
             .rows
@@ -1928,14 +1865,14 @@ mod app_state_tests {
         state.job_list_mode = JobListMode::Last24Hours;
         state = update(state, Msg::tick_at(now)).0;
         assert!(!state
-            .desktop_view()
+            .view()
             .desktop_job_list
             .rows
             .iter()
             .any(|row| row.job_id == 1));
 
         state.set_jobs_search_query("needle".to_string());
-        let view = state.desktop_view();
+        let view = state.view();
         assert_eq!(view.desktop_job_list.scoped_count, 1);
         assert!(!view.desktop_job_list.truncated);
         assert_eq!(
@@ -1962,7 +1899,7 @@ mod app_state_tests {
         state.set_jobs_search_query("needle".to_string());
         state = update(state, Msg::tick_at(now)).0;
 
-        let since_view = state.desktop_view();
+        let since_view = state.view();
         assert!(since_view.desktop_job_list.rows.is_empty());
         state = update(
             state,
@@ -1971,7 +1908,7 @@ mod app_state_tests {
             },
         )
         .0;
-        let recent_view = state.desktop_view();
+        let recent_view = state.view();
         assert_eq!(recent_view.desktop_job_list.query, "needle");
         assert_eq!(recent_view.desktop_job_list.rows[0].job_id, 1);
 
@@ -1982,7 +1919,7 @@ mod app_state_tests {
             },
         )
         .0;
-        let restored_view = state.desktop_view();
+        let restored_view = state.view();
         assert_eq!(restored_view.desktop_job_list.query, "needle");
         assert!(restored_view.desktop_job_list.rows.is_empty());
     }
@@ -1998,10 +1935,10 @@ mod app_state_tests {
         );
         state.job_list_mode = JobListMode::Last24Hours;
         state = update(state, Msg::tick_at(first_now)).0;
-        assert_eq!(state.desktop_view().desktop_job_list.rows.len(), 1);
+        assert_eq!(state.view().desktop_job_list.rows.len(), 1);
 
         state = update(state, Msg::tick_at(first_now + chrono::Duration::hours(2))).0;
-        assert!(state.desktop_view().desktop_job_list.rows.is_empty());
+        assert!(state.view().desktop_job_list.rows.is_empty());
     }
 
     #[test]
@@ -2016,7 +1953,7 @@ mod app_state_tests {
 
         assert_eq!(
             state
-                .desktop_view()
+                .view()
                 .desktop_job_list
                 .selected_job
                 .as_ref()
@@ -2532,7 +2469,6 @@ mod app_state_tests {
                 .collect::<Vec<_>>(),
             vec![1]
         );
-        assert_eq!(view.left_pane.first_visible_job_id, Some(1));
     }
 
     #[test]
@@ -2570,7 +2506,7 @@ mod app_state_tests {
                 .collect::<Vec<_>>(),
             vec![1]
         );
-        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 jobs"));
+        assert_eq!(view.desktop_job_list.scoped_count, 1);
     }
 
     #[test]
@@ -2628,7 +2564,7 @@ mod app_state_tests {
     }
 
     #[test]
-    fn selected_jobs_visible_in_filter_tracks_selection_without_clearing_preview() {
+    fn selection_survives_a_search_query_that_excludes_its_row() {
         let mut state = AppState::new();
         insert_done_job(&mut state, 1, "https://example.com/kube");
         insert_done_job(&mut state, 2, "https://example.com/rust");
@@ -2637,18 +2573,17 @@ mod app_state_tests {
 
         let view = state.view();
         assert_eq!(view.selected_job_id, Some(1));
-        assert!(view.left_pane.selected_jobs_visible_in_filter);
+        assert!(view.desktop_job_list.selected_job.is_some());
 
         state.set_jobs_search_query("rust".to_string());
         let view = state.view();
         assert_eq!(view.selected_job_id, Some(1));
         assert_eq!(view.desktop_job_list.rows[0].job_id, 2);
-        assert_eq!(view.left_pane.first_visible_job_id, Some(2));
-        assert_eq!(
-            view.left_pane.first_visible_job_id,
-            view.desktop_job_list.rows.first().map(|row| row.job_id)
-        );
-        assert!(!view.left_pane.selected_jobs_visible_in_filter);
+        assert!(matches!(
+            view.desktop_job_list.selected_job,
+            Some(ref selected)
+                if selected.list_visibility == SelectedJobVisibility::QueryMismatch
+        ));
     }
 
     #[test]
@@ -2674,17 +2609,17 @@ mod app_state_tests {
     }
 
     #[test]
-    fn left_pane_header_count_label_reflects_desktop_scope() {
+    fn desktop_scope_count_reflects_search_query() {
         let mut state = AppState::new();
         insert_done_job(&mut state, 1, "https://example.com/kube");
         insert_done_job(&mut state, 2, "https://example.com/rust");
 
         let view = state.view();
-        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("2 jobs"));
+        assert_eq!(view.desktop_job_list.scoped_count, 2);
 
         state.set_jobs_search_query("kube".to_string());
         let view = state.view();
-        assert_eq!(view.left_pane_header.count_label.as_deref(), Some("1 jobs"));
+        assert_eq!(view.desktop_job_list.scoped_count, 1);
         assert_eq!(view.desktop_job_list.rows.len(), 1);
     }
 
@@ -2766,32 +2701,6 @@ mod briefing_history_state_tests {
 #[cfg(test)]
 mod poll_stats_view_tests {
     use super::*;
-
-    #[test]
-    fn poll_stats_workspace_uses_page_level_header_override() {
-        let mut state = AppState::new();
-        state.set_workspace_view(crate::WorkspaceView::PollStats);
-        let view = state.view();
-        assert!(
-            view.preview_header_text.is_some(),
-            "poll stats tab must provide a preview header override"
-        );
-        assert!(
-            view.preview_header_text
-                .as_deref()
-                .unwrap()
-                .contains("Poll Stats"),
-            "poll stats tab header must identify the poll-stats source"
-        );
-    }
-
-    #[test]
-    fn poll_stats_header_not_overridden_outside_its_workspace() {
-        let mut state = AppState::new();
-        state.set_workspace_view(crate::WorkspaceView::Review);
-        let view = state.view();
-        assert_eq!(view.preview_header_text, None);
-    }
 
     #[test]
     fn ingest_skips_blacklisted_domain() {
@@ -2887,7 +2796,7 @@ mod trends_view_tests {
     use super::*;
 
     #[test]
-    fn trends_workspace_uses_page_level_header_override_alongside_selected_article_context() {
+    fn trends_workspace_keeps_selected_article_context() {
         let mut state = AppState::new();
         state.jobs.insert(
             1,
@@ -2903,13 +2812,6 @@ mod trends_view_tests {
 
         let view = state.view();
 
-        assert!(
-            view.preview_header_text
-                .as_deref()
-                .unwrap_or("")
-                .contains("Trends"),
-            "trends tab must provide a page-level header override"
-        );
         assert!(
             view.preview_context
                 .as_ref()

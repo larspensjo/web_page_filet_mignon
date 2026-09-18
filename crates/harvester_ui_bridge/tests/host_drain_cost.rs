@@ -21,7 +21,7 @@ const SUMMARY_TITLE_ROWS: usize = 110;
 #[test]
 fn view_build_compare_and_project_stay_within_the_drain_budget() {
     let (state, summary_cache_entries) = drain_cost_state();
-    let previous = state.desktop_view();
+    let previous = state.view();
     let shape = assert_representative_shape(&previous, None, summary_cache_entries);
     let measured = median_drain_cost(&state, &previous);
     let measured_ms = measured.total_ms;
@@ -46,9 +46,9 @@ fn view_build_compare_and_project_stay_within_the_drain_budget() {
 #[test]
 fn search_driven_view_rebuild_stays_within_the_drain_budget() {
     let (state, summary_cache_entries) = drain_cost_state();
-    let previous = state.desktop_view();
+    let previous = state.view();
     let (state, _) = update(state, Msg::JobsSearchQueryChanged("needle".into()));
-    let searched = state.desktop_view();
+    let searched = state.view();
     let shape = assert_representative_shape(&searched, Some("needle"), summary_cache_entries);
     let measured = median_drain_cost(&state, &previous);
     let measured_ms = measured.total_ms;
@@ -147,7 +147,7 @@ fn seed_populated_run_progress() -> AppState {
         .0;
     }
     assert_eq!(
-        state.desktop_view().run_progress.activity.len(),
+        state.view().run_progress.activity.len(),
         ACTIVITY_FEED_CAPACITY
     );
     state
@@ -352,7 +352,7 @@ fn median_drain_cost(
         .map(|_| {
             let started = Instant::now();
             let view_started = Instant::now();
-            let view = state.desktop_view();
+            let view = state.view();
             let view_us = view_started.elapsed().as_micros();
             let compare_started = Instant::now();
             let _changed = view != *previous;

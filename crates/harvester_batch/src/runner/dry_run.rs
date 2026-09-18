@@ -5,7 +5,10 @@ use super::reporting::print_poll_stats;
 use crate::cli::Args;
 use engine_logging::engine_info;
 use harvester_core::{update, AppState, Msg};
-use harvester_io::{load_completed_jobs, EffectRunner, NoOpPlatformHandler, RuntimePaths};
+use harvester_io::{
+    load_completed_jobs, EffectRunner, NoOpPlatformHandler, NoOpRuntimePersistenceSink,
+    RuntimePaths,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -42,7 +45,12 @@ pub(super) fn run_dry_run(
 
     // Create effect runner
     let platform_handler = Box::new(NoOpPlatformHandler);
-    let effect_runner = EffectRunner::new(paths.clone(), msg_tx.clone(), platform_handler);
+    let effect_runner = EffectRunner::new(
+        paths.clone(),
+        msg_tx.clone(),
+        platform_handler,
+        Box::new(NoOpRuntimePersistenceSink),
+    );
 
     // Dispatch poll
     engine_info!("[dry-run] Dispatching poll");

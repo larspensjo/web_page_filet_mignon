@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use harvester_core::{Effect, JobResultKind, LlmResultKind, Msg};
+use harvester_core::{AppState, Effect, JobResultKind, LlmResultKind, Msg, PersistenceSnapshot};
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::OPENAI_MODEL_GPT_4O_MINI;
 use harvester_engine::llm::{LlmCompletionError, LlmEvent};
@@ -12,7 +12,7 @@ use harvester_engine::{FailureKind, FetchSettings, Stage, UrlPolicy};
 use tempfile::tempdir;
 
 use crate::effect_helpers::{download_link_page, map_llm_event};
-use crate::RuntimePaths;
+use crate::{load_completed_jobs, NoOpRuntimePersistenceSink, PersistenceWorker, RuntimePaths};
 
 use super::{is_actionable_job_failure, EffectRunner, NoOpPlatformHandler};
 
@@ -41,7 +41,81 @@ fn runner_with_receiver(base: &Path) -> (EffectRunner, mpsc::Receiver<Msg>) {
     let (tx, rx) = mpsc::channel();
     let paths = make_test_runtime_paths(base);
     let platform_handler = Box::new(NoOpPlatformHandler);
-    (EffectRunner::new(paths, tx, platform_handler), rx)
+    let persistence_sink = Box::new(PersistenceWorker::new(
+        paths.state_path.clone(),
+        paths.blacklist_path.clone(),
+    ));
+    (
+        EffectRunner::new(paths, tx, platform_handler, persistence_sink),
+        rx,
+    )
+}
+
+#[test]
+fn runtime_persistence_effect_is_flushed_when_the_runner_shuts_down() {
+    let temp = tempdir().expect("tempdir");
+    let paths = make_test_runtime_paths(temp.path());
+    let state_path = paths.state_path.clone();
+    let (tx, _rx) = mpsc::channel();
+    let persistence_sink = Box::new(PersistenceWorker::new(
+        paths.state_path.clone(),
+        paths.blacklist_path.clone(),
+    ));
+    let runner = EffectRunner::new(paths, tx, Box::new(NoOpPlatformHandler), persistence_sink);
+    let (state, _) = harvester_core::update(
+        AppState::default(),
+        Msg::RestoreCompletedJobs(vec![harvester_core::CompletedJobSnapshot {
+            url: "https://example.com/persisted".to_string(),
+            tokens: Some(1),
+            bytes: Some(2),
+            links: Vec::new(),
+            fetched_utc: None,
+        }]),
+    );
+
+    runner.enqueue(vec![Effect::PersistRuntimeState {
+        snapshot: PersistenceSnapshot::capture(&state),
+    }]);
+    drop(runner);
+
+    assert_eq!(
+        load_completed_jobs(&state_path)[0].url,
+        "https://example.com/persisted"
+    );
+}
+
+#[test]
+fn runner_without_persistence_does_not_write_runtime_state() {
+    let temp = tempdir().expect("tempdir");
+    let paths = make_test_runtime_paths(temp.path());
+    let state_path = paths.state_path.clone();
+    let blacklist_path = paths.blacklist_path.clone();
+    let (tx, _rx) = mpsc::channel();
+    let runner = EffectRunner::new(
+        paths,
+        tx,
+        Box::new(NoOpPlatformHandler),
+        Box::new(NoOpRuntimePersistenceSink),
+    );
+    let (_, effects) = harvester_core::update(
+        AppState::default(),
+        Msg::JobDone {
+            job_id: 1,
+            result: JobResultKind::Success,
+            content_preview: None,
+            extracted_links: Vec::new(),
+            fetched_utc: None,
+        },
+    );
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PersistRuntimeState { .. })));
+
+    runner.enqueue(effects);
+    drop(runner);
+
+    assert!(!state_path.exists());
+    assert!(!blacklist_path.exists());
 }
 
 fn write_prompt_context(dir: &Path, filename: &str, prompt_id: PromptId) {
@@ -531,8 +605,13 @@ async fn job_completed_emits_fetch_outcome_classified_before_job_done() {
             ..Default::default()
         };
 
-        let runner =
-            EffectRunner::with_engine_config(paths, tx, config, Box::new(NoOpPlatformHandler));
+        let runner = EffectRunner::with_engine_config(
+            paths,
+            tx,
+            config,
+            Box::new(NoOpPlatformHandler),
+            Box::new(NoOpRuntimePersistenceSink),
+        );
         runner.enqueue(vec![Effect::EnqueueUrl { job_id: 1, url }]);
 
         let mut msgs = Vec::new();

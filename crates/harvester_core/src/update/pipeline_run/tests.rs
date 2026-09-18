@@ -502,6 +502,33 @@ fn full_run_progress_walk_preserves_every_stage_and_counts() {
 }
 
 #[test]
+fn load_progress_activates_loading_stage_with_intermediate_counts() {
+    let total = 4;
+    let mut state = tick(AppState::new(), 0);
+    state = crate::update(state, Msg::PipelineRunRequested).0;
+    state.set_triage(crate::triage::TriageSession::new_loading(None));
+    state.set_triage_in_flight(42);
+
+    let state = crate::update(
+        state,
+        Msg::TriageArticlesLoadProgress {
+            request_id: 42,
+            files_scanned: 2,
+            files_total: total,
+        },
+    )
+    .0;
+    let loading =
+        &state.run_progress().expect("run progress").stages[PipelineStage::LoadingArticles.index()];
+
+    assert_eq!(loading.status, StageStatus::Active);
+    assert_eq!(
+        (loading.completed, loading.failed, loading.total),
+        (2, 0, 4)
+    );
+}
+
+#[test]
 fn scoring_stays_active_from_triage_cache_hit_through_the_last_summary_wave() {
     let (mut state, articles) = prepare_pipeline(2, 0);
     seed_cached_summary(&mut state, &articles[0]);

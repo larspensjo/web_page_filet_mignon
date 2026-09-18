@@ -4,43 +4,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::blacklist::BlacklistState;
-use harvester_core::{AppState, CompletedJobSnapshot, JobResultKind, Msg};
+use harvester_core::PersistenceSnapshot;
 
 use crate::{persist_runtime_state, save_blacklist};
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(350);
 const MAX_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
-
-#[derive(Debug, Clone)]
-pub struct PersistenceSnapshot {
-    pub completed: Vec<CompletedJobSnapshot>,
-    pub blacklist: BlacklistState,
-}
-
-impl PersistenceSnapshot {
-    pub fn capture(state: &AppState) -> Self {
-        Self {
-            completed: state.completed_jobs_snapshot(),
-            blacklist: state.blacklist().clone(),
-        }
-    }
-}
-
-/// Whether reducing a message changes one of the persisted runtime projections.
-pub fn requires_persistence_snapshot(message: &Msg) -> bool {
-    matches!(
-        message,
-        Msg::JobDone {
-            result: JobResultKind::Success,
-            ..
-        } | Msg::FetchOutcomeClassified {
-            class: harvester_engine::FetchOutcomeClass::PermanentBlock
-                | harvester_engine::FetchOutcomeClass::Success,
-            ..
-        }
-    )
-}
 
 #[derive(Debug)]
 struct PendingSnapshot {
@@ -290,7 +259,7 @@ mod tests {
             }]),
         );
         let t0 = chrono::DateTime::from_timestamp(0, 0).unwrap();
-        let mut blacklist = BlacklistState::default();
+        let mut blacklist = harvester_core::blacklist::BlacklistState::default();
         blacklist.record_outcome(
             "example.com",
             FetchOutcomeClass::PermanentBlock,
@@ -313,7 +282,7 @@ mod tests {
         let mut worker = PersistenceWorker::new(s_path.clone(), bl_path.clone());
 
         let t0 = chrono::DateTime::from_timestamp(0, 0).unwrap();
-        let mut blacklist = BlacklistState::default();
+        let mut blacklist = harvester_core::blacklist::BlacklistState::default();
         for _ in 0..3 {
             blacklist.record_outcome(
                 "example.com",

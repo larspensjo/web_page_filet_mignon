@@ -20,7 +20,18 @@ mod tests;
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let progress_before = pipeline_run::progress_before(&state, &msg);
-    let effects = match msg {
+    let persist_runtime_state = matches!(
+        &msg,
+        Msg::JobDone {
+            result: crate::JobResultKind::Success,
+            ..
+        } | Msg::FetchOutcomeClassified {
+            class: harvester_engine::FetchOutcomeClass::PermanentBlock
+                | harvester_engine::FetchOutcomeClass::Success,
+            ..
+        }
+    );
+    let mut effects = match msg {
         Msg::InputChanged(text) => {
             state.set_input_buffer(text);
             Vec::new()
@@ -357,16 +368,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             request_id,
             articles,
         } => triage::handle_articles_loaded(&mut state, request_id, articles),
-        Msg::TriageArticlesLoadProgress {
-            request_id,
-            files_scanned,
-            files_total,
-        } => triage::handle_articles_load_progress(
-            &mut state,
-            request_id,
-            files_scanned,
-            files_total,
-        ),
+        Msg::TriageArticlesLoadProgress { .. } => Vec::new(),
         Msg::TriageArticlesLoadFailed { request_id, reason } => {
             triage::handle_articles_load_failed(&mut state, request_id, reason)
         }
@@ -563,6 +565,11 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     };
 
     pipeline_run::record_progress_after(&mut state, progress_before);
+    if persist_runtime_state {
+        effects.push(Effect::PersistRuntimeState {
+            snapshot: crate::PersistenceSnapshot::capture(&state),
+        });
+    }
     (state, effects)
 }
 
@@ -578,6 +585,39 @@ mod desktop_contract_tests {
         let (state, effects) = update(AppState::default(), Msg::TrendsViewOpened);
         assert_eq!(state.workspace_view(), WorkspaceView::Trends);
         assert_eq!(effects, vec![Effect::LoadEntityIndex]);
+    }
+
+    #[test]
+    fn successful_job_completion_emits_a_runtime_persistence_snapshot() {
+        let (state, _effects) = update(
+            AppState::default(),
+            Msg::InputChanged("https://example.com/article".to_string()),
+        );
+        let (state, effects) = update(state, Msg::UrlsSubmitted);
+        let job_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::EnqueueUrl { job_id, .. } => Some(*job_id),
+                _ => None,
+            })
+            .expect("URL submission must enqueue a job");
+
+        let (_state, effects) = update(
+            state,
+            Msg::JobDone {
+                job_id,
+                result: crate::JobResultKind::Success,
+                content_preview: None,
+                extracted_links: Vec::new(),
+                fetched_utc: None,
+            },
+        );
+
+        assert!(matches!(
+            effects.last(),
+            Some(Effect::PersistRuntimeState { snapshot })
+                if snapshot.completed.len() == 1 && snapshot.completed[0].url == "https://example.com/article"
+        ));
     }
 
     #[test]

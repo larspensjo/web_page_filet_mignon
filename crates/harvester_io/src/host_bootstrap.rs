@@ -14,7 +14,7 @@ use harvester_engine::llm::{
 use crate::{
     load_blacklist, load_completed_jobs, load_signal_candidate_cache,
     load_signal_candidate_overrides, load_summary_cache, load_triage_cache, EffectRunner,
-    PlatformEffectHandler, RuntimePaths,
+    PlatformEffectHandler, RuntimePaths, RuntimePersistenceSink,
 };
 
 /// The LLM settings that intentionally differ between executable hosts.
@@ -139,6 +139,7 @@ pub fn build_effect_runner(
     llm_concurrency: usize,
     defaults: &HostLlmDefaults,
     platform_handler: Box<dyn PlatformEffectHandler>,
+    persistence_sink: Box<dyn RuntimePersistenceSink>,
     missing_api_key_warning: &'static str,
     empty_api_key_warning: Option<&'static str>,
 ) -> Result<EffectRunnerBuild, String> {
@@ -147,7 +148,7 @@ pub fn build_effect_runner(
             if let Some(warning) = empty_api_key_warning {
                 engine_warn!("{}", warning);
                 return Ok((
-                    EffectRunner::new(paths.clone(), msg_tx, platform_handler),
+                    EffectRunner::new(paths.clone(), msg_tx, platform_handler, persistence_sink),
                     None,
                     None,
                 ));
@@ -198,12 +199,13 @@ pub fn build_effect_runner(
             registry,
             model_map,
             platform_handler,
+            persistence_sink,
         );
         Ok((runner, Some(quota_limits), Some(runtime)))
     } else {
         engine_warn!("{}", missing_api_key_warning);
         Ok((
-            EffectRunner::new(paths.clone(), msg_tx, platform_handler),
+            EffectRunner::new(paths.clone(), msg_tx, platform_handler, persistence_sink),
             None,
             None,
         ))

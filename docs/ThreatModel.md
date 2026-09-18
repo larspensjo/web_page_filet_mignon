@@ -30,7 +30,9 @@ Structured threat model for the batch host and the Tauri desktop host, covering:
    - LLM outputs and replay payloads are advisory only and must be treated as tainted (Phase 1+)
    - LLM API keys are never checked into source and must be rotated/encrypted in production
    - Vault secrets are scoped per launched process; the rule applies to every vault secret, not only Harvester keys
-   - Side effects require passing through `EffectRunner` policy checks
+   - Side effects require passing through `EffectRunner` policy checks; runtime
+     persistence is a reducer-emitted effect whose snapshot is captured during
+     update, never by a host reading state out of band
    - All resource consumption is bounded
    - Probe mode is a scoped diagnostic exemption: it constructs no `AppState`, `RuntimePaths`, effects, or secrets, and only adds its acknowledgement/report IPC commands in that mode. It also ships the permanently embedded `probe-*` capability window-label glob in `crates/harvester_ui/capabilities/default.json`; this does not widen page authority because `core:default` grants no window creation, closing, or destruction, the only labels created in code are production `main` and `probe-<slug>` inside `run_probe`, and embedded capabilities cannot be conditional on `--probe-ipc`.
 5. **Lessons learned** (from review):

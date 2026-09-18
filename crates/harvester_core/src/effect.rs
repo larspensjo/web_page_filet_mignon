@@ -6,6 +6,23 @@ use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion
 use harvester_engine::llm::types::ModelId;
 use serde::{Deserialize, Serialize};
 
+/// The reducer-owned runtime projection written by the persistence worker.
+/// Capturing it while reducing keeps the host from reading state out of band.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PersistenceSnapshot {
+    pub completed: Vec<crate::CompletedJobSnapshot>,
+    pub blacklist: crate::blacklist::BlacklistState,
+}
+
+impl PersistenceSnapshot {
+    pub fn capture(state: &crate::AppState) -> Self {
+        Self {
+            completed: state.completed_jobs_snapshot(),
+            blacklist: state.blacklist().clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     EnqueueUrl {
@@ -147,6 +164,10 @@ pub enum Effect {
     PersistDesktopWindowSize {
         width: i32,
         height: i32,
+    },
+    /// Persist the reducer-owned runtime projection through the effect runner.
+    PersistRuntimeState {
+        snapshot: PersistenceSnapshot,
     },
 }
 

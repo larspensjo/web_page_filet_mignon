@@ -112,10 +112,9 @@ pub fn format_exclusion_for_preview(entry: &ArticleFilterEntry) -> String {
     let _ = writeln!(out, "# Not Included");
     out.push('\n');
 
-    let decision_label = match (entry.auto_verdict, entry.manual_decision) {
-        (_, Some(crate::pre_triage_filter::ManualDecision::Exclude)) => "Manually excluded",
-        (AutoVerdict::HardExclude, None) => "Auto-excluded",
-        (AutoVerdict::Review, None) => "Needs review",
+    let decision_label = match entry.auto_verdict {
+        AutoVerdict::HardExclude => "Auto-excluded",
+        AutoVerdict::Review => "Needs review",
         _ => "Excluded",
     };
     let _ = writeln!(out, "**Decision:** {}", decision_label);
@@ -129,10 +128,6 @@ pub fn format_exclusion_for_preview(entry: &ArticleFilterEntry) -> String {
         out.push('\n');
     }
 
-    let _ = writeln!(
-        out,
-        "*Tip: Override in the pre-triage review panel to include this article.*"
-    );
     out
 }
 
@@ -253,7 +248,7 @@ mod tests {
 
     #[test]
     fn exclusion_formatter_includes_decision_source() {
-        use crate::pre_triage_filter::{ArticleFilterKey, ManualDecision};
+        use crate::pre_triage_filter::ArticleFilterKey;
 
         let entry_auto = ArticleFilterEntry {
             key: ArticleFilterKey {
@@ -268,19 +263,6 @@ mod tests {
         let formatted = format_exclusion_for_preview(&entry_auto);
         assert!(formatted.contains("Auto-excluded"));
         assert!(formatted.contains("- Blocked host"));
-
-        let entry_manual = ArticleFilterEntry {
-            key: ArticleFilterKey {
-                url: "https://example.com".to_string(),
-                content_hash: 12345,
-            },
-            source_title: Some("Test".to_string()),
-            auto_verdict: AutoVerdict::Review,
-            reasons: vec![],
-            manual_decision: Some(ManualDecision::Exclude),
-        };
-        let formatted = format_exclusion_for_preview(&entry_manual);
-        assert!(formatted.contains("Manually excluded"));
     }
 
     #[test]

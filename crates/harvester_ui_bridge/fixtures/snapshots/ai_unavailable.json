@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 8,
+  "schema_version": 9,
   "view": {
     "ai_unavailable_message": "AI features unavailable: OPENAI_API_KEY is not set",
     "ai_warning_banner": {
@@ -34,15 +34,7 @@
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
     "left_pane": {
-      "first_visible_job_id": null,
-      "jobs_search_query": "",
-      "selected_jobs_visible_in_filter": false
-    },
-    "left_pane_header": {
-      "count_label": "0 jobs",
-      "scope_label": "Since checkpoint",
-      "state_label": "no jobs in scope",
-      "title": "Jobs"
+      "jobs_search_query": ""
     },
     "llm_quota": {
       "label": "LLM calls unavailable",
@@ -57,7 +49,6 @@
     "poll_sources_enabled": true,
     "preview_context": null,
     "preview_header": null,
-    "preview_header_text": null,
     "preview_source": null,
     "preview_text": null,
     "queued_urls": [],

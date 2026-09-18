@@ -14,7 +14,10 @@ use harvester_engine::llm::{
     PricingRegistry, PromptRegistry, ProviderKind, TokenUsage, DEFAULT_BRIEFING_MODEL,
     DEFAULT_SUMMARY_MODEL, DEFAULT_TRIAGE_MODEL, OPENAI_MODEL_GPT_4O_MINI,
 };
-use harvester_io::{load_briefing_checkpoint, EffectRunner, NoOpPlatformHandler, RuntimePaths};
+use harvester_io::{
+    load_briefing_checkpoint, EffectRunner, NoOpPlatformHandler, NoOpRuntimePersistenceSink,
+    RuntimePaths,
+};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -550,8 +553,12 @@ fn test_dispatch_loop_reduces_queued_poll_before_settling() {
 
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let mut state = AppState::new();
-    let effect_runner =
-        EffectRunner::new(runtime_paths, msg_tx.clone(), Box::new(NoOpPlatformHandler));
+    let effect_runner = EffectRunner::new(
+        runtime_paths,
+        msg_tx.clone(),
+        Box::new(NoOpPlatformHandler),
+        Box::new(NoOpRuntimePersistenceSink),
+    );
     let shutdown_flag = Arc::new(AtomicBool::new(false));
 
     msg_tx.send(Msg::PollSourcesClicked).unwrap();
@@ -593,8 +600,12 @@ fn test_dispatch_loop_ticks_drive_pretriage_from_restore_signal() {
 
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let mut state = AppState::new();
-    let effect_runner =
-        EffectRunner::new(runtime_paths, msg_tx.clone(), Box::new(NoOpPlatformHandler));
+    let effect_runner = EffectRunner::new(
+        runtime_paths,
+        msg_tx.clone(),
+        Box::new(NoOpPlatformHandler),
+        Box::new(NoOpRuntimePersistenceSink),
+    );
     let shutdown_flag = Arc::new(AtomicBool::new(false));
 
     msg_tx

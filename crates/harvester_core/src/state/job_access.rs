@@ -80,7 +80,6 @@ impl AppState {
         self.reset_llm_requests();
         self.pre_triage = crate::pre_triage_filter::PreTriageSession::default();
         self.pre_triage_load_context = None;
-        self.pre_triage_load_progress = None;
 
         for entry in entries {
             let CompletedJobSnapshot {
@@ -164,12 +163,10 @@ impl AppState {
         }
 
         if let Some(entry) = self.pre_triage.entry_for_url(url) {
-            use crate::pre_triage_filter::{AutoVerdict, ManualDecision};
+            use crate::pre_triage_filter::AutoVerdict;
             let is_excluded = matches!(
-                (entry.auto_verdict, entry.manual_decision),
-                (AutoVerdict::HardExclude, None)
-                    | (AutoVerdict::Review, None)
-                    | (_, Some(ManualDecision::Exclude))
+                entry.auto_verdict,
+                AutoVerdict::HardExclude | AutoVerdict::Review
             );
             if is_excluded {
                 return (

@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 8,
+  "schema_version": 9,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -76,15 +76,7 @@
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
     "left_pane": {
-      "first_visible_job_id": 2,
-      "jobs_search_query": "",
-      "selected_jobs_visible_in_filter": false
-    },
-    "left_pane_header": {
-      "count_label": "1 jobs",
-      "scope_label": "Since checkpoint",
-      "state_label": null,
-      "title": "Jobs"
+      "jobs_search_query": ""
     },
     "llm_quota": {
       "label": "LLM calls unavailable",
@@ -112,7 +104,6 @@
       "stage": "Done",
       "tokens": 42
     },
-    "preview_header_text": null,
     "preview_source": "Fallback",
     "preview_text": {
       "byte_len": 155,

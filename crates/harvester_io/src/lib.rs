@@ -18,7 +18,10 @@ mod summary_cache_store;
 mod triage_cache_store;
 
 pub use blacklist_store::{default_blacklist_path, load_blacklist, save_blacklist};
-pub use effect_runner::{EffectRunner, NoOpPlatformHandler, PlatformEffectHandler};
+pub use effect_runner::{
+    EffectRunner, NoOpPlatformHandler, NoOpRuntimePersistenceSink, PlatformEffectHandler,
+    RuntimePersistenceSink,
+};
 pub use entity_index_store::{
     load_entity_index, save_entity_index, upsert_entry, EntityIndexPatch,
 };
@@ -27,9 +30,7 @@ pub use persistence::{
     load_window_size, persist_completed_jobs, persist_desktop_window_size, persist_runtime_state,
     persist_window_size, save_briefing_checkpoint, save_briefing_history,
 };
-pub use persistence_worker::{
-    requires_persistence_snapshot, PersistenceSnapshot, PersistenceWorker,
-};
+pub use persistence_worker::PersistenceWorker;
 pub use prompt_template_store::load_prompt_templates;
 pub use run_lock::{acquire_lock, LockGuard, LockIdentity, GUI_LOCK_IDENTITY};
 pub use runtime_paths::{default_sources_path, RuntimePaths, DEFAULT_SOURCES_FILENAME};

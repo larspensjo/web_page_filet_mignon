@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 8,
+  "schema_version": 9,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -70,15 +70,7 @@
     "job_list_mode": "Last24Hours",
     "last_paste_stats": null,
     "left_pane": {
-      "first_visible_job_id": 1,
-      "jobs_search_query": "",
-      "selected_jobs_visible_in_filter": false
-    },
-    "left_pane_header": {
-      "count_label": "2 jobs",
-      "scope_label": "Last 24 hours",
-      "state_label": null,
-      "title": "Jobs"
+      "jobs_search_query": ""
     },
     "llm_quota": {
       "label": "LLM calls unavailable",
@@ -93,7 +85,6 @@
     "poll_sources_enabled": true,
     "preview_context": null,
     "preview_header": null,
-    "preview_header_text": null,
     "preview_source": null,
     "preview_text": null,
     "queued_urls": [],

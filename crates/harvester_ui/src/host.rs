@@ -276,7 +276,6 @@ pub fn run(probe: bool) -> Result<(), String> {
                 app_state,
                 receiver,
                 state.clone(),
-                paths.clone(),
                 effect_runner,
             );
             Ok(())
@@ -774,6 +773,10 @@ fn prepare_state(
         llm_concurrency,
         &defaults,
         Box::new(PlatformHandler),
+        Box::new(PersistenceWorker::new(
+            paths.state_path.clone(),
+            paths.blacklist_path.clone(),
+        )),
         "OPENAI_API_KEY not set; LLM features disabled",
         None,
     )?;
@@ -796,7 +799,6 @@ fn start_driver(
     state: AppState,
     receiver: mpsc::Receiver<Msg>,
     host: HostState,
-    paths: RuntimePaths,
     effect_runner: EffectRunner,
 ) {
     let sender = host.sender.clone();
@@ -806,10 +808,6 @@ fn start_driver(
             thread::sleep(Duration::from_millis(75));
         }
     });
-    let persistence = Arc::new(Mutex::new(PersistenceWorker::new(
-        paths.state_path.clone(),
-        paths.blacklist_path.clone(),
-    )));
     let runner = Arc::new(Mutex::new(effect_runner));
     let driver_host = host.clone();
     let command_app = app.clone();
@@ -848,12 +846,6 @@ fn start_driver(
                     *snapshot.write().expect("snapshot lock") = Some(envelope.clone());
                     let _ = signal_app.emit("harvester://snapshot", envelope);
                 }
-            },
-            move |snapshot| {
-                persistence
-                    .lock()
-                    .expect("persistence lock")
-                    .enqueue(snapshot)
             },
             bodies,
             {

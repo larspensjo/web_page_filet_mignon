@@ -47,18 +47,14 @@ pub(super) fn domain_from_url(url: &str) -> String {
 }
 
 pub(super) fn map_job_filter_status(entry: &crate::ArticleFilterEntry) -> JobFilterStatus {
-    match entry.manual_decision {
-        Some(crate::ManualDecision::Exclude) => JobFilterStatus::ManuallyExcluded,
-        Some(crate::ManualDecision::Include) => JobFilterStatus::ManuallyIncluded,
-        None => match entry.auto_verdict {
-            crate::AutoVerdict::HardExclude => JobFilterStatus::HardExcluded {
-                reasons: entry.reasons.clone(),
-            },
-            crate::AutoVerdict::Review => JobFilterStatus::ReviewNeeded {
-                reasons: entry.reasons.clone(),
-            },
-            crate::AutoVerdict::Include => JobFilterStatus::AutoIncluded,
+    match entry.auto_verdict {
+        crate::AutoVerdict::HardExclude => JobFilterStatus::HardExcluded {
+            reasons: entry.reasons.clone(),
         },
+        crate::AutoVerdict::Review => JobFilterStatus::ReviewNeeded {
+            reasons: entry.reasons.clone(),
+        },
+        crate::AutoVerdict::Include => JobFilterStatus::AutoIncluded,
     }
 }
 

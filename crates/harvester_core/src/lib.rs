@@ -40,7 +40,7 @@ pub use briefing_snapshot::{
     build_briefing_snapshot, BriefingSnapshot, SnapshotArticle, BRIEFING_SNAPSHOT_BUDGET_BYTES,
 };
 pub use cache_utils::model_ids_compatible;
-pub use effect::{Effect, StopPolicy};
+pub use effect::{Effect, PersistenceSnapshot, StopPolicy};
 pub use entity_index::{EntityIndex, EntityIndexEntry};
 pub use harvester_engine::llm::SummaryEntities;
 pub use import_session::{ImportPhase, ImportSessionState};
@@ -96,9 +96,9 @@ pub use update::update;
 pub use view_model::{
     AppViewModel, ArchivePartialCoverageView, CategoryTrendView, DesktopJobListView,
     EntityLineView, IndirectLinkPhase, IndirectLinkSummary, InlineWarningView, JobFilterStatus,
-    JobListRowView, JobRowView, LeftPaneHeaderView, LeftPaneView, LinkRowView, LlmModelUsageView,
-    PreviewContextView, PreviewHeaderView, RightPaneView, ScoreBand, SelectedJobView,
-    SelectedJobVisibility, SignalCandidateOutcome, SignalCandidatePreviewView, SignalCandidateRow,
+    JobListRowView, JobRowView, LeftPaneView, LinkRowView, LlmModelUsageView, PreviewContextView,
+    PreviewHeaderView, RightPaneView, ScoreBand, SelectedJobView, SelectedJobVisibility,
+    SignalCandidateOutcome, SignalCandidatePreviewView, SignalCandidateRow,
     SignalCandidateRowState, StopFinishButtonState, TrendsTabView, TriageAnnotationView,
     DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, DESKTOP_JOB_LIST_MAX_ROWS,
     DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,

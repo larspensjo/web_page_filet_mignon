@@ -156,3 +156,21 @@ Consequences: The runtime prompt registry, metadata, and file-loading paths stay
 Prompt tuning would be a fresh implementation against a future UI.
 Refs: docs/plans/Plan.TauriDesktopUi.md (Phase 7); crates/harvester_core;
 crates/harvester_io
+
+## 2026-09-18 - Host persistence is a reducer-emitted effect
+Decision: Host runtime persistence is emitted by the pure reducer as a
+`PersistRuntimeState` effect and serviced by `EffectRunner`; hosts do not
+schedule state capture.
+Context: The desktop driver previously inspected messages, captured `AppState`,
+and handed snapshots directly to `PersistenceWorker`, leaving a second I/O path
+outside the common runner boundary.
+Consequences: The post-update snapshot travels with the effect, the runner owns
+an injected persistence sink, and normal hosts supply the existing debounced
+newest-wins worker while dry-run supplies a no-op sink. Dropping a runner flushes
+pending state in batch and tests; the desktop runner remains process-lifetime,
+so this change adds no desktop-exit flush and no new shutdown-loss window. Save
+timing remains equivalent for the previously persisted job and blacklist
+transitions.
+Refs: crates/harvester_core/src/effect.rs,
+crates/harvester_core/src/update/mod.rs,
+crates/harvester_io/src/effect_runner/, docs/Architecture.md

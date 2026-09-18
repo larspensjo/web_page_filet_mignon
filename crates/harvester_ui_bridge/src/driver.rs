@@ -7,9 +7,7 @@ use engine_logging::engine_error;
 use harvester_core::{
     AppState, AppViewModel, ArchiveTokenEstimates, Effect, Msg, SignalCandidateDialogDefault,
 };
-use harvester_io::{
-    host_bootstrap::pump_pre_triage_refresh, requires_persistence_snapshot, PersistenceSnapshot,
-};
+use harvester_io::host_bootstrap::pump_pre_triage_refresh;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -175,14 +173,13 @@ impl SnapshotCoalescer {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn run_driver<R, ES, CS, SS, PS, N>(
+pub fn run_driver<R, ES, CS, SS, N>(
     mut state: AppState,
     receiver: mpsc::Receiver<Msg>,
     reducer: R,
     mut effect_sink: ES,
     mut command_sink: CS,
     mut snapshot_sink: SS,
-    mut persistence_sink: PS,
     bodies: Arc<RwLock<BodyTable>>,
     mut now: N,
 ) -> DriverTermination
@@ -191,7 +188,6 @@ where
     ES: FnMut(Vec<Effect>),
     CS: FnMut(UiCommand),
     SS: FnMut(SnapshotSignal),
-    PS: FnMut(PersistenceSnapshot),
     N: FnMut() -> Duration,
 {
     let mut last_message_kind = "startup".to_string();
@@ -218,12 +214,8 @@ where
             messages.extend(receiver.try_iter());
             for message in messages {
                 last_message_kind = message_kind(&message);
-                let persist = requires_persistence_snapshot(&message);
                 let (next, effects) = reducer(state, message);
                 state = next;
-                if persist {
-                    persistence_sink(PersistenceSnapshot::capture(&state));
-                }
                 dispatch_effects(effects, &mut effect_sink, &mut command_sink);
             }
             let (next, effects, _) = pump_pre_triage_refresh(state);
@@ -238,7 +230,7 @@ where
                 state = next;
                 dispatch_effects(effects, &mut effect_sink, &mut command_sink);
             }
-            let view = Arc::new(state.desktop_view());
+            let view = Arc::new(state.view());
             if last_view.as_deref() != Some(view.as_ref()) {
                 if let Some((snapshot, table)) = coalescer.push(Arc::clone(&view), now()) {
                     *bodies.write().expect("body table lock") = table;
@@ -400,7 +392,6 @@ mod tests {
                 move |signal| {
                     let _ = signal_sender.send(signal);
                 },
-                |_| {},
                 Arc::new(RwLock::new(BodyTable::new())),
                 move || match driver_clock_calls.fetch_add(1, Ordering::SeqCst) {
                     0..=1 => Duration::ZERO,
@@ -459,7 +450,6 @@ mod tests {
             |_| {},
             |_| {},
             |signal| signals.push(signal),
-            |_| {},
             Arc::new(RwLock::new(BodyTable::new())),
             || Duration::ZERO,
         );
@@ -472,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn driver_persists_successful_job_completion_but_not_tick() {
+    fn driver_forwards_reducer_emitted_persistence_effect() {
         let (sender, receiver) = mpsc::channel();
         sender.send(Msg::tick_at(DateTime::UNIX_EPOCH)).unwrap();
         sender
@@ -485,18 +475,23 @@ mod tests {
             })
             .unwrap();
         drop(sender);
-        let mut persisted = 0;
+        let mut effects = Vec::new();
         let _ = run_driver(
             AppState::default(),
             receiver,
             harvester_core::update,
+            |emitted| effects.extend(emitted),
             |_| {},
             |_| {},
-            |_| {},
-            |_| persisted += 1,
             Arc::new(RwLock::new(BodyTable::new())),
             || Duration::from_millis(100),
         );
-        assert_eq!(persisted, 1);
+        assert_eq!(
+            effects
+                .iter()
+                .filter(|effect| matches!(effect, Effect::PersistRuntimeState { .. }))
+                .count(),
+            1
+        );
     }
 }

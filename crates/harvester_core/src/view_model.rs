@@ -120,14 +120,6 @@ pub struct PreviewHeaderView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LeftPaneHeaderView {
-    pub title: String,
-    pub scope_label: Option<String>,
-    pub count_label: Option<String>,
-    pub state_label: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum IndirectLinkPhase {
     Collecting,
     Ready,
@@ -256,10 +248,6 @@ pub const DEFAULT_WINDOW_HEIGHT: i32 = 720;
 pub struct LeftPaneView {
     /// Current Jobs-tab search query.
     pub jobs_search_query: String,
-    /// First job visible in the desktop job list.
-    pub first_visible_job_id: Option<JobId>,
-    /// Whether the selected job remains visible under the Jobs-tab filter.
-    pub selected_jobs_visible_in_filter: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -292,11 +280,9 @@ pub struct AppViewModel {
     pub raw_unprocessed_count: usize,
     pub preview_text: Option<String>,
     pub selected_job_id: Option<crate::JobId>,
-    pub left_pane_header: LeftPaneHeaderView,
     pub preview_header: Option<PreviewHeaderView>,
     pub preview_context: Option<PreviewContextView>,
     pub ai_warning_banner: Option<InlineWarningView>,
-    pub preview_header_text: Option<String>,
     pub preview_source: Option<PreviewContentKind>,
     pub briefing_generate_enabled: bool,
     pub next_item_enabled: bool,
@@ -349,16 +335,9 @@ impl Default for AppViewModel {
             raw_unprocessed_count: 0,
             preview_text: None,
             selected_job_id: None,
-            left_pane_header: LeftPaneHeaderView {
-                title: "Jobs".to_string(),
-                scope_label: None,
-                count_label: None,
-                state_label: None,
-            },
             preview_header: None,
             preview_context: None,
             ai_warning_banner: None,
-            preview_header_text: None,
             preview_source: None,
             briefing_generate_enabled: false,
             next_item_enabled: false,
@@ -632,8 +611,6 @@ impl SelectedJobView {
 pub enum JobFilterStatus {
     HardExcluded { reasons: Vec<FilterReason> },
     ReviewNeeded { reasons: Vec<FilterReason> },
-    ManuallyExcluded,
-    ManuallyIncluded,
     AutoIncluded,
 }
 

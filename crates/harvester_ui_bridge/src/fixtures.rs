@@ -37,7 +37,7 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     ];
     states
         .into_iter()
-        .map(|(name, state)| (name, project(&state.desktop_view()).0.with_generation(1)))
+        .map(|(name, state)| (name, project(&state.view()).0.with_generation(1)))
         .collect()
 }
 
@@ -140,7 +140,7 @@ fn idle_with_corpus(empty: &AppState) -> AppState {
     let second_request_id = request_id(&second_effects, PromptId::ArticleTriage, "second triage");
     let state = reduce(state, triage_success(second_request_id, 5));
 
-    let view = state.desktop_view();
+    let view = state.view();
     assert_eq!(
         view.desktop_job_list
             .rows
@@ -179,7 +179,7 @@ fn idle_last_24_hours(empty: &AppState) -> AppState {
             mode: JobListMode::Last24Hours,
         },
     );
-    let view = state.desktop_view();
+    let view = state.view();
     assert_eq!(view.desktop_job_list.mode, JobListMode::Last24Hours);
     assert_eq!(
         view.desktop_job_list
@@ -220,7 +220,7 @@ fn selected_fixture_state(empty: &AppState) -> AppState {
         Msg::BriefingCheckpointSet(Some("1970-01-01T00:00:01Z".into())),
     );
     let state = reduce(state, Msg::JobSelected { job_id: 1 });
-    let selected_view = state.desktop_view();
+    let selected_view = state.view();
     assert_eq!(selected_view.desktop_job_list.rows.len(), 1);
     assert!(matches!(
         selected_view
@@ -238,7 +238,7 @@ fn run_in_progress_with_failures() -> AppState {
     let state = add_llm_metadata(state);
     let state = reduce(state, Msg::PipelineRunRequested);
     let state = reduce(state, Msg::PipelineRunAdvance);
-    assert!(state.desktop_view().run_progress.run_active);
+    assert!(state.view().run_progress.run_active);
     state
 }
 
@@ -279,8 +279,8 @@ fn completed_run_state() -> AppState {
     state = reduce(state, signal_success(signal_request_id));
     state = reduce(state, Msg::PipelineRunAdvance);
     state = reduce(state, Msg::JobSelected { job_id });
-    assert!(state.desktop_view().run_completion_notice.is_some());
-    assert!(!state.desktop_view().signal_candidate_rows.is_empty());
+    assert!(state.view().run_completion_notice.is_some());
+    assert!(!state.view().signal_candidate_rows.is_empty());
     state
 }
 
@@ -370,14 +370,6 @@ fn prepared_article_state_with_source_failure(
         },
     );
     let (state, load_request_id) = triage_load_request(state);
-    let state = reduce(
-        state,
-        Msg::TriageArticlesLoadProgress {
-            request_id: load_request_id,
-            files_scanned: 0,
-            files_total: 1,
-        },
-    );
     let state = reduce(
         state,
         Msg::TriageArticlesLoaded {

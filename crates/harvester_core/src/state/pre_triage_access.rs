@@ -1,4 +1,4 @@
-use super::{AppState, JobId, PreTriageActionability, PreTriageLoadContext, PreTriageLoadProgress};
+use super::{AppState, JobId, PreTriageActionability, PreTriageLoadContext};
 use crate::pre_triage_coordinator::PreTriageRefreshReason;
 use crate::pre_triage_filter::{ArticleFilterKey, PreTriagePhase, PreTriageSession};
 use crate::triage::TriageSession;
@@ -74,7 +74,6 @@ impl AppState {
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
         if !matches!(pre_triage.phase(), PreTriagePhase::LoadingArticles) {
             self.pre_triage_load_context = None;
-            self.pre_triage_load_progress = None;
         }
         self.pre_triage = pre_triage;
         self.dirty = true;
@@ -83,40 +82,6 @@ impl AppState {
     pub(crate) fn set_pre_triage_load_context(&mut self, reason: PreTriageRefreshReason) {
         self.pre_triage_load_context = Some(PreTriageLoadContext { reason });
         self.dirty = true;
-    }
-
-    pub(crate) fn set_pre_triage_load_progress(
-        &mut self,
-        request_id: u64,
-        files_scanned: usize,
-        files_total: usize,
-    ) {
-        let progress = PreTriageLoadProgress {
-            request_id,
-            files_scanned,
-            files_total,
-        };
-        if self.pre_triage_load_progress != Some(progress) {
-            self.pre_triage_load_progress = Some(progress);
-            self.dirty = true;
-        }
-    }
-
-    pub(crate) fn clear_pre_triage_load_progress(&mut self) {
-        if self.pre_triage_load_progress.take().is_some() {
-            self.dirty = true;
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn pre_triage_load_progress(&self) -> Option<(usize, usize, u64)> {
-        self.pre_triage_load_progress.map(
-            |PreTriageLoadProgress {
-                 request_id,
-                 files_scanned,
-                 files_total,
-             }| { (files_scanned, files_total, request_id) },
-        )
     }
 
     pub fn is_pre_triage_reviewing(&self) -> bool {

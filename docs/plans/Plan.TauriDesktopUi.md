@@ -1972,8 +1972,9 @@ deferred to Run 3. The `left_pane_header`, `preview_header_text`,
 `left_pane.first_visible_job_id`, and
 `left_pane.selected_jobs_visible_in_filter` payload fields now have no frontend
 reader and are deferred to Run 4, along with deleting
-`pre_triage_load_progress` and `Msg::TriageArticlesLoadProgress` as further
-Win32 residue.
+`pre_triage_load_progress` and reviewing `Msg::TriageArticlesLoadProgress` as
+possible Win32 residue. Run 4 later confirmed that the message still drives the
+desktop run timeline and retained it.
 
 **Run 3 progress.** Run 3 deleted Prompt Lab, while retaining engine prompt
 loading and context-file runtime paths. Prompt-Lab-only template saving and
@@ -1985,6 +1986,19 @@ dead-payload sweep must include the now-unreachable
 variants (mapped in `state/link_helpers.rs` and surfaced in
 `frontend/src/ipc/types.ts`) plus the `Manually excluded` preview label in
 `preview.rs`.
+
+**Run 4 progress.** Run 4 moved runtime persistence onto a reducer-emitted
+effect serviced by `EffectRunner`; the bridge driver no longer captures state
+or schedules writes. The runner receives a host-selected persistence sink:
+normal hosts inject the debounced newest-wins worker, while dry-run injects a
+no-op sink and stays write-free. It removed the deferred desktop-dead payload,
+manual filter-status variants and label, and dead reducer-side pre-triage load
+progress state, while retaining the throttled progress message that drives the
+Loading articles progress bar and ETA. It also collapsed the now-identical view
+entry points, bumped IPC schema version 9, and regenerated the snapshot
+fixtures. Dropping the runner flushes a worker-backed sink in batch and tests;
+the desktop runner remains process-lifetime, so this introduces no new shutdown
+loss window but does not add an explicit desktop-exit flush.
 
 1. **Delete `crates/harvester_app` and remove it from BOTH `[workspace] members`
    and `[workspace] default-members` in the root `Cargo.toml`.** Both, in the same
@@ -2059,6 +2073,29 @@ than opening a blank window.
 but retained as compiled, tested domain state, while Prompt Lab is deleted
 outright — a tool whose real output is files that survive it independently does
 not need its editor preserved. Diary: `Type: Implementation` for the retirement.
+
+**Outcome — all eleven items landed across four runs; Phase 7 and this plan are
+complete.** The legacy desktop host, launch policy, and submodule are gone; the
+Tauri host is the supported desktop boundary. Core now has one desktop view
+projection and the IPC envelope carries no Win32-only geometry, headers,
+full-corpus list data, Prompt Lab state, briefing bodies, manual filter states,
+or reducer-side loader-progress state. The live loader-progress message remains
+because it activates the Loading articles stage and supplies intermediate
+counts to the desktop progress bar and ETA. Briefing remains compiled and
+tested domain state, while Prompt Lab and manual pre-triage overrides are
+deliberately deleted; old state files continue to tolerate the removed override
+field on read.
+
+Runtime persistence now follows the same pure reducer → effect → `EffectRunner`
+path as other I/O. The effect carries the post-update snapshot, and the runner
+forwards it to an injected sink. Normal hosts use the existing debounced worker;
+dry-run uses a no-op sink and writes no runtime state or blacklist. Runner drop
+flushes pending snapshots in batch and tests, while desktop exit retains its
+pre-existing process-lifetime behavior. This preserves the previous save
+triggers and coalescing semantics without a driver-scheduled capture. No further
+Phase 7 work is deliberately left undone; the separately recorded
+batch-versus-GUI lock and product re-enablement ideas remain future work, not
+retirement gaps.
 
 ## Coupled artifacts and documents
 

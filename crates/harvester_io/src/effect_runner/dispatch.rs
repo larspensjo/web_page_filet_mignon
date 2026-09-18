@@ -763,6 +763,9 @@ impl EffectRunner {
                     );
                 });
             }
+            Effect::PersistRuntimeState { snapshot } => {
+                self.persistence_sink.enqueue(snapshot);
+            }
 
             // --- Import saved webpages ---
             Effect::ImportSavedWebpages { dir, request_id } => {
