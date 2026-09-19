@@ -6,7 +6,9 @@ after [Review.ArchiveExportContract.md](../Review.ArchiveExportContract.md); eve
 was checked against the source and adopted, with the choices recorded inline. Phase 1 is
 implemented in the working tree (uncommitted, pending adoption). Phase 2 is carried out in
 `../AI_portfolio` and is recorded
-here so producer and consumer are read together.
+here so producer and consumer are read together. Phase 3 was rewritten on 2026-09-19 from the
+evidence of the first live schema-2 batch; it no longer waits for the Jev verdict and is not yet
+reviewed by the scraper side.
 
 Terms: "the scraper" is this repository; "the portfolio" is `../AI_portfolio`. Portfolio paths are
 written relative to that repository's root.
@@ -308,36 +310,229 @@ Verification, in two gates:
    the 11 September archive, so a before/after comparison on that batch depends on the scraper
    regenerating it with a `since` window; otherwise the first live batch is the test.
 
-## Phase 3 (sketch only, after the Jev verdict)
+## Phase 3 (scraper and portfolio): judgments the portfolio can use
 
-Not built by this plan. Listed so schema 2 leaves room for it.
+Rewritten 2026-09-19 after the first live schema-2 batch. The earlier sketch was gated on the
+Jev verdict. That gate is removed: the Jev experiment may end without a production change, and
+nothing below needs it. Every judgment here is specified as a field with a meaning, and is
+produced by whatever model the scraper already runs for triage and signal-candidate scoring. If
+a typed-judgment model is adopted later, it fills the same fields; the contract does not change.
 
-- **Ride-along article judgments**, each article-only and therefore scraper-side: `article_kind`
-  (issuer release, filing, trade rewrite, analyst target, price coverage, research study,
-  commentary); `primary_url` (code lists the article's outbound links, the model selects the
-  checkable primary or none; the scraper already harvests `linked/`); `legal_claim` and
-  `cites_report` flags. With Jev these are extra `noul`/`choice` questions in the existing call,
-  subject to the request-budget question left open in the experiment plan. With OpenAI they are
-  extra DTO fields. The portfolio maps `article_kind` plus `primary_url` to a Methodology tier in
-  code. These are additive fields within schema 2.
-- **Same-event judgment to replace the generated `signal_key`.** Jev cannot write a slug. Pairwise
-  "same underlying event" over candidates sharing an entity and a date window, merged in code,
-  yields a cluster id. Its scope and stability must be defined first (per archive, per corpus, or
-  stable across runs), and because a cluster id is not a slug the field's meaning changes: by
-  the contract's own rule that is a new field or a schema bump, not a silent reuse of
-  `signal_key`.
-- **Lens file.** The standing lens is recall-critical and should be screened upstream of the
-  priority filter, on every scraped article, but its text belongs to the portfolio. The portfolio
-  generates one small file — standing lens, tracked entity names, themes, the date and the
-  `Foundations.md` commit it was derived from — and the scraper reads it. It replaces the
-  hand-derived context in `contexts/article_signal_candidate.toml`, and joins `.sources.ron` under
-  the "keep the news scraper in sync" invariant in the portfolio's `Agents.md`.
-- **Tier naming.** When the lens file replaces the signal-candidate context, rename the scraper's
-  outlet scale (`SourceTier`, `Tier1`–`Tier3`, e.g. to an outlet class) end to end: context text,
-  model output field, persisted cache values (accept the old strings on load), the desktop job
-  list label and its fixtures. It collides with the portfolio's Methodology tiers. Resolve the
-  triage prompt's company "Tier 1"/"Tier 2" watchlist names in the same pass, since they are a
-  third "Tier" scale.
+Not built yet. Steps 3a to 3e are independent enough to ship one at a time, in this order.
+
+### What the first live batch showed
+
+One batch of 106 articles (fetched 12–19 September 2026), so indicative, not a measurement.
+
+- **`signal_key` grouped nothing.** 106 articles carried 106 distinct keys. One event produced
+  families of near-identical keys (five for the Rocket Lab and Iridium financing, four for
+  d-Matrix and NVLink Fusion), so the context's instruction to reuse one key per event across
+  outlets had no effect. The portfolio clustered by reading.
+- **Same-source retelling is the largest avoidable cost.** 26 articles sat behind 7 underlying
+  sources (one 8-K, one customer notice, one release, and so on). Ten of the 30 drops were
+  retellings.
+- **Reiteration against the portfolio's files was the largest drop class** (13 of 30). It needs
+  the portfolio's current state, so by the dividing rule it stays in the portfolio. Nothing in
+  this phase addresses it.
+- **Primaries were found and then refused.** The portfolio's agents located the filing or
+  release behind most load-bearing claims, and several fetches failed with HTTP 403 or an
+  unreachable docket. The obstacle was access more than discovery.
+- **Misses are invisible.** The priority-against-outcome table covers exported articles only.
+  Schema 2 says nothing about what the scraper held back.
+
+### Principles for this phase
+
+- **Additive within schema 2.** Every new value is a new optional header field or a new
+  name-keyed line in the index header. Readers ignore unknown fields. Index *rows* keep their
+  six columns: the portfolio's reader validates the column line and the column count exactly,
+  so a seventh column is a breaking change and would need `export_schema: 3`.
+- **Absent means unavailable.** Articles scored under an older context carry none of the new
+  fields until they are rescored. No backfill is required for correctness.
+- **One revision of the signal-candidate context.** Changing the model-facing context or its
+  output fields changes the context hash and invalidates every cached signal score. All changes
+  to that call (3c and the tier rename) therefore land in one revision, not one per field.
+- **Export never waits on a model and never fails because of one.** A judgment that is missing,
+  late or invalid at submit time is an absent field.
+- **Fields order the portfolio's work; none is evidence.** The Phase 2 rules stand: no field sets
+  a Methodology tier, priority is not a filter, and whether two reports are independent is
+  decided by the portfolio after it inspects the sources.
+- **Model output is untrusted until validated.** Each new field has a closed vocabulary or a
+  code-checked value (see each step), and an invalid value is dropped, not exported.
+
+### 3a. Make recall visible (no model)
+
+Add name-keyed lines to the index header, after `fetched_to`:
+
+```
+window_count: 412
+unexported_by_priority: {"5":0,"4":3,"3":41,"2":118,"1":96,"untriaged":48}
+```
+
+- `window_count` is the number of corpus articles that pass the export's `since` filter,
+  exported or not. `doc_count` stays the number exported.
+- `unexported_by_priority` is a compact JSON object on one line, counting the articles in the
+  window that were not exported, by triage priority, with `untriaged` for the rest. When the
+  export has no `since` bound both lines are omitted.
+- Reducer or exporter, whichever already holds the filtered set; no new state.
+
+This is the prerequisite for 3e: without it no later change can be shown to improve recall.
+Tests: golden index with and without a `since` bound; counts agree with the fixture corpus.
+
+### 3b. Event clusters
+
+New optional header field `event_cluster`: a positive integer, **scoped to this archive only**.
+Two documents with the same value are judged to report the same underlying event. The numbers
+carry no meaning across archives and are assigned in order of first appearance. A document
+judged alone gets its own number; a document not judged has no field.
+
+`signal_key` is kept unchanged for one cycle, because the portfolio's reader sorts on it. It is
+retired by a later schema bump once `event_cluster` has been used on several batches. The
+contract's rule holds: a cluster id is not a slug, so it is a new field, never a reuse of
+`signal_key`.
+
+Why per archive: the portfolio consumes one archive at a time, and recognising an event it has
+already logged needs its own ledger. A stable cross-run id would add state and a failure mode
+for a benefit that belongs on the other side of the boundary.
+
+Construction, cheapest first:
+
+1. **In code, no model.** Group documents that share a canonical `primary_url` (from 3c, when
+   present), and documents whose normalised titles are near-duplicates. This alone would have
+   caught most of the 26 retellings in the first batch, and it is deterministic.
+2. **One grouping judgment per candidate bucket.** Bucket the remaining documents by shared
+   entity (from `tags`, `themes` and the leading token of `signal_key`) within a date window of
+   a few days. For each bucket with more than one document, one model call receives the titles
+   and summaries and returns a partition of the document numbers. One call per bucket, not one
+   per pair. Buckets are small; the first batch would have needed on the order of twenty calls.
+3. **Validate in code.** The response must be a partition of exactly the bucket's document
+   numbers. Anything else discards that bucket's result and leaves those documents with the
+   step-1 grouping only.
+
+Timing is the open design question (see Open questions 5). The grouping depends on which
+documents are exported together, so it cannot be fully precomputed at scoring time. The
+preferred shape is to compute it when the export dialog opens, for the pinned selection, as an
+ordinary effect with a cache keyed by the sorted set of article content hashes in the bucket
+plus the grouping context hash. If results are not complete at submit, the export proceeds with
+what has arrived.
+
+Tests: step-1 grouping on fixtures sharing a primary and on near-duplicate titles; partition
+validation (missing number, extra number, duplicate number, non-integer); an invalid response
+leaves the step-1 grouping intact; numbering is stable for a fixed selection; the field is
+absent, not `0`, for unjudged documents.
+
+### 3c. One revision of the signal-candidate call
+
+All of the following change the model-facing context or its output, so they ship together and
+the cache is invalidated once.
+
+- **`article_kind`** — closed vocabulary, one value: `issuer_release`, `filing`,
+  `official_notice` (regulator, court, agency), `research_study`, `trade_report` (original
+  reporting), `relay` (restates one named statement, release or filing and adds no reporting),
+  `analyst_note` (rating or target change), `price_coverage`, `commentary`. `relay` is the kind
+  the first batch needed most: it is an article-only judgment and it marks the same-source
+  retellings directly. An unrecognised value is dropped.
+- **`primary_url`** — the checkable primary the article rests on, or absent. Code lists the
+  article's outbound links and the model selects one of them by index or selects none, so the
+  model never writes a URL. Whether the extracted article text still carries its outbound links
+  is unverified (Open questions 6); if it does not, the link list must be captured at extraction
+  time, which is a larger change.
+- **`legal_claim`** and **`cites_report`** — booleans, written `true` or `false`. `legal_claim`
+  marks a statement about a law, order, ruling, award or permit, which the portfolio must check
+  against the primary text. `cites_report` marks reliance on a named research report, which the
+  portfolio checks against its report register before treating it as net-new.
+- **Re-derive the context from the portfolio's `Foundations.md`.** The current
+  `contexts/article_signal_candidate.toml` is dated 2026-05-25 and the foundations were amended
+  on 2026-09-07 and 2026-09-12 (see Verified facts). The revision records the `Foundations.md`
+  commit it was derived from.
+- **Strengthen or drop the `signal_key` reuse instruction.** The model scores one article at a
+  time and cannot see other articles' keys, so "use the same key across outlets" cannot work as
+  written. Either drop the instruction, or state the key's construction rule tightly enough to
+  be reproducible (entity, then event type, then nothing else). With `event_cluster` in place
+  the key only needs to sort well.
+- **Tier naming.** Rename the scraper's outlet scale (`SourceTier`, `Tier1`–`Tier3`) to an
+  outlet class, end to end: context text, model output field, persisted cache values (accept the
+  old strings on load), the desktop job list label and its fixtures. It collides with the
+  portfolio's Methodology tiers. Resolve the triage prompt's company "Tier 1"/"Tier 2" watchlist
+  names in the same pass, since they are a third "Tier" scale. The outlet class stays
+  unexported, as decided in schema 2.
+
+The ride-along fields cost output tokens only; the call count does not change. Rescoring the
+cached corpus after the revision is not required: old articles simply lack the new fields.
+
+Tests: DTO validation for each vocabulary and for a link index out of range; golden export with
+each new field present, absent and `false`; old persisted tier strings load under the new name;
+a context-hash test that pins the single revision.
+
+### 3d. Primary text beside the article
+
+When `primary_url` is present and the scraper has fetched that page, add `primary_file`: the
+corpus-relative path of the harvested text (for example `linked/<name>.md`). The portfolio then
+reads a local file where its own tools would have met a 403.
+
+Two facts to establish first. The linked-page harvest exists in code, but `output/linked` held
+no files on 2026-09-19 against more than 10,000 article files, so it is either switched off or
+not reaching this corpus. And the value of the step rests on the scraper's fetcher reaching
+pages the portfolio's tools cannot. Check that directly before building: run the fetcher against
+the primaries the first batch could not open (the FCC public notice, the GAO docket, OpenAI's
+framework page and Rocket Lab's own release pages; the portfolio's 2026-09-19 batch
+comment in `SignalLog.md` lists them). If it does no better, stop after 3c; the URL alone is still
+useful.
+
+The harvested text is untrusted content like any article body. It is never inlined into the
+archive; the field is a path.
+
+### 3e. Standing-lens screen
+
+The standing lens is the portfolio's current question (for the first batch: neocloud credit). It
+is recall-critical, so it should be screened on every scraped article, upstream of the priority
+filter. Its text belongs to the portfolio and changes as often as every batch.
+
+- **Lens file, generated by the portfolio.** One small file: the standing lens as a few plain
+  sentences, the date, and the `Foundations.md` commit. The scraper reads it and never edits it.
+  It joins `.sources.ron` under the "keep the news scraper in sync" invariant in the
+  portfolio's `Agents.md`.
+- **A separate judgment with its own cache key.** The lens screen must not live inside the
+  signal-candidate context: the lens changes often, and there it would invalidate every cached
+  score on every change. It is its own small call (article summary plus lens text, yes or no),
+  cached by article content hash plus lens-text hash.
+- **Header field `lens_match: true|false`**, and a lens hit is exported even when it falls below
+  the priority cut. The index header gains `lens_hits_below_cut: <n>`, so 3a's counts show what
+  the screen added.
+- **Tracked entity names are not part of the lens file.** They already live in `.sources.ron`.
+  The portfolio instead gains a check that every tracked company file has a source key, which is
+  the drift its own invariant names.
+- **Hostile text.** The lens text goes into a model prompt, so the scraper treats the file as
+  input to validate: size cap, plain text, no marker lines. Article text is already untrusted.
+
+Build this only after 3a has run for a few batches, so there is a before to compare with.
+
+### Portfolio side, per step
+
+Each scraper step has a small counterpart in `../AI_portfolio`, carried out there:
+
+- 3a: the reader prints the window counts; the batch report's feedback table gains a line for
+  what was held back.
+- 3b: the reader sorts by `event_cluster` when present and falls back to `signal_key`; the skill
+  text says a shared cluster is a provisional same-event grouping and nothing more.
+- 3c: the reader shows `article_kind` and the two flags with `-Wide`. The skill may use
+  `article_kind` and `primary_url` to **propose** a tier, which the agent confirms only after
+  opening the artifact. The earlier sketch had the portfolio map these to a tier in code; that
+  contradicts the Phase 2 rule that no header field sets a tier, and a misclassified relay would
+  enter a file as Tier 1 unread.
+- 3d: the agent packet names `primary_file` paths, under the same trust boundary as bodies.
+- 3e: the portfolio writes the lens file at the end of each batch, in the step that records the
+  standing lens in the batch comment.
+
+After each scraper step, the shared fixtures gain the new fields and the portfolio runs
+`Invoke-Pester scripts/tests`.
+
+### Not in this phase
+
+- **Reiteration against the portfolio's files.** The largest drop class, and portfolio-side by
+  the dividing rule. If it is worth automating, it is a portfolio change: a check of each
+  cluster against `SignalLog.md` and the destination file before an agent reads the blocks.
+- **Replacing triage.** Whether another model replaces the current triage call is the Jev
+  experiment's question. This phase neither needs nor blocks it.
 
 ## Open questions
 
@@ -351,5 +546,20 @@ Not built by this plan. Listed so schema 2 leaves room for it.
    harm that motivated the rename (a scraper tier read as a Methodology tier) is already closed
    by not exporting `source_tier`; what remains is naming confusion. Renaming the model-facing
    field or context text changes the context hash and invalidates every cached signal score, so
-   it waits for the Phase 3 lens-file rewrite, which invalidates them anyway. See the Phase 3
-   "Tier naming" item.
+   it waits for the single signal-candidate context revision in Phase 3 step 3c, which
+   invalidates them anyway. (Revised 2026-09-19: the rename rides with 3c, not with the lens
+   file; the lens screen is a separate call precisely so that it does not touch that cache.)
+5. Open (3b): when is the grouping judgment computed? Preferred: when the export dialog opens,
+   for the pinned selection, as a cached effect, with the export proceeding on whatever has
+   arrived. To confirm against the effect system: that a dialog-scoped effect can be started
+   and abandoned cleanly, and where its results live in state. The alternative is a
+   code-only `event_cluster` (step 1 of 3b) with no model call at all; the first batch suggests
+   that alone recovers most of the value.
+6. Open (3c): does the extracted article text still carry its outbound links? If extraction
+   strips them, `primary_url` needs the link list captured at extraction time, and should be
+   planned as its own step after the rest of 3c.
+7. Open (3d): is the linked-page harvest switched on for this corpus (`output/linked` was empty
+   on 2026-09-19), and does the scraper's fetcher reach the primaries the portfolio's tools
+   could not? Both are checks, not builds, and 3d is dropped if the second answer is no.
+8. Open (3a): does the export path hold the full `since`-filtered set with triage state at
+   submit time, or only the pinned selection? `unexported_by_priority` needs the former.
