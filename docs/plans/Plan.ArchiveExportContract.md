@@ -3,9 +3,9 @@
 Written 2026-09-18 from the consumer side (the portfolio model, `../AI_portfolio`), and filed here
 because this repository produces the archive and therefore owns the contract. Revised 2026-09-19
 after [Review.ArchiveExportContract.md](../Review.ArchiveExportContract.md); every finding there
-was checked against the source and adopted, with the choices recorded inline. Nothing here is
-built yet. Phase 1 is a proposal: verify it against this repository's architecture, decision log
-and conventions before adopting it. Phase 2 is carried out in `../AI_portfolio` and is recorded
+was checked against the source and adopted, with the choices recorded inline. Phase 1 is
+implemented in the working tree (uncommitted, pending adoption). Phase 2 is carried out in
+`../AI_portfolio` and is recorded
 here so producer and consumer are read together.
 
 Terms: "the scraper" is this repository; "the portfolio" is `../AI_portfolio`. Portfolio paths are
@@ -124,11 +124,11 @@ Rules:
   value for it. A computed zero is written as `0`. A computed empty collection is written as `[]`.
   Triage status is inferred from `priority` alone; `triage_model` may be absent on a triaged
   article. Signal status is inferred from `signal_key` alone.
-- **Lists are JSON arrays on one line.** `["AI", "chips"]` and `["AI, chips"]` stay distinct.
+- **Lists are compact JSON arrays on one line.** `["AI","chips"]` and `["AI, chips"]` stay distinct.
   Elements are JSON-escaped, so quotes, CR, LF and reserved marker text inside a tag survive.
   Existing cache entries are exported as validated; no new tag grammar is imposed.
-- **Header values are one line.** The exporter strips CR and LF from every scalar value,
-  including `title`, and a scalar that would start with `=====` is prefixed with a space. A value
+- **Header values are one line.** The exporter strips CR, LF, U+0085, U+2028 and U+2029 from
+  every scalar value, including `title`, and a scalar that would start with `=====` is prefixed with a space. A value
   cannot forge a header line because the header ends at the first blank line and the body cannot
   contain an unescaped marker (next rule).
 - **Reserved marker lines are escaped in bodies.** The four markers `===== DOC START =====`,
@@ -176,9 +176,9 @@ doc | line | fetched_utc | priority | signal_key | title
 ```
 
 - `line` is the 1-based line of the block's `DOC START`, computed while the buffer is built.
-  Lines are LF-delimited; the exporter writes only LF, and readers must count LF, not CRLF
-  pairs, because a raw body may contain CR.
-- `-` marks an absent value; `|` inside a title is replaced by `/`.
+  Lines are LF-delimited; the exporter normalises CRLF and lone CR in bodies to LF and readers
+  count LF delimiters.
+- `-` marks an absent value; `|` inside a title or index `fetched_utc` is replaced by `/`.
 - `fetched_from` and `fetched_to` are the minimum and maximum over the emitted documents whose
   `fetched_utc` parses as RFC 3339. When no document parses, both are `-`. Unparseable
   timestamps still appear verbatim in their rows.
@@ -321,6 +321,12 @@ Not built by this plan. Listed so schema 2 leaves room for it.
   `Foundations.md` commit it was derived from — and the scraper reads it. It replaces the
   hand-derived context in `contexts/article_signal_candidate.toml`, and joins `.sources.ron` under
   the "keep the news scraper in sync" invariant in the portfolio's `Agents.md`.
+- **Tier naming.** When the lens file replaces the signal-candidate context, rename the scraper's
+  outlet scale (`SourceTier`, `Tier1`–`Tier3`, e.g. to an outlet class) end to end: context text,
+  model output field, persisted cache values (accept the old strings on load), the desktop job
+  list label and its fixtures. It collides with the portfolio's Methodology tiers. Resolve the
+  triage prompt's company "Tier 1"/"Tier 2" watchlist names in the same pass, since they are a
+  third "Tier" scale.
 
 ## Open questions
 
@@ -330,5 +336,9 @@ Not built by this plan. Listed so schema 2 leaves room for it.
 3. Resolved 2026-09-19: the trailing index is acceptable in-file. The scraper's only readers are
    the artifact-recognition and scan-exclusion paths, which gain the index-only signature. No
    sidecar.
-4. Should the scraper's tier scale be renamed (`outlet_class`) so the two "Tier 1"s stop colliding
-   in conversation, even though it is not exported?
+4. Resolved 2026-09-19: the scraper's tier scale will be renamed, but in Phase 3, not now. The
+   harm that motivated the rename (a scraper tier read as a Methodology tier) is already closed
+   by not exporting `source_tier`; what remains is naming confusion. Renaming the model-facing
+   field or context text changes the context hash and invalidates every cached signal score, so
+   it waits for the Phase 3 lens-file rewrite, which invalidates them anyway. See the Phase 3
+   "Tier naming" item.

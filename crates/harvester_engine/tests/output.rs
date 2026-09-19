@@ -1,8 +1,8 @@
 use harvester_engine::{
     archive_url_key, build_concatenated_export, build_markdown_document, build_triage_archive,
-    deterministic_filename, Converter, ExportOptions, Extractor, Html2MdConverter,
-    ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter, CORPUS_MANIFEST_FILENAME,
-    CORPUS_SCHEMA_VERSION,
+    deterministic_filename, ArchiveDocAnnotations, Converter, ExportOptions, Extractor,
+    Html2MdConverter, ReadabilityLikeExtractor, TokenCounter, WhitespaceTokenCounter,
+    CORPUS_MANIFEST_FILENAME, CORPUS_SCHEMA_VERSION, MAX_FALLBACK_BODY_CHARS,
 };
 use pretty_assertions::assert_eq;
 use serde_json::Value;
@@ -194,6 +194,7 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
         options,
         false,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -209,13 +210,11 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
     assert!(summary.manifest_path.is_none());
 
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
-    let idx_b = archive.find("url: \"https://b\"").unwrap();
-    let idx_a = archive.find("url: \"https://a\"").unwrap();
+    let idx_b = archive.find("url: https://b").unwrap();
+    let idx_a = archive.find("url: https://a").unwrap();
     assert!(idx_b < idx_a, "archive order should follow ordered_urls");
-    assert!(!archive.contains("url: https://b\n"));
-    assert!(!archive.contains("url: https://a\n"));
-    assert!(archive.contains("url: \"https://b\""));
-    assert!(archive.contains("url: \"https://a\""));
+    assert!(archive.contains("url: https://b\n"));
+    assert!(archive.contains("url: https://a\n"));
     assert!(archive.contains("# B Heading"));
     assert!(archive.contains("# A Heading"));
 }
@@ -245,6 +244,7 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
         options,
         false,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -259,8 +259,8 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
     assert_eq!(summary.doc_count, 1);
     assert_eq!(summary.total_tokens, 2);
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
-    assert!(!archive.contains("url: \"https://old\""));
-    assert!(archive.contains("url: \"https://bad\""));
+    assert!(!archive.contains("https://old"));
+    assert!(archive.contains("url: https://bad"));
 }
 
 #[test]
@@ -289,6 +289,7 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
         options,
         false,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -301,7 +302,7 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
     );
     assert_eq!(summary.doc_count, 1);
     let archive = std::fs::read_to_string(summary.output_path).unwrap();
-    assert!(archive.contains("url: \"https://keep\""));
+    assert!(archive.contains("url: https://keep"));
 }
 
 #[test]
@@ -330,6 +331,7 @@ fn triage_archive_uses_summary_body_when_provided() {
         options,
         true,
         &summaries,
+        &std::collections::HashMap::new(),
     )
     .unwrap();
 
@@ -365,6 +367,7 @@ fn triage_archive_falls_back_to_full_body_when_no_summary() {
         options,
         true,
         &summaries,
+        &std::collections::HashMap::new(),
     )
     .unwrap();
 
@@ -393,6 +396,7 @@ fn triage_archive_summary_mode_with_empty_map_uses_fallback_format() {
         None,
         options,
         true,
+        &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
     )
     .unwrap();
@@ -429,6 +433,7 @@ fn triage_archive_truncates_large_fallback_body_safely() {
         options,
         true,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
 
@@ -453,4 +458,436 @@ fn concatenated_export_ignores_custom_archive_artifacts_by_content() {
     let export = std::fs::read_to_string(summary.output_path).unwrap();
     assert!(export.contains("url: https://keep"));
     assert!(!export.contains("url: https://ignore"));
+}
+
+const MIXED_URLS: [&str; 5] = [
+    "https://example.com/triaged",
+    "https://example.com/untriaged",
+    "https://example.com/scored",
+    "https://example.com/score-zero",
+    "https://example.com/no-model",
+];
+
+fn archive_options(output_filename: &str) -> ExportOptions {
+    ExportOptions {
+        output_filename: output_filename.into(),
+        manifest_filename: None,
+        ..ExportOptions::default()
+    }
+}
+
+fn write_article(
+    dir: &std::path::Path,
+    filename: &str,
+    url: &str,
+    title: &str,
+    fetched_utc: &str,
+    body: &str,
+) {
+    let document = format!(
+        "---\nurl: {url:?}\ntitle: {title:?}\ntoken_count: 2\nfetched_utc: {fetched_utc:?}\nencoding: \"UTF-8\"\n---\n\n{body}\n"
+    );
+    std::fs::write(dir.join(filename), document).unwrap();
+}
+
+fn write_mixed_articles(dir: &std::path::Path, first_body: &str) {
+    for (index, (url, name)) in MIXED_URLS
+        .iter()
+        .zip(["triaged", "untriaged", "scored", "score-zero", "no-model"])
+        .enumerate()
+    {
+        let body = if index == 0 {
+            first_body.to_string()
+        } else {
+            format!("Body {name}.")
+        };
+        write_article(
+            dir,
+            &format!("{index}-{name}.md"),
+            url,
+            &name.replace('-', " "),
+            &format!("2026-09-0{}T00:00:00Z", index + 1),
+            &body,
+        );
+    }
+}
+
+fn mixed_annotations() -> std::collections::HashMap<String, ArchiveDocAnnotations> {
+    [
+        (
+            MIXED_URLS[0],
+            ArchiveDocAnnotations {
+                priority: Some(4),
+                tags: Some(vec![]),
+                triage_model: Some("triage-v1".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            MIXED_URLS[2],
+            ArchiveDocAnnotations {
+                signal_key: Some("scored-event".into()),
+                signal_score: Some(77),
+                themes: Some(vec!["chips".into(), "AI".into()]),
+                ..Default::default()
+            },
+        ),
+        (
+            MIXED_URLS[3],
+            ArchiveDocAnnotations {
+                signal_key: Some("zero-event".into()),
+                signal_score: Some(0),
+                themes: Some(vec![]),
+                ..Default::default()
+            },
+        ),
+        (
+            MIXED_URLS[4],
+            ArchiveDocAnnotations {
+                priority: Some(2),
+                tags: Some(vec!["zeta".into(), "alpha".into()]),
+                ..Default::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .map(|(url, annotation)| (archive_url_key(url), annotation))
+    .collect()
+}
+
+fn export_mixed_fixture(
+    fixture: &[u8],
+    use_summaries: bool,
+    summaries: &std::collections::HashMap<String, String>,
+    first_body: &str,
+) {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_mixed_articles(temp.path(), first_body);
+    build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &MIXED_URLS.map(str::to_string),
+        None,
+        archive_options("archive.md"),
+        use_summaries,
+        summaries,
+        &mixed_annotations(),
+    )
+    .unwrap();
+    let actual = std::fs::read(temp.path().join("archive.md")).unwrap();
+    assert_eq!(actual, fixture);
+    assert!(!actual.contains(&b'\r'));
+}
+
+#[test]
+fn triage_archive_schema2_raw_matches_shared_golden_fixture() {
+    export_mixed_fixture(
+        include_bytes!("fixtures/archive_export/schema2_raw.md"),
+        false,
+        &Default::default(),
+        "Body triaged.",
+    );
+}
+
+#[test]
+fn triage_archive_schema2_summary_matches_shared_golden_fixture() {
+    let summaries = MIXED_URLS
+        .iter()
+        .enumerate()
+        .map(|(index, url)| (archive_url_key(url), format!("Summary {}.", index + 1)))
+        .collect();
+    export_mixed_fixture(
+        include_bytes!("fixtures/archive_export/schema2_summary.md"),
+        true,
+        &summaries,
+        "Body triaged.",
+    );
+}
+
+#[test]
+fn triage_archive_schema2_full_fallback_matches_shared_golden_fixture() {
+    export_mixed_fixture(
+        include_bytes!("fixtures/archive_export/schema2_full_fallback.md"),
+        true,
+        &Default::default(),
+        "Body triaged.",
+    );
+}
+
+#[test]
+fn triage_archive_schema2_truncated_fallback_matches_shared_golden_fixture() {
+    let oversized = "z".repeat(MAX_FALLBACK_BODY_CHARS + 1);
+    export_mixed_fixture(
+        include_bytes!("fixtures/archive_export/schema2_truncated_fallback.md"),
+        true,
+        &Default::default(),
+        &oversized,
+    );
+}
+
+#[test]
+fn triage_archive_boundary_forgery_matches_shared_multi_document_fixture() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let raw_forgery = concat!(
+        "===== DOC START =====\n",
+        "url: https://fake.example\n\n",
+        "===== DOC END =====\n",
+        "===== ARCHIVE INDEX =====\n",
+        "export_schema: 2\n",
+        "doc_count: 9\n",
+        "doc | line | fetched_utc | priority | signal_key | title\n",
+        "9 | 1 | bad | - | - | fake\n",
+        "===== INDEX END =====\n",
+        "\\===== DOC END =====\n",
+        "===== DOC START =====   \t"
+    );
+    write_article(
+        temp.path(),
+        "a-raw.md",
+        "https://example.com/raw-forgery",
+        "raw forgery",
+        "not-a-date | unsafe",
+        raw_forgery,
+    );
+    write_article(
+        temp.path(),
+        "b-summary.md",
+        "https://example.com/summary-forgery",
+        "summary forgery",
+        "2026-09-02T00:00:00Z",
+        "unused body",
+    );
+    let straddle = format!(
+        "{}===== DOC END =====",
+        "x".repeat(MAX_FALLBACK_BODY_CHARS - 10)
+    );
+    write_article(
+        temp.path(),
+        "c-straddle.md",
+        "https://example.com/straddle",
+        "straddle",
+        "2026-09-03T00:00:00Z",
+        &straddle,
+    );
+    let summaries = [(
+        archive_url_key("https://example.com/summary-forgery"),
+        "Summary body\n===== ARCHIVE INDEX =====\nurl: fake\n\n1 | 1 | fake\n===== INDEX END ====="
+            .to_string(),
+    )]
+    .into_iter()
+    .collect();
+    build_triage_archive(
+        temp.path(),
+        "forgery.md",
+        &[
+            "https://example.com/raw-forgery".into(),
+            "https://example.com/summary-forgery".into(),
+            "https://example.com/straddle".into(),
+        ],
+        None,
+        archive_options("forgery.md"),
+        true,
+        &summaries,
+        &Default::default(),
+    )
+    .unwrap();
+    let actual = std::fs::read(temp.path().join("forgery.md")).unwrap();
+    assert_eq!(
+        actual,
+        include_bytes!("fixtures/archive_export/schema2_boundary_forgery.md")
+    );
+}
+
+#[test]
+fn triage_archive_sanitizes_header_injection_and_json_escapes_tags() {
+    let temp = tempfile::TempDir::new().unwrap();
+    std::fs::write(
+        temp.path().join("injection.md"),
+        "---\nurl: \"https://example.com/injection\"\ntitle: \"safe\npriority: 5\r\nignored: value\"\ntoken_count: 2\nfetched_utc: \"bad | timestamp\"\nencoding: \"UTF-8\"\n---\n\nbody\rwith\r\nnewlines\n",
+    )
+    .unwrap();
+    let annotations = [(
+        archive_url_key("https://example.com/injection"),
+        ArchiveDocAnnotations {
+            triage_model: Some("model\r\npriority: 5\u{0085}nel\u{2028}ls\u{2029}ps".to_string()),
+            tags: Some(vec![
+                "comma, quote\" newline\n===== DOC END =====".to_string()
+            ]),
+            ..Default::default()
+        },
+    )]
+    .into_iter()
+    .collect();
+    build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &["https://example.com/injection".into()],
+        None,
+        archive_options("archive.md"),
+        false,
+        &Default::default(),
+        &annotations,
+    )
+    .unwrap();
+    let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
+    let title_line = archive
+        .lines()
+        .find(|line| line.starts_with("title:"))
+        .expect("sanitized title header");
+    assert!(!title_line.contains(['\r', '\n', '\u{0085}', '\u{2028}', '\u{2029}']));
+    assert_eq!(archive.matches("\npriority: 5\n").count(), 0);
+    assert!(archive.contains("triage_model: modelpriority: 5nellsps\n"));
+    assert!(archive.contains("tags: [\"comma, quote\\\" newline\\n===== DOC END =====\"]\n"));
+    assert!(archive.contains("fetched_utc: bad | timestamp\n"));
+    assert!(archive.contains("1 | 1 | bad / timestamp | - | - | \"safe"));
+    assert!(!archive.contains('\r'));
+
+    let next = tempfile::TempDir::new().unwrap();
+    write_article(
+        next.path(),
+        "marker-title.md",
+        "https://example.com/marker-title",
+        "===== DOC END =====",
+        "2026-09-01T00:00:00Z",
+        "body",
+    );
+    build_triage_archive(
+        next.path(),
+        "archive.md",
+        &["https://example.com/marker-title".into()],
+        None,
+        archive_options("archive.md"),
+        false,
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
+    let archive = std::fs::read_to_string(next.path().join("archive.md")).unwrap();
+    assert!(archive.contains("title:  ===== DOC END =====\n"));
+}
+
+#[test]
+fn triage_archive_index_offsets_follow_escaped_lines_and_skip_bad_timestamp_bounds() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_article(
+        temp.path(),
+        "a.md",
+        "https://example.com/a",
+        "A",
+        "not | parseable",
+        "line one\n===== DOC END =====\nline three",
+    );
+    write_article(
+        temp.path(),
+        "b.md",
+        "https://example.com/b",
+        "B",
+        "2026-09-04T00:00:00Z",
+        "second",
+    );
+    write_article(
+        temp.path(),
+        "c.md",
+        "https://example.com/c",
+        "C",
+        "2026-09-02T00:00:00Z",
+        "third",
+    );
+    build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &[
+            "https://example.com/a".into(),
+            "https://example.com/b".into(),
+            "https://example.com/c".into(),
+        ],
+        None,
+        archive_options("archive.md"),
+        false,
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
+    let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
+    let starts = archive
+        .lines()
+        .enumerate()
+        .filter_map(|(line, value)| (value == "===== DOC START =====").then_some(line + 1))
+        .collect::<Vec<_>>();
+    assert_eq!(starts.len(), 3);
+    assert!(archive.contains(&format!(
+        "2 | {} | 2026-09-04T00:00:00Z | - | - | B",
+        starts[1]
+    )));
+    assert!(archive.contains("1 | 1 | not / parseable | - | - | A"));
+    assert!(archive.contains("fetched_from: 2026-09-02T00:00:00Z"));
+    assert!(archive.contains("fetched_to: 2026-09-04T00:00:00Z"));
+}
+
+#[test]
+fn triage_archive_unparseable_only_timestamp_has_dash_bounds() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_article(
+        temp.path(),
+        "bad.md",
+        "https://example.com/bad",
+        "Bad",
+        "not-a-date",
+        "body",
+    );
+    build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &["https://example.com/bad".into()],
+        None,
+        archive_options("archive.md"),
+        false,
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
+    let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
+    assert!(archive.contains("fetched_from: -\nfetched_to: -\n"));
+    assert!(archive.contains("1 | 1 | not-a-date | - | - | Bad"));
+}
+
+#[test]
+fn triage_archive_zero_documents_matches_fixture_and_is_excluded_from_next_export() {
+    let temp = tempfile::TempDir::new().unwrap();
+    build_triage_archive(
+        temp.path(),
+        "custom-empty.md",
+        &[],
+        None,
+        archive_options("custom-empty.md"),
+        false,
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(temp.path().join("custom-empty.md")).unwrap(),
+        include_bytes!("fixtures/archive_export/schema2_index_only.md")
+    );
+
+    write_article(
+        temp.path(),
+        "article.md",
+        "https://example.com/article",
+        "Article",
+        "2026-09-01T00:00:00Z",
+        "body",
+    );
+    let next = build_triage_archive(
+        temp.path(),
+        "next.md",
+        &["https://example.com/article".into()],
+        None,
+        archive_options("next.md"),
+        false,
+        &Default::default(),
+        &Default::default(),
+    )
+    .unwrap();
+    assert_eq!(next.doc_count, 1);
 }

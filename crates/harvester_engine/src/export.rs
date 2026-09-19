@@ -12,7 +12,30 @@ use crate::persist::{ensure_output_dir, AtomicFileWriter, PersistError};
 use crate::truncate_to_char_boundary;
 
 /// Maximum character count for full-article fallback bodies in summary mode.
-const MAX_FALLBACK_BODY_CHARS: usize = 50_000;
+pub const MAX_FALLBACK_BODY_CHARS: usize = 50_000;
+
+const DOC_START_MARKER: &str = "===== DOC START =====";
+const DOC_END_MARKER: &str = "===== DOC END =====";
+const ARCHIVE_INDEX_MARKER: &str = "===== ARCHIVE INDEX =====";
+const INDEX_END_MARKER: &str = "===== INDEX END =====";
+const RESERVED_MARKERS: [&str; 4] = [
+    DOC_START_MARKER,
+    DOC_END_MARKER,
+    ARCHIVE_INDEX_MARKER,
+    INDEX_END_MARKER,
+];
+
+/// Per-document judgments supplied by the reducer at archive submission time.
+/// All fields are optional because scoring and triage may not have completed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ArchiveDocAnnotations {
+    pub priority: Option<u8>,
+    pub tags: Option<Vec<String>>,
+    pub triage_model: Option<String>,
+    pub signal_key: Option<String>,
+    pub signal_score: Option<u8>,
+    pub themes: Option<Vec<String>>,
+}
 
 #[derive(Debug, Clone)]
 pub struct ExportOptions {
@@ -58,7 +81,6 @@ struct DocMeta {
     fetched_utc: String,
     token_count: Option<u32>,
     body: String,
-    raw_content: String,
     filename: String,
 }
 
@@ -127,6 +149,7 @@ pub fn build_concatenated_export(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_triage_archive(
     output_dir: &Path,
     basename: &str,
@@ -135,6 +158,7 @@ pub fn build_triage_archive(
     options: ExportOptions,
     use_summaries: bool,
     summaries: &HashMap<String, String>,
+    annotations: &HashMap<String, ArchiveDocAnnotations>,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     write_corpus_manifest(output_dir)?;
@@ -176,59 +200,49 @@ pub fn build_triage_archive(
     }
 
     let mut buffer = String::new();
+    let mut index_rows = Vec::new();
+    let mut parsed_fetched = Vec::new();
     let mut total_tokens: u64 = 0;
-    for doc in &docs {
+    let mut lines_written = 0usize;
+    for (position, doc) in docs.iter().enumerate() {
         if let Some(t) = doc.token_count {
             total_tokens += t as u64;
         }
-        buffer.push_str(&options.delimiter_start);
+        let line = lines_written + 1;
+        let block_start = buffer.len();
+        buffer.push_str(DOC_START_MARKER);
         buffer.push('\n');
-
-        if !use_summaries {
-            buffer.push_str(&doc.raw_content);
-            if !doc.raw_content.ends_with('\n') {
-                buffer.push('\n');
-            }
+        let normalized = archive_url_key(&doc.url);
+        let annotation = annotations.get(&normalized);
+        let (content_label, body) = if !use_summaries {
+            ("full", doc.body.trim_end().to_string())
+        } else if let Some(summary_body) = summaries.get(&normalized) {
+            ("summary", summary_body.trim_end().to_string())
         } else {
-            let normalized = archive_url_key(&doc.url);
-            if let Some(summary_body) = summaries.get(&normalized) {
-                buffer.push_str(&format!(
-                    "url: {}\ntitle: {}\ntokens: {}\nfetched_utc: {}\nfilename: {}\ncontent: summary\n\n",
-                    doc.url,
-                    doc.title,
-                    doc.token_count.unwrap_or(0),
-                    doc.fetched_utc,
-                    doc.filename,
-                ));
-                buffer.push_str(summary_body.trim_end());
-                buffer.push('\n');
+            let full_body = doc.body.trim_end();
+            let truncated = truncate_to_char_boundary(full_body, MAX_FALLBACK_BODY_CHARS);
+            let content_label = if full_body.chars().count() > MAX_FALLBACK_BODY_CHARS {
+                "full-truncated"
             } else {
-                let body = doc.body.trim_end();
-                let truncated = truncate_to_char_boundary(body, MAX_FALLBACK_BODY_CHARS);
-                let was_truncated = body.chars().count() > MAX_FALLBACK_BODY_CHARS;
-                let content_label = if was_truncated {
-                    "full-truncated"
-                } else {
-                    "full"
-                };
-                buffer.push_str(&format!(
-                    "url: {}\ntitle: {}\ntokens: {}\nfetched_utc: {}\nfilename: {}\ncontent: {content_label}\n\n",
-                    doc.url,
-                    doc.title,
-                    doc.token_count.unwrap_or(0),
-                    doc.fetched_utc,
-                    doc.filename,
-                ));
-                buffer.push_str(truncated);
-                buffer.push('\n');
-            }
-        }
-        if !buffer.ends_with('\n') {
-            buffer.push('\n');
-        }
-        buffer.push_str(&options.delimiter_end);
+                "full"
+            };
+            (content_label, truncated.to_string())
+        };
+        write_archive_header(&mut buffer, doc, position + 1, content_label, annotation);
+        buffer.push_str(&escape_archive_body(&body));
+        buffer.push('\n');
+        buffer.push_str(DOC_END_MARKER);
         buffer.push_str("\n\n");
+        lines_written += buffer[block_start..]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count();
+        if let Ok(parsed) = DateTime::parse_from_rfc3339(&doc.fetched_utc) {
+            parsed_fetched.push((parsed.with_timezone(&Utc), doc.fetched_utc.clone()));
+        }
+        index_rows.push((position + 1, line, doc, annotation));
     }
+    write_archive_index(&mut buffer, &index_rows, &parsed_fetched);
 
     let output_path = write_export_file(output_dir, basename, &buffer)?;
     let manifest_path =
@@ -290,7 +304,10 @@ fn is_archive_artifact(path: &Path, output_dir: &Path, output_filename: &str) ->
         return true;
     }
     fs::read(path)
-        .map(|bytes| bytes.starts_with(b"===== DOC START ====="))
+        .map(|bytes| {
+            bytes.starts_with(DOC_START_MARKER.as_bytes())
+                || bytes.starts_with(ARCHIVE_INDEX_MARKER.as_bytes())
+        })
         .unwrap_or(false)
 }
 
@@ -372,7 +389,117 @@ fn parse_doc(content: &str, filename: &str) -> Result<DocMeta, ExportError> {
         fetched_utc: fetched,
         token_count: fields.token_count,
         body,
-        raw_content: content.to_string(),
         filename: filename.to_string(),
     })
+}
+
+fn write_archive_header(
+    buffer: &mut String,
+    doc: &DocMeta,
+    position: usize,
+    content: &str,
+    annotations: Option<&ArchiveDocAnnotations>,
+) {
+    use std::fmt::Write;
+    let _ = writeln!(buffer, "url: {}", sanitize_scalar(&doc.url));
+    let _ = writeln!(buffer, "title: {}", sanitize_scalar(&doc.title));
+    let _ = writeln!(buffer, "tokens: {}", doc.token_count.unwrap_or(0));
+    let _ = writeln!(buffer, "fetched_utc: {}", sanitize_scalar(&doc.fetched_utc));
+    let _ = writeln!(buffer, "filename: {}", sanitize_scalar(&doc.filename));
+    let _ = writeln!(buffer, "content: {content}");
+    buffer.push_str("export_schema: 2\n");
+    let _ = writeln!(buffer, "doc: {position}");
+    if let Some(annotations) = annotations {
+        if let Some(priority) = annotations.priority {
+            let _ = writeln!(buffer, "priority: {priority}");
+        }
+        if let Some(tags) = &annotations.tags {
+            let _ = writeln!(buffer, "tags: {}", json_list(tags));
+        }
+        if let Some(model) = &annotations.triage_model {
+            let _ = writeln!(buffer, "triage_model: {}", sanitize_scalar(model));
+        }
+        if let Some(signal_key) = &annotations.signal_key {
+            let _ = writeln!(buffer, "signal_key: {}", sanitize_scalar(signal_key));
+        }
+        if let Some(score) = annotations.signal_score {
+            let _ = writeln!(buffer, "signal_score: {score}");
+        }
+        if let Some(themes) = &annotations.themes {
+            let _ = writeln!(buffer, "themes: {}", json_list(themes));
+        }
+    }
+    buffer.push('\n');
+}
+
+fn json_list(values: &[String]) -> String {
+    let mut sorted = values.to_vec();
+    sorted.sort();
+    serde_json::to_string(&sorted).expect("strings always serialize as JSON")
+}
+
+fn sanitize_scalar(value: &str) -> String {
+    let mut sanitized = value.replace(['\r', '\n', '\u{0085}', '\u{2028}', '\u{2029}'], "");
+    if sanitized.starts_with("=====") {
+        sanitized.insert(0, ' ');
+    }
+    sanitized
+}
+
+fn escape_archive_body(body: &str) -> String {
+    body.replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .lines()
+        .map(|line| {
+            let stripped = line.trim_start_matches('\\').trim_end();
+            if RESERVED_MARKERS.contains(&stripped) {
+                format!("\\{line}")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn write_archive_index(
+    buffer: &mut String,
+    rows: &[(usize, usize, &DocMeta, Option<&ArchiveDocAnnotations>)],
+    parsed_fetched: &[(DateTime<Utc>, String)],
+) {
+    use std::fmt::Write;
+    let fetched_from = parsed_fetched
+        .iter()
+        .min_by_key(|(date, _)| *date)
+        .map(|(_, original)| original.as_str())
+        .unwrap_or("-");
+    let fetched_to = parsed_fetched
+        .iter()
+        .max_by_key(|(date, _)| *date)
+        .map(|(_, original)| original.as_str())
+        .unwrap_or("-");
+    buffer.push_str(ARCHIVE_INDEX_MARKER);
+    buffer.push_str("\nexport_schema: 2\n");
+    let _ = writeln!(buffer, "doc_count: {}", rows.len());
+    let _ = writeln!(buffer, "fetched_from: {fetched_from}");
+    let _ = writeln!(buffer, "fetched_to: {fetched_to}");
+    buffer.push_str("doc | line | fetched_utc | priority | signal_key | title\n");
+    for (doc, line, meta, annotation) in rows {
+        let priority = annotation
+            .and_then(|annotation| annotation.priority)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let signal_key = annotation
+            .and_then(|annotation| annotation.signal_key.as_deref())
+            .map(sanitize_scalar)
+            .unwrap_or_else(|| "-".to_string());
+        let title = sanitize_scalar(&meta.title).replace('|', "/");
+        let fetched_utc = sanitize_scalar(&meta.fetched_utc).replace('|', "/");
+        let _ = writeln!(
+            buffer,
+            "{doc} | {line} | {fetched_utc} | {priority} | {signal_key} | {title}"
+        );
+    }
+    buffer.push_str(INDEX_END_MARKER);
+    buffer.push('\n');
 }

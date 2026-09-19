@@ -84,6 +84,80 @@ fn triage_completion_backfills_one_slot() {
 }
 
 #[test]
+fn fresh_triage_completion_records_snapshot_model_provenance() {
+    init_logging();
+    let (state, effects) = start_triage_for_test(AppState::new(), loaded_triage_articles(1));
+    let request_id = request_id_for_prompt(
+        &effects,
+        harvester_engine::llm::prompt::PromptId::ArticleTriage,
+    )
+    .expect("triage request");
+    let (state, _) = update(state, triage_success(request_id));
+
+    assert_eq!(
+        state.triage().triage_model_for_url("https://example.com/0"),
+        Some("test-model")
+    );
+}
+
+#[test]
+fn key_unavailable_triage_completion_exports_priority_without_model_provenance() {
+    use harvester_engine::archive_url_key;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let article = crate::briefing::LoadedArticle {
+        url: "https://example.com/no-key".to_string(),
+        source_title: None,
+        prepared_text: "article content".to_string(),
+        content_hash: String::new(),
+        fetched_utc: None,
+    };
+    let mut state = prime_llm_metadata(AppState::new());
+    let mut triage = crate::triage::TriageSession::new_loading(None);
+    triage.set_articles(vec![article]);
+    triage.transition_to_triaging();
+    state.set_triage(triage);
+    state.start_triage_cache_run();
+    state.mark_triage_metadata_ready();
+    let mut effects = Vec::new();
+    crate::update::triage::dispatch_next_triage_step(&mut state, &mut effects);
+    let request_id =
+        request_id_for_prompt(&effects, PromptId::ArticleTriage).expect("triage request");
+    let (state, _) = update(state, triage_success(request_id));
+    assert_eq!(
+        state
+            .triage()
+            .triage_model_for_url("https://example.com/no-key"),
+        None
+    );
+
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let archive_request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id: archive_request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+    let annotations = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested { annotations, .. } => Some(annotations),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    let annotation = &annotations[&archive_url_key("https://example.com/no-key")];
+    assert_eq!(annotation.priority, Some(3));
+    assert!(annotation.triage_model.is_none());
+}
+
+#[test]
 fn triage_out_of_order_completion_routes_correctly() {
     init_logging();
     let mut state = AppState::new();

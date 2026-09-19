@@ -1,5 +1,6 @@
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
+use harvester_engine::{archive_url_key, ArchiveDocAnnotations};
 
 pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
     let request_id = state.allocate_next_archive_request_id();
@@ -165,6 +166,7 @@ pub(super) fn handle_dialog_submitted(
     } else {
         std::collections::HashMap::new()
     };
+    let annotations = build_annotation_map(state, &ordered_urls);
     let mut effects = vec![Effect::ArchiveRequested {
         request_id,
         basename,
@@ -173,6 +175,7 @@ pub(super) fn handle_dialog_submitted(
         requested_checkpoint,
         use_summaries,
         summaries,
+        annotations,
     }];
     let had_signal_candidate_overrides = !state.signal_candidate().excluded().is_empty();
     if set_checkpoint && had_signal_candidate_overrides {
@@ -189,6 +192,36 @@ pub(super) fn handle_dialog_submitted(
         state.mark_dirty();
     }
     effects
+}
+
+fn build_annotation_map(
+    state: &AppState,
+    ordered_urls: &[String],
+) -> std::collections::HashMap<String, ArchiveDocAnnotations> {
+    let signal_results: std::collections::HashMap<_, _> =
+        state.signal_candidate().iter_completed().collect();
+    let mut annotations = std::collections::HashMap::new();
+    for url in ordered_urls {
+        let key = archive_url_key(url);
+        let mut annotation = ArchiveDocAnnotations::default();
+        if let Some(result) = state.triage().result_for_url(url) {
+            annotation.priority = Some(result.priority);
+            annotation.tags = Some(result.tags.clone());
+            annotation.triage_model = state
+                .triage()
+                .triage_model_for_url(url)
+                .map(ToOwned::to_owned);
+        }
+        if let Some(result) = signal_results.get(url.as_str()) {
+            annotation.signal_key = Some(result.signal_key.clone());
+            annotation.signal_score = Some(result.signal_score);
+            annotation.themes = Some(result.themes.clone());
+        }
+        if annotation != ArchiveDocAnnotations::default() {
+            annotations.insert(key, annotation);
+        }
+    }
+    annotations
 }
 
 pub(super) fn handle_export_completed(
@@ -327,4 +360,66 @@ fn signal_candidate_selection_fingerprint(state: &AppState, urls: &[String]) -> 
         hasher.update(b"\n");
     }
     crate::cache_utils::hex_digest(hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::briefing::LoadedArticle;
+    use crate::triage::{ArticleTriageResult, TriageSession};
+    use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
+
+    #[test]
+    fn annotations_include_triage_empty_tags_and_zero_score_but_omit_unavailable_values() {
+        let url = "https://example.com/article";
+        let mut state = AppState::new();
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(vec![LoadedArticle {
+            url: url.into(),
+            source_title: None,
+            prepared_text: String::new(),
+            content_hash: "hash".into(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        triage.complete_article_with_model(
+            0,
+            ArticleTriageResult {
+                category: "news".into(),
+                priority: 4,
+                tags: vec![],
+                rationale: String::new(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+            Some("stored-model".into()),
+        );
+        state.set_triage(triage);
+        state.signal_candidate_mut().enqueue(url.into());
+        state.signal_candidate_mut().complete(
+            url,
+            SignalCandidateResult {
+                signal_score: 0,
+                signal_key: "event".into(),
+                themes: vec![],
+                draft_gist: String::new(),
+                source_tier: SourceTier::Tier1,
+                confidence: Confidence::Low,
+                reasoning: String::new(),
+                input_tokens: 0,
+                output_tokens: 0,
+            },
+        );
+        let annotations =
+            build_annotation_map(&state, &[url.into(), "https://example.com/none".into()]);
+        assert_eq!(annotations.len(), 1);
+        assert_eq!(annotations[&archive_url_key(url)].priority, Some(4));
+        assert_eq!(annotations[&archive_url_key(url)].tags, Some(vec![]));
+        assert_eq!(
+            annotations[&archive_url_key(url)].triage_model.as_deref(),
+            Some("stored-model")
+        );
+        assert_eq!(annotations[&archive_url_key(url)].signal_score, Some(0));
+        assert_eq!(annotations[&archive_url_key(url)].themes, Some(vec![]));
+    }
 }

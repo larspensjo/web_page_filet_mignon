@@ -238,7 +238,7 @@ impl AppState {
             .filter_map(|url| {
                 let content_hash = self.pre_triage().article_content_hash(&url)?;
                 match self.try_reuse_triage(content_hash) {
-                    crate::state::TriageCacheLookupResult::Hit(result) => {
+                    crate::state::TriageCacheLookupResult::Hit { result, .. } => {
                         Some((result.priority, url))
                     }
                     _ => None,

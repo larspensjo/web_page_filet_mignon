@@ -107,7 +107,10 @@ pub(crate) struct PendingBriefingCheckpointSaveSnapshot {
 }
 
 pub(crate) enum TriageCacheLookupResult<'a> {
-    Hit(&'a ArticleTriageResult),
+    Hit {
+        result: &'a ArticleTriageResult,
+        stored_model_id: &'a str,
+    },
     Miss,
     KeyUnavailable,
 }

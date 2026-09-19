@@ -218,7 +218,7 @@ mod tests {
         persist_triage_cache(&cache, &path).unwrap();
         let loaded = load_triage_cache(&path);
         assert_eq!(loaded.len(), 1);
-        let loaded_entry = loaded.lookup(&key).unwrap();
+        let (_, loaded_entry) = loaded.lookup(&key).unwrap();
         assert_eq!(loaded_entry.category, result.category);
         assert_eq!(loaded_entry.priority, result.priority);
     }

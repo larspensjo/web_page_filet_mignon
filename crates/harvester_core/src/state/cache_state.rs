@@ -265,16 +265,25 @@ impl AppState {
             Err(_) => return TriageCacheLookupResult::KeyUnavailable,
         };
         match self.triage_cache.lookup(&key) {
-            Some(result) => TriageCacheLookupResult::Hit(result),
+            Some((stored_key, result)) => TriageCacheLookupResult::Hit {
+                result,
+                stored_model_id: &stored_key.model_id,
+            },
             None => TriageCacheLookupResult::Miss,
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn store_triage_result(&mut self, content_hash: &str, result: ArticleTriageResult) {
-        let snapshot = match &self.triage_cache_metadata_snapshot {
-            Some(snapshot) => snapshot,
-            None => return,
-        };
+        let _ = self.store_triage_result_with_model(content_hash, result);
+    }
+
+    pub(crate) fn store_triage_result_with_model(
+        &mut self,
+        content_hash: &str,
+        result: ArticleTriageResult,
+    ) -> Option<String> {
+        let snapshot = self.triage_cache_metadata_snapshot.as_ref()?;
         let key = match TriageCacheKey::try_new_with_context_hash(
             content_hash,
             PromptId::ArticleTriage,
@@ -283,10 +292,12 @@ impl AppState {
             &snapshot.context_hash,
         ) {
             Ok(key) => key,
-            Err(_) => return,
+            Err(_) => return None,
         };
 
+        let stored_model_id = key.model_id.clone();
         self.triage_cache.insert(key, result);
+        Some(stored_model_id)
     }
 
     pub(crate) fn store_frozen_triage_result(

@@ -56,6 +56,11 @@ Generated archive/export files are not article records even when they use
 Markdown extensions. Readers should ignore files listed in
 `layout.generated_artifacts`.
 
+`archive.md` uses its own [archive export contract](ArchiveExportFormat.md),
+not `CORPUS_SCHEMA_VERSION`. Corpus scans also identify a custom-named archive
+by either first-byte signature: `===== DOC START =====` or the index-only
+signature `===== ARCHIVE INDEX =====`.
+
 ## Private Files
 
 Hidden `.ron` files, `llm_results/`, `logs/`, and refresh reports are outside the

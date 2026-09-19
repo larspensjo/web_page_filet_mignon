@@ -39,6 +39,8 @@ pub struct TriageArticle {
     pub prepared_text: String,
     pub content_hash: String,
     pub fetched_utc: Option<String>,
+    /// Provenance belongs to the selected session result, not the serialized result.
+    pub triage_model: Option<String>,
     pub triage_state: ArticleTriageState,
 }
 
@@ -99,6 +101,7 @@ impl TriageSession {
                 prepared_text: article.prepared_text,
                 content_hash: article.content_hash,
                 fetched_utc: article.fetched_utc,
+                triage_model: None,
                 triage_state: ArticleTriageState::Pending,
             })
             .collect();
@@ -128,8 +131,18 @@ impl TriageSession {
     }
 
     pub fn complete_article(&mut self, article_id: TriageArticleId, result: ArticleTriageResult) {
+        self.complete_article_with_model(article_id, result, None);
+    }
+
+    pub fn complete_article_with_model(
+        &mut self,
+        article_id: TriageArticleId,
+        result: ArticleTriageResult,
+        triage_model: Option<String>,
+    ) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.triage_state = ArticleTriageState::Completed { result };
+            article.triage_model = triage_model;
         }
     }
 
@@ -268,6 +281,16 @@ impl TriageSession {
                 ArticleTriageState::Completed { result } if article.url == url => Some(result),
                 _ => None,
             })
+    }
+
+    pub fn triage_model_for_url(&self, url: &str) -> Option<&str> {
+        self.articles
+            .iter()
+            .find(|article| {
+                article.url == url
+                    && matches!(article.triage_state, ArticleTriageState::Completed { .. })
+            })
+            .and_then(|article| article.triage_model.as_deref())
     }
 
     pub fn source_title_for_url(&self, url: &str) -> Option<&str> {

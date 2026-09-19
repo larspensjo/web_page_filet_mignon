@@ -2348,3 +2348,21 @@ bar and ETA. Bumped IPC schema version and regenerated snapshot fixtures.
 Refs: crates/harvester_core/src/effect.rs,
 crates/harvester_io/src/effect_runner/, crates/harvester_ui_bridge/src/driver.rs,
 docs/plans/Plan.TauriDesktopUi.md
+
+## 2026-09-19 - Schema 2 archive exports and empty-export scan fix
+Type: Bug Fix
+Context: Downstream archive readers need the scraper's existing triage and
+signal judgments without reparsing article bodies. A zero-document export under
+a custom basename was later scanned as an article and failed with
+`MissingFrontmatter`.
+Change: Added canonical schema-2 archive blocks, escaped body markers,
+provenance-aware annotations, and an in-file line-offset index including the
+zero-document artifact signature.
+Lessons Learned: Generated artifacts need a content signature even when their
+normal payload is empty; filename-only exclusion is insufficient for custom
+names.
+Prevention: Keep index-only archives in shared exact-byte fixtures and verify a
+subsequent corpus export excludes them by signature.
+Refs: crates/harvester_engine/src/export.rs,
+crates/harvester_engine/tests/output.rs,
+crates/harvester_core/src/update/archive.rs, docs/ArchiveExportFormat.md

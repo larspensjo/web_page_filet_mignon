@@ -1,1 +1,2 @@
 * text=auto eol=lf
+crates/harvester_engine/tests/fixtures/archive_export/** -text

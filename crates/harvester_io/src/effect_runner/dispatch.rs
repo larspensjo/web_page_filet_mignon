@@ -100,6 +100,7 @@ impl EffectRunner {
                 requested_checkpoint,
                 use_summaries,
                 summaries,
+                annotations,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
@@ -117,6 +118,7 @@ impl EffectRunner {
                         options,
                         use_summaries,
                         &summaries,
+                        &annotations,
                     ) {
                         Ok(summary) => {
                             engine_info!(

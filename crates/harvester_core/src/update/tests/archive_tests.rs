@@ -837,6 +837,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             requested_checkpoint,
             use_summaries,
             summaries,
+            annotations: _,
         } => {
             assert_eq!(request_id, 1);
             assert_eq!(basename, "custom-archive.md");
@@ -848,6 +849,196 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
         }
         _ => unreachable!(),
     }
+}
+
+#[test]
+fn archive_dialog_submitted_emits_triage_and_signal_annotations() {
+    use harvester_engine::archive_url_key;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    complete_signal_candidate(&mut state, 1, 0, "zero-event");
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+
+    let (ordered_urls, annotations) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                annotations,
+                ..
+            } => Some((ordered_urls, annotations)),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(ordered_urls.len(), 2);
+    let triaged = &annotations[&archive_url_key("https://triage-complete.com/0")];
+    assert_eq!(triaged.priority, Some(3));
+    assert_eq!(triaged.tags, Some(vec![]));
+    assert!(triaged.triage_model.is_none());
+    assert!(triaged.signal_key.is_none());
+    let scored = &annotations[&archive_url_key("https://triage-complete.com/1")];
+    assert_eq!(scored.priority, Some(3));
+    assert_eq!(scored.signal_key.as_deref(), Some("zero-event"));
+    assert_eq!(scored.signal_score, Some(0));
+}
+
+#[test]
+fn archive_annotations_are_read_at_submit_after_scoring_without_changing_pinned_selection() {
+    use harvester_engine::archive_url_key;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let state = complete_triage_state_for_test(2);
+    let (mut state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let url = "https://triage-complete.com/0";
+    state.signal_candidate_mut().enqueue(url.to_string());
+    state.signal_candidate_mut().mark_scoring(url, 77);
+    state.record_pending_llm_request(77, PromptId::ArticleSignalCandidate);
+
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: 77,
+            result: LlmResultKind::Success {
+                output_json: r#"{
+                    "signal_score": 84,
+                    "signal_key": "late-event",
+                    "themes": ["late-theme"],
+                    "draft_gist": "Example outlet reports a concrete AI infrastructure event.",
+                    "source_tier": "Tier1",
+                    "confidence": "High",
+                    "reasoning": "Concrete event."
+                }"#
+                .to_string(),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 1,
+                resolved_model: "signal-model".to_string(),
+            },
+            metadata: None,
+        },
+    );
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+
+    let (ordered_urls, annotations) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                annotations,
+                ..
+            } => Some((ordered_urls, annotations)),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(
+        ordered_urls,
+        vec![
+            "https://triage-complete.com/0".to_string(),
+            "https://triage-complete.com/1".to_string()
+        ]
+    );
+    let annotation = &annotations[&archive_url_key(url)];
+    assert_eq!(annotation.signal_key.as_deref(), Some("late-event"));
+    assert_eq!(annotation.signal_score, Some(84));
+    assert_eq!(annotation.themes, Some(vec!["late-theme".to_string()]));
+}
+
+#[test]
+fn compatible_triage_cache_hit_exports_the_stored_model_id() {
+    use harvester_engine::archive_url_key;
+    use harvester_engine::llm::prompt::PromptId;
+
+    init_logging();
+    let mut state = prime_llm_metadata(AppState::new());
+    state.store_triage_result(
+        "hash-0",
+        crate::triage::ArticleTriageResult {
+            category: "news".to_string(),
+            priority: 4,
+            tags: vec!["cached".to_string()],
+            rationale: "cached".to_string(),
+            input_tokens: 1,
+            output_tokens: 1,
+        },
+    );
+    let mut active_versions = std::collections::HashMap::new();
+    active_versions.insert(PromptId::ArticleTriage, 1);
+    let mut effective_models = std::collections::HashMap::new();
+    effective_models.insert(PromptId::ArticleTriage, "test-model-2026-03-31".to_string());
+    let (state, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    );
+    let mut state = state;
+    let load_request_id = state.alloc_triage_request_id();
+    state.set_triage_in_flight(load_request_id);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_request_id,
+            articles: loaded_triage_articles(1),
+        },
+    );
+    let (state, _) = update(state, Msg::TriageClicked);
+    assert_eq!(
+        state.triage().triage_model_for_url("https://example.com/0"),
+        Some("test-model")
+    );
+
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: false,
+        },
+    );
+    let annotations = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested { annotations, .. } => Some(annotations),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(
+        annotations[&archive_url_key("https://example.com/0")]
+            .triage_model
+            .as_deref(),
+        Some("test-model")
+    );
 }
 
 #[test]

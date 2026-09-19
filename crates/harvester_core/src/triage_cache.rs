@@ -90,9 +90,14 @@ impl TriageCache {
         }
     }
 
-    pub fn lookup(&self, key: &TriageCacheKey) -> Option<&ArticleTriageResult> {
-        if let Some(entry) = self.entries.get(key) {
-            return Some(&entry.result);
+    /// Returns both the result and its stored key so consumers retain provenance
+    /// when a compatible model alias satisfies the lookup.
+    pub fn lookup<'a>(
+        &'a self,
+        key: &TriageCacheKey,
+    ) -> Option<(&'a TriageCacheKey, &'a ArticleTriageResult)> {
+        if let Some((stored_key, entry)) = self.entries.get_key_value(key) {
+            return Some((stored_key, &entry.result));
         }
         self.entries.iter().find_map(|(stored_key, entry)| {
             let model_match = model_ids_compatible(&stored_key.model_id, &key.model_id)
@@ -103,7 +108,7 @@ impl TriageCache {
                 && stored_key.context_hash == key.context_hash
                 && model_match
             {
-                Some(&entry.result)
+                Some((stored_key, &entry.result))
             } else {
                 None
             }
@@ -217,7 +222,7 @@ mod tests {
         )
         .unwrap();
         cache.insert(key.clone(), sample_result());
-        let retrieved = cache.lookup(&key).unwrap();
+        let (_, retrieved) = cache.lookup(&key).unwrap();
         assert_eq!(retrieved.category, "cat");
     }
 
@@ -244,7 +249,8 @@ mod tests {
         let stored_key = build_key("hash", TEST_MODEL_ID, &context_hash);
         cache.insert(stored_key, sample_result());
         let lookup_key = build_key("hash", TEST_MODEL_VARIANT_ID, &context_hash);
-        assert!(cache.lookup(&lookup_key).is_some());
+        let (stored_key, _) = cache.lookup(&lookup_key).expect("compatible cache hit");
+        assert_eq!(stored_key.model_id, TEST_MODEL_ID);
     }
 
     #[test]

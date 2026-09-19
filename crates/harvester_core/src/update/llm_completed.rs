@@ -302,10 +302,13 @@ fn handle_triage_completion(
                     };
                     let triage_priority = result.priority;
                     let themes = result.tags.clone();
-                    state
-                        .triage_mut()
-                        .complete_article(article_idx, result.clone());
-                    state.store_triage_result(&content_hash, result);
+                    let triage_model =
+                        state.store_triage_result_with_model(&content_hash, result.clone());
+                    state.triage_mut().complete_article_with_model(
+                        article_idx,
+                        result.clone(),
+                        triage_model,
+                    );
                     effects.push(Effect::UpsertEntityIndexEntry {
                         url,
                         fetched_utc,

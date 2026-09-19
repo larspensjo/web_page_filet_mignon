@@ -715,6 +715,7 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
         requested_checkpoint: None,
         use_summaries: false,
         summaries: HashMap::new(),
+        annotations: HashMap::new(),
     }]);
 
     let msg = rx

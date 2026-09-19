@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use harvester_engine::llm::dto::SummaryEntities;
 use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PromptVersion};
 use harvester_engine::llm::types::ModelId;
+use harvester_engine::ArchiveDocAnnotations;
 use serde::{Deserialize, Serialize};
 
 /// The reducer-owned runtime projection written by the persistence worker.
@@ -67,6 +68,7 @@ pub enum Effect {
         requested_checkpoint: Option<chrono::DateTime<chrono::Utc>>,
         use_summaries: bool,
         summaries: HashMap<String, String>,
+        annotations: HashMap<String, ArchiveDocAnnotations>,
     },
     OpenArchiveDialog {
         request_id: u64,

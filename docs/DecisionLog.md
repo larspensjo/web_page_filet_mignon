@@ -174,3 +174,26 @@ transitions.
 Refs: crates/harvester_core/src/effect.rs,
 crates/harvester_core/src/update/mod.rs,
 crates/harvester_io/src/effect_runner/, docs/Architecture.md
+
+## 2026-09-19 - The archive export is a versioned external contract
+Decision: `archive.md` is a versioned contract with the portfolio model
+(`../AI_portfolio`), currently `export_schema: 2`. `docs/ArchiveExportFormat.md`
+is authoritative, and the fixtures under
+`crates/harvester_engine/tests/fixtures/archive_export/` are shared bytes that
+both repositories test against. Changes within a schema number are additive
+only; a rename or a change of meaning bumps `export_schema`.
+Context: The portfolio's `/process-archive` step re-derived clusters and
+relevance from grepped titles while the scraper already held triage and
+signal-candidate judgments. Article-only judgments belong to the scraper;
+judgments that need the portfolio's private, changing state belong to the
+portfolio, which makes the archive the boundary between them.
+Consequences: The export carries existing judgments only and adds no model
+call. `source_tier`, rationale, reasoning, draft gist and confidence are not
+exported, because the scraper's outlet tier would be read as a portfolio
+Methodology tier. Reserved marker lines in bodies are escaped, the trailing
+index is authoritative for line offsets, and an index-only file is a
+recognised archive artifact. The archive stays a generated artifact outside
+the corpus schema, so `CORPUS_SCHEMA_VERSION` is unchanged. Fixture bytes are
+exempt from line-ending normalisation.
+Refs: docs/ArchiveExportFormat.md, docs/CorpusFormat.md,
+docs/plans/Plan.ArchiveExportContract.md, crates/harvester_engine/src/export.rs

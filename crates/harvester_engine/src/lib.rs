@@ -51,7 +51,8 @@ pub use decode::{decode_html, DecodeError, DecodedHtml};
 pub use domain::registrable_domain;
 pub use engine::{EngineConfig, EngineHandle};
 pub use export::{
-    build_concatenated_export, build_triage_archive, ExportError, ExportOptions, ExportSummary,
+    build_concatenated_export, build_triage_archive, ArchiveDocAnnotations, ExportError,
+    ExportOptions, ExportSummary, MAX_FALLBACK_BODY_CHARS,
 };
 pub use extract::{ExtractedContent, Extractor, ReadabilityLikeExtractor};
 pub use fetch::{FetchSettings, Fetcher, ProgressSink, ReqwestFetcher, RetrySettings};

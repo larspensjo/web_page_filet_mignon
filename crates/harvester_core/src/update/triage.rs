@@ -220,18 +220,26 @@ pub(super) fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<
         let content_hash_short = short_hash(&content_hash);
 
         match state.try_reuse_triage(&content_hash) {
-            TriageCacheLookupResult::Hit(cached) => {
+            TriageCacheLookupResult::Hit {
+                result: cached,
+                stored_model_id,
+            } => {
                 let themes = cached.tags.clone();
                 let url = state.triage().articles()[next_idx].url.clone();
                 let fetched_utc = state.triage().articles()[next_idx].fetched_utc.clone();
                 let triage_priority = cached.priority;
                 let result = cached.clone();
+                let stored_model_id = stored_model_id.to_string();
                 let summary_ready = state.summary_result_for_url(&url).is_some();
                 let signal_state_present_before_enqueue =
                     state.signal_candidate().state_for(&url).is_some();
                 state.record_triage_cache_hit();
                 engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
-                state.triage_mut().complete_article(next_idx, result);
+                state.triage_mut().complete_article_with_model(
+                    next_idx,
+                    result,
+                    Some(stored_model_id),
+                );
                 engine_info!(
                     "[signal-dispatch] triage cache-hit url={} summary_ready={} triage_priority={} signal_state_present_before_enqueue={}",
                     url,

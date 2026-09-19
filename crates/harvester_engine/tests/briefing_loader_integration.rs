@@ -490,28 +490,49 @@ fn filtered_loader_single_selection_ignores_unrelated_invalid_markdown() {
     assert_eq!(articles[0].url, "https://example.com/a");
 }
 
-/// Archive files (multi-doc format, starting with `===== DOC START =====`) live in the same
-/// output directory as articles. The scan must skip them without preventing valid articles
-/// from loading.
+/// Archive files in either legacy shape or schema 2 live beside articles. The scan must skip
+/// them without preventing valid articles from loading.
 #[test]
 fn archive_format_file_in_output_dir_does_not_block_article_scan() {
     let registry = prompt_registry_with_defaults();
-    let tmp = tempdir().unwrap();
-    write_markdown_file(
-        tmp.path(),
-        "article.md",
-        "https://example.com/article",
-        Some("Article"),
-        "body text",
-    );
-    // Simulate an archive file: starts with the multi-doc separator, not a frontmatter block.
-    let archive_content = "===== DOC START =====\n---\nurl: \"https://example.com/old\"\ntitle: \"Old\"\n---\n\nold body\n";
-    fs::write(tmp.path().join("archive.md"), archive_content).unwrap();
+    let cases: [(&str, &[u8]); 4] = [
+        (
+            "legacy raw copy",
+            b"===== DOC START =====\n---\nurl: \"https://example.com/old\"\ntitle: \"Old\"\n---\n\nold body\n",
+        ),
+        (
+            "legacy summary header",
+            b"===== DOC START =====\nurl: https://example.com/old\ntitle: Old\ntokens: 1\nfetched_utc: 2026-01-01T00:00:00Z\nfilename: old.md\ncontent: summary\n\nold summary\n===== DOC END =====\n",
+        ),
+        (
+            "schema 2 document archive",
+            include_bytes!("fixtures/archive_export/schema2_raw.md"),
+        ),
+        (
+            "schema 2 index-only archive",
+            include_bytes!("fixtures/archive_export/schema2_index_only.md"),
+        ),
+    ];
 
-    let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+    for (case, archive_content) in cases {
+        let tmp = tempdir().unwrap();
+        write_markdown_file(
+            tmp.path(),
+            "article.md",
+            "https://example.com/article",
+            Some("Article"),
+            "body text",
+        );
+        fs::write(tmp.path().join("archive.md"), archive_content).unwrap();
 
-    assert_eq!(articles.len(), 1);
-    assert_eq!(articles[0].url, "https://example.com/article");
+        let (articles, _) = load_and_prepare_articles(tmp.path(), 10_000, &registry, None).unwrap();
+
+        assert_eq!(articles.len(), 1, "case: {case}");
+        assert_eq!(
+            articles[0].url, "https://example.com/article",
+            "case: {case}"
+        );
+    }
 }
 
 /// When `since_utc` is set and all selected URLs belong to articles older than the cutoff,
