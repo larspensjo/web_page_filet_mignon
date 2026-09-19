@@ -246,6 +246,17 @@ Tests, keyless, all deterministic:
 
 ## Phase 2 (portfolio, `../AI_portfolio`): read schema 2
 
+Status 2026-09-19: implemented in the portfolio's working tree (uncommitted) after Phase 1 landed
+in `929aa3a`. One deviation from the Survey item below: the reader is code, not skill prose.
+`scripts/Read-ArchiveIndex.ps1` scans the whole file (about 300 KB) instead of reading the tail
+backwards, which makes the index validation, the offset rebuild and the unescape deterministic
+and keeps the archive out of the orchestrator's context. Gate 1 is
+`scripts/tests/Read-ArchiveIndex.Tests.ps1` (Pester, 21 tests against the shared fixtures plus
+inline schema-1 samples); it passes. Gate 2, the live run, is outstanding. First observation
+from the 106-article export of 2026-09-19: no two articles share a `signal_key`, although
+several events are covered three times under near-identical keys, so the key groups nothing by
+exact match and the survey sorts by key to put one entity's articles together.
+
 Safe to apply before Phase 1 lands because of the schema-1 fallback, but better applied after the
 header fields are confirmed. Edit the three places that state step 1, keeping them consistent:
 `.claude/skills/process-archive/SKILL.md`, `.codex/skills/process-archive/SKILL.md`, and
