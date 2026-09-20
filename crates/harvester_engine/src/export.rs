@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
+use engine_logging::engine_warn;
 use serde_json::json;
 
 use crate::archive_url_key;
@@ -62,6 +63,8 @@ pub struct ExportSummary {
     pub total_tokens: u64,
     pub output_path: PathBuf,
     pub manifest_path: Option<PathBuf>,
+    pub window_count: Option<usize>,
+    pub unexported_by_priority: Option<[usize; 6]>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -146,6 +149,8 @@ pub fn build_concatenated_export(
         total_tokens,
         output_path,
         manifest_path,
+        window_count: None,
+        unexported_by_priority: None,
     })
 }
 
@@ -159,6 +164,7 @@ pub fn build_triage_archive(
     use_summaries: bool,
     summaries: &HashMap<String, String>,
     annotations: &HashMap<String, ArchiveDocAnnotations>,
+    priority_snapshot: &HashMap<String, u8>,
 ) -> Result<ExportSummary, ExportError> {
     ensure_output_dir(output_dir)?;
     write_corpus_manifest(output_dir)?;
@@ -187,6 +193,7 @@ pub fn build_triage_archive(
         docs_by_url.entry(normalized).or_insert(meta);
     }
 
+    let window_count = docs_by_url.len();
     let mut docs = Vec::new();
     let mut selected = HashSet::new();
     for url in ordered_urls {
@@ -198,6 +205,11 @@ pub fn build_triage_archive(
             docs.push(meta);
         }
     }
+    let unexported_by_priority = if since_utc.is_some() {
+        unexported_priority_counts(&docs_by_url, priority_snapshot)
+    } else {
+        [0; 6]
+    };
 
     let mut buffer = String::new();
     let mut index_rows = Vec::new();
@@ -242,7 +254,14 @@ pub fn build_triage_archive(
         }
         index_rows.push((position + 1, line, doc, annotation));
     }
-    write_archive_index(&mut buffer, &index_rows, &parsed_fetched);
+    write_archive_index(
+        &mut buffer,
+        &index_rows,
+        &parsed_fetched,
+        since_utc.is_some(),
+        window_count,
+        unexported_by_priority,
+    );
 
     let output_path = write_export_file(output_dir, basename, &buffer)?;
     let manifest_path =
@@ -253,6 +272,8 @@ pub fn build_triage_archive(
         total_tokens,
         output_path,
         manifest_path,
+        window_count: since_utc.is_some().then_some(window_count),
+        unexported_by_priority: since_utc.is_some().then_some(unexported_by_priority),
     })
 }
 
@@ -466,6 +487,9 @@ fn write_archive_index(
     buffer: &mut String,
     rows: &[(usize, usize, &DocMeta, Option<&ArchiveDocAnnotations>)],
     parsed_fetched: &[(DateTime<Utc>, String)],
+    include_coverage: bool,
+    window_count: usize,
+    unexported_by_priority: [usize; 6],
 ) {
     use std::fmt::Write;
     let fetched_from = parsed_fetched
@@ -483,6 +507,15 @@ fn write_archive_index(
     let _ = writeln!(buffer, "doc_count: {}", rows.len());
     let _ = writeln!(buffer, "fetched_from: {fetched_from}");
     let _ = writeln!(buffer, "fetched_to: {fetched_to}");
+    if include_coverage {
+        let _ = writeln!(buffer, "window_count: {window_count}");
+        let [priority_5, priority_4, priority_3, priority_2, priority_1, unavailable] =
+            unexported_by_priority;
+        let _ = writeln!(
+            buffer,
+            "unexported_by_priority: {{\"5\":{priority_5},\"4\":{priority_4},\"3\":{priority_3},\"2\":{priority_2},\"1\":{priority_1},\"unavailable\":{unavailable}}}"
+        );
+    }
     buffer.push_str("doc | line | fetched_utc | priority | signal_key | title\n");
     for (doc, line, meta, annotation) in rows {
         let priority = annotation
@@ -502,4 +535,30 @@ fn write_archive_index(
     }
     buffer.push_str(INDEX_END_MARKER);
     buffer.push('\n');
+}
+
+fn unexported_priority_counts(
+    docs_by_url: &HashMap<String, DocMeta>,
+    priority_snapshot: &HashMap<String, u8>,
+) -> [usize; 6] {
+    let mut counts = [0; 6];
+    for url in docs_by_url.keys() {
+        match priority_snapshot.get(url).copied() {
+            Some(5) => counts[0] += 1,
+            Some(4) => counts[1] += 1,
+            Some(3) => counts[2] += 1,
+            Some(2) => counts[3] += 1,
+            Some(1) => counts[4] += 1,
+            Some(priority) => {
+                engine_warn!(
+                    "[archive-export] out-of-range triage priority url={} priority={}",
+                    url,
+                    priority
+                );
+                counts[5] += 1;
+            }
+            None => counts[5] += 1,
+        }
+    }
+    counts
 }

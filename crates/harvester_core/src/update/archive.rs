@@ -167,6 +167,7 @@ pub(super) fn handle_dialog_submitted(
         std::collections::HashMap::new()
     };
     let annotations = build_annotation_map(state, &ordered_urls);
+    let priority_snapshot = build_priority_snapshot(state);
     let mut effects = vec![Effect::ArchiveRequested {
         request_id,
         basename,
@@ -176,6 +177,7 @@ pub(super) fn handle_dialog_submitted(
         use_summaries,
         summaries,
         annotations,
+        priority_snapshot,
     }];
     let had_signal_candidate_overrides = !state.signal_candidate().excluded().is_empty();
     if set_checkpoint && had_signal_candidate_overrides {
@@ -192,6 +194,14 @@ pub(super) fn handle_dialog_submitted(
         state.mark_dirty();
     }
     effects
+}
+
+fn build_priority_snapshot(state: &AppState) -> std::collections::HashMap<String, u8> {
+    state
+        .triage()
+        .iter_completed_priorities()
+        .map(|(url, priority)| (archive_url_key(url), priority))
+        .collect()
 }
 
 fn build_annotation_map(

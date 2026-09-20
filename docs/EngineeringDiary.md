@@ -2366,3 +2366,20 @@ subsequent corpus export excludes them by signature.
 Refs: crates/harvester_engine/src/export.rs,
 crates/harvester_engine/tests/output.rs,
 crates/harvester_core/src/update/archive.rs, docs/ArchiveExportFormat.md
+
+## 2026-09-20 - Archive selection coverage counters
+Type: Implementation
+Context: The portfolio needs to see how much of a bounded export window the
+scraper held back, including articles without a loaded triage result.
+Change: Added submit-time triage priority snapshots and bounded-export index
+counters derived from the exporter-owned, filtered and canonicalized document
+map. Added byte-exact bounded-export coverage and invariant/zero-export tests,
+including distinct per-priority counts and the manual-exclusion reducer path.
+Coverage is included in the completion log; corrupt cached priorities are
+warned with their URL and retained in the `unavailable` invariant bucket.
+Refs: crates/harvester_engine/src/export.rs,
+crates/harvester_engine/tests/output.rs,
+crates/harvester_core/src/triage.rs,
+crates/harvester_core/src/update/archive.rs,
+crates/harvester_io/src/effect_runner/dispatch.rs,
+docs/ArchiveExportFormat.md

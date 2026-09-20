@@ -197,3 +197,30 @@ the corpus schema, so `CORPUS_SCHEMA_VERSION` is unchanged. Fixture bytes are
 exempt from line-ending normalisation.
 Refs: docs/ArchiveExportFormat.md, docs/CorpusFormat.md,
 docs/plans/Plan.ArchiveExportContract.md, crates/harvester_engine/src/export.rs
+
+## 2026-09-20 - Archive coverage counters measure the exporter's window
+Decision: The schema-2 index lines `window_count` and `unexported_by_priority`
+count the exporter's own `since`-filtered, canonical-URL-deduplicated document
+map, which includes harvested link-target pages under `linked/`, rather than
+the policy-filtered pinned corpus or the per-document annotation map. The
+reducer supplies a submit-time snapshot of every completed triage result it
+holds; a URL missing from that snapshot counts as `unavailable`, never as
+`untriaged`, and the reducer does not consult any cache by content hash to
+fill the gap. Both lines are written only when the export has a `since` bound.
+Context: The pinned corpus is already policy-filtered and annotations cover
+only selected URLs, so either would hide the exclusions these counters exist
+to reveal. Link targets are never triaged, so they land in `unavailable` and
+enlarge the window; `docs/ArchiveExportFormat.md` states this so a consumer
+does not read the bucket as "articles held back".
+Consequences: The counters measure selection coverage, not recall; a recall
+claim additionally needs the sampled review of withheld documents that step 3e
+must define. The invariant `window_count = doc_count + sum(buckets)` is
+structural and readers check it. New index data stays in name-keyed header
+lines: index rows keep their six columns, so a seventh column would require
+`export_schema: 3`. Narrowing the population later would change the meaning of
+a number the portfolio already reads and would need a schema bump, whereas
+adding a separate link-page counter remains additive and compatible.
+Refs: docs/ArchiveExportFormat.md,
+docs/plans/Plan.ArchiveExportContract.md (Phase 3, step 3a),
+crates/harvester_engine/src/export.rs,
+crates/harvester_core/src/update/archive.rs

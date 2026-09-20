@@ -320,8 +320,9 @@ nothing below needs it. Every judgment here is specified as a field with a meani
 produced by whatever model the scraper already runs for triage and signal-candidate scoring. If
 a typed-judgment model is adopted later, it fills the same fields; the contract does not change.
 
-Not built yet. The steps ship one at a time. The step letters are kept because the portfolio
-refers to them, but the delivery order (revised 2026-09-20) is:
+Status 2026-09-20: 3a is implemented in this repository's working tree (uncommitted) and
+verified offline; 3b-3e are not built. The steps ship one at a time. The step letters are
+kept because the portfolio refers to them, but the delivery order (revised 2026-09-20) is:
 
 1. **3a**, coverage counters, with the portfolio's display of them.
 2. **3c**, the single signal-candidate context revision. The link-candidate transport is an
@@ -382,6 +383,10 @@ One batch of 106 articles (fetched 12–19 September 2026), so indicative, not a
   cover an unknown additive field and `false` versus absent for every boolean.
 
 ### 3a. Make selection coverage visible (no model)
+
+Status 2026-09-20: implemented in this repository, uncommitted. Verified with an offline
+workspace build, the full test suite, clippy at -D warnings and rustfmt. The portfolio-side
+counterpart in the list below - printing the counts and checking the invariant - is outstanding.
 
 Add name-keyed lines to the index header, after `fetched_to`:
 

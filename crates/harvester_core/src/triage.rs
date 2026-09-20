@@ -283,6 +283,17 @@ impl TriageSession {
             })
     }
 
+    pub fn iter_completed_priorities(&self) -> impl Iterator<Item = (&str, u8)> {
+        self.articles
+            .iter()
+            .filter_map(|article| match &article.triage_state {
+                ArticleTriageState::Completed { result } => {
+                    Some((article.url.as_str(), result.priority))
+                }
+                _ => None,
+            })
+    }
+
     pub fn triage_model_for_url(&self, url: &str) -> Option<&str> {
         self.articles
             .iter()

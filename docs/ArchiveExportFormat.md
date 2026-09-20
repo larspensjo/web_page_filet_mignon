@@ -78,15 +78,47 @@ export_schema: 2
 doc_count: 2
 fetched_from: 2026-09-07T04:11:09Z
 fetched_to: 2026-09-11T09:40:51Z
+window_count: 2
+unexported_by_priority: {"5":0,"4":0,"3":0,"2":0,"1":0,"unavailable":0}
 doc | line | fetched_utc | priority | signal_key | title
 1 | 1 | 2026-09-07T04:11:09Z | 4 | nvda-dmatrix-nvlink-fusion | d-Matrix joins NVLink Fusion
 2 | 38 | 2026-09-11T09:40:51Z | - | - | Example without triage
 ===== INDEX END =====
 ```
 
-The exact index metadata keys are `export_schema`, `doc_count`,
-`fetched_from`, and `fetched_to`. The column-header line shown above is part of
-the format. `line` is the 1-based line of that block's unescaped `DOC START`.
+Always present: `export_schema`, `doc_count`, `fetched_from`, `fetched_to`.
+Present only when the export has a `since` bound: `window_count`,
+`unexported_by_priority`. The index header is a sequence of `name: value` lines
+terminated by the column-header line. Readers must locate metadata keys by name
+and skip unknown name-keyed lines; they must never parse the header by line
+position.
+
+The bounded-export fields appear immediately after `fetched_to` and before the
+column-header line. `window_count` is the number of canonical URLs in the
+exporter-owned document map after the `since` filter and URL deduplication,
+including articles under `linked/`, and before the selected documents are
+removed. An unparseable `fetched_utc` passes the `since` filter as usual. Linked
+pages are included in this population but are not triaged, so they will normally
+increase `unavailable`; do not read that bucket as only "articles the scraper
+held back."
+
+`unexported_by_priority` is compact JSON with exactly these keys, in this order:
+`5`, `4`, `3`, `2`, `1`, `unavailable`. Its values count the canonical URLs
+remaining after the selection loop. The exporter looks those URLs up in the
+submit-time triage priority snapshot. `unavailable` means the session held no
+usable priority from 1 through 5 for that URL; it does not mean that the article
+was never triaged. An out-of-range cached priority is logged and counted as
+`unavailable`. The invariant is `window_count = doc_count + sum(values)`.
+
+Coverage is per export, not a cumulative held-back total. Repeating an export
+without advancing the checkpoint reuses the same `since` bound, so documents
+selected by the first export can be counted as unexported when they are not
+selected by the second.
+
+When there is no `since` bound, both `window_count` and
+`unexported_by_priority` are omitted entirely. The column-header line shown
+above is part of the format. `line` is the 1-based line of that block's
+unescaped `DOC START`.
 The exporter writes only LF, including after normalising body CR and CRLF, so
 readers count LF delimiters.
 
@@ -97,8 +129,10 @@ and are excluded from bounds. `fetched_from` and `fetched_to` are the minimum
 and maximum parseable RFC 3339 values; both are `-` when none parse.
 
 For zero documents the file contains only the index, with `doc_count: 0`, both
-bounds `-`, the column header, and no rows. This leading index marker is an
-archive-artifact signature, including under a custom basename.
+bounds `-`, the column header, and no rows. When the export has a `since` bound,
+it also contains `window_count` and `unexported_by_priority`, which then account
+for the entire window. This leading index marker is an archive-artifact
+signature, including under a custom basename.
 
 ### Reader validation
 

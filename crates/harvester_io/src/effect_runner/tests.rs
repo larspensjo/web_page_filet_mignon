@@ -716,6 +716,7 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
         use_summaries: false,
         summaries: HashMap::new(),
         annotations: HashMap::new(),
+        priority_snapshot: HashMap::new(),
     }]);
 
     let msg = rx

@@ -69,6 +69,7 @@ pub enum Effect {
         use_summaries: bool,
         summaries: HashMap<String, String>,
         annotations: HashMap<String, ArchiveDocAnnotations>,
+        priority_snapshot: HashMap<String, u8>,
     },
     OpenArchiveDialog {
         request_id: u64,

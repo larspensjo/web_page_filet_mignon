@@ -195,6 +195,7 @@ fn triage_archive_uses_ordered_urls_and_preserves_full_markdown() {
         false,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -245,6 +246,7 @@ fn triage_archive_since_filter_excludes_old_docs_but_keeps_malformed_timestamps(
         false,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -290,6 +292,7 @@ fn triage_archive_ignores_existing_archive_md_artifact() {
         false,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     assert_eq!(
@@ -332,6 +335,7 @@ fn triage_archive_uses_summary_body_when_provided() {
         true,
         &summaries,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
 
@@ -368,6 +372,7 @@ fn triage_archive_falls_back_to_full_body_when_no_summary() {
         true,
         &summaries,
         &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
 
@@ -396,6 +401,7 @@ fn triage_archive_summary_mode_with_empty_map_uses_fallback_format() {
         None,
         options,
         true,
+        &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
     )
@@ -432,6 +438,7 @@ fn triage_archive_truncates_large_fallback_body_safely() {
         None,
         options,
         true,
+        &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
     )
@@ -572,11 +579,222 @@ fn export_mixed_fixture(
         use_summaries,
         summaries,
         &mixed_annotations(),
+        &std::collections::HashMap::new(),
     )
     .unwrap();
     let actual = std::fs::read(temp.path().join("archive.md")).unwrap();
     assert_eq!(actual, fixture);
     assert!(!actual.contains(&b'\r'));
+}
+
+#[test]
+fn triage_archive_schema2_since_matches_shared_golden_fixture() {
+    let temp = tempfile::TempDir::new().unwrap();
+    write_mixed_articles(temp.path(), "Body triaged.");
+    for (priority, count) in [(5, 1), (4, 2), (3, 3)] {
+        for index in 0..count {
+            let name = format!("golden-priority-{priority}-{index}");
+            write_article(
+                temp.path(),
+                &format!("{name}.md"),
+                &format!("https://example.com/{name}"),
+                &name,
+                "2026-09-06T00:00:00Z",
+                &format!("Body {name}."),
+            );
+        }
+    }
+    for index in 0..4 {
+        let name = format!("golden-unavailable-{index}");
+        write_article(
+            temp.path(),
+            &format!("{name}.md"),
+            &format!("https://example.com/{name}"),
+            &name,
+            "2026-09-06T00:00:00Z",
+            &format!("Body {name}."),
+        );
+    }
+    let since = chrono::DateTime::parse_from_rfc3339("2026-09-02T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let mut priority_snapshot: std::collections::HashMap<_, _> = [
+        ("https://example.com/score-zero", 1),
+        ("https://example.com/no-model", 2),
+        ("https://example.com/triaged", 4),
+    ]
+    .into_iter()
+    .map(|(url, priority)| (archive_url_key(url), priority))
+    .collect();
+    for (priority, count) in [(5, 1), (4, 2), (3, 3)] {
+        for index in 0..count {
+            priority_snapshot.insert(
+                archive_url_key(&format!(
+                    "https://example.com/golden-priority-{priority}-{index}"
+                )),
+                priority,
+            );
+        }
+    }
+    build_triage_archive(
+        temp.path(),
+        "archive.md",
+        &[
+            "https://example.com/untriaged".into(),
+            "https://example.com/scored".into(),
+        ],
+        Some(since),
+        archive_options("archive.md"),
+        false,
+        &Default::default(),
+        &mixed_annotations(),
+        &priority_snapshot,
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(temp.path().join("archive.md")).unwrap(),
+        include_bytes!("fixtures/archive_export/schema2_since_raw.md")
+    );
+}
+
+#[test]
+fn triage_archive_since_coverage_counts_window_remainders_and_zero_export() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    for index in 0..2 {
+        let name = format!("selected-{index}");
+        write_article(
+            dir,
+            &format!("{name}.md"),
+            &format!("https://coverage.example/{name}"),
+            &name,
+            "2026-09-02T00:00:00Z",
+            &name,
+        );
+    }
+
+    let linked = dir.join("linked");
+    std::fs::create_dir_all(&linked).unwrap();
+    let mut priority_snapshot = std::collections::HashMap::new();
+    for index in 0..2 {
+        priority_snapshot.insert(
+            archive_url_key(&format!("https://coverage.example/selected-{index}")),
+            5,
+        );
+    }
+    for (priority, count) in [(5, 1), (4, 2), (3, 3), (2, 4), (1, 5)] {
+        for index in 0..count {
+            let name = match (priority, index) {
+                (3, 0) => "manually-excluded".to_string(),
+                (1, 0) => "below-threshold".to_string(),
+                (4, 0) => "linked".to_string(),
+                _ => format!("priority-{priority}-{index}"),
+            };
+            let article_dir = if name == "linked" { &linked } else { dir };
+            let url = format!("https://coverage.example/{name}");
+            write_article(
+                article_dir,
+                &format!("{name}.md"),
+                &url,
+                &name,
+                "2026-09-03T00:00:00Z",
+                &name,
+            );
+            priority_snapshot.insert(archive_url_key(&url), priority);
+        }
+    }
+    for index in 0..6 {
+        let name = if index == 0 {
+            "no-triage".to_string()
+        } else if index == 1 {
+            "malformed-date".to_string()
+        } else if index == 5 {
+            "invalid-priority".to_string()
+        } else {
+            format!("unavailable-{index}")
+        };
+        let fetched_utc = if index == 1 {
+            "not-a-date"
+        } else {
+            "2026-09-04T00:00:00Z"
+        };
+        write_article(
+            dir,
+            &format!("{name}.md"),
+            &format!("https://coverage.example/{name}"),
+            &name,
+            fetched_utc,
+            &name,
+        );
+        if index == 5 {
+            priority_snapshot.insert(
+                archive_url_key("https://coverage.example/invalid-priority"),
+                6,
+            );
+        }
+    }
+
+    write_article(
+        &linked,
+        "duplicate-linked.md",
+        "https://coverage.example/selected-1#linked",
+        "Duplicate linked",
+        "2026-09-05T00:00:00Z",
+        "duplicate linked",
+    );
+    let since = chrono::DateTime::parse_from_rfc3339("2026-09-02T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let coverage_summary = build_triage_archive(
+        dir,
+        "coverage.md",
+        &[
+            "https://coverage.example/selected-0".into(),
+            "https://coverage.example/selected-1".into(),
+        ],
+        Some(since),
+        archive_options("coverage.md"),
+        false,
+        &Default::default(),
+        &Default::default(),
+        &priority_snapshot,
+    )
+    .unwrap();
+    let archive = std::fs::read_to_string(dir.join("coverage.md")).unwrap();
+    assert_eq!(coverage_summary.window_count, Some(23));
+    assert_eq!(
+        coverage_summary.unexported_by_priority,
+        Some([1, 2, 3, 4, 5, 6])
+    );
+    assert!(archive.contains("window_count: 23\n"));
+    assert!(archive.contains(
+        "unexported_by_priority: {\"5\":1,\"4\":2,\"3\":3,\"2\":4,\"1\":5,\"unavailable\":6}\n"
+    ));
+    assert_eq!(archive.matches("===== DOC START =====").count(), 2);
+
+    let zero_summary = build_triage_archive(
+        dir,
+        "zero.md",
+        &[],
+        Some(since),
+        archive_options("zero.md"),
+        false,
+        &Default::default(),
+        &Default::default(),
+        &priority_snapshot,
+    )
+    .unwrap();
+    let zero = std::fs::read_to_string(dir.join("zero.md")).unwrap();
+    assert_eq!(zero_summary.window_count, Some(23));
+    assert_eq!(
+        zero_summary.unexported_by_priority,
+        Some([3, 2, 3, 4, 5, 6])
+    );
+    assert!(zero.contains("doc_count: 0\n"));
+    assert!(zero.contains("window_count: 23\n"));
+    assert!(zero.contains(
+        "unexported_by_priority: {\"5\":3,\"4\":2,\"3\":3,\"2\":4,\"1\":5,\"unavailable\":6}\n"
+    ));
 }
 
 #[test]
@@ -689,6 +907,7 @@ fn triage_archive_boundary_forgery_matches_shared_multi_document_fixture() {
         true,
         &summaries,
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     let actual = std::fs::read(temp.path().join("forgery.md")).unwrap();
@@ -727,6 +946,7 @@ fn triage_archive_sanitizes_header_injection_and_json_escapes_tags() {
         false,
         &Default::default(),
         &annotations,
+        &Default::default(),
     )
     .unwrap();
     let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
@@ -758,6 +978,7 @@ fn triage_archive_sanitizes_header_injection_and_json_escapes_tags() {
         None,
         archive_options("archive.md"),
         false,
+        &Default::default(),
         &Default::default(),
         &Default::default(),
     )
@@ -806,6 +1027,7 @@ fn triage_archive_index_offsets_follow_escaped_lines_and_skip_bad_timestamp_boun
         false,
         &Default::default(),
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
@@ -844,6 +1066,7 @@ fn triage_archive_unparseable_only_timestamp_has_dash_bounds() {
         false,
         &Default::default(),
         &Default::default(),
+        &Default::default(),
     )
     .unwrap();
     let archive = std::fs::read_to_string(temp.path().join("archive.md")).unwrap();
@@ -861,6 +1084,7 @@ fn triage_archive_zero_documents_matches_fixture_and_is_excluded_from_next_expor
         None,
         archive_options("custom-empty.md"),
         false,
+        &Default::default(),
         &Default::default(),
         &Default::default(),
     )
@@ -885,6 +1109,7 @@ fn triage_archive_zero_documents_matches_fixture_and_is_excluded_from_next_expor
         None,
         archive_options("next.md"),
         false,
+        &Default::default(),
         &Default::default(),
         &Default::default(),
     )

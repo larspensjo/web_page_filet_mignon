@@ -838,6 +838,7 @@ fn archive_dialog_submitted_validates_basename_and_checkpoint_flag() {
             use_summaries,
             summaries,
             annotations: _,
+            priority_snapshot: _,
         } => {
             assert_eq!(request_id, 1);
             assert_eq!(basename, "custom-archive.md");
@@ -893,6 +894,106 @@ fn archive_dialog_submitted_emits_triage_and_signal_annotations() {
     assert_eq!(scored.priority, Some(3));
     assert_eq!(scored.signal_key.as_deref(), Some("zero-event"));
     assert_eq!(scored.signal_score, Some(0));
+}
+
+#[test]
+fn archive_submit_priority_snapshot_includes_unselected_completed_result() {
+    use harvester_engine::archive_url_key;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    complete_signal_candidate(&mut state, 0, 80, "selected-event");
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: true,
+        },
+    );
+
+    let (ordered_urls, priority_snapshot) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                priority_snapshot,
+                ..
+            } => Some((ordered_urls, priority_snapshot)),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(ordered_urls, vec!["https://triage-complete.com/0"]);
+    assert_eq!(
+        priority_snapshot.get(&archive_url_key("https://triage-complete.com/1")),
+        Some(&3),
+        "snapshot must include completed triage results outside the exported selection"
+    );
+    assert_eq!(
+        priority_snapshot.get(&archive_url_key("https://triage-complete.com/0")),
+        Some(&3),
+        "snapshot must also include the exported selection's own triage results"
+    );
+    assert_eq!(
+        priority_snapshot.len(),
+        2,
+        "snapshot must cover every completed triage result the session holds"
+    );
+}
+
+#[test]
+fn archive_submit_priority_snapshot_includes_manually_excluded_candidate() {
+    use harvester_engine::archive_url_key;
+
+    init_logging();
+    let mut state = complete_triage_state_for_test(2);
+    complete_signal_candidate(&mut state, 0, 80, "selected-event");
+    complete_signal_candidate(&mut state, 1, 90, "excluded-event");
+    let (state, _) = update(
+        state,
+        Msg::ToggleSignalCandidateExclusion {
+            signal_key: "excluded-event".to_string(),
+        },
+    );
+    assert_eq!(state.signal_candidate().excluded().len(), 1);
+
+    let (state, _) = update(state, Msg::ArchiveClicked);
+    let request_id = state.archive_request_id();
+    let (_state, effects) = update(
+        state,
+        Msg::ArchiveDialogSubmitted {
+            request_id,
+            basename: "archive.md".to_string(),
+            set_checkpoint: false,
+            submitted_at: chrono::Utc::now(),
+            use_summaries: false,
+            use_signal_candidates: true,
+        },
+    );
+
+    let (ordered_urls, priority_snapshot) = effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            Effect::ArchiveRequested {
+                ordered_urls,
+                priority_snapshot,
+                ..
+            } => Some((ordered_urls, priority_snapshot)),
+            _ => None,
+        })
+        .expect("ArchiveRequested effect expected");
+    assert_eq!(ordered_urls, vec!["https://triage-complete.com/0"]);
+    assert!(!ordered_urls.contains(&"https://triage-complete.com/1".to_string()));
+    assert_eq!(
+        priority_snapshot.get(&archive_url_key("https://triage-complete.com/1")),
+        Some(&3),
+        "manually excluded completed triage results must remain in the snapshot"
+    );
 }
 
 #[test]

@@ -101,6 +101,7 @@ impl EffectRunner {
                 use_summaries,
                 summaries,
                 annotations,
+                priority_snapshot,
             } => {
                 let msg_tx = self.msg_tx.clone();
                 let output_dir = self.paths.output_dir.clone();
@@ -119,14 +120,35 @@ impl EffectRunner {
                         use_summaries,
                         &summaries,
                         &annotations,
+                        &priority_snapshot,
                     ) {
                         Ok(summary) => {
-                            engine_info!(
-                                "[archive-dialog] export completed request_id={} docs={} path={}",
-                                request_id,
-                                summary.doc_count,
-                                summary.output_path.display()
-                            );
+                            if let (Some(window_count), Some(counts)) =
+                                (summary.window_count, summary.unexported_by_priority)
+                            {
+                                let [priority_5, priority_4, priority_3, priority_2, priority_1, unavailable] =
+                                    counts;
+                                engine_info!(
+                                    "[archive-dialog] export completed request_id={} docs={} window_count={} unexported_by_priority={{\"5\":{},\"4\":{},\"3\":{},\"2\":{},\"1\":{},\"unavailable\":{}}} path={}",
+                                    request_id,
+                                    summary.doc_count,
+                                    window_count,
+                                    priority_5,
+                                    priority_4,
+                                    priority_3,
+                                    priority_2,
+                                    priority_1,
+                                    unavailable,
+                                    summary.output_path.display()
+                                );
+                            } else {
+                                engine_info!(
+                                    "[archive-dialog] export completed request_id={} docs={} path={}",
+                                    request_id,
+                                    summary.doc_count,
+                                    summary.output_path.display()
+                                );
+                            }
                             let _ = msg_tx.send(Msg::ArchiveExportCompleted {
                                 request_id,
                                 path: summary.output_path,
