@@ -3,12 +3,13 @@
 Written 2026-09-18 from the consumer side (the portfolio model, `../AI_portfolio`), and filed here
 because this repository produces the archive and therefore owns the contract. Revised 2026-09-19
 after [Review.ArchiveExportContract.md](../Review.ArchiveExportContract.md); every finding there
-was checked against the source and adopted, with the choices recorded inline. Phase 1 is
-implemented in the working tree (uncommitted, pending adoption). Phase 2 is carried out in
-`../AI_portfolio` and is recorded
+was checked against the source and adopted, with the choices recorded inline. Phase 1 landed in
+`929aa3a`. Phase 2 is carried out in `../AI_portfolio` and is recorded
 here so producer and consumer are read together. Phase 3 was rewritten on 2026-09-19 from the
-evidence of the first live schema-2 batch; it no longer waits for the Jev verdict and is not yet
-reviewed by the scraper side.
+evidence of the first live schema-2 batch; it no longer waits for the Jev verdict. It was revised
+on 2026-09-20 after the scraper-side review
+[Review.ArchiveExportContract.Phase3.md](../Review.ArchiveExportContract.Phase3.md): all eight
+findings were checked against the source and adopted, with the choices recorded inline.
 
 Terms: "the scraper" is this repository; "the portfolio" is `../AI_portfolio`. Portfolio paths are
 written relative to that repository's root.
@@ -27,8 +28,9 @@ Done means:
   index with line offsets, produced by code, and no article body can forge either;
 - step 1 of `/process-archive` reads those fields instead of grepping titles, and still works on
   an archive without them;
-- no new model call is added anywhere, so the change is independent of the Jev-versus-OpenAI
-  verdict in `Plan.JevTriageExperiment.md`, and need not ship on that experiment's branch.
+- Phases 1 and 2 add no model call, so they are independent of the Jev-versus-OpenAI verdict in
+  `Plan.JevTriageExperiment.md`, and need not ship on that experiment's branch. Phase 3 is
+  scoped separately: 3e adds a call, and 3b may add one later (see those steps).
 
 ## Dividing rule (settled 2026-09-18)
 
@@ -318,7 +320,16 @@ nothing below needs it. Every judgment here is specified as a field with a meani
 produced by whatever model the scraper already runs for triage and signal-candidate scoring. If
 a typed-judgment model is adopted later, it fills the same fields; the contract does not change.
 
-Not built yet. Steps 3a to 3e are independent enough to ship one at a time, in this order.
+Not built yet. The steps ship one at a time. The step letters are kept because the portfolio
+refers to them, but the delivery order (revised 2026-09-20) is:
+
+1. **3a**, coverage counters, with the portfolio's display of them.
+2. **3c**, the single signal-candidate context revision. The link-candidate transport is an
+   explicit dependency of `primary_url` and is part of this step.
+3. **3b, code-only grouping**, with the reader's support for archives where only some documents
+   carry a cluster. Model-assisted grouping is deferred (see 3b).
+4. **3d's fetch-access experiment**, then 3d itself only if the experiment passes.
+5. **3e**, as its own plan document, after 3a has produced coverage baselines over a few batches.
 
 ### What the first live batch showed
 
@@ -357,33 +368,73 @@ One batch of 106 articles (fetched 12–19 September 2026), so indicative, not a
   a Methodology tier, priority is not a filter, and whether two reports are independent is
   decided by the portfolio after it inspects the sources.
 - **Model output is untrusted until validated.** Each new field has a closed vocabulary or a
-  code-checked value (see each step), and an invalid value is dropped, not exported.
+  code-checked value (see each step), and an invalid value is dropped, not exported. Dropping is
+  field-local: an invalid new field never discards the valid fields beside it (see 3c).
+- **A cache key covers every input the judgment actually saw.** Following
+  `signal_candidate_cache.rs`: the hash of the rendered inputs (not just the article content
+  hash, since a re-summary changes the input), the context or algorithm version, the prompt
+  version and the model id. Archive document numbers are never part of a cached identity; they
+  exist only after the exporter has deduplicated, filtered and ordered one particular archive.
+- **Every shipped addition updates the contract and both readers' view of it.** That means
+  `docs/ArchiveExportFormat.md`, the shared fixtures, and the portfolio reader's `-AsJson` and
+  `-Wide` output. The reader parses unknown header names but projects only the properties it
+  knows, so a field the reader merely tolerates is still invisible to the workflow. Fixtures
+  cover an unknown additive field and `false` versus absent for every boolean.
 
-### 3a. Make recall visible (no model)
+### 3a. Make selection coverage visible (no model)
 
 Add name-keyed lines to the index header, after `fetched_to`:
 
 ```
 window_count: 412
-unexported_by_priority: {"5":0,"4":3,"3":41,"2":118,"1":96,"untriaged":48}
+unexported_by_priority: {"5":0,"4":3,"3":41,"2":118,"1":96,"unavailable":48}
 ```
 
-- `window_count` is the number of corpus articles that pass the export's `since` filter,
-  exported or not. `doc_count` stays the number exported.
-- `unexported_by_priority` is a compact JSON object on one line, counting the articles in the
-  window that were not exported, by triage priority, with `untriaged` for the rest. When the
-  export has no `since` bound both lines are omitted.
-- Reducer or exporter, whichever already holds the filtered set; no new state.
+- **The exporter owns window membership.** `build_triage_archive` already scans the root and
+  `linked/` articles, applies `since`, and deduplicates by `archive_url_key` into one map before
+  it removes the selected documents. `window_count` is the size of that map before removal: one
+  per canonical URL, not one per file, with linked articles included and an unparseable
+  `fetched_utc` passing the filter exactly as it does today. What remains in the map after
+  removal is the unexported set. Neither the pinned corpus nor the annotation map can serve as
+  the population: the pinned corpus is already policy-filtered by
+  `CurrentWorkingCorpus::select_for_archive`, and annotations cover only the selected URLs, so
+  either would hide the exclusions this step exists to show.
+- **A separate submit-time priority snapshot.** `handle_dialog_submitted` adds a second map to
+  `Effect::ArchiveRequested`, beside `annotations`: `archive_url_key(url)` to priority for every
+  triage result the session holds at submit time, whether or not the URL is selected. The
+  exporter looks each unexported URL up in it.
+- **`unavailable`, not `untriaged`.** A URL with no result in the snapshot is counted under
+  `unavailable`: the session cannot tell "never triaged" from "triaged in an earlier session and
+  not loaded". The reducer does not look results up in the cache by hash to fill the gap. If the
+  `unavailable` bucket turns out to dominate, a hydration path for historical triage results is
+  planned as its own step; it is not assumed here.
+- A manually excluded candidate, a below-cut article and a below-threshold candidate are all
+  simply unexported and are counted under their priority.
+- **Invariant:** `window_count = doc_count + sum(unexported_by_priority.values())`. The reader
+  checks it and reports a mismatch.
+- When the export has no `since` bound both lines are omitted.
 
-This is the prerequisite for 3e: without it no later change can be shown to improve recall.
-Tests: golden index with and without a `since` bound; counts agree with the fixture corpus.
+**What this measures.** Selection coverage, not recall: the counters say how much was held back
+and at what priority, not whether anything held back was relevant. They are still the
+prerequisite for 3e, because they give the baseline of what is withheld. A claim that 3e
+improves recall additionally needs a repeatable sampled review of withheld documents, which 3e's
+plan must define.
+
+Tests: golden index with and without a `since` bound. One fixture corpus in which a below-cut
+triaged article, an article with no triage result, a manually excluded candidate, two files with
+one canonical URL, a linked article, an article with a malformed date and a zero-export run all
+satisfy the invariant. A reducer test asserts the emitted effect's priority snapshot contains an
+unselected URL, so the reducer-to-effect path is covered and not only the exporter fixture.
 
 ### 3b. Event clusters
 
 New optional header field `event_cluster`: a positive integer, **scoped to this archive only**.
 Two documents with the same value are judged to report the same underlying event. The numbers
-carry no meaning across archives and are assigned in order of first appearance. A document
-judged alone gets its own number; a document not judged has no field.
+carry no meaning across archives and are assigned in order of first emitted document. When
+grouping ran, every emitted document gets a number, singletons included; when it did not run or
+failed, no document has the field. A singleton means only that the conservative rules below
+found no duplicate, so two different numbers are not evidence of two different events, and the
+portfolio still merges on reading.
 
 `signal_key` is kept unchanged for one cycle, because the portfolio's reader sorts on it. It is
 retired by a later schema bump once `event_cluster` has been used on several batches. The
@@ -394,31 +445,57 @@ Why per archive: the portfolio consumes one archive at a time, and recognising a
 already logged needs its own ledger. A stable cross-run id would add state and a failure mode
 for a benefit that belongs on the other side of the boundary.
 
-Construction, cheapest first:
+**Ship code-only grouping first (decided 2026-09-20).** It runs inside the exporter over the
+emitted documents, is deterministic, needs no cache, no model and no dialog lifecycle, and the
+first batch suggests it recovers most of the value (26 articles behind 7 sources).
 
-1. **In code, no model.** Group documents that share a canonical `primary_url` (from 3c, when
-   present), and documents whose normalised titles are near-duplicates. This alone would have
-   caught most of the 26 retellings in the first batch, and it is deterministic.
-2. **One grouping judgment per candidate bucket.** Bucket the remaining documents by shared
-   entity (from `tags`, `themes` and the leading token of `signal_key`) within a date window of
-   a few days. For each bucket with more than one document, one model call receives the titles
-   and summaries and returns a partition of the document numbers. One call per bucket, not one
-   per pair. Buckets are small; the first batch would have needed on the order of twenty calls.
-3. **Validate in code.** The response must be a partition of exactly the bucket's document
-   numbers. Anything else discards that bucket's result and leaves those documents with the
-   step-1 grouping only.
+- **Inputs.** Per emitted document: title, `fetched_utc`, and from the annotations `primary_url`
+  and `article_kind` when 3c has supplied them. `fetched_utc` stands in for event time; that is
+  an approximation and the contract says so.
+- **A shared primary is candidate evidence, not a rule.** One filing, report or rolling notice
+  page can support distinct events. Two documents are merged only when they were fetched within
+  three days of each other **and** either
+  - they share a canonical `primary_url` (compared by `archive_url_key`) and both are
+    `article_kind: relay`, or
+  - their normalised titles are near-duplicates.
+- **Near-duplicate titles.** Normalise by lowercasing, dropping punctuation and a trailing outlet
+  suffix (` - Outlet`, ` | Outlet`), then compare token sets by Jaccard similarity with a
+  threshold of 0.8. Titles whose numeric tokens differ (amounts, dates, counts) are never
+  near-duplicates, so "raises $500M" and "raises $300M" stay apart. The threshold and the
+  three-day window are pinned by fixtures taken from the first batch and changed only with them.
+- **One global partition.** Merges are edges; clusters are the connected components over all
+  emitted documents, so a third report joins an existing pair and no document can receive two
+  assignments. Numbers are assigned after the partition, in first-emitted-document order.
+- **Failure.** If grouping fails for any reason the export proceeds without the field.
 
-Timing is the open design question (see Open questions 5). The grouping depends on which
-documents are exported together, so it cannot be fully precomputed at scoring time. The
-preferred shape is to compute it when the export dialog opens, for the pinned selection, as an
-ordinary effect with a cache keyed by the sorted set of article content hashes in the bucket
-plus the grouping context hash. If results are not complete at submit, the export proceeds with
-what has arrived.
+Tests: two relays sharing a primary merge; two non-relay articles sharing one filing do not;
+two different events from one filing stay apart; similar titles with different amounts or dates
+stay apart; a third report joins a pair; identical bodies at two URLs are two members; numbering
+follows emitted order and changes when the selection or mode changes the order; the field is
+absent, not `0`, when grouping did not run. False merges are tested as deliberately as recovered
+retellings, and every source document remains present in the archive whatever its cluster.
 
-Tests: step-1 grouping on fixtures sharing a primary and on near-duplicate titles; partition
-validation (missing number, extra number, duplicate number, non-integer); an invalid response
-leaves the step-1 grouping intact; numbering is stable for a fixed selection; the field is
-absent, not `0`, for unjudged documents.
+**Model-assisted grouping is deferred**, not designed here. The earlier sketch (one grouping
+call per entity bucket, started when the dialog opens, cached by the set of content hashes,
+returning a partition of document numbers) is withdrawn because:
+
+- document numbers exist only after the exporter has deduplicated, filtered and ordered one
+  archive, and the dialog pins both a base and a candidate selection with the mode chosen at
+  submit, so a cached numeric partition can attach to the wrong articles;
+- a set of content hashes loses multiplicity and ignores changed summaries;
+- a document can share entities with several buckets, so per-bucket partitions need not combine
+  into one global partition;
+- starting work at dialog open adds a lifecycle the reducer does not have today (cancelling the
+  dialog is a host no-op).
+
+It is reconsidered only after code-only grouping has run on several batches and the remaining
+missed retellings have been counted. A future design must then settle: stable member identities
+(canonical URL plus content hash) end to end, with the cached partition expressed in those
+identities and intersected with the emitted documents at export; a cache key following the
+cache principle above; entity buckets built from structured summary entities, not broad themes
+or the first token of a slug, with a stated overlap rule that yields one global partition;
+reducer-owned request state with generation checks for late results, submit, reopen and cancel;
+bounded bucket size and concurrency; and export that never waits.
 
 ### 3c. One revision of the signal-candidate call
 
@@ -431,11 +508,37 @@ the cache is invalidated once.
   `analyst_note` (rating or target change), `price_coverage`, `commentary`. `relay` is the kind
   the first batch needed most: it is an article-only judgment and it marks the same-source
   retellings directly. An unrecognised value is dropped.
-- **`primary_url`** — the checkable primary the article rests on, or absent. Code lists the
-  article's outbound links and the model selects one of them by index or selects none, so the
-  model never writes a URL. Whether the extracted article text still carries its outbound links
-  is unverified (Open questions 6); if it does not, the link list must be captured at extraction
-  time, which is a larger change.
+- **`primary_url`** — the checkable primary the article rests on, or absent. Code supplies a
+  numbered candidate list and the model selects one entry by index or selects none, so the model
+  never writes a URL. The transport is part of this step (Open questions 6, resolved):
+  - *Source.* Reuse the links extraction already captures. `LinkExtractingConverter` keeps the
+    anchor text in the body and records target URLs separately; the extraction pipeline returns
+    them and job state stores them. No second extractor. The article body therefore does not
+    carry Markdown links, and today's signal input snapshot carries neither links nor body.
+  - *Candidate list.* Eligible HTTP(S) links only, canonicalised and deduplicated, in document
+    order, capped at a fixed number, numbered from 1. Entry 0 is always the article's own URL, so
+    an article that *is* the primary (an issuer release, a filing) can say so; an outbound-only
+    list cannot express that. "None" is a distinct answer, not an index.
+  - *Restored and corpus-only articles.* Restoration rebuilds links without anchor text, so the
+    list is URLs with anchor text where available and must be useful without it. An article for
+    which no link list is available gets no candidate list and therefore no `primary_url`;
+    absent means unavailable.
+  - *Freezing.* The exact list is frozen in the request snapshot, is part of the hashed scoring
+    inputs, and the returned index is resolved against that frozen list at completion, never
+    against the job's current links. Reordered links, a restart or a duplicate URL therefore
+    cannot turn one answer into a different primary; they produce a different input hash.
+- **Evidence for the new judgments.** Summaries can omit the attribution that separates original
+  reporting from relay, or the citation behind `legal_claim` and `cites_report`. Decided
+  2026-09-20 (Open questions 9): the scoring input gains a bounded lead excerpt of the article
+  body, since attribution usually sits in the first paragraphs. The excerpt is cut
+  deterministically at a fixed character cap on a character boundary, is frozen in the request
+  snapshot and is part of the hashed scoring inputs like every other input. When the body is
+  unavailable the excerpt is omitted and the judgments fall back to the summary. This raises
+  input tokens per call; the earlier statement that the ride-along fields cost output tokens
+  only is withdrawn. The excerpt is article text and is untrusted prompt input like the summary.
+- **`published_at` is `fetched_utc`.** The scoring input labelled `published_at` is filled from
+  the fetch time. The context revision either renames it or states the approximation to the
+  model; it is not presented as event time.
 - **`legal_claim`** and **`cites_report`** — booleans, written `true` or `false`. `legal_claim`
   marks a statement about a law, order, ruling, award or permit, which the portfolio must check
   against the primary text. `cites_report` marks reliance on a named research report, which the
@@ -454,14 +557,33 @@ the cache is invalidated once.
   old strings on load), the desktop job list label and its fixtures. It collides with the
   portfolio's Methodology tiers. Resolve the triage prompt's company "Tier 1"/"Tier 2" watchlist
   names in the same pass, since they are a third "Tier" scale. The outlet class stays
-  unexported, as decided in schema 2.
+  unexported, as decided in schema 2. The renamed enum keeps its ordering: it participates in
+  candidate selection, not only in display.
 
-The ride-along fields cost output tokens only; the call count does not change. Rescoring the
-cached corpus after the revision is not required: old articles simply lack the new fields.
+**Validation and compatibility.** `validate_signal_candidate` returns one result today and any
+error fails the whole scoring job; `SignalCandidateResult` is also what the signal cache
+persists. So:
 
-Tests: DTO validation for each vocabulary and for a link index out of range; golden export with
-each new field present, absent and `false`; old persisted tier strings load under the new name;
-a context-hash test that pins the single revision.
+- Every added judgment is an optional member with a missing-field default. An old cached record
+  without the new fields loads unchanged, and a missing boolean is unavailable, never `false`.
+- Each optional field is validated on its own. An unrecognised `article_kind`, an out-of-range
+  link index or a non-boolean flag drops that field only and is logged through `engine_logging`
+  with the job and URL; the score and the other fields survive.
+- Malformed JSON and invalid legacy required fields remain whole-result failures, as today.
+- The same policy applies to ordinary completion and to Batch API collection and replay.
+
+The call count does not change. Rescoring the cached corpus after the revision is not required:
+old articles simply lack the new fields.
+
+Tests: load a real old result shape with none of the new fields; each optional field missing,
+invalid and valid, `false` in particular; a bad `article_kind` or link index does not discard a
+valid score; the same samples pass through deferred-collection validation; a link-bearing
+article keeps its candidate identity through scoring, and restart, missing link metadata,
+reordered links, duplicate URLs and an out-of-range index cannot yield a different primary; the
+self entry resolves to the article's own URL; a relay whose summary omits the attribution
+(fixture for the evidence question); golden export with each new field present, absent and
+`false`; old persisted tier strings load under the new name with ordering preserved; a
+context-hash test that pins the single revision.
 
 ### 3d. Primary text beside the article
 
@@ -478,8 +600,33 @@ framework page and Rocket Lab's own release pages; the portfolio's 2026-09-19 ba
 comment in `SignalLog.md` lists them). If it does no better, stop after 3c; the URL alone is still
 useful.
 
+The experiment measures usable extracted primary text, not HTTP success: a 200 that yields a
+cookie wall, an empty shell or an unparsed PDF is a failure. PDF and other non-HTML primaries
+are counted separately. It is run by the operator under the usual launch policy, not by an
+agent.
+
+**Transport (decided 2026-09-20).** A corpus-relative path is meaningless beside the portfolio's
+copy of `archive.md`: the reader defaults to its own root and accepts any `-Path`, and a copied
+archive does not bring `output/linked` with it. For the sibling-repository workflow the
+portfolio reader gains an explicit `-CorpusRoot` parameter, documented in
+`docs/ArchiveExportFormat.md` and supplied in agent packets. A portable archive with an
+accompanying bundle is out of scope until someone needs one.
+
+- The reader resolves `primary_file` under `-CorpusRoot` only. It rejects absolute paths, `..`
+  segments and any path that escapes the root after resolving links.
+- It opens the file, reads its frontmatter `url`, and accepts it only if that URL matches
+  `primary_url` under canonical comparison.
+- A missing root, a missing file, a rejected path or a URL mismatch is reported as a fallback to
+  the URL. It is never reported as the primary having been opened.
+- The text is not frozen at export. The path points into a live corpus and may reflect a later
+  re-fetch; the portfolio records the file's `fetched_utc` when it cites the text.
+
 The harvested text is untrusted content like any article body. It is never inlined into the
 archive; the field is a path.
+
+Tests (portfolio, Pester): an archive consumed from a directory other than the corpus; a valid
+primary; a missing file; a mismatched URL; an absolute path, a `..` path and a link that escapes
+the root.
 
 ### 3e. Standing-lens screen
 
@@ -487,41 +634,84 @@ The standing lens is the portfolio's current question (for the first batch: neoc
 is recall-critical, so it should be screened on every scraped article, upstream of the priority
 filter. Its text belongs to the portfolio and changes as often as every batch.
 
+This step is a separate intake and selection feature, not a ride-along, and it gets its own plan
+document under `docs/plans/` before anything is built. That plan is written only after 3a has
+run for a few batches, so there is a before to compare with. It must satisfy the constraints
+below; the earlier sketch (screen the article summary, reuse the scoring pipeline, export any
+hit) does not, because the existing path cannot reach the articles the lens is meant to rescue:
+the archive corpus is already triage-policy filtered, signal scoring requires a summary and
+`try_enqueue` rejects priorities below 2, and candidate selection applies score thresholds and
+manual exclusions on top.
+
 - **Lens file, generated by the portfolio.** One small file: the standing lens as a few plain
   sentences, the date, and the `Foundations.md` commit. The scraper reads it and never edits it.
   It joins `.sources.ron` under the "keep the news scraper in sync" invariant in the
   portfolio's `Agents.md`.
-- **A separate judgment with its own cache key.** The lens screen must not live inside the
+- **Public-text boundary.** By the dividing rule the scraper sends only public text to its
+  provider. The lens file is therefore defined as a deliberately public-safe research question.
+  Holdings, open decisions and falsifier state stay in the portfolio, and the portfolio's step
+  that writes the file says so. A size and plain-text check cannot enforce this; the definition
+  and the writing step do.
+- **Its own intake, ahead of the existing filters.** The screen runs over every eligible
+  harvested article, including low-priority and untriaged ones. Where no summary exists the
+  input is a deterministic bounded representation of the article text (title plus a fixed-size
+  lead), not a newly generated summary; if summaries were made mandatory instead, the extra
+  summarisation calls would have to be budgeted in that plan.
+- **A separate judgment with a complete cache key.** The screen must not live inside the
   signal-candidate context: the lens changes often, and there it would invalidate every cached
-  score on every change. It is its own small call (article summary plus lens text, yes or no),
-  cached by article content hash plus lens-text hash.
-- **Header field `lens_match: true|false`**, and a lens hit is exported even when it falls below
-  the priority cut. The index header gains `lens_hits_below_cut: <n>`, so 3a's counts show what
-  the screen added.
+  score on every change. Its cache key follows the cache principle above: hash of the actual
+  screen input (so a re-summary misses), lens-text hash, prompt or context version, model id.
+- **Lens identity in the archive.** The index header carries the lens identity applied to this
+  export (`lens_id`: text hash, plus the lens date), and every exported `lens_match` was judged
+  under that identity. A lens change while the dialog is open cannot mix two lenses: results
+  under any other identity are treated as unavailable. The portfolio can then say which
+  question an old archive's booleans answered.
+- **Selection is an explicit union.** Exported set = ordinary selection ∪ eligible lens hits,
+  pinned when the dialog opens like the rest of the selection. The plan must settle, with the
+  user: whether a manual exclusion beats a lens hit (recommended: yes), that the `since` filter
+  applies to hits as to everything else, how hits enter candidate mode, when a hit that lands
+  after the dialog opened becomes eligible (recommended: the next export), and that checkpoint
+  advancement cannot silently put a late hit out of reach.
+- **Header field `lens_match: true|false`**, absent when the screen is pending, failed or was
+  never run. An incomplete screen is never presented as a negative.
+- **Coverage counts in the index header:** screened, matched, and unavailable, so partial
+  screening is visible. `lens_hits_below_cut` counts documents actually exported because of the
+  lens that the named baseline (the ordinary selection pinned for the same dialog) would not
+  have exported; it is not the number of positive judgments.
+- **Recall claim.** The repeatable sampled review of withheld documents required by 3a is
+  defined here before any claim that the screen improves recall.
 - **Tracked entity names are not part of the lens file.** They already live in `.sources.ron`.
   The portfolio instead gains a check that every tracked company file has a source key, which is
   the drift its own invariant names.
-- **Hostile text.** The lens text goes into a model prompt, so the scraper treats the file as
-  input to validate: size cap, plain text, no marker lines. Article text is already untrusted.
+- **Hostile text.** The lens text goes into a model prompt, so the scraper validates the file's
+  structure (size cap, plain text, no marker lines) and, separately, treats its content as
+  untrusted prompt input in the same way as article text.
 
-Build this only after 3a has run for a few batches, so there is a before to compare with.
+Acceptance checks for that plan: low-priority and untriaged articles with no summary; candidate
+mode; manual exclusion; failed and pending screens; late hits; checkpoint and reopen; changing
+the lens, the summary, the prompt or the model changes the cache identity.
 
 ### Portfolio side, per step
 
 Each scraper step has a small counterpart in `../AI_portfolio`, carried out there:
 
-- 3a: the reader prints the window counts; the batch report's feedback table gains a line for
-  what was held back.
-- 3b: the reader sorts by `event_cluster` when present and falls back to `signal_key`; the skill
-  text says a shared cluster is a provisional same-event grouping and nothing more.
+- 3a: the reader prints the window counts and checks the invariant; the batch report's feedback
+  table gains a line for what was held back, labelled as selection coverage, not recall.
+- 3b: the reader sorts `event_cluster` numerically (10 after 9, not after 1). In an archive where
+  only some documents carry the field, clustered documents come first in cluster order and the
+  rest follow in `signal_key` order; with no field at all it sorts by `signal_key` as today. The
+  skill text says a shared cluster is a provisional same-event grouping and nothing more, and
+  that different clusters are not evidence of different events.
 - 3c: the reader shows `article_kind` and the two flags with `-Wide`. The skill may use
   `article_kind` and `primary_url` to **propose** a tier, which the agent confirms only after
   opening the artifact. The earlier sketch had the portfolio map these to a tier in code; that
   contradicts the Phase 2 rule that no header field sets a tier, and a misclassified relay would
   enter a file as Tier 1 unread.
-- 3d: the agent packet names `primary_file` paths, under the same trust boundary as bodies.
-- 3e: the portfolio writes the lens file at the end of each batch, in the step that records the
-  standing lens in the batch comment.
+- 3d: the reader gains `-CorpusRoot` and the path, URL-match and fallback rules in 3d; the agent
+  packet names the resolved `primary_file` paths, under the same trust boundary as bodies.
+- 3e: the portfolio writes the public-safe lens file at the end of each batch, in the step that
+  records the standing lens in the batch comment, and the reader reports the `lens_id` an
+  archive was screened under.
 
 After each scraper step, the shared fixtures gain the new fields and the portfolio runs
 `Invoke-Pester scripts/tests`.
@@ -549,17 +739,27 @@ After each scraper step, the shared fixtures gain the new fields and the portfol
    it waits for the single signal-candidate context revision in Phase 3 step 3c, which
    invalidates them anyway. (Revised 2026-09-19: the rename rides with 3c, not with the lens
    file; the lens screen is a separate call precisely so that it does not touch that cache.)
-5. Open (3b): when is the grouping judgment computed? Preferred: when the export dialog opens,
-   for the pinned selection, as a cached effect, with the export proceeding on whatever has
-   arrived. To confirm against the effect system: that a dialog-scoped effect can be started
-   and abandoned cleanly, and where its results live in state. The alternative is a
-   code-only `event_cluster` (step 1 of 3b) with no model call at all; the first batch suggests
-   that alone recovers most of the value.
-6. Open (3c): does the extracted article text still carry its outbound links? If extraction
-   strips them, `primary_url` needs the link list captured at extraction time, and should be
-   planned as its own step after the rest of 3c.
+5. Resolved 2026-09-20 (3b): `event_cluster` ships code-only, computed in the exporter. There is
+   no dialog-scoped effect today and cancelling the dialog is a host no-op, so a grouping call
+   started at dialog open would add a lifecycle that does not exist. Model-assisted grouping is
+   deferred until code-only grouping has been measured; 3b lists what a future design must
+   settle.
+6. Resolved 2026-09-20 (3c): the extracted body does not carry its links; extraction records
+   them separately and job state stores them, so nothing new needs capturing. What is missing is
+   the transport: the signal input snapshot carries no links, and restoration drops anchor
+   text. 3c specifies the frozen candidate list.
 7. Open (3d): is the linked-page harvest switched on for this corpus (`output/linked` was empty
-   on 2026-09-19), and does the scraper's fetcher reach the primaries the portfolio's tools
-   could not? Both are checks, not builds, and 3d is dropped if the second answer is no.
-8. Open (3a): does the export path hold the full `since`-filtered set with triage state at
-   submit time, or only the pinned selection? `unexported_by_priority` needs the former.
+   on 2026-09-19), and does the scraper's fetcher yield usable text for the primaries the
+   portfolio's tools could not open? Both are checks, not builds, and 3d is dropped if the
+   second answer is no. Not run as of 2026-09-20.
+8. Resolved 2026-09-20 (3a): neither side holds it alone. The exporter holds the full
+   `since`-filtered, deduplicated set but no triage state; the reducer holds triage state but
+   pins only a policy-filtered selection. 3a has the exporter own membership and the reducer
+   pass a priority snapshot for every result in the session.
+9. Resolved 2026-09-20 (3c), decided by the user: the scoring input gains a bounded lead excerpt
+   of the article body, accepting more input tokens on every scoring call for better relay and
+   citation detection. The cap is fixed when 3c is built and pinned by the context-hash test.
+10. Open (3a): how large is the `unavailable` bucket in practice? If it dominates, plan a
+    hydration path for historical triage results.
+11. Open (3b): the 0.8 title threshold and three-day window are starting values, to be pinned
+    against fixtures drawn from the 2026-09-19 batch before the step ships.
