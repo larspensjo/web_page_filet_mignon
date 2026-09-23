@@ -3,7 +3,7 @@
 Written 2026-09-23 from the design brief for a one-press desktop Run with overlapping stages.
 Revised the same day after the Codex plan review (eight issues, all applied) and the user's
 answers to the first draft's twelve open questions, which are now stated as decisions below.
-Status: not started. Nothing below is built.
+Status: Phase 1 landed (incremental corpus hand-off). Phases 2–8 not started.
 
 Terms:
 
@@ -223,7 +223,8 @@ entries as (URL, `content_hash`, preparation budget). The loader returns:
 
 A template change between runs therefore re-prepares every held article on the next load, while
 their identities, and so their cache keys, stay the same. The loader stops building the
-collection text on this path. Order stays filename order.
+collection text on this path. Order stays download order, as today; the
+window is not re-sorted by filename.
 
 **Reducer merge.** `TriageArticlesLoaded` applies the delta to the pre-triage session:
 
@@ -556,7 +557,7 @@ Tests:
   - new, changed and deleted files;
   - the `since` filter using the cached `fetched_utc`;
   - archive artifacts excluded;
-  - filename order.
+  - download order preserved.
 - Engine contract: triage-path and summary-path preparation give identical `prepared_text` and
   `content_hash`.
 - `harvester_io`:
