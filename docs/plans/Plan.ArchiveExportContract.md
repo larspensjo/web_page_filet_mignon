@@ -386,7 +386,12 @@ One batch of 106 articles (fetched 12–19 September 2026), so indicative, not a
 
 Status 2026-09-20: implemented in this repository in `f88a207`. Verified with an offline
 workspace build, the full test suite, clippy at -D warnings and rustfmt. The portfolio-side
-counterpart in the list below - printing the counts and checking the invariant - is outstanding.
+counterpart landed on 2026-09-23: `Read-ArchiveIndex.ps1` prints a `coverage` line, returns a
+`coverage` object with `-AsJson`, and reports a broken invariant, a malformed or reordered bucket
+object, or one line without the other as a `coverage counters:` diagnostic without invalidating
+the index. Its Pester tests read `schema2_since_raw.md`. The batch report's feedback table gains
+the held-back rows. The first live archive with the counters (2026-09-23, 54 documents) satisfied
+the invariant: window 204, held back 150.
 
 Add name-keyed lines to the index header, after `fetched_to`:
 
