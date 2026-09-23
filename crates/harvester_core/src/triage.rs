@@ -1,5 +1,6 @@
 use crate::briefing::LoadedArticle;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 pub type TriageArticleId = usize;
 
@@ -41,6 +42,7 @@ pub struct TriageArticle {
     pub fetched_utc: Option<String>,
     /// Provenance belongs to the selected session result, not the serialized result.
     pub triage_model: Option<String>,
+    pub preparation_budget: Option<usize>,
     pub triage_state: ArticleTriageState,
 }
 
@@ -102,9 +104,43 @@ impl TriageSession {
                 content_hash: article.content_hash,
                 fetched_utc: article.fetched_utc,
                 triage_model: None,
+                preparation_budget: None,
                 triage_state: ArticleTriageState::Pending,
             })
             .collect();
+    }
+
+    pub(crate) fn set_preparation_budgets(&mut self, held: &[harvester_engine::HeldArticle]) {
+        let budgets: HashMap<_, _> = held
+            .iter()
+            .map(|h| {
+                (
+                    (h.url.as_str(), h.content_hash.as_str()),
+                    h.preparation_budget,
+                )
+            })
+            .collect();
+        for article in &mut self.articles {
+            article.preparation_budget = budgets
+                .get(&(article.url.as_str(), article.content_hash.as_str()))
+                .copied();
+        }
+    }
+
+    pub(crate) fn refresh_preparation(&mut self, articles: &[LoadedArticle], budget: usize) {
+        let prepared: HashMap<_, _> = articles
+            .iter()
+            .filter(|a| a.prepared_text.len() <= budget)
+            .map(|a| ((a.url.as_str(), a.content_hash.as_str()), a))
+            .collect();
+        for article in &mut self.articles {
+            if let Some(prepared) =
+                prepared.get(&(article.url.as_str(), article.content_hash.as_str()))
+            {
+                article.prepared_text = prepared.prepared_text.clone();
+                article.preparation_budget = Some(budget);
+            }
+        }
     }
 
     pub fn reset_with_articles(&mut self, loaded: Vec<LoadedArticle>) {

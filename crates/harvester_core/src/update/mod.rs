@@ -9,11 +9,14 @@ mod import;
 mod llm_completed;
 mod pipeline_run;
 mod polling;
+pub(crate) mod processing;
 pub(crate) mod signal_candidate;
 mod summary_cache_support;
 mod triage;
 mod url_input;
 
+#[cfg(test)]
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;
 
@@ -364,13 +367,50 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             briefing::handle_articles_load_failed(&mut state, reason)
         }
         Msg::TriageClicked => triage::handle_triage_clicked(&mut state),
-        Msg::TriageArticlesLoaded {
-            request_id,
-            articles,
-        } => triage::handle_articles_loaded(&mut state, request_id, articles),
+        Msg::TriageArticlesLoaded { request_id, delta } => {
+            triage::handle_articles_loaded(&mut state, request_id, delta)
+        }
         Msg::TriageArticlesLoadProgress { .. } => Vec::new(),
         Msg::TriageArticlesLoadFailed { request_id, reason } => {
             triage::handle_articles_load_failed(&mut state, request_id, reason)
+        }
+        Msg::ProcessingConfigurationLoaded {
+            request_id,
+            contexts,
+            active_versions,
+            effective_models,
+            preparation_budget,
+        } => {
+            if state
+                .processing_start
+                .as_ref()
+                .is_some_and(|p| p.configuration_request == Some(request_id))
+            {
+                state.set_prompt_contexts(contexts);
+                state.mark_prompt_template_files_loaded();
+                state.set_llm_metadata(active_versions, effective_models);
+                state.mark_triage_metadata_ready();
+                state.mark_briefing_metadata_ready();
+                state.processing_budget = Some(preparation_budget);
+                state
+                    .processing_start
+                    .as_mut()
+                    .unwrap()
+                    .configuration_request = None;
+                processing::resume(&mut state)
+            } else {
+                Vec::new()
+            }
+        }
+        Msg::ProcessingConfigurationFailed { request_id, reason } => {
+            if state
+                .processing_start
+                .as_ref()
+                .is_some_and(|p| p.configuration_request == Some(request_id))
+            {
+                processing::fail(&mut state, reason);
+            }
+            Vec::new()
         }
         Msg::PromptContextsLoaded { contexts } => {
             engine_info!("[PromptContext] Loaded {} context(s)", contexts.len());

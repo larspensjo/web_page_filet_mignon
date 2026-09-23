@@ -28,9 +28,14 @@ fn parse_rfc3339_utc(label: &str, value: &str) -> Result<chrono::DateTime<chrono
         .map_err(|e| format!("[briefing-filter] {label}: invalid RFC3339 '{snippet}': {e}"))
 }
 
+mod corpus_index;
+pub use corpus_index::{
+    CorpusScanIndex, CorpusScanStats, HeldArticle, TriageArticleDelta, WindowArticle,
+};
+
 const MIN_COLLECTION_PER_ARTICLE: usize = 64;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LoadedArticle {
     pub url: String,
     pub source_title: Option<String>,
@@ -330,27 +335,45 @@ pub fn load_and_prepare_articles(
     prepare_loaded_articles_and_collection(packages, max_input_bytes, registry)
 }
 
+/// Budget shared by triage preparation and article summaries.
+pub fn summary_preparation_budget(
+    max_input_bytes: usize,
+    registry: &PromptRegistry,
+) -> Result<usize, String> {
+    let template = registry
+        .active_effective(PromptId::ArticleSummary)
+        .ok_or_else(|| "summary prompt not registered".to_string())?;
+    let overhead = crate::content_prep::compute_template_overhead(
+        template.system_template(),
+        template.user_template(),
+        "content",
+        &[],
+    );
+    max_input_bytes.checked_sub(overhead).ok_or_else(|| {
+        format!("summary prompt overhead ({overhead}) exceeds max input budget ({max_input_bytes})")
+    })
+}
+
+fn prepare_article(package: &ArticlePackage, budget: usize) -> LoadedArticle {
+    let (prepared_text, _) = truncate_to_budget(package.clean_text.text(), budget);
+    LoadedArticle {
+        url: package.url.clone(),
+        source_title: package.source_title.clone(),
+        prepared_text,
+        content_hash: package.clean_text.content_hash().to_string(),
+        fetched_utc: package.fetched_utc.clone(),
+    }
+}
+
 fn prepare_loaded_articles_and_collection(
     packages: Vec<ArticlePackage>,
     max_input_bytes: usize,
     registry: &PromptRegistry,
 ) -> Result<(Vec<LoadedArticle>, String), String> {
-    let summary_template = registry
-        .active(PromptId::ArticleSummary)
-        .ok_or_else(|| "summary prompt not registered".to_string())?;
+    let summary_budget = summary_preparation_budget(max_input_bytes, registry)?;
     let briefing_template = registry
         .active(PromptId::AggregateBriefing)
         .ok_or_else(|| "aggregate briefing prompt not registered".to_string())?;
-
-    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
-    let summary_budget = max_input_bytes
-        .checked_sub(summary_overhead)
-        .ok_or_else(|| {
-            format!(
-                "summary prompt overhead ({}) exceeds max input budget ({})",
-                summary_overhead, max_input_bytes
-            )
-        })?;
 
     let briefing_overhead = compute_prompt_overhead(briefing_template, "collection", &[]);
     let collection_budget = max_input_bytes
@@ -366,17 +389,10 @@ fn prepare_loaded_articles_and_collection(
         return Ok((Vec::new(), String::new()));
     }
 
-    let mut loaded_articles = Vec::with_capacity(packages.len());
-    for package in packages.iter() {
-        let (bounded_text, _) = truncate_to_budget(package.clean_text.text(), summary_budget);
-        loaded_articles.push(LoadedArticle {
-            url: package.url.clone(),
-            source_title: package.source_title.clone(),
-            prepared_text: bounded_text,
-            content_hash: package.clean_text.content_hash().to_string(),
-            fetched_utc: package.fetched_utc.clone(),
-        });
-    }
+    let loaded_articles = packages
+        .iter()
+        .map(|package| prepare_article(package, summary_budget))
+        .collect();
 
     let total_articles = packages.len();
     let max_header_len = packages
@@ -759,38 +775,12 @@ pub fn load_and_prepare_articles_for_triage(
     max_input_bytes: usize,
     registry: &PromptRegistry,
 ) -> Result<Vec<LoadedArticle>, String> {
-    let triage_template = registry
-        .active(PromptId::ArticleTriage)
-        .ok_or_else(|| "triage prompt not registered".to_string())?;
-    let triage_overhead = compute_prompt_overhead(triage_template, "content", &[]);
-    let triage_budget = max_input_bytes
-        .checked_sub(triage_overhead)
-        .ok_or_else(|| {
-            format!(
-                "triage prompt overhead ({}) exceeds max input budget ({})",
-                triage_overhead, max_input_bytes
-            )
-        })?;
-
+    let budget = summary_preparation_budget(max_input_bytes, registry)?;
     let packages = scan_and_prepare_articles(output_dir, None)?;
-
-    if packages.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut loaded_articles = Vec::with_capacity(packages.len());
-    for package in packages.iter() {
-        let (bounded_text, _) = truncate_to_budget(package.clean_text.text(), triage_budget);
-        loaded_articles.push(LoadedArticle {
-            url: package.url.clone(),
-            source_title: package.source_title.clone(),
-            prepared_text: bounded_text,
-            content_hash: package.clean_text.content_hash().to_string(),
-            fetched_utc: package.fetched_utc.clone(),
-        });
-    }
-
-    Ok(loaded_articles)
+    Ok(packages
+        .iter()
+        .map(|package| prepare_article(package, budget))
+        .collect())
 }
 
 /// Load articles from exact archive file paths (for imported-corpus post-actions).

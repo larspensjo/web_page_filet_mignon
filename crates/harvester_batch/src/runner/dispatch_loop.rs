@@ -112,8 +112,11 @@ pub(crate) fn summarize_batch_msg(msg: &Msg) -> String {
             };
             format!("JobDone {{ job_id: {}, result: {} }}", job_id, result_label)
         }
-        Msg::TriageArticlesLoaded { articles, .. } => {
-            format!("TriageArticlesLoaded {{ articles: {} }}", articles.len())
+        Msg::TriageArticlesLoaded { delta, .. } => {
+            format!(
+                "TriageArticlesLoaded {{ articles: {} }}",
+                delta.members.len()
+            )
         }
         Msg::ArticlesLoaded { articles, .. } => {
             format!("ArticlesLoaded {{ articles: {} }}", articles.len())

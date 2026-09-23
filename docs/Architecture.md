@@ -60,6 +60,44 @@ Key rules:
 - **LLM workflow:** request orchestration, validation, and replay are executed as effects with results fed back into state.
 - **Rendering:** UI is a projection of state, designed for fast updates and clear feedback.
 
+## Incremental corpus preparation
+
+`EffectRunner` owns one process-lifetime `CorpusScanIndex` from `harvester_engine`.
+The index lists article files on each scan, reuses metadata when length and modification
+time match, reads new or changed files, and forgets deleted files. It retains URL, title,
+fetched time, content hash and article/non-article status, but no text. Clearing the
+imported corpus resets this index through an effect. The index is never persisted and
+does not change the public corpus format.
+
+Cold reads and budget-driven re-preparation use a chunked worker pool.
+`LoadArticlesForTriage` carries held URL/content-hash identities and their preparation
+budgets. Its response contains one first-filename match per requested URL in download
+order, the current
+summary preparation budget, and prepared text only for missing or differently budgeted
+identities. The budget subtracts the effective summary template overhead, including
+saved overlays, from the configured input limit. Content hashes derive from untruncated
+clean text; a budget change does not change identity. This path builds no aggregate
+collection text. Scan counts and timings are logged with the request ID as `[corpus-index]`.
+
+The reducer merges these deltas into pre-triage, preserving verdicts for unchanged
+identities, replacing changed preparation, evaluating new identities and removing departed
+members. The hand-off to triage makes pre-triage non-actionable while retaining preparation
+for later deltas. Refresh demand does not erase pre-triage or reset it to Loading.
+`pipeline_activity().intake_refresh_pending` counts pending demand, in-flight loads and
+processing-start preparation; both hosts therefore wait for refresh completion before
+starting triage or summaries.
+
+A triage start loads contexts, saved template overlays and LLM metadata as one ordered
+configuration operation. A standalone summary start does the same; summaries following
+triage reuse its configuration. Background refreshes do not begin a configuration snapshot.
+Only triage starts require the ArticleTriage context. A failed processing start preserves
+an already completed session.
+Before either stage dispatches, the reducer checks the stored preparation budget against
+the snapshot budget and requests a delta load when necessary. A failed or mismatched
+preparation cannot dispatch model work. Summaries take their text directly from the triage
+session. `LoadArticlesForBriefing` remains available for the aggregate-briefing domain
+path. Stage order and separate model concurrency limits are unchanged.
+
 ## Determinism and robustness
 - Stable ordering, identifiers, and output formats keep behavior reproducible.
 - Corpus schema changes are versioned through `CORPUS_SCHEMA_VERSION` and documented in `docs/CorpusFormat.md`.

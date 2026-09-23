@@ -496,7 +496,7 @@ fn cycle_counter_baseline_reports_deltas_not_cumulative_totals() {
 fn test_summarize_batch_msg_compacts_large_payloads() {
     let msg = Msg::TriageArticlesLoaded {
         request_id: 1,
-        articles: Vec::new(),
+        delta: harvester_engine::TriageArticleDelta::full_window(Vec::new(), 100_000),
     };
     let summary = summarize_batch_msg(&msg);
     assert!(summary.contains("TriageArticlesLoaded"));

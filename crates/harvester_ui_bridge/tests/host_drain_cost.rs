@@ -225,7 +225,7 @@ fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: articles.clone(),
+            delta: harvester_engine::TriageArticleDelta::full_window(articles.clone(), 100_000),
         },
     );
     state = next_state;

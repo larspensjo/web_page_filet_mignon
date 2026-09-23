@@ -12,6 +12,7 @@ pub(super) struct ProgressBefore {
     counts_as_work_message: bool,
     event: ProgressEvent,
     signal_enqueued_before: u32,
+    processing_target: Option<super::processing::StartTarget>,
 }
 
 enum ProgressEvent {
@@ -65,6 +66,7 @@ pub(super) fn progress_before(state: &AppState, msg: &Msg) -> ProgressBefore {
             counts_as_work_message,
             event: ProgressEvent::None,
             signal_enqueued_before: 0,
+            processing_target: None,
         };
     }
 
@@ -104,12 +106,11 @@ pub(super) fn progress_before(state: &AppState, msg: &Msg) -> ProgressBefore {
                 total: *files_total as u32,
             }
         }
-        Msg::TriageArticlesLoaded {
-            request_id,
-            articles,
-        } if state.triage_in_flight_request_id() == Some(*request_id) => {
+        Msg::TriageArticlesLoaded { request_id, delta }
+            if state.triage_in_flight_request_id() == Some(*request_id) =>
+        {
             ProgressEvent::LoadingDone {
-                total: articles.len() as u32,
+                total: delta.members.len() as u32,
             }
         }
         Msg::TriageArticlesLoadFailed { request_id, .. }
@@ -142,6 +143,14 @@ pub(super) fn progress_before(state: &AppState, msg: &Msg) -> ProgressBefore {
         counts_as_work_message,
         event,
         signal_enqueued_before: state.signal_candidate().enqueued_count(),
+        processing_target: state
+            .processing_start
+            .as_ref()
+            .map(|p| p.target)
+            .or_else(|| {
+                matches!(msg, Msg::PrepareSummariesClicked)
+                    .then_some(super::processing::StartTarget::Summaries)
+            }),
     }
 }
 
@@ -399,6 +408,14 @@ pub(super) fn record_progress_after(state: &mut AppState, before: ProgressBefore
         }
     }
 
+    if state.processing_start.is_none() {
+        match before.processing_target {
+            Some(super::processing::StartTarget::Triage) => record_triage(state, true),
+            Some(super::processing::StartTarget::Summaries) => record_summaries(state, true),
+            None => {}
+        }
+    }
+
     if state.signal_candidate().enqueued_count() > before.signal_enqueued_before
         || stage_is_active(state, PipelineStage::ScoringSignals)
     {
@@ -439,7 +456,7 @@ fn record_triage(state: &mut AppState, allow_activation: bool) {
     }
 }
 
-fn record_summaries(state: &mut AppState, allow_activation: bool) {
+pub(super) fn record_summaries(state: &mut AppState, allow_activation: bool) {
     if !allow_activation && !stage_is_active(state, PipelineStage::Summarizing) {
         return;
     }

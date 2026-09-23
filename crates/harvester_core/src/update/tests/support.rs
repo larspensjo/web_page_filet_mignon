@@ -356,7 +356,7 @@ pub(super) fn start_triage_for_test(
         state,
         Msg::TriageArticlesLoaded {
             request_id: triage_request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     update(state, Msg::TriageClicked)
@@ -501,7 +501,10 @@ pub(super) fn ready_pre_triage_state(urls: &[&str]) -> AppState {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_pre_triage_articles(urls),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_pre_triage_articles(urls),
+                100_000,
+            ),
         },
     );
     assert!(matches!(

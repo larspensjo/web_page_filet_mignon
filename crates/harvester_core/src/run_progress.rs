@@ -268,6 +268,7 @@ pub struct PipelineActivity {
     pub poll_in_progress: usize,
     pub jobs_pending_or_in_flight: usize,
     pub pre_triage_loading: usize,
+    pub intake_refresh_pending: bool,
     pub triage_pending_or_in_flight: usize,
     pub summary_pending_or_in_flight: usize,
     pub signal_pending_or_in_flight: usize,
@@ -277,7 +278,8 @@ pub struct PipelineActivity {
 
 impl PipelineActivity {
     pub fn is_settled(&self) -> bool {
-        self.poll_in_progress == 0
+        !self.intake_refresh_pending
+            && self.poll_in_progress == 0
             && self.jobs_pending_or_in_flight == 0
             && self.pre_triage_loading == 0
             && self.triage_pending_or_in_flight == 0

@@ -2383,3 +2383,36 @@ crates/harvester_core/src/triage.rs,
 crates/harvester_core/src/update/archive.rs,
 crates/harvester_io/src/effect_runner/dispatch.rs,
 docs/ArchiveExportFormat.md
+
+
+## 2026-09-23 - Incremental corpus preparation and in-memory summary hand-off
+Type: Implementation
+Context: Repeated intake refreshes and summary starts reread and prepared the same corpus,
+including aggregate collection text that article triage did not use.
+Change: Added a process-lifetime metadata scan index in the effect runner, download-ordered
+window deltas with per-article preparation budgets, verdict-preserving pre-triage merges,
+and refresh-aware settlement. Summaries now use triage-session text. Processing starts
+load configuration once and re-prepare mismatched budgets before model dispatch; following
+summaries reuse the snapshot. Effective template overlays participate in budget calculation.
+Existing full-list tests use the full-window delta adapter; asynchronous configuration
+fixtures complete the new handshake without deleting tests. The budget test
+`triage_loader_respects_triage_budget` was migrated to
+`triage_loader_respects_shared_summary_budget`. Run progress remains accumulated
+in the reducer, including summary starts that no longer receive a disk-load message.
+Refs: crates/harvester_engine/src/briefing/corpus_index.rs,
+crates/harvester_core/src/update/processing.rs,
+crates/harvester_core/src/update/tests/delta_tests.rs,
+crates/harvester_engine/tests/corpus_scan_index.rs,
+crates/harvester_io/src/effect_runner/tests.rs
+
+Review follow-up: The index now selects the first filename match for each requested URL,
+returns those matches in download order, and parallelizes cold reads and re-preparation.
+The reducer waits for queued refresh demand and pending processing starts before dispatch,
+preserves completed sessions on start failures, and accepts a missing ArticleTriage context
+for standalone summaries. Context and overlay handlers, plus configuration fixtures, now
+share their implementations. Index reset is requested atomically so the host does not wait
+for a scan. Regression coverage includes duplicate URLs, pending refresh, completed-session
+preservation, standalone summary configuration, and corpus-clear reset. The engine order test
+is now `scan_tracks_new_changed_deleted_files_and_requested_order_excluding_archives`.
+Prepared text remains in pre-triage after hand-off, leaving three copies where two
+previously existed; sharing that text is a possible memory-use follow-up.

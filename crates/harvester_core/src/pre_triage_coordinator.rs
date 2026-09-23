@@ -56,7 +56,7 @@ pub(crate) struct PreTriageRefreshDispatch {
 /// Outcome of `schedule_refresh`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PreTriageRefreshScheduleResult {
-    /// Refresh has been queued; caller should set pre-triage to loading state.
+    /// Refresh has been queued; existing preparation remains available.
     Scheduled,
     /// URL list was empty; caller should reset pre-triage immediately (no effect dispatch).
     ImmediateReset,
@@ -88,6 +88,22 @@ pub(crate) struct PreTriageRefreshCoordinator {
 }
 
 impl PreTriageRefreshCoordinator {
+    pub(crate) fn refresh_pending(&self) -> bool {
+        self.dirty || self.in_flight_request_id.is_some()
+    }
+
+    pub(crate) fn allocate_request_id(&mut self) -> u64 {
+        let id = self.next_request_id;
+        self.next_request_id += 1;
+        id
+    }
+
+    pub(crate) fn begin_preparation_load(&mut self) -> u64 {
+        let id = self.allocate_request_id();
+        self.in_flight_request_id = NonZeroU64::new(id);
+        id
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             dirty: false,
@@ -114,6 +130,7 @@ impl PreTriageRefreshCoordinator {
         if ordered_urls.is_empty() {
             // Empty corpus: caller must reset pre-triage immediately.
             self.dirty = false;
+            self.in_flight_request_id = None;
             self.pending_ordered_urls.clear();
             self.demand_started_tick = None;
             return PreTriageRefreshScheduleResult::ImmediateReset;

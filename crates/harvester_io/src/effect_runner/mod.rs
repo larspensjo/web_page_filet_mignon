@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -12,6 +12,7 @@ use harvester_engine::{
     is_confined_to, EngineConfig, EngineEvent, EngineHandle, FailureKind, FetchSettings, UrlPolicy,
 };
 
+mod configuration;
 mod dispatch;
 mod poll;
 mod worker;
@@ -85,6 +86,8 @@ impl RuntimePersistenceSink for NoOpRuntimePersistenceSink {
 /// the sender is dropped, which closes the channel and signals the worker to exit cleanly.
 pub struct EffectRunner {
     engine: EngineHandle,
+    corpus_scan_index: Arc<Mutex<harvester_engine::CorpusScanIndex>>,
+    corpus_scan_reset_requested: Arc<AtomicBool>,
     msg_tx: mpsc::Sender<Msg>,
     paths: RuntimePaths,
     url_policy: UrlPolicy,
@@ -171,6 +174,8 @@ impl EffectRunner {
         });
 
         let runner = Self {
+            corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
+            corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
             engine,
             msg_tx: msg_tx.clone(),
             paths,
@@ -210,6 +215,8 @@ impl EffectRunner {
         });
 
         let runner = Self {
+            corpus_scan_index: Arc::new(Mutex::new(harvester_engine::CorpusScanIndex::default())),
+            corpus_scan_reset_requested: Arc::new(AtomicBool::new(false)),
             engine,
             msg_tx: msg_tx.clone(),
             paths,

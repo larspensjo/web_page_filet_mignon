@@ -85,7 +85,10 @@ impl AppState {
             });
         }
 
-        if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles) {
+        if matches!(self.pre_triage.phase(), PreTriagePhase::LoadingArticles)
+            || (self.pre_triage_coordinator.refresh_pending()
+                && self.pre_triage.entries().is_empty())
+        {
             return Some(match self.pre_triage_load_context {
                 Some(PreTriageLoadContext {
                     reason: PreTriageRefreshReason::RestoreCompletedJobs,

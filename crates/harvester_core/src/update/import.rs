@@ -65,5 +65,5 @@ pub(super) fn handle_import_failed(
 pub(super) fn handle_corpus_cleared(state: &mut AppState) -> Vec<Effect> {
     engine_info!("[import-saved-web] corpus cleared");
     state.import_session.clear();
-    Vec::new()
+    vec![Effect::ResetCorpusScanIndex]
 }

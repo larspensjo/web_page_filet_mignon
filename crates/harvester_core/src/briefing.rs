@@ -199,15 +199,7 @@ pub struct BriefingSession {
     exec_dispatch_deferred: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LoadedArticle {
-    pub url: String,
-    pub source_title: Option<String>,
-    pub prepared_text: String,
-    pub content_hash: String,
-    /// RFC3339 UTC timestamp from the article's frontmatter; `None` if absent or unparseable.
-    pub fetched_utc: Option<String>,
-}
+pub use harvester_engine::LoadedArticle;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TriageSelectionPolicy {

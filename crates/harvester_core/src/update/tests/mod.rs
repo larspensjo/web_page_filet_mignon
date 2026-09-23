@@ -1,3 +1,4 @@
+use super::test_support::update;
 use super::*;
 use crate::briefing::{ArticleSummaryState, BriefingPhase, LoadedArticle};
 use crate::signal_candidate::{ArchiveSelectionSource, OverrideKey};
@@ -10,6 +11,7 @@ mod support;
 use support::*;
 
 mod batch_api_tests;
+mod delta_tests;
 
 #[test]
 fn prompt_context_load_failure_keeps_triage_metadata_unready() {
@@ -276,19 +278,22 @@ fn prepare_summaries_loads_base_corpus_skip_aggregate() {
 
     let (state, effects) = update(state, Msg::PrepareSummariesClicked);
 
-    let load = effects
+    assert!(effects
         .iter()
-        .find_map(|effect| match effect {
-            Effect::LoadArticlesForBriefing { ordered_urls, .. } => Some(ordered_urls.clone()),
-            _ => None,
-        })
-        .expect("expected LoadArticlesForBriefing effect");
-
-    assert_eq!(load, state.archive_corpus().ordered_urls().to_vec());
+        .all(|e| !matches!(e, Effect::LoadArticlesForBriefing { .. })));
+    assert_eq!(
+        state
+            .briefing()
+            .articles()
+            .iter()
+            .map(|a| a.url.clone())
+            .collect::<Vec<_>>(),
+        state.archive_corpus().ordered_urls().to_vec()
+    );
     assert!(state.briefing_orchestration_skip_aggregate());
     assert!(matches!(
         state.briefing().phase(),
-        BriefingPhase::LoadingArticles
+        BriefingPhase::Summarizing
     ));
 }
 

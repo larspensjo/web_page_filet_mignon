@@ -30,11 +30,18 @@ pub enum Effect {
         job_id: crate::JobId,
         url: String,
     },
+    /// Loads aggregate-briefing articles for the aggregate-briefing domain path.
     LoadArticlesForBriefing {
         ordered_urls: Vec<String>,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,
     },
+    LoadProcessingConfiguration {
+        request_id: u64,
+        require_triage_context: bool,
+    },
+    ResetCorpusScanIndex,
     LoadArticlesForTriage {
+        held: Vec<harvester_engine::HeldArticle>,
         request_id: u64,
         ordered_urls: Vec<String>,
         since_utc: Option<chrono::DateTime<chrono::Utc>>,

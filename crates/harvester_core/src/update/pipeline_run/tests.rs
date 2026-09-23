@@ -9,7 +9,7 @@ use std::collections::HashMap;
 const BASE_TIME: i64 = 1_700_000_000;
 
 fn tick(state: AppState, second: i64) -> AppState {
-    crate::update(
+    crate::update::test_support::update(
         state,
         Msg::Tick {
             now: DateTime::from_timestamp(BASE_TIME + second, 0)
@@ -89,15 +89,15 @@ fn add_metadata(state: AppState) -> AppState {
             "test-briefing-model".to_string(),
         ),
     ]);
-    let (state, _) = crate::update(
+    let (state, _) = crate::update::test_support::update(
         state,
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
         },
     );
-    let (state, _) = crate::update(state, Msg::PromptTemplateFilesLoaded);
-    crate::update(
+    let (state, _) = crate::update::test_support::update(state, Msg::PromptTemplateFilesLoaded);
+    crate::update::test_support::update(
         state,
         Msg::PromptContextsLoaded {
             contexts: HashMap::new(),
@@ -181,13 +181,13 @@ fn prepare_pipeline(
 ) -> (AppState, Vec<LoadedArticle>) {
     let total = download_successes + download_failures;
     let state = tick(AppState::new(), 0);
-    let (state, effects) = crate::update(state, Msg::PollSourcesClicked);
+    let (state, effects) = crate::update::test_support::update(state, Msg::PollSourcesClicked);
     assert_eq!(effects, vec![Effect::PollAllSources]);
-    let (state, _) = crate::update(state, Msg::PollStarted { total: 1 });
+    let (state, _) = crate::update::test_support::update(state, Msg::PollStarted { total: 1 });
     let urls = (0..total)
         .map(|index| format!("https://progress.invalid/article-{index}"))
         .collect::<Vec<_>>();
-    let (mut state, effects) = crate::update(
+    let (mut state, effects) = crate::update::test_support::update(
         state,
         Msg::SourcePollCompleted {
             source_id: SourceId::new("progress-source").expect("valid source id"),
@@ -205,13 +205,13 @@ fn prepare_pipeline(
         })
         .collect::<Vec<_>>();
     assert_eq!(job_ids.len(), total);
-    state = crate::update(state, Msg::PipelineRunRequested).0;
-    state = crate::update(state, Msg::AllSourcesPollEnded).0;
+    state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
+    state = crate::update::test_support::update(state, Msg::AllSourcesPollEnded).0;
 
     for (index, job_id) in job_ids.into_iter().enumerate() {
         let progress_repetitions = if index == 0 { 8 } else { 1 };
         for _ in 0..progress_repetitions {
-            state = crate::update(
+            state = crate::update::test_support::update(
                 state,
                 Msg::JobProgress {
                     job_id,
@@ -224,7 +224,7 @@ fn prepare_pipeline(
             .0;
         }
         let succeeds = index < download_successes;
-        state = crate::update(
+        state = crate::update::test_support::update(
             state,
             Msg::JobDone {
                 job_id,
@@ -247,7 +247,7 @@ fn prepare_pipeline(
         .map(loaded_article)
         .collect::<Vec<_>>();
     let ordered_urls = articles.iter().map(|article| article.url.clone()).collect();
-    state = crate::update(
+    state = crate::update::test_support::update(
         state,
         Msg::EvaluatePreTriageRefresh {
             ordered_urls,
@@ -257,7 +257,7 @@ fn prepare_pipeline(
     .0;
     let mut load_request_id = None;
     for second in 1..=20 {
-        let (next, effects) = crate::update(
+        let (next, effects) = crate::update::test_support::update(
             state,
             Msg::Tick {
                 now: DateTime::from_timestamp(BASE_TIME + second, 0).expect("valid test timestamp"),
@@ -273,7 +273,7 @@ fn prepare_pipeline(
         }
     }
     let load_request_id = load_request_id.expect("pre-triage load dispatched");
-    state = crate::update(
+    state = crate::update::test_support::update(
         state,
         Msg::TriageArticlesLoadProgress {
             request_id: load_request_id,
@@ -282,11 +282,11 @@ fn prepare_pipeline(
         },
     )
     .0;
-    state = crate::update(
+    state = crate::update::test_support::update(
         state,
         Msg::TriageArticlesLoaded {
             request_id: load_request_id,
-            articles: articles.clone(),
+            delta: harvester_engine::TriageArticleDelta::full_window(articles.clone(), 100_000),
         },
     )
     .0;
@@ -294,8 +294,8 @@ fn prepare_pipeline(
 }
 
 fn dispatch_triage(mut state: AppState) -> (AppState, Vec<Effect>) {
-    state = crate::update(state, Msg::PipelineRunRequested).0;
-    crate::update(state, Msg::PipelineRunAdvance)
+    state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
+    crate::update::test_support::update(state, Msg::PipelineRunAdvance)
 }
 
 fn complete_triage(mut state: AppState, mut effects: Vec<Effect>) -> (AppState, Vec<Effect>) {
@@ -303,18 +303,24 @@ fn complete_triage(mut state: AppState, mut effects: Vec<Effect>) -> (AppState, 
         let Some(id) = request_id(&effects, PromptId::ArticleTriage) else {
             return (state, effects);
         };
-        (state, effects) = crate::update(state, triage_success(id));
+        (state, effects) = crate::update::test_support::update(state, triage_success(id));
     }
 }
 
-fn dispatch_summaries(state: AppState) -> (AppState, Vec<Effect>) {
-    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
-    assert!(effects.is_empty());
+fn dispatch_summaries(mut state: AppState) -> (AppState, Vec<Effect>) {
+    if matches!(
+        state.pipeline_run_phase(),
+        PipelineRunPhase::Dispatched { .. }
+    ) {
+        let (next, effects) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
+        assert!(effects.is_empty());
+        state = next;
+    }
     assert!(matches!(
         state.pipeline_run_phase(),
         PipelineRunPhase::AwaitingSettle
     ));
-    crate::update(state, Msg::PipelineRunAdvance)
+    crate::update::test_support::update(state, Msg::PipelineRunAdvance)
 }
 
 fn complete_summaries(
@@ -338,53 +344,45 @@ fn complete_summaries(
         };
         let succeeds = outcomes[outcome_index];
         outcome_index += 1;
-        (state, effects) = crate::update(state, summary_result(id, succeeds));
+        (state, effects) = crate::update::test_support::update(state, summary_result(id, succeeds));
     }
 }
 
 fn run_to_completion(
     state: AppState,
-    articles: &[LoadedArticle],
+    _articles: &[LoadedArticle],
     summary_outcomes: &[bool],
 ) -> AppState {
     let mut previous = progress_snapshot(&state);
     let (state, triage_effects) = dispatch_triage(state);
     assert_progress_does_not_regress(&mut previous, &state);
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
     assert_progress_does_not_regress(&mut previous, &state);
-    assert!(matches!(
-        state.pipeline_run_phase(),
-        PipelineRunPhase::Dispatched { .. }
-    ));
-    let (state, _) = complete_triage(state, triage_effects);
-    assert_progress_does_not_regress(&mut previous, &state);
-    let (state, summary_load_effects) = dispatch_summaries(state);
-    assert_progress_does_not_regress(&mut previous, &state);
-    assert!(summary_load_effects
-        .iter()
-        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefing { .. })));
-    let state = add_metadata(state);
-    let (state, summary_effects) = crate::update(
-        state,
-        Msg::ArticlesLoaded {
-            articles: articles.to_vec(),
-            collection_text: "progress collection".into(),
-        },
-    );
-    assert_progress_does_not_regress(&mut previous, &state);
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
     assert!(matches!(
         state.pipeline_run_phase(),
         PipelineRunPhase::AwaitingSettle
     ));
+    let (state, _) = complete_triage(state, triage_effects);
+    assert_progress_does_not_regress(&mut previous, &state);
+    let (state, summary_effects) = dispatch_summaries(state);
+    assert_progress_does_not_regress(&mut previous, &state);
+    assert!(summary_effects
+        .iter()
+        .all(|e| !matches!(e, Effect::LoadArticlesForBriefing { .. })));
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
+    assert!(matches!(
+        state.pipeline_run_phase(),
+        PipelineRunPhase::Dispatched { .. }
+    ));
     let (mut state, signal_ids) = complete_summaries(state, summary_effects, summary_outcomes);
     assert_progress_does_not_regress(&mut previous, &state);
     for signal_id in signal_ids {
-        state = crate::update(state, signal_success(signal_id)).0;
+        state = crate::update::test_support::update(state, signal_success(signal_id)).0;
         assert_progress_does_not_regress(&mut previous, &state);
     }
-    let state = crate::update(state, Msg::PipelineRunAdvance).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunAdvance).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunAdvance).0;
     assert_progress_does_not_regress(&mut previous, &state);
     state
 }
@@ -505,11 +503,11 @@ fn full_run_progress_walk_preserves_every_stage_and_counts() {
 fn load_progress_activates_loading_stage_with_intermediate_counts() {
     let total = 4;
     let mut state = tick(AppState::new(), 0);
-    state = crate::update(state, Msg::PipelineRunRequested).0;
+    state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
     state.set_triage(crate::triage::TriageSession::new_loading(None));
     state.set_triage_in_flight(42);
 
-    let state = crate::update(
+    let state = crate::update::test_support::update(
         state,
         Msg::TriageArticlesLoadProgress {
             request_id: 42,
@@ -534,39 +532,32 @@ fn scoring_stays_active_from_triage_cache_hit_through_the_last_summary_wave() {
     seed_cached_summary(&mut state, &articles[0]);
     let mut previous = progress_snapshot(&state);
     let (state, triage_effects) = dispatch_triage(state);
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
 
     let first_triage_id =
         request_id(&triage_effects, PromptId::ArticleTriage).expect("first triage request");
-    let (state, effects) = crate::update(state, triage_success(first_triage_id));
+    let (state, effects) =
+        crate::update::test_support::update(state, triage_success(first_triage_id));
     let first_signal_id = request_id(&effects, PromptId::ArticleSignalCandidate)
         .expect("cached summary should enqueue scoring during triage");
     let second_triage_id =
         request_id(&effects, PromptId::ArticleTriage).expect("second triage request");
-    let (state, _) = crate::update(state, triage_success(second_triage_id));
+    let (state, _) = crate::update::test_support::update(state, triage_success(second_triage_id));
     assert_eq!(
         state.batch_next_action(),
         BatchNextAction::DispatchSummaries
     );
 
-    let state = crate::update(state, signal_success(first_signal_id)).0;
+    let state = crate::update::test_support::update(state, signal_success(first_signal_id)).0;
     assert_progress_does_not_regress(&mut previous, &state);
     let scoring =
         &state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()];
     assert_eq!(scoring.status, StageStatus::Active);
     assert_eq!((scoring.completed, scoring.total), (1, 1));
 
-    let (state, _) = dispatch_summaries(state);
-    let state = add_metadata(state);
-    let (state, summary_effects) = crate::update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text: "progress collection".into(),
-        },
-    );
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, summary_effects) = dispatch_summaries(state);
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
     let second_summary_id = request_id(&summary_effects, PromptId::ArticleSummary)
         .expect("uncached article summary request");
     let progress = state.run_progress().expect("run progress");
@@ -576,15 +567,17 @@ fn scoring_stays_active_from_triage_cache_hit_through_the_last_summary_wave() {
         "scoring stays active while the uncached summary can enqueue more work"
     );
 
-    let (state, effects) = crate::update(state, summary_result(second_summary_id, true));
+    let (state, effects) =
+        crate::update::test_support::update(state, summary_result(second_summary_id, true));
     let second_signal_id =
         request_id(&effects, PromptId::ArticleSignalCandidate).expect("second signal request");
-    let state = crate::update(state, signal_success(second_signal_id)).0;
+    let state = crate::update::test_support::update(state, signal_success(second_signal_id)).0;
     let scoring =
         &state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()];
     assert_eq!(scoring.status, StageStatus::Active);
     assert_eq!((scoring.completed, scoring.total), (2, 2));
-    let state = crate::update(state, Msg::PipelineRunAdvance).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunAdvance).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunAdvance).0;
     let progress = state.run_progress().expect("run progress");
     assert_eq!(
         progress.stages[PipelineStage::Summarizing.index()].status,
@@ -607,27 +600,20 @@ fn scoring_stays_active_from_triage_cache_hit_through_the_last_summary_wave() {
 
 #[test]
 fn deferred_signal_rearm_does_not_enqueue_into_a_done_stage() {
-    let (state, articles) = prepare_pipeline(1, 0);
+    let (state, _articles) = prepare_pipeline(1, 0);
     let (state, triage_effects) = dispatch_triage(state);
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
     let (state, _) = complete_triage(state, triage_effects);
-    let (state, _) = dispatch_summaries(state);
-    let state = add_metadata(state);
-    let (state, summary_effects) = crate::update(
-        state,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text: "progress collection".into(),
-        },
-    );
-    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, summary_effects) = dispatch_summaries(state);
+    let (state, _) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
     let summary_id =
         request_id(&summary_effects, PromptId::ArticleSummary).expect("summary request");
-    let (state, effects) = crate::update(state, summary_result(summary_id, true));
+    let (state, effects) =
+        crate::update::test_support::update(state, summary_result(summary_id, true));
     let signal_id = request_id(&effects, PromptId::ArticleSignalCandidate).expect("signal request");
 
-    let state = crate::update(state, signal_deferred(signal_id)).0;
+    let state = crate::update::test_support::update(state, signal_deferred(signal_id)).0;
     assert_eq!(state.batch_next_action(), BatchNextAction::None);
     assert!(state.pipeline_activity().is_settled());
     assert_eq!(
@@ -637,7 +623,8 @@ fn deferred_signal_rearm_does_not_enqueue_into_a_done_stage() {
         "deferred work may be rearmed before the run driver settles"
     );
 
-    let (state, effects) = crate::update(state, Msg::RearmDeferredBatchStages);
+    let (state, effects) =
+        crate::update::test_support::update(state, Msg::RearmDeferredBatchStages);
 
     assert!(request_id(&effects, PromptId::ArticleSignalCandidate).is_some());
     assert_eq!(
@@ -654,7 +641,8 @@ fn accepted_stop_while_scoring_is_active_leaves_no_stage_active() {
     let (state, triage_effects) = dispatch_triage(state);
     let first_triage_id =
         request_id(&triage_effects, PromptId::ArticleTriage).expect("first triage request");
-    let (state, effects) = crate::update(state, triage_success(first_triage_id));
+    let (state, effects) =
+        crate::update::test_support::update(state, triage_success(first_triage_id));
     assert!(request_id(&effects, PromptId::ArticleSignalCandidate).is_some());
     assert!(request_id(&effects, PromptId::ArticleTriage).is_some());
     assert_eq!(
@@ -663,7 +651,7 @@ fn accepted_stop_while_scoring_is_active_leaves_no_stage_active() {
         StageStatus::Active
     );
 
-    let (state, effects) = crate::update(state, Msg::StopFinishClicked);
+    let (state, effects) = crate::update::test_support::update(state, Msg::StopFinishClicked);
 
     assert!(effects
         .iter()
@@ -714,10 +702,10 @@ fn partial_failures_finish_done_and_retain_failure_counts() {
 #[test]
 fn total_source_failure_marks_scanning_failed() {
     let state = tick(AppState::new(), 0);
-    let state = crate::update(state, Msg::PollSourcesClicked).0;
-    let state = crate::update(state, Msg::PollStarted { total: 2 }).0;
+    let state = crate::update::test_support::update(state, Msg::PollSourcesClicked).0;
+    let state = crate::update::test_support::update(state, Msg::PollStarted { total: 2 }).0;
     let source_id = SourceId::new("failed-source").expect("valid source id");
-    let state = crate::update(
+    let state = crate::update::test_support::update(
         state,
         Msg::SourcePollFailed {
             source_id: source_id.clone(),
@@ -725,7 +713,7 @@ fn total_source_failure_marks_scanning_failed() {
         },
     )
     .0;
-    let state = crate::update(
+    let state = crate::update::test_support::update(
         state,
         Msg::SourcePollFailed {
             source_id,
@@ -733,7 +721,7 @@ fn total_source_failure_marks_scanning_failed() {
         },
     )
     .0;
-    let state = crate::update(state, Msg::AllSourcesPollEnded).0;
+    let state = crate::update::test_support::update(state, Msg::AllSourcesPollEnded).0;
     let scan = &state.run_progress().expect("run").stages[PipelineStage::ScanningSources.index()];
     assert_eq!(
         (scan.status, scan.completed, scan.failed),
@@ -744,10 +732,10 @@ fn total_source_failure_marks_scanning_failed() {
 #[test]
 fn poll_only_run_becomes_terminal_when_source_poll_settles() {
     let state = tick(AppState::new(), 0);
-    let (state, effects) = crate::update(state, Msg::PollSourcesClicked);
+    let (state, effects) = crate::update::test_support::update(state, Msg::PollSourcesClicked);
     assert_eq!(effects, vec![Effect::PollAllSources]);
-    let state = crate::update(state, Msg::PollStarted { total: 1 }).0;
-    let state = crate::update(
+    let state = crate::update::test_support::update(state, Msg::PollStarted { total: 1 }).0;
+    let state = crate::update::test_support::update(
         state,
         Msg::SourcePollCompleted {
             source_id: SourceId::new("poll-only-source").expect("valid source id"),
@@ -758,7 +746,7 @@ fn poll_only_run_becomes_terminal_when_source_poll_settles() {
         },
     )
     .0;
-    let state = crate::update(state, Msg::AllSourcesPollEnded).0;
+    let state = crate::update::test_support::update(state, Msg::AllSourcesPollEnded).0;
 
     assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
     assert!(state.run_progress().expect("poll run").terminal);
@@ -768,9 +756,9 @@ fn poll_only_run_becomes_terminal_when_source_poll_settles() {
 #[test]
 fn accepted_stop_freezes_poll_run_while_pipeline_driver_is_idle() {
     let state = tick(AppState::new(), 0);
-    let state = crate::update(state, Msg::PollSourcesClicked).0;
-    let state = crate::update(state, Msg::PollStarted { total: 1 }).0;
-    let (state, effects) = crate::update(
+    let state = crate::update::test_support::update(state, Msg::PollSourcesClicked).0;
+    let state = crate::update::test_support::update(state, Msg::PollStarted { total: 1 }).0;
+    let (state, effects) = crate::update::test_support::update(
         state,
         Msg::SourcePollCompleted {
             source_id: SourceId::new("stoppable-poll-source").expect("valid source id"),
@@ -786,7 +774,7 @@ fn accepted_stop_freezes_poll_run_while_pipeline_driver_is_idle() {
     assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
     assert!(state.stop_finish_button_state().is_enabled());
 
-    let (state, effects) = crate::update(state, Msg::StopFinishClicked);
+    let (state, effects) = crate::update::test_support::update(state, Msg::StopFinishClicked);
 
     assert!(effects
         .iter()
@@ -810,8 +798,10 @@ fn skipped_download_stage_stays_pending() {
         links: Vec::new(),
         fetched_utc: None,
     }];
-    let state = crate::update(AppState::new(), Msg::RestoreCompletedJobs(snapshots)).0;
-    let state = crate::update(state, Msg::PipelineRunRequested).0;
+    let state =
+        crate::update::test_support::update(AppState::new(), Msg::RestoreCompletedJobs(snapshots))
+            .0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
     let stage =
         &state.run_progress().expect("run").stages[PipelineStage::DownloadingArticles.index()];
     assert_eq!((stage.status, stage.total), (StageStatus::Pending, 0));
@@ -827,7 +817,7 @@ fn accepted_stop_during_triage_leaves_skipped_stages_pending_and_never_dispatche
     );
     let frozen_counts =
         state.run_progress().expect("run").stages[PipelineStage::Triaging.index()].clone();
-    let (state, effects) = crate::update(state, Msg::StopFinishClicked);
+    let (state, effects) = crate::update::test_support::update(state, Msg::StopFinishClicked);
     assert!(effects
         .iter()
         .any(|effect| matches!(effect, Effect::StopFinish { .. })));
@@ -852,7 +842,7 @@ fn accepted_stop_during_triage_leaves_skipped_stages_pending_and_never_dispatche
         progress.stages[PipelineStage::Triaging.index()].failed,
         frozen_counts.failed
     );
-    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    let (state, effects) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
     assert!(effects.is_empty());
     assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
 }
@@ -860,8 +850,8 @@ fn accepted_stop_during_triage_leaves_skipped_stages_pending_and_never_dispatche
 #[test]
 fn disabled_stop_intent_does_not_freeze_the_run() {
     let state = tick(AppState::new(), 0);
-    let state = crate::update(state, Msg::PipelineRunRequested).0;
-    let (state, effects) = crate::update(state, Msg::StopFinishClicked);
+    let state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
+    let (state, effects) = crate::update::test_support::update(state, Msg::StopFinishClicked);
     assert!(effects.is_empty());
     assert!(matches!(
         state.pipeline_run_phase(),
@@ -883,7 +873,7 @@ fn rerun_resets_six_pending_stages_with_a_new_run_id_and_ignores_stale_sessions(
     let (state, articles) = prepare_pipeline(1, 0);
     let state = run_to_completion(state, &articles, &[true]);
     let old_run_id = state.run_progress().expect("first run").run_id;
-    let state = crate::update(state, Msg::PipelineRunRequested).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
     let new_run_id = state.run_progress().expect("second run").run_id;
     assert_ne!(new_run_id, old_run_id);
     let state = tick(state, 50);
@@ -900,10 +890,10 @@ fn rerun_resets_six_pending_stages_with_a_new_run_id_and_ignores_stale_sessions(
 #[test]
 fn pipeline_request_joins_an_active_poll_run_without_resetting() {
     let state = tick(AppState::new(), 0);
-    let state = crate::update(state, Msg::PollSourcesClicked).0;
-    let state = crate::update(state, Msg::PollStarted { total: 3 }).0;
+    let state = crate::update::test_support::update(state, Msg::PollSourcesClicked).0;
+    let state = crate::update::test_support::update(state, Msg::PollStarted { total: 3 }).0;
     let run_id = state.run_progress().expect("poll run").run_id;
-    let state = crate::update(state, Msg::PipelineRunRequested).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
     assert_eq!(state.run_progress().expect("joined run").run_id, run_id);
     assert_eq!(state.run_progress().expect("joined run").stages[0].total, 3);
 }
@@ -926,36 +916,34 @@ fn driver_runs_triage_summaries_scoring_and_sets_notice_exactly_once() {
         state.run_progress()
     );
     assert_eq!(notice.completed_at_utc, expected_completed_at);
-    let state = crate::update(state, Msg::PipelineRunAdvance).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunAdvance).0;
     assert_eq!(state.run_completion_notice(), Some(&notice));
-    let state = crate::update(state, Msg::RunFinishedNoticeDismissed).0;
+    let state = crate::update::test_support::update(state, Msg::RunFinishedNoticeDismissed).0;
     assert!(state.run_completion_notice().is_none());
 }
 
 #[test]
 fn advance_pulses_do_not_satisfy_the_post_dispatch_message_guard() {
     let (state, _) = prepare_pipeline(1, 0);
-    let (state, effects) = dispatch_triage(state);
-    assert!(request_id(&effects, PromptId::ArticleTriage).is_some());
-    let since_seq = match state.pipeline_run_phase() {
-        PipelineRunPhase::Dispatched { since_seq } => since_seq,
-        phase => panic!("expected dispatched phase, got {phase:?}"),
-    };
+    let state = crate::update(state, Msg::PipelineRunRequested).0;
+    let (state, effects) = crate::update(state, Msg::PipelineRunAdvance);
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::LoadProcessingConfiguration { .. })));
+    let phase = state.pipeline_run_phase();
+    assert!(matches!(phase, crate::PipelineRunPhase::Dispatched { .. }));
     let state = crate::update(state, Msg::PipelineRunAdvance).0;
     let state = crate::update(state, Msg::PipelineRunAdvance).0;
-    assert_eq!(
-        state.pipeline_run_phase(),
-        PipelineRunPhase::Dispatched { since_seq }
-    );
+    assert_eq!(state.pipeline_run_phase(), phase);
 }
 
 #[test]
 fn second_pipeline_request_is_ignored_while_driver_is_active() {
     let (state, _) = prepare_pipeline(1, 0);
-    let state = crate::update(state, Msg::PipelineRunRequested).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
     let run_id = state.run_progress().expect("run").run_id;
     let phase = state.pipeline_run_phase();
-    let state = crate::update(state, Msg::PipelineRunRequested).0;
+    let state = crate::update::test_support::update(state, Msg::PipelineRunRequested).0;
     assert_eq!(state.pipeline_run_phase(), phase);
     assert_eq!(state.run_progress().expect("same run").run_id, run_id);
 }
@@ -965,20 +953,13 @@ fn gui_and_batch_paths_reach_the_same_terminal_pipeline_activity() {
     let (prepared, articles) = prepare_pipeline(1, 0);
     let gui = run_to_completion(prepared.clone(), &articles, &[true]);
 
-    let (batch, triage_effects) = crate::update(prepared, Msg::TriageClicked);
+    let (batch, triage_effects) = crate::update::test_support::update(prepared, Msg::TriageClicked);
     let (batch, _) = complete_triage(batch, triage_effects);
-    let (batch, _) = crate::update(batch, Msg::PrepareSummariesClicked);
-    let batch = add_metadata(batch);
-    let (batch, summary_effects) = crate::update(
-        batch,
-        Msg::ArticlesLoaded {
-            articles,
-            collection_text: "progress collection".into(),
-        },
-    );
+    let (batch, summary_effects) =
+        crate::update::test_support::update(batch, Msg::PrepareSummariesClicked);
     let (mut batch, signal_ids) = complete_summaries(batch, summary_effects, &[true]);
     for signal_id in signal_ids {
-        batch = crate::update(batch, signal_success(signal_id)).0;
+        batch = crate::update::test_support::update(batch, signal_success(signal_id)).0;
     }
 
     assert_eq!(gui.pipeline_activity(), batch.pipeline_activity());

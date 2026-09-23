@@ -22,14 +22,14 @@ fn prompt_registry_with_defaults() -> PromptRegistry {
 }
 
 #[test]
-fn triage_loader_respects_triage_budget() {
+fn triage_loader_respects_shared_summary_budget() {
     let registry = prompt_registry_with_defaults();
-    let triage_template = registry
-        .active(PromptId::ArticleTriage)
-        .expect("triage prompt missing");
-    let triage_overhead = compute_prompt_overhead(triage_template, "content", &[]);
-    let triage_budget = 1_000;
-    let max_input = triage_overhead + triage_budget;
+    let summary_template = registry
+        .active(PromptId::ArticleSummary)
+        .expect("summary prompt missing");
+    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
+    let summary_budget = 1_000;
+    let max_input = summary_overhead + summary_budget;
 
     let tmp = tempdir().unwrap();
     write_markdown_file(
@@ -43,7 +43,7 @@ fn triage_loader_respects_triage_budget() {
     let articles = load_and_prepare_articles_for_triage(tmp.path(), max_input, &registry).unwrap();
     assert_eq!(articles.len(), 1);
     let loaded = &articles[0];
-    assert!(loaded.prepared_text.len() <= triage_budget);
+    assert!(loaded.prepared_text.len() <= summary_budget);
 }
 
 #[test]
@@ -73,16 +73,17 @@ fn triage_loader_shared_scanning_matches_briefing() {
         .map(|article| article.url.clone())
         .collect();
     assert_eq!(briefing_urls, triage_urls);
+    assert_eq!(briefing_articles, triage_articles);
 }
 
 #[test]
 fn triage_loader_truncates_at_utf8_boundary() {
     let registry = prompt_registry_with_defaults();
-    let triage_template = registry
-        .active(PromptId::ArticleTriage)
-        .expect("triage prompt missing");
-    let triage_overhead = compute_prompt_overhead(triage_template, "content", &[]);
-    let max_input = triage_overhead + 5;
+    let summary_template = registry
+        .active(PromptId::ArticleSummary)
+        .expect("summary prompt missing");
+    let summary_overhead = compute_prompt_overhead(summary_template, "content", &[]);
+    let max_input = summary_overhead + 5;
 
     let tmp = tempdir().unwrap();
     write_markdown_file(

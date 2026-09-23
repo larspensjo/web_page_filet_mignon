@@ -142,7 +142,10 @@ fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigat
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     )
     .0;

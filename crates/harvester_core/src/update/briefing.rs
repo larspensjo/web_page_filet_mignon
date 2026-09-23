@@ -34,30 +34,37 @@ fn briefing_stream_hydration_effects(state: &AppState) -> Vec<Effect> {
     effects
 }
 
-fn begin_briefing_article_load(
-    state: &mut AppState,
-    ordered_urls: Vec<String>,
-    skip_aggregate: bool,
-) -> Vec<Effect> {
+pub(super) fn start_summaries_from_triage(state: &mut AppState) -> Vec<Effect> {
+    let urls: std::collections::HashSet<_> = state
+        .archive_corpus()
+        .ordered_urls()
+        .iter()
+        .cloned()
+        .collect();
+    let articles = state
+        .triage()
+        .articles()
+        .iter()
+        .filter(|a| urls.contains(&a.url))
+        .map(|a| crate::LoadedArticle {
+            url: a.url.clone(),
+            source_title: a.source_title.clone(),
+            prepared_text: a.prepared_text.clone(),
+            content_hash: a.content_hash.clone(),
+            fetched_utc: a.fetched_utc.clone(),
+        })
+        .collect();
     state.clear_provider_alert();
-    if skip_aggregate {
-        state.request_summary_preparation();
-    } else {
-        state.request_briefing_orchestration();
-    }
+    state.request_summary_preparation();
     state.start_summary_cache_run();
+    state.mark_briefing_metadata_ready();
     state.set_briefing(BriefingSession::new_loading(None));
     snapshot_briefing_coverage_window(state);
-    let since_utc = state.briefing_since_utc();
-    vec![
-        Effect::LoadPromptContexts,
-        Effect::LoadPromptTemplateFiles,
-        Effect::LoadLlmMetadata,
-        Effect::LoadArticlesForBriefing {
-            ordered_urls,
-            since_utc,
-        },
-    ]
+    let effects = handle_articles_loaded(state, articles, String::new());
+    if state.run_progress_is_active() {
+        super::pipeline_run::record_summaries(state, true);
+    }
+    effects
 }
 
 fn fail_generate(state: &mut AppState, reason: &str) -> Vec<Effect> {
@@ -223,7 +230,7 @@ pub(super) fn handle_prepare_summaries_clicked(state: &mut AppState) -> Vec<Effe
         "[briefing-triage] summary-prep base-corpus count={}",
         ordered_urls.len()
     );
-    begin_briefing_article_load(state, ordered_urls, true)
+    super::processing::begin(state, super::processing::StartTarget::Summaries)
 }
 
 pub(super) fn handle_history_loaded(

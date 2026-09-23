@@ -65,7 +65,10 @@ fn triage_loaded_matching_request_id_applies_articles() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
     assert!(
@@ -93,7 +96,10 @@ fn triage_loaded_stale_request_id_is_ignored() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: stale_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
     assert_eq!(
@@ -192,7 +198,10 @@ fn restore_completed_jobs_schedules_and_dispatches_after_quiet_window() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
 
@@ -263,7 +272,10 @@ fn new_demand_while_in_flight_queues_and_dispatches_after_response() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: first_request_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
 

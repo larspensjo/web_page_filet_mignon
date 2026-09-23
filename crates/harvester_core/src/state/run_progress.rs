@@ -24,6 +24,10 @@ impl AppState {
     pub fn pipeline_activity(&self) -> PipelineActivity {
         let batch = self.batch_observation();
         PipelineActivity {
+            intake_refresh_pending: self.pre_triage_refresh_eval_pending
+                || self.processing_start.is_some()
+                || self.pre_triage_coordinator.refresh_pending()
+                || self.triage_in_flight_request_id().is_some(),
             poll_in_progress: usize::from(batch.poll_in_progress),
             jobs_pending_or_in_flight: batch.jobs_in_flight,
             pre_triage_loading: usize::from(matches!(

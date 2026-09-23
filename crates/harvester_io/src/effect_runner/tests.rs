@@ -51,6 +51,114 @@ fn runner_with_receiver(base: &Path) -> (EffectRunner, mpsc::Receiver<Msg>) {
     )
 }
 
+fn receive_delta(rx: &mpsc::Receiver<Msg>) -> harvester_engine::TriageArticleDelta {
+    loop {
+        match rx.recv_timeout(Duration::from_secs(5)).unwrap() {
+            Msg::TriageArticlesLoadProgress { .. } => {}
+            Msg::TriageArticlesLoaded { delta, .. } => return delta,
+            other => panic!("unexpected load response: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn incremental_load_prepares_only_arrivals_then_rebudgets_all_held_articles() {
+    let temp = tempdir().unwrap();
+    write_markdown(temp.path(), "a.md", "https://example.com/a");
+    let a_path = temp.path().join("a.md");
+    fs::write(
+        &a_path,
+        format!(
+            "{}\n{}",
+            fs::read_to_string(&a_path).unwrap(),
+            "long content ".repeat(2000)
+        ),
+    )
+    .unwrap();
+    let (mut runner, rx) = runner_with_receiver(temp.path());
+    runner.llm_max_input_bytes = Some(10_000);
+    let urls = vec![
+        "https://example.com/a".to_string(),
+        "https://example.com/b".to_string(),
+    ];
+    let load = |id, held| Effect::LoadArticlesForTriage {
+        request_id: id,
+        ordered_urls: urls.clone(),
+        since_utc: None,
+        held,
+    };
+    runner.enqueue(vec![load(1, vec![])]);
+    let first = receive_delta(&rx);
+    let held = |delta: &harvester_engine::TriageArticleDelta| {
+        delta
+            .members
+            .iter()
+            .map(|a| harvester_engine::HeldArticle {
+                url: a.url.clone(),
+                content_hash: a.content_hash.clone(),
+                preparation_budget: delta.preparation_budget,
+            })
+            .collect()
+    };
+    write_markdown(temp.path(), "b.md", "https://example.com/b");
+    let b_path = temp.path().join("b.md");
+    fs::write(
+        &b_path,
+        format!(
+            "{}\n{}",
+            fs::read_to_string(&b_path).unwrap(),
+            "long content ".repeat(2000)
+        ),
+    )
+    .unwrap();
+    runner.enqueue(vec![load(2, held(&first))]);
+    let second = receive_delta(&rx);
+    assert_eq!(second.members.len(), 2);
+    assert_eq!(second.articles.len(), 1);
+    assert_eq!(second.articles[0].url, urls[1]);
+    {
+        let mut registry = runner.prompt_registry.write().unwrap();
+        let mut template = harvester_engine::llm::prompt::PromptTemplateOwned::from(
+            registry.active(PromptId::ArticleSummary).unwrap(),
+        );
+        template
+            .system_template
+            .push_str(&" extra instructions".repeat(50));
+        registry.register_overlay(template);
+    }
+    runner.enqueue(vec![load(3, held(&second))]);
+    let third = receive_delta(&rx);
+    assert!(third.preparation_budget < second.preparation_budget);
+    assert_eq!(third.members, second.members);
+    assert_eq!(third.articles.len(), 2);
+    assert!(third.articles[0].prepared_text.len() < first.articles[0].prepared_text.len());
+    assert!(third
+        .articles
+        .iter()
+        .all(|a| a.prepared_text.len() <= third.preparation_budget));
+    for a in &third.articles {
+        assert_eq!(
+            a.content_hash,
+            second
+                .members
+                .iter()
+                .find(|m| m.url == a.url)
+                .unwrap()
+                .content_hash
+        );
+    }
+    runner.enqueue(vec![Effect::ResetCorpusScanIndex]);
+    assert!(runner
+        .corpus_scan_reset_requested
+        .load(std::sync::atomic::Ordering::Acquire));
+    runner.enqueue(vec![load(4, held(&third))]);
+    let fourth = receive_delta(&rx);
+    assert_eq!(fourth.members, third.members);
+    assert!(!runner
+        .corpus_scan_reset_requested
+        .load(std::sync::atomic::Ordering::Acquire));
+}
+
 #[test]
 fn runtime_persistence_effect_is_flushed_when_the_runner_shuts_down() {
     let temp = tempdir().expect("tempdir");
@@ -187,6 +295,35 @@ fn load_prompt_contexts_fails_when_required_triage_context_is_missing() {
             assert!(reason.contains("article_triage.toml"));
         }
         other => panic!("unexpected message: {:?}", other),
+    }
+}
+
+#[test]
+fn standalone_summary_configuration_accepts_missing_triage_context() {
+    let temp = tempdir().expect("tempdir");
+    let contexts_dir = temp.path().join("contexts");
+    fs::create_dir_all(&contexts_dir).unwrap();
+    write_prompt_context(
+        &contexts_dir,
+        "article_summary.toml",
+        PromptId::ArticleSummary,
+    );
+    let (runner, rx) = runner_with_receiver(temp.path());
+    runner.enqueue(vec![Effect::LoadProcessingConfiguration {
+        request_id: 44,
+        require_triage_context: false,
+    }]);
+    match rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+        Msg::ProcessingConfigurationLoaded {
+            request_id,
+            contexts,
+            ..
+        } => {
+            assert_eq!(request_id, 44);
+            assert!(contexts.contains_key(&PromptId::ArticleSummary));
+            assert!(!contexts.contains_key(&PromptId::ArticleTriage));
+        }
+        other => panic!("unexpected message: {other:?}"),
     }
 }
 
@@ -401,6 +538,7 @@ fn load_articles_for_triage_respects_since_utc_filter() {
         .with_timezone(&chrono::Utc);
 
     runner.enqueue(vec![Effect::LoadArticlesForTriage {
+        held: Vec::new(),
         request_id: 1,
         ordered_urls: vec![
             "https://example.com/old".to_string(),
@@ -426,13 +564,10 @@ fn load_articles_for_triage_respects_since_utc_filter() {
                 assert!(files_scanned >= 1);
                 saw_progress = true;
             }
-            Msg::TriageArticlesLoaded {
-                request_id,
-                articles,
-            } => {
+            Msg::TriageArticlesLoaded { request_id, delta } => {
                 assert_eq!(request_id, 1);
-                assert_eq!(articles.len(), 1);
-                assert_eq!(articles[0].url, "https://example.com/new");
+                assert_eq!(delta.articles.len(), 1);
+                assert_eq!(delta.articles[0].url, "https://example.com/new");
                 assert!(
                     saw_progress,
                     "triage loads should emit progress before completion"

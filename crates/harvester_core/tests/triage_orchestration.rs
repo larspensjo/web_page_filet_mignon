@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Once;
 
-use harvester_core::{update, AppState, Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg};
+use harvester_core::{AppState, Effect, JobResultKind, LlmResultKind, LoadedArticle, Msg};
 use harvester_engine::llm::prompt::PromptId;
 
 fn init_logging() {
@@ -80,7 +80,7 @@ fn simulate_triage_loaded(state: AppState, articles: Vec<LoadedArticle>) -> AppS
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     state
@@ -579,7 +579,10 @@ fn rerun_uses_triage_cache_when_metadata_and_corpus_unchanged() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: 0, // stale — no in-flight request at this point
-            articles: sample_articles(&["https://one.example"]),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                sample_articles(&["https://one.example"]),
+                100_000,
+            ),
         },
     );
     let (_state, rerun_effects) = update(state, Msg::TriageClicked);
@@ -590,4 +593,9 @@ fn rerun_uses_triage_cache_when_metadata_and_corpus_unchanged() {
             .any(|effect| matches!(effect, Effect::RequestLlmCompletion { .. })),
         "rerun should reuse triage cache and avoid new llm requests"
     );
+}
+
+fn update(state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    let (state, effects) = harvester_core::update(state, msg);
+    harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000)
 }

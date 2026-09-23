@@ -381,6 +381,10 @@ pub struct AppState {
     poll_pipeline: Option<PollPipelineProgressState>,
     /// Logical tick counter driven by `Msg::Tick`; used by the pre-triage refresh coordinator.
     tick: u64,
+    /// Configuration and preparation pending for a processing start.
+    pub(crate) processing_start: Option<crate::update::processing::PendingStart>,
+    pub(crate) processing_budget: Option<usize>,
+    pub(crate) summaries_follow_triage: bool,
     /// Reducer-owned coordinator for batching pre-triage refresh demand.
     pub(crate) pre_triage_coordinator: crate::pre_triage_coordinator::PreTriageRefreshCoordinator,
     /// True when app/batch loop should dispatch one `Msg::EvaluatePreTriageRefresh`.
@@ -470,6 +474,9 @@ impl Default for AppState {
             triage_in_flight_request_id: None,
             poll_pipeline: None,
             tick: 0,
+            processing_start: None,
+            processing_budget: None,
+            summaries_follow_triage: false,
             pre_triage_coordinator: crate::pre_triage_coordinator::PreTriageRefreshCoordinator::new(
             ),
             pre_triage_refresh_eval_pending: false,

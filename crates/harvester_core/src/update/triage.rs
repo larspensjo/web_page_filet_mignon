@@ -12,6 +12,7 @@ pub(super) fn handle_evaluate_pre_triage_refresh(
     ordered_urls: Vec<String>,
     triggered_by_job_done: bool,
 ) -> Vec<Effect> {
+    state.take_pre_triage_refresh_evaluation_request();
     // INTENTIONAL EXCEPTION: pre-triage refresh is the mechanism that BUILDS
     // the candidate corpus — it runs before the shared working-corpus selector
     // has anything to select from. It reads from completed jobs (upstream of
@@ -37,19 +38,13 @@ pub(super) fn handle_triage_clicked(state: &mut AppState) -> Vec<Effect> {
     if !state.can_start_triage_from_pre_triage() {
         return Vec::new();
     }
-    if !state.triage_metadata_ready() {
-        state.mark_triage_metadata_pending();
-        engine_warn!("[triage-cache] metadata not ready; loading metadata before dispatch");
-        return vec![Effect::LoadPromptContexts, Effect::LoadLlmMetadata];
-    }
-    engine_info!("[triage] triage requested");
-    start_triage_from_pretriage(state)
+    super::processing::begin(state, super::processing::StartTarget::Triage)
 }
 
 pub(super) fn handle_articles_loaded(
     state: &mut AppState,
     request_id: u64,
-    articles: Vec<crate::briefing::LoadedArticle>,
+    delta: harvester_engine::TriageArticleDelta,
 ) -> Vec<Effect> {
     if Some(request_id) != state.triage_in_flight_request_id() {
         engine_info!(
@@ -63,7 +58,8 @@ pub(super) fn handle_articles_loaded(
     state.clear_triage_in_flight();
     state.pre_triage_coordinator.complete_request(request_id);
     // Backfill fetched_utc from frontmatter for jobs restored without it (pre-feature state).
-    let url_to_fetched: std::collections::HashMap<String, chrono::DateTime<chrono::Utc>> = articles
+    let url_to_fetched: std::collections::HashMap<String, chrono::DateTime<chrono::Utc>> = delta
+        .members
         .iter()
         .filter_map(|a| {
             let fu = a.fetched_utc.as_deref()?;
@@ -72,14 +68,22 @@ pub(super) fn handle_articles_loaded(
         })
         .collect();
     state.backfill_jobs_fetched_utc(&url_to_fetched);
+    if state
+        .processing_start
+        .as_ref()
+        .is_some_and(|p| p.target == super::processing::StartTarget::Summaries)
+    {
+        state
+            .triage_mut()
+            .refresh_preparation(&delta.articles, delta.preparation_budget);
+    }
     let policy = PreTriagePolicy::default();
-    let mut pre_triage = PreTriageSession::load_articles(articles, &policy);
     let job_url_pairs = state.job_url_pairs();
-    pre_triage.bind_job_ids(&job_url_pairs);
-    state.set_pre_triage(pre_triage);
+    state.pre_triage_mut().merge_delta(delta, &policy);
+    state.pre_triage_mut().bind_job_ids(&job_url_pairs);
     state.refresh_selected_preview();
     state.mark_dirty();
-    Vec::new()
+    super::processing::resume(state)
 }
 
 pub(super) fn handle_articles_load_failed(
@@ -102,6 +106,7 @@ pub(super) fn handle_articles_load_failed(
     );
     state.clear_triage_in_flight();
     state.pre_triage_coordinator.complete_request(request_id);
+    super::processing::fail(state, reason.clone());
     // Do NOT fail the TriageSession — a background refresh error should not
     // destroy the user's active triage session.
     state.set_pre_triage(PreTriageSession::default());
@@ -134,9 +139,7 @@ fn schedule_pre_triage_refresh(
                 "[pre-triage-refresh-coord] request scheduled reason={:?}",
                 reason
             );
-            // Set pre-triage to loading so the UI shows a spinner immediately.
             state.set_pre_triage_load_context(reason);
-            state.set_pre_triage(PreTriageSession::new_loading());
             state.mark_dirty();
             Vec::new()
         }
@@ -169,13 +172,14 @@ pub(super) fn dispatch_pre_triage_if_due(
         ordered_urls.len()
     );
     vec![Effect::LoadArticlesForTriage {
+        held: state.pre_triage().held_articles(),
         request_id,
         ordered_urls,
         since_utc,
     }]
 }
 
-fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
+pub(super) fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
     state.clear_provider_alert();
     // Consumes the pre-triage articles via a phase-guarded helper that atomically
     // resets pre-triage to Idle, ensuring it cannot remain action-ready after
@@ -195,7 +199,9 @@ fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
         included.len(),
     );
     state.set_triage(TriageSession::new_loading(None));
+    let held = state.pre_triage().held_articles();
     state.triage_mut().set_articles(included);
+    state.triage_mut().set_preparation_budgets(&held);
     state.triage_mut().transition_to_triaging();
     state.mark_dirty();
     state.start_triage_cache_run();

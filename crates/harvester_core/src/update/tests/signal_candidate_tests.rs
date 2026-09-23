@@ -6,7 +6,7 @@ use crate::signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheKey, SignalCandidateInputBundle,
 };
 use crate::triage::{ArticleTriageResult, TriageSession};
-use crate::update::update;
+use crate::update::test_support::update;
 use crate::{AppState, Effect, LlmResultKind, Msg, SummaryCacheKey};
 use harvester_engine::llm::dto::{Confidence, SignalCandidateResult, SourceTier};
 use harvester_engine::llm::prompt::PromptId;
@@ -467,7 +467,7 @@ fn triage_cache_hit_enqueues_signal_candidate_scoring() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: triage_request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     let (state, effects) = update(state, Msg::TriageClicked);

@@ -7,6 +7,8 @@ pub mod briefing_snapshot;
 mod cache_utils;
 mod effect;
 pub mod entity_index;
+#[doc(hidden)]
+pub mod fixture_support;
 pub mod import_session;
 mod llm_quota_view;
 mod msg;

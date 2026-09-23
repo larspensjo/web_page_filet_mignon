@@ -1,13 +1,15 @@
+#[cfg(test)]
 use std::collections::HashMap;
 use std::fs;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
 use engine_logging::{engine_error, engine_info, engine_warn};
 use harvester_core::{Effect, LlmResultKind, LoadedArticle, Msg, StopPolicy};
-use harvester_engine::llm::load_context_file;
-use harvester_engine::llm::prompt::{PromptId, PromptTemplateOwned, PROMPT_VERSION_DRAFT};
+#[cfg(test)]
+use harvester_engine::llm::prompt::PromptId;
 #[cfg(test)]
 use harvester_engine::llm::prompt_context::ContextMeta;
 use harvester_engine::llm::prompt_context::PromptContextFile;
@@ -20,7 +22,7 @@ use harvester_engine::{
 
 use super::worker::{run_triage_refresh_load, EntityIndexWorkerMsg};
 use super::{truncate_url_for_log, EffectRunner};
-use crate::effect_helpers::{download_link_page, prompt_context_filename};
+use crate::effect_helpers::download_link_page;
 
 pub(crate) fn ordered_context_pairs(ctx_file: &PromptContextFile) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = ctx_file
@@ -363,7 +365,56 @@ impl EffectRunner {
                     }
                 });
             }
+            Effect::LoadProcessingConfiguration {
+                request_id,
+                require_triage_context,
+            } => {
+                let msg_tx = self.msg_tx.clone();
+                let paths = self.paths.clone();
+                let registry = self.prompt_registry.clone();
+                let effective_models = self.llm_metadata_models.clone();
+                let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
+                thread::spawn(move || {
+                    engine_info!(
+                        "[processing-configuration] request_id={} start require_triage_context={}",
+                        request_id,
+                        require_triage_context
+                    );
+                    let result = super::configuration::load(
+                        &paths,
+                        &registry,
+                        max_input_bytes,
+                        require_triage_context,
+                    );
+                    let msg = match result {
+                        Ok((contexts, active_versions, preparation_budget)) => {
+                            Msg::ProcessingConfigurationLoaded {
+                                request_id,
+                                contexts,
+                                active_versions,
+                                effective_models,
+                                preparation_budget,
+                            }
+                        }
+                        Err(reason) => {
+                            engine_warn!(
+                                "[processing-configuration] request_id={} failed: {}",
+                                request_id,
+                                reason
+                            );
+                            Msg::ProcessingConfigurationFailed { request_id, reason }
+                        }
+                    };
+                    let _ = msg_tx.send(msg);
+                });
+            }
+            Effect::ResetCorpusScanIndex => {
+                self.corpus_scan_reset_requested
+                    .store(true, Ordering::Release);
+                engine_info!("[corpus-index] reset requested after imported-corpus clear");
+            }
             Effect::LoadArticlesForTriage {
+                held,
                 request_id,
                 ordered_urls,
                 since_utc,
@@ -372,8 +423,13 @@ impl EffectRunner {
                 let output_dir = self.paths.output_dir.clone();
                 let registry = Arc::clone(&self.prompt_registry);
                 let max_input_bytes = self.llm_max_input_bytes.unwrap_or(100_000);
+                let index = self.corpus_scan_index.clone();
+                let reset_requested = self.corpus_scan_reset_requested.clone();
                 thread::spawn(move || {
                     run_triage_refresh_load(
+                        index,
+                        reset_requested,
+                        held,
                         request_id,
                         ordered_urls,
                         since_utc,
@@ -388,59 +444,9 @@ impl EffectRunner {
                 let msg_tx = self.msg_tx.clone();
                 let contexts_dir = self.paths.contexts_dir.clone();
                 thread::spawn(move || {
-                    if !contexts_dir.exists() {
-                        let reason = format!(
-                            "required prompt contexts directory not found at {:?}",
-                            contexts_dir
-                        );
-                        engine_warn!("[PromptContext] {}", reason);
-                        let _ = msg_tx.send(Msg::PromptContextsLoadFailed { reason });
-                        return;
-                    }
-
-                    let mut contexts = HashMap::new();
-                    let mut required_context_failure = None;
-                    let prompt_ids = [
-                        PromptId::ArticleTriage,
-                        PromptId::ArticleSummary,
-                        PromptId::ArticleSignalCandidate,
-                        PromptId::AggregateBriefing,
-                        PromptId::BriefingExecutiveSummary,
-                        PromptId::BriefingNextItem,
-                    ];
-
-                    for prompt_id in prompt_ids {
-                        let filename = prompt_context_filename(prompt_id);
-                        let path = contexts_dir.join(filename);
-
-                        if !path.exists() {
-                            if prompt_id == PromptId::ArticleTriage {
-                                required_context_failure = Some(format!(
-                                    "required ArticleTriage context file missing at {:?}",
-                                    path
-                                ));
-                            }
-                            continue;
-                        }
-
-                        match load_context_file(&path) {
-                            Ok(ctx_file) => {
-                                contexts.insert(prompt_id, ordered_context_pairs(&ctx_file));
-                            }
-                            Err(e) => {
-                                if prompt_id == PromptId::ArticleTriage {
-                                    required_context_failure = Some(format!(
-                                        "required ArticleTriage context failed to load from {:?}: {}",
-                                        path, e
-                                    ));
-                                    continue;
-                                }
-                                engine_warn!("[PromptContext] Failed to load {:?}: {}", path, e);
-                            }
-                        }
-                    }
-
-                    if let Some(reason) = required_context_failure {
+                    let (contexts, failure) =
+                        super::configuration::load_contexts(&contexts_dir, true);
+                    if let Some(reason) = failure {
                         if !contexts.is_empty() {
                             let _ = msg_tx.send(Msg::PromptContextsLoaded { contexts });
                         }
@@ -456,37 +462,7 @@ impl EffectRunner {
                 let prompts_dir = self.paths.prompts_dir.clone();
                 let registry = self.prompt_registry.clone();
                 thread::spawn(move || {
-                    for entry in crate::load_prompt_templates(&prompts_dir) {
-                        let loaded_template = match entry {
-                            Ok(lt) => lt,
-                            Err(reason) => {
-                                engine_warn!(
-                                    "[prompt-lab-template] Failed to load saved template: {}",
-                                    reason
-                                );
-                                continue;
-                            }
-                        };
-
-                        if loaded_template.template_file.version == PROMPT_VERSION_DRAFT {
-                            engine_warn!("[prompt-lab-template] skipping draft saved template prompt_id={:?} path={}", loaded_template.prompt_id, loaded_template.path.display());
-                            continue;
-                        }
-
-                        let overlay = PromptTemplateOwned {
-                            id: loaded_template.prompt_id,
-                            version: loaded_template.template_file.version,
-                            system_template: loaded_template.template_file.system_template,
-                            user_template: loaded_template.template_file.user_template,
-                            description: loaded_template.template_file.description,
-                            expected_format: loaded_template.template_file.expected_format,
-                        };
-
-                        if let Ok(mut guard) = registry.write() {
-                            guard.register_overlay(overlay);
-                        }
-                        engine_info!("[prompt-lab-template] Loaded saved template prompt_id={:?} version={} path={}", loaded_template.prompt_id, loaded_template.template_file.version, loaded_template.path.display());
-                    }
+                    super::configuration::load_overlays(&prompts_dir, &registry);
                     let _ = msg_tx.send(Msg::PromptTemplateFilesLoaded);
                 });
             }

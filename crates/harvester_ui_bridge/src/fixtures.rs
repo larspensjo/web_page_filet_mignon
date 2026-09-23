@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use harvester_core::{
-    update, AiAvailability, AiUnavailableReason, AppState, CompletedJobSnapshot, Effect,
-    JobListMode, LinkSnapshotRecord, LlmResultKind, Msg, SelectedJobVisibility,
+    AiAvailability, AiUnavailableReason, AppState, CompletedJobSnapshot, Effect, JobListMode,
+    LinkSnapshotRecord, LlmResultKind, Msg, SelectedJobVisibility,
 };
 use harvester_engine::{llm::prompt::PromptId, SourceId, SourceKind};
 
@@ -130,7 +130,7 @@ fn idle_with_corpus(empty: &AppState) -> AppState {
         state,
         Msg::TriageArticlesLoaded {
             request_id: load_request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     let state = add_llm_metadata(state);
@@ -243,7 +243,7 @@ fn run_in_progress_with_failures() -> AppState {
 }
 
 fn completed_run_state() -> AppState {
-    let (mut state, article, job_id) = prepared_article_state();
+    let (mut state, _article, job_id) = prepared_article_state();
     state = add_llm_metadata(state);
     let (next, _) = update(state, Msg::PipelineRunRequested);
     state = next;
@@ -253,20 +253,11 @@ fn completed_run_state() -> AppState {
     state = reduce(state, triage_success(triage_request_id, 4));
 
     state = reduce(state, Msg::PipelineRunAdvance);
-    let (next, summary_load_effects) = update(state, Msg::PipelineRunAdvance);
+    let (next, summary_effects) = update(state, Msg::PipelineRunAdvance);
     state = next;
-    assert!(summary_load_effects
+    assert!(summary_effects
         .iter()
-        .any(|effect| matches!(effect, Effect::LoadArticlesForBriefing { .. })));
-    state = add_llm_metadata(state);
-    let (next, summary_effects) = update(
-        state,
-        Msg::ArticlesLoaded {
-            articles: vec![article],
-            collection_text: "fixture collection".into(),
-        },
-    );
-    state = next;
+        .all(|effect| !matches!(effect, Effect::LoadArticlesForBriefing { .. })));
     state = reduce(state, Msg::PipelineRunAdvance);
     let summary_request_id = request_id(&summary_effects, PromptId::ArticleSummary, "summary");
     let (next, signal_effects) = update(state, summary_success(summary_request_id));
@@ -277,6 +268,7 @@ fn completed_run_state() -> AppState {
         "signal candidate",
     );
     state = reduce(state, signal_success(signal_request_id));
+    state = reduce(state, Msg::PipelineRunAdvance);
     state = reduce(state, Msg::PipelineRunAdvance);
     state = reduce(state, Msg::JobSelected { job_id });
     assert!(state.view().run_completion_notice.is_some());
@@ -374,7 +366,10 @@ fn prepared_article_state_with_source_failure(
         state,
         Msg::TriageArticlesLoaded {
             request_id: load_request_id,
-            articles: vec![article.clone()],
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                vec![article.clone()],
+                100_000,
+            ),
         },
     );
     (state, article, job_id)
@@ -516,6 +511,11 @@ fn time(offset_seconds: i64) -> DateTime<Utc> {
     DateTime::from_timestamp(FIXTURE_TIME + offset_seconds, 0)
         .expect("fixture timestamp")
         .with_timezone(&Utc)
+}
+
+fn update(state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
+    let (state, effects) = harvester_core::update(state, msg);
+    harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000)
 }
 
 #[cfg(test)]

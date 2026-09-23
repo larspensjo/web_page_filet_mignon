@@ -150,6 +150,9 @@ impl AppState {
     }
 
     pub fn batch_next_action(&self) -> BatchNextAction {
+        if self.processing_start.is_some() || self.pre_triage_coordinator.refresh_pending() {
+            return BatchNextAction::None;
+        }
         let pre_triage_included = self.pre_triage.resolved_included_articles().len();
 
         if self.can_start_triage_from_pre_triage()
@@ -477,7 +480,7 @@ mod tests {
             state,
             Msg::TriageArticlesLoaded {
                 request_id,
-                articles,
+                delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
             },
         );
         assert!(effects.is_empty());
@@ -495,7 +498,7 @@ mod tests {
         state.set_prompt_contexts(HashMap::new());
         state.mark_triage_metadata_ready();
 
-        let (state, _) = update(state, Msg::TriageClicked);
+        let (state, _) = crate::update::test_support::update(state, Msg::TriageClicked);
         assert_eq!(
             state
                 .triage()

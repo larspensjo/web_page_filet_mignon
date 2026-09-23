@@ -43,6 +43,7 @@ impl BriefingOrchestration {
 }
 
 impl AppState {
+    #[cfg(test)]
     pub(crate) fn request_briefing_orchestration(&mut self) {
         self.briefing_orchestration.request(false);
     }

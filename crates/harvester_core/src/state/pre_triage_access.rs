@@ -51,11 +51,11 @@ impl AppState {
         )
     }
 
-    /// Consumes the pre-triage included articles for use in a triage session,
+    /// Hands off the pre-triage included articles for use in a triage session,
     /// resetting pre-triage to Idle. Returns `None` if pre-triage is not in an
     /// interactive phase or has no resolved articles. This is a one-way
     /// transition that ensures pre-triage cannot remain action-ready after its
-    /// articles have been handed off.
+    /// articles have been handed off. Preparation and verdicts remain held for delta loads.
     pub(crate) fn consume_interactive_pre_triage_articles_for_triage(
         &mut self,
     ) -> Option<Vec<crate::briefing::LoadedArticle>> {
@@ -66,9 +66,13 @@ impl AppState {
         if articles.is_empty() {
             return None;
         }
-        self.pre_triage.reset();
+        self.pre_triage.finish_handoff();
         self.dirty = true;
         Some(articles)
+    }
+
+    pub(crate) fn pre_triage_mut(&mut self) -> &mut PreTriageSession {
+        &mut self.pre_triage
     }
 
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {

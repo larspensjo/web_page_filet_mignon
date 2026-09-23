@@ -62,7 +62,10 @@ fn archive_clicked_with_triage_complete_and_pre_triage_ready_sets_pending_count(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: loaded_pre_triage_articles(&[url]),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_pre_triage_articles(&[url]),
+                100_000,
+            ),
         },
     );
     assert_eq!(
@@ -447,7 +450,7 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     assert!(
@@ -622,7 +625,7 @@ fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles: new_articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(new_articles, 100_000),
         },
     );
 
@@ -686,7 +689,7 @@ fn archive_clicked_with_pre_triage_reviewing_has_zero_pending_count() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     assert!(
@@ -1105,7 +1108,10 @@ fn compatible_triage_cache_hit_exports_the_stored_model_id() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: load_request_id,
-            articles: loaded_triage_articles(1),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_triage_articles(1),
+                100_000,
+            ),
         },
     );
     let (state, _) = update(state, Msg::TriageClicked);
@@ -1557,7 +1563,10 @@ fn refresh_between_open_and_submit_uses_pinned_snapshot() {
         state,
         Msg::TriageArticlesLoaded {
             request_id: request_id2,
-            articles: loaded_pre_triage_articles(&[pre_triage_url]),
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                loaded_pre_triage_articles(&[pre_triage_url]),
+                100_000,
+            ),
         },
     );
     assert_eq!(
@@ -2886,7 +2895,7 @@ fn cache_derived_archive_counts_populate_while_pre_triage_is_reviewing() {
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            articles,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
     // Manual resolution no longer exists, so both review articles remain

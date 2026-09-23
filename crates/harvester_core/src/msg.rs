@@ -15,6 +15,7 @@ use crate::tabs::TrendCategory;
 use crate::CollectedEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[rustfmt::skip]
 pub enum Msg {
     /// User edited the URL input box (debounced text).
     InputChanged(String),
@@ -228,7 +229,7 @@ pub enum Msg {
     /// Triage-specific articles prepared by the loader.
     TriageArticlesLoaded {
         request_id: u64,
-        articles: Vec<LoadedArticle>,
+        delta: harvester_engine::TriageArticleDelta,
     },
     /// Incremental loader progress for a triage-specific article load.
     TriageArticlesLoadProgress {
@@ -254,6 +255,17 @@ pub enum Msg {
     /// Request to update the in-memory briefing checkpoint (and persist it).
     /// Raw wire type; the reducer validates the string before storing.
     BriefingCheckpointSet(Option<String>),
+    ProcessingConfigurationLoaded {
+        request_id: u64,
+        contexts: HashMap<PromptId, Vec<(String, String)>>,
+        active_versions: HashMap<PromptId, PromptVersion>,
+        effective_models: HashMap<PromptId, String>,
+        preparation_budget: usize,
+    },
+    ProcessingConfigurationFailed {
+        request_id: u64,
+        reason: String,
+    },
     /// Prompt contexts loaded from disk.
     PromptContextsLoaded {
         contexts: HashMap<PromptId, Vec<(String, String)>>,

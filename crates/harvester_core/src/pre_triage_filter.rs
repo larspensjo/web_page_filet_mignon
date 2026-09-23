@@ -188,6 +188,7 @@ pub struct PreTriageSession {
     entries: Vec<ArticleFilterEntry>,
     job_key_by_id: HashMap<JobId, ArticleFilterKey>,
     loaded_by_url: HashMap<String, LoadedArticle>,
+    preparation_budgets: HashMap<String, usize>,
 }
 
 impl Default for PreTriageSession {
@@ -197,6 +198,7 @@ impl Default for PreTriageSession {
             entries: Vec::new(),
             job_key_by_id: HashMap::new(),
             loaded_by_url: HashMap::new(),
+            preparation_budgets: HashMap::new(),
         }
     }
 }
@@ -266,6 +268,7 @@ impl PreTriageSession {
             lifecycle: PreTriageLifecycle::Idle,
             entries,
             job_key_by_id: HashMap::new(),
+            preparation_budgets: HashMap::new(),
             loaded_by_url: articles
                 .into_iter()
                 .map(|article| (article.url.clone(), article))
@@ -273,6 +276,98 @@ impl PreTriageSession {
         };
         session.refresh_loaded_lifecycle("no articles passed pre-triage filters");
         session
+    }
+
+    pub fn held_articles(&self) -> Vec<harvester_engine::HeldArticle> {
+        self.entries
+            .iter()
+            .filter_map(|e| {
+                let a = self.loaded_by_url.get(&e.key.url)?;
+                Some(harvester_engine::HeldArticle {
+                    url: a.url.clone(),
+                    content_hash: a.content_hash.clone(),
+                    preparation_budget: *self.preparation_budgets.get(&a.url)?,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn preparation_budget(&self, url: &str) -> Option<usize> {
+        self.preparation_budgets.get(url).copied()
+    }
+
+    /// Retain preparation and verdicts for subsequent deltas without remaining actionable.
+    pub(crate) fn finish_handoff(&mut self) {
+        self.lifecycle = PreTriageLifecycle::Idle;
+    }
+
+    pub fn merge_delta(
+        &mut self,
+        delta: harvester_engine::TriageArticleDelta,
+        policy: &PreTriagePolicy,
+    ) {
+        let mut prepared: HashMap<_, _> = delta
+            .articles
+            .into_iter()
+            .map(|a| ((a.url.clone(), a.content_hash.clone()), a))
+            .collect();
+        let mut previous: HashMap<_, _> = std::mem::take(&mut self.entries)
+            .into_iter()
+            .map(|entry| (entry.key.url.clone(), entry))
+            .collect();
+        let mut loaded = std::mem::take(&mut self.loaded_by_url);
+        let mut budgets = std::mem::take(&mut self.preparation_budgets);
+        let mut seen_urls = std::collections::HashSet::new();
+        for member in delta.members {
+            // The loader selects one filename-first member per URL. Keep the
+            // reducer stable if an external delta nevertheless contains duplicates.
+            if !seen_urls.insert(member.url.clone()) {
+                continue;
+            }
+            let old = loaded
+                .remove(&member.url)
+                .filter(|a| a.content_hash == member.content_hash);
+            let same_identity = old.is_some();
+            let previous_budget = budgets.remove(&member.url);
+            let mut article = match prepared
+                .remove(&(member.url.clone(), member.content_hash.clone()))
+                .or_else(|| old.filter(|_| previous_budget == Some(delta.preparation_budget)))
+            {
+                Some(a) => a,
+                None => continue,
+            };
+            if article.prepared_text.len() > delta.preparation_budget {
+                continue;
+            }
+            article.source_title = member.source_title;
+            article.fetched_utc = member.fetched_utc;
+            // A changed preparation budget does not change identity or its verdict.
+            let entry = if same_identity {
+                previous.remove(&article.url)
+            } else {
+                None
+            };
+            let mut entry = entry.unwrap_or_else(|| {
+                let (auto_verdict, reasons) = policy.evaluate(&article);
+                ArticleFilterEntry {
+                    key: ArticleFilterKey {
+                        url: article.url.clone(),
+                        content_hash: stable_hash_u64(&article.content_hash),
+                    },
+                    source_title: article.source_title.clone(),
+                    auto_verdict,
+                    reasons,
+                    manual_decision: None,
+                }
+            });
+            entry.source_title = article.source_title.clone();
+            self.preparation_budgets
+                .insert(article.url.clone(), delta.preparation_budget);
+            self.loaded_by_url.insert(article.url.clone(), article);
+            self.entries.push(entry);
+        }
+        self.job_key_by_id.clear();
+        self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
     }
 
     pub fn set_manual_decision(
@@ -399,6 +494,7 @@ impl PreTriageSession {
             entries: Vec::new(),
             job_key_by_id: HashMap::new(),
             loaded_by_url: HashMap::new(),
+            preparation_budgets: HashMap::new(),
         }
     }
 
