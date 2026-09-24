@@ -237,7 +237,9 @@ fn briefing_generate_enabled_false_when_signal_scoring_in_progress() {
     let mut state = complete_triage_with_settled_summaries(2);
     state = with_signal_candidate_metadata(state);
     let url = "https://triage-complete.com/0".to_string();
-    state.signal_candidate_mut().enqueue(url.clone());
+    state
+        .signal_candidate_mut()
+        .enqueue(url.clone(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(&url, 99);
 
     let view = state.view();

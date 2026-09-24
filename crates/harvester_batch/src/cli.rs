@@ -3,8 +3,8 @@ use harvester_io::default_sources_path;
 use std::path::PathBuf;
 
 const DEFAULT_POLL_INTERVAL_MINUTES: u32 = 15;
-const DEFAULT_LLM_CONCURRENCY: usize = 12;
-const MAX_LLM_CONCURRENCY: usize = 12;
+const DEFAULT_LLM_CONCURRENCY: usize = 10;
+const MAX_LLM_CONCURRENCY: usize = harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS;
 
 /// Harvester batch runner - headless mode for scheduled execution
 #[derive(Parser, Debug)]
@@ -26,7 +26,7 @@ pub struct Args {
     #[arg(long, default_value = "prompts")]
     pub prompts_dir: PathBuf,
 
-    /// Maximum concurrent LLM requests (1-12)
+    /// Maximum concurrent LLM requests (1-10)
     #[arg(long, default_value_t = DEFAULT_LLM_CONCURRENCY)]
     pub llm_concurrency: usize,
 
@@ -412,10 +412,10 @@ mod tests {
     }
 
     #[test]
-    fn llm_concurrency_defaults_to_doubled_summary_parallelism() {
+    fn llm_concurrency_defaults_to_worker_cap() {
         let args = Args::parse_from(&["harvester_batch"]);
         assert_eq!(args.llm_concurrency, DEFAULT_LLM_CONCURRENCY);
-        assert_eq!(args.llm_concurrency, 12);
+        assert_eq!(args.llm_concurrency, 10);
     }
 
     #[test]

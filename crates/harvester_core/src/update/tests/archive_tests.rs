@@ -1009,7 +1009,9 @@ fn archive_annotations_are_read_at_submit_after_scoring_without_changing_pinned_
     let (mut state, _) = update(state, Msg::ArchiveClicked);
     let request_id = state.archive_request_id();
     let url = "https://triage-complete.com/0";
-    state.signal_candidate_mut().enqueue(url.to_string());
+    state
+        .signal_candidate_mut()
+        .enqueue(url.to_string(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(url, 77);
     state.record_pending_llm_request(77, PromptId::ArticleSignalCandidate);
 
@@ -1827,9 +1829,10 @@ fn archive_clicked_reports_signal_candidate_snapshot() {
 
     init_logging();
     let mut state = complete_triage_state_for_test(1);
-    state
-        .signal_candidate_mut()
-        .enqueue("https://signal.example/a".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://signal.example/a".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://signal.example/a", 7);
@@ -1892,9 +1895,10 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
 
     init_logging();
     let mut state = complete_triage_state_for_test(1);
-    state
-        .signal_candidate_mut()
-        .enqueue("https://signal.example/a".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://signal.example/a".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://signal.example/a", 7);
@@ -1921,9 +1925,10 @@ fn archive_dialog_submit_uses_pinned_signal_candidate_snapshot_and_clears_overri
     );
     let (mut state, _) = update(state, Msg::ArchiveClicked);
 
-    state
-        .signal_candidate_mut()
-        .enqueue("https://signal.example/b".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://signal.example/b".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://signal.example/b", 8);
@@ -1987,9 +1992,10 @@ fn archive_dialog_submit_with_empty_candidate_snapshot_exports_empty_selection_w
 
     init_logging();
     let mut state = complete_triage_state_for_test(1);
-    state
-        .signal_candidate_mut()
-        .enqueue("https://triage-complete.com/0".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://triage-complete.com/0".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://triage-complete.com/0", 7);
@@ -2072,7 +2078,9 @@ fn signal_candidate_selection_applies_threshold_and_order() {
 
     for (i, score, key) in [(0usize, 80u8, "cluster-a"), (1usize, 30u8, "cluster-b")] {
         let url = format!("https://triage-complete.com/{i}");
-        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .enqueue(url.clone(), "fixture-input".to_string());
         state
             .signal_candidate_mut()
             .mark_scoring(&url, i as u64 + 1);
@@ -2110,7 +2118,9 @@ fn archive_final_selection_signal_filtered_matches_shared_selection() {
     state = with_signal_candidate_metadata(state);
     for (i, score, key) in [(0usize, 80u8, "cluster-a"), (1usize, 30u8, "cluster-b")] {
         let url = format!("https://triage-complete.com/{i}");
-        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .enqueue(url.clone(), "fixture-input".to_string());
         state
             .signal_candidate_mut()
             .mark_scoring(&url, i as u64 + 1);
@@ -2156,7 +2166,9 @@ fn archive_final_selection_settled_empty_falls_back_to_full_corpus() {
     state = with_signal_candidate_metadata(state);
     for i in 0..2usize {
         let url = format!("https://triage-complete.com/{i}");
-        state.signal_candidate_mut().enqueue(url.clone());
+        state
+            .signal_candidate_mut()
+            .enqueue(url.clone(), "fixture-input".to_string());
         state
             .signal_candidate_mut()
             .mark_scoring(&url, i as u64 + 1);
@@ -2364,7 +2376,9 @@ fn briefing_generate_readiness_signal_scoring_in_progress() {
     }
 
     let url = "https://triage-complete.com/0".to_string();
-    state.signal_candidate_mut().enqueue(url);
+    state
+        .signal_candidate_mut()
+        .enqueue(url, "fixture-input".to_string());
     assert!(state.signal_candidate().in_flight_count() > 0);
 
     assert!(matches!(
@@ -2562,7 +2576,9 @@ fn signal_candidate_mode_keeps_raw_count_over_full_archive_corpus() {
 
     // Settle a single signal candidate (article /0). All scoring done, none in flight,
     // so the meter switches to the signal-candidate export subset.
-    state.signal_candidate_mut().enqueue(url_candidate.clone());
+    state
+        .signal_candidate_mut()
+        .enqueue(url_candidate.clone(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(&url_candidate, 1);
     state.signal_candidate_mut().complete(
         &url_candidate,
@@ -2578,6 +2594,36 @@ fn signal_candidate_mode_keeps_raw_count_over_full_archive_corpus() {
             output_tokens: 2,
         },
     );
+
+    // A changed digest replaces only the settled score. The view must return
+    // to the signal-filtered estimate after the replacement settles.
+    assert!(state
+        .signal_candidate_mut()
+        .enqueue(url_candidate.clone(), "changed-input".to_string()));
+    state.signal_candidate_mut().mark_scoring(&url_candidate, 2);
+    state.signal_candidate_mut().complete(
+        &url_candidate,
+        SignalCandidateResult {
+            signal_score: 90,
+            signal_key: "cluster-a".to_string(),
+            themes: vec!["theme".to_string()],
+            draft_gist: "gist".to_string(),
+            source_tier: SourceTier::Tier1,
+            confidence: Confidence::High,
+            reasoning: "reason".to_string(),
+            input_tokens: 10,
+            output_tokens: 2,
+        },
+    );
+    assert_eq!(
+        state
+            .signal_candidate()
+            .observation_counts()
+            .pending_or_in_flight,
+        0
+    );
+    assert_eq!(state.signal_candidate().enqueued_count(), 2);
+    assert_eq!(state.signal_candidate().completed_count(), 2);
 
     let view = state.view();
 
@@ -2727,7 +2773,9 @@ fn cache_derived_startup_counts_do_not_enable_signal_candidate_export() {
     let mut state = ready_pre_triage_state(urls);
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, urls, 3);
-    state.signal_candidate_mut().enqueue(urls[0].to_string());
+    state
+        .signal_candidate_mut()
+        .enqueue(urls[0].to_string(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(urls[0], 1);
     state.signal_candidate_mut().complete(
         urls[0],
@@ -2839,7 +2887,9 @@ fn cache_derived_view_counts_ignore_settled_signal_candidate_override() {
     let mut state = ready_pre_triage_state(urls);
     state = prime_llm_metadata(state);
     seed_triage_cache_for_urls(&mut state, urls, 3);
-    state.signal_candidate_mut().enqueue(urls[0].to_string());
+    state
+        .signal_candidate_mut()
+        .enqueue(urls[0].to_string(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(urls[0], 1);
     state.signal_candidate_mut().complete(
         urls[0],

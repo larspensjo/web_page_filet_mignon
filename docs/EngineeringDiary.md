@@ -2416,3 +2416,51 @@ preservation, standalone summary configuration, and corpus-clear reset. The engi
 is now `scan_tracks_new_changed_deleted_files_and_requested_order_excluding_archives`.
 Prepared text remains in pre-triage after hand-off, leaving three copies where two
 previously existed; sharing that text is a possible memory-use follow-up.
+
+## 2026-09-23 - Shared model dispatch and current-key scoring
+Type: Bug Fix
+Context: Independent triage and summary limits plus unbounded scoring could exceed the
+worker capacity. Scoring could also consume a historical summary or retain a score after
+its upstream input changed.
+Change: Added one reducer scheduler with scoring, summary, then triage priority and
+admission order within each stage. Cache hits consume no request slot. The synchronous
+budget and worker share an engine cap of 10; desktop still defaults to 3 and batch now
+defaults to 10. Batch API buffering uses a separate session-call allowance, with both
+settings logged as `[model-budget]`. Scoring admits pending work only with current-key
+triage and summary results, retains an input digest, and replaces changed Completed or Failed
+entries while refusing same-digest re-admission. Pending inputs update without another count;
+in-flight and deferred entries keep their original request until it settles. Session-call
+quota exhaustion halts dispatch for the process and leaves a visible restart warning.
+Provider credit exhaustion and the existing consecutive-rate-limit threshold halt the
+current run, then reset at the next explicit triage or summaries start. All halts fail
+pending entries across all three stages; stale completions from replaced sessions do not halt.
+Lessons Learned: A downstream queue needs both upstream provenance and its own admission
+identity. Free slots must be allocated centrally, including after cache replay. Count
+outstanding request IDs; preserving an in-flight score lets its paid result reach the cache.
+Prevention: Added emitted-effect regressions for shared capacity, priority, admission order,
+cache completion, historical-key rejection, changed terminal/in-flight scores, provider
+halts and restart semantics, stale quota completions, view settlement after score replacement,
+and deferred allowance separation. The renamed test
+`changed_in_flight_score_settles_and_caches_old_request_before_readmission` replaces
+`changed_in_flight_score_keeps_its_slot_until_old_completion_arrives`; the renamed
+`scoring_uses_run_frozen_triage_key_after_live_metadata_changes` replaces
+`scoring_rejects_triage_from_an_old_key`; and
+`current_summary_key_uses_current_metadata_instead_of_historical_timestamp` replaces
+`summary_cache_key_for_url_uses_parsed_rfc3339_order`. Existing tests were migrated, with no test files
+or coverage removed. The renamed CLI test `llm_concurrency_defaults_to_worker_cap` replaces
+`llm_concurrency_defaults_to_doubled_summary_parallelism`; completed-triage fixtures now
+seed their current cache identity, and pipeline progress tests respect the shared slot.
+The launch scripts still pass no concurrency setting and were left unchanged; Pester is
+reserved for the coordinator. No live model calls, UI/IPC edits, or corpus changes.
+Verification: `cargo build --offline`; `cargo test --offline -p harvester_engine
+-p harvester_core -p harvester_io -p harvester_batch -p harvester_ui_bridge`
+(engine 457 passed, 1 ignored; core 625; IO 106; batch 193; UI bridge 27);
+`cargo clippy --offline --all-targets -- -D warnings`; and `cargo fmt` passed.
+Final test totals: engine 458 (457 passed, existing `real_corpus_dry_run` ignored),
+core 622 passed (baseline 610), IO 106 passed, batch 193 passed (baseline 191),
+UI bridge 27 passed. No required Rust checks remain outstanding.
+Refs: crates/harvester_core/src/update/model_dispatch.rs,
+crates/harvester_core/src/update/model_dispatch_tests.rs,
+crates/harvester_core/src/update/signal_candidate.rs,
+crates/harvester_batch/src/runner/bootstrap.rs,
+crates/harvester_batch/src/cli.rs, docs/Architecture.md

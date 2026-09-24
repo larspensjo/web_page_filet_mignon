@@ -3,7 +3,8 @@
 Written 2026-09-23 from the design brief for a one-press desktop Run with overlapping stages.
 Revised the same day after the Codex plan review (eight issues, all applied) and the user's
 answers to the first draft's twelve open questions, which are now stated as decisions below.
-Status: Phase 1 landed (incremental corpus hand-off). Phases 2–8 not started.
+Status: Phase 1 landed (incremental corpus hand-off). Phase 2 landed (one model-request budget,
+furthest-along first, current-key scoring). Phases 3–8 not started.
 
 Terms:
 

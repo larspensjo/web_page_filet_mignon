@@ -1,7 +1,4 @@
-use super::summary_cache_support::{
-    build_summary_cache_key, context_hash_for_log, log_summary_cache_run_summary,
-    log_summary_cache_warmup_if_needed, short_hash, summary_cache_key_error_reason,
-};
+use super::summary_cache_support::log_summary_cache_run_summary;
 use crate::briefing::{BriefingPhase, BriefingSession};
 use crate::state::BriefingGenerateReadiness;
 use crate::{AppState, Effect};
@@ -55,6 +52,7 @@ pub(super) fn start_summaries_from_triage(state: &mut AppState) -> Vec<Effect> {
         })
         .collect();
     state.clear_provider_alert();
+    state.reset_provider_model_dispatch_halt();
     state.request_summary_preparation();
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
@@ -327,9 +325,7 @@ pub(super) fn handle_articles_loaded(
     state.briefing_mut().set_articles(articles, collection_text);
     state.briefing_mut().transition_to_summarizing();
     state.mark_dirty();
-    let mut effects = Vec::new();
-    try_start_briefing_with_metadata(state, &mut effects);
-    effects
+    Vec::new()
 }
 
 pub(super) fn handle_articles_load_failed(state: &mut AppState, reason: String) -> Vec<Effect> {
@@ -340,151 +336,7 @@ pub(super) fn handle_articles_load_failed(state: &mut AppState, reason: String) 
     vec![Effect::PersistSummaryCache { cache }]
 }
 
-pub(super) fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Vec<Effect>) {
-    log_summary_cache_warmup_if_needed(state);
-
-    let limit = state.summary_max_in_flight();
-
-    loop {
-        // Stop filling if we've reached the concurrency limit.
-        if state.briefing().in_progress_count() >= limit {
-            break;
-        }
-
-        let Some(next_idx) = state.briefing().next_pending_index() else {
-            break;
-        };
-
-        let article = &state.briefing().articles()[next_idx];
-        let prepared_text = article.prepared_text.clone();
-        let content_hash = article.content_hash.clone();
-        let content_hash_short = short_hash(&content_hash);
-        let context = state.context_for(PromptId::ArticleSummary).to_vec();
-        let context_hash_value = context_hash_for_log(&context);
-        let metadata = state.summary_cache_metadata();
-        let version_display = metadata
-            .map(|(version, _)| version.to_string())
-            .unwrap_or_else(|| "<none>".to_string());
-        let model_display = metadata
-            .map(|(_, model)| model.to_string())
-            .unwrap_or_else(|| "<none>".to_string());
-
-        match build_summary_cache_key(
-            &content_hash,
-            PromptId::ArticleSummary,
-            metadata.map(|(version, _)| version),
-            metadata.map(|(_, model)| model),
-            &context,
-        ) {
-            Ok(key) => {
-                state
-                    .briefing_mut()
-                    .set_article_cache_key(next_idx, Some(key.clone()));
-                if let Some(cached_result) = state.try_reuse_summary(&key) {
-                    let article_entities = cached_result.entities.clone();
-                    let url = state.briefing().articles()[next_idx].url.clone();
-                    let fetched_utc = state.briefing().articles()[next_idx].fetched_utc.clone();
-                    let result = cached_result.clone();
-                    state.record_summary_cache_hit();
-                    engine_info!(
-                        "[summary-cache] article={} decision=hit reason=cache-hit prompt_version={} model_id={} context_hash={} content_hash_short={}",
-                        next_idx,
-                        version_display,
-                        model_display,
-                        &context_hash_value,
-                        content_hash_short
-                    );
-                    state.briefing_mut().complete_article(next_idx, result);
-                    state.briefing_mut().set_article_cache_key(next_idx, None);
-                    state.refresh_selected_preview();
-                    state.mark_dirty();
-                    effects.push(Effect::UpsertEntityIndexEntry {
-                        url,
-                        fetched_utc,
-                        content_hash: Some(content_hash.clone()),
-                        summary_entities: Some(article_entities),
-                        themes: None,
-                    });
-                    let article_url = state.briefing().articles()[next_idx].url.clone();
-                    let _ =
-                        crate::update::signal_candidate::try_enqueue(state, &article_url, effects);
-                    // Cache hit: slot not consumed, continue filling.
-                    continue;
-                }
-
-                state.record_summary_cache_miss();
-                engine_info!(
-                    "[summary-cache] article={} decision=miss reason=cache-miss prompt_version={} model_id={} context_hash={} content_hash_short={}",
-                    next_idx,
-                    version_display,
-                    model_display,
-                    &context_hash_value,
-                    content_hash_short
-                );
-                let request_id = state.allocate_next_llm_request_id();
-                state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
-                state.briefing_mut().start_article(next_idx, request_id);
-                engine_info!(
-                    "[llm-concurrency] summary dispatch request_id={} article={} in_flight={} limit={}",
-                    request_id,
-                    next_idx,
-                    state.briefing().in_progress_count(),
-                    limit
-                );
-                effects.push(Effect::RequestLlmCompletion {
-                    request_id,
-                    prompt_id: PromptId::ArticleSummary,
-                    prompt_version: None,
-                    model_override: None,
-                    input_content: prepared_text,
-                    context,
-                    template_override: None,
-                    extra_template_vars: vec![],
-                });
-                state.mark_dirty();
-                // Live request: continue loop to fill remaining slots.
-                continue;
-            }
-            Err(err) => {
-                state.briefing_mut().set_article_cache_key(next_idx, None);
-                state.record_summary_cache_key_unavailable();
-                let reason = summary_cache_key_error_reason(&err);
-                engine_info!(
-                    "[summary-cache] article={} decision=key_unavailable reason={} prompt_version={} model_id={} context_hash={} content_hash_short={}",
-                    next_idx,
-                    reason,
-                    version_display,
-                    model_display,
-                    &context_hash_value,
-                    content_hash_short
-                );
-                let request_id = state.allocate_next_llm_request_id();
-                state.record_pending_llm_request(request_id, PromptId::ArticleSummary);
-                state.briefing_mut().start_article(next_idx, request_id);
-                engine_info!(
-                    "[llm-concurrency] summary dispatch (no-cache-key) request_id={} article={} in_flight={} limit={}",
-                    request_id,
-                    next_idx,
-                    state.briefing().in_progress_count(),
-                    limit
-                );
-                effects.push(Effect::RequestLlmCompletion {
-                    request_id,
-                    prompt_id: PromptId::ArticleSummary,
-                    prompt_version: None,
-                    model_override: None,
-                    input_content: prepared_text,
-                    context,
-                    template_override: None,
-                    extra_template_vars: vec![],
-                });
-                state.mark_dirty();
-                // Live request: continue loop to fill remaining slots.
-                continue;
-            }
-        }
-    }
-
+pub(super) fn settle_summaries(state: &mut AppState, effects: &mut Vec<Effect>) {
     // Gate aggregate briefing on ALL articles settled (no pending, no in-progress).
     if state.briefing().pending_count() > 0 || state.briefing().in_progress_count() > 0 {
         return;
@@ -508,7 +360,8 @@ pub(super) fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Ve
         return;
     }
 
-    if state.briefing_orchestration_skip_aggregate() {
+    if state.briefing_orchestration_skip_aggregate() || state.model_dispatch_halt_reason().is_some()
+    {
         state.briefing_mut().complete_without_briefing();
         state.clear_briefing_orchestration();
         state.mark_dirty();
@@ -568,13 +421,4 @@ pub(super) fn dispatch_next_briefing_step(state: &mut AppState, effects: &mut Ve
 fn snapshot_briefing_coverage_window(state: &mut AppState) {
     let label = crate::briefing::format_briefing_time_window_label(state.briefing_since_utc());
     state.briefing_mut().set_coverage_window_label(label);
-}
-
-pub(super) fn try_start_briefing_with_metadata(state: &mut AppState, effects: &mut Vec<Effect>) {
-    if !state.is_briefing_metadata_ready() {
-        return;
-    }
-    if matches!(state.briefing().phase(), BriefingPhase::Summarizing) {
-        dispatch_next_briefing_step(state, effects);
-    }
 }

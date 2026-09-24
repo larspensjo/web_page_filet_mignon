@@ -32,8 +32,7 @@ pub(super) fn run_dry_run(
     // Initialize state
     let (msg_tx, msg_rx) = mpsc::channel();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(args.llm_concurrency);
-    state.set_summary_max_in_flight(args.llm_concurrency);
+    state.set_llm_max_in_flight(args.llm_concurrency);
     apply_signal_candidate_selection_settings(&mut state, args);
 
     // Restore completed jobs

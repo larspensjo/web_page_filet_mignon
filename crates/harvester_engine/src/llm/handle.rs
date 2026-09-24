@@ -316,7 +316,9 @@ fn worker_loop(
     event_tx: mpsc::Sender<LlmEvent>,
     config: LlmConfig,
 ) {
-    let max_concurrent = config.max_concurrent_requests.clamp(1, 10);
+    let max_concurrent = config
+        .max_concurrent_requests
+        .clamp(1, super::MAX_LLM_CONCURRENT_REQUESTS);
     let runtime = Runtime::new().expect("failed to build tokio runtime for LLM worker");
     let quota_tracker = Arc::new(Mutex::new(LlmQuotaTracker::new(config.quotas.clone())));
     let config = Arc::new(config);

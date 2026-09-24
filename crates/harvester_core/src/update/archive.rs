@@ -405,7 +405,9 @@ mod tests {
             Some("stored-model".into()),
         );
         state.set_triage(triage);
-        state.signal_candidate_mut().enqueue(url.into());
+        state
+            .signal_candidate_mut()
+            .enqueue(url.into(), "fixture-input".to_string());
         state.signal_candidate_mut().complete(
             url,
             SignalCandidateResult {

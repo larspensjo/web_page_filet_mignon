@@ -119,13 +119,16 @@ pub(super) fn with_signal_candidate_metadata(state: AppState) -> AppState {
         PromptId::BriefingNextItem,
         "test-briefing-model".to_string(),
     );
-    let (state, _) = update(
+    let (mut state, _) = update(
         state,
         Msg::LlmMetadataLoaded {
             active_versions,
             effective_models,
         },
     );
+    seed_current_triage_cache(&mut state);
+    state.start_summary_cache_run();
+    state.mark_briefing_metadata_ready();
     state
 }
 
@@ -512,4 +515,23 @@ pub(super) fn ready_pre_triage_state(urls: &[&str]) -> AppState {
         crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
     ));
     state
+}
+
+/// Hand-built completed triage fixtures must carry the current cache identity.
+pub(super) fn seed_current_triage_cache(state: &mut AppState) {
+    state.mark_triage_metadata_ready();
+    let results: Vec<_> = state
+        .triage()
+        .articles()
+        .iter()
+        .filter_map(|article| {
+            state
+                .triage()
+                .result_for_url(&article.url)
+                .map(|result| (article.content_hash.clone(), result.clone()))
+        })
+        .collect();
+    for (hash, result) in results {
+        state.store_triage_result(&hash, result);
+    }
 }

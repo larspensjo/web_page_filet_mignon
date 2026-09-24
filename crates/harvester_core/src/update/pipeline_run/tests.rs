@@ -541,15 +541,17 @@ fn scoring_stays_active_from_triage_cache_hit_through_the_last_summary_wave() {
         crate::update::test_support::update(state, triage_success(first_triage_id));
     let first_signal_id = request_id(&effects, PromptId::ArticleSignalCandidate)
         .expect("cached summary should enqueue scoring during triage");
-    let second_triage_id =
-        request_id(&effects, PromptId::ArticleTriage).expect("second triage request");
+    assert!(request_id(&effects, PromptId::ArticleTriage).is_none());
+    let (state, effects) =
+        crate::update::test_support::update(state, signal_success(first_signal_id));
+    let second_triage_id = request_id(&effects, PromptId::ArticleTriage)
+        .expect("scoring completion frees the shared slot");
     let (state, _) = crate::update::test_support::update(state, triage_success(second_triage_id));
     assert_eq!(
         state.batch_next_action(),
         BatchNextAction::DispatchSummaries
     );
 
-    let state = crate::update::test_support::update(state, signal_success(first_signal_id)).0;
     assert_progress_does_not_regress(&mut previous, &state);
     let scoring =
         &state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()];
@@ -644,7 +646,7 @@ fn accepted_stop_while_scoring_is_active_leaves_no_stage_active() {
     let (state, effects) =
         crate::update::test_support::update(state, triage_success(first_triage_id));
     assert!(request_id(&effects, PromptId::ArticleSignalCandidate).is_some());
-    assert!(request_id(&effects, PromptId::ArticleTriage).is_some());
+    assert!(request_id(&effects, PromptId::ArticleTriage).is_none());
     assert_eq!(
         state.run_progress().expect("run progress").stages[PipelineStage::ScoringSignals.index()]
             .status,

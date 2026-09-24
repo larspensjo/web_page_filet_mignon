@@ -7,6 +7,7 @@ mod batch_results;
 mod briefing;
 mod import;
 mod llm_completed;
+mod model_dispatch;
 mod pipeline_run;
 mod polling;
 pub(crate) mod processing;
@@ -258,15 +259,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.triage_mut().rearm_deferred();
             state.briefing_mut().rearm_deferred();
             state.signal_candidate_mut().rearm_deferred();
-            let mut effects = Vec::new();
-            if matches!(state.triage().phase(), crate::TriagePhase::Triaging) {
-                triage::dispatch_next_triage_step(&mut state, &mut effects);
-            }
-            if matches!(state.briefing().phase(), crate::BriefingPhase::Summarizing) {
-                briefing::dispatch_next_briefing_step(&mut state, &mut effects);
-            }
+            let effects = Vec::new();
             for url in deferred_signal_urls {
-                signal_candidate::try_enqueue(&mut state, &url, &mut effects);
+                signal_candidate::try_enqueue(&mut state, &url);
             }
             state.mark_dirty();
             effects
@@ -451,7 +446,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_triage_metadata_ready();
             state.mark_dirty();
             let mut effects = Vec::new();
-            briefing::try_start_briefing_with_metadata(&mut state, &mut effects);
             effects.extend(briefing::resume_deferred_exec_dispatch(&mut state));
             signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
             effects
@@ -604,6 +598,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::NoOp => Vec::new(),
     };
 
+    model_dispatch::dispatch_model_work(&mut state, &mut effects);
     pipeline_run::record_progress_after(&mut state, progress_before);
     if persist_runtime_state {
         effects.push(Effect::PersistRuntimeState {

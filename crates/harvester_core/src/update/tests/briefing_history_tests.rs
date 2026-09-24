@@ -6,7 +6,7 @@ use harvester_engine::llm::prompt::PromptId;
 fn briefing_aggregate_not_dispatched_until_all_articles_settled() {
     init_logging();
     let mut state = AppState::new();
-    state.set_summary_max_in_flight(2);
+    state.set_llm_max_in_flight(2);
     let state = start_briefing_after_triage(state, loaded_articles().0.clone());
     let (articles, collection_text) = loaded_articles();
 

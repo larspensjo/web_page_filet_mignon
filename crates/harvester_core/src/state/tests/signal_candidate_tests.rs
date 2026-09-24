@@ -8,9 +8,13 @@ fn signal_candidate_rows_leave_gists_empty_for_scoring_and_failed_states() {
 
     insert_done_job(&mut state, 1, &scoring_url);
     insert_done_job(&mut state, 2, &failed_url);
-    state.signal_candidate_mut().enqueue(scoring_url.clone());
+    state
+        .signal_candidate_mut()
+        .enqueue(scoring_url.clone(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(&scoring_url, 7);
-    state.signal_candidate_mut().enqueue(failed_url.clone());
+    state
+        .signal_candidate_mut()
+        .enqueue(failed_url.clone(), "fixture-input".to_string());
     state.signal_candidate_mut().fail(&failed_url, "boom");
 
     let rows = state.build_signal_candidate_rows();
@@ -28,7 +32,9 @@ fn complete_candidate(
     gist: &str,
 ) {
     use harvester_engine::llm::dto::{Confidence, SignalCandidateResult};
-    state.signal_candidate_mut().enqueue(url.to_string());
+    state
+        .signal_candidate_mut()
+        .enqueue(url.to_string(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(url, 1);
     state.signal_candidate_mut().complete(
         url,

@@ -96,7 +96,45 @@ Before either stage dispatches, the reducer checks the stored preparation budget
 the snapshot budget and requests a delta load when necessary. A failed or mismatched
 preparation cannot dispatch model work. Summaries take their text directly from the triage
 session. `LoadArticlesForBriefing` remains available for the aggregate-briefing domain
-path. Stage order and separate model concurrency limits are unchanged.
+path.
+
+## Shared article-model request budget
+
+`update/model_dispatch.rs::dispatch_model_work` schedules admitted triage, summary
+and signal-scoring work after reducer messages. All three stages share
+`llm_max_in_flight`, clamped by `harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS`
+(10); the LLM worker uses the same cap. Desktop uses `LLM_MAX_CONCURRENT_REQUESTS`
+(default 3). Batch uses `--llm-concurrency` (default 10, maximum 10).
+
+The scheduler selects scoring, then summaries, then triage, in that fixed priority
+order. Within each stage it preserves admission order. Cache hits complete without
+occupying a request slot; priority is reconsidered after each completion, including
+cache hits that admit downstream scoring. A freed slot goes to the highest-priority
+pending stage. Startup scoring sweeps still admit work through this scheduler.
+
+Batch API mode sets the separate `llm_deferred_allowance` to the session call limit.
+This bounds outstanding requests being buffered into provider batches, replacing
+the synchronous budget for reducer dispatch in that mode. Requests the runner sends
+synchronously still use the worker semaphore. Both settings are logged separately
+on a `[model-budget]` line. Deferred entries remain non-blocking for
+`pipeline_activity()`; pending and in-flight scoring remain blocking.
+
+Scoring admission requires triage under the current triage key and a summary under
+the current summary key, from the summary session or a current-key cache lookup.
+Historical summaries found by URL cannot supply scoring inputs. Each scoring entry
+retains its input-key digest and a frozen input snapshot while pending or in flight.
+A changed digest replaces a completed or failed score. Pending entries update their
+input snapshot without another admission count; in-flight and deferred entries keep
+their original request until it settles. A same-digest admission is refused.
+Successful summary sessions retain their cache
+identity so scoring can validate their provenance.
+
+The 1,000-call session quota halts article-model dispatch for the process lifetime
+and shows a restart warning on later run starts. Provider out-of-credits and three
+consecutive provider rate-limit failures halt the current run; the next explicit
+triage or summaries start clears those halts and their warnings. Each halt fails
+admitted pending entries across all three stages with its reason; in-flight requests
+can finish. Completions from replaced sessions do not create a scheduler halt.
 
 ## Determinism and robustness
 - Stable ordering, identifiers, and output formats keep behavior reproducible.

@@ -11,6 +11,17 @@ use harvester_io::{
 };
 use std::sync::mpsc;
 
+pub(crate) fn apply_model_budget(state: &mut AppState, args: &Args) {
+    state.set_llm_max_in_flight(args.llm_concurrency);
+    if args.batch_api_enabled() {
+        let session_limit = LlmQuotas::default()
+            .max_calls_per_session
+            .map(|limit| limit as usize)
+            .unwrap_or(crate::batch_coordinator::MAX_BATCH_LINES);
+        state.set_llm_deferred_allowance(session_limit);
+    }
+}
+
 pub(crate) fn apply_signal_candidate_selection_settings(state: &mut AppState, args: &Args) {
     state.set_signal_candidate_threshold(
         args.signal_candidate_threshold
@@ -43,16 +54,7 @@ pub(crate) fn prepare_runtime(
     // Hydrate state
     engine_info!("[batch] Hydrating state from disk");
     let mut state = AppState::new();
-    if args.batch_api_enabled() {
-        let session_limit = LlmQuotas::default()
-            .max_calls_per_session
-            .map(|limit| limit as usize)
-            .unwrap_or(crate::batch_coordinator::MAX_BATCH_LINES);
-        state.set_deferred_batch_max_in_flight(session_limit);
-    } else {
-        state.set_triage_max_in_flight(args.llm_concurrency);
-        state.set_summary_max_in_flight(args.llm_concurrency);
-    }
+    apply_model_budget(&mut state, args);
     apply_signal_candidate_selection_settings(&mut state, args);
 
     let (hydrated_state, startup_effects) = hydrate_state_from_disk(state, paths);
@@ -103,5 +105,36 @@ mod tests {
         assert!(!should_enable_ai_orchestration_for_mode(true, true));
         assert!(should_enable_ai_orchestration_for_mode(true, false));
         assert!(!should_enable_ai_orchestration_for_mode(false, false));
+    }
+}
+
+#[cfg(test)]
+mod model_budget_tests {
+    use super::*;
+
+    #[test]
+    fn batch_api_sets_session_allowance_without_overwriting_sync_budget() {
+        let args = Args::parse_from(&["harvester_batch", "--batch-api", "--llm-concurrency", "2"]);
+        let mut state = AppState::new();
+        apply_model_budget(&mut state, &args);
+        assert_eq!(state.llm_max_in_flight(), 2);
+        assert_eq!(
+            state.llm_deferred_allowance(),
+            LlmQuotas::default()
+                .max_calls_per_session
+                .map(|n| n as usize)
+        );
+    }
+
+    #[test]
+    fn synchronous_batch_defaults_to_worker_cap_without_deferred_allowance() {
+        let args = Args::parse_from(&["harvester_batch"]);
+        let mut state = AppState::new();
+        apply_model_budget(&mut state, &args);
+        assert_eq!(
+            state.llm_max_in_flight(),
+            harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS
+        );
+        assert_eq!(state.llm_deferred_allowance(), None);
     }
 }

@@ -144,6 +144,7 @@ fn set_signal_candidate_metadata_without_sweep(state: &mut AppState) {
         "test-signal-model".to_string(),
     );
     state.set_llm_metadata(active_versions, effective_models);
+    super::support::seed_current_triage_cache(state);
 }
 
 fn prewarm_signal_candidate_cache(
@@ -176,7 +177,7 @@ fn prewarm_signal_candidate_cache(
         summary: summary.summary.as_str(),
         key_points: &key_points,
         upstream_summary_cache_digest: state
-            .summary_cache_key_for_url(url)
+            .current_summary_cache_key(&article.content_hash)
             .expect("summary cache key")
             .digest(),
     };
@@ -237,9 +238,10 @@ fn signal_candidate_session_starts_empty() {
 #[test]
 fn signal_candidate_completion_routes_to_session_and_persists_cache() {
     let mut state = AppState::new();
-    state
-        .signal_candidate_mut()
-        .enqueue("https://example.com/article".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://example.com/article".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://example.com/article", 9);
@@ -289,9 +291,10 @@ fn signal_candidate_completion_routes_to_session_and_persists_cache() {
 #[test]
 fn signal_candidate_validation_failure_marks_failed() {
     let mut state = AppState::new();
-    state
-        .signal_candidate_mut()
-        .enqueue("https://example.com/article".to_string());
+    state.signal_candidate_mut().enqueue(
+        "https://example.com/article".to_string(),
+        "fixture-input".to_string(),
+    );
     state
         .signal_candidate_mut()
         .mark_scoring("https://example.com/article", 8);
@@ -414,12 +417,8 @@ fn triage_cache_hydration_sweeps_signal_candidates_after_metadata_and_summary_re
     let mut state = seed_cached_summary_only_state_for_signal_candidate();
     set_signal_candidate_metadata_without_sweep(&mut state);
 
-    let (state, effects) = update(
-        state,
-        Msg::TriageCacheHydrated {
-            cache: crate::triage_cache::TriageCache::default(),
-        },
-    );
+    let cache = state.triage_cache().clone();
+    let (state, effects) = update(state, Msg::TriageCacheHydrated { cache });
 
     assert!(effects.iter().any(|effect| matches!(
         effect,
@@ -725,7 +724,7 @@ fn summary_cache_hit_reuses_signal_candidate_cache_without_snapshot_leak() {
 }
 
 #[test]
-fn summary_cache_key_for_url_uses_parsed_rfc3339_order() {
+fn current_summary_key_uses_current_metadata_instead_of_historical_timestamp() {
     let mut state = AppState::new();
     let article = LoadedArticle {
         url: "https://example.com/article".to_string(),
@@ -768,9 +767,25 @@ fn summary_cache_key_for_url_uses_parsed_rfc3339_order() {
         "2026-05-25T08:00:00-04:00".to_string(),
     );
 
+    state.set_llm_metadata(
+        [(PromptId::ArticleSummary, 1)].into(),
+        [(PromptId::ArticleSummary, "model-a".to_string())].into(),
+    );
+
     assert_eq!(
-        state.summary_cache_key_for_url("https://example.com/article"),
-        Some(lexically_earlier_but_newer)
+        state.current_summary_cache_key("shared-hash").unwrap(),
+        SummaryCacheKey::try_new(
+            "shared-hash",
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("model-a"),
+            &[]
+        )
+        .unwrap()
+    );
+    assert_ne!(
+        state.current_summary_cache_key("shared-hash").unwrap(),
+        lexically_earlier_but_newer
     );
 }
 

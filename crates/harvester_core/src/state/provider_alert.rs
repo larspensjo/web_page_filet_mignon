@@ -47,6 +47,12 @@ impl AppState {
     }
 
     pub(super) fn provider_alert_banner(&self) -> Option<InlineWarningView> {
+        if let Some(reason) = self.session_quota_halt_reason() {
+            return Some(InlineWarningView {
+                title: "LLM run stopped: session call limit reached".to_string(),
+                body: format!("{reason}. The process has reached its model-call limit. Restart Harvester to start another LLM run."),
+            });
+        }
         self.provider_alert().map(|alert| match alert {
             ProviderAlert::OutOfCredits { detail } => InlineWarningView {
                 title: "LLM run stopped: OpenAI account out of credits".to_string(),

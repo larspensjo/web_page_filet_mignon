@@ -4,6 +4,7 @@ use super::summary_cache_support::{
     summary_cache_key_error_reason,
 };
 use crate::briefing::{ArticleSummaryResult, BriefingItem, BriefingResult, BriefingStoryResult};
+use crate::state::ModelDispatchHalt;
 use crate::triage::ArticleTriageResult;
 use crate::update::signal_candidate::{handle_signal_candidate_completion, try_enqueue};
 use crate::{AppState, Effect, LlmRequestState, LlmResultKind};
@@ -37,14 +38,16 @@ pub(super) fn handle(
         .url_for_request(request_id)
         .is_some()
     {
+        note_article_model_result(state, &result);
         handle_signal_candidate_completion(state, request_id, &result, &mut effects);
     } else if let Some(article_idx) = state.briefing().find_article_by_request_id(request_id) {
+        note_article_model_result(state, &result);
         handle_summary_completion(state, article_idx, &result, &mut effects);
-        super::briefing::dispatch_next_briefing_step(state, &mut effects);
     } else if let Some(article_idx) = state.triage().find_article_by_request_id(request_id) {
+        note_article_model_result(state, &result);
         handle_triage_completion(state, article_idx, &result, &mut effects);
-        super::triage::dispatch_next_triage_step(state, &mut effects);
     } else if state.briefing().is_briefing_request(request_id) {
+        note_owned_quota(state, &result);
         match request_prompt_id {
             Some(PromptId::BriefingExecutiveSummary) => {
                 handle_executive_summary_completion(state, &result);
@@ -64,10 +67,38 @@ pub(super) fn handle(
             }
         }
     } else if state.briefing().next_item_request_id() == Some(request_id) {
+        note_owned_quota(state, &result);
         handle_next_item_completion(state, &result);
     }
 
     effects
+}
+
+fn note_article_model_result(state: &mut AppState, result: &LlmResultKind) {
+    match result {
+        LlmResultKind::QuotaExhausted { .. } => note_owned_quota(state, result),
+        LlmResultKind::RateLimited { reason } => {
+            if state.note_provider_rate_limited() {
+                state.halt_model_dispatch(ModelDispatchHalt::RateLimit(reason.clone()));
+            }
+        }
+        LlmResultKind::Success { .. } => state.note_owned_llm_success(),
+        _ => {}
+    }
+}
+
+fn note_owned_quota(state: &mut AppState, result: &LlmResultKind) {
+    if let LlmResultKind::QuotaExhausted { reason, origin } = result {
+        match origin {
+            QuotaOrigin::SessionBudget => {
+                state.halt_model_dispatch(ModelDispatchHalt::SessionQuota(reason.clone()));
+            }
+            QuotaOrigin::Provider => {
+                state.note_provider_out_of_credits(reason.clone());
+                state.halt_model_dispatch(ModelDispatchHalt::ProviderCredits(reason.clone()));
+            }
+        }
+    }
 }
 
 fn record_llm_result(state: &mut AppState, request_id: u64, result: &LlmResultKind) {
@@ -128,80 +159,78 @@ fn handle_summary_completion(
             output_tokens,
             prompt_version,
             resolved_model,
-        } => {
-            state.note_owned_llm_success();
-            match validate_summary(output_json) {
-                Ok(summary) => {
-                    let summary_result = ArticleSummaryResult {
-                        title: summary.title,
-                        summary: summary.summary,
-                        key_points: summary.key_points,
-                        input_tokens: *input_tokens,
-                        output_tokens: *output_tokens,
-                        entities: summary.entities,
-                    };
+        } => match validate_summary(output_json) {
+            Ok(summary) => {
+                let summary_result = ArticleSummaryResult {
+                    title: summary.title,
+                    summary: summary.summary,
+                    key_points: summary.key_points,
+                    input_tokens: *input_tokens,
+                    output_tokens: *output_tokens,
+                    entities: summary.entities,
+                };
 
-                    let content_hash = state.briefing().articles()[article_idx]
-                        .content_hash
-                        .clone();
-                    let context = state.context_for(PromptId::ArticleSummary).to_vec();
-                    let lookup_key = state.briefing().article_cache_key(article_idx).cloned();
-                    let run_metadata = state
-                        .summary_cache_metadata()
-                        .map(|(version, model)| (version, model.to_string()));
+                let content_hash = state.briefing().articles()[article_idx]
+                    .content_hash
+                    .clone();
+                let context = state.context_for(PromptId::ArticleSummary).to_vec();
+                let lookup_key = state.briefing().article_cache_key(article_idx).cloned();
+                let run_metadata = state
+                    .summary_cache_metadata()
+                    .map(|(version, model)| (version, model.to_string()));
 
-                    state
-                        .briefing_mut()
-                        .complete_article(article_idx, summary_result.clone());
-                    state.refresh_selected_preview();
+                state
+                    .briefing_mut()
+                    .complete_article(article_idx, summary_result.clone());
+                state.refresh_selected_preview();
 
-                    let cache_key_result = match lookup_key.clone() {
-                        Some(key) => Ok(key),
-                        None => build_summary_cache_key(
+                let cache_key_result = match lookup_key.clone() {
+                    Some(key) => Ok(key),
+                    None => build_summary_cache_key(
+                        &content_hash,
+                        PromptId::ArticleSummary,
+                        run_metadata.as_ref().map(|(version, _)| *version),
+                        run_metadata.as_ref().map(|(_, model)| model.as_str()),
+                        &context,
+                    ),
+                };
+
+                match cache_key_result {
+                    Ok(store_key) => {
+                        if let Some(lookup) = lookup_key.as_ref() {
+                            log_summary_cache_lookup_mismatch(article_idx, lookup, &store_key);
+                        }
+
+                        let completion_key = build_summary_cache_key(
                             &content_hash,
                             PromptId::ArticleSummary,
-                            run_metadata.as_ref().map(|(version, _)| *version),
-                            run_metadata.as_ref().map(|(_, model)| model.as_str()),
+                            Some(*prompt_version),
+                            Some(resolved_model.as_str()),
                             &context,
-                        ),
-                    };
-
-                    match cache_key_result {
-                        Ok(store_key) => {
-                            if let Some(lookup) = lookup_key.as_ref() {
-                                log_summary_cache_lookup_mismatch(article_idx, lookup, &store_key);
-                            }
-
-                            let completion_key = build_summary_cache_key(
-                                &content_hash,
-                                PromptId::ArticleSummary,
-                                Some(*prompt_version),
-                                Some(resolved_model.as_str()),
-                                &context,
+                        );
+                        if let Ok(completion_key) = completion_key {
+                            log_summary_cache_completion_metadata(
+                                article_idx,
+                                &store_key,
+                                &completion_key,
                             );
-                            if let Ok(completion_key) = completion_key {
-                                log_summary_cache_completion_metadata(
-                                    article_idx,
-                                    &store_key,
-                                    &completion_key,
-                                );
-                            }
+                        }
 
-                            let article_entities = summary_result.entities.clone();
-                            let article_url = state.briefing().articles()[article_idx].url.clone();
-                            let article_fetched_utc =
-                                state.briefing().articles()[article_idx].fetched_utc.clone();
-                            state.store_summary_result(
-                                store_key.clone(),
-                                summary_result,
-                                chrono::Utc::now().to_rfc3339(),
-                            );
-                            let lookup_label = if lookup_key.is_some() {
-                                "metadata-snapshot"
-                            } else {
-                                "none"
-                            };
-                            engine_info!(
+                        let article_entities = summary_result.entities.clone();
+                        let article_url = state.briefing().articles()[article_idx].url.clone();
+                        let article_fetched_utc =
+                            state.briefing().articles()[article_idx].fetched_utc.clone();
+                        state.store_summary_result(
+                            store_key.clone(),
+                            summary_result,
+                            chrono::Utc::now().to_rfc3339(),
+                        );
+                        let lookup_label = if lookup_key.is_some() {
+                            "metadata-snapshot"
+                        } else {
+                            "none"
+                        };
+                        engine_info!(
                             "[summary-cache] article={} decision=store metadata_source=run-frozen lookup_metadata={} prompt_version={} model_id={} context_hash={} content_hash_short={}",
                             article_idx,
                             lookup_label,
@@ -210,64 +239,42 @@ fn handle_summary_completion(
                             store_key.context_hash,
                             short_hash(&content_hash),
                         );
-                            effects.push(Effect::UpsertEntityIndexEntry {
-                                url: article_url.clone(),
-                                fetched_utc: article_fetched_utc,
-                                content_hash: Some(content_hash.clone()),
-                                summary_entities: Some(article_entities),
-                                themes: None,
-                            });
-                            let _ = try_enqueue(state, &article_url, effects);
-                        }
-                        Err(err) => {
-                            engine_warn!(
-                                "[summary-cache] article={} skip storing result: {}",
-                                article_idx,
-                                summary_cache_key_error_reason(&err)
-                            );
-                        }
+                        effects.push(Effect::UpsertEntityIndexEntry {
+                            url: article_url.clone(),
+                            fetched_utc: article_fetched_utc,
+                            content_hash: Some(content_hash.clone()),
+                            summary_entities: Some(article_entities),
+                            themes: None,
+                        });
+                        let _ = try_enqueue(state, &article_url);
                     }
-                    state
-                        .briefing_mut()
-                        .set_article_cache_key(article_idx, None);
-                }
-                Err(err) => {
-                    state
-                        .briefing_mut()
-                        .fail_article(article_idx, format!("validation failed: {err}"));
+                    Err(err) => {
+                        engine_warn!(
+                            "[summary-cache] article={} skip storing result: {}",
+                            article_idx,
+                            summary_cache_key_error_reason(&err)
+                        );
+                    }
                 }
             }
-        }
-        LlmResultKind::QuotaExhausted { reason, origin } => {
+            Err(err) => {
+                state
+                    .briefing_mut()
+                    .fail_article(article_idx, format!("validation failed: {err}"));
+            }
+        },
+        LlmResultKind::QuotaExhausted { reason, .. } => {
             engine_info!("[briefing] quota exhausted during summaries: {reason}");
-            if matches!(origin, QuotaOrigin::Provider) {
-                state.note_provider_out_of_credits(reason.clone());
-            }
             state
                 .briefing_mut()
                 .fail_article(article_idx, reason.clone());
-            state.briefing_mut().fail_all_pending("quota exhausted");
         }
         LlmResultKind::RateLimited { reason }
         | LlmResultKind::ValidationFailed { reason, .. }
         | LlmResultKind::Failed { reason } => {
-            if matches!(result, LlmResultKind::RateLimited { .. }) {
-                state
-                    .briefing_mut()
-                    .fail_article(article_idx, reason.clone());
-                if state.note_provider_rate_limited() {
-                    engine_warn!(
-                        "[briefing] stopping summaries after repeated provider rate limiting"
-                    );
-                    state
-                        .briefing_mut()
-                        .fail_all_pending("provider rate limited");
-                }
-            } else {
-                state
-                    .briefing_mut()
-                    .fail_article(article_idx, reason.clone());
-            }
+            state
+                .briefing_mut()
+                .fail_article(article_idx, reason.clone());
         }
     }
 }
@@ -285,78 +292,61 @@ fn handle_triage_completion(
             input_tokens,
             output_tokens,
             ..
-        } => {
-            state.note_owned_llm_success();
-            match validate_triage(output_json) {
-                Ok(triage) => {
-                    let content_hash = state.triage().articles()[article_idx].content_hash.clone();
-                    let url = state.triage().articles()[article_idx].url.clone();
-                    let fetched_utc = state.triage().articles()[article_idx].fetched_utc.clone();
-                    let result = ArticleTriageResult {
-                        category: triage.category,
-                        priority: triage.priority.value(),
-                        tags: triage.tags,
-                        rationale: triage.rationale,
-                        input_tokens: *input_tokens,
-                        output_tokens: *output_tokens,
-                    };
-                    let triage_priority = result.priority;
-                    let themes = result.tags.clone();
-                    let triage_model =
-                        state.store_triage_result_with_model(&content_hash, result.clone());
-                    state.triage_mut().complete_article_with_model(
-                        article_idx,
-                        result.clone(),
-                        triage_model,
-                    );
-                    effects.push(Effect::UpsertEntityIndexEntry {
-                        url,
-                        fetched_utc,
-                        content_hash: Some(content_hash),
-                        summary_entities: None,
-                        themes: Some(themes),
-                    });
-                    let article_url = state.triage().articles()[article_idx].url.clone();
-                    let summary_ready = state.summary_result_for_url(&article_url).is_some();
-                    engine_info!(
-                    "[signal-dispatch] triage completed url={} summary_ready={} triage_priority={} signal_state_present_before_enqueue={}",
+        } => match validate_triage(output_json) {
+            Ok(triage) => {
+                let content_hash = state.triage().articles()[article_idx].content_hash.clone();
+                let url = state.triage().articles()[article_idx].url.clone();
+                let fetched_utc = state.triage().articles()[article_idx].fetched_utc.clone();
+                let result = ArticleTriageResult {
+                    category: triage.category,
+                    priority: triage.priority.value(),
+                    tags: triage.tags,
+                    rationale: triage.rationale,
+                    input_tokens: *input_tokens,
+                    output_tokens: *output_tokens,
+                };
+                let triage_priority = result.priority;
+                let themes = result.tags.clone();
+                let triage_model =
+                    state.store_triage_result_with_model(&content_hash, result.clone());
+                state.triage_mut().complete_article_with_model(
+                    article_idx,
+                    result.clone(),
+                    triage_model,
+                );
+                effects.push(Effect::UpsertEntityIndexEntry {
+                    url,
+                    fetched_utc,
+                    content_hash: Some(content_hash),
+                    summary_entities: None,
+                    themes: Some(themes),
+                });
+                let article_url = state.triage().articles()[article_idx].url.clone();
+                engine_info!(
+                    "[signal-dispatch] triage completed url={} triage_priority={} signal_state_present_before_enqueue={}",
                     article_url,
-                    summary_ready,
                     triage_priority,
                     state
                         .signal_candidate()
                         .state_for(&state.triage().articles()[article_idx].url)
                         .is_some(),
                 );
-                    let _ = try_enqueue(state, &article_url, effects);
-                    state.refresh_selected_preview();
-                }
-                Err(err) => {
-                    state
-                        .triage_mut()
-                        .fail_article(article_idx, format!("validation: {err}"));
-                }
+                let _ = try_enqueue(state, &article_url);
+                state.refresh_selected_preview();
             }
-        }
-        LlmResultKind::QuotaExhausted { reason, origin } => {
-            if matches!(origin, QuotaOrigin::Provider) {
-                state.note_provider_out_of_credits(reason.clone());
+            Err(err) => {
+                state
+                    .triage_mut()
+                    .fail_article(article_idx, format!("validation: {err}"));
             }
+        },
+        LlmResultKind::QuotaExhausted { reason, .. } => {
             state.triage_mut().fail_article(article_idx, reason.clone());
-            state.triage_mut().fail_all_pending("quota exhausted");
         }
         LlmResultKind::RateLimited { reason }
         | LlmResultKind::ValidationFailed { reason, .. }
         | LlmResultKind::Failed { reason } => {
-            if matches!(result, LlmResultKind::RateLimited { .. }) {
-                state.triage_mut().fail_article(article_idx, reason.clone());
-                if state.note_provider_rate_limited() {
-                    engine_warn!("[triage] stopping triage after repeated provider rate limiting");
-                    state.triage_mut().fail_all_pending("provider rate limited");
-                }
-            } else {
-                state.triage_mut().fail_article(article_idx, reason.clone());
-            }
+            state.triage_mut().fail_article(article_idx, reason.clone());
         }
     }
 }
@@ -377,10 +367,7 @@ fn handle_executive_summary_completion(state: &mut AppState, result: &LlmResultK
                 }
             }
         }
-        LlmResultKind::QuotaExhausted { reason, origin } => {
-            if matches!(origin, QuotaOrigin::Provider) {
-                state.note_provider_out_of_credits(reason.clone());
-            }
+        LlmResultKind::QuotaExhausted { reason, .. } => {
             state.briefing_mut().fail(reason.clone());
         }
         LlmResultKind::RateLimited { reason } | LlmResultKind::Failed { reason } => {
@@ -492,10 +479,7 @@ fn handle_next_item_completion(state: &mut AppState, result: &LlmResultKind) {
                 }
             }
         }
-        LlmResultKind::QuotaExhausted { reason, origin } => {
-            if matches!(origin, QuotaOrigin::Provider) {
-                state.note_provider_out_of_credits(reason.clone());
-            }
+        LlmResultKind::QuotaExhausted { reason, .. } => {
             engine_warn!("[briefing-stream] next item call failed: {reason}");
             state.briefing_mut().clear_next_item_request_id();
         }

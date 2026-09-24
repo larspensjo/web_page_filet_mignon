@@ -25,6 +25,7 @@ mod job_access;
 mod job_state;
 mod link_helpers;
 mod llm;
+pub(crate) use llm::ModelDispatchHalt;
 mod pre_triage_access;
 mod prompt;
 mod provider_alert;
@@ -159,9 +160,6 @@ pub struct CompletedJobSnapshot {
     pub links: Vec<LinkSnapshotRecord>,
     pub fetched_utc: Option<String>,
 }
-
-/// Maximum allowed value for any per-flow in-flight limit.
-pub const MAX_IN_FLIGHT_LIMIT: usize = 10;
 
 /// Snapshot of batch processing state for headless runners.
 /// Provides observable metrics without UI dependencies.
@@ -345,10 +343,9 @@ pub struct AppState {
     triage_cache_run_metrics: TriageCacheRunMetrics,
     triage_cache_run_start_logged: bool,
     briefing_orchestration: BriefingOrchestration,
-    /// Maximum number of concurrent triage LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
-    triage_max_in_flight: usize,
-    /// Maximum number of concurrent summary LLM requests (default: 1, max: MAX_IN_FLIGHT_LIMIT).
-    summary_max_in_flight: usize,
+    llm_max_in_flight: usize,
+    llm_deferred_allowance: Option<usize>,
+    model_dispatch_halt_reason: Option<llm::ModelDispatchHalt>,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
     /// Authoritative session-scoped quota usage and configured limits.
@@ -454,8 +451,9 @@ impl Default for AppState {
             triage_cache_run_metrics: TriageCacheRunMetrics::default(),
             triage_cache_run_start_logged: false,
             briefing_orchestration: BriefingOrchestration::default(),
-            triage_max_in_flight: 1,
-            summary_max_in_flight: 1,
+            llm_max_in_flight: 1,
+            llm_deferred_allowance: None,
+            model_dispatch_halt_reason: None,
             llm_usage_by_model: BTreeMap::new(),
             llm_quota: crate::LlmQuotaState::default(),
             active_trend_category: TrendCategory::default(),

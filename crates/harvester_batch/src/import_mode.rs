@@ -68,8 +68,7 @@ pub(crate) fn run_import_mode(
 
     let (msg_tx, msg_rx) = mpsc::channel::<Msg>();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(args.llm_concurrency);
-    state.set_summary_max_in_flight(args.llm_concurrency);
+    state.set_llm_max_in_flight(args.llm_concurrency);
     apply_signal_candidate_selection_settings(&mut state, args);
 
     let enable_ai_orchestration = is_ai_orchestration_enabled();

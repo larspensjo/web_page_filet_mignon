@@ -2271,7 +2271,7 @@ mod app_state_tests {
         insert_done_job(&mut state, 2, "https://example.com/not-a-candidate");
         state
             .signal_candidate_mut()
-            .enqueue(candidate_url.to_string());
+            .enqueue(candidate_url.to_string(), "fixture-input".to_string());
         state.signal_candidate_mut().mark_scoring(candidate_url, 1);
         state.signal_candidate_mut().complete(
             candidate_url,

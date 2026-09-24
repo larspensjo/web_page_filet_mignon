@@ -3,12 +3,11 @@
 //! Owns enqueue logic, completion handling, duplicate-enqueue prevention, and
 //! persistence-effect emission for the signal-candidate cache and overrides.
 
-use engine_logging::{engine_info, engine_warn};
+use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_engine::llm::dto::SignalCandidateResult;
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
 use harvester_engine::llm::validation::validate_signal_candidate;
 
-use crate::briefing::ArticleSummaryResult;
 use crate::msg::LlmResultKind;
 use crate::signal_candidate::OverrideKey;
 use crate::signal_candidate_cache::{SignalCandidateCacheKey, SignalCandidateInputBundle};
@@ -143,85 +142,65 @@ pub(crate) fn handle_signal_candidate_completion(
     state.mark_dirty();
 }
 
-pub fn try_enqueue(state: &mut AppState, url: &str, effects: &mut Vec<Effect>) -> bool {
-    if state.signal_candidate().state_for(url).is_some() {
-        return false;
-    }
-
-    let Some(snapshot) = build_input_snapshot(state, url) else {
-        return false;
-    };
-    if snapshot.triage_priority < PRIORITY_CUTOFF_INCLUSIVE {
-        return false;
-    }
-
-    let bundle = build_input_bundle(url, &snapshot);
-    let key = match SignalCandidateCacheKey::try_new(
-        &bundle,
-        Some(snapshot.prompt_version),
-        Some(snapshot.model_id.as_str()),
-        &snapshot.context,
-    ) {
-        Ok(key) => key,
-        Err(err) => {
-            engine_warn!(
-                "[signal-cache] url={} cache key unavailable reason={:?}",
+pub fn try_enqueue(state: &mut AppState, url: &str) -> bool {
+    let snapshot = match build_input_snapshot(state, url) {
+        Ok(snapshot) => snapshot,
+        Err(reason) => {
+            engine_debug!(
+                "[signal-dispatch] enqueue rejected url={} reason={}",
                 url,
-                err
+                reason
             );
             return false;
         }
     };
-
-    if let Some(mut cached) = state.try_reuse_signal_candidate(&key) {
-        engine_info!(
-            "[signal-cache] url={} decision=hit signal_score={} signal_key={} key_digest={}",
-            url,
-            cached.signal_score,
-            cached.signal_key,
-            key.digest()
+    if snapshot.triage_priority < PRIORITY_CUTOFF_INCLUSIVE {
+        engine_debug!(
+            "[signal-dispatch] enqueue rejected url={} reason=below-priority-cutoff",
+            url
         );
-        if state.signal_candidate_mut().enqueue(url.to_string()) {
-            cached.input_tokens = 0;
-            cached.output_tokens = 0;
-            state.signal_candidate_mut().complete(url, cached);
-            state.mark_dirty();
-            return true;
-        }
         return false;
     }
-
-    if !state.signal_candidate_mut().enqueue(url.to_string()) {
+    let Some(key) = input_key(url, &snapshot) else {
+        engine_debug!(
+            "[signal-dispatch] enqueue rejected url={} reason=cache-key-unavailable",
+            url
+        );
+        return false;
+    };
+    if !state
+        .signal_candidate_mut()
+        .enqueue(url.to_string(), key.digest())
+    {
         return false;
     }
-    let request_id = state.allocate_next_llm_request_id();
-    state.record_pending_llm_request(request_id, PromptId::ArticleSignalCandidate);
-    state.signal_candidate_mut().mark_scoring(url, request_id);
-
-    effects.push(Effect::RequestLlmCompletion {
-        request_id,
-        prompt_id: PromptId::ArticleSignalCandidate,
-        prompt_version: Some(snapshot.prompt_version),
-        model_override: None,
-        input_content: render_input_content(url, &snapshot),
-        context: snapshot.context.clone(),
-        template_override: None,
-        extra_template_vars: render_extra_template_vars(url, &snapshot),
-    });
-    engine_info!(
-        "[signal-dispatch] url={} request_id={} decision=enqueued prompt_version={} model_id={}",
-        url,
-        request_id,
-        snapshot.prompt_version,
-        snapshot.model_id
-    );
     state.set_signal_candidate_input_snapshot(url, snapshot);
     state.mark_dirty();
     true
 }
 
-pub fn sweep_eligible_after_hydration(state: &mut AppState, effects: &mut Vec<Effect>) {
-    let mut urls: std::collections::HashSet<String> = state
+pub(super) fn input_key(
+    url: &str,
+    snapshot: &SignalCandidateInputSnapshot,
+) -> Option<SignalCandidateCacheKey> {
+    SignalCandidateCacheKey::try_new(
+        &build_input_bundle(url, snapshot),
+        Some(snapshot.prompt_version),
+        Some(&snapshot.model_id),
+        &snapshot.context,
+    )
+    .map_err(|err| {
+        engine_warn!(
+            "[signal-cache] url={} cache key unavailable reason={}",
+            url,
+            err
+        );
+    })
+    .ok()
+}
+
+pub fn sweep_eligible_after_hydration(state: &mut AppState, _effects: &mut Vec<Effect>) {
+    let mut urls: Vec<String> = state
         .ordered_completed_job_urls_snapshot()
         .into_iter()
         .collect();
@@ -239,8 +218,9 @@ pub fn sweep_eligible_after_hydration(state: &mut AppState, effects: &mut Vec<Ef
             .map(|article| article.url.clone()),
     );
 
-    for url in urls {
-        let _ = try_enqueue(state, &url, effects);
+    let mut seen = std::collections::HashSet::new();
+    for url in urls.into_iter().filter(|url| seen.insert(url.clone())) {
+        let _ = try_enqueue(state, &url);
     }
 }
 
@@ -288,17 +268,49 @@ pub fn handle_toggle_exclusion(
     state.mark_dirty();
 }
 
-fn build_input_snapshot(state: &AppState, url: &str) -> Option<SignalCandidateInputSnapshot> {
+fn build_input_snapshot(
+    state: &AppState,
+    url: &str,
+) -> Result<SignalCandidateInputSnapshot, &'static str> {
     let article = state
         .triage()
         .articles()
         .iter()
-        .find(|article| article.url == url)?;
-    let summary: &ArticleSummaryResult = state.summary_result_for_url(url)?;
-    let triage = state.triage().result_for_url(url)?;
-    let prompt_version = state.active_version_for(PromptId::ArticleSignalCandidate)?;
+        .find(|article| article.url == url)
+        .ok_or("triage-article-unavailable")?;
+    let triage_key = state
+        .current_triage_cache_key(&article.content_hash)
+        .ok_or("current-triage-key-unavailable")?;
+    let (_, triage) = state
+        .triage_cache()
+        .lookup(&triage_key)
+        .ok_or("current-triage-result-unavailable")?;
+    let summary_key = state
+        .current_summary_cache_key(&article.content_hash)
+        .map_err(|_| "current-summary-key-unavailable")?;
+    let summary = state
+        .briefing()
+        .articles()
+        .iter()
+        .enumerate()
+        .find_map(|(idx, candidate)| {
+            if candidate.url != url || state.briefing().article_cache_key(idx) != Some(&summary_key)
+            {
+                return None;
+            }
+            match &candidate.summary_state {
+                crate::briefing::ArticleSummaryState::Completed { result } => Some(result),
+                _ => None,
+            }
+        })
+        .or_else(|| state.try_reuse_summary(&summary_key))
+        .ok_or("current-summary-result-unavailable")?;
+    let prompt_version = state
+        .active_version_for(PromptId::ArticleSignalCandidate)
+        .ok_or("scoring-prompt-version-unavailable")?;
     let model_id = state
-        .effective_model_for(PromptId::ArticleSignalCandidate)?
+        .effective_model_for(PromptId::ArticleSignalCandidate)
+        .ok_or("scoring-model-unavailable")?
         .to_string();
     let published_at = article.fetched_utc.clone().unwrap_or_default();
     let title = crate::preview::best_effort_article_title(article.source_title.as_deref(), url)
@@ -309,11 +321,11 @@ fn build_input_snapshot(state: &AppState, url: &str) -> Option<SignalCandidateIn
                 .unwrap_or_else(|| url.to_string())
         });
     let outlet = best_effort_outlet(article.source_title.as_deref(), url);
-    let upstream_summary_cache_digest = state.summary_cache_key_for_url(url)?.digest();
+    let upstream_summary_cache_digest = summary_key.digest();
     let mut triage_tags_sorted = triage.tags.clone();
     triage_tags_sorted.sort();
 
-    Some(SignalCandidateInputSnapshot {
+    Ok(SignalCandidateInputSnapshot {
         outlet,
         title,
         published_at,
@@ -349,11 +361,11 @@ fn build_input_bundle<'a>(
     }
 }
 
-fn render_input_content(url: &str, snapshot: &SignalCandidateInputSnapshot) -> String {
+pub(super) fn render_input_content(url: &str, snapshot: &SignalCandidateInputSnapshot) -> String {
     format!("signal-candidate scoring for {url} [{}]", snapshot.title)
 }
 
-fn render_extra_template_vars(
+pub(super) fn render_extra_template_vars(
     url: &str,
     snapshot: &SignalCandidateInputSnapshot,
 ) -> Vec<(String, String)> {

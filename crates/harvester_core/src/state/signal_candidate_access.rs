@@ -8,7 +8,7 @@ use crate::signal_candidate_cache::{
     SignalCandidateCache, SignalCandidateCacheEntry, SignalCandidateCacheKey,
 };
 use crate::update::signal_candidate::SignalCandidateInputSnapshot;
-use crate::{FrozenBatchKey, StageKind, SummaryCacheKey};
+use crate::{FrozenBatchKey, StageKind};
 use harvester_engine::llm::dto::SignalCandidateResult;
 use harvester_engine::llm::prompt::PromptId;
 
@@ -146,33 +146,6 @@ impl AppState {
 
     pub fn set_signal_candidate_threshold(&mut self, threshold: u8) {
         self.signal_candidate_threshold = threshold.clamp(0, 100);
-    }
-
-    pub fn summary_cache_key_for_url(&self, url: &str) -> Option<SummaryCacheKey> {
-        let content_hash = self
-            .triage()
-            .article_content_hash(url)
-            .or_else(|| self.pre_triage.article_content_hash(url))?;
-
-        self.summary_cache()
-            .iter()
-            .filter(|(key, _)| {
-                key.content_hash == content_hash && key.prompt_id == PromptId::ArticleSummary
-            })
-            .max_by(|(_, a), (_, b)| {
-                let parsed_a = chrono::DateTime::parse_from_rfc3339(&a.created_at_utc)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc));
-                let parsed_b = chrono::DateTime::parse_from_rfc3339(&b.created_at_utc)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&chrono::Utc));
-
-                match (parsed_a, parsed_b) {
-                    (Some(a), Some(b)) => a.cmp(&b),
-                    _ => a.created_at_utc.cmp(&b.created_at_utc),
-                }
-            })
-            .map(|(key, _)| key.clone())
     }
 
     pub(crate) fn summary_result_for_url(&self, url: &str) -> Option<&ArticleSummaryResult> {

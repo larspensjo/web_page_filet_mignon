@@ -1,4 +1,4 @@
-use super::{AppState, LlmRequestState, MAX_IN_FLIGHT_LIMIT};
+use super::{AppState, LlmRequestState};
 use crate::view_model::LlmModelUsageView;
 use crate::{LlmQuotaLimits, LlmQuotaState, LlmQuotaUsage};
 use harvester_engine::llm::prompt::PromptId;
@@ -6,31 +6,77 @@ use harvester_engine::llm::run_metadata::{CacheStatus, LlmRunMetadata};
 use harvester_engine::llm::TokenUsage;
 
 impl AppState {
-    /// Set the maximum concurrent triage LLM requests. Clamped to MAX_IN_FLIGHT_LIMIT.
-    pub fn set_triage_max_in_flight(&mut self, limit: usize) {
-        self.triage_max_in_flight = limit.clamp(1, MAX_IN_FLIGHT_LIMIT);
+    /// Budget shared by triage, summaries and signal scoring.
+    pub fn set_llm_max_in_flight(&mut self, limit: usize) {
+        self.llm_max_in_flight = limit.clamp(1, harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS);
+        self.log_model_budget();
     }
-
-    /// Set the maximum concurrent summary LLM requests. Clamped to MAX_IN_FLIGHT_LIMIT.
-    pub fn set_summary_max_in_flight(&mut self, limit: usize) {
-        self.summary_max_in_flight = limit.clamp(1, MAX_IN_FLIGHT_LIMIT);
+    /// Outstanding requests allowed while buffering provider batches.
+    pub fn set_llm_deferred_allowance(&mut self, limit: usize) {
+        self.llm_deferred_allowance = Some(limit.max(1));
+        self.log_model_budget();
     }
-
-    /// Batch submission drains may fan out to the session quota rather than
-    /// the synchronous provider concurrency cap. This remains reducer state;
-    /// the runner decides when asynchronous batching is enabled.
-    pub fn set_deferred_batch_max_in_flight(&mut self, limit: usize) {
-        let limit = limit.max(1);
-        self.triage_max_in_flight = limit;
-        self.summary_max_in_flight = limit;
+    fn log_model_budget(&self) {
+        engine_logging::engine_info!(
+            "[model-budget] llm_max_in_flight={} llm_deferred_allowance={:?}",
+            self.llm_max_in_flight,
+            self.llm_deferred_allowance
+        );
     }
-
-    pub fn triage_max_in_flight(&self) -> usize {
-        self.triage_max_in_flight
+    pub fn llm_max_in_flight(&self) -> usize {
+        self.llm_max_in_flight
     }
-
-    pub fn summary_max_in_flight(&self) -> usize {
-        self.summary_max_in_flight
+    pub fn llm_deferred_allowance(&self) -> Option<usize> {
+        self.llm_deferred_allowance
+    }
+    pub(crate) fn model_dispatch_halt_reason(&self) -> Option<&str> {
+        self.model_dispatch_halt_reason
+            .as_ref()
+            .map(|halt| halt.reason())
+    }
+    pub(crate) fn halt_model_dispatch(&mut self, halt: ModelDispatchHalt) {
+        if self.model_dispatch_halt_reason.is_none()
+            || (matches!(halt, ModelDispatchHalt::SessionQuota(_))
+                && self.session_quota_halt_reason().is_none())
+        {
+            engine_logging::engine_warn!(
+                "[model-budget] article dispatch halted kind={:?} reason={}",
+                halt.kind(),
+                halt.reason()
+            );
+            self.model_dispatch_halt_reason = Some(halt);
+            self.mark_dirty();
+        }
+    }
+    pub(crate) fn reset_provider_model_dispatch_halt(&mut self) {
+        if matches!(
+            self.model_dispatch_halt_reason,
+            Some(ModelDispatchHalt::ProviderCredits(_) | ModelDispatchHalt::RateLimit(_))
+        ) {
+            self.model_dispatch_halt_reason = None;
+            self.mark_dirty();
+        }
+    }
+    pub(crate) fn session_quota_halt_reason(&self) -> Option<&str> {
+        match self.model_dispatch_halt_reason.as_ref() {
+            Some(ModelDispatchHalt::SessionQuota(reason)) => Some(reason),
+            _ => None,
+        }
+    }
+    pub(crate) fn article_model_requests_in_flight(&self) -> usize {
+        self.llm_requests
+            .values()
+            .filter(|request| {
+                matches!(
+                    request,
+                    LlmRequestState::Pending {
+                        prompt_id: PromptId::ArticleTriage
+                            | PromptId::ArticleSummary
+                            | PromptId::ArticleSignalCandidate
+                    }
+                )
+            })
+            .count()
     }
 
     pub fn llm_request_state(&self, request_id: u64) -> Option<&LlmRequestState> {
@@ -125,5 +171,30 @@ impl AppState {
     pub fn reset_llm_requests(&mut self) {
         self.llm_requests.clear();
         self.next_llm_request_id = 1;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ModelDispatchHalt {
+    SessionQuota(String),
+    ProviderCredits(String),
+    RateLimit(String),
+}
+
+impl ModelDispatchHalt {
+    fn reason(&self) -> &str {
+        match self {
+            Self::SessionQuota(reason)
+            | Self::ProviderCredits(reason)
+            | Self::RateLimit(reason) => reason,
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::SessionQuota(_) => "session_quota",
+            Self::ProviderCredits(_) => "provider_credits",
+            Self::RateLimit(_) => "rate_limit",
+        }
     }
 }

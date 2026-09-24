@@ -115,10 +115,8 @@ impl AppState {
         // defaults to that subset — show those numbers on the bar instead of the full corpus.
         let sc = self.signal_candidate();
         let settled = sc.completed_count();
-        let in_progress = sc
-            .enqueued_count()
-            .saturating_sub(settled)
-            .saturating_sub(sc.failed_count());
+        let scoring = sc.observation_counts();
+        let in_progress = scoring.pending_or_in_flight + scoring.deferred;
         let (archive_token_estimate, archive_filtered_count) =
             if matches!(archive_display.coverage(), ArchiveCoverage::LiveComplete)
                 && settled > 0

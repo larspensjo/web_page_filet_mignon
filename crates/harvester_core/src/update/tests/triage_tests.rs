@@ -50,7 +50,7 @@ fn triage_click_blocked_when_briefing_owns_triage() {
 fn triage_articles_loaded_dispatches_up_to_limit_requests() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(2);
+    state.set_llm_max_in_flight(2);
     let (state, effects) = start_triage_for_test(state, loaded_triage_articles(3));
     let llm_effects: Vec<_> = effects
         .iter()
@@ -69,7 +69,7 @@ fn triage_articles_loaded_dispatches_up_to_limit_requests() {
 fn triage_completion_backfills_one_slot() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(2);
+    state.set_llm_max_in_flight(2);
     let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
     assert_eq!(state.triage().in_progress_count(), 2);
 
@@ -121,7 +121,7 @@ fn key_unavailable_triage_completion_exports_priority_without_model_provenance()
     state.start_triage_cache_run();
     state.mark_triage_metadata_ready();
     let mut effects = Vec::new();
-    crate::update::triage::dispatch_next_triage_step(&mut state, &mut effects);
+    crate::update::model_dispatch::dispatch_model_work(&mut state, &mut effects);
     let request_id =
         request_id_for_prompt(&effects, PromptId::ArticleTriage).expect("triage request");
     let (state, _) = update(state, triage_success(request_id));
@@ -161,7 +161,7 @@ fn key_unavailable_triage_completion_exports_priority_without_model_provenance()
 fn triage_out_of_order_completion_routes_correctly() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(3);
+    state.set_llm_max_in_flight(3);
     let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
     assert_eq!(state.triage().in_progress_count(), 3);
 
@@ -181,7 +181,7 @@ fn triage_out_of_order_completion_routes_correctly() {
 fn triage_progress_text_counts_settled_articles() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(1);
+    state.set_llm_max_in_flight(1);
     let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
     let text = state.triage().progress_text().unwrap();
     assert!(
@@ -201,7 +201,7 @@ fn triage_progress_text_counts_settled_articles() {
 fn triage_quota_exhausted_fails_all_pending() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(1);
+    state.set_llm_max_in_flight(1);
     let (state, _) = start_triage_for_test(state, loaded_triage_articles(3));
 
     let (state, _) = update(

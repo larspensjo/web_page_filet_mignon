@@ -25,7 +25,7 @@ pub struct HostLlmDefaults {
 }
 
 pub const DEFAULT_LLM_MAX_CONCURRENT_REQUESTS: usize = 3;
-pub const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
+pub use harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS;
 
 pub fn parse_llm_max_concurrency_requests(raw: Option<&str>) -> usize {
     raw.and_then(|value| value.trim().parse::<usize>().ok())
@@ -51,8 +51,7 @@ pub fn prepare_desktop_startup_state(
     llm_quota_limits: Option<LlmQuotaLimits>,
 ) -> (AppState, Vec<Effect>) {
     let mut startup_effects = Vec::new();
-    state.set_triage_max_in_flight(llm_max_concurrent_requests);
-    state.set_summary_max_in_flight(llm_max_concurrent_requests);
+    state.set_llm_max_in_flight(llm_max_concurrent_requests);
     for message in [
         startup_ai_availability.map(|availability| Msg::AiAvailabilityDetected { availability }),
         llm_quota_limits.map(|limits| Msg::LlmQuotaConfigured { limits }),

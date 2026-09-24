@@ -80,7 +80,9 @@ fn seed_summaries_for_triage_hashes(state: &mut AppState, count: usize) {
 
 fn complete_signal_candidate(state: &mut AppState, index: usize, score: u8, key: &str) {
     let url = format!("https://triage-complete.com/{index}");
-    state.signal_candidate_mut().enqueue(url.clone());
+    state
+        .signal_candidate_mut()
+        .enqueue(url.clone(), "fixture-input".to_string());
     state
         .signal_candidate_mut()
         .mark_scoring(&url, index as u64 + 1);
@@ -231,7 +233,9 @@ fn generate_briefing_defensive_fail_when_signal_scoring_in_progress() {
     state = with_signal_candidate_metadata(state);
     seed_summaries_for_triage_hashes(&mut state, 2);
     let url = "https://triage-complete.com/0".to_string();
-    state.signal_candidate_mut().enqueue(url.clone());
+    state
+        .signal_candidate_mut()
+        .enqueue(url.clone(), "fixture-input".to_string());
     state.signal_candidate_mut().mark_scoring(&url, 99);
 
     let (state, effects) = update(state, Msg::GenerateBriefingClicked);

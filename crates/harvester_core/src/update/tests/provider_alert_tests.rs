@@ -19,7 +19,7 @@ fn summary_articles(count: usize) -> (Vec<crate::briefing::LoadedArticle>, Strin
 
 fn start_summary_run(count: usize, max_in_flight: usize) -> (AppState, Vec<u64>) {
     let mut state = AppState::new();
-    state.set_summary_max_in_flight(max_in_flight);
+    state.set_llm_max_in_flight(max_in_flight);
     let (articles, collection_text) = summary_articles(count);
     let state = start_briefing_after_triage(state, articles.clone());
     let (state, effects) = update(
@@ -61,7 +61,11 @@ fn success_result(title: &str) -> LlmResultKind {
 
 fn quota_result(origin: QuotaOrigin) -> LlmResultKind {
     LlmResultKind::QuotaExhausted {
-        reason: "provider quota exhausted: billing".to_string(),
+        reason: match origin {
+            QuotaOrigin::Provider => "provider quota exhausted: billing",
+            QuotaOrigin::SessionBudget => "session call quota exhausted",
+        }
+        .to_string(),
         origin,
     }
 }
@@ -152,13 +156,18 @@ fn provider_quota_exhausted_summary_raises_credits_banner_immediately() {
 }
 
 #[test]
-fn session_budget_quota_exhausted_stops_run_without_credits_banner() {
+fn session_budget_quota_exhausted_stops_run_with_session_limit_banner() {
     init_logging();
     let (state, requests) = start_summary_run(5, 1);
     let (state, _) = deliver(state, requests[0], quota_result(QuotaOrigin::SessionBudget));
 
     assert!(state.provider_alert().is_none());
-    assert!(state.view().ai_warning_banner.is_none());
+    assert!(state
+        .view()
+        .ai_warning_banner
+        .unwrap()
+        .title
+        .contains("session call limit"));
     assert_eq!(state.briefing().pending_count(), 0);
     assert_eq!(state.briefing().failed_summary_count(), 5);
 }
@@ -204,27 +213,70 @@ fn generate_briefing_start_clears_provider_alert() {
 #[test]
 fn stale_quota_completion_after_new_run_start_does_not_raise_banner() {
     init_logging();
-    let (state, requests) = start_summary_run(3, 2);
+    let (mut state, requests) = start_summary_run(3, 2);
     assert_eq!(requests.len(), 2);
-    let (state, _) = deliver(state, requests[0], quota_result(QuotaOrigin::Provider));
-    assert!(state.provider_alert().is_some());
-
-    // A new run clears the alert before its readiness-dependent dispatch. The
-    // separate run-start tests exercise each public start path's guard flow.
-    let mut state = state;
-    state.clear_provider_alert();
+    // Replacing the session leaves the old worker completion unowned.
     state.set_briefing(crate::briefing::BriefingSession::new_loading(None));
     assert!(state.provider_alert().is_none());
-    let (state, _) = deliver(state, requests[1], quota_result(QuotaOrigin::Provider));
+    let (state, _) = deliver(state, requests[1], quota_result(QuotaOrigin::SessionBudget));
 
     assert!(state.provider_alert().is_none());
+    assert!(state.model_dispatch_halt_reason().is_none());
+    assert!(state.view().ai_warning_banner.is_none());
+}
+
+#[test]
+fn provider_credit_halt_resets_when_triage_starts_again() {
+    init_logging();
+    let mut state = AppState::new();
+    state.set_llm_max_in_flight(1);
+    let (state, effects) = start_triage_for_test(state, loaded_triage_articles(3));
+    let id = request_id_for_prompt(
+        &effects,
+        harvester_engine::llm::prompt::PromptId::ArticleTriage,
+    )
+    .unwrap();
+    let (state, _) = deliver(state, id, quota_result(QuotaOrigin::Provider));
+    assert!(state.model_dispatch_halt_reason().is_some());
+    let (state, effects) = start_triage_for_test(state, loaded_triage_articles(2));
+    assert!(request_id_for_prompt(
+        &effects,
+        harvester_engine::llm::prompt::PromptId::ArticleTriage
+    )
+    .is_some());
+    assert!(state.model_dispatch_halt_reason().is_none());
+    assert!(state.provider_alert().is_none());
+}
+
+#[test]
+fn session_quota_halt_persists_across_triage_start_with_visible_reason() {
+    init_logging();
+    let mut state = AppState::new();
+    state.set_llm_max_in_flight(1);
+    let (state, effects) = start_triage_for_test(state, loaded_triage_articles(3));
+    let id = request_id_for_prompt(
+        &effects,
+        harvester_engine::llm::prompt::PromptId::ArticleTriage,
+    )
+    .unwrap();
+    let (state, _) = deliver(state, id, quota_result(QuotaOrigin::SessionBudget));
+    let (state, effects) = start_triage_for_test(state, loaded_triage_articles(2));
+    assert!(request_id_for_prompt(
+        &effects,
+        harvester_engine::llm::prompt::PromptId::ArticleTriage
+    )
+    .is_none());
+    assert!(state.model_dispatch_halt_reason().is_some());
+    let banner = state.view().ai_warning_banner.unwrap();
+    assert!(banner.title.contains("session call limit"));
+    assert!(banner.body.contains("Restart Harvester"));
 }
 
 #[test]
 fn three_consecutive_rate_limited_triage_results_stop_triage_run() {
     init_logging();
     let mut state = AppState::new();
-    state.set_triage_max_in_flight(1);
+    state.set_llm_max_in_flight(1);
     let (mut state, effects) = start_triage_for_test(state, loaded_triage_articles(5));
     let mut request_id = request_id_for_prompt(
         &effects,
@@ -248,4 +300,12 @@ fn three_consecutive_rate_limited_triage_results_stop_triage_run() {
         state.provider_alert(),
         Some(ProviderAlert::RateLimited)
     ));
+    let (state, effects) = start_triage_for_test(state, loaded_triage_articles(2));
+    assert!(request_id_for_prompt(
+        &effects,
+        harvester_engine::llm::prompt::PromptId::ArticleTriage
+    )
+    .is_some());
+    assert!(state.model_dispatch_halt_reason().is_none());
+    assert!(state.provider_alert().is_none());
 }

@@ -1,6 +1,6 @@
 use super::{AppState, TriageCacheLookupResult};
 use crate::context_hash;
-use crate::summary_cache::SummaryCache;
+use crate::summary_cache::{SummaryCache, SummaryCacheKey, SummaryCacheKeyError};
 use crate::triage::ArticleTriageResult;
 use crate::triage_cache::{TriageCache, TriageCacheKey};
 use harvester_engine::llm::prompt::{PromptId, PromptVersion};
@@ -143,6 +143,29 @@ impl AppState {
             .map(|snapshot| (snapshot.prompt_version, snapshot.model_id.as_str()))
     }
 
+    pub(crate) fn current_summary_cache_key(
+        &self,
+        content_hash: &str,
+    ) -> Result<SummaryCacheKey, SummaryCacheKeyError> {
+        let metadata = self.summary_cache_metadata().or_else(|| {
+            if self.is_briefing_metadata_ready() {
+                None
+            } else {
+                Some((
+                    self.active_version_for(PromptId::ArticleSummary)?,
+                    self.effective_model_for(PromptId::ArticleSummary)?,
+                ))
+            }
+        });
+        SummaryCacheKey::try_new(
+            content_hash,
+            PromptId::ArticleSummary,
+            metadata.map(|(version, _)| version),
+            metadata.map(|(_, model)| model),
+            self.context_for(PromptId::ArticleSummary),
+        )
+    }
+
     pub(crate) fn summary_cache_warmup_logged(&self) -> bool {
         self.summary_cache_warmup_logged
     }
@@ -249,20 +272,34 @@ impl AppState {
             })
     }
 
-    pub(crate) fn try_reuse_triage(&self, content_hash: &str) -> TriageCacheLookupResult<'_> {
-        let snapshot = match &self.triage_cache_metadata_snapshot {
-            Some(snapshot) => snapshot,
-            None => return TriageCacheLookupResult::KeyUnavailable,
-        };
-        let key = match TriageCacheKey::try_new_with_context_hash(
+    pub(crate) fn current_triage_cache_key(&self, content_hash: &str) -> Option<TriageCacheKey> {
+        if let Some((version, model, context_hash)) = self.triage_cache_metadata() {
+            return TriageCacheKey::try_new_with_context_hash(
+                content_hash,
+                PromptId::ArticleTriage,
+                Some(version),
+                Some(model),
+                context_hash,
+            )
+            .ok();
+        }
+        if self.triage_metadata_ready() {
+            return None;
+        }
+        TriageCacheKey::try_new(
             content_hash,
             PromptId::ArticleTriage,
-            Some(snapshot.prompt_version),
-            Some(snapshot.model_id.as_str()),
-            &snapshot.context_hash,
-        ) {
-            Ok(key) => key,
-            Err(_) => return TriageCacheLookupResult::KeyUnavailable,
+            self.active_version_for(PromptId::ArticleTriage),
+            self.effective_model_for(PromptId::ArticleTriage),
+            self.context_for(PromptId::ArticleTriage),
+        )
+        .ok()
+    }
+
+    pub(crate) fn try_reuse_triage(&self, content_hash: &str) -> TriageCacheLookupResult<'_> {
+        let key = match self.current_triage_cache_key(content_hash) {
+            Some(key) if self.triage_cache_metadata_snapshot.is_some() => key,
+            _ => return TriageCacheLookupResult::KeyUnavailable,
         };
         match self.triage_cache.lookup(&key) {
             Some((stored_key, result)) => TriageCacheLookupResult::Hit {
@@ -283,17 +320,8 @@ impl AppState {
         content_hash: &str,
         result: ArticleTriageResult,
     ) -> Option<String> {
-        let snapshot = self.triage_cache_metadata_snapshot.as_ref()?;
-        let key = match TriageCacheKey::try_new_with_context_hash(
-            content_hash,
-            PromptId::ArticleTriage,
-            Some(snapshot.prompt_version),
-            Some(snapshot.model_id.as_str()),
-            &snapshot.context_hash,
-        ) {
-            Ok(key) => key,
-            Err(_) => return None,
-        };
+        self.triage_cache_metadata_snapshot.as_ref()?;
+        let key = self.current_triage_cache_key(content_hash)?;
 
         let stored_model_id = key.model_id.clone();
         self.triage_cache.insert(key, result);

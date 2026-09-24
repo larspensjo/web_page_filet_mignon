@@ -48,6 +48,8 @@ pub struct OverrideKey {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SignalCandidateSession {
     states: HashMap<String, SignalCandidateState>,
+    input_digests: HashMap<String, String>,
+    admission_order: Vec<String>,
     pending_request_ids: HashMap<String, u64>,
     pending_urls_by_request: HashMap<u64, String>,
     enqueued: u32,
@@ -57,13 +59,46 @@ pub struct SignalCandidateSession {
 }
 
 impl SignalCandidateSession {
-    pub fn enqueue(&mut self, url: String) -> bool {
-        if self.states.contains_key(&url) {
+    pub fn enqueue(&mut self, url: String, input_digest: String) -> bool {
+        if self.states.contains_key(&url) && self.input_digests.get(&url) == Some(&input_digest) {
             return false;
         }
+        match self.states.get(&url) {
+            Some(SignalCandidateState::Scoring { .. } | SignalCandidateState::Deferred) => {
+                return false;
+            }
+            Some(SignalCandidateState::Pending) => {
+                self.input_digests.insert(url, input_digest);
+                return true;
+            }
+            _ => {}
+        }
+        self.admission_order.retain(|existing| existing != &url);
+        self.admission_order.push(url.clone());
+        self.input_digests.insert(url.clone(), input_digest);
         self.states.insert(url, SignalCandidateState::Pending);
         self.enqueued += 1;
         true
+    }
+
+    pub fn input_digest_for(&self, url: &str) -> Option<&str> {
+        self.input_digests.get(url).map(String::as_str)
+    }
+
+    pub(crate) fn next_pending_url(&self) -> Option<&str> {
+        self.admission_order
+            .iter()
+            .find(|url| matches!(self.states.get(*url), Some(SignalCandidateState::Pending)))
+            .map(String::as_str)
+    }
+
+    pub(crate) fn fail_all_pending(&mut self, reason: &str) -> Vec<String> {
+        let mut failed = Vec::new();
+        while let Some(url) = self.next_pending_url().map(str::to_owned) {
+            self.fail(&url, reason);
+            failed.push(url);
+        }
+        failed
     }
 
     pub fn mark_scoring(&mut self, url: &str, request_id: u64) {
@@ -124,10 +159,10 @@ impl SignalCandidateSession {
     }
 
     pub fn deferred_urls(&self) -> Vec<String> {
-        self.states
+        self.admission_order
             .iter()
-            .filter(|(_, state)| matches!(state, SignalCandidateState::Deferred))
-            .map(|(url, _)| url.clone())
+            .filter(|url| matches!(self.states.get(*url), Some(SignalCandidateState::Deferred)))
+            .cloned()
             .collect()
     }
 
@@ -619,7 +654,7 @@ mod tests {
     #[test]
     fn pending_then_scoring_then_completed_transitions() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("https://a/1".into());
+        s.enqueue("https://a/1".into(), "fixture-input".to_string());
         assert!(matches!(
             s.state_for("https://a/1"),
             Some(SignalCandidateState::Pending)
@@ -642,7 +677,7 @@ mod tests {
     #[test]
     fn failure_increments_failed_counter() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("u".into());
+        s.enqueue("u".into(), "fixture-input".to_string());
         s.mark_scoring("u", 1);
         s.fail("u", "validation: bad");
         assert_eq!(s.failed_count(), 1);
@@ -655,7 +690,7 @@ mod tests {
     #[test]
     fn duplicate_terminal_transitions_do_not_double_count() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("u".into());
+        s.enqueue("u".into(), "fixture-input".to_string());
         s.mark_scoring("u", 1);
         s.complete("u", sample_result(80, "k-one", SourceTier::Tier1));
         s.complete("u", sample_result(70, "k-two", SourceTier::Tier2));
@@ -670,7 +705,7 @@ mod tests {
     #[test]
     fn fail_then_late_complete_does_not_double_count() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("u".into());
+        s.enqueue("u".into(), "fixture-input".to_string());
         s.mark_scoring("u", 1);
         s.fail("u", "validation: bad");
         s.complete("u", sample_result(80, "k-one", SourceTier::Tier1));
@@ -684,25 +719,46 @@ mod tests {
     #[test]
     fn duplicate_enqueue_is_idempotent() {
         let mut s = SignalCandidateSession::default();
-        s.enqueue("u".into());
-        s.enqueue("u".into());
+        s.enqueue("u".into(), "fixture-input".to_string());
+        s.enqueue("u".into(), "fixture-input".to_string());
         assert_eq!(s.enqueued_count(), 1);
+    }
+
+    #[test]
+    fn changed_digest_updates_pending_without_replacing_scoring_or_deferred() {
+        let mut session = SignalCandidateSession::default();
+        assert!(session.enqueue("pending".into(), "first".into()));
+        assert!(session.enqueue("pending".into(), "second".into()));
+        assert_eq!(session.input_digest_for("pending"), Some("second"));
+        assert_eq!(session.enqueued_count(), 1);
+
+        assert!(session.enqueue("scoring".into(), "first".into()));
+        session.mark_scoring("scoring", 7);
+        assert!(!session.enqueue("scoring".into(), "second".into()));
+        assert_eq!(session.url_for_request(7), Some("scoring"));
+        assert_eq!(session.input_digest_for("scoring"), Some("first"));
+
+        assert!(session.enqueue("deferred".into(), "first".into()));
+        session.defer("deferred");
+        assert!(!session.enqueue("deferred".into(), "second".into()));
+        assert_eq!(session.input_digest_for("deferred"), Some("first"));
+        assert_eq!(session.enqueued_count(), 3);
     }
 
     #[test]
     fn observation_counts_classify_each_current_signal_state() {
         let mut session = SignalCandidateSession::default();
-        session.enqueue("pending".into());
-        session.enqueue("scoring".into());
+        session.enqueue("pending".into(), "fixture-input".to_string());
+        session.enqueue("scoring".into(), "fixture-input".to_string());
         session.mark_scoring("scoring", 1);
-        session.enqueue("deferred".into());
+        session.enqueue("deferred".into(), "fixture-input".to_string());
         session.defer("deferred");
-        session.enqueue("completed".into());
+        session.enqueue("completed".into(), "fixture-input".to_string());
         session.complete(
             "completed",
             sample_result(80, "complete", SourceTier::Tier1),
         );
-        session.enqueue("failed".into());
+        session.enqueue("failed".into(), "fixture-input".to_string());
         session.fail("failed", "validation: bad");
 
         let counts = session.observation_counts();
@@ -722,18 +778,18 @@ mod tests {
     #[test]
     fn observation_counts_use_current_rearmed_epoch_not_historical_counters() {
         let mut session = SignalCandidateSession::default();
-        session.enqueue("completed".into());
+        session.enqueue("completed".into(), "fixture-input".to_string());
         session.complete(
             "completed",
             sample_result(80, "complete", SourceTier::Tier1),
         );
-        session.enqueue("failed".into());
+        session.enqueue("failed".into(), "fixture-input".to_string());
         session.fail("failed", "validation: bad");
         session.defer("completed");
         session.defer("failed");
 
         session.rearm_deferred();
-        session.enqueue("replayed".into());
+        session.enqueue("replayed".into(), "fixture-input".to_string());
 
         let counts = session.observation_counts();
 

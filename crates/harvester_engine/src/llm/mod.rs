@@ -25,6 +25,9 @@ pub const DEFAULT_TRIAGE_MODEL: &str = OPENAI_MODEL_GPT_5_4_NANO;
 pub const DEFAULT_SUMMARY_MODEL: &str = OPENAI_MODEL_GPT_5_4_MINI;
 pub const DEFAULT_BRIEFING_MODEL: &str = OPENAI_MODEL_GPT_5_4_MINI;
 
+/// Shared upper bound for synchronous model requests.
+pub const MAX_LLM_CONCURRENT_REQUESTS: usize = 10;
+
 pub use dto::{
     AggregateBriefing, ArticleSummary, BriefingExecutiveSummaryResult, BriefingNextItem,
     BriefingStory, Confidence, SignalCandidateResult, SourceTier, SummaryEntities, TriagePriority,

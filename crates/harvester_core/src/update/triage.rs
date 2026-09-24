@@ -1,11 +1,7 @@
-use super::summary_cache_support::short_hash;
 use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
-use crate::state::TriageCacheLookupResult;
 use crate::triage::TriageSession;
-use crate::update::signal_candidate::try_enqueue;
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
-use harvester_engine::llm::prompt::PromptId;
 
 pub(super) fn handle_evaluate_pre_triage_refresh(
     state: &mut AppState,
@@ -181,6 +177,7 @@ pub(super) fn dispatch_pre_triage_if_due(
 
 pub(super) fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
     state.clear_provider_alert();
+    state.reset_provider_model_dispatch_halt();
     // Consumes the pre-triage articles via a phase-guarded helper that atomically
     // resets pre-triage to Idle, ensuring it cannot remain action-ready after
     // its articles have been handed off to triage.
@@ -206,118 +203,10 @@ pub(super) fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
     state.mark_dirty();
     state.start_triage_cache_run();
     state.mark_triage_metadata_ready();
-    let mut effects = Vec::new();
-    dispatch_next_triage_step(state, &mut effects);
-    effects
+    Vec::new()
 }
 
-pub(super) fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<Effect>) {
-    log_triage_cache_run_start_if_needed(state);
-    let limit = state.triage_max_in_flight();
-
-    // Fill available in-flight slots.
-    while state.triage().can_dispatch_more(limit) {
-        let next_idx = state
-            .triage()
-            .next_pending_index()
-            .expect("can_dispatch_more guarantees pending exists");
-
-        let content_hash = state.triage().articles()[next_idx].content_hash.clone();
-        let content_hash_short = short_hash(&content_hash);
-
-        match state.try_reuse_triage(&content_hash) {
-            TriageCacheLookupResult::Hit {
-                result: cached,
-                stored_model_id,
-            } => {
-                let themes = cached.tags.clone();
-                let url = state.triage().articles()[next_idx].url.clone();
-                let fetched_utc = state.triage().articles()[next_idx].fetched_utc.clone();
-                let triage_priority = cached.priority;
-                let result = cached.clone();
-                let stored_model_id = stored_model_id.to_string();
-                let summary_ready = state.summary_result_for_url(&url).is_some();
-                let signal_state_present_before_enqueue =
-                    state.signal_candidate().state_for(&url).is_some();
-                state.record_triage_cache_hit();
-                engine_info!("[triage-cache] hit content_hash={}", content_hash_short);
-                state.triage_mut().complete_article_with_model(
-                    next_idx,
-                    result,
-                    Some(stored_model_id),
-                );
-                engine_info!(
-                    "[signal-dispatch] triage cache-hit url={} summary_ready={} triage_priority={} signal_state_present_before_enqueue={}",
-                    url,
-                    summary_ready,
-                    triage_priority,
-                    signal_state_present_before_enqueue
-                );
-                let enqueued = try_enqueue(state, &url, effects);
-                engine_info!(
-                    "[signal-dispatch] triage cache-hit enqueue url={} enqueued={}",
-                    url,
-                    enqueued
-                );
-                state.refresh_selected_preview();
-                state.mark_dirty();
-                effects.push(Effect::UpsertEntityIndexEntry {
-                    url,
-                    fetched_utc,
-                    content_hash: Some(content_hash.clone()),
-                    summary_entities: None,
-                    themes: Some(themes),
-                });
-                continue;
-            }
-            TriageCacheLookupResult::Miss => {
-                state.record_triage_cache_miss();
-                engine_info!("[triage-cache] miss content_hash={}", content_hash_short);
-            }
-            TriageCacheLookupResult::KeyUnavailable => {
-                state.record_triage_cache_key_unavailable();
-                if state.triage_metadata_ready() {
-                    engine_warn!(
-                        "[triage-cache] key-unavailable despite metadata-ready content_hash={}",
-                        content_hash_short
-                    );
-                } else {
-                    engine_info!(
-                        "[triage-cache] key-unavailable metadata-pending content_hash={}",
-                        content_hash_short
-                    );
-                }
-            }
-        }
-
-        let prepared_text = state.triage().articles()[next_idx].prepared_text.clone();
-        let request_id = state.allocate_next_llm_request_id();
-        state.record_pending_llm_request(request_id, PromptId::ArticleTriage);
-        state.triage_mut().start_article(next_idx, request_id);
-
-        let context = state.context_for(PromptId::ArticleTriage).to_vec();
-
-        engine_info!(
-            "[llm-concurrency] triage dispatch request_id={} article={} in_flight={} limit={}",
-            request_id,
-            next_idx,
-            state.triage().in_progress_count(),
-            limit
-        );
-
-        effects.push(Effect::RequestLlmCompletion {
-            request_id,
-            prompt_id: PromptId::ArticleTriage,
-            prompt_version: None,
-            model_override: None,
-            input_content: prepared_text,
-            context,
-            template_override: None,
-            extra_template_vars: vec![],
-        });
-        state.mark_dirty();
-    }
-
+pub(super) fn settle_triage(state: &mut AppState, effects: &mut Vec<Effect>) {
     // Check if all articles are settled (no pending, no in-progress).
     if state.triage().pending_count() == 0 && state.triage().in_progress_count() == 0 {
         if state.triage().deferred_count() > 0 {
@@ -340,7 +229,7 @@ pub(super) fn dispatch_next_triage_step(state: &mut AppState, effects: &mut Vec<
     }
 }
 
-fn log_triage_cache_run_start_if_needed(state: &mut AppState) {
+pub(super) fn log_triage_cache_run_start_if_needed(state: &mut AppState) {
     if state.triage_cache_run_start_logged() {
         return;
     }
