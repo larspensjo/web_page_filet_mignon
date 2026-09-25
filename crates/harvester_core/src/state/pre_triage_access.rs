@@ -19,6 +19,17 @@ impl AppState {
         self.dirty = true;
     }
 
+    #[cfg(feature = "host-drain-fixture")]
+    #[doc(hidden)]
+    pub fn set_complete_triage_for_host_drain_fixture(&mut self, triage: TriageSession) {
+        assert!(matches!(
+            triage.phase(),
+            crate::triage::TriagePhase::Complete
+        ));
+        self.pre_triage.finish_handoff();
+        self.set_triage(triage);
+    }
+
     pub(crate) fn pre_triage(&self) -> &PreTriageSession {
         &self.pre_triage
     }
@@ -27,14 +38,14 @@ impl AppState {
         match self.pre_triage.phase() {
             PreTriagePhase::LoadingArticles => PreTriageActionability::Loading,
             PreTriagePhase::ReadyToTriage => {
-                if self.pre_triage.resolved_included_articles().is_empty() {
+                if !self.pre_triage.has_resolved_included_article() {
                     PreTriageActionability::Unavailable
                 } else {
                     PreTriageActionability::Ready
                 }
             }
             PreTriagePhase::Reviewing => {
-                if self.pre_triage.resolved_included_articles().is_empty() {
+                if !self.pre_triage.has_resolved_included_article() {
                     PreTriageActionability::Unavailable
                 } else {
                     PreTriageActionability::ReadyWithPendingReview

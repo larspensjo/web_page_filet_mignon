@@ -70,6 +70,7 @@ impl AppState {
         }
 
         self.jobs.clear();
+        self.archive_article_tokens = Default::default();
         self.seen_urls.clear();
         self.metrics = MetricsState::default();
         self.ui.urls.clear();
@@ -97,6 +98,7 @@ impl AppState {
                 job_id,
                 JobState {
                     url: url.clone(),
+                    archive_url_key: harvester_engine::archive_url_key(&url),
                     stage: Stage::Done,
                     outcome: Some(JobResultKind::Success),
                     tokens,
@@ -126,6 +128,8 @@ impl AppState {
                 self.metrics.total_tokens = self.metrics.total_tokens.saturating_add(tokens as u64);
             }
         }
+
+        self.rebuild_archive_job_tokens();
 
         self.metrics.total_urls = self.jobs.len();
         self.session = SessionState::Idle;

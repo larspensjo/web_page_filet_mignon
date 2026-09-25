@@ -239,15 +239,26 @@ impl AppState {
     /// full "can generate now" answer.
     pub fn briefing_generate_readiness(&self) -> BriefingGenerateReadiness {
         let corpus = self.archive_corpus();
+        self.briefing_generate_readiness_for_corpus(&corpus, |url| {
+            self.summary_result_for_url(url).is_some()
+        })
+    }
+
+    pub(in crate::state) fn briefing_generate_readiness_for_corpus(
+        &self,
+        corpus: &crate::working_corpus::CurrentWorkingCorpus,
+        has_summary: impl Fn(&str) -> bool,
+    ) -> BriefingGenerateReadiness {
         if corpus.is_empty()
             || !matches!(self.triage().phase(), crate::triage::TriagePhase::Complete)
         {
             return BriefingGenerateReadiness::TriageOrCorpusNotReady;
         }
 
-        let all_settled = corpus.ordered_urls().iter().all(|url| {
-            self.summary_result_for_url(url).is_some() || self.briefing.summary_failed_for_url(url)
-        });
+        let all_settled = corpus
+            .ordered_urls()
+            .iter()
+            .all(|url| has_summary(url) || self.briefing.summary_failed_for_url(url));
         if !all_settled {
             return BriefingGenerateReadiness::SummariesNotSettled;
         }

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+host-drain-fixture = []
+
 [dependencies]
 url = "2"
 harvester_engine = { path = "../harvester_engine" }

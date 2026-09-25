@@ -640,6 +640,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.recompute_unfinished_work();
         }
     }
+    if after_revisions.1 != unfinished_revisions.1 {
+        state.rebuild_cache_derived_archive_index();
+    }
     pipeline_run::record_progress_after(&mut state, progress_before);
     if persist_runtime_state {
         effects.push(Effect::PersistRuntimeState {

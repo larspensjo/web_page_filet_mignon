@@ -82,7 +82,13 @@ pub struct TriageCacheEntry {
 pub struct TriageCache {
     entries: HashMap<TriageCacheKey, TriageCacheEntry>,
     #[serde(skip)]
-    aliases: HashMap<(String, PromptId, PromptVersion, String), Vec<TriageCacheKey>>,
+    aliases: HashMap<String, Vec<TriageCacheAlias>>,
+}
+
+#[derive(Debug, Clone)]
+struct TriageCacheAlias {
+    key: TriageCacheKey,
+    priority: u8,
 }
 
 impl PartialEq for TriageCache {
@@ -125,22 +131,83 @@ impl TriageCache {
         if let Some((stored_key, entry)) = self.entries.get_key_value(key) {
             return Some((stored_key, &entry.result));
         }
-        let alias_key = (
-            key.content_hash.clone(),
+        self.lookup_current_key_parts(
+            &key.content_hash,
             key.prompt_id,
             key.prompt_version,
-            key.context_hash.clone(),
-        );
-        self.aliases.get(&alias_key)?.iter().find_map(|candidate| {
-            let (stored_key, entry) = self.entries.get_key_value(candidate)?;
-            let model_match = model_ids_compatible(&stored_key.model_id, &key.model_id)
-                || model_ids_compatible(&key.model_id, &stored_key.model_id);
-            if model_match {
-                Some((stored_key, &entry.result))
-            } else {
-                None
-            }
-        })
+            &key.model_id,
+            &key.context_hash,
+        )
+    }
+
+    /// Look up a current metadata key without allocating an owned cache-key tuple for each
+    /// article. Exact model matches retain the same precedence as `lookup`; compatible model
+    /// aliases retain their insertion order within the matching prompt/version/context group.
+    pub(crate) fn lookup_current_key_parts(
+        &self,
+        content_hash: &str,
+        prompt_id: PromptId,
+        prompt_version: PromptVersion,
+        model_id: &str,
+        context_hash: &str,
+    ) -> Option<(&TriageCacheKey, &ArticleTriageResult)> {
+        let alias = self.current_alias(
+            content_hash,
+            prompt_id,
+            prompt_version,
+            model_id,
+            context_hash,
+        )?;
+        let (stored_key, entry) = self.entries.get_key_value(&alias.key)?;
+        Some((stored_key, &entry.result))
+    }
+
+    pub(crate) fn lookup_current_priority_parts(
+        &self,
+        content_hash: &str,
+        prompt_id: PromptId,
+        prompt_version: PromptVersion,
+        model_id: &str,
+        context_hash: &str,
+    ) -> Option<u8> {
+        self.current_alias(
+            content_hash,
+            prompt_id,
+            prompt_version,
+            model_id,
+            context_hash,
+        )
+        .map(|alias| alias.priority)
+    }
+
+    fn current_alias(
+        &self,
+        content_hash: &str,
+        prompt_id: PromptId,
+        prompt_version: PromptVersion,
+        model_id: &str,
+        context_hash: &str,
+    ) -> Option<&TriageCacheAlias> {
+        let candidates = self.aliases.get(content_hash)?;
+        let matches_metadata = |candidate: &&TriageCacheAlias| {
+            candidate.key.prompt_id == prompt_id
+                && candidate.key.prompt_version == prompt_version
+                && candidate.key.context_hash == context_hash
+        };
+        let exact = candidates
+            .iter()
+            .filter(matches_metadata)
+            .find(|candidate| candidate.key.model_id == model_id);
+        let candidate = exact.or_else(|| {
+            candidates
+                .iter()
+                .filter(matches_metadata)
+                .find(|candidate| {
+                    model_ids_compatible(&candidate.key.model_id, model_id)
+                        || model_ids_compatible(model_id, &candidate.key.model_id)
+                })
+        })?;
+        Some(candidate)
     }
 
     pub fn insert(&mut self, key: TriageCacheKey, result: ArticleTriageResult) -> Vec<String> {
@@ -152,16 +219,23 @@ impl TriageCache {
     }
 
     pub fn insert_entry(&mut self, key: TriageCacheKey, entry: TriageCacheEntry) -> Vec<String> {
-        if !self.entries.contains_key(&key) {
+        let priority = entry.result.priority;
+        if self.entries.contains_key(&key) {
+            if let Some(alias) = self
+                .aliases
+                .get_mut(&key.content_hash)
+                .and_then(|candidates| candidates.iter_mut().find(|candidate| candidate.key == key))
+            {
+                alias.priority = priority;
+            }
+        } else {
             self.aliases
-                .entry((
-                    key.content_hash.clone(),
-                    key.prompt_id,
-                    key.prompt_version,
-                    key.context_hash.clone(),
-                ))
+                .entry(key.content_hash.clone())
                 .or_default()
-                .push(key.clone());
+                .push(TriageCacheAlias {
+                    key: key.clone(),
+                    priority,
+                });
         }
         self.entries.insert(key, entry);
         self.enforce_capacity()
@@ -169,16 +243,14 @@ impl TriageCache {
 
     pub(crate) fn rebuild_alias_index(&mut self) {
         self.aliases.clear();
-        for key in self.entries.keys() {
+        for (key, entry) in &self.entries {
             self.aliases
-                .entry((
-                    key.content_hash.clone(),
-                    key.prompt_id,
-                    key.prompt_version,
-                    key.context_hash.clone(),
-                ))
+                .entry(key.content_hash.clone())
                 .or_default()
-                .push(key.clone());
+                .push(TriageCacheAlias {
+                    key: key.clone(),
+                    priority: entry.result.priority,
+                });
         }
     }
 
@@ -308,6 +380,97 @@ mod tests {
         let lookup_key = build_key("hash", TEST_MODEL_VARIANT_ID, &context_hash);
         let (stored_key, _) = cache.lookup(&lookup_key).expect("compatible cache hit");
         assert_eq!(stored_key.model_id, TEST_MODEL_ID);
+        assert_eq!(
+            cache.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_VARIANT_ID,
+                &context_hash,
+            ),
+            Some(sample_result().priority)
+        );
+    }
+
+    #[test]
+    fn current_priority_index_tracks_cache_writes_hydration_and_metadata() {
+        let context_hash = "triage-context";
+        let key = build_key("hash", TEST_MODEL_ID, context_hash);
+        let mut cache = TriageCache::new();
+
+        let mut result = sample_result();
+        result.priority = 2;
+        cache.insert_entry(
+            key.clone(),
+            TriageCacheEntry {
+                result,
+                created_at_utc: "2026-09-25T12:00:00Z".into(),
+            },
+        );
+        assert_eq!(
+            cache.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_ID,
+                context_hash,
+            ),
+            cache.lookup(&key).map(|(_, result)| result.priority)
+        );
+
+        let mut replacement = sample_result();
+        replacement.priority = 5;
+        cache.insert_entry(
+            key.clone(),
+            TriageCacheEntry {
+                result: replacement,
+                created_at_utc: "2026-09-25T12:01:00Z".into(),
+            },
+        );
+        assert_eq!(
+            cache.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_ID,
+                context_hash,
+            ),
+            cache.lookup(&key).map(|(_, result)| result.priority)
+        );
+
+        let mut hydrated = cache.clone();
+        hydrated.aliases.clear();
+        hydrated.rebuild_alias_index();
+        assert_eq!(
+            hydrated.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_ID,
+                context_hash,
+            ),
+            hydrated.lookup(&key).map(|(_, result)| result.priority)
+        );
+        assert_eq!(
+            hydrated.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                2,
+                TEST_MODEL_ID,
+                context_hash,
+            ),
+            None
+        );
+        assert_eq!(
+            hydrated.lookup_current_priority_parts(
+                "hash",
+                PromptId::ArticleTriage,
+                1,
+                TEST_MODEL_ID,
+                "changed-context",
+            ),
+            None
+        );
     }
 
     #[test]

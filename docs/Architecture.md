@@ -163,6 +163,28 @@ along with identities affected by cache eviction. A quota halt rebuilds it after
 pending entries are failed. View and snapshot construction only read state and
 never recompute this aggregate.
 
+The triage cache also keeps a skipped-from-persistence alias index keyed by content
+hash for current-metadata lookups. Each alias carries the cached priority used by
+cache-derived archive coverage, avoiding a full cache-key allocation and second
+cache lookup per included article. Cache hydration rebuilds the index, while writes
+and eviction keep it aligned with the authoritative cache entries.
+
+The live triage session indexes article URLs to their positions, preserving first-entry
+lookup and first-completed-result precedence when duplicate URLs occur. Pre-triage
+indexes the first filter entry by URL and stores its unresolved-review count; set,
+merge, replacement, and manual-decision operations refresh those values. The
+reducer also stores cache-derived archive scores aligned with the included URL set.
+Global input-revision changes rebuild that score index; triage cache writes and
+evictions refresh only affected content hashes. Views rank the stored scores with
+the same archive selection policy used by dialog and export actions.
+
+Each job stores its canonical archive URL key when its URL is created or changed.
+The reducer maintains a job-token index on restore and token progress; duplicate
+canonical keys retain the later job's tokens. The view and archive dialog use one
+token-estimate helper and read this index without rebuilding it. These indexes are
+derived state, are not persisted, and do not perform a window scan on article
+completion.
+
 The pure reprocess-notice evaluator uses named defaults: more than 150 previously
 in-window articles needing work, or an estimate strictly greater than 50 percent of
 the remaining session call quota. Equality at either threshold does not trigger the

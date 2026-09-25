@@ -301,6 +301,8 @@ pub enum BatchNextAction {
 pub struct AppState {
     session: SessionState,
     jobs: BTreeMap<JobId, JobState>,
+    archive_article_tokens: batch::ArchiveArticleTokenLookup,
+    cache_derived_archive_index: batch::CacheDerivedArchiveIndex,
     metrics: MetricsState,
     ui: UiState,
     seen_urls: HashSet<String>,
@@ -417,6 +419,8 @@ impl Default for AppState {
         Self {
             session: SessionState::Idle,
             jobs: BTreeMap::new(),
+            archive_article_tokens: batch::ArchiveArticleTokenLookup::default(),
+            cache_derived_archive_index: batch::CacheDerivedArchiveIndex::default(),
             metrics: MetricsState::default(),
             ui: UiState::default(),
             seen_urls: HashSet::new(),

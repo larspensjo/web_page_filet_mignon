@@ -23,6 +23,7 @@ impl AppState {
                 job_id,
                 JobState {
                     url: entry.canonical_url.clone(),
+                    archive_url_key: harvester_engine::archive_url_key(&entry.canonical_url),
                     stage: Stage::Done,
                     outcome: Some(JobResultKind::Success),
                     tokens: None,
@@ -114,8 +115,10 @@ impl AppState {
     }
 
     fn build_job_state(url: String, origin: JobOrigin) -> JobState {
+        let archive_url_key = harvester_engine::archive_url_key(&url);
         JobState {
             url,
+            archive_url_key,
             stage: Stage::Queued,
             outcome: None,
             tokens: None,
@@ -265,6 +268,7 @@ impl AppState {
         bytes: Option<u64>,
         content_preview: Option<String>,
     ) {
+        let mut token_changed = false;
         if let Some(job) = self.jobs.get_mut(&job_id) {
             job.stage = stage;
             if let Some(t) = tokens {
@@ -276,6 +280,7 @@ impl AppState {
                         .saturating_sub(previous)
                         .saturating_add(t as u64);
                     job.tokens = Some(t);
+                    token_changed = true;
                 }
             }
             if let Some(b) = bytes {
@@ -292,6 +297,9 @@ impl AppState {
                 job.set_preview_content(content);
             }
             self.dirty = true;
+        }
+        if token_changed {
+            self.record_archive_job_tokens(job_id);
         }
     }
 

@@ -192,6 +192,8 @@ impl PreTriagePolicy {
 pub struct PreTriageSession {
     lifecycle: PreTriageLifecycle,
     entries: Vec<ArticleFilterEntry>,
+    first_entry_by_url: HashMap<String, usize>,
+    unresolved_review_count: usize,
     job_key_by_id: HashMap<JobId, ArticleFilterKey>,
     loaded_by_url: HashMap<String, LoadedArticle>,
     preparation_budgets: HashMap<String, usize>,
@@ -202,6 +204,8 @@ impl Default for PreTriageSession {
         Self {
             lifecycle: PreTriageLifecycle::Idle,
             entries: Vec::new(),
+            first_entry_by_url: HashMap::new(),
+            unresolved_review_count: 0,
             job_key_by_id: HashMap::new(),
             loaded_by_url: HashMap::new(),
             preparation_budgets: HashMap::new(),
@@ -257,9 +261,7 @@ impl PreTriageSession {
     }
 
     pub fn has_unresolved_review(&self) -> bool {
-        self.entries.iter().any(|entry| {
-            matches!(entry.auto_verdict, AutoVerdict::Review) && entry.manual_decision.is_none()
-        })
+        self.unresolved_review_count > 0
     }
 
     pub fn load_articles(articles: Vec<LoadedArticle>, policy: &PreTriagePolicy) -> Self {
@@ -283,6 +285,8 @@ impl PreTriageSession {
         let mut session = Self {
             lifecycle: PreTriageLifecycle::Idle,
             entries,
+            first_entry_by_url: HashMap::new(),
+            unresolved_review_count: 0,
             job_key_by_id: HashMap::new(),
             preparation_budgets: HashMap::new(),
             loaded_by_url: articles
@@ -290,6 +294,8 @@ impl PreTriageSession {
                 .map(|article| (article.url.clone(), article))
                 .collect(),
         };
+        session.rebuild_entry_index();
+        session.refresh_unresolved_review_count();
         session.refresh_loaded_lifecycle("no articles passed pre-triage filters");
         session
     }
@@ -383,6 +389,8 @@ impl PreTriageSession {
             self.entries.push(entry);
         }
         self.job_key_by_id.clear();
+        self.rebuild_entry_index();
+        self.refresh_unresolved_review_count();
         self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
     }
 
@@ -398,6 +406,7 @@ impl PreTriageSession {
             return Err("filter key not found");
         };
         entry.manual_decision = Some(decision);
+        self.refresh_unresolved_review_count();
         self.refresh_loaded_lifecycle("no included articles after manual decisions");
         Ok(())
     }
@@ -406,6 +415,7 @@ impl PreTriageSession {
         for entry in &mut self.entries {
             entry.manual_decision = None;
         }
+        self.refresh_unresolved_review_count();
         self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
     }
 
@@ -420,6 +430,7 @@ impl PreTriageSession {
         for entry in &mut self.entries {
             entry.manual_decision = overrides.get(&entry.key).copied();
         }
+        self.refresh_unresolved_review_count();
         self.refresh_loaded_lifecycle("no articles passed pre-triage filters");
     }
 
@@ -456,6 +467,25 @@ impl PreTriageSession {
         self.resolved_included_urls_internal()
     }
 
+    /// Borrow the provisional include set without allocating one URL per article.
+    /// This follows the same decision rules as `tentative_included_urls` and preserves
+    /// duplicate entries if a loaded delta contains the same URL more than once.
+    pub(crate) fn tentative_included_url_refs(&self) -> impl Iterator<Item = &str> + '_ {
+        self.entries.iter().filter_map(|entry| {
+            (resolved_decision(entry) == ManualDecision::Include).then_some(entry.key.url.as_str())
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tentative_included_url_count(&self) -> usize {
+        self.tentative_included_url_refs().count()
+    }
+
+    pub(crate) fn has_resolved_included_article(&self) -> bool {
+        self.tentative_included_url_refs()
+            .any(|url| self.loaded_by_url.contains_key(url))
+    }
+
     /// Returns the currently included articles for interactive workflows.
     ///
     /// Unlike `resolved_included_urls()`, this includes tentative decisions while `Reviewing`.
@@ -474,7 +504,7 @@ impl PreTriageSession {
     pub fn bind_job_ids(&mut self, job_url_pairs: &[(JobId, String)]) {
         self.job_key_by_id.clear();
         for (job_id, job_url) in job_url_pairs {
-            if let Some(entry) = self.entries.iter().find(|entry| entry.key.url == *job_url) {
+            if let Some(entry) = self.entry_for_url(job_url) {
                 self.job_key_by_id.insert(*job_id, entry.key.clone());
             }
         }
@@ -485,7 +515,9 @@ impl PreTriageSession {
     }
 
     pub fn entry_for_url(&self, url: &str) -> Option<&ArticleFilterEntry> {
-        self.entries.iter().find(|entry| entry.key.url == url)
+        self.first_entry_by_url
+            .get(url)
+            .map(|&index| &self.entries[index])
     }
 
     pub fn article_content_hash(&self, url: &str) -> Option<&str> {
@@ -508,6 +540,8 @@ impl PreTriageSession {
         Self {
             lifecycle: PreTriageLifecycle::Loaded,
             entries: Vec::new(),
+            first_entry_by_url: HashMap::new(),
+            unresolved_review_count: 0,
             job_key_by_id: HashMap::new(),
             loaded_by_url: HashMap::new(),
             preparation_budgets: HashMap::new(),
@@ -532,13 +566,28 @@ impl PreTriageSession {
     }
 
     fn resolved_included_urls_internal(&self) -> Vec<String> {
-        self.entries
-            .iter()
-            .filter_map(|entry| match resolved_decision(entry) {
-                ManualDecision::Include => Some(entry.key.url.clone()),
-                ManualDecision::Exclude => None,
-            })
+        self.tentative_included_url_refs()
+            .map(str::to_owned)
             .collect()
+    }
+
+    fn rebuild_entry_index(&mut self) {
+        self.first_entry_by_url.clear();
+        for (index, entry) in self.entries.iter().enumerate() {
+            self.first_entry_by_url
+                .entry(entry.key.url.clone())
+                .or_insert(index);
+        }
+    }
+
+    fn refresh_unresolved_review_count(&mut self) {
+        self.unresolved_review_count = self
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(entry.auto_verdict, AutoVerdict::Review) && entry.manual_decision.is_none()
+            })
+            .count();
     }
 }
 
@@ -598,4 +647,105 @@ pub(crate) fn stable_hash_u64(input: &str) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn article(url: &str, content_hash: &str, text: &str) -> LoadedArticle {
+        LoadedArticle {
+            url: url.to_string(),
+            source_title: None,
+            prepared_text: text.to_string(),
+            content_hash: content_hash.to_string(),
+            fetched_utc: None,
+        }
+    }
+
+    fn assert_borrowed_includes_match_materialized_values(session: &PreTriageSession) {
+        let materialized = session.tentative_included_urls();
+        let borrowed = session.tentative_included_url_refs().collect::<Vec<_>>();
+        assert_eq!(
+            borrowed,
+            materialized.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        assert_eq!(session.tentative_included_url_count(), materialized.len());
+        assert_eq!(
+            session.has_resolved_included_article(),
+            !session.resolved_included_articles().is_empty()
+        );
+        let unresolved = session
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(entry.auto_verdict, AutoVerdict::Review) && entry.manual_decision.is_none()
+            })
+            .count();
+        assert_eq!(session.unresolved_review_count, unresolved);
+        for entry in &session.entries {
+            assert_eq!(
+                session.entry_for_url(&entry.key.url),
+                session
+                    .entries
+                    .iter()
+                    .find(|candidate| candidate.key.url == entry.key.url)
+            );
+        }
+    }
+
+    #[test]
+    fn borrowed_included_article_queries_follow_verdict_and_delta_changes() {
+        let url_a = "https://pre-triage-query.example/a";
+        let url_b = "https://pre-triage-query.example/b";
+        let rich_text = std::iter::repeat_n("contentword", 220)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut session = PreTriageSession::load_articles(
+            vec![
+                article(url_a, "hash-a", &rich_text),
+                article(url_b, "hash-b-old", "too short"),
+            ],
+            &PreTriagePolicy::default(),
+        );
+        assert_borrowed_includes_match_materialized_values(&session);
+        assert_eq!(session.tentative_included_url_count(), 1);
+
+        let a_key = session
+            .entries()
+            .iter()
+            .find(|entry| entry.key.url == url_a)
+            .expect("article A entry")
+            .key
+            .clone();
+        session
+            .set_manual_decision(&a_key, ManualDecision::Exclude)
+            .expect("loaded decisions can change");
+        assert_borrowed_includes_match_materialized_values(&session);
+        assert!(!session.has_resolved_included_article());
+
+        session.merge_delta(
+            harvester_engine::TriageArticleDelta::full_window(
+                vec![
+                    article(url_a, "hash-a", &rich_text),
+                    article(url_b, "hash-b-new", &rich_text),
+                ],
+                100_000,
+            ),
+            &PreTriagePolicy::default(),
+        );
+        assert_borrowed_includes_match_materialized_values(&session);
+        assert_eq!(session.tentative_included_urls(), vec![url_b.to_string()]);
+        assert!(session.has_resolved_included_article());
+
+        session.merge_delta(
+            harvester_engine::TriageArticleDelta::full_window(
+                vec![article(url_b, "hash-b-replaced", &rich_text)],
+                100_000,
+            ),
+            &PreTriagePolicy::default(),
+        );
+        assert_borrowed_includes_match_materialized_values(&session);
+        assert_eq!(session.entry_for_url(url_a), None);
+    }
 }

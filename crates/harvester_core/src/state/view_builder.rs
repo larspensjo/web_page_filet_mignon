@@ -87,12 +87,8 @@ impl AppState {
         let stop_finish_button = self.stop_finish_button_state();
         let archive_display = self.archive_display_counts();
         let full_filtered_count = archive_display.filtered_count();
-        let mut archive_url_tokens = None;
-        let archive_estimates = self.archive_token_estimates_for_view(
-            archive_display.ordered_urls(),
-            &mut archive_url_tokens,
-            &summary_lookup,
-        );
+        let archive_estimates =
+            self.archive_token_estimates_for_view(archive_display.ordered_urls(), &summary_lookup);
 
         let archive_partial_coverage = match archive_display.coverage() {
             ArchiveCoverage::CacheDerived {
@@ -144,7 +140,6 @@ impl AppState {
                 } else {
                     let sc_estimates = self.archive_token_estimates_for_view(
                         &selection.selected_urls,
-                        &mut archive_url_tokens,
                         &summary_lookup,
                     );
                     (sc_estimates.summary_tokens, selection.selected_urls.len())
@@ -152,6 +147,24 @@ impl AppState {
             } else {
                 (archive_estimates.summary_tokens, full_filtered_count)
             };
+        let briefing_generate_ready = archive_display.live_corpus().is_some_and(|corpus| {
+            let all_summarized = archive_estimates.summary_coverage == full_filtered_count;
+            matches!(
+                self.briefing_generate_readiness_for_corpus(corpus, |url| {
+                    all_summarized
+                        || summary_lookup.briefing_by_url.contains_key(url)
+                        || self.content_hash_for_url(url).is_some_and(|hash| {
+                            summary_lookup.summary_for_content_hash(hash).is_some()
+                        })
+                }),
+                crate::state::BriefingGenerateReadiness::Ready { .. }
+            )
+        }) && self.briefing.can_generate()
+            && self.briefing_ai_available();
+        let summaries_can_start = matches!(self.triage.phase(), TriagePhase::Complete)
+            && !archive_display.ordered_urls().is_empty()
+            && self.briefing.can_start()
+            && self.briefing_ai_available();
         AppViewModel {
             workspace_view: self.workspace_view(),
             job_list_mode: self.job_list_mode(),
@@ -173,13 +186,9 @@ impl AppState {
             preview_context,
             ai_warning_banner,
             preview_source,
-            briefing_generate_enabled: matches!(
-                self.briefing_generate_readiness(),
-                crate::state::BriefingGenerateReadiness::Ready { .. }
-            ) && self.briefing.can_generate()
-                && self.briefing_ai_available(),
+            briefing_generate_enabled: briefing_generate_ready,
             next_item_enabled: self.briefing.next_item_enabled() && self.briefing_ai_available(),
-            summaries_can_start: self.summaries_can_start() && self.briefing_ai_available(),
+            summaries_can_start,
             stop_finish_button,
             triage_can_start: self.triage_ai_available()
                 && self.triage.can_start()
@@ -318,17 +327,15 @@ impl AppState {
     fn archive_token_estimates_for_view(
         &self,
         urls: &[String],
-        archive_url_tokens: &mut Option<HashMap<String, u64>>,
         summary_lookup: &SummaryLookup,
     ) -> crate::ArchiveTokenEstimates {
         if urls.is_empty() {
             return crate::ArchiveTokenEstimates::default();
         }
-        let archive_url_tokens =
-            archive_url_tokens.get_or_insert_with(|| self.archive_article_token_lookup());
-        archive_token_estimates_from_parts(urls, archive_url_tokens, |url| {
+        let url_tokens = self.archive_article_token_lookup();
+        archive_token_estimates_from_parts(urls, url_tokens, |url| {
             self.content_hash_for_url(url)
-                .and_then(|content_hash| summary_lookup.summary_for_content_hash(content_hash))
+                .and_then(|hash| summary_lookup.summary_for_content_hash(hash))
                 .map(|summary| summary.output_tokens)
         })
     }
@@ -362,6 +369,7 @@ impl AppState {
             },
             ..Default::default()
         };
+        let selected_id = self.ui.selected_job_id();
         for (job_id, job) in &self.jobs {
             let in_scope = match mode {
                 JobListMode::SinceCheckpoint => is_since_checkpoint(job, since),
@@ -371,17 +379,23 @@ impl AppState {
             if !in_scope {
                 continue;
             }
-            selection.scoped_ids.insert(*job_id);
-            if !job_matches_search_query(
-                &job.url,
-                summary_lookup
-                    .summary_for_job(self, job)
-                    .map(|summary| summary.title.as_str()),
-                query_lower,
-            ) {
+            if selected_id == Some(*job_id) {
+                selection.selected_in_scope = true;
+            }
+            if !query_lower.is_empty()
+                && !job_matches_search_query(
+                    &job.url,
+                    summary_lookup
+                        .summary_for_job(self, job)
+                        .map(|summary| summary.title.as_str()),
+                    query_lower,
+                )
+            {
                 continue;
             }
-            selection.searched_ids.insert(*job_id);
+            if selected_id == Some(*job_id) {
+                selection.selected_matches_query = true;
+            }
             selection.emitted.push(DesktopJobSelectionRow {
                 job_id: *job_id,
                 fetched_utc: job.fetched_utc,
@@ -389,14 +403,20 @@ impl AppState {
         }
         selection.searched_count = selection.emitted.len();
         if selection.emitted.len() > DESKTOP_JOB_LIST_MAX_ROWS {
-            selection.emitted.sort_unstable_by(|left, right| {
+            let order = |left: &DesktopJobSelectionRow, right: &DesktopJobSelectionRow| {
                 fetched_descending(left.fetched_utc, right.fetched_utc)
                     .then_with(|| right.job_id.cmp(&left.job_id))
-            });
+            };
+            selection
+                .emitted
+                .select_nth_unstable_by(DESKTOP_JOB_LIST_MAX_ROWS, order);
             selection.emitted.truncate(DESKTOP_JOB_LIST_MAX_ROWS);
             selection.emitted.sort_unstable_by_key(|row| row.job_id);
         }
-        selection.emitted_ids = selection.emitted.iter().map(|row| row.job_id).collect();
+        selection.selected_emitted = selection
+            .emitted
+            .iter()
+            .any(|row| Some(row.job_id) == selected_id);
         selection
     }
 
@@ -421,6 +441,8 @@ impl AppState {
         let query = query.to_string();
         let query_lower = query.to_lowercase();
         let selection = self.select_desktop_job_rows(&query_lower, summary_lookup);
+        let since = self.briefing_since_utc();
+        let show_filter_status = self.show_filter_status();
         let mut rows = selection
             .emitted
             .iter()
@@ -432,8 +454,8 @@ impl AppState {
                 let metadata = self.enrich_job_view_metadata(
                     selected.job_id,
                     job,
-                    self.briefing_since_utc(),
-                    self.show_filter_status(),
+                    since,
+                    show_filter_status,
                     summary_lookup,
                 );
                 JobListRowView::from_row(&self.materialize_job_row(&metadata), selected.fetched_utc)
@@ -458,11 +480,11 @@ impl AppState {
                     }
                 }
                 JobListMode::SinceCheckpoint | JobListMode::Last24Hours => {
-                    if !selection.scoped_ids.contains(&selected_job_id) {
+                    if !selection.selected_in_scope {
                         SelectedJobVisibility::OutsideScope
-                    } else if !selection.searched_ids.contains(&selected_job_id) {
+                    } else if !selection.selected_matches_query {
                         SelectedJobVisibility::QueryMismatch
-                    } else if !selection.emitted_ids.contains(&selected_job_id) {
+                    } else if !selection.selected_emitted {
                         SelectedJobVisibility::Capped
                     } else {
                         SelectedJobVisibility::Visible
@@ -472,8 +494,8 @@ impl AppState {
             let metadata = self.enrich_job_view_metadata(
                 selected_job_id,
                 job,
-                self.briefing_since_utc(),
-                self.show_filter_status(),
+                since,
+                show_filter_status,
                 summary_lookup,
             );
             Some(SelectedJobView::from_row(
@@ -496,6 +518,9 @@ impl AppState {
     }
 
     pub fn build_signal_candidate_rows(&self) -> Vec<SignalCandidateRow> {
+        if self.signal_candidate.iter_states().next().is_none() {
+            return Vec::new();
+        }
         let completed_candidates: Vec<ScoredCandidate> = self
             .signal_candidate
             .iter_completed()
@@ -799,9 +824,9 @@ impl<'a> SummaryLookup<'a> {
 
 #[derive(Default)]
 struct DesktopJobSelection {
-    scoped_ids: HashSet<crate::JobId>,
-    searched_ids: HashSet<crate::JobId>,
-    emitted_ids: HashSet<crate::JobId>,
+    selected_in_scope: bool,
+    selected_matches_query: bool,
+    selected_emitted: bool,
     emitted: Vec<DesktopJobSelectionRow>,
     searched_count: usize,
     hidden_without_fetch_time: usize,
@@ -911,5 +936,243 @@ fn build_preview_context_view(header: &PreviewHeaderView) -> PreviewContextView 
         source_label,
         status_label,
         attention_label,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ArticleSummaryResult, ArticleTriageResult, JobOrigin, SummaryCache, SummaryCacheEntry,
+        SummaryCacheKey, TriageSession,
+    };
+
+    #[test]
+    fn archive_view_estimates_track_triage_job_url_cache_and_checkpoint_inputs() {
+        let url = "https://view-cost.example/article";
+        let content_hash = "view-cost-content";
+        let mut triage = TriageSession::new_loading(None);
+        triage.set_articles(vec![crate::LoadedArticle {
+            url: url.to_string(),
+            source_title: Some("View cost fixture".into()),
+            prepared_text: "article body".into(),
+            content_hash: content_hash.into(),
+            fetched_utc: None,
+        }]);
+        triage.transition_to_triaging();
+        triage.complete_article(
+            0,
+            ArticleTriageResult {
+                category: "news".into(),
+                priority: 3,
+                tags: Vec::new(),
+                rationale: "fixture".into(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+        triage.complete();
+
+        let fetched_utc = chrono::DateTime::parse_from_rfc3339("2026-09-01T12:00:00Z")
+            .expect("valid fetched timestamp")
+            .with_timezone(&Utc);
+        let mut state = AppState::new();
+        state.set_triage(triage);
+        state.job_list_mode = JobListMode::SinceCheckpoint;
+        state.jobs.insert(
+            1,
+            JobState {
+                url: url.to_string(),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                tokens: Some(1_200),
+                origin: JobOrigin::Direct,
+                fetched_utc: Some(fetched_utc),
+                ..Default::default()
+            },
+        );
+        state.rebuild_archive_job_tokens();
+        assert_archive_view_matches_full_lookup(&state);
+        assert_eq!(state.view().archive_token_estimate, 1_200);
+
+        state.jobs.get_mut(&1).expect("fixture job").tokens = Some(2_400);
+        state.rebuild_archive_job_tokens();
+        assert_archive_view_matches_full_lookup(&state);
+        assert_eq!(state.view().archive_token_estimate, 2_400);
+
+        state
+            .jobs
+            .get_mut(&1)
+            .expect("fixture job")
+            .set_url(format!("{url}#section"));
+        state.rebuild_archive_job_tokens();
+        assert_archive_view_matches_full_lookup(&state);
+        assert_eq!(state.view().archive_token_estimate, 2_400);
+
+        state.jobs.insert(
+            2,
+            JobState {
+                url: format!("{url}#duplicate"),
+                stage: Stage::Done,
+                outcome: Some(JobResultKind::Success),
+                tokens: Some(3_600),
+                origin: JobOrigin::Direct,
+                fetched_utc: Some(fetched_utc),
+                ..Default::default()
+            },
+        );
+        state.rebuild_archive_job_tokens();
+        assert_archive_view_matches_full_lookup(&state);
+        assert_eq!(state.view().archive_token_estimate, 3_600);
+
+        let summary_key = SummaryCacheKey::try_new(
+            content_hash,
+            PromptId::ArticleSummary,
+            Some(1),
+            Some("summary-model"),
+            &[],
+        )
+        .expect("complete summary cache key");
+        let mut cache = SummaryCache::new();
+        cache.insert(
+            summary_key.clone(),
+            SummaryCacheEntry {
+                result: ArticleSummaryResult {
+                    title: "Current summary".into(),
+                    summary: "Summary body".into(),
+                    key_points: Vec::new(),
+                    input_tokens: 300,
+                    output_tokens: 700,
+                    entities: crate::SummaryEntities::default(),
+                },
+                created_at_utc: "2026-09-25T12:00:00Z".into(),
+            },
+        );
+        state.set_summary_cache(cache.clone());
+        assert_archive_view_matches_full_lookup(&state);
+        assert_eq!(state.view().archive_token_estimate, 700);
+
+        cache.insert(
+            summary_key,
+            SummaryCacheEntry {
+                result: ArticleSummaryResult {
+                    title: "Updated summary".into(),
+                    summary: "Updated summary body".into(),
+                    key_points: Vec::new(),
+                    input_tokens: 320,
+                    output_tokens: 880,
+                    entities: crate::SummaryEntities::default(),
+                },
+                created_at_utc: "2026-09-25T12:01:00Z".into(),
+            },
+        );
+        state.set_summary_cache(cache);
+        assert_archive_view_matches_full_lookup(&state);
+        assert_eq!(state.view().archive_token_estimate, 880);
+
+        state.briefing_since_utc = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-09-02T00:00:00Z")
+                .expect("valid checkpoint")
+                .with_timezone(&Utc),
+        );
+        assert!(state.view().desktop_job_list.rows.is_empty());
+        state.briefing_since_utc = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-08-31T00:00:00Z")
+                .expect("valid checkpoint")
+                .with_timezone(&Utc),
+        );
+        let view = state.view();
+        assert_eq!(view.desktop_job_list.rows.len(), 2);
+        assert!(view
+            .desktop_job_list
+            .rows
+            .iter()
+            .all(|row| row.is_since_checkpoint));
+        assert_archive_view_matches_full_lookup(&state);
+    }
+
+    fn assert_archive_view_matches_full_lookup(state: &AppState) {
+        let corpus = state.archive_corpus();
+        let expected = state.archive_token_estimates(corpus.ordered_urls());
+        let view = state.view();
+        assert_eq!(view.archive_filtered_count, corpus.count());
+        assert_eq!(view.archive_token_estimate, expected.summary_tokens);
+        assert_eq!(
+            view.raw_unprocessed_count,
+            corpus.count() - expected.summary_coverage
+        );
+        assert_eq!(view.archive_partial_coverage, None);
+    }
+
+    #[test]
+    fn archive_job_token_index_matches_from_scratch_after_restore_progress_and_url_change() {
+        use crate::{CompletedJobSnapshot, Msg};
+        let url = "https://archive-index.example/article";
+        let snapshots = [
+            (url.to_string(), Some(100)),
+            (format!("{url}#later"), Some(200)),
+            ("https://archive-index.example/other".to_string(), None),
+        ]
+        .into_iter()
+        .map(|(url, tokens)| CompletedJobSnapshot {
+            url,
+            tokens,
+            bytes: None,
+            links: Vec::new(),
+            fetched_utc: None,
+        })
+        .collect();
+        let (mut state, _) = crate::update(AppState::new(), Msg::RestoreCompletedJobs(snapshots));
+        assert_archive_job_tokens_match_scan(&state);
+        assert_eq!(
+            state.archive_article_token_lookup().tokens_for_url(url),
+            200
+        );
+
+        state = crate::update(
+            state,
+            Msg::JobProgress {
+                job_id: 3,
+                stage: Stage::Downloading,
+                tokens: Some(300),
+                bytes: None,
+                content_preview: None,
+            },
+        )
+        .0;
+        assert_archive_job_tokens_match_scan(&state);
+
+        state
+            .jobs
+            .get_mut(&2)
+            .unwrap()
+            .set_url("https://archive-index.example/replaced".into());
+        state.rebuild_archive_job_tokens();
+        assert_archive_job_tokens_match_scan(&state);
+        assert_eq!(
+            state.archive_article_token_lookup().tokens_for_url(url),
+            100
+        );
+
+        state.set_summary_cache(SummaryCache::new());
+        assert_archive_job_tokens_match_scan(&state);
+    }
+
+    fn assert_archive_job_tokens_match_scan(state: &AppState) {
+        let mut expected = HashMap::new();
+        for job in state.jobs.values() {
+            if let Some(tokens) = job.tokens {
+                expected.insert(harvester_engine::archive_url_key(&job.url), tokens as u64);
+            }
+        }
+        for job in state.jobs.values() {
+            let key = harvester_engine::archive_url_key(&job.url);
+            assert_eq!(
+                state
+                    .archive_article_token_lookup()
+                    .tokens_for_url(&job.url),
+                expected.get(&key).copied().unwrap_or(0)
+            );
+        }
     }
 }

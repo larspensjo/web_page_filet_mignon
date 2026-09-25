@@ -54,6 +54,7 @@ pub struct TriageArticle {
 pub struct TriageSession {
     phase: TriagePhase,
     articles: Vec<TriageArticle>,
+    article_indices_by_url: HashMap<String, Vec<usize>>,
     started_at: Option<String>,
 }
 
@@ -62,6 +63,7 @@ impl Default for TriageSession {
         Self {
             phase: TriagePhase::Idle,
             articles: Vec::new(),
+            article_indices_by_url: HashMap::new(),
             started_at: None,
         }
     }
@@ -72,6 +74,7 @@ impl TriageSession {
         Self {
             phase: TriagePhase::LoadingArticles,
             articles: Vec::new(),
+            article_indices_by_url: HashMap::new(),
             started_at,
         }
     }
@@ -113,6 +116,13 @@ impl TriageSession {
                 triage_state: ArticleTriageState::Pending,
             })
             .collect();
+        self.article_indices_by_url.clear();
+        for (index, article) in self.articles.iter().enumerate() {
+            self.article_indices_by_url
+                .entry(article.url.clone())
+                .or_default()
+                .push(index);
+        }
     }
 
     pub(crate) fn set_preparation_budgets(&mut self, held: &[harvester_engine::HeldArticle]) {
@@ -149,7 +159,6 @@ impl TriageSession {
     }
 
     pub fn reset_with_articles(&mut self, loaded: Vec<LoadedArticle>) {
-        self.articles.clear();
         self.set_articles(loaded);
         self.started_at = None;
         self.phase = TriagePhase::LoadingArticles;
@@ -326,10 +335,11 @@ impl TriageSession {
     }
 
     pub fn result_for_url(&self, url: &str) -> Option<&ArticleTriageResult> {
-        self.articles
+        self.article_indices_by_url
+            .get(url)?
             .iter()
-            .find_map(|article| match &article.triage_state {
-                ArticleTriageState::Completed { result } if article.url == url => Some(result),
+            .find_map(|&index| match &self.articles[index].triage_state {
+                ArticleTriageState::Completed { result } => Some(result),
                 _ => None,
             })
     }
@@ -346,36 +356,36 @@ impl TriageSession {
     }
 
     pub fn triage_model_for_url(&self, url: &str) -> Option<&str> {
-        self.articles
+        self.article_indices_by_url
+            .get(url)?
             .iter()
-            .find(|article| {
-                article.url == url
-                    && matches!(article.triage_state, ArticleTriageState::Completed { .. })
-            })
+            .map(|&index| &self.articles[index])
+            .find(|article| matches!(article.triage_state, ArticleTriageState::Completed { .. }))
             .and_then(|article| article.triage_model.as_deref())
     }
 
     pub fn source_title_for_url(&self, url: &str) -> Option<&str> {
-        self.articles
-            .iter()
-            .find(|article| article.url == url)
+        self.article_for_url(url)
             .and_then(|article| article.source_title.as_deref())
             .map(str::trim)
             .filter(|title| !title.is_empty())
     }
 
     pub fn fetched_utc_for_url(&self, url: &str) -> Option<&str> {
-        self.articles
-            .iter()
-            .find(|article| article.url == url)
+        self.article_for_url(url)
             .and_then(|article| article.fetched_utc.as_deref())
     }
 
     pub fn article_content_hash(&self, url: &str) -> Option<&str> {
-        self.articles
-            .iter()
-            .find(|article| article.url == url)
+        self.article_for_url(url)
             .map(|article| article.content_hash.as_str())
+    }
+
+    fn article_for_url(&self, url: &str) -> Option<&TriageArticle> {
+        self.article_indices_by_url
+            .get(url)
+            .and_then(|indices| indices.first())
+            .map(|&index| &self.articles[index])
     }
 
     pub fn sorted_results(&self) -> Vec<&ArticleTriageResult> {
@@ -472,5 +482,60 @@ mod tests {
             Some("2026-06-10T00:00:00Z")
         );
         assert_eq!(session.fetched_utc_for_url("https://nope"), None);
+    }
+
+    #[test]
+    fn url_index_matches_article_scan_after_set_completion_and_replacement() {
+        let mut session = TriageSession::new_loading(None);
+        let first = "https://example.com/first";
+        let second = "https://example.com/second";
+        for urls in [vec![first, second, first], vec![second, first], vec![first]] {
+            session.set_articles(
+                urls.iter()
+                    .enumerate()
+                    .map(|(index, url)| LoadedArticle {
+                        url: (*url).into(),
+                        source_title: Some(format!(" Title {index} ")),
+                        prepared_text: String::new(),
+                        content_hash: format!("hash-{index}"),
+                        fetched_utc: Some(format!("time-{index}")),
+                    })
+                    .collect(),
+            );
+            for index in (0..session.total()).rev() {
+                session.complete_article(index, result_for_priority(index as u8));
+            }
+            for url in [first, second, "https://example.com/missing"] {
+                let first_match = session.articles.iter().find(|article| article.url == url);
+                assert_eq!(
+                    session.article_content_hash(url),
+                    first_match.map(|article| article.content_hash.as_str())
+                );
+                assert_eq!(
+                    session.source_title_for_url(url),
+                    first_match
+                        .and_then(|article| article.source_title.as_deref())
+                        .map(str::trim)
+                );
+                assert_eq!(
+                    session.fetched_utc_for_url(url),
+                    first_match.and_then(|article| article.fetched_utc.as_deref())
+                );
+                let completed =
+                    session
+                        .articles
+                        .iter()
+                        .find_map(|article| match &article.triage_state {
+                            ArticleTriageState::Completed { result } if article.url == url => {
+                                Some(result)
+                            }
+                            _ => None,
+                        });
+                assert_eq!(session.result_for_url(url), completed);
+            }
+        }
+        session.reset_with_articles(vec![loaded_article_with_url(second)]);
+        assert_eq!(session.article_content_hash(first), None);
+        assert_eq!(session.article_content_hash(second), Some(""));
     }
 }

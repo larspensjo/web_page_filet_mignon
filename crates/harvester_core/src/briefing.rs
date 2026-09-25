@@ -226,13 +226,16 @@ impl TriageSelectionPolicy {
     /// cache-derived archive corpus so both rank identically.
     ///
     /// Orders by descending priority, then ascending URL for a stable tie-break.
-    pub fn rank_eligible(&self, scored: impl IntoIterator<Item = (u8, String)>) -> Vec<String> {
+    pub fn rank_eligible<S>(&self, scored: impl IntoIterator<Item = (u8, S)>) -> Vec<String>
+    where
+        S: AsRef<str> + Into<String>,
+    {
         let mut entries: Vec<_> = scored
             .into_iter()
             .filter(|(priority, _)| *priority > self.cutoff_exclusive)
             .collect();
-        entries.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        entries.into_iter().map(|(_, url)| url).collect()
+        entries.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.as_ref().cmp(b.1.as_ref())));
+        entries.into_iter().map(|(_, url)| url.into()).collect()
     }
 }
 

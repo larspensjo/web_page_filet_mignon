@@ -331,6 +331,17 @@ impl AppState {
         }
     }
 
+    pub(crate) fn cached_triage_priority(&self, content_hash: &str) -> Option<u8> {
+        let (prompt_version, model_id, context_hash) = self.triage_cache_metadata()?;
+        self.triage_cache.lookup_current_priority_parts(
+            content_hash,
+            PromptId::ArticleTriage,
+            prompt_version,
+            model_id,
+            context_hash,
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn store_triage_result(&mut self, content_hash: &str, result: ArticleTriageResult) {
         let _ = self.store_triage_result_with_model(content_hash, result);
@@ -347,6 +358,10 @@ impl AppState {
         let stored_model_id = key.model_id.clone();
         self.note_unfinished_inputs_changed();
         let evicted = self.triage_cache.insert(key, result);
+        self.refresh_cache_derived_archive_hash(content_hash);
+        for hash in &evicted {
+            self.refresh_cache_derived_archive_hash(hash);
+        }
         self.note_unfinished_evictions(evicted);
         Some(stored_model_id)
     }
@@ -358,6 +373,7 @@ impl AppState {
         created_at_utc: String,
     ) {
         self.note_unfinished_inputs_changed();
+        let content_hash = key.content_hash.clone();
         let evicted = self.triage_cache.insert_entry(
             key,
             crate::triage_cache::TriageCacheEntry {
@@ -365,6 +381,10 @@ impl AppState {
                 created_at_utc,
             },
         );
+        self.refresh_cache_derived_archive_hash(&content_hash);
+        for hash in &evicted {
+            self.refresh_cache_derived_archive_hash(hash);
+        }
         self.note_unfinished_evictions(evicted);
     }
 

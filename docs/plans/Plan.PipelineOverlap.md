@@ -4,14 +4,14 @@ Written 2026-09-23 from the design brief for a one-press desktop Run with overla
 Revised the same day after the Codex plan review (eight issues, all applied) and the user's
 answers to the first draft's twelve open questions, which are now stated as decisions below.
 Status: Phase 1 landed (incremental corpus hand-off). Phase 2 landed (one model-request budget,
-furthest-along first, current-key scoring). Phase 3 implemented (identity-based completeness),
-uncommitted. Phases 4–8 not started.
+furthest-along first, current-key scoring). Phase 3 landed (identity-based completeness).
+Phases 4–8 not started.
 
-Follow-up before Phase 4 (user decision 2026-09-25): building the desktop view over a
-production-scale included window exceeds the 40 ms host-drain budget (about 100–235 ms in the dev
-profile). This predates Phase 3. The honest production-scale view test in
-`crates/harvester_ui_bridge/tests/host_drain_cost.rs` is `#[ignore]`d until a separately reviewed
-fix lands. Fix it before the accumulating sessions of Phase 4 grow the window.
+Follow-up before Phase 4 (user decision 2026-09-25), done: building the desktop view at
+production scale took 90–700 ms against the 40 ms host-drain budget, depending on whether jobs
+and a triage session were loaded. It now takes 13–22 ms in the dev profile. The production-scale
+view tests in `crates/harvester_ui_bridge/tests/host_drain_cost.rs` are enabled, and cover
+restored jobs and loaded Triaging and Complete sessions.
 
 Terms:
 

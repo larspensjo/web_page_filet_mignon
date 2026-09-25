@@ -8,7 +8,7 @@ use crate::working_corpus::CurrentWorkingCorpus;
 use crate::PreTriagePhase;
 use crate::{FrozenBatchKey, StageKind};
 use harvester_engine::llm::PromptId;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 impl AppState {
     /// Returns the immutable cache identity captured by an in-flight
@@ -198,9 +198,8 @@ impl AppState {
         }
 
         if let Some(cache_derived) = self.cache_derived_archive_display() {
-            let actionable_total = self.pre_triage().tentative_included_urls().len();
             if cache_derived.cache_hit_count() > 0 {
-                return ArchiveDisplayCounts::cache_derived(cache_derived, actionable_total);
+                return ArchiveDisplayCounts::cache_derived(cache_derived);
             }
         }
 
@@ -232,26 +231,58 @@ impl AppState {
         if !self.can_start_triage_from_pre_triage() {
             return None;
         }
-        let included = self.pre_triage().tentative_included_urls();
-        if included.is_empty() {
+        let actionable_total = self.cache_derived_archive_index.urls.len();
+        if actionable_total == 0 {
             return None;
         }
-        let scored: Vec<(u8, String)> = included
-            .into_iter()
-            .filter_map(|url| {
-                let content_hash = self.pre_triage().article_content_hash(&url)?;
-                match self.try_reuse_triage(content_hash) {
-                    crate::state::TriageCacheLookupResult::Hit { result, .. } => {
-                        Some((result.priority, url))
-                    }
-                    _ => None,
-                }
-            })
-            .collect();
+        let scored = self
+            .cache_derived_archive_index
+            .urls
+            .iter()
+            .zip(&self.cache_derived_archive_index.hash_positions)
+            .filter_map(|(url, position)| {
+                self.cache_derived_archive_index.priorities[position.as_ref().copied()?]
+                    .map(|priority| (priority, url.as_str()))
+            });
         Some(CacheDerivedArchive::from_scored(
             scored,
+            actionable_total,
             self.briefing_triage_policy(),
         ))
+    }
+
+    pub(crate) fn rebuild_cache_derived_archive_index(&mut self) {
+        let mut index = CacheDerivedArchiveIndex::default();
+        if self.triage_metadata_ready() && self.can_start_triage_from_pre_triage() {
+            for url in self.pre_triage().tentative_included_url_refs() {
+                let content_hash = self.pre_triage().article_content_hash(url);
+                let hash_position = content_hash.map(|hash| {
+                    if let Some(&position) = index.index_by_hash.get(hash) {
+                        position
+                    } else {
+                        let position = index.priorities.len();
+                        index.index_by_hash.insert(hash.to_string(), position);
+                        index.priorities.push(self.cached_triage_priority(hash));
+                        position
+                    }
+                });
+                index.hash_positions.push(hash_position);
+                index.urls.push(url.to_string());
+            }
+        }
+        self.cache_derived_archive_index = index;
+    }
+
+    pub(in crate::state) fn refresh_cache_derived_archive_hash(&mut self, content_hash: &str) {
+        let Some(&position) = self
+            .cache_derived_archive_index
+            .index_by_hash
+            .get(content_hash)
+        else {
+            return;
+        };
+        self.cache_derived_archive_index.priorities[position] =
+            self.cached_triage_priority(content_hash);
     }
 
     /// Compute token estimates for the two archive modes for the given ordered URL list.
@@ -270,23 +301,28 @@ impl AppState {
             return ArchiveTokenEstimates::default();
         }
         let url_tokens = self.archive_article_token_lookup();
-        archive_token_estimates_from_parts(urls, &url_tokens, |url| {
+        archive_token_estimates_from_parts(urls, url_tokens, |url| {
             self.content_hash_for_url(url)
                 .and_then(|hash| self.summary_cache().lookup_any_by_content_hash(hash))
                 .map(|entry| entry.result.output_tokens)
         })
     }
 
-    pub(in crate::state) fn archive_article_token_lookup(&self) -> HashMap<String, u64> {
-        use harvester_engine::archive_url_key;
+    pub(in crate::state) fn archive_article_token_lookup(&self) -> &ArchiveArticleTokenLookup {
+        &self.archive_article_tokens
+    }
 
-        self.jobs
-            .values()
-            .filter_map(|job| {
-                job.tokens
-                    .map(|tokens| (archive_url_key(&job.url), tokens as u64))
-            })
-            .collect()
+    pub(in crate::state) fn record_archive_job_tokens(&mut self, job_id: super::JobId) {
+        if let Some(job) = self.jobs.get(&job_id) {
+            self.archive_article_tokens.record(job_id, job);
+        }
+    }
+
+    pub(in crate::state) fn rebuild_archive_job_tokens(&mut self) {
+        self.archive_article_tokens = ArchiveArticleTokenLookup::default();
+        for (&job_id, job) in &self.jobs {
+            self.archive_article_tokens.record(job_id, job);
+        }
     }
 
     pub(crate) fn content_hash_for_url(&self, url: &str) -> Option<&str> {
@@ -328,22 +364,64 @@ impl AppState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(in crate::state) struct ArchiveArticleTokenLookup {
+    tokens_by_key: HashMap<String, BTreeMap<super::JobId, u64>>,
+    key_by_exact_url: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(in crate::state) struct CacheDerivedArchiveIndex {
+    urls: Vec<String>,
+    hash_positions: Vec<Option<usize>>,
+    priorities: Vec<Option<u8>>,
+    index_by_hash: HashMap<String, usize>,
+}
+
+impl ArchiveArticleTokenLookup {
+    fn record(&mut self, job_id: super::JobId, job: &super::JobState) {
+        let Some(tokens) = job.tokens else { return };
+        let key = job.archive_url_key().into_owned();
+        self.key_by_exact_url.insert(job.url.clone(), key.clone());
+        self.tokens_by_key
+            .entry(key)
+            .or_default()
+            .insert(job_id, tokens as u64);
+    }
+
+    pub(in crate::state) fn tokens_for_url(&self, url: &str) -> u64 {
+        if self.tokens_by_key.is_empty() {
+            return 0;
+        }
+        let key = self.key_by_exact_url.get(url).map(String::as_str);
+        let canonical;
+        let key = if let Some(key) = key {
+            key
+        } else {
+            canonical = harvester_engine::archive_url_key(url);
+            &canonical
+        };
+        self.tokens_by_key
+            .get(key)
+            .and_then(|jobs| jobs.last_key_value().map(|(_, &tokens)| tokens))
+            .unwrap_or(0)
+    }
+}
+
 pub(in crate::state) fn archive_token_estimates_from_parts<F>(
     urls: &[String],
-    url_tokens: &HashMap<String, u64>,
+    url_tokens: &ArchiveArticleTokenLookup,
     summary_tokens_for_url: F,
 ) -> ArchiveTokenEstimates
 where
     F: Fn(&str) -> Option<u32>,
 {
-    use harvester_engine::archive_url_key;
-
     let mut full_tokens = 0u64;
     let mut summary_tokens = 0u64;
     let mut summary_coverage = 0usize;
 
     for url in urls {
-        let article_tokens = url_tokens.get(&archive_url_key(url)).copied().unwrap_or(0);
+        let article_tokens = url_tokens.tokens_for_url(url);
         full_tokens = full_tokens.saturating_add(article_tokens);
 
         if let Some(tokens) = summary_tokens_for_url(url) {
@@ -368,7 +446,7 @@ mod tests {
     use crate::briefing::LoadedArticle;
     use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
     use crate::triage::TriageSession;
-    use crate::{update, ArticleTriageResult, Msg};
+    use crate::{update, ArticleTriageResult, Msg, TriageCache, TriageCacheKey};
     use harvester_engine::llm::prompt::PromptId;
     use std::collections::HashMap;
 
@@ -438,6 +516,257 @@ mod tests {
 
         assert_eq!(display.coverage(), &ArchiveCoverage::LiveComplete);
         assert_eq!(display.filtered_count(), 0);
+    }
+
+    #[test]
+    fn cache_derived_archive_display_tracks_delta_verdict_cache_and_metadata_changes() {
+        let url_a = "https://batch-display.example/a";
+        let url_b = "https://batch-display.example/b";
+        let url_c = "https://batch-display.example/c";
+        let rich_text = std::iter::repeat_n("contentword", 220)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let articles = vec![
+            LoadedArticle {
+                url: url_a.into(),
+                source_title: None,
+                prepared_text: rich_text.clone(),
+                content_hash: "hash-a".into(),
+                fetched_utc: None,
+            },
+            LoadedArticle {
+                url: url_b.into(),
+                source_title: None,
+                prepared_text: rich_text.clone(),
+                content_hash: "hash-b-old".into(),
+                fetched_utc: None,
+            },
+            LoadedArticle {
+                url: url_c.into(),
+                source_title: None,
+                prepared_text: rich_text.clone(),
+                content_hash: "hash-c".into(),
+                fetched_utc: None,
+            },
+        ];
+        let mut state = AppState::new();
+        state.set_pre_triage(PreTriageSession::load_articles(
+            articles.clone(),
+            &PreTriagePolicy::default(),
+        ));
+        set_test_triage_metadata(&mut state, 1);
+        state.set_triage_cache(test_triage_cache(
+            1,
+            &[("hash-a", 4), ("hash-b-old", 2), ("hash-c", 3)],
+        ));
+        assert_cache_derived_display_matches_scratch(&mut state);
+        assert_eq!(
+            state.archive_display_counts().ordered_urls(),
+            &[url_a.to_string(), url_c.to_string(), url_b.to_string()]
+        );
+
+        let a_key = state
+            .pre_triage()
+            .entry_for_url(url_a)
+            .expect("article A entry")
+            .key
+            .clone();
+        state
+            .pre_triage_mut()
+            .set_manual_decision(&a_key, crate::ManualDecision::Exclude)
+            .expect("included article can be excluded");
+        assert_cache_derived_display_matches_scratch(&mut state);
+        assert_eq!(
+            state.archive_display_counts().ordered_urls(),
+            &[url_c.to_string(), url_b.to_string()]
+        );
+
+        let delta = harvester_engine::TriageArticleDelta::full_window(
+            vec![
+                articles[0].clone(),
+                LoadedArticle {
+                    url: url_b.into(),
+                    source_title: None,
+                    prepared_text: rich_text.clone(),
+                    content_hash: "hash-b-new".into(),
+                    fetched_utc: None,
+                },
+                articles[2].clone(),
+            ],
+            100_000,
+        );
+        state
+            .pre_triage_mut()
+            .merge_delta(delta, &PreTriagePolicy::default());
+        assert_cache_derived_display_matches_scratch(&mut state);
+        assert_eq!(
+            state.archive_display_counts().ordered_urls(),
+            &[url_c.to_string()]
+        );
+
+        set_test_triage_metadata(&mut state, 2);
+        assert_cache_derived_display_matches_scratch(&mut state);
+        assert_eq!(state.archive_display_counts().filtered_count(), 0);
+
+        state.set_triage_cache(test_triage_cache(2, &[("hash-b-new", 5), ("hash-c", 3)]));
+        assert_cache_derived_display_matches_scratch(&mut state);
+        assert_eq!(
+            state.archive_display_counts().ordered_urls(),
+            &[url_b.to_string(), url_c.to_string()]
+        );
+
+        state.set_triage_cache(test_triage_cache(2, &[("hash-b-new", 2), ("hash-c", 3)]));
+        assert_cache_derived_display_matches_scratch(&mut state);
+        assert_eq!(
+            state.archive_display_counts().ordered_urls(),
+            &[url_c.to_string(), url_b.to_string()]
+        );
+    }
+
+    fn set_test_triage_metadata(state: &mut AppState, version: u32) {
+        let mut versions = HashMap::new();
+        versions.insert(PromptId::ArticleTriage, version);
+        let mut models = HashMap::new();
+        models.insert(PromptId::ArticleTriage, "test-model".to_string());
+        state.set_llm_metadata(versions, models);
+        state.set_prompt_contexts(HashMap::new());
+        state.mark_triage_metadata_ready();
+    }
+
+    fn test_triage_cache(version: u32, hashes_and_priorities: &[(&str, u8)]) -> TriageCache {
+        let mut cache = TriageCache::new();
+        for (content_hash, priority) in hashes_and_priorities {
+            let key = TriageCacheKey::try_new(
+                content_hash,
+                PromptId::ArticleTriage,
+                Some(version),
+                Some("test-model"),
+                &[],
+            )
+            .expect("complete triage cache key");
+            cache.insert_entry(
+                key,
+                crate::TriageCacheEntry {
+                    result: ArticleTriageResult {
+                        category: "news".into(),
+                        priority: *priority,
+                        tags: Vec::new(),
+                        rationale: "fixture".into(),
+                        input_tokens: 1,
+                        output_tokens: 1,
+                    },
+                    created_at_utc: "2026-09-25T12:00:00Z".into(),
+                },
+            );
+        }
+        cache
+    }
+
+    fn assert_cache_derived_display_matches_scratch(state: &mut AppState) {
+        state.rebuild_cache_derived_archive_index();
+        assert_indexed_cache_display_matches_scratch(state);
+    }
+
+    fn assert_indexed_cache_display_matches_scratch(state: &AppState) {
+        let display = state.archive_display_counts();
+        if matches!(state.triage().phase(), TriagePhase::Complete) {
+            let corpus = state.archive_corpus();
+            assert_eq!(display.coverage(), &ArchiveCoverage::LiveComplete);
+            assert_eq!(display.ordered_urls(), corpus.ordered_urls());
+            assert_eq!(display.filtered_count(), corpus.count());
+            return;
+        }
+
+        if !state.triage_metadata_ready() || !state.can_start_triage_from_pre_triage() {
+            let corpus = state.archive_corpus();
+            assert_eq!(display.coverage(), &ArchiveCoverage::LiveComplete);
+            assert_eq!(display.ordered_urls(), corpus.ordered_urls());
+            return;
+        }
+
+        let included = state.pre_triage().tentative_included_urls();
+        let scored = included
+            .iter()
+            .filter_map(|url| {
+                let content_hash = state.pre_triage().article_content_hash(url)?;
+                let key = state.current_triage_cache_key(content_hash)?;
+                state
+                    .triage_cache()
+                    .lookup(&key)
+                    .map(|(_, result)| (result.priority, url.clone()))
+            })
+            .collect::<Vec<_>>();
+        if scored.is_empty() {
+            let corpus = state.archive_corpus();
+            assert_eq!(display.coverage(), &ArchiveCoverage::LiveComplete);
+            assert_eq!(display.ordered_urls(), corpus.ordered_urls());
+            return;
+        }
+
+        let expected_urls = state.briefing_triage_policy().rank_eligible(scored.clone());
+        assert_eq!(
+            display.coverage(),
+            &ArchiveCoverage::CacheDerived {
+                triaged: scored.len(),
+                actionable_total: included.len(),
+            }
+        );
+        assert_eq!(display.ordered_urls(), expected_urls);
+        assert_eq!(display.filtered_count(), expected_urls.len());
+    }
+
+    #[test]
+    fn cache_derived_index_tracks_triage_cache_writes_without_full_rebuild() {
+        let url = "https://batch-display.example/write";
+        let text = std::iter::repeat_n("contentword", 220)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut state = AppState::new();
+        state.set_pre_triage(PreTriageSession::load_articles(
+            [url, "https://batch-display.example/write-two"]
+                .into_iter()
+                .map(|url| LoadedArticle {
+                    url: url.into(),
+                    source_title: None,
+                    prepared_text: text.clone(),
+                    content_hash: "write-hash".into(),
+                    fetched_utc: None,
+                })
+                .collect(),
+            &PreTriagePolicy::default(),
+        ));
+        set_test_triage_metadata(&mut state, 1);
+        state.rebuild_cache_derived_archive_index();
+        assert_eq!(state.cache_derived_archive_index.priorities.len(), 1);
+        assert_indexed_cache_display_matches_scratch(&state);
+
+        state.store_triage_result(
+            "write-hash",
+            ArticleTriageResult {
+                category: "news".into(),
+                priority: 3,
+                tags: Vec::new(),
+                rationale: "fixture".into(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+        assert_indexed_cache_display_matches_scratch(&state);
+        assert_eq!(state.archive_display_counts().filtered_count(), 2);
+
+        state.store_triage_result(
+            "write-hash",
+            ArticleTriageResult {
+                category: "news".into(),
+                priority: 0,
+                tags: Vec::new(),
+                rationale: "fixture".into(),
+                input_tokens: 1,
+                output_tokens: 1,
+            },
+        );
+        assert_indexed_cache_display_matches_scratch(&state);
+        assert!(state.archive_display_counts().ordered_urls().is_empty());
     }
 
     #[test]
