@@ -56,6 +56,12 @@ pub struct ArticleFilterEntry {
     pub manual_decision: Option<ManualDecision>,
 }
 
+impl ArticleFilterEntry {
+    pub(crate) fn is_excluded(&self) -> bool {
+        matches!(resolved_decision(self), ManualDecision::Exclude)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreTriagePhase {
     Idle,
@@ -230,6 +236,16 @@ impl PreTriageSession {
 
     pub fn entries(&self) -> &[ArticleFilterEntry] {
         &self.entries
+    }
+
+    pub(crate) fn window_articles(
+        &self,
+    ) -> impl Iterator<Item = (&ArticleFilterEntry, &LoadedArticle)> + '_ {
+        self.entries.iter().filter_map(|entry| {
+            self.loaded_by_url
+                .get(&entry.key.url)
+                .map(|article| (entry, article))
+        })
     }
 
     pub fn is_reviewing(&self) -> bool {

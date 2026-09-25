@@ -85,6 +85,7 @@ impl AppState {
     }
 
     pub fn signal_candidate_mut(&mut self) -> &mut SignalCandidateSession {
+        self.note_unfinished_inputs_changed();
         &mut self.signal_candidate
     }
 
@@ -93,6 +94,7 @@ impl AppState {
     }
 
     pub(crate) fn set_signal_candidate_cache(&mut self, cache: SignalCandidateCache) {
+        self.note_unfinished_global_inputs_changed();
         self.signal_candidate_cache = cache;
     }
 
@@ -111,6 +113,7 @@ impl AppState {
         result: SignalCandidateResult,
         now_utc: String,
     ) {
+        self.note_unfinished_inputs_changed();
         self.signal_candidate_cache.insert(
             key,
             SignalCandidateCacheEntry {

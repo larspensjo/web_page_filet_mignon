@@ -78,8 +78,7 @@ impl AppState {
         self.last_paste_stats = None;
         self.next_job_id = 1;
         self.reset_llm_requests();
-        self.pre_triage = crate::pre_triage_filter::PreTriageSession::default();
-        self.pre_triage_load_context = None;
+        self.set_pre_triage(crate::pre_triage_filter::PreTriageSession::default());
 
         for entry in entries {
             let CompletedJobSnapshot {
@@ -131,8 +130,8 @@ impl AppState {
         self.metrics.total_urls = self.jobs.len();
         self.session = SessionState::Idle;
         self.dirty = true;
-        self.briefing = crate::briefing::BriefingSession::default();
-        self.triage = TriageSession::default();
+        self.set_briefing(crate::briefing::BriefingSession::default());
+        self.set_triage(TriageSession::default());
         self.source_states = SourceStateIndex::default();
     }
 

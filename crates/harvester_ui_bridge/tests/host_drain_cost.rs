@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
 use harvester_core::{
-    update, AppState, ArticleSummaryResult, CompletedJobSnapshot, Effect, JobResultKind,
-    LinkSnapshotRecord, LoadedArticle, Msg, Stage, SummaryCache, SummaryCacheEntry,
-    SummaryCacheKey, ACTIVITY_FEED_CAPACITY, MAX_EXTRACTED_LINKS,
+    update, AppState, ArticleSummaryResult, ArticleTriageResult, CompletedJobSnapshot, Effect,
+    JobResultKind, LinkSnapshotRecord, LlmResultKind, LoadedArticle, Msg, Stage, SummaryCache,
+    SummaryCacheEntry, SummaryCacheKey, TriageCache, TriageCacheKey, UnfinishedWork,
+    ACTIVITY_FEED_CAPACITY, MAX_EXTRACTED_LINKS,
 };
 use harvester_engine::llm::{prompt::PromptId, SummaryEntities};
 use harvester_ui_bridge::{
@@ -17,6 +19,7 @@ const DRAIN_COST_LINK_DISTRIBUTION: [(usize, usize, usize); 3] =
     [(11, 0, 0), (7, 1, 5), (2, 20, 40)];
 const DRAIN_COST_ITERATIONS: usize = 5;
 const SUMMARY_TITLE_ROWS: usize = 110;
+const PRODUCTION_SCALE_WINDOW_ARTICLES: usize = 10_450;
 
 #[test]
 fn view_build_compare_and_project_stay_within_the_drain_budget() {
@@ -69,6 +72,115 @@ fn search_driven_view_rebuild_stays_within_the_drain_budget() {
         measured_ms <= HOST_DRAIN_BUDGET_MS,
         "search-driven view build + comparison + projection took {measured_ms} ms; budget is {HOST_DRAIN_BUDGET_MS} ms"
     );
+}
+
+#[test]
+#[ignore = "Known view build over a production-scale included window exceeds the host-drain budget; this predates completeness and is tracked as a separate follow-up"]
+fn production_scale_included_window_view_cost_follow_up() {
+    let state = load_production_scale_window();
+    let unfinished = match state.unfinished_work() {
+        UnfinishedWork::Known(summary) => summary,
+        UnfinishedWork::Unknown => panic!("article metadata should make completeness known"),
+    };
+    assert_eq!(
+        unfinished.window_articles(),
+        PRODUCTION_SCALE_WINDOW_ARTICLES
+    );
+    assert_eq!(unfinished.not_eligible, 6_666);
+    assert_eq!(unfinished.needs_triage, 450);
+    assert_eq!(unfinished.needs_scoring, 3_334);
+
+    let previous = state.view();
+    let measured = median_drain_cost(&state, &previous);
+    println!("production-scale included view cost: measured_ms={} view_us={} compare_us={} project_us={}", measured.total_ms, measured.view_us, measured.compare_us, measured.project_us);
+    assert!(
+        measured.total_ms <= HOST_DRAIN_BUDGET_MS,
+        "production-scale view build + comparison + projection took {} ms; budget is {HOST_DRAIN_BUDGET_MS} ms",
+        measured.total_ms
+    );
+}
+
+#[test]
+fn production_scale_article_completion_reducer_stays_within_budget() {
+    let mut state = load_production_scale_window();
+    let (next, effects) = update(state, Msg::TriageClicked);
+    state = next;
+    let configuration_request = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadProcessingConfiguration { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("triage configuration request");
+    let (versions, models) = production_metadata();
+    let (state, effects) = update(
+        state,
+        Msg::ProcessingConfigurationLoaded {
+            request_id: configuration_request,
+            contexts: production_contexts(),
+            active_versions: versions,
+            effective_models: models,
+            preparation_budget: 100_000,
+        },
+    );
+    let request_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: PromptId::ArticleSignalCandidate,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+        .expect("one article scoring request");
+    let samples = (0..DRAIN_COST_ITERATIONS).map(|_| {
+        let copy = state.clone();
+        let started = Instant::now();
+        let (after, _) = update(
+            copy,
+            Msg::LlmCompleted {
+                request_id,
+                result: LlmResultKind::Failed {
+                    reason: "cost probe".into(),
+                },
+                metadata: None,
+            },
+        );
+        assert_eq!(
+            known_window_articles(&after),
+            PRODUCTION_SCALE_WINDOW_ARTICLES
+        );
+        started.elapsed().as_micros()
+    });
+    let hot_us = median(samples);
+    let (mut versions, models) = production_metadata();
+    versions.insert(PromptId::ArticleTriage, 2);
+    let started = Instant::now();
+    let (after, _) = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions: versions,
+            effective_models: models,
+        },
+    );
+    let full_pass_us = started.elapsed().as_micros();
+    assert_eq!(
+        known_window_articles(&after),
+        PRODUCTION_SCALE_WINDOW_ARTICLES
+    );
+    println!("production-scale reducer cost: article_completion_us={hot_us} full_pass_prompt_version_us={full_pass_us} window_articles={PRODUCTION_SCALE_WINDOW_ARTICLES}");
+    assert!(
+        hot_us <= u128::from(HOST_DRAIN_BUDGET_MS) * 1_000,
+        "article completion reducer took {hot_us} us; budget is {HOST_DRAIN_BUDGET_MS} ms"
+    );
+}
+
+fn known_window_articles(state: &AppState) -> usize {
+    match state.unfinished_work() {
+        UnfinishedWork::Known(summary) => summary.window_articles(),
+        UnfinishedWork::Unknown => panic!("production metadata should be loaded"),
+    }
 }
 
 fn drain_cost_state() -> (AppState, usize) {
@@ -267,6 +379,189 @@ fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
         update(state, Msg::SummaryCacheHydrated { cache }).0,
         summary_cache_entries,
     )
+}
+
+fn load_production_scale_window() -> AppState {
+    let mut state = AppState::new();
+    let (active_versions, effective_models) = production_metadata();
+    let contexts = production_contexts();
+    state = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    )
+    .0;
+    state = update(
+        state,
+        Msg::PromptContextsLoaded {
+            contexts: contexts.clone(),
+        },
+    )
+    .0;
+    let mut triage_cache = TriageCache::new();
+    let mut summary_cache = SummaryCache::new();
+    for index in 0usize..10_000 {
+        let content_hash = format!("drain-cost-content-{index}");
+        let triage_key = TriageCacheKey::try_new(
+            &content_hash,
+            PromptId::ArticleTriage,
+            Some(1),
+            Some("drain-cost-triage-model"),
+            contexts.get(&PromptId::ArticleTriage).unwrap(),
+        )
+        .unwrap();
+        triage_cache.insert(
+            triage_key,
+            ArticleTriageResult {
+                category: "news".into(),
+                priority: if index.is_multiple_of(3) { 3 } else { 1 },
+                tags: vec!["topic".into()],
+                rationale: "representative triage".into(),
+                input_tokens: 100,
+                output_tokens: 30,
+            },
+        );
+        if index.is_multiple_of(3) {
+            let key = SummaryCacheKey::try_new(
+                &content_hash,
+                PromptId::ArticleSummary,
+                Some(1),
+                Some("drain-cost-model"),
+                contexts.get(&PromptId::ArticleSummary).unwrap(),
+            )
+            .unwrap();
+            summary_cache.insert(
+                key,
+                SummaryCacheEntry {
+                    result: ArticleSummaryResult {
+                        title: format!("Production summary {index}"),
+                        summary: "Representative summary text".repeat(8),
+                        key_points: vec!["Representative point".into()],
+                        input_tokens: 200,
+                        output_tokens: 80,
+                        entities: SummaryEntities::default(),
+                    },
+                    created_at_utc: "2026-09-06T12:00:00Z".into(),
+                },
+            );
+        }
+    }
+    state = update(
+        state,
+        Msg::TriageCacheHydrated {
+            cache: triage_cache,
+        },
+    )
+    .0;
+    state = update(
+        state,
+        Msg::SummaryCacheHydrated {
+            cache: summary_cache,
+        },
+    )
+    .0;
+    state = update(
+        state,
+        Msg::SignalCandidateCacheLoaded {
+            cache: Default::default(),
+        },
+    )
+    .0;
+
+    let urls = (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
+        .map(production_window_url)
+        .collect::<Vec<_>>();
+    state = update(
+        state,
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls: urls,
+            triggered_by_job_done: false,
+        },
+    )
+    .0;
+    let request_id = (0..100)
+        .find_map(|tick| {
+            let (next_state, effects) = update(
+                std::mem::take(&mut state),
+                Msg::Tick {
+                    now: chrono::DateTime::from_timestamp(1_778_000_000 + tick, 0)
+                        .expect("valid fixture timestamp"),
+                },
+            );
+            state = next_state;
+            effects.into_iter().find_map(|effect| match effect {
+                Effect::LoadArticlesForTriage { request_id, .. } => Some(request_id),
+                _ => None,
+            })
+        })
+        .expect("production-scale window load should be dispatched");
+    let articles = (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
+        .map(|index| LoadedArticle {
+            url: production_window_url(index),
+            source_title: Some(format!("Production-scale source {index}")),
+            prepared_text: "word ".repeat(600),
+            content_hash: format!("drain-cost-content-{index}"),
+            fetched_utc: Some(if index < PROBE_CORPUS_JOBS {
+                "2026-09-06T12:00:00Z".into()
+            } else {
+                "2026-09-05T12:01:00Z".into()
+            }),
+        })
+        .collect::<Vec<_>>();
+    update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    )
+    .0
+}
+
+fn production_contexts() -> HashMap<PromptId, Vec<(String, String)>> {
+    [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
+    ]
+    .into_iter()
+    .map(|prompt_id| (prompt_id, vec![("policy".into(), "context ".repeat(375))]))
+    .collect()
+}
+
+fn production_metadata() -> (HashMap<PromptId, u32>, HashMap<PromptId, String>) {
+    let mut active_versions = HashMap::new();
+    let mut effective_models = HashMap::new();
+    for prompt_id in [
+        PromptId::ArticleTriage,
+        PromptId::ArticleSummary,
+        PromptId::ArticleSignalCandidate,
+        PromptId::BriefingExecutiveSummary,
+        PromptId::BriefingNextItem,
+    ] {
+        active_versions.insert(prompt_id, 1);
+    }
+    effective_models.insert(PromptId::ArticleTriage, "drain-cost-triage-model".into());
+    effective_models.insert(PromptId::ArticleSummary, "drain-cost-model".into());
+    effective_models.insert(
+        PromptId::ArticleSignalCandidate,
+        "drain-cost-scoring-model".into(),
+    );
+    effective_models.insert(
+        PromptId::BriefingExecutiveSummary,
+        "drain-cost-briefing-model".into(),
+    );
+    effective_models.insert(
+        PromptId::BriefingNextItem,
+        "drain-cost-briefing-model".into(),
+    );
+    (active_versions, effective_models)
+}
+
+fn production_window_url(index: usize) -> String {
+    job_url(index)
 }
 
 fn job_url(index: usize) -> String {

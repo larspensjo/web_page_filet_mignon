@@ -2464,3 +2464,10 @@ crates/harvester_core/src/update/model_dispatch_tests.rs,
 crates/harvester_core/src/update/signal_candidate.rs,
 crates/harvester_batch/src/runner/bootstrap.rs,
 crates/harvester_batch/src/cli.rs, docs/Architecture.md
+
+## 2026-09-24 - Identity-based unfinished-work summary
+Type: Implementation
+Context: Pipeline overlap needs completeness to survive window reloads and distinguish current-key results from stale or missing stage work.
+Change: Added reducer-computed per-stage verdicts and a stored per-identity aggregate, call estimates, and the pure strict-threshold reprocess-notice evaluator. The reducer refreshes an article identity on completion, plus any identity affected by cache eviction, and rebuilds after metadata, cache hydration, window, or broad session changes; mutator revisions also catch briefing-owned quota halts and restored sessions. The classifier and dispatch share key builders, with per-pass context hashes and indexed triage aliases. Pending entries remain in progress even with a stale key snapshot; admitted work is excluded from `articles_with_work`. The retained notice test is `state::unfinished_work::tests::reprocess_notice_uses_strict_article_and_quota_thresholds`.
+Verification: An included 10,450-member host-drain fixture with triage and summary caches measures article-completion reducer cost under the 40 ms budget and prints the prompt-version full-pass cost. The two existing host-drain tests remain unchanged. An explicitly ignored test prints the production-scale view cost and fails the 40 ms gate when run; this view-build cost predates the completeness summary and is an open, separately reviewed step before further pipeline work.
+Refs: crates/harvester_core/src/state/unfinished_work.rs, crates/harvester_core/src/update/tests/unfinished_work_tests.rs, crates/harvester_ui_bridge/tests/host_drain_cost.rs, docs/Architecture.md

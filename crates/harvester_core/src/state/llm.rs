@@ -45,6 +45,7 @@ impl AppState {
                 halt.reason()
             );
             self.model_dispatch_halt_reason = Some(halt);
+            self.note_unfinished_global_inputs_changed();
             self.mark_dirty();
         }
     }

@@ -12,6 +12,7 @@ use support::*;
 
 mod batch_api_tests;
 mod delta_tests;
+mod unfinished_work_tests;
 
 #[test]
 fn prompt_context_load_failure_keeps_triage_metadata_unready() {

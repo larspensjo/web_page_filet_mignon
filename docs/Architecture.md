@@ -136,6 +136,39 @@ triage or summaries start clears those halts and their warnings. Each halt fails
 admitted pending entries across all three stages with its reason; in-flight requests
 can finish. Completions from replaced sessions do not create a scheduler halt.
 
+### Identity-based completeness
+
+The pure classifier evaluates each pre-triage window member by its URL and content
+hash. The reducer uses the same current-key builders as article dispatch: triage must
+hit its current cache key, summaries must hit their current summary key, and signal
+scoring must hit the key built from those current upstream results. A stale or failed
+stage result does not make the member complete. Pre-triage exclusions and articles
+below the applicable priority cutoffs do not request model work. Admitted pending,
+in-flight, and Batch API deferred work is reported as in progress, including a pending
+stage entry that has not yet received its dispatch-time key. Unadmitted work is only in
+the completeness summary and never enters a stage queue or `pipeline_activity()`.
+
+`AppState::unfinished_stage_verdicts()` reports the triage, summary, and scoring
+verdicts for one URL and content-hash identity. A downstream verdict is Unknown
+until its current-key upstream result exists. The aggregate uses the first
+actionable stage for each member. `AppState::unfinished_work()` reads a stored
+aggregate with counts for each classification, the number of window articles
+needing an unadmitted stage, and an upper-bound
+call estimate: three calls per article needing triage, two per article needing a
+summary, and one per article needing scoring. It is Unknown until the article-stage
+prompt metadata and contexts are available. Relevant state mutators advance an
+input revision. The reducer rebuilds the aggregate after global inputs or broad
+session changes and refreshes the affected identity after an article completion,
+along with identities affected by cache eviction. A quota halt rebuilds it after
+pending entries are failed. View and snapshot construction only read state and
+never recompute this aggregate.
+
+The pure reprocess-notice evaluator uses named defaults: more than 150 previously
+in-window articles needing work, or an estimate strictly greater than 50 percent of
+the remaining session call quota. Equality at either threshold does not trigger the
+notice. Recording the result at initial admission, logging it, and displaying it are
+owned by the run surface and host lifecycle.
+
 ## Determinism and robustness
 - Stable ordering, identifiers, and output formats keep behavior reproducible.
 - Corpus schema changes are versioned through `CORPUS_SCHEMA_VERSION` and documented in `docs/CorpusFormat.md`.

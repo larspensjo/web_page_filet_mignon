@@ -58,6 +58,20 @@ impl SignalCandidateCacheKey {
         model_id: Option<&str>,
         context: &[(String, String)],
     ) -> Result<Self, SignalCandidateCacheKeyError> {
+        Self::try_new_with_context_hash(
+            input_bundle,
+            prompt_version,
+            model_id,
+            &context_hash(context),
+        )
+    }
+
+    pub fn try_new_with_context_hash(
+        input_bundle: &SignalCandidateInputBundle<'_>,
+        prompt_version: Option<PromptVersion>,
+        model_id: Option<&str>,
+        context_hash: &str,
+    ) -> Result<Self, SignalCandidateCacheKeyError> {
         let model_id = model_id
             .filter(|s| !s.is_empty())
             .ok_or(SignalCandidateCacheKeyError::EmptyModelId)?
@@ -73,7 +87,7 @@ impl SignalCandidateCacheKey {
             prompt_id: PromptId::ArticleSignalCandidate,
             prompt_version,
             model_id,
-            context_hash: context_hash(context),
+            context_hash: context_hash.to_string(),
         })
     }
 

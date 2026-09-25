@@ -34,6 +34,7 @@ pub(crate) use run_progress::PollPipelineJobSnapshot;
 mod signal_candidate_access;
 mod source_poll;
 mod ui_state;
+mod unfinished_work;
 mod view_builder;
 
 #[cfg(test)]
@@ -62,6 +63,11 @@ use job_state::PreviewQuality;
 
 pub use provider_alert::ProviderAlert;
 pub(crate) use signal_candidate_access::BriefingGenerateReadiness;
+pub use unfinished_work::{
+    evaluate_reprocess_notice, UnfinishedStageVerdict, UnfinishedStageVerdicts, UnfinishedWork,
+    UnfinishedWorkClass, UnfinishedWorkSummary, DEFAULT_REPROCESS_NOTICE_ARTICLE_THRESHOLD,
+    DEFAULT_REPROCESS_NOTICE_QUOTA_PERCENT,
+};
 
 pub type JobId = u64;
 
@@ -320,6 +326,7 @@ pub struct AppState {
     indirect_poll_in_progress: bool,
     source_states: SourceStateIndex,
     prompt_contexts: HashMap<PromptId, Vec<(String, String)>>,
+    prompt_contexts_ready: bool,
     prompt_contexts_load_failed: bool,
     prompt_template_files_loaded: bool,
     active_prompt_versions: HashMap<PromptId, PromptVersion>,
@@ -391,6 +398,11 @@ pub struct AppState {
     /// Reducer-owned state for the imported-corpus workflow.
     pub(crate) import_session: crate::import_session::ImportSessionState,
     pub(crate) blacklist: crate::blacklist::BlacklistState,
+    unfinished_work: UnfinishedWork,
+    unfinished_classes: HashMap<(String, String), UnfinishedWorkClass>,
+    unfinished_inputs_revision: u64,
+    unfinished_global_revision: u64,
+    unfinished_evicted_content_hashes: Vec<String>,
 }
 
 pub struct IngestResult {
@@ -429,6 +441,7 @@ impl Default for AppState {
             indirect_poll_in_progress: false,
             source_states: SourceStateIndex::default(),
             prompt_contexts: HashMap::new(),
+            prompt_contexts_ready: false,
             prompt_contexts_load_failed: false,
             prompt_template_files_loaded: false,
             active_prompt_versions: HashMap::new(),
@@ -481,6 +494,11 @@ impl Default for AppState {
             pre_triage_refresh_eval_job_done: false,
             import_session: crate::import_session::ImportSessionState::default(),
             blacklist: crate::blacklist::BlacklistState::default(),
+            unfinished_work: UnfinishedWork::Unknown,
+            unfinished_classes: HashMap::new(),
+            unfinished_inputs_revision: 0,
+            unfinished_global_revision: 0,
+            unfinished_evicted_content_hashes: Vec::new(),
         }
     }
 }

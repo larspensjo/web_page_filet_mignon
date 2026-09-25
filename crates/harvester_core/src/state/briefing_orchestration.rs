@@ -78,10 +78,12 @@ impl AppState {
     }
 
     pub(crate) fn briefing_mut(&mut self) -> &mut BriefingSession {
+        self.note_unfinished_inputs_changed();
         &mut self.briefing
     }
 
     pub(crate) fn set_briefing(&mut self, briefing: BriefingSession) {
+        self.note_unfinished_inputs_changed();
         self.briefing = briefing;
         self.dirty = true;
     }

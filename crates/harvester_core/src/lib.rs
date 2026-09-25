@@ -74,10 +74,13 @@ pub use signal_candidate_cache::{
 };
 pub use source_state::{SourceInstanceState, SourcePollStat, SourceStateIndex};
 pub use state::{
-    normalize_url_for_dedupe, AiAvailability, AiUnavailableReason, AppState, ArchiveTokenEstimates,
-    BatchNextAction, BatchObservation, BatchStatus, CompletedJobSnapshot, JobId, JobOrigin,
-    JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState, LlmResultIndex,
-    PreTriageActionability, ProviderAlert, SessionState, Stage, MAX_EXTRACTED_LINKS,
+    evaluate_reprocess_notice, normalize_url_for_dedupe, AiAvailability, AiUnavailableReason,
+    AppState, ArchiveTokenEstimates, BatchNextAction, BatchObservation, BatchStatus,
+    CompletedJobSnapshot, JobId, JobOrigin, JobResultKind, LinkDownloadState, LinkSnapshotRecord,
+    LlmRequestState, LlmResultIndex, PreTriageActionability, ProviderAlert, SessionState, Stage,
+    UnfinishedStageVerdict, UnfinishedStageVerdicts, UnfinishedWork, UnfinishedWorkClass,
+    UnfinishedWorkSummary, DEFAULT_REPROCESS_NOTICE_ARTICLE_THRESHOLD,
+    DEFAULT_REPROCESS_NOTICE_QUOTA_PERCENT, MAX_EXTRACTED_LINKS,
 };
 pub use ui_intent::{HostAction, IntentContext, IntentEffect, UiIntent};
 // ImportPhase is re-exported from import_session above; BatchObservation uses it.

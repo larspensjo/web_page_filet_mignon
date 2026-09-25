@@ -9,10 +9,12 @@ impl AppState {
     }
 
     pub(crate) fn triage_mut(&mut self) -> &mut TriageSession {
+        self.note_unfinished_inputs_changed();
         &mut self.triage
     }
 
     pub(crate) fn set_triage(&mut self, triage: TriageSession) {
+        self.note_unfinished_inputs_changed();
         self.triage = triage;
         self.dirty = true;
     }
@@ -72,10 +74,12 @@ impl AppState {
     }
 
     pub(crate) fn pre_triage_mut(&mut self) -> &mut PreTriageSession {
+        self.note_unfinished_global_inputs_changed();
         &mut self.pre_triage
     }
 
     pub(crate) fn set_pre_triage(&mut self, pre_triage: PreTriageSession) {
+        self.note_unfinished_global_inputs_changed();
         if !matches!(pre_triage.phase(), PreTriagePhase::LoadingArticles) {
             self.pre_triage_load_context = None;
         }

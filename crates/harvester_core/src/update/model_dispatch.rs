@@ -122,6 +122,10 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
     };
     let content_hash = state.triage().articles()[next_idx].content_hash.clone();
     let content_hash_short = short_hash(&content_hash);
+    let current_key = state.current_triage_cache_key(&content_hash);
+    state
+        .triage_mut()
+        .set_article_cache_key(next_idx, current_key);
 
     match state.try_reuse_triage(&content_hash) {
         TriageCacheLookupResult::Hit {

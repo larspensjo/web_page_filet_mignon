@@ -24,6 +24,33 @@ mod tests;
 /// Pure update function: applies a message to state and returns any effects.
 pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let progress_before = pipeline_run::progress_before(&state, &msg);
+    let unfinished_revisions = state.unfinished_revisions();
+    let completed_identity = match &msg {
+        Msg::LlmCompleted { request_id, .. } => state
+            .signal_candidate()
+            .url_for_request(*request_id)
+            .and_then(|url| {
+                state
+                    .pre_triage()
+                    .article_content_hash(url)
+                    .map(|hash| (url.to_string(), hash.to_string()))
+            })
+            .or_else(|| {
+                state
+                    .briefing()
+                    .find_article_by_request_id(*request_id)
+                    .and_then(|index| state.briefing().articles().get(index))
+                    .map(|article| (article.url.clone(), article.content_hash.clone()))
+            })
+            .or_else(|| {
+                state
+                    .triage()
+                    .find_article_by_request_id(*request_id)
+                    .and_then(|index| state.triage().articles().get(index))
+                    .map(|article| (article.url.clone(), article.content_hash.clone()))
+            }),
+        _ => None,
+    };
     let persist_runtime_state = matches!(
         &msg,
         Msg::JobDone {
@@ -49,6 +76,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             Vec::new()
         }
         Msg::StartupHydrationRequested => {
+            state.mark_prompt_contexts_pending();
             state.mark_triage_metadata_pending();
             vec![
                 Effect::LoadPromptContexts,
@@ -599,6 +627,19 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     };
 
     model_dispatch::dispatch_model_work(&mut state, &mut effects);
+    let after_revisions = state.unfinished_revisions();
+    if after_revisions.0 != unfinished_revisions.0 {
+        if after_revisions.1 == unfinished_revisions.1 {
+            if let Some((url, content_hash)) = completed_identity {
+                state.refresh_unfinished_identity(&url, &content_hash);
+                state.refresh_unfinished_evictions();
+            } else {
+                state.recompute_unfinished_work();
+            }
+        } else {
+            state.recompute_unfinished_work();
+        }
+    }
     pipeline_run::record_progress_after(&mut state, progress_before);
     if persist_runtime_state {
         effects.push(Effect::PersistRuntimeState {

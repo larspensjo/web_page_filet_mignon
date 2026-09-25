@@ -96,15 +96,19 @@ impl AppState {
             result,
             created_at_utc,
         };
-        self.summary_cache.insert(key, entry);
+        self.note_unfinished_inputs_changed();
+        let evicted = self.summary_cache.insert(key, entry);
+        self.note_unfinished_evictions(evicted);
     }
 
     /// Replace the entire summary cache (used for hydration).
     pub(crate) fn set_summary_cache(&mut self, cache: SummaryCache) {
+        self.note_unfinished_global_inputs_changed();
         self.summary_cache = cache;
     }
 
     pub(crate) fn start_summary_cache_run(&mut self) {
+        self.note_unfinished_global_inputs_changed();
         self.summary_cache_metrics = SummaryCacheMetrics::default();
         self.summary_cache_metadata_snapshot = None;
         self.summary_cache_warmup_logged = false;
@@ -131,6 +135,7 @@ impl AppState {
         };
         self.summary_cache_metadata_snapshot = snapshot;
         self.briefing_metadata_state = MetadataLoadState::Ready;
+        self.note_unfinished_global_inputs_changed();
     }
 
     pub(crate) fn is_briefing_metadata_ready(&self) -> bool {
@@ -147,6 +152,17 @@ impl AppState {
         &self,
         content_hash: &str,
     ) -> Result<SummaryCacheKey, SummaryCacheKeyError> {
+        self.current_summary_cache_key_with_context_hash(
+            content_hash,
+            &context_hash(self.context_for(PromptId::ArticleSummary)),
+        )
+    }
+
+    pub(crate) fn current_summary_cache_key_with_context_hash(
+        &self,
+        content_hash: &str,
+        context_hash: &str,
+    ) -> Result<SummaryCacheKey, SummaryCacheKeyError> {
         let metadata = self.summary_cache_metadata().or_else(|| {
             if self.is_briefing_metadata_ready() {
                 None
@@ -157,12 +173,12 @@ impl AppState {
                 ))
             }
         });
-        SummaryCacheKey::try_new(
+        SummaryCacheKey::try_new_with_context_hash(
             content_hash,
             PromptId::ArticleSummary,
             metadata.map(|(version, _)| version),
             metadata.map(|(_, model)| model),
-            self.context_for(PromptId::ArticleSummary),
+            context_hash,
         )
     }
 
@@ -191,6 +207,7 @@ impl AppState {
     }
 
     pub(crate) fn finalize_summary_cache_run(&mut self) {
+        self.note_unfinished_global_inputs_changed();
         self.briefing_metadata_state = MetadataLoadState::Idle;
         self.summary_cache_metadata_snapshot = None;
         self.summary_cache_warmup_logged = false;
@@ -201,7 +218,9 @@ impl AppState {
         &self.summary_cache
     }
 
-    pub(crate) fn set_triage_cache(&mut self, cache: TriageCache) {
+    pub(crate) fn set_triage_cache(&mut self, mut cache: TriageCache) {
+        self.note_unfinished_global_inputs_changed();
+        cache.rebuild_alias_index();
         self.triage_cache = cache;
     }
 
@@ -224,10 +243,12 @@ impl AppState {
     }
 
     pub(crate) fn mark_triage_metadata_pending(&mut self) {
+        self.note_unfinished_global_inputs_changed();
         self.triage_metadata_state = MetadataLoadState::Pending;
     }
 
     pub(crate) fn mark_triage_metadata_ready(&mut self) {
+        self.note_unfinished_global_inputs_changed();
         if self.prompt_contexts_load_failed() {
             self.triage_metadata_state = MetadataLoadState::Pending;
             self.triage_cache_metadata_snapshot = None;
@@ -324,7 +345,9 @@ impl AppState {
         let key = self.current_triage_cache_key(content_hash)?;
 
         let stored_model_id = key.model_id.clone();
-        self.triage_cache.insert(key, result);
+        self.note_unfinished_inputs_changed();
+        let evicted = self.triage_cache.insert(key, result);
+        self.note_unfinished_evictions(evicted);
         Some(stored_model_id)
     }
 
@@ -334,13 +357,15 @@ impl AppState {
         result: ArticleTriageResult,
         created_at_utc: String,
     ) {
-        self.triage_cache.insert_entry(
+        self.note_unfinished_inputs_changed();
+        let evicted = self.triage_cache.insert_entry(
             key,
             crate::triage_cache::TriageCacheEntry {
                 result,
                 created_at_utc,
             },
         );
+        self.note_unfinished_evictions(evicted);
     }
 
     pub(crate) fn record_triage_cache_hit(&mut self) {

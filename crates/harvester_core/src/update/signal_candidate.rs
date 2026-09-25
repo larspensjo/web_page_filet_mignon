@@ -10,10 +10,12 @@ use harvester_engine::llm::validation::validate_signal_candidate;
 
 use crate::msg::LlmResultKind;
 use crate::signal_candidate::OverrideKey;
-use crate::signal_candidate_cache::{SignalCandidateCacheKey, SignalCandidateInputBundle};
+use crate::signal_candidate_cache::{
+    SignalCandidateCacheKey, SignalCandidateCacheKeyError, SignalCandidateInputBundle,
+};
 use crate::{AppState, Effect};
 
-const PRIORITY_CUTOFF_INCLUSIVE: u8 = 2;
+pub(crate) const PRIORITY_CUTOFF_INCLUSIVE: u8 = 2;
 
 /// Inputs required to compute the signal-candidate cache key for a URL.
 ///
@@ -179,24 +181,31 @@ pub fn try_enqueue(state: &mut AppState, url: &str) -> bool {
     true
 }
 
-pub(super) fn input_key(
+pub(crate) fn input_key(
     url: &str,
     snapshot: &SignalCandidateInputSnapshot,
 ) -> Option<SignalCandidateCacheKey> {
+    try_input_key(url, snapshot)
+        .map_err(|err| {
+            engine_warn!(
+                "[signal-cache] url={} cache key unavailable reason={}",
+                url,
+                err
+            );
+        })
+        .ok()
+}
+
+fn try_input_key(
+    url: &str,
+    snapshot: &SignalCandidateInputSnapshot,
+) -> Result<SignalCandidateCacheKey, SignalCandidateCacheKeyError> {
     SignalCandidateCacheKey::try_new(
         &build_input_bundle(url, snapshot),
         Some(snapshot.prompt_version),
         Some(&snapshot.model_id),
         &snapshot.context,
     )
-    .map_err(|err| {
-        engine_warn!(
-            "[signal-cache] url={} cache key unavailable reason={}",
-            url,
-            err
-        );
-    })
-    .ok()
 }
 
 pub fn sweep_eligible_after_hydration(state: &mut AppState, _effects: &mut Vec<Effect>) {
@@ -305,6 +314,106 @@ fn build_input_snapshot(
         })
         .or_else(|| state.try_reuse_summary(&summary_key))
         .ok_or("current-summary-result-unavailable")?;
+    build_input_snapshot_from_current_result_fields(
+        state,
+        &article.url,
+        article.source_title.as_deref(),
+        article.fetched_utc.as_deref(),
+        triage,
+        &summary_key,
+        summary,
+    )
+}
+
+/// Build the signal-scoring key from already-resolved current-key upstream
+/// results. Dispatch and completeness use this same path so scoring identity
+/// cannot drift between queueing and unfinished-work classification.
+pub(crate) struct SignalArticleFields<'a> {
+    pub url: &'a str,
+    pub source_title: Option<&'a str>,
+    pub fetched_utc: Option<&'a str>,
+}
+
+#[cfg(test)]
+pub(crate) fn input_key_for_current_results(
+    state: &AppState,
+    article: &crate::briefing::LoadedArticle,
+    triage: &crate::triage::ArticleTriageResult,
+    summary_key: &crate::summary_cache::SummaryCacheKey,
+    summary: &crate::briefing::ArticleSummaryResult,
+) -> Option<SignalCandidateCacheKey> {
+    input_key_for_current_result_fields(
+        state,
+        &article.url,
+        article.source_title.as_deref(),
+        article.fetched_utc.as_deref(),
+        triage,
+        summary_key,
+        summary,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn input_key_for_current_result_fields(
+    state: &AppState,
+    url: &str,
+    source_title: Option<&str>,
+    fetched_utc: Option<&str>,
+    triage: &crate::triage::ArticleTriageResult,
+    summary_key: &crate::summary_cache::SummaryCacheKey,
+    summary: &crate::briefing::ArticleSummaryResult,
+) -> Option<SignalCandidateCacheKey> {
+    let context_hash = crate::context_hash(state.context_for(PromptId::ArticleSignalCandidate));
+    input_key_for_current_result_fields_with_context_hash(
+        state,
+        SignalArticleFields {
+            url,
+            source_title,
+            fetched_utc,
+        },
+        triage,
+        summary_key,
+        summary,
+        &context_hash,
+    )
+}
+
+pub(crate) fn input_key_for_current_result_fields_with_context_hash(
+    state: &AppState,
+    article: SignalArticleFields<'_>,
+    triage: &crate::triage::ArticleTriageResult,
+    summary_key: &crate::summary_cache::SummaryCacheKey,
+    summary: &crate::briefing::ArticleSummaryResult,
+    context_hash: &str,
+) -> Option<SignalCandidateCacheKey> {
+    let snapshot = build_input_snapshot_from_current_result_fields(
+        state,
+        article.url,
+        article.source_title,
+        article.fetched_utc,
+        triage,
+        summary_key,
+        summary,
+    )
+    .ok()?;
+    SignalCandidateCacheKey::try_new_with_context_hash(
+        &build_input_bundle(article.url, &snapshot),
+        Some(snapshot.prompt_version),
+        Some(&snapshot.model_id),
+        context_hash,
+    )
+    .ok()
+}
+
+fn build_input_snapshot_from_current_result_fields(
+    state: &AppState,
+    url: &str,
+    source_title: Option<&str>,
+    fetched_utc: Option<&str>,
+    triage: &crate::triage::ArticleTriageResult,
+    summary_key: &crate::summary_cache::SummaryCacheKey,
+    summary: &crate::briefing::ArticleSummaryResult,
+) -> Result<SignalCandidateInputSnapshot, &'static str> {
     let prompt_version = state
         .active_version_for(PromptId::ArticleSignalCandidate)
         .ok_or("scoring-prompt-version-unavailable")?;
@@ -312,15 +421,13 @@ fn build_input_snapshot(
         .effective_model_for(PromptId::ArticleSignalCandidate)
         .ok_or("scoring-model-unavailable")?
         .to_string();
-    let published_at = article.fetched_utc.clone().unwrap_or_default();
-    let title = crate::preview::best_effort_article_title(article.source_title.as_deref(), url)
-        .unwrap_or_else(|| {
-            article
-                .source_title
-                .clone()
-                .unwrap_or_else(|| url.to_string())
-        });
-    let outlet = best_effort_outlet(article.source_title.as_deref(), url);
+    let published_at = fetched_utc.unwrap_or_default().to_string();
+    let title = crate::preview::best_effort_article_title(source_title, url).unwrap_or_else(|| {
+        source_title
+            .map(str::to_string)
+            .unwrap_or_else(|| url.to_string())
+    });
+    let outlet = best_effort_outlet(source_title, url);
     let upstream_summary_cache_digest = summary_key.digest();
     let mut triage_tags_sorted = triage.tags.clone();
     triage_tags_sorted.sort();

@@ -501,7 +501,6 @@ impl BriefingSession {
     pub fn defer_article(&mut self, article_id: BriefingArticleId) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.summary_state = ArticleSummaryState::Deferred;
-            article.cache_key_snapshot = None;
         }
     }
 

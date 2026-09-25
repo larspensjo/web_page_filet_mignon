@@ -1,4 +1,5 @@
 use crate::briefing::LoadedArticle;
+use crate::triage_cache::TriageCacheKey;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -43,6 +44,9 @@ pub struct TriageArticle {
     /// Provenance belongs to the selected session result, not the serialized result.
     pub triage_model: Option<String>,
     pub preparation_budget: Option<usize>,
+    /// Key used by the current admitted triage attempt, retained so unfinished
+    /// work can distinguish current-key requests from stale requests.
+    pub cache_key_snapshot: Option<TriageCacheKey>,
     pub triage_state: ArticleTriageState,
 }
 
@@ -105,6 +109,7 @@ impl TriageSession {
                 fetched_utc: article.fetched_utc,
                 triage_model: None,
                 preparation_budget: None,
+                cache_key_snapshot: None,
                 triage_state: ArticleTriageState::Pending,
             })
             .collect();
@@ -163,6 +168,16 @@ impl TriageSession {
     pub fn start_article(&mut self, article_id: TriageArticleId, request_id: u64) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.triage_state = ArticleTriageState::InProgress { request_id };
+        }
+    }
+
+    pub(crate) fn set_article_cache_key(
+        &mut self,
+        article_id: TriageArticleId,
+        key: Option<TriageCacheKey>,
+    ) {
+        if let Some(article) = self.articles.get_mut(article_id) {
+            article.cache_key_snapshot = key;
         }
     }
 

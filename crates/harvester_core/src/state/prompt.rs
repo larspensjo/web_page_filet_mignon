@@ -16,11 +16,21 @@ impl AppState {
         &mut self,
         contexts: HashMap<PromptId, Vec<(String, String)>>,
     ) {
+        self.note_unfinished_global_inputs_changed();
         self.prompt_contexts = contexts;
+        self.prompt_contexts_ready = true;
+        self.prompt_contexts_load_failed = false;
+    }
+
+    pub(crate) fn mark_prompt_contexts_pending(&mut self) {
+        self.note_unfinished_global_inputs_changed();
+        self.prompt_contexts_ready = false;
         self.prompt_contexts_load_failed = false;
     }
 
     pub(crate) fn mark_prompt_contexts_load_failed(&mut self) {
+        self.note_unfinished_global_inputs_changed();
+        self.prompt_contexts_ready = false;
         self.prompt_contexts_load_failed = true;
     }
 
@@ -73,6 +83,7 @@ impl AppState {
         active_versions: HashMap<PromptId, PromptVersion>,
         effective_models: HashMap<PromptId, String>,
     ) {
+        self.note_unfinished_global_inputs_changed();
         self.active_prompt_versions = active_versions;
         self.effective_models = effective_models;
     }

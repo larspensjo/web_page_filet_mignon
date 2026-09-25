@@ -78,15 +78,41 @@ pub struct TriageCacheEntry {
 }
 
 /// In-memory cache for article triage results.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TriageCache {
     entries: HashMap<TriageCacheKey, TriageCacheEntry>,
+    #[serde(skip)]
+    aliases: HashMap<(String, PromptId, PromptVersion, String), Vec<TriageCacheKey>>,
+}
+
+impl PartialEq for TriageCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+    }
+}
+
+impl Eq for TriageCache {}
+
+impl<'de> Deserialize<'de> for TriageCache {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Wire {
+            entries: HashMap<TriageCacheKey, TriageCacheEntry>,
+        }
+        let mut cache = Self {
+            entries: Wire::deserialize(deserializer)?.entries,
+            aliases: HashMap::new(),
+        };
+        cache.rebuild_alias_index();
+        Ok(cache)
+    }
 }
 
 impl TriageCache {
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            aliases: HashMap::new(),
         }
     }
 
@@ -99,15 +125,17 @@ impl TriageCache {
         if let Some((stored_key, entry)) = self.entries.get_key_value(key) {
             return Some((stored_key, &entry.result));
         }
-        self.entries.iter().find_map(|(stored_key, entry)| {
+        let alias_key = (
+            key.content_hash.clone(),
+            key.prompt_id,
+            key.prompt_version,
+            key.context_hash.clone(),
+        );
+        self.aliases.get(&alias_key)?.iter().find_map(|candidate| {
+            let (stored_key, entry) = self.entries.get_key_value(candidate)?;
             let model_match = model_ids_compatible(&stored_key.model_id, &key.model_id)
                 || model_ids_compatible(&key.model_id, &stored_key.model_id);
-            if stored_key.content_hash == key.content_hash
-                && stored_key.prompt_id == key.prompt_id
-                && stored_key.prompt_version == key.prompt_version
-                && stored_key.context_hash == key.context_hash
-                && model_match
-            {
+            if model_match {
                 Some((stored_key, &entry.result))
             } else {
                 None
@@ -115,33 +143,58 @@ impl TriageCache {
         })
     }
 
-    pub fn insert(&mut self, key: TriageCacheKey, result: ArticleTriageResult) {
+    pub fn insert(&mut self, key: TriageCacheKey, result: ArticleTriageResult) -> Vec<String> {
         let entry = TriageCacheEntry {
             result,
             created_at_utc: Utc::now().to_rfc3339(),
         };
-        self.insert_entry(key, entry);
+        self.insert_entry(key, entry)
     }
 
-    pub fn insert_entry(&mut self, key: TriageCacheKey, entry: TriageCacheEntry) {
-        self.entries.insert(key, entry);
-        self.enforce_capacity();
-    }
-
-    fn enforce_capacity(&mut self) {
-        if self.entries.len() <= DEFAULT_CACHE_CAPACITY {
-            return;
+    pub fn insert_entry(&mut self, key: TriageCacheKey, entry: TriageCacheEntry) -> Vec<String> {
+        if !self.entries.contains_key(&key) {
+            self.aliases
+                .entry((
+                    key.content_hash.clone(),
+                    key.prompt_id,
+                    key.prompt_version,
+                    key.context_hash.clone(),
+                ))
+                .or_default()
+                .push(key.clone());
         }
-        let before = self.entries.len();
-        self.evict_to_limit(DEFAULT_CACHE_CAPACITY);
-        let evicted = before - self.entries.len();
-        if evicted > 0 {
+        self.entries.insert(key, entry);
+        self.enforce_capacity()
+    }
+
+    pub(crate) fn rebuild_alias_index(&mut self) {
+        self.aliases.clear();
+        for key in self.entries.keys() {
+            self.aliases
+                .entry((
+                    key.content_hash.clone(),
+                    key.prompt_id,
+                    key.prompt_version,
+                    key.context_hash.clone(),
+                ))
+                .or_default()
+                .push(key.clone());
+        }
+    }
+
+    fn enforce_capacity(&mut self) -> Vec<String> {
+        if self.entries.len() <= DEFAULT_CACHE_CAPACITY {
+            return Vec::new();
+        }
+        let evicted = self.evict_to_limit(DEFAULT_CACHE_CAPACITY);
+        if !evicted.is_empty() {
             engine_info!(
                 "[triage-cache] Evicted {} oldest entries (capacity: {})",
-                evicted,
+                evicted.len(),
                 DEFAULT_CACHE_CAPACITY
             );
         }
+        evicted
     }
 
     pub fn len(&self) -> usize {
@@ -156,9 +209,9 @@ impl TriageCache {
         self.entries.iter()
     }
 
-    fn evict_to_limit(&mut self, limit: usize) {
+    fn evict_to_limit(&mut self, limit: usize) -> Vec<String> {
         if self.entries.len() <= limit {
-            return;
+            return Vec::new();
         }
         let mut entries: Vec<_> = self
             .entries
@@ -167,9 +220,13 @@ impl TriageCache {
             .collect();
         entries.sort_by(|a, b| a.1.cmp(&b.1));
         let to_remove = self.entries.len() - limit;
+        let mut evicted = Vec::with_capacity(to_remove);
         for (key, _) in entries.iter().take(to_remove) {
             self.entries.remove(key);
+            evicted.push(key.content_hash.clone());
         }
+        self.rebuild_alias_index();
+        evicted
     }
 }
 

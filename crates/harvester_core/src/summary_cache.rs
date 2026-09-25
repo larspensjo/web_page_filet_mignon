@@ -30,18 +30,33 @@ impl SummaryCacheKey {
         model_id: Option<&str>,
         context: &[(String, String)],
     ) -> Result<Self, SummaryCacheKeyError> {
+        Self::try_new_with_context_hash(
+            content_hash,
+            prompt_id,
+            prompt_version,
+            model_id,
+            &context_hash(context),
+        )
+    }
+
+    pub fn try_new_with_context_hash(
+        content_hash: &str,
+        prompt_id: PromptId,
+        prompt_version: Option<PromptVersion>,
+        model_id: Option<&str>,
+        context_hash: &str,
+    ) -> Result<Self, SummaryCacheKeyError> {
         if content_hash.is_empty() {
             return Err(SummaryCacheKeyError::EmptyContentHash);
         }
         let prompt_version = prompt_version.ok_or(SummaryCacheKeyError::MissingPromptVersion)?;
         let model_id = model_id.ok_or(SummaryCacheKeyError::MissingModelId)?;
-        let context_hash = context_hash(context);
         Ok(Self {
             content_hash: content_hash.to_string(),
             prompt_id,
             prompt_version,
             model_id: model_id.to_string(),
-            context_hash,
+            context_hash: context_hash.to_string(),
         })
     }
 
@@ -102,22 +117,22 @@ impl SummaryCache {
 
     /// Insert a new cache entry, replacing any existing entry with the same key.
     /// Automatically evicts oldest entries if capacity limit is exceeded.
-    pub fn insert(&mut self, key: SummaryCacheKey, entry: SummaryCacheEntry) {
+    pub fn insert(&mut self, key: SummaryCacheKey, entry: SummaryCacheEntry) -> Vec<String> {
         self.entries.insert(key, entry);
 
         // Enforce capacity limit
         if self.entries.len() > DEFAULT_CACHE_CAPACITY {
-            let before = self.entries.len();
-            self.evict_to_limit(DEFAULT_CACHE_CAPACITY);
-            let evicted = before - self.entries.len();
-            if evicted > 0 {
+            let evicted = self.evict_to_limit_with_hashes(DEFAULT_CACHE_CAPACITY);
+            if !evicted.is_empty() {
                 engine_info!(
                     "[summary-cache] Evicted {} oldest entries (capacity: {})",
-                    evicted,
+                    evicted.len(),
                     DEFAULT_CACHE_CAPACITY
                 );
             }
+            return evicted;
         }
+        Vec::new()
     }
 
     /// Get the number of cached entries.
@@ -143,8 +158,12 @@ impl SummaryCache {
     /// Evict the oldest entries to keep the cache size at or below the limit.
     /// Uses created_at_utc to determine age (lexicographic ordering of ISO 8601 timestamps).
     pub fn evict_to_limit(&mut self, limit: usize) {
+        self.evict_to_limit_with_hashes(limit);
+    }
+
+    fn evict_to_limit_with_hashes(&mut self, limit: usize) -> Vec<String> {
         if self.entries.len() <= limit {
-            return;
+            return Vec::new();
         }
 
         // Collect all entries with timestamps
@@ -159,9 +178,12 @@ impl SummaryCache {
 
         // Remove oldest entries until we're at the limit
         let to_remove = self.entries.len() - limit;
+        let mut evicted = Vec::with_capacity(to_remove);
         for (key, _) in entries.iter().take(to_remove) {
             self.entries.remove(key);
+            evicted.push(key.content_hash.clone());
         }
+        evicted
     }
 
     /// Evict entries older than the given UTC timestamp.
