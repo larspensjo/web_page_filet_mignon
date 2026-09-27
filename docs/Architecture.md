@@ -179,7 +179,8 @@ The scheduler selects scoring, then summaries, then triage, in that fixed priori
 order. Within each stage it preserves admission order. Cache hits complete without
 occupying a request slot; priority is reconsidered after each completion, including
 cache hits that admit downstream scoring. A freed slot goes to the highest-priority
-pending stage. Startup scoring sweeps still admit work through this scheduler.
+pending stage. Hydration admits no scoring; eligible unscored articles are unfinished
+work until a run admits them through this scheduler.
 
 Batch API mode sets the separate `llm_deferred_allowance` to the session call limit.
 This bounds outstanding requests being buffered into provider batches, replacing
