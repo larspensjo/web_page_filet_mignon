@@ -145,6 +145,9 @@ pub(crate) fn handle_signal_candidate_completion(
 }
 
 pub fn try_enqueue(state: &mut AppState, url: &str) -> bool {
+    if !state.pipeline_ready() {
+        return false;
+    }
     let snapshot = match build_input_snapshot(state, url) {
         Ok(snapshot) => snapshot,
         Err(reason) => {
@@ -170,12 +173,25 @@ pub fn try_enqueue(state: &mut AppState, url: &str) -> bool {
         );
         return false;
     };
-    if !state
-        .signal_candidate_mut()
-        .enqueue(url.to_string(), key.digest())
+    let Some(hash) = state.content_hash_for_url(url).map(str::to_owned) else {
+        return false;
+    };
+    let member = (url.to_owned(), hash);
+    if state
+        .pipeline_admission
+        .as_ref()
+        .is_some_and(|run| run.admitted[2].contains(&member))
     {
         return false;
     }
+    let digest = key.digest();
+    if !state
+        .signal_candidate_mut()
+        .enqueue(url.to_string(), digest.clone())
+    {
+        return false;
+    }
+    assert!(super::waves::scoring_admitted(state, member, digest));
     state.set_signal_candidate_input_snapshot(url, snapshot);
     state.mark_dirty();
     true
@@ -208,38 +224,16 @@ fn try_input_key(
     )
 }
 
-pub fn sweep_eligible_after_hydration(state: &mut AppState, _effects: &mut Vec<Effect>) {
-    let mut urls: Vec<String> = state
-        .ordered_completed_job_urls_snapshot()
-        .into_iter()
-        .collect();
-    urls.extend(
-        state
-            .briefing()
-            .articles()
-            .iter()
-            .filter(|article| {
-                matches!(
-                    article.summary_state,
-                    crate::briefing::ArticleSummaryState::Completed { .. }
-                )
-            })
-            .map(|article| article.url.clone()),
-    );
-
-    let mut seen = std::collections::HashSet::new();
-    for url in urls.into_iter().filter(|url| seen.insert(url.clone())) {
-        let _ = try_enqueue(state, &url);
+pub(super) fn restore_rearmed_snapshot(state: &mut AppState, url: &str) {
+    if let Ok(snapshot) = build_input_snapshot(state, url) {
+        state.set_signal_candidate_input_snapshot(url, snapshot);
     }
 }
-
 pub fn handle_cache_loaded(
     state: &mut AppState,
     cache: crate::signal_candidate_cache::SignalCandidateCache,
-    effects: &mut Vec<Effect>,
 ) {
     state.set_signal_candidate_cache(cache);
-    sweep_eligible_after_hydration(state, effects);
     state.mark_dirty();
 }
 

@@ -599,3 +599,134 @@ fn update(state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let (state, effects) = harvester_core::update(state, msg);
     harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000)
 }
+
+#[test]
+fn legacy_run_settles_and_resume_retries_failure_without_host_advances() {
+    let urls = ["https://retry.example/article"];
+    let (state, _) = ready_state_with_pretriage(&urls);
+    let (state, effects) = update(state, Msg::TriageClicked);
+    assert!(state.pipeline_run_armed());
+    let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id,
+            result: triage_failure("temporary"),
+            metadata: None,
+        },
+    );
+    assert!(!state.view().run_progress.run_active);
+    assert!(state.pipeline_activity().is_settled());
+    let original_run = state.pipeline_waves().waves()[0].run_id;
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let request_id = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("Resume refreshes membership");
+    assert!(state.pipeline_activity().intake_refresh_pending);
+    let (state, effects) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                sample_articles(&urls),
+                100_000,
+            ),
+        },
+    );
+    assert_eq!(state.batch_observation().triage_total, 1);
+    assert_eq!(state.batch_observation().triage_failed, 0);
+    assert_ne!(
+        state.pipeline_waves().waves().last().unwrap().run_id,
+        original_run
+    );
+    let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id,
+            result: triage_success(1),
+            metadata: None,
+        },
+    );
+    assert!(!state.view().run_progress.run_active);
+    assert!(state.pipeline_activity().is_settled());
+}
+
+#[test]
+fn current_triage_survives_resume_and_departed_members_leave_the_session() {
+    let urls = ["https://retained.example/article"];
+    let (state, _) = ready_state_with_pretriage(&urls);
+    let (state, effects) = update(state, Msg::TriageClicked);
+    let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id,
+            result: triage_success(1),
+            metadata: None,
+        },
+    );
+    let original = state.triage_cache().clone();
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let load_id = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .unwrap();
+    let (state, effects) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                sample_articles(&urls),
+                100_000,
+            ),
+        },
+    );
+    assert_eq!(state.triage_cache(), &original);
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    assert!(!state.view().run_progress.run_active);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let load_id = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .unwrap();
+    let (state, effects) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(vec![], 100_000),
+        },
+    );
+    assert_eq!(state.batch_observation().triage_total, 0);
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
+    assert!(state.pipeline_activity().is_settled());
+}

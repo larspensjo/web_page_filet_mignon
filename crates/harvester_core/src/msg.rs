@@ -90,7 +90,7 @@ pub enum Msg {
     /// Open desktop Trends and request its index.
     TrendsViewOpened,
     /// Desktop request to run the merged triage + summary pipeline.
-    PipelineRunRequested,
+    PipelineRunRequested { scope: crate::PipelineRunScope },
     /// Reducer-owned orchestration pulse, sent by the desktop host while active.
     PipelineRunAdvance,
     /// Dismiss the desktop completion notice.

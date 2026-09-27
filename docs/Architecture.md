@@ -12,13 +12,51 @@ This document describes the overall system shape, centered on a unidirectional d
 
 ### Reducer-owned pipeline lifecycle
 
-The desktop pipeline has three reducer-owned concepts. `RunProgress` is an accumulator
-that retains completed stage counts and bounded activity after live poll and load sessions
-are cleared. `PipelineRunPhase` drives the merged triage-and-summary action through
-reducer messages; the desktop core thread only reads the phase to decide whether to send
-an advance message. `AppState::pipeline_activity()` is the single pure completion query
-used by both desktop and batch hosts. It counts pending and in-flight work (never deferred
-Batch API work), and deliberately includes signal scoring so neither host settles early.
+The reducer owns process-lifetime triage, summary and scoring sessions and a
+`PipelineWaves` release ledger. Entries retain the key under which they completed;
+identities leaving the window are removed. Admission is independent for each stage:
+missing, failed or stale completed work becomes pending, while current results and
+pending, in-flight or deferred entries remain unchanged. Stale results remain in caches.
+Each identity is admitted at most once per stage per run; a later run can retry failures.
+
+`PipelineRunRequested` carries Full (intake and processing), Resume (the current
+window) or Continue (already admitted batch work). Resume upgrades an active poll run
+to Full. Compatible requests join the active run. A run arms model dispatch only when
+AI is available; Full otherwise performs intake only. Legacy stage actions arm Resume.
+Configuration loads once before the run's first preparation read and model dispatch,
+then stays fixed. Hydration discovers unfinished work without admitting scoring.
+
+Armed Full and Resume intake can release triage after the quiet interval or maximum
+wait while downloads remain in flight. A Batch API intake cycle remains unarmed and
+keeps the poll-burst barrier, producing one hand-off after downloads settle.
+Admissions split in window order at four times
+the synchronous request budget; deferred batch allowance keeps a buffered admission in
+one wave. A triage wave releases completed, summary-eligible members in the same reducer
+step once no pending or in-flight member remains. Deferred members do not block release.
+Replay waves retain their original wave number as an origin; identity and upstream-key
+markers prevent duplicate downstream releases. Summaries release scoring per article.
+Within a stage, dispatch follows wave and member order. Across stages, scoring precedes
+summary, then triage, all sharing one request budget. Indexed queues and changed-wave
+tracking keep completion work bounded without rebuilding the full ledger per dispatch.
+
+`AppState::pipeline_activity()` is the single settlement query for both hosts. It
+counts admitted pending and in-flight work plus intake refresh demand, loads and
+processing preparation; deferred work is non-blocking. A run becomes Terminal exactly
+once after intake closes and activity settles, including when the host sends no advance
+messages. Rearming outside an armed run records replay members while leaving session
+entries Deferred, so it cannot strand undispatchable Pending work. A pure collect-only
+batch cycle requests Continue before rearming; intake cycles and `--drain` request no run.
+An accepted Stop withdraws never-dispatched Pending entries from all three stages,
+keeps in-flight results, and releases no downstream work from those completions.
+Withdrawn identities remain unfinished under their current keys.
+
+`RunProgress` accumulates this run's admitted totals, including triage and summary
+cache hits. Scoring already completed under the same digest is not readmitted. Multiple
+stages can be Active together; model stages become Done only at Terminal. Totals grow
+with waves, and `total_is_final` becomes true once upstream can add no more members.
+Every stage is terminal when the run is Terminal. Wave releases and the initial
+reprocessing notice use `engine_logging` with run and count context; they do not consume
+the bounded 50-entry activity feed.
 
 ### Desktop intent runtime diagram
 ```mermaid
@@ -84,12 +122,11 @@ identities, replacing changed preparation, evaluating new identities and removin
 members. The hand-off to triage makes pre-triage non-actionable while retaining preparation
 for later deltas. Refresh demand does not erase pre-triage or reset it to Loading.
 `pipeline_activity().intake_refresh_pending` counts pending demand, in-flight loads and
-processing-start preparation; both hosts therefore wait for refresh completion before
-starting triage or summaries.
+processing-start preparation; both hosts therefore keep the run open until refresh completion.
 
-A triage start loads contexts, saved template overlays and LLM metadata as one ordered
-configuration operation. A standalone summary start does the same; summaries following
-triage reuse its configuration. Background refreshes do not begin a configuration snapshot.
+An armed run loads contexts, saved template overlays and LLM metadata as one ordered
+configuration operation. Every stage and later intake wave reuses that snapshot.
+Background refreshes do not begin a configuration snapshot.
 Only triage starts require the ArticleTriage context. A failed processing start preserves
 an already completed session.
 Before either stage dispatches, the reducer checks the stored preparation budget against

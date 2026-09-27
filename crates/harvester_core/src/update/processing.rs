@@ -16,15 +16,11 @@ pub(crate) struct PendingStart {
 }
 
 pub(super) fn begin(state: &mut AppState, target: StartTarget) -> Vec<Effect> {
-    if state.processing_start.is_some()
-        || state.triage().is_active()
-        || state.briefing().is_active()
-    {
+    if state.processing_start.is_some() {
         return Vec::new();
     }
-    let reuse = target == StartTarget::Summaries
-        && state.summaries_follow_triage
-        && state.processing_budget.is_some();
+    super::pipeline_run::arm_legacy(state);
+    let reuse = state.pipeline_ready();
     state.summaries_follow_triage = target == StartTarget::Triage;
     let configuration_request = if reuse {
         None
@@ -41,6 +37,7 @@ pub(super) fn begin(state: &mut AppState, target: StartTarget) -> Vec<Effect> {
     );
     state.mark_dirty();
     if let Some(request_id) = configuration_request {
+        state.start_summary_cache_run();
         state.processing_budget = None;
         vec![Effect::LoadProcessingConfiguration {
             request_id,
@@ -72,6 +69,11 @@ pub(super) fn fail(state: &mut AppState, reason: String) {
             _ => {}
         }
         state.summaries_follow_triage = false;
+        if let Some(run) = state.pipeline_admission.as_mut() {
+            run.armed = false;
+            run.fresh_load = false;
+            run.initial_admitted = true;
+        }
         state.mark_dirty();
     }
 }
@@ -80,15 +82,49 @@ pub(super) fn resume(state: &mut AppState) -> Vec<Effect> {
     let Some(start) = state.processing_start.clone() else {
         return Vec::new();
     };
-    if start.configuration_request.is_some()
-        || state.triage_in_flight_request_id().is_some()
-        || state.pre_triage_coordinator.refresh_pending()
-    {
+    // Only an in-flight load blocks the start. Waiting for refresh demand to go idle
+    // would defer the start until downloads end, because every finished download
+    // records new demand; later arrivals are admitted as later waves instead.
+    if start.configuration_request.is_some() || state.triage_in_flight_request_id().is_some() {
         return Vec::new();
     }
     let Some(budget) = state.processing_budget else {
         return Vec::new();
     };
+    if let Some(run) = state.pipeline_admission.as_mut() {
+        run.configured = true;
+        if run.scope == crate::PipelineRunScope::Continue {
+            state.processing_start = None;
+            return Vec::new();
+        }
+        if run.fresh_load {
+            run.fresh_load = false;
+            state
+                .processing_start
+                .as_mut()
+                .unwrap()
+                .preparation_requested = true;
+            let mut urls = state.ordered_completed_job_urls_snapshot();
+            // Legacy starts can carry prepared articles before their restored job snapshot.
+            urls.extend(
+                state
+                    .pre_triage()
+                    .window_articles()
+                    .map(|(_, a)| a.url.clone()),
+            );
+            urls.extend(state.triage().articles().iter().map(|a| a.url.clone()));
+            let mut seen = std::collections::HashSet::new();
+            urls.retain(|url| seen.insert(url.clone()));
+            let request_id = state.pre_triage_coordinator.begin_preparation_load();
+            state.set_triage_in_flight(request_id);
+            return vec![Effect::LoadArticlesForTriage {
+                request_id,
+                ordered_urls: urls,
+                since_utc: state.briefing_since_utc(),
+                held: state.pre_triage().held_articles(),
+            }];
+        }
+    }
     if start.target == StartTarget::Triage && !state.triage_metadata_ready() {
         fail(state, "Triage configuration is unavailable".into());
         return Vec::new();
@@ -132,7 +168,12 @@ pub(super) fn resume(state: &mut AppState) -> Vec<Effect> {
             StartTarget::Summaries => super::briefing::start_summaries_from_triage(state),
         };
     }
-    if start.preparation_requested || urls.is_empty() {
+    if urls.is_empty() {
+        state.processing_start = None;
+        super::waves::admit_triage(state, Vec::new());
+        return Vec::new();
+    }
+    if start.preparation_requested {
         engine_warn!("[processing-start] target={:?} article preparation unavailable budget={} urls={} retry={}", start.target, budget, urls.len(), start.preparation_requested);
         fail(state, "Article preparation is unavailable for the current configuration; refresh and run triage again".to_string());
         return Vec::new();

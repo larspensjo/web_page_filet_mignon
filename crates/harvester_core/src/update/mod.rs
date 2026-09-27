@@ -15,6 +15,7 @@ pub(crate) mod signal_candidate;
 mod summary_cache_support;
 mod triage;
 mod url_input;
+mod waves;
 
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -211,9 +212,8 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.set_workspace_view(crate::WorkspaceView::Trends);
             vec![Effect::LoadEntityIndex]
         }
-        Msg::PipelineRunRequested => {
-            pipeline_run::handle_pipeline_requested(&mut state);
-            Vec::new()
+        Msg::PipelineRunRequested { scope } => {
+            pipeline_run::handle_pipeline_requested(&mut state, scope)
         }
         Msg::PipelineRunAdvance => pipeline_run::handle_pipeline_advance(&mut state),
         Msg::RunFinishedNoticeDismissed => {
@@ -283,16 +283,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             metadata,
         } => llm_completed::handle(&mut state, request_id, result, metadata),
         Msg::RearmDeferredBatchStages => {
-            let deferred_signal_urls = state.signal_candidate().deferred_urls();
-            state.triage_mut().rearm_deferred();
-            state.briefing_mut().rearm_deferred();
-            state.signal_candidate_mut().rearm_deferred();
-            let effects = Vec::new();
-            for url in deferred_signal_urls {
-                signal_candidate::try_enqueue(&mut state, &url);
-            }
+            waves::rearm(&mut state);
             state.mark_dirty();
-            effects
+            Vec::new()
         }
         Msg::BatchResultsCollected { entries } => batch_results::handle(&mut state, entries),
         Msg::LlmQuotaConfigured { limits } => {
@@ -415,6 +408,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 state.mark_triage_metadata_ready();
                 state.mark_briefing_metadata_ready();
                 state.processing_budget = Some(preparation_budget);
+                if let Some(run) = state.pipeline_admission.as_mut() {
+                    run.configured = true;
+                }
                 state
                     .processing_start
                     .as_mut()
@@ -433,6 +429,14 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             {
                 processing::fail(&mut state, reason);
             }
+            Vec::new()
+        }
+        Msg::PromptContextsLoaded { .. }
+        | Msg::PromptContextsLoadFailed { .. }
+        | Msg::PromptTemplateFilesLoaded
+        | Msg::LlmMetadataLoaded { .. }
+            if state.pipeline_ready() =>
+        {
             Vec::new()
         }
         Msg::PromptContextsLoaded { contexts } => {
@@ -475,7 +479,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             state.mark_dirty();
             let mut effects = Vec::new();
             effects.extend(briefing::resume_deferred_exec_dispatch(&mut state));
-            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
             effects
         }
         Msg::AiAvailabilityDetected { availability } => {
@@ -490,18 +493,15 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_summary_cache(cache);
             state.mark_dirty();
-            let mut effects = Vec::new();
-            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
-            effects
+            Vec::new()
         }
         Msg::SignalCandidateCacheLoaded { cache } => {
             engine_info!(
                 "[signal-cache] Hydrated {} entries from persistent store",
                 cache.len()
             );
-            let mut effects = Vec::new();
-            signal_candidate::handle_cache_loaded(&mut state, cache, &mut effects);
-            effects
+            signal_candidate::handle_cache_loaded(&mut state, cache);
+            Vec::new()
         }
         Msg::SignalCandidateOverridesLoaded { overrides } => {
             engine_info!(
@@ -518,9 +518,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             );
             state.set_triage_cache(cache);
             state.mark_dirty();
-            let mut effects = Vec::new();
-            signal_candidate::sweep_eligible_after_hydration(&mut state, &mut effects);
-            effects
+            Vec::new()
         }
         Msg::OpenInBrowserClicked => match state.selected_article_url() {
             Some(url) => {
@@ -644,6 +642,7 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         state.rebuild_cache_derived_archive_index();
     }
     pipeline_run::record_progress_after(&mut state, progress_before);
+    pipeline_run::finish_if_settled(&mut state);
     if persist_runtime_state {
         effects.push(Effect::PersistRuntimeState {
             snapshot: crate::PersistenceSnapshot::capture(&state),

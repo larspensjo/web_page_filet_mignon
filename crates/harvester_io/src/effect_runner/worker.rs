@@ -25,35 +25,65 @@ pub(super) enum EntityIndexWorkerMsg {
 
 /// Serialized entity-index worker.
 ///
-/// Processes `EntityIndexWorkerMsg::Upsert` messages one at a time, performing
-/// a full load → merge → atomic-write cycle per message to ensure no concurrent writes.
+/// Each cycle takes every upsert already queued and applies them with one
+/// load → merge → atomic-write, so a burst costs one rewrite of the index file
+/// rather than one per entry. Writes stay serialized on this thread.
 ///
-/// Exits when the sender (`entity_index_worker_tx`) is dropped (channel closed).
-pub(super) fn run_entity_index_worker(rx: mpsc::Receiver<EntityIndexWorkerMsg>, path: PathBuf) {
+/// Exits when the sender (`entity_index_worker_tx`) is dropped (channel closed)
+/// and returns the number of index writes it performed.
+pub(super) fn run_entity_index_worker(
+    rx: mpsc::Receiver<EntityIndexWorkerMsg>,
+    path: PathBuf,
+) -> usize {
     engine_info!("[entity-index] worker started");
-    for msg in rx {
-        match msg {
-            EntityIndexWorkerMsg::Upsert { url, patch } => {
-                let mut index = crate::entity_index_store::load_entity_index(&path);
-                crate::entity_index_store::upsert_entry(&mut index, &url, patch);
-                if let Err(e) = crate::entity_index_store::save_entity_index(&path, &index) {
-                    engine_error!(
-                        "[entity-index] worker failed to save after upsert for '{}': {}",
-                        url,
-                        e
-                    );
-                } else {
-                    engine_debug!("[entity-index] upserted entry for '{}'", url);
+    let mut writes = 0;
+    while let Ok(first) = rx.recv() {
+        let mut batch = Vec::new();
+        let mut next = Some(first);
+        while let Some(msg) = next.take() {
+            match msg {
+                EntityIndexWorkerMsg::Upsert { url, patch } => batch.push((url, patch)),
+                #[cfg(test)]
+                EntityIndexWorkerMsg::Flush { done } => {
+                    // Everything queued before the flush is written before it is acknowledged.
+                    writes += write_entity_index_batch(&path, std::mem::take(&mut batch));
+                    let _ = done.send(());
                 }
             }
-            #[cfg(test)]
-            EntityIndexWorkerMsg::Flush { done } => {
-                // All prior messages have been processed by the time we reach here.
-                let _ = done.send(());
-            }
+            next = rx.try_recv().ok();
         }
+        writes += write_entity_index_batch(&path, batch);
     }
-    engine_info!("[entity-index] worker exited cleanly");
+    engine_info!("[entity-index] worker exited cleanly writes={writes}");
+    writes
+}
+
+fn write_entity_index_batch(
+    path: &std::path::Path,
+    batch: Vec<(String, EntityIndexPatch)>,
+) -> usize {
+    if batch.is_empty() {
+        return 0;
+    }
+    let started = Instant::now();
+    let entries = batch.len();
+    let mut index = crate::entity_index_store::load_entity_index(path);
+    for (url, patch) in batch {
+        crate::entity_index_store::upsert_entry(&mut index, &url, patch);
+    }
+    match crate::entity_index_store::save_entity_index(path, &index) {
+        Ok(_) => engine_debug!(
+            "[entity-index] upserted entries={} elapsed_ms={}",
+            entries,
+            started.elapsed().as_millis()
+        ),
+        Err(e) => engine_error!(
+            "[entity-index] worker failed to save after upserting entries={}: {}",
+            entries,
+            e
+        ),
+    }
+    1
 }
 
 /// Execute a single pre-triage article load in the calling thread.

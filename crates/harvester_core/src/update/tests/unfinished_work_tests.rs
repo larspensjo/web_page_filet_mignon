@@ -578,8 +578,9 @@ fn window_metadata_session_and_cache_changes_refresh_the_stored_summary() {
         },
     );
     assert_eq!(known(&state).needs_triage, 0);
-    assert_eq!(known(&state).needs_summary, 1);
-    assert_eq!(known(&state).estimated_calls, 2);
+    assert_eq!(known(&state).needs_summary, 0);
+    assert_eq!(known(&state).in_progress, 1);
+    assert_eq!(known(&state).estimated_calls, 0);
 }
 
 #[test]

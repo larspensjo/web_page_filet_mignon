@@ -58,12 +58,27 @@ fn archive_clicked_with_triage_complete_and_pre_triage_ready_sets_pending_count(
     let url = "https://pending.com/1";
     let state = add_completed_job_for_test(state, url);
     let (state, request_id) = tick_until_dispatch(state);
+    let retained = state
+        .triage()
+        .articles()
+        .iter()
+        .map(|a| LoadedArticle {
+            url: a.url.clone(),
+            source_title: a.source_title.clone(),
+            prepared_text: a.prepared_text.clone(),
+            content_hash: a.content_hash.clone(),
+            fetched_utc: a.fetched_utc.clone(),
+        })
+        .collect::<Vec<_>>();
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
             delta: harvester_engine::TriageArticleDelta::full_window(
-                loaded_pre_triage_articles(&[url]),
+                retained
+                    .into_iter()
+                    .chain(loaded_pre_triage_articles(&[url]))
+                    .collect(),
                 100_000,
             ),
         },
@@ -1561,12 +1576,27 @@ fn refresh_between_open_and_submit_uses_pinned_snapshot() {
     let pre_triage_url = "https://pretriage.com/1";
     let state = add_completed_job_for_test(state, pre_triage_url);
     let (state, request_id2) = tick_until_dispatch(state);
+    let retained = state
+        .triage()
+        .articles()
+        .iter()
+        .map(|a| LoadedArticle {
+            url: a.url.clone(),
+            source_title: a.source_title.clone(),
+            prepared_text: a.prepared_text.clone(),
+            content_hash: a.content_hash.clone(),
+            fetched_utc: a.fetched_utc.clone(),
+        })
+        .collect::<Vec<_>>();
     let (state, _) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id: request_id2,
             delta: harvester_engine::TriageArticleDelta::full_window(
-                loaded_pre_triage_articles(&[pre_triage_url]),
+                retained
+                    .into_iter()
+                    .chain(loaded_pre_triage_articles(&[pre_triage_url]))
+                    .collect(),
                 100_000,
             ),
         },

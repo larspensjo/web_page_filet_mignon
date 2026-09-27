@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 9,
+  "schema_version": 10,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -115,9 +115,85 @@
     },
     "run_completion_notice": null,
     "run_progress": {
-      "activity": [],
-      "run_active": false,
-      "stages": []
+      "activity": [
+        {
+          "outcome": "Succeeded",
+          "seq": 0,
+          "stage": "Triaging",
+          "title": "Lower-priority fixture",
+          "url": "https://example.invalid/lower-priority"
+        },
+        {
+          "outcome": "Succeeded",
+          "seq": 1,
+          "stage": "Triaging",
+          "title": "Higher-priority fixture",
+          "url": "https://example.invalid/higher-priority"
+        }
+      ],
+      "run_active": true,
+      "stages": [
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "stage": "ScanningSources",
+          "started_at_utc": null,
+          "status": "Pending",
+          "total": 0,
+          "total_is_final": false
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "stage": "DownloadingArticles",
+          "started_at_utc": null,
+          "status": "Pending",
+          "total": 0,
+          "total_is_final": false
+        },
+        {
+          "completed": 2,
+          "ended_at_utc": "2023-11-14T22:13:24Z",
+          "failed": 0,
+          "stage": "LoadingArticles",
+          "started_at_utc": "2023-11-14T22:13:24Z",
+          "status": "Done",
+          "total": 2,
+          "total_is_final": true
+        },
+        {
+          "completed": 2,
+          "ended_at_utc": null,
+          "failed": 0,
+          "stage": "Triaging",
+          "started_at_utc": "2023-11-14T22:13:24Z",
+          "status": "Active",
+          "total": 2,
+          "total_is_final": true
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "stage": "Summarizing",
+          "started_at_utc": "2023-11-14T22:13:24Z",
+          "status": "Active",
+          "total": 2,
+          "total_is_final": true
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
+          "failed": 0,
+          "stage": "ScoringSignals",
+          "started_at_utc": null,
+          "status": "Pending",
+          "total": 0,
+          "total_is_final": false
+        }
+      ]
     },
     "selected_job_id": null,
     "selected_url": null,
@@ -125,7 +201,7 @@
     "signal_candidate_preview": null,
     "signal_candidate_rows": [],
     "stop_finish_button": "Disabled",
-    "summaries_can_start": true,
+    "summaries_can_start": false,
     "token_limit": 100000,
     "total_tokens": 84,
     "triage_blocked_reason": null,

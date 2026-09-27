@@ -153,16 +153,45 @@ impl AppState {
         if self.processing_start.is_some() || self.pre_triage_coordinator.refresh_pending() {
             return BatchNextAction::None;
         }
-        let pre_triage_included = self.pre_triage.resolved_included_articles().len();
+        let needs_admission = self
+            .pre_triage
+            .tentative_included_url_refs()
+            .filter_map(|url| {
+                self.pre_triage
+                    .article_content_hash(url)
+                    .map(|hash| (url, hash))
+            })
+            .any(|(url, hash)| {
+                let identity = (url.to_owned(), hash.to_owned());
+                if self.pipeline_run_armed()
+                    && self
+                        .pipeline_admission
+                        .as_ref()
+                        .is_some_and(|r| r.admitted[0].contains(&identity))
+                {
+                    return false;
+                }
+                if self.triage.index_for_identity(url, hash).is_none() {
+                    return true;
+                }
+                if let Some(class) = self.unfinished_classes.get(&identity) {
+                    return matches!(
+                        class,
+                        crate::UnfinishedWorkClass::NeedsTriage
+                            | crate::UnfinishedWorkClass::NeedsSummary
+                            | crate::UnfinishedWorkClass::NeedsScoring
+                    );
+                }
+                self.current_triage_cache_key(hash)
+                    .is_none_or(|k| self.triage_cache().lookup(&k).is_none())
+            });
 
-        if self.can_start_triage_from_pre_triage()
-            && self.triage.can_start()
-            && self.triage.total() < pre_triage_included
-        {
+        if self.can_start_triage_from_pre_triage() && !self.triage.is_active() && needs_admission {
             return BatchNextAction::DispatchTriage;
         }
 
-        if matches!(self.triage.phase(), TriagePhase::Complete)
+        if !self.pipeline_run_armed()
+            && matches!(self.triage.phase(), TriagePhase::Complete)
             && self.triage.completed_count() > 0
             && self.briefing.can_start()
             && !self.triage.is_active()

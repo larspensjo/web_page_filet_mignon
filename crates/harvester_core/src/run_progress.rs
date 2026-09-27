@@ -49,6 +49,7 @@ pub struct StageRecord {
     pub completed: u32,
     pub failed: u32,
     pub total: u32,
+    pub total_is_final: bool,
     pub started_at_utc: Option<DateTime<Utc>>,
     pub ended_at_utc: Option<DateTime<Utc>>,
 }
@@ -60,6 +61,7 @@ impl Default for StageRecord {
             completed: 0,
             failed: 0,
             total: 0,
+            total_is_final: false,
             started_at_utc: None,
             ended_at_utc: None,
         }
@@ -162,6 +164,7 @@ impl RunProgress {
     }
     pub(crate) fn finish(&mut self, stage: PipelineStage, now: Option<DateTime<Utc>>) {
         let record = self.stage_mut(stage);
+        record.total_is_final = true;
         if matches!(record.status, StageStatus::Pending) {
             return;
         }
@@ -177,12 +180,26 @@ impl RunProgress {
     pub(crate) fn stop(&mut self, now: Option<DateTime<Utc>>) {
         for stage in PipelineStage::ALL {
             let record = self.stage_mut(stage);
+            record.total_is_final = true;
             if matches!(record.status, StageStatus::Active) {
-                record.status = StageStatus::Done;
+                record.status = if record.completed == 0 && record.failed > 0 {
+                    StageStatus::Failed
+                } else {
+                    StageStatus::Done
+                };
                 record.ended_at_utc = now;
             }
         }
         self.terminal = true;
+    }
+    pub(crate) fn settle(&mut self, now: Option<DateTime<Utc>>) {
+        self.stop(now);
+        for record in &mut self.stages {
+            if record.status == StageStatus::Pending {
+                record.status = StageStatus::Done;
+                record.ended_at_utc = now;
+            }
+        }
     }
     pub(crate) fn push_activity(
         &mut self,
@@ -220,6 +237,7 @@ pub struct StageProgress {
     pub completed: u32,
     pub failed: u32,
     pub total: u32,
+    pub total_is_final: bool,
     pub started_at_utc: Option<DateTime<Utc>>,
     pub ended_at_utc: Option<DateTime<Utc>>,
 }
@@ -237,6 +255,7 @@ impl RunProgress {
                         completed: r.completed,
                         failed: r.failed,
                         total: r.total,
+                        total_is_final: r.total_is_final,
                         started_at_utc: r.started_at_utc,
                         ended_at_utc: r.ended_at_utc,
                     }
@@ -252,7 +271,6 @@ impl RunProgress {
 pub enum PipelineRunPhase {
     Idle,
     Requested,
-    Dispatched { since_seq: u64 },
     AwaitingSettle,
     Stopping,
 }

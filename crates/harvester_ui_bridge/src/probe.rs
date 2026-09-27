@@ -181,6 +181,7 @@ fn synthetic_run_progress(generation: u64) -> RunProgressView {
         .into_iter()
         .enumerate()
         .map(|(index, stage)| StageProgress {
+            total_is_final: true,
             stage,
             status: if index < 4 {
                 StageStatus::Done

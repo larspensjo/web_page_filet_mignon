@@ -18,6 +18,7 @@ fn article(name: &str) -> LoadedArticle {
 
 fn state_with_work(triage: &[&str], summaries: &[&str], scores: &[&str]) -> AppState {
     let mut state = AppState::new();
+    crate::update::test_support::arm_admitted(&mut state);
     state.set_llm_metadata(
         STAGE_PRIORITY.iter().map(|id| (*id, 1)).collect(),
         STAGE_PRIORITY
@@ -260,6 +261,7 @@ fn changed_in_flight_score_settles_and_caches_old_request_before_readmission() {
     ));
     assert!(state.try_reuse_signal_candidate(&first_key).is_some());
     assert_eq!(state.signal_candidate().enqueued_count(), 1);
+    crate::update::test_support::arm_admitted(&mut state);
     assert!(try_enqueue(&mut state, &url));
     assert_eq!(state.signal_candidate().enqueued_count(), 2);
     let (state, effects) = crate::update(state, Msg::NoOp);
@@ -336,6 +338,7 @@ fn triage_cache_hit_rejects_old_summary_then_current_completion_admits_scoring()
     summaries.set_articles(vec![article("article")], "collection".into());
     summaries.transition_to_summarizing();
     state.set_briefing(summaries);
+    crate::update::test_support::arm_admitted(&mut state);
     let (state, effects) = crate::update(state, Msg::NoOp);
     let id = requests(&effects)[0].0;
     let (state, effects) = completion(
@@ -393,6 +396,8 @@ fn changed_summary_replaces_completed_and_failed_scores_but_same_digest_is_refus
             summary_result("changed"),
             "later".into(),
         );
+        assert!(!try_enqueue(&mut state, &url));
+        crate::update::test_support::arm_admitted(&mut state);
         assert!(try_enqueue(&mut state, &url));
         assert_ne!(
             state.signal_candidate().input_digest_for(&url),

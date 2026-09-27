@@ -181,6 +181,7 @@ pub fn format_briefing_time_window_label(
 pub struct BriefingSession {
     phase: BriefingPhase,
     articles: Vec<BriefingArticle>,
+    article_indices: std::collections::HashMap<(String, String), usize>,
     collection_text: Option<String>,
     briefing_request_id: Option<u64>,
     briefing_result: Option<BriefingResult>,
@@ -244,6 +245,7 @@ impl Default for BriefingSession {
         Self {
             phase: BriefingPhase::Idle,
             articles: Vec::new(),
+            article_indices: Default::default(),
             collection_text: None,
             briefing_request_id: None,
             briefing_result: None,
@@ -268,6 +270,7 @@ impl BriefingSession {
     pub fn new_loading(started_at: Option<String>) -> Self {
         Self {
             phase: BriefingPhase::LoadingArticles,
+            article_indices: Default::default(),
             articles: Vec::new(),
             collection_text: None,
             briefing_request_id: None,
@@ -464,6 +467,12 @@ impl BriefingSession {
                 cache_key_snapshot: None,
             })
             .collect();
+        self.article_indices = self
+            .articles
+            .iter()
+            .enumerate()
+            .map(|(i, a)| ((a.url.clone(), a.content_hash.clone()), i))
+            .collect();
         self.collection_text = Some(collection_text);
     }
 
@@ -490,14 +499,12 @@ impl BriefingSession {
     ) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.summary_state = ArticleSummaryState::Completed { result };
-            article.cache_key_snapshot = None;
         }
     }
 
     pub fn fail_article(&mut self, article_id: BriefingArticleId, reason: String) {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.summary_state = ArticleSummaryState::Failed { reason };
-            article.cache_key_snapshot = None;
         }
     }
 
@@ -505,6 +512,88 @@ impl BriefingSession {
         if let Some(article) = self.articles.get_mut(article_id) {
             article.summary_state = ArticleSummaryState::Deferred;
         }
+    }
+
+    pub(crate) fn admit(&mut self, loaded: LoadedArticle, key: Option<SummaryCacheKey>) {
+        if let Some(&index) = self
+            .article_indices
+            .get(&(loaded.url.clone(), loaded.content_hash.clone()))
+        {
+            let article = &mut self.articles[index];
+            article.prepared_text = loaded.prepared_text;
+            if matches!(
+                article.summary_state,
+                ArticleSummaryState::Pending
+                    | ArticleSummaryState::InProgress { .. }
+                    | ArticleSummaryState::Deferred
+            ) || (matches!(article.summary_state, ArticleSummaryState::Completed { .. })
+                && article.cache_key_snapshot == key)
+            {
+                return;
+            }
+            article.summary_state = ArticleSummaryState::Pending;
+            article.cache_key_snapshot = key;
+        } else {
+            self.article_indices.insert(
+                (loaded.url.clone(), loaded.content_hash.clone()),
+                self.articles.len(),
+            );
+            self.articles.push(BriefingArticle {
+                url: loaded.url,
+                source_title: loaded.source_title,
+                prepared_text: loaded.prepared_text,
+                content_hash: loaded.content_hash,
+                fetched_utc: loaded.fetched_utc,
+                summary_state: ArticleSummaryState::Pending,
+                cache_key_snapshot: key,
+            });
+        }
+        self.phase = BriefingPhase::Summarizing;
+    }
+
+    pub(crate) fn index_for_identity(&self, url: &str, hash: &str) -> Option<usize> {
+        self.article_indices
+            .get(&(url.to_owned(), hash.to_owned()))
+            .copied()
+    }
+
+    pub(crate) fn retain_members(&mut self, members: &std::collections::HashSet<(String, String)>) {
+        let previous_len = self.articles.len();
+        self.articles
+            .retain(|a| members.contains(&(a.url.clone(), a.content_hash.clone())));
+        self.article_indices = self
+            .articles
+            .iter()
+            .enumerate()
+            .map(|(i, a)| ((a.url.clone(), a.content_hash.clone()), i))
+            .collect();
+        if self.articles.len() != previous_len {
+            self.phase = if self.pending_count() + self.in_progress_count() > 0 {
+                BriefingPhase::Summarizing
+            } else if self.deferred_count() > 0 {
+                BriefingPhase::AwaitingBatch
+            } else if self.completed_summary_count() > 0 {
+                BriefingPhase::Complete
+            } else {
+                BriefingPhase::Failed {
+                    reason: "no successful admitted articles remain".into(),
+                }
+            };
+        }
+    }
+
+    pub(crate) fn withdraw_pending(&mut self) -> usize {
+        let pending = self.pending_count();
+        if pending > 0 {
+            let retained = self
+                .articles
+                .iter()
+                .filter(|a| !matches!(a.summary_state, ArticleSummaryState::Pending))
+                .map(|a| (a.url.clone(), a.content_hash.clone()))
+                .collect();
+            self.retain_members(&retained);
+        }
+        pending
     }
 
     pub fn deferred_count(&self) -> usize {

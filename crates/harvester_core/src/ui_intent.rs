@@ -89,7 +89,9 @@ impl UiIntent {
             DismissRunFinishedNotice => Msg::RunFinishedNoticeDismissed,
             PollSources => Msg::PollSourcesClicked,
             PollIndirectLinks => Msg::PollIndirectLinks,
-            RunPipeline => Msg::PipelineRunRequested,
+            RunPipeline => Msg::PipelineRunRequested {
+                scope: crate::PipelineRunScope::Resume,
+            },
             StopOrFinish => Msg::StopFinishClicked,
             OpenSelectedInBrowser => Msg::OpenInBrowserClicked,
             OpenExtractedLink { job_id, link_index } => {
@@ -203,7 +205,9 @@ mod tests {
             ),
             (
                 UiIntent::RunPipeline,
-                IntentEffect::Dispatch(Msg::PipelineRunRequested),
+                IntentEffect::Dispatch(Msg::PipelineRunRequested {
+                    scope: crate::PipelineRunScope::Resume,
+                }),
             ),
             (
                 UiIntent::StopOrFinish,

@@ -85,9 +85,13 @@ pub(crate) struct PreTriageRefreshCoordinator {
     poll_burst_active: bool,
     poll_sources_ended: bool,
     last_job_done_tick: Option<u64>,
+    overlap: bool,
 }
 
 impl PreTriageRefreshCoordinator {
+    pub(crate) fn set_overlap(&mut self, armed: bool) {
+        self.overlap = armed;
+    }
     pub(crate) fn refresh_pending(&self) -> bool {
         self.dirty || self.in_flight_request_id.is_some()
     }
@@ -115,6 +119,7 @@ impl PreTriageRefreshCoordinator {
             poll_burst_active: false,
             poll_sources_ended: false,
             last_job_done_tick: None,
+            overlap: false,
         }
     }
 
@@ -136,7 +141,7 @@ impl PreTriageRefreshCoordinator {
             return PreTriageRefreshScheduleResult::ImmediateReset;
         }
 
-        let quiet_ticks = if self.poll_burst_active {
+        let quiet_ticks = if self.poll_burst_active || self.overlap {
             QUIET_TICKS_AFTER_POLL
         } else {
             QUIET_TICKS_NORMAL
@@ -197,7 +202,7 @@ impl PreTriageRefreshCoordinator {
         // During an active poll burst, block dispatch until:
         //   - poll has ended AND no engine jobs are in flight
         //   - OR max-wait is exceeded (starvation guard)
-        if self.poll_burst_active && !max_wait_exceeded {
+        if self.poll_burst_active && !max_wait_exceeded && !self.overlap {
             if !self.poll_sources_ended {
                 return None;
             }
@@ -206,7 +211,9 @@ impl PreTriageRefreshCoordinator {
             }
         }
 
-        if current_tick < self.earliest_dispatch_tick && !max_wait_exceeded {
+        let downloads_settled =
+            self.overlap && self.poll_sources_ended && !has_in_flight_engine_jobs;
+        if current_tick < self.earliest_dispatch_tick && !max_wait_exceeded && !downloads_settled {
             return None;
         }
 

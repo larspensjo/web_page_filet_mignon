@@ -35,6 +35,12 @@ fn deferred_triage_settles_and_rearm_redispatches() {
     assert!(!state.triage().is_active());
     assert_eq!(state.batch_status(), BatchStatus::Settled);
 
+    let (state, _) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Continue,
+        },
+    );
     let (state, effects) = update(state, Msg::RearmDeferredBatchStages);
     assert_eq!(state.triage().in_progress_count(), 1);
     assert_eq!(
@@ -204,6 +210,12 @@ fn collected_summary_rearm_cache_hits_and_runs_post_processing_once() {
         .iter()
         .any(|effect| matches!(effect, Effect::PersistSummaryCache { .. })));
 
+    let (state, _) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Continue,
+        },
+    );
     let (state, effects) = update(state, Msg::RearmDeferredBatchStages);
     assert_eq!(state.briefing().completed_summary_count(), 1);
     assert_eq!(

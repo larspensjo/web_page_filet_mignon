@@ -46,6 +46,9 @@ pub(super) fn handle(
     } else if let Some(article_idx) = state.triage().find_article_by_request_id(request_id) {
         note_article_model_result(state, &result);
         handle_triage_completion(state, article_idx, &result, &mut effects);
+        let article = &state.triage().articles()[article_idx];
+        let identity = (article.url.clone(), article.content_hash.clone());
+        super::waves::triage_changed(state, &identity.0, &identity.1);
     } else if state.briefing().is_briefing_request(request_id) {
         note_owned_quota(state, &result);
         match request_prompt_id {

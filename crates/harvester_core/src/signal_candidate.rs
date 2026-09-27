@@ -59,19 +59,33 @@ pub struct SignalCandidateSession {
 }
 
 impl SignalCandidateSession {
+    pub(crate) fn retain_urls(&mut self, urls: &HashSet<String>) {
+        self.states.retain(|url, _| urls.contains(url));
+        self.input_digests.retain(|url, _| urls.contains(url));
+        self.admission_order.retain(|url| urls.contains(url));
+        self.pending_request_ids.retain(|url, _| urls.contains(url));
+        self.pending_urls_by_request
+            .retain(|_, url| urls.contains(url));
+    }
     pub fn enqueue(&mut self, url: String, input_digest: String) -> bool {
-        if self.states.contains_key(&url) && self.input_digests.get(&url) == Some(&input_digest) {
+        if self.states.contains_key(&url)
+            && self.input_digests.get(&url) == Some(&input_digest)
+            && !matches!(
+                self.states.get(&url),
+                Some(SignalCandidateState::Failed { .. })
+            )
+        {
             return false;
         }
-        match self.states.get(&url) {
-            Some(SignalCandidateState::Scoring { .. } | SignalCandidateState::Deferred) => {
-                return false;
-            }
-            Some(SignalCandidateState::Pending) => {
-                self.input_digests.insert(url, input_digest);
-                return true;
-            }
-            _ => {}
+        if matches!(
+            self.states.get(&url),
+            Some(
+                SignalCandidateState::Pending
+                    | SignalCandidateState::Scoring { .. }
+                    | SignalCandidateState::Deferred
+            )
+        ) {
+            return false;
         }
         self.admission_order.retain(|existing| existing != &url);
         self.admission_order.push(url.clone());
@@ -154,8 +168,27 @@ impl SignalCandidateSession {
     }
 
     pub fn rearm_deferred(&mut self) {
-        self.states
-            .retain(|_, state| !matches!(state, SignalCandidateState::Deferred));
+        for state in self.states.values_mut() {
+            if matches!(state, SignalCandidateState::Deferred) {
+                *state = SignalCandidateState::Pending;
+            }
+        }
+    }
+
+    pub(crate) fn withdraw_pending(&mut self) -> Vec<String> {
+        let withdrawn: Vec<_> = self
+            .states
+            .iter()
+            .filter(|(_, state)| matches!(state, SignalCandidateState::Pending))
+            .map(|(url, _)| url.clone())
+            .collect();
+        for url in &withdrawn {
+            self.states.remove(url);
+            self.input_digests.remove(url);
+        }
+        self.admission_order
+            .retain(|url| self.states.contains_key(url));
+        withdrawn
     }
 
     pub fn deferred_urls(&self) -> Vec<String> {
@@ -725,11 +758,11 @@ mod tests {
     }
 
     #[test]
-    fn changed_digest_updates_pending_without_replacing_scoring_or_deferred() {
+    fn changed_digest_preserves_pending_scoring_and_deferred_admission() {
         let mut session = SignalCandidateSession::default();
         assert!(session.enqueue("pending".into(), "first".into()));
-        assert!(session.enqueue("pending".into(), "second".into()));
-        assert_eq!(session.input_digest_for("pending"), Some("second"));
+        assert!(!session.enqueue("pending".into(), "second".into()));
+        assert_eq!(session.input_digest_for("pending"), Some("first"));
         assert_eq!(session.enqueued_count(), 1);
 
         assert!(session.enqueue("scoring".into(), "first".into()));
@@ -776,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn observation_counts_use_current_rearmed_epoch_not_historical_counters() {
+    fn observation_counts_include_accumulated_rearmed_members() {
         let mut session = SignalCandidateSession::default();
         session.enqueue("completed".into(), "fixture-input".to_string());
         session.complete(
@@ -796,8 +829,8 @@ mod tests {
         assert_eq!(session.completed_count(), 1);
         assert_eq!(session.failed_count(), 1);
         assert_eq!(session.enqueued_count(), 3);
-        assert_eq!(counts.total, 1);
-        assert_eq!(counts.pending_or_in_flight, 1);
+        assert_eq!(counts.total, 3);
+        assert_eq!(counts.pending_or_in_flight, 3);
         assert_eq!(counts.deferred, 0);
         assert_eq!(counts.completed, 0);
         assert_eq!(counts.failed, 0);

@@ -143,6 +143,7 @@ export type StageProgress = {
 	completed: number;
 	failed: number;
 	total: number;
+	total_is_final: boolean;
 	started_at_utc: string | null;
 	ended_at_utc: string | null;
 };

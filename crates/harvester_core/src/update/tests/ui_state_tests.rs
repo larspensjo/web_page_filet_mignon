@@ -157,9 +157,15 @@ fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigat
         },
     )
     .0;
-    let state = update(state, Msg::PipelineRunRequested).0;
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, duplicate_effects) = update(state, Msg::TriageClicked);
+    assert!(duplicate_effects.is_empty());
 
     assert!(effects.iter().any(|effect| matches!(
         effect,
@@ -189,7 +195,13 @@ fn job_selected_during_run_keeps_desktop_workspace_stable_after_legacy_navigatio
         },
     )
     .0;
-    let state = update(state, Msg::PipelineRunRequested).0;
+    let state = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    )
+    .0;
 
     let (state, _) = update(state, Msg::JobSelected { job_id });
 

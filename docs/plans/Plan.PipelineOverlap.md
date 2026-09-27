@@ -5,7 +5,8 @@ Revised the same day after the Codex plan review (eight issues, all applied) and
 answers to the first draft's twelve open questions, which are now stated as decisions below.
 Status: Phase 1 landed (incremental corpus hand-off). Phase 2 landed (one model-request budget,
 furthest-along first, current-key scoring). Phase 3 landed (identity-based completeness).
-Phases 4–8 not started.
+Phase 4 landed (waves, admission, run scopes and progress). Phases 5–8 remain outstanding,
+except the explicitly approved Continue-before-rearm batch collection step brought forward.
 
 Follow-up before Phase 4 (user decision 2026-09-25), done: building the desktop view at
 production scale took 90–700 ms against the 40 ms host-drain budget, depending on whether jobs

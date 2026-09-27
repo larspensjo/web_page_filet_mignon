@@ -133,6 +133,24 @@ pub fn evaluate_reprocess_notice(
 }
 
 impl AppState {
+    pub(crate) fn reprocess_counts(
+        &mut self,
+        previous: &std::collections::HashSet<(String, String)>,
+    ) -> (usize, u64) {
+        self.recompute_unfinished_work();
+        previous
+            .iter()
+            .filter_map(|identity| self.unfinished_classes.get(identity))
+            .fold((0, 0), |(articles, calls), class| {
+                let estimate = match class {
+                    UnfinishedWorkClass::NeedsTriage => 3,
+                    UnfinishedWorkClass::NeedsSummary => 2,
+                    UnfinishedWorkClass::NeedsScoring => 1,
+                    _ => 0,
+                };
+                (articles + usize::from(estimate > 0), calls + estimate)
+            })
+    }
     pub(crate) fn note_unfinished_inputs_changed(&mut self) {
         self.unfinished_inputs_revision = self.unfinished_inputs_revision.wrapping_add(1);
     }

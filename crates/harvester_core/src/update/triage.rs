@@ -1,5 +1,5 @@
 use crate::pre_triage_filter::{PreTriagePolicy, PreTriageSession};
-use crate::triage::TriageSession;
+
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
 
@@ -73,13 +73,30 @@ pub(super) fn handle_articles_loaded(
             .triage_mut()
             .refresh_preparation(&delta.articles, delta.preparation_budget);
     }
+    let members = delta
+        .members
+        .iter()
+        .map(|m| (m.url.clone(), m.content_hash.clone()))
+        .collect();
+    super::waves::prune(state, members);
     let policy = PreTriagePolicy::default();
     let job_url_pairs = state.job_url_pairs();
     state.pre_triage_mut().merge_delta(delta, &policy);
     state.pre_triage_mut().bind_job_ids(&job_url_pairs);
     state.refresh_selected_preview();
     state.mark_dirty();
-    super::processing::resume(state)
+    let effects = super::processing::resume(state);
+    if state.pipeline_ready()
+        && state.processing_start.is_none()
+        && state
+            .pipeline_admission
+            .as_ref()
+            .is_some_and(|r| r.scope != crate::PipelineRunScope::Continue)
+    {
+        let included = state.pre_triage().resolved_included_articles();
+        super::waves::admit_triage(state, included);
+    }
+    effects
 }
 
 pub(super) fn handle_articles_load_failed(
@@ -119,6 +136,9 @@ fn schedule_pre_triage_refresh(
     ordered_urls: Vec<String>,
 ) -> Vec<Effect> {
     let tick = state.current_tick();
+    state
+        .pre_triage_coordinator
+        .set_overlap(state.pipeline_run_armed());
     let result = state
         .pre_triage_coordinator
         .schedule_refresh(ordered_urls, reason, tick);
@@ -148,6 +168,11 @@ pub(super) fn dispatch_pre_triage_if_due(
     tick: u64,
     has_in_flight_engine_jobs: bool,
 ) -> Vec<Effect> {
+    if state.pipeline_run_armed() && !state.pipeline_ready() {
+        return Vec::new();
+    }
+    let armed = state.pipeline_run_armed();
+    state.pre_triage_coordinator.set_overlap(armed);
     let Some(dispatch) = state
         .pre_triage_coordinator
         .maybe_dispatch(tick, has_in_flight_engine_jobs)
@@ -195,12 +220,7 @@ pub(super) fn start_triage_from_pretriage(state: &mut AppState) -> Vec<Effect> {
         "[triage] consumed pre-triage for triage start count={}",
         included.len(),
     );
-    state.set_triage(TriageSession::new_loading(None));
-    let held = state.pre_triage().held_articles();
-    state.triage_mut().set_articles(included);
-    state.triage_mut().set_preparation_budgets(&held);
-    state.triage_mut().transition_to_triaging();
-    state.mark_dirty();
+    super::waves::admit_triage(state, included);
     state.start_triage_cache_run();
     state.mark_triage_metadata_ready();
     Vec::new()

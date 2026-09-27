@@ -207,6 +207,9 @@ impl AppState {
     }
 
     pub(crate) fn finalize_summary_cache_run(&mut self) {
+        if self.pipeline_run_armed() {
+            return;
+        }
         self.note_unfinished_global_inputs_changed();
         self.briefing_metadata_state = MetadataLoadState::Idle;
         self.summary_cache_metadata_snapshot = None;

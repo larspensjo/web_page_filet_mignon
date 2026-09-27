@@ -46,3 +46,35 @@ pub fn complete_processing_configuration(
         },
     )
 }
+
+/// Completes the configuration and fresh membership read using the fixture's held corpus.
+#[doc(hidden)]
+pub fn complete_processing_start(
+    state: AppState,
+    effects: Vec<Effect>,
+    preparation_budget: usize,
+) -> (AppState, Vec<Effect>) {
+    let articles = state.pre_triage().resolved_included_articles();
+    let configuring = effects
+        .iter()
+        .any(|e| matches!(e, Effect::LoadProcessingConfiguration { .. }));
+    let (state, effects) = complete_processing_configuration(state, effects, preparation_budget);
+    if configuring {
+        if let Some(request_id) = effects.iter().find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        }) {
+            return crate::update(
+                state,
+                Msg::TriageArticlesLoaded {
+                    request_id,
+                    delta: harvester_engine::TriageArticleDelta::full_window(
+                        articles,
+                        preparation_budget,
+                    ),
+                },
+            );
+        }
+    }
+    (state, effects)
+}

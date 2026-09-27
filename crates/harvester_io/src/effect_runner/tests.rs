@@ -882,3 +882,39 @@ fn archive_requested_writes_archive_markdown_for_selected_urls() {
     assert!(!archive.contains("https://example.com/a"));
     assert!(!archive.contains("A body"));
 }
+
+#[test]
+fn entity_index_worker_writes_a_queued_burst_once() {
+    use super::worker::{run_entity_index_worker, EntityIndexWorkerMsg};
+    use crate::entity_index_store::EntityIndexPatch;
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join(".entity_index.ron");
+    // A run start that reuses cached triage and summaries emits one upsert per result, and a
+    // desktop start routinely exceeds the old 256-slot queue in a single reducer step.
+    let burst = 300;
+    let (tx, rx) = mpsc::channel();
+    for index in 0..burst {
+        tx.send(EntityIndexWorkerMsg::Upsert {
+            url: format!("https://example.test/{index}"),
+            patch: EntityIndexPatch {
+                fetched_utc: None,
+                content_hash: Some(format!("hash-{index}")),
+                summary_entities: None,
+                themes: Some(vec!["topic".into()]),
+            },
+        })
+        .unwrap();
+    }
+    drop(tx);
+
+    let writes = run_entity_index_worker(rx, path.clone());
+
+    assert_eq!(writes, 1, "a queued burst must cost one load and one write");
+    let index = crate::load_entity_index(&path);
+    assert_eq!(index.entries.len(), burst);
+    assert_eq!(
+        index.entries["https://example.test/299"].themes,
+        vec!["topic".to_string()]
+    );
+}

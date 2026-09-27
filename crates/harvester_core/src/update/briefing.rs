@@ -1,5 +1,5 @@
 use super::summary_cache_support::log_summary_cache_run_summary;
-use crate::briefing::{BriefingPhase, BriefingSession};
+use crate::briefing::BriefingPhase;
 use crate::state::BriefingGenerateReadiness;
 use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
@@ -56,15 +56,10 @@ pub(super) fn start_summaries_from_triage(state: &mut AppState) -> Vec<Effect> {
     state.request_summary_preparation();
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
-    state.set_briefing(BriefingSession::new_loading(None));
     snapshot_briefing_coverage_window(state);
-    let effects = handle_articles_loaded(state, articles, String::new());
-    if state.run_progress_is_active() {
-        super::pipeline_run::record_summaries(state, true);
-    }
-    effects
+    super::waves::admit_summaries(state, articles);
+    Vec::new()
 }
-
 fn fail_generate(state: &mut AppState, reason: &str) -> Vec<Effect> {
     engine_warn!("[briefing-triage] generate blocked: {}", reason);
     state.briefing_mut().fail(reason.to_string());

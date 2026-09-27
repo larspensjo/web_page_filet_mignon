@@ -32,15 +32,18 @@ pub(super) fn dispatch_model_work(state: &mut AppState, effects: &mut Vec<Effect
             state.clear_signal_candidate_input_snapshot(&url);
         }
     } else {
-        loop {
-            let progressed = STAGE_PRIORITY.iter().any(|stage| match stage {
-                PromptId::ArticleSignalCandidate => dispatch_scoring(state, effects),
-                PromptId::ArticleSummary => dispatch_summary(state, effects),
-                PromptId::ArticleTriage => dispatch_triage(state, effects),
-                _ => unreachable!(),
-            });
-            if !progressed {
-                break;
+        if state.pipeline_ready() {
+            loop {
+                super::waves::release_ready(state);
+                let progressed = STAGE_PRIORITY.iter().any(|stage| match stage {
+                    PromptId::ArticleSignalCandidate => dispatch_scoring(state, effects),
+                    PromptId::ArticleSummary => dispatch_summary(state, effects),
+                    PromptId::ArticleTriage => dispatch_triage(state, effects),
+                    _ => unreachable!(),
+                });
+                if !progressed {
+                    break;
+                }
             }
         }
     }
@@ -55,11 +58,7 @@ pub(super) fn dispatch_model_work(state: &mut AppState, effects: &mut Vec<Effect
 }
 
 fn dispatch_scoring(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
-    let Some(url) = state
-        .signal_candidate()
-        .next_pending_url()
-        .map(str::to_owned)
-    else {
+    let Some(url) = super::waves::next_score(state) else {
         return false;
     };
     let Some(snapshot) = state.signal_candidate_input_snapshot(&url).cloned() else {
@@ -117,7 +116,7 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
         return false;
     }
     super::triage::log_triage_cache_run_start_if_needed(state);
-    let Some(next_idx) = state.triage().next_pending_index() else {
+    let Some(next_idx) = super::waves::next_article(state, crate::PipelineStage::Triaging) else {
         return false;
     };
     let content_hash = state.triage().articles()[next_idx].content_hash.clone();
@@ -151,6 +150,7 @@ fn dispatch_triage(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
                     triage_priority,
                     signal_state_present_before_enqueue
                 );
+            super::waves::triage_changed(state, &url, &content_hash);
             let enqueued = try_enqueue(state, &url);
             engine_info!(
                 "[signal-dispatch] triage cache-hit enqueue url={} enqueued={}",
@@ -234,7 +234,8 @@ fn dispatch_summary(state: &mut AppState, effects: &mut Vec<Effect>) -> bool {
         return false;
     }
     log_summary_cache_warmup_if_needed(state);
-    let Some(next_idx) = state.briefing().next_pending_index() else {
+    let Some(next_idx) = super::waves::next_article(state, crate::PipelineStage::Summarizing)
+    else {
         return false;
     };
     let article = &state.briefing().articles()[next_idx];

@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 9,
+  "schema_version": 10,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -23,7 +23,7 @@
           "bytes": 1024,
           "downloaded_link_count": 0,
           "fetched_utc": "2023-11-14T22:13:20Z",
-          "filter_status": null,
+          "filter_status": "AutoIncluded",
           "has_analysis": true,
           "has_summary": true,
           "is_since_checkpoint": true,
@@ -50,7 +50,7 @@
       "selected_job": {
         "bytes": 1024,
         "fetched_utc": "2023-11-14T22:13:20Z",
-        "filter_status": null,
+        "filter_status": "AutoIncluded",
         "has_summary": true,
         "job_id": 1,
         "links": [
@@ -88,7 +88,7 @@
       "count": 0,
       "phase": "Ready"
     },
-    "is_pre_triage_reviewing": false,
+    "is_pre_triage_reviewing": true,
     "job_count": 1,
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
@@ -152,7 +152,7 @@
       }
     },
     "run_completion_notice": {
-      "completed_at_utc": "2023-11-14T22:13:36Z",
+      "completed_at_utc": "2023-11-14T22:13:21Z",
       "new_result_count": 1
     },
     "run_progress": {
@@ -202,7 +202,8 @@
           "stage": "ScanningSources",
           "started_at_utc": "2023-11-14T22:13:20Z",
           "status": "Done",
-          "total": 1
+          "total": 1,
+          "total_is_final": true
         },
         {
           "completed": 1,
@@ -211,43 +212,48 @@
           "stage": "DownloadingArticles",
           "started_at_utc": "2023-11-14T22:13:20Z",
           "status": "Done",
-          "total": 1
+          "total": 1,
+          "total_is_final": true
         },
         {
           "completed": 1,
-          "ended_at_utc": "2023-11-14T22:13:36Z",
+          "ended_at_utc": "2023-11-14T22:13:21Z",
           "failed": 0,
           "stage": "LoadingArticles",
-          "started_at_utc": "2023-11-14T22:13:36Z",
+          "started_at_utc": "2023-11-14T22:13:20Z",
           "status": "Done",
-          "total": 1
+          "total": 1,
+          "total_is_final": true
         },
         {
           "completed": 1,
-          "ended_at_utc": "2023-11-14T22:13:36Z",
+          "ended_at_utc": "2023-11-14T22:13:21Z",
           "failed": 0,
           "stage": "Triaging",
-          "started_at_utc": "2023-11-14T22:13:36Z",
+          "started_at_utc": "2023-11-14T22:13:21Z",
           "status": "Done",
-          "total": 1
+          "total": 1,
+          "total_is_final": true
         },
         {
           "completed": 1,
-          "ended_at_utc": "2023-11-14T22:13:36Z",
+          "ended_at_utc": "2023-11-14T22:13:21Z",
           "failed": 0,
           "stage": "Summarizing",
-          "started_at_utc": "2023-11-14T22:13:36Z",
+          "started_at_utc": "2023-11-14T22:13:21Z",
           "status": "Done",
-          "total": 1
+          "total": 1,
+          "total_is_final": true
         },
         {
           "completed": 1,
-          "ended_at_utc": "2023-11-14T22:13:36Z",
+          "ended_at_utc": "2023-11-14T22:13:21Z",
           "failed": 0,
           "stage": "ScoringSignals",
-          "started_at_utc": "2023-11-14T22:13:36Z",
+          "started_at_utc": "2023-11-14T22:13:21Z",
           "status": "Done",
-          "total": 1
+          "total": 1,
+          "total_is_final": true
         }
       ]
     },
@@ -284,7 +290,7 @@
     "token_limit": 100000,
     "total_tokens": 0,
     "triage_blocked_reason": null,
-    "triage_can_start": false,
+    "triage_can_start": true,
     "triage_results_reorder_suppressed": false,
     "workspace_view": "Review"
   },

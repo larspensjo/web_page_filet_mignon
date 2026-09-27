@@ -98,7 +98,7 @@ pub struct EffectRunner {
     llm_metadata_models: HashMap<PromptId, String>,
     platform_handler: Box<dyn PlatformEffectHandler>,
     /// Sender to the serialized entity-index worker. Dropping this closes the channel.
-    entity_index_worker_tx: mpsc::SyncSender<EntityIndexWorkerMsg>,
+    entity_index_worker_tx: mpsc::Sender<EntityIndexWorkerMsg>,
     /// Host-selected sink for reducer-emitted runtime persistence snapshots.
     persistence_sink: Box<dyn RuntimePersistenceSink>,
 }
@@ -166,9 +166,10 @@ impl EffectRunner {
 
         // Spawn the serialized entity-index worker.
         // All UpsertEntityIndexEntry effects are forwarded to this single-threaded worker,
-        // which processes them sequentially (load â†’ merge â†’ atomic write).
+        // which applies each queued burst with one load, merge and atomic write. The queue is
+        // unbounded so the host thread that executes effects never waits on disk writes.
         let entity_index_path = paths.entity_index_path.clone();
-        let (worker_tx, worker_rx) = mpsc::sync_channel::<EntityIndexWorkerMsg>(256);
+        let (worker_tx, worker_rx) = mpsc::channel::<EntityIndexWorkerMsg>();
         thread::spawn(move || {
             run_entity_index_worker(worker_rx, entity_index_path);
         });
@@ -209,7 +210,7 @@ impl EffectRunner {
         let engine = EngineHandle::new(engine_config);
 
         let entity_index_path = paths.entity_index_path.clone();
-        let (worker_tx, worker_rx) = mpsc::sync_channel::<EntityIndexWorkerMsg>(256);
+        let (worker_tx, worker_rx) = mpsc::channel::<EntityIndexWorkerMsg>();
         thread::spawn(move || {
             run_entity_index_worker(worker_rx, entity_index_path);
         });

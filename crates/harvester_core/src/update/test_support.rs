@@ -40,3 +40,20 @@ pub(crate) fn update(state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     }
     (state, effects)
 }
+
+/// Build a configured run around explicitly seeded admitted-work fixtures.
+/// Production and lifecycle tests enter through messages instead.
+pub(crate) fn arm_admitted(state: &mut AppState) {
+    super::pipeline_run::begin_run_if_needed(state);
+    let mut run = crate::pipeline_waves::PipelineAdmission::new(
+        crate::PipelineRunScope::Continue,
+        true,
+        Default::default(),
+    );
+    state.start_summary_cache_run();
+    state.mark_briefing_metadata_ready();
+    run.configured = true;
+    run.awaiting_rearm = false;
+    state.pipeline_admission = Some(run);
+    state.set_pipeline_run_phase(crate::PipelineRunPhase::AwaitingSettle);
+}

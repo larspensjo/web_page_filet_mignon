@@ -234,31 +234,28 @@ fn selected_fixture_state(empty: &AppState) -> AppState {
 }
 
 fn run_in_progress_with_failures() -> AppState {
-    let (state, _, _) = prepared_article_state_with_source_failure(true);
+    let (state, _, _, _) = prepared_article_state_with_source_failure(true);
     let state = add_llm_metadata(state);
-    let state = reduce(state, Msg::PipelineRunRequested);
+    let state = reduce(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
     let state = reduce(state, Msg::PipelineRunAdvance);
     assert!(state.view().run_progress.run_active);
     state
 }
 
 fn completed_run_state() -> AppState {
-    let (mut state, _article, job_id) = prepared_article_state();
+    let (mut state, _article, job_id, triage_effects) = prepared_article_state();
     state = add_llm_metadata(state);
-    let (next, _) = update(state, Msg::PipelineRunRequested);
-    state = next;
-    let (next, triage_effects) = update(state, Msg::PipelineRunAdvance);
-    state = next;
     let triage_request_id = request_id(&triage_effects, PromptId::ArticleTriage, "triage");
-    state = reduce(state, triage_success(triage_request_id, 4));
-
-    state = reduce(state, Msg::PipelineRunAdvance);
-    let (next, summary_effects) = update(state, Msg::PipelineRunAdvance);
+    let (next, summary_effects) = update(state, triage_success(triage_request_id, 4));
     state = next;
     assert!(summary_effects
         .iter()
         .all(|effect| !matches!(effect, Effect::LoadArticlesForBriefing { .. })));
-    state = reduce(state, Msg::PipelineRunAdvance);
     let summary_request_id = request_id(&summary_effects, PromptId::ArticleSummary, "summary");
     let (next, signal_effects) = update(state, summary_success(summary_request_id));
     state = next;
@@ -276,13 +273,13 @@ fn completed_run_state() -> AppState {
     state
 }
 
-fn prepared_article_state() -> (AppState, harvester_core::LoadedArticle, u64) {
+fn prepared_article_state() -> (AppState, harvester_core::LoadedArticle, u64, Vec<Effect>) {
     prepared_article_state_with_source_failure(false)
 }
 
 fn prepared_article_state_with_source_failure(
     with_source_failure: bool,
-) -> (AppState, harvester_core::LoadedArticle, u64) {
+) -> (AppState, harvester_core::LoadedArticle, u64, Vec<Effect>) {
     let article = harvester_core::LoadedArticle {
         url: "https://fixture.invalid/article".into(),
         source_title: Some("Fixture article".into()),
@@ -290,7 +287,7 @@ fn prepared_article_state_with_source_failure(
         content_hash: "fixture-content-hash".into(),
         fetched_utc: Some("2023-11-14T22:13:20Z".into()),
     };
-    let state = reduce(AppState::new(), Msg::tick_at(time(0)));
+    let state = reduce(add_llm_metadata(AppState::new()), Msg::tick_at(time(0)));
     let state = reduce(state, Msg::PollSourcesClicked);
     let state = reduce(
         state,
@@ -326,7 +323,12 @@ fn prepared_article_state_with_source_failure(
             _ => None,
         })
         .expect("fixture job is enqueued");
-    let state = reduce(state, Msg::PipelineRunRequested);
+    let state = reduce(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
     let state = reduce(state, Msg::AllSourcesPollEnded);
     let state = reduce(
         state,
@@ -362,7 +364,7 @@ fn prepared_article_state_with_source_failure(
         },
     );
     let (state, load_request_id) = triage_load_request(state);
-    let state = reduce(
+    let (state, effects) = update(
         state,
         Msg::TriageArticlesLoaded {
             request_id: load_request_id,
@@ -372,7 +374,7 @@ fn prepared_article_state_with_source_failure(
             ),
         },
     );
-    (state, article, job_id)
+    (state, article, job_id, effects)
 }
 
 fn triage_load_request(mut state: AppState) -> (AppState, u64) {
@@ -515,7 +517,7 @@ fn time(offset_seconds: i64) -> DateTime<Utc> {
 
 fn update(state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     let (state, effects) = harvester_core::update(state, msg);
-    harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000)
+    harvester_core::fixture_support::complete_processing_start(state, effects, 100_000)
 }
 
 #[cfg(test)]

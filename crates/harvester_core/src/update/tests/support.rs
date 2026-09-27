@@ -93,11 +93,12 @@ pub(super) fn with_summary_metadata(state: AppState) -> AppState {
         PromptId::BriefingNextItem,
         vec![("policy".to_string(), "briefing context".to_string())],
     );
-    let (state, _) = update(state, Msg::PromptContextsLoaded { contexts });
+    let (mut state, _) = update(state, Msg::PromptContextsLoaded { contexts });
+    seed_current_triage_cache(&mut state);
     state
 }
 
-pub(super) fn with_signal_candidate_metadata(state: AppState) -> AppState {
+pub(super) fn with_signal_candidate_metadata(mut state: AppState) -> AppState {
     let mut active_versions = HashMap::new();
     active_versions.insert(PromptId::ArticleTriage, 1);
     active_versions.insert(PromptId::ArticleSummary, 1);
@@ -119,13 +120,8 @@ pub(super) fn with_signal_candidate_metadata(state: AppState) -> AppState {
         PromptId::BriefingNextItem,
         "test-briefing-model".to_string(),
     );
-    let (mut state, _) = update(
-        state,
-        Msg::LlmMetadataLoaded {
-            active_versions,
-            effective_models,
-        },
-    );
+    state.set_llm_metadata(active_versions, effective_models);
+    state.reconcile_ai_availability_from_metadata();
     seed_current_triage_cache(&mut state);
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
@@ -265,6 +261,7 @@ pub(super) fn start_briefing_after_triage(
     state.start_summary_cache_run();
     state.mark_briefing_metadata_ready();
     state.set_briefing(BriefingSession::new_loading(None));
+    crate::update::test_support::arm_admitted(&mut state);
     state
 }
 
@@ -533,5 +530,17 @@ pub(super) fn seed_current_triage_cache(state: &mut AppState) {
         .collect();
     for (hash, result) in results {
         state.store_triage_result(&hash, result);
+        let key = state.current_triage_cache_key(&hash);
+        let indices: Vec<_> = state
+            .triage()
+            .articles()
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.content_hash == hash)
+            .map(|(i, _)| i)
+            .collect();
+        for i in indices {
+            state.triage_mut().set_article_cache_key(i, key.clone());
+        }
     }
 }

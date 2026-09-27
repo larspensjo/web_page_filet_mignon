@@ -6,8 +6,8 @@ use crate::{
 };
 use engine_logging::engine_warn;
 use harvester_core::{
-    update, AppState, FrozenBatchKey, Msg, SignalCandidateCacheKey, StageKind, SummaryCacheKey,
-    TriageCacheKey,
+    update, AppState, Effect, FrozenBatchKey, Msg, SignalCandidateCacheKey, StageKind,
+    SummaryCacheKey, TriageCacheKey,
 };
 use harvester_engine::llm::prompt::PromptId;
 use harvester_engine::llm::{
@@ -401,6 +401,7 @@ pub(super) fn collect_and_rearm_batch_cycle(
     effect_runner: &EffectRunner,
     msg_tx: &mpsc::Sender<Msg>,
     progress: &mut LiveSystemBatchProgress,
+    request_continue: bool,
 ) -> AppState {
     // Batch results are collected at the cycle boundary before re-arming.
     // A collected manifest snapshot is durable before this reducer message,
@@ -461,7 +462,7 @@ pub(super) fn collect_and_rearm_batch_cycle(
     // reduced inside the dispatch loop.
     progress.set_phase(BatchDisplayPhase::Replaying);
     progress.paint(&state, batch.realized_cost_microdollars, true);
-    let (new_state, rearm_effects) = update(state, Msg::RearmDeferredBatchStages);
+    let (new_state, rearm_effects) = rearm_for_cycle(state, request_continue);
     state = new_state;
     if !rearm_effects.is_empty() {
         let rearm_effects = divert_batch_effects(&state, rearm_effects, batch, msg_tx);
@@ -497,6 +498,27 @@ pub(super) fn invalid_collected_custom_ids(
             harvester_core::CollectedOutcome::LineError { .. } => None,
         })
         .collect()
+}
+
+/// Enter a collection-only run before replaying already admitted members.
+pub(super) fn continue_deferred_batch_work(state: AppState) -> (AppState, Vec<Effect>) {
+    let (state, mut effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Continue,
+        },
+    );
+    let (state, replay) = update(state, Msg::RearmDeferredBatchStages);
+    effects.extend(replay);
+    (state, effects)
+}
+
+pub(super) fn rearm_for_cycle(state: AppState, request_continue: bool) -> (AppState, Vec<Effect>) {
+    if request_continue {
+        continue_deferred_batch_work(state)
+    } else {
+        update(state, Msg::RearmDeferredBatchStages)
+    }
 }
 
 #[cfg(test)]

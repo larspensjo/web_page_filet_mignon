@@ -251,6 +251,9 @@ fn drain_cost_state() -> (AppState, usize) {
         .collect();
     let state = seed_populated_run_progress();
     let (state, _) = update(state, Msg::RestoreCompletedJobs(snapshots));
+    // Restoration resets source state; keep a real source poll open for the active-run fixture.
+    let (state, _) = update(state, Msg::PollSourcesClicked);
+    let (state, _) = update(state, Msg::PollStarted { total: 1 });
     let (state, _) = update(
         state,
         Msg::BriefingCheckpointSet(Some("2026-09-05T12:00:00Z".into())),
@@ -261,7 +264,7 @@ fn drain_cost_state() -> (AppState, usize) {
 fn seed_populated_run_progress() -> AppState {
     const ACTIVITY_JOBS: usize = ACTIVITY_FEED_CAPACITY / 2;
     let (state, _) = update(AppState::new(), Msg::PollSourcesClicked);
-    let (state, _) = update(state, Msg::PollStarted { total: 1 });
+    let (state, _) = update(state, Msg::PollStarted { total: 2 });
     let urls = (0..ACTIVITY_JOBS).map(job_url).collect::<Vec<_>>();
     let (mut state, effects) = update(
         state,
@@ -281,8 +284,7 @@ fn seed_populated_run_progress() -> AppState {
         })
         .collect::<Vec<_>>();
     assert_eq!(job_ids.len(), ACTIVITY_JOBS);
-    state = update(state, Msg::PipelineRunRequested).0;
-    state = update(state, Msg::AllSourcesPollEnded).0;
+    // Keep intake open so the measured populated run has genuine pending work.
     for job_id in job_ids {
         state = update(
             state,
@@ -343,6 +345,22 @@ fn link_snapshots(index: usize) -> Vec<LinkSnapshotRecord> {
 }
 
 fn seed_summary_titles_through_cache(mut state: AppState) -> (AppState, usize) {
+    let (active_versions, effective_models) = production_metadata();
+    state = update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions,
+            effective_models,
+        },
+    )
+    .0;
+    let (next, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    state = harvester_core::fixture_support::complete_processing_start(next, effects, 100_000).0;
     let summary_urls = (PROBE_CORPUS_JOBS - SUMMARY_TITLE_ROWS..PROBE_CORPUS_JOBS)
         .map(job_url)
         .collect::<Vec<_>>();

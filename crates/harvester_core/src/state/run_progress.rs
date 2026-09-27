@@ -9,6 +9,21 @@ pub(crate) struct PollPipelineJobSnapshot {
 }
 
 impl AppState {
+    pub fn pipeline_waves(&self) -> &crate::PipelineWaves {
+        &self.pipeline_waves
+    }
+
+    pub fn pipeline_run_armed(&self) -> bool {
+        self.run_progress_is_active() && self.pipeline_admission.as_ref().is_some_and(|r| r.armed)
+    }
+
+    pub(crate) fn pipeline_ready(&self) -> bool {
+        self.pipeline_run_armed()
+            && self
+                .pipeline_admission
+                .as_ref()
+                .is_some_and(|r| r.configured)
+    }
     pub fn pipeline_run_phase(&self) -> PipelineRunPhase {
         self.pipeline_run_phase
     }
@@ -63,14 +78,6 @@ impl AppState {
 
     pub(crate) fn set_pipeline_run_phase(&mut self, phase: PipelineRunPhase) {
         self.pipeline_run_phase = phase;
-    }
-
-    pub(crate) fn reduced_message_seq(&self) -> u64 {
-        self.reduced_message_seq
-    }
-
-    pub(crate) fn note_reduced_work_message(&mut self) {
-        self.reduced_message_seq = self.reduced_message_seq.wrapping_add(1);
     }
 
     pub(crate) fn set_run_completion_notice(&mut self, notice: RunCompletionNotice) {

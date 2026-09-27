@@ -70,6 +70,96 @@ impl Default for TriageSession {
 }
 
 impl TriageSession {
+    pub(crate) fn index_for_identity(&self, url: &str, hash: &str) -> Option<usize> {
+        self.article_indices_by_url
+            .get(url)?
+            .iter()
+            .copied()
+            .find(|&i| self.articles[i].content_hash == hash)
+    }
+    pub(crate) fn admit(
+        &mut self,
+        loaded: LoadedArticle,
+        key: Option<TriageCacheKey>,
+        budget: Option<usize>,
+    ) {
+        if let Some(index) = self.index_for_identity(&loaded.url, &loaded.content_hash) {
+            let article = &mut self.articles[index];
+            article.prepared_text = loaded.prepared_text;
+            article.preparation_budget = budget;
+            if matches!(
+                article.triage_state,
+                ArticleTriageState::Pending
+                    | ArticleTriageState::InProgress { .. }
+                    | ArticleTriageState::Deferred
+            ) || (matches!(article.triage_state, ArticleTriageState::Completed { .. })
+                && article.cache_key_snapshot == key)
+            {
+                return;
+            }
+            article.triage_state = ArticleTriageState::Pending;
+            article.triage_model = None;
+            article.cache_key_snapshot = key;
+        } else {
+            let index = self.articles.len();
+            self.article_indices_by_url
+                .entry(loaded.url.clone())
+                .or_default()
+                .push(index);
+            self.articles.push(TriageArticle {
+                url: loaded.url,
+                source_title: loaded.source_title,
+                prepared_text: loaded.prepared_text,
+                content_hash: loaded.content_hash,
+                fetched_utc: loaded.fetched_utc,
+                triage_model: None,
+                preparation_budget: budget,
+                cache_key_snapshot: key,
+                triage_state: ArticleTriageState::Pending,
+            });
+        }
+        self.phase = TriagePhase::Triaging;
+    }
+
+    pub(crate) fn retain_members(&mut self, members: &std::collections::HashSet<(String, String)>) {
+        let previous_len = self.articles.len();
+        self.articles
+            .retain(|a| members.contains(&(a.url.clone(), a.content_hash.clone())));
+        self.article_indices_by_url.clear();
+        for (index, a) in self.articles.iter().enumerate() {
+            self.article_indices_by_url
+                .entry(a.url.clone())
+                .or_default()
+                .push(index);
+        }
+        if self.articles.len() != previous_len {
+            self.phase = if self.pending_count() + self.in_progress_count() > 0 {
+                TriagePhase::Triaging
+            } else if self.deferred_count() > 0 {
+                TriagePhase::AwaitingBatch
+            } else if self.completed_count() > 0 {
+                TriagePhase::Complete
+            } else {
+                TriagePhase::Failed {
+                    reason: "no successful admitted articles remain".into(),
+                }
+            };
+        }
+    }
+
+    pub(crate) fn withdraw_pending(&mut self) -> usize {
+        let pending = self.pending_count();
+        if pending > 0 {
+            let retained = self
+                .articles
+                .iter()
+                .filter(|a| !matches!(a.triage_state, ArticleTriageState::Pending))
+                .map(|a| (a.url.clone(), a.content_hash.clone()))
+                .collect();
+            self.retain_members(&retained);
+        }
+        pending
+    }
     pub fn new_loading(started_at: Option<String>) -> Self {
         Self {
             phase: TriagePhase::LoadingArticles,
@@ -122,23 +212,6 @@ impl TriageSession {
                 .entry(article.url.clone())
                 .or_default()
                 .push(index);
-        }
-    }
-
-    pub(crate) fn set_preparation_budgets(&mut self, held: &[harvester_engine::HeldArticle]) {
-        let budgets: HashMap<_, _> = held
-            .iter()
-            .map(|h| {
-                (
-                    (h.url.as_str(), h.content_hash.as_str()),
-                    h.preparation_budget,
-                )
-            })
-            .collect();
-        for article in &mut self.articles {
-            article.preparation_budget = budgets
-                .get(&(article.url.as_str(), article.content_hash.as_str()))
-                .copied();
         }
     }
 

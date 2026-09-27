@@ -120,6 +120,7 @@ fn key_unavailable_triage_completion_exports_priority_without_model_provenance()
     state.set_triage(triage);
     state.start_triage_cache_run();
     state.mark_triage_metadata_ready();
+    crate::update::test_support::arm_admitted(&mut state);
     let mut effects = Vec::new();
     crate::update::model_dispatch::dispatch_model_work(&mut state, &mut effects);
     let request_id =

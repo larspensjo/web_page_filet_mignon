@@ -19,6 +19,132 @@ use harvester_io::{
     RuntimePaths,
 };
 use std::collections::HashSet;
+
+#[test]
+fn collect_only_replay_dispatches_and_settles_without_pipeline_advance() {
+    use harvester_core::{Effect, LlmResultKind, Msg, PipelineRunScope};
+    use harvester_engine::llm::PromptId;
+    let state = harvester_core::AppState::new();
+    let (state, _) = harvester_core::update(
+        state,
+        Msg::LlmMetadataLoaded {
+            active_versions: [(PromptId::ArticleTriage, 1)].into_iter().collect(),
+            effective_models: [(PromptId::ArticleTriage, "test-model".into())]
+                .into_iter()
+                .collect(),
+        },
+    );
+    let (state, effects) = harvester_core::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: PipelineRunScope::Resume,
+        },
+    );
+    let (state, effects) =
+        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    let load_id = effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .unwrap();
+    let (state, effects) = harvester_core::update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                vec![harvester_engine::LoadedArticle {
+                    url: "https://batch.example/replay".into(),
+                    source_title: None,
+                    prepared_text: std::iter::repeat_n("contentword", 220)
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    content_hash: "replay-hash".into(),
+                    fetched_utc: None,
+                }],
+                100_000,
+            ),
+        },
+    );
+    let request = |effects: &[Effect]| {
+        effects.iter().find_map(|e| match e {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: PromptId::ArticleTriage,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+    };
+    let id = request(&effects).unwrap();
+    let (state, _) = harvester_core::update(
+        state,
+        Msg::LlmCompleted {
+            request_id: id,
+            result: LlmResultKind::DeferredToBatch,
+            metadata: None,
+        },
+    );
+    assert!(state.pipeline_activity().is_settled());
+    assert!(!state.view().run_progress.run_active);
+    let (state, effects) = super::batch_runtime::continue_deferred_batch_work(state);
+    let (state, effects) =
+        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    assert!(state.view().run_progress.run_active);
+    let id = request(&effects).expect("collect-only rearm dispatches within its Continue run");
+    let (state, _) = harvester_core::update(
+        state,
+        Msg::LlmCompleted {
+            request_id: id,
+            result: LlmResultKind::Failed {
+                reason: "test failure".into(),
+            },
+            metadata: None,
+        },
+    );
+    assert!(state.pipeline_activity().is_settled());
+    assert!(!state.view().run_progress.run_active);
+    let (state, effects) = super::batch_runtime::continue_deferred_batch_work(state);
+    assert!(
+        effects
+            .iter()
+            .any(|e| matches!(e, Effect::LoadProcessingConfiguration { .. })),
+        "later cycle starts a new run"
+    );
+    let (state, effects) =
+        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    assert!(request(&effects).is_none());
+    assert!(state.pipeline_activity().is_settled());
+    assert!(!state.view().run_progress.run_active);
+}
+
+#[test]
+fn empty_collect_only_cycle_settles_without_admitting_the_window() {
+    use harvester_core::{Effect, Msg};
+    use harvester_engine::llm::PromptId;
+    let (state, _) = harvester_core::update(
+        harvester_core::AppState::new(),
+        Msg::LlmMetadataLoaded {
+            active_versions: [(PromptId::ArticleTriage, 1)].into_iter().collect(),
+            effective_models: [(PromptId::ArticleTriage, "test-model".into())]
+                .into_iter()
+                .collect(),
+        },
+    );
+    let (state, effects) = super::batch_runtime::continue_deferred_batch_work(state);
+    let (state, effects) =
+        harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    assert!(effects.iter().all(|e| !matches!(
+        e,
+        Effect::RequestLlmCompletion { .. }
+            | Effect::LoadArticlesForTriage { .. }
+            | Effect::PollAllSources
+    )));
+    assert!(state.pipeline_activity().is_settled());
+    assert!(!state.view().run_progress.run_active);
+    assert!(state.pipeline_waves().waves().is_empty());
+}
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
@@ -424,6 +550,104 @@ fn drain_makes_the_first_cycle_collect_only_so_no_sources_are_polled() {
     // Without the Batch API runtime there is no manifest to collect from.
     assert!(!is_collect_only_cycle(false, false, 1));
     assert!(!is_collect_only_cycle(false, false, 2));
+}
+
+#[test]
+fn batch_api_intake_after_collection_waits_for_all_downloads_and_hands_off_once() {
+    use harvester_core::{Effect, JobResultKind};
+    use harvester_engine::{SourceId, SourceKind};
+    let (state, effects) = super::batch_runtime::rearm_for_cycle(
+        AppState::new(),
+        should_request_continue(is_collect_only_cycle(true, false, 1), false),
+    );
+    assert!(effects.is_empty());
+    assert!(!state.pipeline_run_armed());
+    let (state, _) = harvester_core::update(state, Msg::PollSourcesClicked);
+    let (state, _) = harvester_core::update(state, Msg::PollStarted { total: 1 });
+    let urls: Vec<_> = (0..3)
+        .map(|i| format!("https://batch.example/intake-{i}"))
+        .collect();
+    let (state, effects) = harvester_core::update(
+        state,
+        Msg::SourcePollCompleted {
+            source_id: SourceId::new("batch-intake").unwrap(),
+            urls: urls.clone(),
+            kind: SourceKind::Rss,
+            parsed: 3,
+            dedup_filtered: 0,
+        },
+    );
+    let jobs: Vec<_> = effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::EnqueueUrl { job_id, .. } => Some(*job_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(jobs.len(), 3);
+    let (mut state, _) = harvester_core::update(state, Msg::AllSourcesPollEnded);
+    let mut loads = 0;
+    for (index, job_id) in jobs.into_iter().enumerate() {
+        let (next, _) = harvester_core::update(
+            state,
+            Msg::JobDone {
+                job_id,
+                result: JobResultKind::Success,
+                content_preview: None,
+                extracted_links: vec![],
+                fetched_utc: None,
+            },
+        );
+        let (next, effects) = harvester_core::update(
+            next,
+            Msg::EvaluatePreTriageRefresh {
+                ordered_urls: urls[..=index].to_vec(),
+                triggered_by_job_done: true,
+            },
+        );
+        state = next;
+        assert!(effects
+            .iter()
+            .all(|e| !matches!(e, Effect::LoadArticlesForTriage { .. })));
+        let ticks = if index < 2 { 10 } else { 40 };
+        for tick in 1..=ticks {
+            let (next, effects) = harvester_core::update(
+                state,
+                Msg::tick_at(
+                    chrono::DateTime::from_timestamp(1_700_100_000 + index as i64 * 100 + tick, 0)
+                        .unwrap(),
+                ),
+            );
+            state = next;
+            loads += effects
+                .iter()
+                .filter(|e| matches!(e, Effect::LoadArticlesForTriage { .. }))
+                .count();
+            if index < 2 {
+                assert_eq!(loads, 0, "no mid-download hand-off");
+            }
+        }
+    }
+    assert_eq!(loads, 1, "one triage hand-off for the intake cycle");
+}
+
+#[test]
+fn drain_rearms_without_requesting_a_run_or_model_work_and_settles() {
+    use harvester_core::Effect;
+    let (state, effects) = super::batch_runtime::rearm_for_cycle(
+        AppState::new(),
+        should_request_continue(is_collect_only_cycle(true, true, 1), true),
+    );
+    assert!(effects.iter().all(|e| !matches!(
+        e,
+        Effect::RequestLlmCompletion { .. } | Effect::LoadProcessingConfiguration { .. }
+    )));
+    assert!(!state.pipeline_run_armed());
+    assert!(!should_request_continue(
+        is_collect_only_cycle(true, true, 2),
+        true
+    ));
+    assert!(should_settle_cycle(state.batch_status()));
 }
 
 #[test]

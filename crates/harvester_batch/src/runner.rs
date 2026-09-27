@@ -138,6 +138,10 @@ fn is_collect_only_cycle(batch_api_enabled: bool, drain: bool, cycle_count: usiz
     batch_api_enabled && (drain || cycle_count > 1)
 }
 
+fn should_request_continue(collect_only_cycle: bool, drain: bool) -> bool {
+    collect_only_cycle && !drain
+}
+
 fn require_new_jobs_since(
     single_shot: bool,
     batch_api: bool,
@@ -338,6 +342,7 @@ pub fn run(args: Args) -> Result<i32, String> {
                 &effect_runner,
                 &msg_tx,
                 &mut progress,
+                should_request_continue(collect_only_cycle, args.drain),
             );
         }
 

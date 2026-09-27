@@ -109,3 +109,6 @@ pub use view_model::{
     DESKTOP_JOB_LIST_RECENT_WINDOW_HOURS, TOKEN_LIMIT,
 };
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
+
+mod pipeline_waves;
+pub use pipeline_waves::{PipelineRunScope, PipelineWave, PipelineWaves};
