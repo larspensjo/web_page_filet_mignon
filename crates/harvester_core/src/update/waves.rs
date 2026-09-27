@@ -426,24 +426,27 @@ pub(super) fn record_progress(state: &mut AppState) {
     let summary_final = triage_final
         && state.briefing().pending_count() + state.briefing().in_progress_count() == 0;
     let now = state.last_observed_utc();
+    let stopping = state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping;
     let Some(progress) = state.run_progress_mut() else {
         return;
     };
-    for (stage, (done, failed, total)) in
-        [Stage::Triaging, Stage::Summarizing, Stage::ScoringSignals]
-            .into_iter()
-            .zip(counts)
+    for (stage, (done, failed, total), total_is_final) in [
+        (Stage::Triaging, counts[0], intake_final),
+        (Stage::Summarizing, counts[1], triage_final),
+        (Stage::ScoringSignals, counts[2], summary_final),
+    ]
+    .into_iter()
     {
         if total > 0 {
             progress.counts(stage, done, failed, total, now);
+        } else if !total_is_final && !stopping {
+            progress.activate(stage, 0, now);
         }
+        progress.stage_mut(stage).total_is_final = total_is_final || stopping;
     }
     progress.counts(Stage::LoadingArticles, counts[0].2, 0, counts[0].2, now);
     if intake_final {
         progress.finish(Stage::LoadingArticles, now);
     }
-    progress.stage_mut(Stage::LoadingArticles).total_is_final = intake_final;
-    progress.stage_mut(Stage::Triaging).total_is_final = intake_final;
-    progress.stage_mut(Stage::Summarizing).total_is_final = triage_final;
-    progress.stage_mut(Stage::ScoringSignals).total_is_final = summary_final;
+    progress.stage_mut(Stage::LoadingArticles).total_is_final = intake_final || stopping;
 }

@@ -144,6 +144,8 @@ impl RunProgress {
         }
         if matches!(record.status, StageStatus::Pending) {
             record.status = StageStatus::Active;
+        }
+        if total > 0 && record.started_at_utc.is_none() {
             record.started_at_utc = now;
         }
         record.total = record.total.max(total);
@@ -194,7 +196,15 @@ impl RunProgress {
     }
     pub(crate) fn begin_stopping(&mut self) {
         for stage in PipelineStage::ALL {
-            self.stage_mut(stage).total_is_final = true;
+            let record = self.stage_mut(stage);
+            record.total_is_final = true;
+            if record.status == StageStatus::Active
+                && record.total == 0
+                && record.completed == 0
+                && record.failed == 0
+            {
+                record.status = StageStatus::Pending;
+            }
         }
     }
     pub(crate) fn settle(&mut self, now: Option<DateTime<Utc>>) {

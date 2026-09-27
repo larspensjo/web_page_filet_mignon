@@ -166,6 +166,24 @@ export type RunProgressView = {
 	activity: ActivityEntry[];
 };
 
+export type UnfinishedWorkSummary = {
+	not_eligible: number;
+	in_progress: number;
+	needs_triage: number;
+	needs_summary: number;
+	needs_scoring: number;
+	complete: number;
+	articles_with_work: number;
+	estimated_calls: number;
+};
+
+export type UnfinishedWork = "Unknown" | { Known: UnfinishedWorkSummary };
+
+export type ReprocessNoticeView = {
+	articles: number;
+	estimated_calls: number;
+};
+
 export type RunState = "Idle" | "Active" | { Stopping: { in_flight: number } };
 
 export type RunCompletionNotice = {
@@ -261,9 +279,11 @@ export type SnapshotEnvelope = {
 		archive_enabled: boolean;
 		run_state: RunState;
 		run_completion_notice: RunCompletionNotice | null;
-		poll_sources_enabled: boolean;
-		triage_can_start: boolean;
-		summaries_can_start: boolean;
+		run_enabled: boolean;
+		resume_enabled: boolean;
+		resume_disabled_reason: string | null;
+		unfinished_work: UnfinishedWork;
+		reprocess_notice: ReprocessNoticeView | null;
 		stop_finish_button: StopFinishButtonState;
 	} & Record<string, unknown>;
 	fatal_message: string | null;

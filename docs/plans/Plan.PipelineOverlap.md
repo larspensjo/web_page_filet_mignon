@@ -7,7 +7,8 @@ Status: Phase 1 landed (incremental corpus hand-off). Phase 2 landed (one model-
 furthest-along first, current-key scoring). Phase 3 landed (identity-based completeness).
 Phase 4 landed (waves, admission, run scopes and progress). Phase 5 landed (batch host and import
 mode on reducer-owned runs). Phase 6 landed (Stop drains, the engine resumes, and export waits
-only for the run). Phases 7–8 remain outstanding, except the explicitly approved
+only for the run). Phase 7 landed (desktop one-press Run surface). Phase 8 remains outstanding,
+except the explicitly approved
 Continue-before-rearm batch collection step brought forward.
 
 Follow-up before Phase 4 (user decision 2026-09-25), done: building the desktop view at

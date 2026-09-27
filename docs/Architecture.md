@@ -73,6 +73,15 @@ are gated by this state; a rejected submit reports that export is unavailable wh
 a run is in progress. Desktop snapshots expose `archive_enabled` and `run_state`
 (`Idle`, `Active`, or `Stopping { in_flight }`) as IPC fields.
 
+The desktop's primary Run action requests Full (poll, download and process). Process
+unfinished requests Resume without fetching and is enabled only when AI is available
+and the reducer's stored unfinished-work summary is known and nonzero. The view also
+provides both actions' enablement, the unfinished count and disabled reason, and any
+non-blocking reprocess notice; rendering does not classify work. Poll Sources is not
+part of the desktop intent vocabulary. Stop remains separate and destructive, and
+reads `Stopping…` while in-flight work drains. Open stage totals have no ETA; a stage
+with no admitted work while its total remains open reads “Waiting for articles.”
+
 `RunProgress` accumulates this run's admitted totals, including triage and summary
 cache hits. Scoring already completed under the same digest is not readmitted. Multiple
 stages can be Active together; model stages become Done only at Terminal. Totals grow
@@ -84,7 +93,7 @@ the bounded 50-entry activity feed.
 ### Desktop intent runtime diagram
 ```mermaid
 flowchart LR
-    UI[UI Action: Poll Sources or Run Pipeline]
+    UI[UI Action: Run or Process unfinished]
     I[Restricted UiIntent]
     U[Core Update/Reducer]
     E[Effect Runner]
@@ -93,7 +102,7 @@ flowchart LR
     S[Core AppState]
     R[UI Render]
 
-    UI -->|UiIntent::PollSources / RunPipeline| I
+    UI -->|RunPipeline Full / ResumeUnfinishedWork Resume| I
     I --> U
     U -->|Effect requests| E
     E --> P

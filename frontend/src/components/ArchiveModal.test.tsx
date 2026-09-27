@@ -9,12 +9,16 @@ vi.mock("../ipc/intent", () => ({ dispatchIntent: vi.fn() }));
 
 const fixture = (showArchiveDialog as unknown as UiCommand).ShowArchiveDialog;
 
-function renderModal(overrides: Partial<ArchiveDialogRequest> = {}) {
+function renderModal(
+	overrides: Partial<ArchiveDialogRequest> = {},
+	archiveEnabled = true,
+) {
 	const onClose = vi.fn();
 	render(
 		<ArchiveModal
 			request={{ ...fixture, ...overrides }}
 			partialCoverage={null}
+			archiveEnabled={archiveEnabled}
 			onClose={onClose}
 		/>,
 	);
@@ -115,6 +119,14 @@ describe("ArchiveModal", () => {
 		).toBeInTheDocument();
 	});
 
+	it("disables and refuses submission when core marks export unavailable", () => {
+		renderModal({}, false);
+		const exportButton = screen.getByRole("button", { name: /^Export/ });
+		expect(exportButton).toBeDisabled();
+		fireEvent.submit(exportButton.closest("form") as HTMLFormElement);
+		expect(dispatchIntent).not.toHaveBeenCalled();
+	});
+
 	it("defaults the candidate selection on when core says all candidates settled", () => {
 		renderModal({
 			signal_candidate_default: "OnAllSettled",
@@ -146,6 +158,7 @@ describe("ArchiveModal", () => {
 			<ArchiveModal
 				request={{ ...fixture, pending_pre_triage_count: 4 }}
 				partialCoverage={{ triaged: 5, actionable_total: 9 }}
+				archiveEnabled={true}
 				onClose={vi.fn()}
 			/>,
 		);

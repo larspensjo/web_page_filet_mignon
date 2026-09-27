@@ -4,6 +4,7 @@ use crate::summary_cache::SummaryCacheKey;
 use crate::triage::{ArticleTriageState, TriageArticle};
 use crate::{AppState, LoadedArticle};
 use harvester_engine::llm::prompt::PromptId;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 type ArticleIdentity<'a> = (&'a str, &'a str);
@@ -61,14 +62,14 @@ impl UnfinishedStageVerdicts {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum UnfinishedWork {
     #[default]
     Unknown,
     Known(UnfinishedWorkSummary),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct UnfinishedWorkSummary {
     pub not_eligible: usize,
     pub in_progress: usize,

@@ -174,6 +174,7 @@ pub(super) fn handle_pipeline_advance(state: &mut AppState) -> Vec<Effect> {
 
 pub(super) fn finish_if_settled(state: &mut AppState) {
     if state.pipeline_run_phase() == PipelineRunPhase::Stopping {
+        super::waves::record_progress(state);
         if state.pipeline_activity().is_settled() {
             settle_stopped_run(state);
         }

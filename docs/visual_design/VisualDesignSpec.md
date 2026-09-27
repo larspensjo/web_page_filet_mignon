@@ -167,6 +167,15 @@ Buttons should clearly express priority and intent.
 - Support clear visual treatment for default, hover, focus, active, selected, and disabled states.
 - State changes should be visible through tone, accent, or fill changes rather than through heavy animation or dramatic shadow shifts.
 
+### Desktop run surface
+
+- Run is the single Accent Primary action. Process unfinished is a secondary outlined action.
+- Stop stays visually separate and uses Accent Warning. While in-flight work drains, it is disabled
+  and reads “Stopping…”.
+- Pipeline stages may be active together and remain separate rows. A stage with an open total has
+  no ETA; when it has no admitted work it reads “Waiting for articles.”
+- A large reprocess notice is muted run-surface text, not a modal or confirmation step.
+
 ## Links
 
 Links should feel clearly interactive without introducing a second accent system or adding visual noise to dense reading surfaces.

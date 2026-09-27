@@ -1,5 +1,11 @@
+import exportUnavailable from "@fixtures/snapshots/export_unavailable_during_run.json";
+import overlappingActiveStages from "@fixtures/snapshots/overlapping_active_stages.json";
+import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
 import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
+import stoppedWithUnfinishedWork from "@fixtures/snapshots/stopped_with_unfinished_work_export_enabled.json";
+import stoppingWithInFlightWork from "@fixtures/snapshots/stopping_with_in_flight_work.json";
+import unfinishedWorkAvailable from "@fixtures/snapshots/unfinished_work_available.json";
 import {
 	act,
 	cleanup,
@@ -16,6 +22,13 @@ vi.mock("../ipc/intent", () => ({ dispatchIntent: vi.fn() }));
 
 const inProgress = runInProgressWithFailures as unknown as SnapshotEnvelope;
 const finished = runFinishedWithNotice as unknown as SnapshotEnvelope;
+const overlapping = overlappingActiveStages as unknown as SnapshotEnvelope;
+const unfinished = unfinishedWorkAvailable as unknown as SnapshotEnvelope;
+const stopping = stoppingWithInFlightWork as unknown as SnapshotEnvelope;
+const stoppedUnfinished =
+	stoppedWithUnfinishedWork as unknown as SnapshotEnvelope;
+const exportBusy = exportUnavailable as unknown as SnapshotEnvelope;
+const reprocess = reprocessNotice as unknown as SnapshotEnvelope;
 
 describe("RunSurface", () => {
 	afterEach(() => {
@@ -24,7 +37,7 @@ describe("RunSurface", () => {
 		vi.useRealTimers();
 	});
 
-	it("renders the six projected stages, including failure counts and muted skips", () => {
+	it("renders the six projected stages, failure counts and waiting stages", () => {
 		render(<RunSurface view={inProgress.view} />);
 
 		expect(screen.getByText("Scanning sources")).toBeInTheDocument();
@@ -35,7 +48,9 @@ describe("RunSurface", () => {
 		expect(document.querySelectorAll(".stage-row")).toHaveLength(6);
 		expect(document.querySelectorAll(".stage-row .stage-bar")).toHaveLength(6);
 		expect(document.querySelector(".run-eta")).toBeNull();
-		expect(document.querySelector(".stage-row--muted")).not.toBeNull();
+		expect(
+			document.querySelector('[data-stage="ScoringSignals"] .stage-status'),
+		).toHaveTextContent("Waiting for articles");
 	});
 
 	it("collapses to the projected idle summary when no run is active", () => {
@@ -110,37 +125,95 @@ describe("RunSurface", () => {
 		expect(
 			screen.getByText("Run finished - 1 article scored"),
 		).toBeInTheDocument();
-		expect(
-			screen.getByRole("button", { name: "Run triage + summaries" }),
-		).not.toBeDisabled();
+		expect(screen.getByRole("button", { name: "Run" })).not.toBeDisabled();
 		fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
 		expect(dispatchIntent).toHaveBeenCalledWith({
 			type: "DismissRunFinishedNotice",
 		});
 	});
 
-	it("gates the three actions from projected view flags and dispatches their intents", () => {
-		const view = {
-			...inProgress.view,
-			triage_can_start: true,
-		};
-		render(<RunSurface view={view} />);
+	it("renders a single primary Run and sends a Full run intent", () => {
+		render(<RunSurface view={finished.view} />);
+		const run = screen.getByRole("button", { name: "Run" });
+		expect(run).toHaveClass("run-primary");
+		expect(run).toBeEnabled();
+		expect(screen.queryByRole("button", { name: "Poll Sources" })).toBeNull();
+		fireEvent.click(run);
+		expect(dispatchIntent).toHaveBeenCalledWith({ type: "RunPipeline" });
+	});
 
-		const poll = screen.getByRole("button", { name: "Poll Sources" });
-		const pipeline = screen.getByRole("button", {
-			name: "Run triage + summaries",
+	it("renders the core unfinished count and sends a payload-free Resume intent", () => {
+		render(<RunSurface view={unfinished.view} />);
+		const summary = (
+			unfinished.view.unfinished_work as {
+				Known: { articles_with_work: number };
+			}
+		).Known;
+		const resume = screen.getByRole("button", {
+			name: `Process unfinished (${summary.articles_with_work})`,
 		});
-		const stop = screen.getByRole("button", { name: "Stop" });
-		expect(poll).not.toBeDisabled();
-		expect(pipeline).not.toBeDisabled();
-		expect(stop).not.toBeDisabled();
+		expect(resume).toBeEnabled();
+		fireEvent.click(resume);
+		expect(dispatchIntent).toHaveBeenCalledWith({
+			type: "ResumeUnfinishedWork",
+		});
+	});
 
-		fireEvent.click(poll);
-		fireEvent.click(pipeline);
+	it("disables both run requests while active and reports Stopping… during a drain", () => {
+		render(<RunSurface view={exportBusy.view} />);
+		expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+		const stop = screen.getByRole("button", { name: "Stop" });
+		expect(stop).toBeEnabled();
 		fireEvent.click(stop);
-		expect(dispatchIntent).toHaveBeenNthCalledWith(1, { type: "PollSources" });
-		expect(dispatchIntent).toHaveBeenNthCalledWith(2, { type: "RunPipeline" });
-		expect(dispatchIntent).toHaveBeenNthCalledWith(3, { type: "StopOrFinish" });
+		expect(dispatchIntent).toHaveBeenCalledWith({ type: "StopOrFinish" });
+		expect(
+			screen.getByRole("button", { name: /Process unfinished/ }),
+		).toBeDisabled();
+		cleanup();
+
+		render(<RunSurface view={stopping.view} />);
+		expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+		expect(screen.getByRole("button", { name: "Stopping…" })).toBeDisabled();
+	});
+
+	it("renders concurrent active rows and withholds ETAs while totals are open", () => {
+		render(<RunSurface view={overlapping.view} />);
+		const openTotalRows = overlapping.view.run_progress.stages.filter(
+			(stage) => stage.status === "Active" && !stage.total_is_final,
+		);
+		expect(openTotalRows.length).toBeGreaterThan(0);
+		expect(
+			document.querySelectorAll('.stage-row[data-status="Active"]').length,
+		).toBeGreaterThanOrEqual(2);
+		for (const stage of openTotalRows) {
+			expect(
+				document.querySelector(`[data-stage="${stage.stage}"] .stage-status`),
+			).not.toHaveTextContent(/about .* left/);
+		}
+		expect(screen.getAllByText("Waiting for articles").length).toBeGreaterThan(
+			0,
+		);
+	});
+
+	it("keeps Run available after Stop when unfinished work remains", () => {
+		render(<RunSurface view={stoppedUnfinished.view} />);
+		expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+		expect(
+			screen.getByRole("button", { name: /Process unfinished \(/ }),
+		).toBeEnabled();
+	});
+
+	it("renders the reducer reprocess notice as a muted status", () => {
+		render(<RunSurface view={reprocess.view} />);
+		expect(
+			document.querySelector('.stage-row[data-stage="ScanningSources"]'),
+		).toHaveClass("stage-row--muted");
+		expect(screen.getByRole("status")).toHaveTextContent(
+			/This run is reprocessing 151 unfinished articles/,
+		);
+		expect(document.querySelector(".run-reprocess-notice")).not.toHaveClass(
+			"run-notice",
+		);
 	});
 
 	it("computes ETA only from each active stage's own rate", () => {
@@ -203,7 +276,7 @@ describe("RunSurface", () => {
 		).toHaveTextContent("about 15 sec left");
 	});
 
-	it("reports an active zero-total stage as in progress", () => {
+	it("reports an open zero-total stage as waiting for articles", () => {
 		const stages = inProgress.view.run_progress.stages.map((stage) => ({
 			...stage,
 			status:
@@ -211,6 +284,7 @@ describe("RunSurface", () => {
 			completed: stage.stage === "Triaging" ? 0 : stage.total,
 			failed: 0,
 			total: stage.stage === "Triaging" ? 0 : stage.total,
+			total_is_final: stage.stage === "Triaging" ? false : stage.total_is_final,
 		}));
 		const view = {
 			...inProgress.view,
@@ -221,7 +295,7 @@ describe("RunSurface", () => {
 
 		expect(
 			document.querySelector('[data-stage="Triaging"] .stage-status'),
-		).toHaveTextContent("In progress");
+		).toHaveTextContent("Waiting for articles");
 	});
 
 	it("keeps the finishing fallback on an active stage with no remaining work", () => {
@@ -230,6 +304,7 @@ describe("RunSurface", () => {
 			status:
 				stage.stage === "Triaging" ? ("Active" as const) : ("Done" as const),
 			completed: stage.total,
+			total_is_final: true,
 		}));
 		const view = {
 			...inProgress.view,

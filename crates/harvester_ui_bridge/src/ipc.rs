@@ -1,7 +1,7 @@
 use engine_logging::engine_warn;
 use harvester_core::UiIntent;
 
-pub const IPC_SCHEMA_VERSION: u32 = 11;
+pub const IPC_SCHEMA_VERSION: u32 = 12;
 
 pub fn decode_intent(command_name: &str, payload: &[u8]) -> Result<UiIntent, serde_json::Error> {
     serde_json::from_slice(payload).map_err(|error| {
@@ -40,6 +40,20 @@ mod tests {
         };
         let encoded = serde_json::to_vec(&intent).unwrap();
         assert_eq!(decode_intent("dispatch_intent", &encoded).unwrap(), intent);
+    }
+
+    #[test]
+    fn round_trips_pipeline_intents() {
+        for intent in [UiIntent::RunPipeline, UiIntent::ResumeUnfinishedWork] {
+            let encoded = serde_json::to_vec(&intent).unwrap();
+            assert_eq!(decode_intent("dispatch_intent", &encoded).unwrap(), intent);
+        }
+    }
+
+    #[test]
+    fn removed_poll_sources_intent_fails_closed() {
+        let payload = br#"{"type":"PollSources"}"#;
+        assert!(decode_intent("dispatch_intent", payload).is_err());
     }
 
     #[test]

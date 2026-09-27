@@ -6,6 +6,7 @@ use crate::tabs::{JobListMode, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
 use crate::{
     JobId, JobResultKind, RunCompletionNotice, RunProgressView, RunState, SessionState, Stage,
+    UnfinishedWork,
 };
 use chrono::{DateTime, Utc};
 use harvester_engine::llm::dto::SourceTier;
@@ -258,6 +259,12 @@ pub struct ArchivePartialCoverageView {
     pub actionable_total: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReprocessNoticeView {
+    pub articles: usize,
+    pub estimated_calls: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppViewModel {
     pub workspace_view: crate::WorkspaceView,
@@ -288,9 +295,7 @@ pub struct AppViewModel {
     pub preview_source: Option<PreviewContentKind>,
     pub briefing_generate_enabled: bool,
     pub next_item_enabled: bool,
-    pub summaries_can_start: bool,
     pub stop_finish_button: StopFinishButtonState,
-    pub triage_can_start: bool,
     pub triage_results_reorder_suppressed: bool,
     pub signal_candidate_rows: Vec<SignalCandidateRow>,
     pub signal_candidate_preview: Option<SignalCandidatePreviewView>,
@@ -302,7 +307,13 @@ pub struct AppViewModel {
     pub archive_enabled: bool,
     pub run_state: RunState,
     pub run_completion_notice: Option<RunCompletionNotice>,
-    pub poll_sources_enabled: bool,
+    pub run_enabled: bool,
+    pub resume_enabled: bool,
+    /// Core-authored tooltip text when Process unfinished is disabled.
+    pub resume_disabled_reason: Option<String>,
+    /// Stored reducer summary; the view never classifies work.
+    pub unfinished_work: UnfinishedWork,
+    pub reprocess_notice: Option<ReprocessNoticeView>,
     pub poll_indirect_links_enabled: bool,
     pub checkpoint_status_message: Option<String>,
     /// URL of the currently selected job, only when it has a completed summary.
@@ -345,9 +356,7 @@ impl Default for AppViewModel {
             preview_source: None,
             briefing_generate_enabled: false,
             next_item_enabled: false,
-            summaries_can_start: false,
             stop_finish_button: StopFinishButtonState::Disabled,
-            triage_can_start: false,
             triage_results_reorder_suppressed: false,
             signal_candidate_rows: Vec::new(),
             signal_candidate_preview: None,
@@ -358,7 +367,11 @@ impl Default for AppViewModel {
             archive_enabled: true,
             run_state: RunState::Idle,
             run_completion_notice: None,
-            poll_sources_enabled: false,
+            run_enabled: true,
+            resume_enabled: false,
+            resume_disabled_reason: Some("Unfinished work is not known yet.".to_string()),
+            unfinished_work: UnfinishedWork::Unknown,
+            reprocess_notice: None,
             poll_indirect_links_enabled: false,
             checkpoint_status_message: None,
             selected_url: None,

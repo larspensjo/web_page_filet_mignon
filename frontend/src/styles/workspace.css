@@ -82,22 +82,23 @@
 	cursor: not-allowed;
 }
 
-.run-actions .run-poll {
+.run-actions .run-resume {
 	border: var(--border-contained);
 	background: transparent;
 	color: var(--text-secondary);
 }
 
-.run-actions .run-poll:hover {
+.run-actions .run-resume:hover {
 	background: var(--surface-overlay);
 }
 
-.run-actions .run-poll:disabled {
+.run-actions .run-resume:disabled {
 	background: var(--surface-overlay);
 	color: var(--text-disabled);
 }
 
 .run-actions .run-stop {
+	margin-left: var(--space-major);
 	background: var(--accent-warning);
 }
 
@@ -111,6 +112,13 @@
 	border: var(--border-contained);
 	border-color: var(--accent-primary);
 	color: var(--text-primary);
+}
+
+.run-reprocess-notice {
+	margin: var(--space-compact) 0 0;
+	color: var(--text-tertiary);
+	font-size: var(--metadata-size);
+	line-height: var(--metadata-line-height);
 }
 
 .run-details {

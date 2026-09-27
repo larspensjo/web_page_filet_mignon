@@ -26,7 +26,12 @@ export function estimateActiveStageEtas(
 	if (!Number.isFinite(nowMs)) return [];
 
 	return stages.flatMap((stage) => {
-		if (stage.status !== "Active" || stage.started_at_utc === null) return [];
+		if (
+			stage.status !== "Active" ||
+			!stage.total_is_final ||
+			stage.started_at_utc === null
+		)
+			return [];
 		const startedAt = Date.parse(stage.started_at_utc);
 		const total = Math.max(stage.total, 0);
 		const settled = Math.min(
@@ -139,6 +144,10 @@ function stageStatus(
 	eta: ActiveStageEta | undefined,
 ): string {
 	if (stage.status !== "Active") return statusLabel(stage.status);
+	if (!stage.total_is_final)
+		return stage.completed + stage.failed >= stage.total
+			? "Waiting for articles"
+			: "In progress";
 	if (eta) return formatStageEta(eta);
 	if (stage.total === 0) return statusLabel(stage.status);
 	return stage.completed + stage.failed < stage.total
@@ -168,6 +177,7 @@ function StageList({
 								: ""
 						}`}
 						data-stage={stage.stage}
+						data-status={stage.status}
 						key={stage.stage}
 					>
 						<span className="stage-name">{stageLabel(stage.stage)}</span>
@@ -200,8 +210,17 @@ export function RunSurface({ view }: { view: RunView }) {
 	const stageEtas = progress.run_active
 		? estimateActiveStageEtas(progress.stages, now)
 		: [];
-	const canRunPipeline = view.triage_can_start || view.summaries_can_start;
 	const canStop = stopEnabled(view.stop_finish_button);
+	const isStopping =
+		typeof view.run_state === "object" && "Stopping" in view.run_state;
+	const unfinishedCount =
+		view.unfinished_work === "Unknown"
+			? null
+			: view.unfinished_work.Known.articles_with_work;
+	const resumeLabel =
+		unfinishedCount === null
+			? "Process unfinished"
+			: `Process unfinished (${unfinishedCount})`;
 
 	return (
 		<section className="run-surface" aria-labelledby="run-surface-heading">
@@ -219,30 +238,41 @@ export function RunSurface({ view }: { view: RunView }) {
 				</div>
 				<div className="run-actions">
 					<button
-						className="run-poll"
+						className="run-primary"
 						type="button"
-						disabled={!view.poll_sources_enabled}
-						onClick={() => void dispatchIntent({ type: "PollSources" })}
+						disabled={!view.run_enabled}
+						onClick={() => void dispatchIntent({ type: "RunPipeline" })}
 					>
-						Poll Sources
+						Run
 					</button>
 					<button
 						type="button"
-						disabled={!canRunPipeline}
-						onClick={() => void dispatchIntent({ type: "RunPipeline" })}
+						className="run-resume"
+						disabled={!view.resume_enabled}
+						title={view.resume_disabled_reason ?? undefined}
+						onClick={() =>
+							void dispatchIntent({ type: "ResumeUnfinishedWork" })
+						}
 					>
-						Run triage + summaries
+						{resumeLabel}
 					</button>
 					<button
 						className="run-stop"
 						type="button"
-						disabled={!canStop}
+						disabled={isStopping || !canStop}
 						onClick={() => void dispatchIntent({ type: "StopOrFinish" })}
 					>
-						Stop
+						{isStopping ? "Stopping…" : "Stop"}
 					</button>
 				</div>
 			</div>
+			{view.reprocess_notice && (
+				<p className="run-reprocess-notice" role="status">
+					{`This run is reprocessing ${view.reprocess_notice.articles} unfinished article${
+						view.reprocess_notice.articles === 1 ? "" : "s"
+					} (up to ${view.reprocess_notice.estimated_calls} model calls).`}
+				</p>
+			)}
 
 			{notice && (
 				<div className="run-notice" role="status">

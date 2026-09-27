@@ -159,7 +159,7 @@ export function App() {
 						</button>
 						<button
 							type="button"
-							disabled={!snapshot}
+							disabled={!snapshot?.view.archive_enabled}
 							onClick={() => void dispatchIntent({ type: "OpenArchiveDialog" })}
 						>
 							Archive…
@@ -202,6 +202,7 @@ export function App() {
 					key={archiveRequest.request_id}
 					request={archiveRequest}
 					partialCoverage={snapshot?.view.archive_partial_coverage}
+					archiveEnabled={snapshot?.view.archive_enabled ?? false}
 					onClose={() => setArchiveRequest(null)}
 				/>
 			)}

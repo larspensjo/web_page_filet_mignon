@@ -5,7 +5,7 @@ use crate::{JobId, JobListMode, Msg, TrendCategory, WorkspaceView};
 
 /// The deliberately restricted frontend vocabulary.
 ///
-/// JSON uses adjacently tagged objects (`{"type":"PollSources"}` or
+/// JSON uses adjacently tagged objects (`{"type":"RunPipeline"}` or
 /// `{"type":"SelectJob","payload":{"job_id":1}}`). Unknown fields are
 /// rejected rather than ignored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -30,9 +30,9 @@ pub enum UiIntent {
     },
     TrendsViewOpened,
     DismissRunFinishedNotice,
-    PollSources,
     PollIndirectLinks,
     RunPipeline,
+    ResumeUnfinishedWork,
     StopOrFinish,
     OpenSelectedInBrowser,
     OpenExtractedLink {
@@ -87,9 +87,11 @@ impl UiIntent {
             SetTrendCategory { category } => Msg::TrendCategorySelected { category },
             TrendsViewOpened => Msg::TrendsViewOpened,
             DismissRunFinishedNotice => Msg::RunFinishedNoticeDismissed,
-            PollSources => Msg::PollSourcesClicked,
             PollIndirectLinks => Msg::PollIndirectLinks,
             RunPipeline => Msg::PipelineRunRequested {
+                scope: crate::PipelineRunScope::Full,
+            },
+            ResumeUnfinishedWork => Msg::PipelineRunRequested {
                 scope: crate::PipelineRunScope::Resume,
             },
             StopOrFinish => Msg::StopFinishClicked,
@@ -196,15 +198,17 @@ mod tests {
                 IntentEffect::Dispatch(Msg::RunFinishedNoticeDismissed),
             ),
             (
-                UiIntent::PollSources,
-                IntentEffect::Dispatch(Msg::PollSourcesClicked),
-            ),
-            (
                 UiIntent::PollIndirectLinks,
                 IntentEffect::Dispatch(Msg::PollIndirectLinks),
             ),
             (
                 UiIntent::RunPipeline,
+                IntentEffect::Dispatch(Msg::PipelineRunRequested {
+                    scope: crate::PipelineRunScope::Full,
+                }),
+            ),
+            (
+                UiIntent::ResumeUnfinishedWork,
                 IntentEffect::Dispatch(Msg::PipelineRunRequested {
                     scope: crate::PipelineRunScope::Resume,
                 }),

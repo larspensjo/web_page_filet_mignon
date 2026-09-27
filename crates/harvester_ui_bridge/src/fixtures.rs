@@ -18,6 +18,29 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
     let with_selection = selected_fixture_state(&empty);
     let run_in_progress = run_in_progress_with_failures();
     let run_finished = completed_run_state();
+    let overlapping_stages = overlapping_active_stages();
+    let unfinished_work = idle_with_corpus(&empty);
+    let stopping = stopping_with_in_flight_work();
+    let stopped_unfinished = stopped_with_unfinished_work();
+    let reprocessing = reprocess_notice_state();
+    assert!(matches!(
+        unfinished_work.unfinished_work(),
+        harvester_core::UnfinishedWork::Known(summary) if summary.articles_with_work > 0
+    ));
+    assert!(unfinished_work.view().resume_enabled);
+    assert!(matches!(
+        stopping.run_state(),
+        harvester_core::RunState::Stopping { in_flight: 1 }
+    ));
+    assert!(!stopping.view().archive_enabled);
+    assert!(stopped_unfinished.view().archive_enabled);
+    assert!(stopped_unfinished.view().resume_enabled);
+    assert!(matches!(
+        stopped_unfinished.unfinished_work(),
+        harvester_core::UnfinishedWork::Known(summary) if summary.articles_with_work > 0
+    ));
+    assert!(!run_in_progress_with_failures().view().archive_enabled);
+    assert!(reprocessing.view().reprocess_notice.is_some());
     let ai_unavailable = reduce(
         empty.clone(),
         Msg::AiAvailabilityDetected {
@@ -34,6 +57,18 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
         ("run_in_progress_with_failures", run_in_progress),
         ("run_finished_with_notice", run_finished),
         ("ai_unavailable", ai_unavailable),
+        ("overlapping_active_stages", overlapping_stages),
+        ("unfinished_work_available", unfinished_work),
+        ("stopping_with_in_flight_work", stopping),
+        (
+            "stopped_with_unfinished_work_export_enabled",
+            stopped_unfinished,
+        ),
+        (
+            "export_unavailable_during_run",
+            run_in_progress_with_failures(),
+        ),
+        ("reprocess_notice", reprocessing),
     ];
     states
         .into_iter()
@@ -278,6 +313,123 @@ fn run_in_progress_with_failures() -> AppState {
     );
     let state = reduce(state, Msg::PipelineRunAdvance);
     assert!(state.view().run_progress.run_active);
+    state
+}
+
+fn stopping_with_in_flight_work() -> AppState {
+    let (state, _, _, effects) = prepared_article_state();
+    let request = request_id(&effects, PromptId::ArticleTriage, "stopping triage");
+    let (state, effects) = update(state, Msg::StopFinishClicked);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    assert!(matches!(
+        state.run_state(),
+        harvester_core::RunState::Stopping { in_flight: 1 }
+    ));
+    assert!(state
+        .pending_llm_request_ids()
+        .any(|request_id| request_id == request));
+    state
+}
+
+fn stopped_with_unfinished_work() -> AppState {
+    let (state, _, _, effects) = prepared_article_state();
+    let request = request_id(&effects, PromptId::ArticleTriage, "stopped triage");
+    let state = reduce(state, Msg::StopFinishClicked);
+    let state = reduce(state, triage_success(request, 5));
+    assert!(state.export_available());
+    assert!(matches!(
+        state.unfinished_work(),
+        harvester_core::UnfinishedWork::Known(summary) if summary.articles_with_work > 0
+    ));
+    state
+}
+
+fn overlapping_active_stages() -> AppState {
+    let (mut state, first, _, first_effects) = prepared_article_state();
+    state.set_llm_max_in_flight(1);
+    let mut second = first.clone();
+    second.url = "https://fixture.invalid/overlap-second".into();
+    second.source_title = Some("Second overlapping fixture article".into());
+    second.content_hash = "fixture-content-hash-second".into();
+    let (next, _) = update(
+        state,
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls: vec![first.url.clone(), second.url.clone()],
+            triggered_by_job_done: true,
+        },
+    );
+    state = next;
+    let (state, load_id) = triage_load_request(state);
+    let (state, effects) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(
+                vec![first.clone(), second],
+                100_000,
+            ),
+        },
+    );
+    let first_request = request_id(&first_effects, PromptId::ArticleTriage, "overlap triage");
+    let first_request = if state
+        .pending_llm_request_ids()
+        .any(|id| id == first_request)
+    {
+        first_request
+    } else {
+        request_id(&effects, PromptId::ArticleTriage, "second overlap triage")
+    };
+    let (state, _) = update(state, triage_success(first_request, 5));
+    let active_stages = state
+        .view()
+        .run_progress
+        .stages
+        .iter()
+        .filter(|stage| stage.status == harvester_core::StageStatus::Active)
+        .count();
+    assert!(active_stages >= 2, "expected overlapping active rows");
+    state
+}
+
+fn reprocess_notice_state() -> AppState {
+    let state = add_llm_metadata(reduce(AppState::new(), Msg::tick_at(time(0))));
+    let articles = (0..151)
+        .map(|index| harvester_core::LoadedArticle {
+            url: format!("https://fixture.invalid/reprocess-{index}"),
+            source_title: Some(format!("Reprocess fixture article {index}")),
+            prepared_text: "A complete fixture article used to pin the large reprocess notice. "
+                .repeat(100),
+            content_hash: format!("fixture-reprocess-hash-{index}"),
+            fetched_utc: Some("2023-11-14T22:13:20Z".into()),
+        })
+        .collect::<Vec<_>>();
+    let (state, _) = update(
+        state,
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls: articles.iter().map(|article| article.url.clone()).collect(),
+            triggered_by_job_done: false,
+        },
+    );
+    let (state, load_id) = triage_load_request(state);
+    let state = reduce(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles.clone(), 100_000),
+        },
+    );
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::RequestLlmCompletion { .. })));
+    assert!(state.reprocess_notice().is_some());
     state
 }
 

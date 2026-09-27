@@ -702,6 +702,147 @@ fn accepted_stop_drains_an_in_flight_score_before_terminalizing_the_run() {
 }
 
 #[test]
+fn desktop_run_actions_follow_lifecycle_unfinished_work_and_ai_availability() {
+    let idle = AppState::new().view();
+    assert!(idle.run_enabled);
+    assert!(!idle.resume_enabled);
+    assert_eq!(idle.unfinished_work, crate::UnfinishedWork::Unknown);
+
+    let (state, _articles) = prepare_pipeline(2, 0);
+    assert!(!state.view().run_enabled);
+    assert!(!state.view().resume_enabled);
+
+    let request_id = triage_request(&state).expect("one in-flight triage request");
+    let (state, _) = crate::update(state, Msg::StopFinishClicked);
+    assert!(!state.view().run_enabled);
+    assert!(!state.view().resume_enabled);
+    assert!(matches!(
+        state.view().run_state,
+        crate::RunState::Stopping { in_flight: 1 }
+    ));
+
+    let (state, effects) = crate::update(state, triage_success(request_id));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
+    assert_eq!(state.run_state(), crate::RunState::Idle);
+    assert!(state.view().run_enabled);
+    assert!(matches!(
+        state.unfinished_work(),
+        crate::UnfinishedWork::Known(summary) if summary.articles_with_work > 0
+    ));
+    assert!(state.view().resume_enabled);
+
+    let (unavailable, _) = crate::update(
+        state,
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
+    assert!(unavailable.view().run_enabled);
+    assert!(!unavailable.view().resume_enabled);
+    assert_eq!(
+        unavailable.view().resume_disabled_reason.as_deref(),
+        Some("AI features unavailable: OPENAI_API_KEY is not set")
+    );
+
+    let (complete, articles) = prepare_pipeline(1, 0);
+    let complete = run_to_completion(complete, &articles, &[true]);
+    assert!(complete.view().run_enabled);
+    assert!(!complete.view().resume_enabled);
+    assert!(matches!(
+        complete.unfinished_work(),
+        crate::UnfinishedWork::Known(summary) if summary.articles_with_work == 0
+    ));
+    assert_eq!(
+        complete.view().resume_disabled_reason.as_deref(),
+        Some("There is no unfinished work to process.")
+    );
+}
+
+#[test]
+fn reprocess_notice_disappears_after_normal_and_stopped_settlement() {
+    let (mut state, articles) = prepare_pipeline(1, 0);
+    state.pipeline_admission.as_mut().unwrap().reprocess_notice = Some((151, 453));
+    assert!(state.view().reprocess_notice.is_some());
+    let settled = run_to_completion(state, &articles, &[true]);
+    assert!(settled.run_progress().unwrap().terminal);
+    assert!(settled.view().reprocess_notice.is_none());
+
+    let (mut state, _) = prepare_pipeline(1, 0);
+    state.pipeline_admission.as_mut().unwrap().reprocess_notice = Some((151, 453));
+    let request_id = triage_request(&state).expect("in-flight triage");
+    let (state, _) = crate::update(state, Msg::StopFinishClicked);
+    assert!(state.view().reprocess_notice.is_some());
+    let (state, _) = crate::update(state, triage_success(request_id));
+    assert!(state.run_progress().unwrap().terminal);
+    assert!(state.view().reprocess_notice.is_none());
+}
+
+#[test]
+fn stop_drain_recounts_each_completion_without_releasing_more_work() {
+    let (mut state, _) = prepare_pipeline(2, 0);
+    state.set_llm_max_in_flight(2);
+    let (state, _) = crate::update(state, Msg::PipelineRunAdvance);
+    let in_flight = state
+        .triage()
+        .articles()
+        .iter()
+        .filter_map(|article| match article.triage_state {
+            crate::triage::ArticleTriageState::InProgress { request_id } => Some(request_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(in_flight.len(), 2);
+    let (state, _) = crate::update(state, Msg::StopFinishClicked);
+    let (state, effects) = crate::update(state, triage_success(in_flight[0]));
+    assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Stopping);
+    assert_eq!(
+        state.run_progress().unwrap().stages[PipelineStage::Triaging.index()].completed,
+        1
+    );
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
+
+    let (state, effects) = crate::update(state, triage_success(in_flight[1]));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
+    assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(
+        state.run_progress().unwrap().stages[PipelineStage::Triaging.index()].completed,
+        2
+    );
+}
+
+#[test]
+fn waiting_stage_starts_its_clock_when_work_is_admitted() {
+    let mut state = tick(add_metadata(AppState::new()), 0);
+    begin_run_if_needed(&mut state);
+    state.pipeline_admission = Some(crate::pipeline_waves::PipelineAdmission::new(
+        crate::PipelineRunScope::Full,
+        true,
+        Default::default(),
+    ));
+    super::super::waves::record_progress(&mut state);
+    let waiting = &state.run_progress().unwrap().stages[PipelineStage::Triaging.index()];
+    assert_eq!(waiting.status, StageStatus::Active);
+    assert_eq!(waiting.started_at_utc, None);
+
+    state = tick(state, 20);
+    let now = state.last_observed_utc();
+    state.pipeline_admission.as_mut().unwrap().admitted[0]
+        .insert(("https://progress.invalid/admitted".into(), "hash".into()));
+    super::super::waves::record_progress(&mut state);
+    let admitted = &state.run_progress().unwrap().stages[PipelineStage::Triaging.index()];
+    assert_eq!(admitted.total, 1);
+    assert_eq!(admitted.started_at_utc, now);
+}
+
+#[test]
 fn settle_run_terminalizes_any_residual_active_stage() {
     let mut state = tick(AppState::new(), 0);
     begin_run_if_needed(&mut state);
@@ -917,7 +1058,7 @@ fn skipped_download_stage_stays_pending() {
 }
 
 #[test]
-fn accepted_stop_during_triage_drains_before_terminalizing_skipped_stages() {
+fn accepted_stop_during_triage_drains_before_terminalizing_waiting_stages() {
     let (state, _) = prepare_pipeline(1, 0);
     assert_eq!(
         state.run_progress().expect("run").stages[PipelineStage::Triaging.index()].status,
@@ -983,6 +1124,11 @@ fn accepted_stop_during_triage_drains_before_terminalizing_skipped_stages() {
         .iter()
         .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
     assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(
+        state.run_progress().unwrap().stages[PipelineStage::Triaging.index()].completed,
+        frozen_counts.completed + 1,
+        "the in-flight completion must count during the Stop drain"
+    );
     assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Idle);
     assert_eq!(state.view().session, crate::SessionState::Idle);
     assert!(state

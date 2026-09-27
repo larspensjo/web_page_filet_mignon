@@ -4,10 +4,10 @@
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
-    "archive_enabled": true,
-    "archive_filtered_count": 2,
+    "archive_enabled": false,
+    "archive_filtered_count": 0,
     "archive_partial_coverage": null,
-    "archive_token_estimate": 84,
+    "archive_token_estimate": 0,
     "blacklist": {
       "blacklisted_count": 0,
       "rows": []
@@ -23,35 +23,9 @@
         {
           "bytes": 1024,
           "downloaded_link_count": 0,
-          "fetched_utc": "1970-01-01T00:00:01Z",
+          "fetched_utc": "2023-11-14T22:13:20Z",
           "filter_status": null,
-          "has_analysis": true,
-          "has_summary": false,
-          "is_since_checkpoint": true,
-          "job_id": 2,
-          "link_count": 1,
-          "origin": "Direct",
-          "outcome": "Success",
-          "stage": "Done",
-          "summary_title": null,
-          "summary_tokens": null,
-          "tokens": 42,
-          "triage_annotation": {
-            "category": "news",
-            "priority": 5,
-            "tags": [
-              "fixture",
-              "review"
-            ]
-          },
-          "url": "https://example.invalid/higher-priority"
-        },
-        {
-          "bytes": 1024,
-          "downloaded_link_count": 0,
-          "fetched_utc": "1970-01-01T00:00:00Z",
-          "filter_status": null,
-          "has_analysis": true,
+          "has_analysis": false,
           "has_summary": false,
           "is_since_checkpoint": true,
           "job_id": 1,
@@ -61,27 +35,23 @@
           "stage": "Done",
           "summary_title": null,
           "summary_tokens": null,
-          "tokens": 42,
-          "triage_annotation": {
-            "category": "news",
-            "priority": 2,
-            "tags": [
-              "fixture",
-              "review"
-            ]
-          },
-          "url": "https://example.invalid/lower-priority"
+          "tokens": null,
+          "triage_annotation": null,
+          "url": "https://fixture.invalid/article"
         }
       ],
-      "scoped_count": 2,
+      "scoped_count": 1,
       "selected_job": null,
       "truncated": false,
-      "visible_count": 2
+      "visible_count": 1
     },
     "dirty": true,
-    "indirect_link_summary": null,
+    "indirect_link_summary": {
+      "count": 0,
+      "phase": "Ready"
+    },
     "is_pre_triage_reviewing": false,
-    "job_count": 2,
+    "job_count": 1,
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
     "left_pane": {
@@ -102,12 +72,16 @@
     "preview_source": null,
     "preview_text": null,
     "queued_urls": [],
-    "raw_unprocessed_count": 2,
+    "raw_unprocessed_count": 0,
     "reprocess_notice": null,
-    "resume_disabled_reason": null,
-    "resume_enabled": true,
+    "resume_disabled_reason": "The current run is still stopping.",
+    "resume_enabled": false,
     "right_pane": {
-      "poll_stats_markdown": null,
+      "poll_stats_markdown": {
+        "byte_len": 114,
+        "content_hash": "5df8e15f29950fa6c26a7ac96260b59a0feabed3c984dd96f888858d6f43ce3f",
+        "key": "PollStatsMarkdown"
+      },
       "summary_markdown": null,
       "trends": {
         "active_category": "Companies",
@@ -117,107 +91,111 @@
       "triage_markdown": null
     },
     "run_completion_notice": null,
-    "run_enabled": true,
+    "run_enabled": false,
     "run_progress": {
       "activity": [
         {
-          "outcome": "Succeeded",
+          "outcome": "Started",
           "seq": 0,
-          "stage": "Triaging",
-          "title": "Lower-priority fixture",
-          "url": "https://example.invalid/lower-priority"
+          "stage": "DownloadingArticles",
+          "title": null,
+          "url": "https://fixture.invalid/article"
         },
         {
           "outcome": "Succeeded",
           "seq": 1,
-          "stage": "Triaging",
-          "title": "Higher-priority fixture",
-          "url": "https://example.invalid/higher-priority"
+          "stage": "DownloadingArticles",
+          "title": null,
+          "url": "https://fixture.invalid/article"
         }
       ],
-      "run_active": false,
+      "run_active": true,
       "stages": [
         {
-          "completed": 0,
-          "ended_at_utc": "2023-11-14T22:13:24Z",
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:20Z",
           "failed": 0,
           "stage": "ScanningSources",
-          "started_at_utc": null,
+          "started_at_utc": "2023-11-14T22:13:20Z",
           "status": "Done",
-          "total": 0,
+          "total": 1,
           "total_is_final": true
         },
         {
-          "completed": 0,
-          "ended_at_utc": "2023-11-14T22:13:24Z",
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:20Z",
           "failed": 0,
           "stage": "DownloadingArticles",
-          "started_at_utc": null,
+          "started_at_utc": "2023-11-14T22:13:20Z",
           "status": "Done",
-          "total": 0,
+          "total": 1,
           "total_is_final": true
         },
         {
-          "completed": 2,
-          "ended_at_utc": "2023-11-14T22:13:24Z",
+          "completed": 1,
+          "ended_at_utc": "2023-11-14T22:13:21Z",
           "failed": 0,
           "stage": "LoadingArticles",
-          "started_at_utc": "2023-11-14T22:13:24Z",
+          "started_at_utc": "2023-11-14T22:13:21Z",
           "status": "Done",
-          "total": 2,
-          "total_is_final": true
-        },
-        {
-          "completed": 2,
-          "ended_at_utc": "2023-11-14T22:13:24Z",
-          "failed": 0,
-          "stage": "Triaging",
-          "started_at_utc": "2023-11-14T22:13:24Z",
-          "status": "Done",
-          "total": 2,
+          "total": 1,
           "total_is_final": true
         },
         {
           "completed": 0,
-          "ended_at_utc": "2023-11-14T22:13:24Z",
+          "ended_at_utc": null,
+          "failed": 0,
+          "stage": "Triaging",
+          "started_at_utc": "2023-11-14T22:13:21Z",
+          "status": "Active",
+          "total": 1,
+          "total_is_final": true
+        },
+        {
+          "completed": 0,
+          "ended_at_utc": null,
           "failed": 0,
           "stage": "Summarizing",
           "started_at_utc": null,
-          "status": "Done",
+          "status": "Pending",
           "total": 0,
           "total_is_final": true
         },
         {
           "completed": 0,
-          "ended_at_utc": "2023-11-14T22:13:24Z",
+          "ended_at_utc": null,
           "failed": 0,
           "stage": "ScoringSignals",
           "started_at_utc": null,
-          "status": "Done",
+          "status": "Pending",
           "total": 0,
           "total_is_final": true
         }
       ]
     },
-    "run_state": "Idle",
+    "run_state": {
+      "Stopping": {
+        "in_flight": 1
+      }
+    },
     "selected_job_id": null,
     "selected_url": null,
-    "session": "Idle",
+    "session": "Finishing",
     "signal_candidate_preview": null,
     "signal_candidate_rows": [],
     "stop_finish_button": "Disabled",
     "token_limit": 100000,
-    "total_tokens": 84,
+    "total_tokens": 0,
     "triage_blocked_reason": null,
-    "triage_results_reorder_suppressed": false,
+    "triage_results_reorder_suppressed": true,
     "unfinished_work": {
       "Known": {
-        "articles_with_work": 2,
+        "articles_with_work": 0,
         "complete": 0,
-        "estimated_calls": 4,
-        "in_progress": 0,
+        "estimated_calls": 0,
+        "in_progress": 1,
         "needs_scoring": 0,
-        "needs_summary": 2,
+        "needs_summary": 0,
         "needs_triage": 0,
         "not_eligible": 0
       }

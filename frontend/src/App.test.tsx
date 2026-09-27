@@ -1,10 +1,16 @@
 import aiUnavailable from "@fixtures/snapshots/ai_unavailable.json";
+import exportUnavailable from "@fixtures/snapshots/export_unavailable_during_run.json";
 import emptyCorpus from "@fixtures/snapshots/idle_empty_corpus.json";
 import last24Hours from "@fixtures/snapshots/idle_last_24_hours.json";
 import withCorpus from "@fixtures/snapshots/idle_with_corpus.json";
 import withSelection from "@fixtures/snapshots/idle_with_selection.json";
+import overlappingActiveStages from "@fixtures/snapshots/overlapping_active_stages.json";
+import reprocessNotice from "@fixtures/snapshots/reprocess_notice.json";
 import runFinishedWithNotice from "@fixtures/snapshots/run_finished_with_notice.json";
 import runInProgressWithFailures from "@fixtures/snapshots/run_in_progress_with_failures.json";
+import stoppedWithUnfinishedWork from "@fixtures/snapshots/stopped_with_unfinished_work_export_enabled.json";
+import stoppingWithInFlightWork from "@fixtures/snapshots/stopping_with_in_flight_work.json";
+import unfinishedWorkAvailable from "@fixtures/snapshots/unfinished_work_available.json";
 import showArchiveDialog from "@fixtures/ui_commands/show_archive_dialog.json";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -39,6 +45,12 @@ const reviewFixtures = [
 	["run finished with notice", runFinishedWithNotice],
 	["AI unavailable", aiUnavailable],
 	["idle with selection", withSelection],
+	["overlapping active stages", overlappingActiveStages],
+	["unfinished work available", unfinishedWorkAvailable],
+	["stopping with in-flight work", stoppingWithInFlightWork],
+	["stopped with unfinished work", stoppedWithUnfinishedWork],
+	["export unavailable during run", exportUnavailable],
+	["reprocess notice", reprocessNotice],
 ] as const;
 let snapshot: SnapshotEnvelope | null = corpus;
 let bodyResponses = new Map<string, BodyResponse | null>();
@@ -977,13 +989,18 @@ describe("job list", () => {
 		rendered.unmount();
 	});
 
-	it("dispatches PollSources through the restricted intent channel", async () => {
+	it("dispatches Run and Process unfinished through the restricted intent channel", async () => {
+		snapshot = unfinishedWorkAvailable as unknown as SnapshotEnvelope;
 		await renderLoaded();
-		fireEvent.click(screen.getByRole("button", { name: "Poll Sources" }));
+		fireEvent.click(screen.getByRole("button", { name: "Run" }));
+		fireEvent.click(
+			screen.getByRole("button", { name: /Process unfinished \(/ }),
+		);
 		await waitFor(() =>
-			expect(invoke).toHaveBeenCalledWith("dispatch_intent", {
-				payload: { type: "PollSources" },
-			}),
+			expect(intents().map(([, arg]) => arg)).toEqual([
+				{ payload: { type: "RunPipeline" } },
+				{ payload: { type: "ResumeUnfinishedWork" } },
+			]),
 		);
 	});
 });
@@ -1083,6 +1100,24 @@ describe("modals and chrome", () => {
 			["dispatch_intent", { payload: { type: "OpenArchiveDialog" } }],
 		]);
 		expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+	});
+
+	it("gates Archive and its open dialog from the core export flag", async () => {
+		for (const runFixture of [exportUnavailable, stoppingWithInFlightWork]) {
+			snapshot = runFixture as unknown as SnapshotEnvelope;
+			await renderWithCommands();
+			expect(screen.getByRole("button", { name: "Archive…" })).toBeDisabled();
+			emitUiCommand(showArchiveDialog);
+			expect(screen.getByRole("button", { name: /^Export/ })).toBeDisabled();
+			cleanup();
+			listeners.clear();
+		}
+
+		snapshot = stoppedWithUnfinishedWork as unknown as SnapshotEnvelope;
+		await renderWithCommands();
+		expect(screen.getByRole("button", { name: "Archive…" })).toBeEnabled();
+		expect(snapshot.view.archive_enabled).toBe(true);
+		expect(snapshot.view.resume_enabled).toBe(true);
 	});
 
 	it("Ctrl+L opens Add URLs, paste submits, Escape closes", async () => {

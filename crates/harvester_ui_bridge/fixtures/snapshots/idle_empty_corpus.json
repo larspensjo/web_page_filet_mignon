@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 11,
+  "schema_version": 12,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -44,13 +44,15 @@
     "llm_usage_by_model": [],
     "next_item_enabled": false,
     "poll_indirect_links_enabled": false,
-    "poll_sources_enabled": true,
     "preview_context": null,
     "preview_header": null,
     "preview_source": null,
     "preview_text": null,
     "queued_urls": [],
     "raw_unprocessed_count": 0,
+    "reprocess_notice": null,
+    "resume_disabled_reason": "Unfinished work is not known yet.",
+    "resume_enabled": false,
     "right_pane": {
       "poll_stats_markdown": null,
       "summary_markdown": null,
@@ -62,6 +64,7 @@
       "triage_markdown": null
     },
     "run_completion_notice": null,
+    "run_enabled": true,
     "run_progress": {
       "activity": [],
       "run_active": false,
@@ -74,12 +77,11 @@
     "signal_candidate_preview": null,
     "signal_candidate_rows": [],
     "stop_finish_button": "Disabled",
-    "summaries_can_start": false,
     "token_limit": 100000,
     "total_tokens": 0,
     "triage_blocked_reason": null,
-    "triage_can_start": false,
     "triage_results_reorder_suppressed": false,
+    "unfinished_work": "Unknown",
     "workspace_view": "Review"
   },
   "fatal_message": null

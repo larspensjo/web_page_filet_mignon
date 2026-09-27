@@ -1,7 +1,5 @@
 use super::batch::archive_token_estimates_from_parts;
-use super::{
-    domain_from_url, map_job_filter_status, AppState, JobResultKind, JobState, SessionState, Stage,
-};
+use super::{domain_from_url, map_job_filter_status, AppState, JobResultKind, JobState, Stage};
 use crate::archive_display::ArchiveCoverage;
 use crate::briefing::ArticleSummaryResult;
 use crate::pre_triage_filter::PreTriagePhase;
@@ -161,10 +159,44 @@ impl AppState {
             )
         }) && self.briefing.can_generate()
             && self.briefing_ai_available();
-        let summaries_can_start = matches!(self.triage.phase(), TriagePhase::Complete)
-            && !archive_display.ordered_urls().is_empty()
-            && self.briefing.can_start()
-            && self.briefing_ai_available();
+        let run_state = self.run_state();
+        let run_enabled = matches!(run_state, crate::RunState::Idle);
+        let unfinished_work = self.unfinished_work().clone();
+        let resume_disabled_reason = if !run_enabled {
+            Some(match run_state {
+                crate::RunState::Active => "A run is already in progress.".to_string(),
+                crate::RunState::Stopping { .. } => {
+                    "The current run is still stopping.".to_string()
+                }
+                crate::RunState::Idle => unreachable!(),
+            })
+        } else if !self.triage_ai_available() {
+            Some(
+                ai_unavailable_message
+                    .clone()
+                    .unwrap_or_else(|| "AI is unavailable.".to_string()),
+            )
+        } else {
+            match &unfinished_work {
+                crate::UnfinishedWork::Unknown => {
+                    Some("Unfinished work is not known yet.".to_string())
+                }
+                crate::UnfinishedWork::Known(summary) if summary.articles_with_work == 0 => {
+                    Some("There is no unfinished work to process.".to_string())
+                }
+                crate::UnfinishedWork::Known(_) => None,
+            }
+        };
+        let resume_enabled = resume_disabled_reason.is_none();
+        let reprocess_notice = (!matches!(run_state, crate::RunState::Idle))
+            .then(|| self.reprocess_notice())
+            .flatten()
+            .map(
+                |(articles, estimated_calls)| crate::view_model::ReprocessNoticeView {
+                    articles,
+                    estimated_calls,
+                },
+            );
         AppViewModel {
             workspace_view: self.workspace_view(),
             job_list_mode: self.job_list_mode(),
@@ -188,11 +220,7 @@ impl AppState {
             preview_source,
             briefing_generate_enabled: briefing_generate_ready,
             next_item_enabled: self.briefing.next_item_enabled() && self.briefing_ai_available(),
-            summaries_can_start,
             stop_finish_button,
-            triage_can_start: self.triage_ai_available()
-                && self.triage.can_start()
-                && self.can_start_triage_from_pre_triage(),
             triage_results_reorder_suppressed: self.triage_reorder_suppressed(),
             signal_candidate_rows,
             signal_candidate_preview,
@@ -204,12 +232,13 @@ impl AppState {
                 .as_ref()
                 .map_or_else(Default::default, crate::RunProgress::view),
             archive_enabled: self.export_available(),
-            run_state: self.run_state(),
+            run_state,
             run_completion_notice: self.run_completion_notice.clone(),
-            poll_sources_enabled: matches!(
-                self.session,
-                SessionState::Idle | SessionState::Running
-            ) && !self.source_states.is_poll_in_progress(),
+            run_enabled,
+            resume_enabled,
+            resume_disabled_reason,
+            unfinished_work,
+            reprocess_notice,
             poll_indirect_links_enabled: !self.indirect_link_pool.is_empty()
                 && !self.indirect_poll_in_progress(),
             checkpoint_status_message: self.briefing_checkpoint_status_message.clone(),

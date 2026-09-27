@@ -235,7 +235,7 @@ fn briefing_generate_enabled_false_when_triage_incomplete_or_corpus_empty() {
     let view = AppState::new().view();
 
     assert!(!view.briefing_generate_enabled);
-    assert!(!view.summaries_can_start);
+    assert_eq!(view.unfinished_work, crate::UnfinishedWork::Unknown);
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn briefing_generate_enabled_false_when_summaries_not_settled() {
 
     let view = state.view();
     assert!(!view.briefing_generate_enabled);
-    assert!(view.summaries_can_start);
+    assert_eq!(state.triage().completed_count(), 2);
 }
 
 #[test]
@@ -261,7 +261,10 @@ fn briefing_generate_enabled_false_when_signal_scoring_in_progress() {
 
     let view = state.view();
     assert!(!view.briefing_generate_enabled);
-    assert!(view.summaries_can_start);
+    assert!(matches!(
+        state.signal_candidate().state_for(&url),
+        Some(crate::signal_candidate::SignalCandidateState::Scoring { .. })
+    ));
 }
 
 #[test]
@@ -271,7 +274,7 @@ fn briefing_generate_enabled_true_when_summaries_settled_and_signal_idle() {
 
     let view = state.view();
     assert!(view.briefing_generate_enabled);
-    assert!(view.summaries_can_start);
+    assert_eq!(state.triage().completed_count(), 2);
 }
 
 #[test]
@@ -293,17 +296,25 @@ fn briefing_generate_enabled_false_while_briefing_is_running() {
 }
 
 #[test]
-fn summaries_can_start_false_when_triage_incomplete() {
+fn run_is_enabled_when_triage_and_corpus_are_empty() {
     init_logging();
     let view = AppState::new().view();
 
-    assert!(!view.summaries_can_start);
+    assert!(view.run_enabled);
 }
 
 #[test]
-fn summaries_can_start_false_when_ai_unavailable() {
+fn run_stays_enabled_but_resume_is_disabled_when_ai_is_unavailable() {
     init_logging();
-    let state = with_summary_metadata(complete_triage_state_for_test(1));
+    let mut state =
+        with_signal_candidate_metadata(with_summary_metadata(ready_pre_triage_state(&[
+            "https://ai-unavailable.example/article",
+        ])));
+    state.recompute_unfinished_work();
+    assert!(matches!(
+        state.unfinished_work(),
+        crate::UnfinishedWork::Known(summary) if summary.articles_with_work > 0
+    ));
     let (state, _) = update(
         state,
         Msg::AiAvailabilityDetected {
@@ -315,7 +326,12 @@ fn summaries_can_start_false_when_ai_unavailable() {
 
     let view = state.view();
     assert!(!view.briefing_generate_enabled);
-    assert!(!view.summaries_can_start);
+    assert!(view.run_enabled);
+    assert!(!view.resume_enabled);
+    assert_eq!(
+        view.resume_disabled_reason.as_deref(),
+        Some("AI features unavailable: OPENAI_API_KEY is not set")
+    );
 }
 
 #[test]
@@ -332,9 +348,9 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
     );
 
     let view = state.view();
-    assert!(!view.triage_can_start);
+    assert!(view.run_enabled);
+    assert!(!view.resume_enabled);
     assert!(!view.briefing_generate_enabled);
-    assert!(!view.summaries_can_start);
     assert_eq!(
         view.ai_unavailable_message.as_deref(),
         Some("AI features unavailable: OPENAI_API_KEY is not set")

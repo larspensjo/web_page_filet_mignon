@@ -1,6 +1,6 @@
 {
   "generation": 1,
-  "schema_version": 11,
+  "schema_version": 12,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
@@ -106,7 +106,6 @@
     "llm_usage_by_model": [],
     "next_item_enabled": false,
     "poll_indirect_links_enabled": false,
-    "poll_sources_enabled": true,
     "preview_context": {
       "attention_label": null,
       "source_label": "fixture.invalid",
@@ -130,6 +129,9 @@
     },
     "queued_urls": [],
     "raw_unprocessed_count": 0,
+    "reprocess_notice": null,
+    "resume_disabled_reason": "There is no unfinished work to process.",
+    "resume_enabled": false,
     "right_pane": {
       "poll_stats_markdown": {
         "byte_len": 114,
@@ -156,6 +158,7 @@
       "completed_at_utc": "2023-11-14T22:13:21Z",
       "new_result_count": 1
     },
+    "run_enabled": true,
     "run_progress": {
       "activity": [
         {
@@ -221,7 +224,7 @@
           "ended_at_utc": "2023-11-14T22:13:21Z",
           "failed": 0,
           "stage": "LoadingArticles",
-          "started_at_utc": "2023-11-14T22:13:20Z",
+          "started_at_utc": "2023-11-14T22:13:21Z",
           "status": "Done",
           "total": 1,
           "total_is_final": true
@@ -288,12 +291,22 @@
       }
     ],
     "stop_finish_button": "Disabled",
-    "summaries_can_start": true,
     "token_limit": 100000,
     "total_tokens": 0,
     "triage_blocked_reason": null,
-    "triage_can_start": false,
     "triage_results_reorder_suppressed": false,
+    "unfinished_work": {
+      "Known": {
+        "articles_with_work": 0,
+        "complete": 1,
+        "estimated_calls": 0,
+        "in_progress": 0,
+        "needs_scoring": 0,
+        "needs_summary": 0,
+        "needs_triage": 0,
+        "not_eligible": 0
+      }
+    },
     "workspace_view": "Review"
   },
   "fatal_message": null

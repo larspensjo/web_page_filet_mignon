@@ -177,7 +177,7 @@ fn resume_run_triages_prepared_article() {
     assert!(effects
         .iter()
         .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
-    assert!(!state.view().triage_can_start);
+    assert!(!state.view().run_enabled);
 }
 
 fn with_triage_metadata_ready(state: AppState) -> AppState {
@@ -231,7 +231,10 @@ fn triage_articles_loaded_empty_fails() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = simulate_triage_loaded(state, Vec::new());
-    assert!(!state.view().triage_can_start);
+    assert!(matches!(
+        state.batch_observation().pre_triage_phase,
+        harvester_core::PreTriagePhase::Failed { .. }
+    ));
     assert!(!state.view().triage_results_reorder_suppressed);
 }
 
@@ -240,7 +243,7 @@ fn triage_load_failed_transitions_to_failed() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = simulate_triage_load_failed(state, "boom");
-    assert!(!state.view().triage_can_start);
+    assert!(!state.can_start_triage_from_pre_triage());
     assert!(!state.view().triage_results_reorder_suppressed);
 }
 
@@ -302,9 +305,8 @@ fn triage_all_completed_transitions_to_complete() {
     );
     assert_persist_triage_cache_effect(&effects, &state);
     let view = state.view();
-    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
-    // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
-    assert!(!view.triage_can_start);
+    // The second triage response arrives while its Resume run is still active.
+    assert!(!view.run_enabled);
 }
 
 #[test]
@@ -328,9 +330,8 @@ fn triage_all_failed_transitions_to_failed() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
-    // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
-    assert!(!state.view().triage_can_start);
+    // The run is terminal after every triage request fails, so the primary Run action is enabled.
+    assert!(state.view().run_enabled);
     assert!(state.view().desktop_job_list.rows[0]
         .triage_annotation
         .is_none());
@@ -357,9 +358,8 @@ fn triage_partial_failure_still_completes() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
-    // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
-    assert!(!state.view().triage_can_start);
+    // The downstream stages are still part of the active run after partial triage failure.
+    assert!(!state.view().run_enabled);
     assert!(state.view().desktop_job_list.rows[0]
         .triage_annotation
         .is_some());
@@ -378,9 +378,8 @@ fn triage_quota_exhaustion_fails_remaining() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
-    // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
-    assert!(!state.view().triage_can_start);
+    // Quota exhaustion terminalizes the run; Run stays available for a later retry.
+    assert!(state.view().run_enabled);
 }
 
 #[test]
@@ -534,21 +533,21 @@ fn resume_run_enters_the_pipeline_after_briefing_readiness_failure() {
             ..
         }
     )));
-    assert!(!state.view().triage_can_start);
+    assert!(!state.view().run_enabled);
 }
 
 #[test]
-fn triage_can_start_false_without_completed_jobs() {
+fn run_is_enabled_without_completed_jobs() {
     init_logging();
     let state = AppState::new();
-    assert!(!state.view().triage_can_start);
+    assert!(state.view().run_enabled);
 }
 
 #[test]
-fn triage_can_start_true_with_completed_jobs() {
+fn run_is_enabled_with_completed_jobs() {
     init_logging();
     let (state, _) = ready_state_with_pretriage(&["https://one.example"]);
-    assert!(state.view().triage_can_start);
+    assert!(state.view().run_enabled);
 }
 
 #[test]

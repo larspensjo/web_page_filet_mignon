@@ -666,7 +666,7 @@ fn resume_run_consumes_reviewing_pre_triage_into_triage_session() {
         "one unresolved review item should keep pre-triage in Reviewing"
     );
     assert!(
-        state.view().triage_can_start,
+        state.view().run_enabled,
         "Reviewing phase with tentative included articles must allow triage start"
     );
 

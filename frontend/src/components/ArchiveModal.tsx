@@ -11,6 +11,7 @@ import { Modal } from "./Modal";
 type ArchiveModalProps = {
 	request: ArchiveDialogRequest;
 	partialCoverage: ArchivePartialCoverageView | null | undefined;
+	archiveEnabled: boolean;
 	onClose: () => void;
 };
 
@@ -73,6 +74,7 @@ function candidateNotice(request: ArchiveDialogRequest): {
 export function ArchiveModal({
 	request,
 	partialCoverage,
+	archiveEnabled,
 	onClose,
 }: ArchiveModalProps) {
 	const [basename, setBasename] = useState(request.default_basename);
@@ -85,7 +87,8 @@ export function ArchiveModal({
 	const basenameValid = isSafeArchiveBasename(basename);
 	const candidatesAvailable = request.signal_candidate_count > 0;
 	const candidatesOn = useSignalCandidates && candidatesAvailable;
-	const canExport = request.article_count > 0 && basenameValid;
+	const canExport =
+		archiveEnabled && request.article_count > 0 && basenameValid;
 	const overwrite =
 		request.default_file_exists && basename === request.default_basename;
 	const notice = candidateNotice(request);

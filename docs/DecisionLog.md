@@ -252,3 +252,13 @@ would change the public corpus format.
 Consequences: Failed articles are retried on the next run, with no retry cap for now.
 Refs: docs/Architecture.md, crates/harvester_core/src/update/pipeline_run.rs,
 crates/harvester_engine/src/engine.rs
+
+## 2026-09-27 - The desktop Run is one primary action
+Context: One press should run unattended; a separate Poll action split the workflow.
+Decision: Run performs poll through scoring, and the Poll Sources action is gone. A secondary
+action processes unfinished window work without fetching and is enabled only when such work
+exists.
+Consequences: The desktop intent vocabulary loses `PollSources` and gains
+`ResumeUnfinishedWork`.
+Refs: docs/Architecture.md, crates/harvester_core/src/ui_intent.rs,
+frontend/src/components/RunSurface.tsx
