@@ -23,7 +23,7 @@
           "bytes": 1024,
           "downloaded_link_count": 0,
           "fetched_utc": "2023-11-14T22:13:20Z",
-          "filter_status": "AutoIncluded",
+          "filter_status": null,
           "has_analysis": true,
           "has_summary": true,
           "is_since_checkpoint": true,
@@ -50,7 +50,7 @@
       "selected_job": {
         "bytes": 1024,
         "fetched_utc": "2023-11-14T22:13:20Z",
-        "filter_status": "AutoIncluded",
+        "filter_status": null,
         "has_summary": true,
         "job_id": 1,
         "links": [
@@ -88,7 +88,7 @@
       "count": 0,
       "phase": "Ready"
     },
-    "is_pre_triage_reviewing": true,
+    "is_pre_triage_reviewing": false,
     "job_count": 1,
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,
@@ -290,7 +290,7 @@
     "token_limit": 100000,
     "total_tokens": 0,
     "triage_blocked_reason": null,
-    "triage_can_start": true,
+    "triage_can_start": false,
     "triage_results_reorder_suppressed": false,
     "workspace_view": "Review"
   },

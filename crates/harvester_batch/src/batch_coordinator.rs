@@ -777,7 +777,7 @@ fn fail_group(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::progress::{
         format_dashboard, BatchDisplayPhase, BatchProgressProjection, BatchRunBaseline, PassCounts,
@@ -795,15 +795,15 @@ mod tests {
     use tempfile::TempDir;
 
     #[derive(Clone, Default)]
-    struct FakeTransport {
-        uploaded: Arc<Mutex<Vec<Vec<u8>>>>,
-        created: Arc<Mutex<Vec<String>>>,
+    pub(crate) struct FakeTransport {
+        pub(crate) uploaded: Arc<Mutex<Vec<Vec<u8>>>>,
+        pub(crate) created: Arc<Mutex<Vec<String>>>,
         fail_upload: bool,
         fail_create: bool,
-        list_pages: Arc<Mutex<VecDeque<Vec<BatchHandle>>>>,
+        pub(crate) list_pages: Arc<Mutex<VecDeque<Vec<BatchHandle>>>>,
         list_after: Arc<Mutex<Vec<Option<String>>>>,
-        retrieved: Arc<Mutex<HashMap<String, BatchHandle>>>,
-        downloads: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+        pub(crate) retrieved: Arc<Mutex<HashMap<String, BatchHandle>>>,
+        pub(crate) downloads: Arc<Mutex<HashMap<String, Vec<u8>>>>,
     }
 
     #[async_trait]
@@ -879,7 +879,7 @@ mod tests {
         }
     }
 
-    fn handle(id: &str, input_file_id: &str, status: BatchLifecycle) -> BatchHandle {
+    pub(crate) fn handle(id: &str, input_file_id: &str, status: BatchLifecycle) -> BatchHandle {
         BatchHandle {
             id: id.into(),
             status,

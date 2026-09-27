@@ -218,7 +218,12 @@ fn known(state: &AppState) -> &crate::UnfinishedWorkSummary {
 }
 
 fn start_triage(state: AppState) -> (AppState, u64) {
-    let (state, effects) = reduce(state, Msg::TriageClicked);
+    let (state, effects) = reduce(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     let configuration_request = effects
         .iter()
         .find_map(|effect| match effect {
@@ -260,6 +265,21 @@ fn start_triage(state: AppState) -> (AppState, u64) {
             active_versions,
             effective_models,
             preparation_budget: PREPARATION_BUDGET,
+        },
+    );
+    let load_request = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("Resume refreshes the current window before triage");
+    let articles = state.pre_triage().resolved_included_articles();
+    let (state, effects) = reduce(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_request,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, PREPARATION_BUDGET),
         },
     );
     let request_id = effects

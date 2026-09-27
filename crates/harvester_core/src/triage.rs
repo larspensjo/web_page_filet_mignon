@@ -215,22 +215,6 @@ impl TriageSession {
         }
     }
 
-    pub(crate) fn refresh_preparation(&mut self, articles: &[LoadedArticle], budget: usize) {
-        let prepared: HashMap<_, _> = articles
-            .iter()
-            .filter(|a| a.prepared_text.len() <= budget)
-            .map(|a| ((a.url.as_str(), a.content_hash.as_str()), a))
-            .collect();
-        for article in &mut self.articles {
-            if let Some(prepared) =
-                prepared.get(&(article.url.as_str(), article.content_hash.as_str()))
-            {
-                article.prepared_text = prepared.prepared_text.clone();
-                article.preparation_budget = Some(budget);
-            }
-        }
-    }
-
     pub fn reset_with_articles(&mut self, loaded: Vec<LoadedArticle>) {
         self.set_articles(loaded);
         self.started_at = None;

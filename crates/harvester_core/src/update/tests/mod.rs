@@ -281,7 +281,12 @@ fn prepare_summaries_loads_base_corpus_skip_aggregate() {
     let state = complete_triage_state_for_test(2);
     let state = with_summary_metadata(state);
 
-    let (state, effects) = update(state, Msg::PrepareSummariesClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
     assert!(effects
         .iter()

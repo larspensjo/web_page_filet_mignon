@@ -8,7 +8,7 @@
 The briefing and the Archive select articles through different paths, so they can
 operate on different sets of articles.
 
-- **Briefing** (today): `GenerateBriefingClicked` / `PrepareSummariesClicked` start
+- **Briefing** (today): `GenerateBriefingClicked` / `PipelineRunRequested { scope: Resume }` start
   from *all completed jobs* (`ordered_completed_job_urls_snapshot()`), build an
   ephemeral pre-triage pass, run (or reuse) a briefing-owned triage, then apply the
   `TriageSelectionPolicy` cutoff (`priority > 1`). This is documented as an
@@ -64,7 +64,7 @@ click).
 
 ### Button behavior
 
-- **Summarize Articles** (`PrepareSummariesClicked`): enabled when triage is
+- **Summarize Articles** (the `PipelineRunRequested { scope: Resume }` path): enabled when triage is
   `Complete` with ≥1 eligible article and the briefing is not active. Summarizes the
   **base corpus** (no signal narrowing), `skip_aggregate = true`. Summaries populate
   the cache and trigger signal scoring as they complete.
@@ -208,7 +208,7 @@ checkpoint/time window.
 ### F. Batch flow
 
 No change required. `harvester_batch` runs only `DispatchTriage → DispatchSummaries`
-(→ `PrepareSummariesClicked`); it never generates aggregate briefings. `Summarize`
+(→ `PipelineRunRequested { scope: Resume }`); it never generates aggregate briefings. `Summarize`
 uses the base corpus and has no signal-readiness dependency, and signal scoring runs as
 a side effect of summary completion (feeding the Archive export). The
 `DispatchSummaries` gate already requires `triage.phase() == Complete`, which matches
@@ -255,7 +255,7 @@ so the briefing's corpus decision stays traceable.
 8. **Failed summary does not block:** an eligible article with a recorded summary
    failure (others summarized) → readiness reaches `Ready` (failure is terminal).
 9. **Readiness — scoring in flight:** `in_flight_count > 0` → `SignalScoringInProgress`.
-10. **Summarize uses base corpus:** `PrepareSummariesClicked` emits
+10. **Summarize uses base corpus:** `PipelineRunRequested { scope: Resume }` emits
     `LoadArticlesForBriefing` with `archive_corpus()` URLs (no signal narrowing) and
     skip-aggregate.
 11. **Button enablement:** view model exposes `briefing_generate_enabled = false` until

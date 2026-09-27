@@ -5,7 +5,8 @@ Revised the same day after the Codex plan review (eight issues, all applied) and
 answers to the first draft's twelve open questions, which are now stated as decisions below.
 Status: Phase 1 landed (incremental corpus hand-off). Phase 2 landed (one model-request budget,
 furthest-along first, current-key scoring). Phase 3 landed (identity-based completeness).
-Phase 4 landed (waves, admission, run scopes and progress). Phases 5–8 remain outstanding,
+Phase 4 landed (waves, admission, run scopes and progress). Phase 5 landed (batch host and import
+mode on reducer-owned runs). Phases 6–8 remain outstanding,
 except the explicitly approved Continue-before-rearm batch collection step brought forward.
 
 Follow-up before Phase 4 (user decision 2026-09-25), done: building the desktop view at
@@ -110,7 +111,10 @@ Done means:
     Failed articles stay on the leftover list and are retried on the next run. There is no retry
     cap for now; a cap is a possible later addition.
 
-## Verified facts (checked against the source on 2026-09-23)
+## Baseline facts (checked against the source on 2026-09-23 before implementation)
+
+These bullets record the starting architecture. The landed lifecycle is summarized under
+"Reducer-owned pipeline lifecycle" and "Migration-only stage entry points (removed)" below.
 
 Intake and hand-offs:
 
@@ -407,11 +411,10 @@ run is armed only when AI is available; otherwise a Full run is intake-only.
 A request that arrives while a compatible run is active joins it, as a pipeline request already
 joins an active poll run today.
 
-**Legacy entry points during migration.** Until the batch host migrates in Phase 5,
-`TriageClicked` and `PrepareSummariesClicked` start an armed `Resume` run if none is active, then
-behave as before. `batch_next_action` stays as a shim over the new sessions until then. This
-keeps the old batch orchestration dispatching in Phase 4. Phase 5 deletes the shim, the legacy
-arming and `BatchNextAction`.
+**Migration-only stage entry points (removed).** `TriageClicked`,
+`PrepareSummariesClicked`, `batch_next_action` and `BatchNextAction` no longer exist. Hosts
+request Full, Resume or Continue runs explicitly, and pump `PipelineRunAdvance` while a run is
+active. No stage is armed from inferred phase state.
 
 ### 5. Settlement and progress under overlap
 
@@ -668,6 +671,9 @@ Docs: Architecture (completeness is identity-based under current keys); Engineer
 Scope: `harvester_core`, `harvester_ui_bridge` (fixtures), `frontend/` (one new field only). The
 desktop gains overlap through its existing buttons. Batch keeps its old orchestration through
 legacy arming.
+
+The legacy batch behavior below records the interim migration state before batch and import
+moved onto reducer-owned runs. Current lifecycle behavior is summarized in the sections above.
 
 1. Make the sessions accumulate, record completion keys, and derive phases from admitted
    contents. Implement the admission transitions in section 4.

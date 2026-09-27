@@ -1,5 +1,6 @@
 use super::batch_runtime::{divert_batch_effects, BatchRuntime};
 use super::live_progress::LiveSystemBatchProgress;
+use super::CycleStartWorkReporter;
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
 use harvester_core::{update, AppState, BatchObservation, Msg};
@@ -19,8 +20,6 @@ pub(crate) enum CycleOutcome {
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct DispatchLoopOptions {
-    pub(crate) enable_ai_orchestration: bool,
-    pub(crate) require_new_jobs_since: Option<usize>,
     pub(crate) tick_interval: Duration,
 }
 
@@ -32,29 +31,11 @@ pub(super) fn should_settle_cycle(status: harvester_core::BatchStatus) -> bool {
     matches!(status, harvester_core::BatchStatus::Settled)
 }
 
-pub(super) fn should_check_settlement_this_iteration(orchestrated: bool) -> bool {
-    !orchestrated
-}
-
 pub(super) fn batch_buffer_is_quiescent(state: &AppState, buffered_ids: &HashSet<u64>) -> bool {
     !buffered_ids.is_empty()
         && state
             .pending_llm_request_ids()
             .all(|request_id| buffered_ids.contains(&request_id))
-}
-
-pub(super) fn should_run_ai_orchestration(
-    enable_ai_orchestration: bool,
-    require_new_jobs_since: Option<usize>,
-    obs: &BatchObservation,
-) -> bool {
-    if !enable_ai_orchestration {
-        return false;
-    }
-    match require_new_jobs_since {
-        Some(baseline_jobs_total) => obs.jobs_total > baseline_jobs_total,
-        None => true,
-    }
 }
 
 /// Classifies the outcome of a completed cycle based on observation metrics.
@@ -146,6 +127,57 @@ pub(crate) fn should_log_batch_msg(msg: &Msg) -> bool {
     )
 }
 
+/// Reduce startup metadata and the restored article window before the first
+/// cycle reports unfinished work or requests intake.
+pub(super) fn prepare_startup_window(
+    state: &mut AppState,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_runner: &EffectRunner,
+) -> Result<(), String> {
+    let mut templates_loaded = false;
+    let mut metadata_loaded = false;
+    let mut contexts_loaded = false;
+    for _ in 0..10_000 {
+        match msg_rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(msg) => {
+                templates_loaded |= matches!(msg, Msg::PromptTemplateFilesLoaded);
+                metadata_loaded |= matches!(msg, Msg::LlmMetadataLoaded { .. });
+                contexts_loaded |= matches!(
+                    msg,
+                    Msg::PromptContextsLoaded { .. } | Msg::PromptContextsLoadFailed { .. }
+                );
+                let (next, effects) = update(std::mem::take(state), msg);
+                *state = next;
+                if !effects.is_empty() {
+                    effect_runner.enqueue(effects);
+                }
+                let (next, effects, _) = pump_pre_triage_refresh(std::mem::take(state));
+                *state = next;
+                if !effects.is_empty() {
+                    effect_runner.enqueue(effects);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("Startup message channel disconnected unexpectedly".into());
+            }
+        }
+        let (next, effects) = update(std::mem::take(state), Msg::tick_at(Utc::now()));
+        *state = next;
+        if !effects.is_empty() {
+            effect_runner.enqueue(effects);
+        }
+        if templates_loaded
+            && metadata_loaded
+            && contexts_loaded
+            && !state.pipeline_activity().intake_refresh_pending
+        {
+            return Ok(());
+        }
+    }
+    Err("Startup article window did not settle before the first cycle".into())
+}
+
 /// Runs the inner dispatch loop until settlement or error.
 /// Processes messages, updates state, executes effects, and checks for settlement.
 pub(super) fn run_dispatch_loop(
@@ -182,7 +214,21 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
     let timeout = Duration::from_millis(100);
     let mut iterations = 0;
     let mut last_tick = Instant::now();
+    let mut cycle_start_work = CycleStartWorkReporter::default();
     const MAX_ITERATIONS: usize = 10_000; // Safety limit
+
+    if let Some(line) = cycle_start_work.pending_count_line(state) {
+        if let Some(p) = progress.as_deref_mut() {
+            p.suspend_for_output();
+        }
+        println!("{line}");
+        if let Some(p) = progress.as_deref_mut() {
+            let cost = batch_runtime
+                .as_ref()
+                .map_or(0, |batch| batch.realized_cost_microdollars);
+            p.resume(state, cost);
+        }
+    }
 
     loop {
         iterations += 1;
@@ -202,9 +248,10 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
 
         // Receive at least one message with timeout, then drain a bounded batch.
         // Large restored states make reducer clones expensive; bounding the batch
-        // keeps progress and tick-driven orchestration responsive under bursts.
+        // keeps reducer-owned run advancement responsive under bursts.
         let mut recv_idle = false;
         let mut enqueued_effects = false;
+        let mut queued_effects = Vec::new();
         match msg_rx.recv_timeout(timeout) {
             Ok(first_msg) => {
                 let mut inbox = vec![first_msg];
@@ -215,7 +262,6 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
                     inbox.push(next_msg);
                 }
 
-                let mut queued_effects = Vec::new();
                 for msg in inbox {
                     if should_log_batch_msg(&msg) {
                         engine_debug!("[batch] Processing message: {}", summarize_batch_msg(&msg));
@@ -236,19 +282,6 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
                 let (next_state, effects, _) = pump_pre_triage_refresh(current_state);
                 *state = next_state;
                 queued_effects.extend(effects);
-
-                if !queued_effects.is_empty() {
-                    engine_debug!("[batch] Enqueuing {} effects", queued_effects.len());
-                    let queued_effects = if let Some(batch) = batch_runtime.as_deref_mut() {
-                        divert_batch_effects(state, queued_effects, batch, msg_tx)
-                    } else {
-                        queued_effects
-                    };
-                    if !queued_effects.is_empty() {
-                        enqueued_effects = true;
-                        effect_runner.enqueue(queued_effects);
-                    }
-                }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 recv_idle = true;
@@ -258,25 +291,52 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
             }
         }
 
-        if options.enable_ai_orchestration && last_tick.elapsed() >= options.tick_interval {
+        if state.pipeline_run_phase() != harvester_core::PipelineRunPhase::Idle {
+            let (new_state, advance_effects) =
+                update(std::mem::take(state), Msg::PipelineRunAdvance);
+            *state = new_state;
+            queued_effects.extend(advance_effects);
+        }
+
+        if state.pipeline_wave_policy() != harvester_core::PipelineWavePolicy::Disabled
+            && last_tick.elapsed() >= options.tick_interval
+        {
             let (new_state, tick_effects) = update(state.clone(), Msg::tick_at(Utc::now()));
             *state = new_state;
-            if !tick_effects.is_empty() {
-                let tick_effects = if let Some(batch) = batch_runtime.as_deref_mut() {
-                    divert_batch_effects(state, tick_effects, batch, msg_tx)
-                } else {
-                    tick_effects
-                };
-                if !tick_effects.is_empty() {
-                    enqueued_effects = true;
-                    effect_runner.enqueue(tick_effects);
-                }
-            }
+            queued_effects.extend(tick_effects);
             last_tick = Instant::now();
         }
 
+        if !queued_effects.is_empty() {
+            engine_debug!("[batch] Enqueuing {} effects", queued_effects.len());
+            let queued_effects = if let Some(batch) = batch_runtime.as_deref_mut() {
+                divert_batch_effects(state, queued_effects, batch, msg_tx)
+            } else {
+                queued_effects
+            };
+            if !queued_effects.is_empty() {
+                enqueued_effects = true;
+                effect_runner.enqueue(queued_effects);
+            }
+        }
+
+        let lines = cycle_start_work.pending_lines(state);
+        if !lines.is_empty() {
+            if let Some(p) = progress.as_deref_mut() {
+                p.suspend_for_output();
+            }
+            for line in lines {
+                println!("{line}");
+            }
+            if let Some(p) = progress.as_deref_mut() {
+                let cost = batch_runtime
+                    .as_ref()
+                    .map_or(0, |batch| batch.realized_cost_microdollars);
+                p.resume(state, cost);
+            }
+        }
+
         // Check for settlement after processing available work.
-        let mut orchestrated = false;
         if let Some(p) = progress.as_deref_mut() {
             let cost = batch_runtime
                 .as_ref()
@@ -285,25 +345,10 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
             p.paint(state, cost, false);
         }
         let obs = state.batch_observation();
-        if should_run_ai_orchestration(
-            options.enable_ai_orchestration,
-            options.require_new_jobs_since,
-            &obs,
-        ) {
-            if let Some(next_msg) = maybe_dispatch_batch_ai_orchestration(state) {
-                msg_tx.send(next_msg.clone()).map_err(|e| {
-                    format!(
-                        "Failed to dispatch orchestration message {:?}: {}",
-                        next_msg, e
-                    )
-                })?;
-                orchestrated = true;
-            }
-        }
 
         // This prevents an immediate idle-state exit before queued actions
-        // (like PollSourcesClicked) have been reduced.
-        if !orchestrated && recv_idle && !enqueued_effects {
+        // (like PipelineRunRequested) have been reduced.
+        if recv_idle && !enqueued_effects {
             if let Some(batch) = batch_runtime.as_deref_mut() {
                 let buffered_ids = batch.coordinator.buffered_request_ids();
                 if batch_buffer_is_quiescent(state, &buffered_ids) {
@@ -321,9 +366,7 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
             }
         }
 
-        if should_check_settlement_this_iteration(orchestrated)
-            && should_settle_cycle(state.batch_status())
-        {
+        if should_settle_cycle(state.batch_status()) {
             engine_info!(
                 "[batch] Cycle settled after {} iterations: jobs={}/{}, triage={}/{}",
                 iterations,
@@ -334,13 +377,5 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
             );
             return Ok(classify_cycle_outcome(&obs));
         }
-    }
-}
-
-pub(crate) fn maybe_dispatch_batch_ai_orchestration(state: &AppState) -> Option<Msg> {
-    match state.batch_next_action() {
-        harvester_core::BatchNextAction::DispatchTriage => Some(Msg::TriageClicked),
-        harvester_core::BatchNextAction::DispatchSummaries => Some(Msg::PrepareSummariesClicked),
-        harvester_core::BatchNextAction::None => None,
     }
 }

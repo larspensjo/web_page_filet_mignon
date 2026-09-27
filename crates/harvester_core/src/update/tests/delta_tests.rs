@@ -212,7 +212,12 @@ fn triage_waits_for_matching_budget_then_summaries_reuse_snapshot_and_prepared_t
         with_summary_metadata(AppState::new()),
         TriageArticleDelta::full_window(vec![a.clone()], 10_000),
     );
-    let (state, effects) = reduce(state, Msg::TriageClicked);
+    let (state, effects) = reduce(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     no_models(&effects);
     let (state, effects) = config(state, &effects, 1_000);
     no_models(&effects);
@@ -252,7 +257,12 @@ fn triage_waits_for_matching_budget_then_summaries_reuse_snapshot_and_prepared_t
         .expect("triage dispatch after preparation");
     assert_eq!(state.triage().articles()[0].preparation_budget, Some(1_000));
     let (state, effects) = reduce(state, triage_success(id));
-    let (state, duplicate_effects) = reduce(state, Msg::PrepareSummariesClicked);
+    let (state, duplicate_effects) = reduce(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(duplicate_effects.is_empty());
     assert!(effects.iter().all(|e| !matches!(
         e,
@@ -271,68 +281,54 @@ fn triage_waits_for_matching_budget_then_summaries_reuse_snapshot_and_prepared_t
 }
 
 #[test]
-fn standalone_summaries_reprepare_before_dispatch_and_reject_wrong_budget() {
-    let state = with_summary_metadata(complete_triage_state_for_test(2));
-    let (state, effects) = reduce(state, Msg::PrepareSummariesClicked);
-    no_models(&effects);
-    let (state, effects) = config(state, &effects, 1_000);
-    no_models(&effects);
-    let request_id = effects
-        .iter()
-        .find_map(|e| match e {
-            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
-            _ => None,
-        })
-        .unwrap();
-    let articles = state
-        .triage()
-        .articles()
-        .iter()
-        .map(|a| LoadedArticle {
-            url: a.url.clone(),
-            content_hash: a.content_hash.clone(),
-            source_title: a.source_title.clone(),
-            fetched_utc: a.fetched_utc.clone(),
-            prepared_text: "within budget".into(),
-        })
-        .collect();
+fn resume_reprepares_before_summary_dispatch_and_rejects_wrong_budget() {
+    let url = "https://resume-budget.example/article";
+    let start = || {
+        let base = with_summary_metadata(support::ready_pre_triage_state(&[url]));
+        let (state, effects) = reduce(
+            base,
+            Msg::PipelineRunRequested {
+                scope: crate::PipelineRunScope::Resume,
+            },
+        );
+        let (state, effects) = config(state, &effects, 1_000);
+        let request_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+                _ => None,
+            })
+            .expect("Resume requests fresh article preparation");
+        (state, request_id)
+    };
+    let (state, request_id) = start();
+    let prepared = LoadedArticle {
+        prepared_text: "within budget".into(),
+        ..article(url, &format!("hash-{url}"))
+    };
     let (rejected, effects) = reduce(
-        state.clone(),
+        state,
         Msg::TriageArticlesLoaded {
             request_id,
-            delta: TriageArticleDelta::full_window(articles, 2_000),
+            delta: TriageArticleDelta::full_window(vec![prepared.clone()], 2_000),
         },
     );
     no_models(&effects);
     assert!(matches!(
-        rejected.briefing().phase(),
-        BriefingPhase::Failed { .. }
+        rejected.triage().phase(),
+        crate::triage::TriagePhase::Failed { .. }
     ));
-    let articles = state
-        .triage()
-        .articles()
-        .iter()
-        .map(|a| LoadedArticle {
-            url: a.url.clone(),
-            content_hash: a.content_hash.clone(),
-            source_title: a.source_title.clone(),
-            fetched_utc: a.fetched_utc.clone(),
-            prepared_text: "within budget".into(),
-        })
-        .collect();
+
+    let (state, request_id) = start();
     let (state, effects) = reduce(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
-            delta: TriageArticleDelta::full_window(articles, 1_000),
+            delta: TriageArticleDelta::full_window(vec![prepared], 1_000),
         },
     );
-    assert!(effects.iter().any(|e| matches!(e, Effect::RequestLlmCompletion { prompt_id: PromptId::ArticleSummary, input_content, .. } if input_content == "within budget")));
-    assert!(state
-        .triage()
-        .articles()
-        .iter()
-        .all(|a| a.preparation_budget == Some(1_000)));
+    let effects = complete_triage_if_requested(state, effects);
+    assert!(effects.iter().any(|e| matches!(e, Effect::RequestLlmCompletion { prompt_id: PromptId::ArticleSummary, input_content, .. } if input_content == "within budget")), "effects={effects:?}");
 }
 
 #[test]
@@ -368,14 +364,20 @@ fn duplicate_url_delta_keeps_first_identity_and_manual_decision() {
 }
 
 #[test]
-fn processing_start_waits_for_configuration_but_not_queued_refresh() {
+fn resume_run_loads_the_current_window_before_triage() {
     let a = article("https://example.com/a", "a");
     let b = article("https://example.com/b", "b");
     let state = apply(
         AppState::new(),
         TriageArticleDelta::full_window(vec![a.clone()], 10_000),
     );
-    let (state, effects) = reduce(state, Msg::TriageClicked);
+    let state = support::add_completed_job_for_test(state, &b.url);
+    let (state, effects) = reduce(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(matches!(
         effects.as_slice(),
         [Effect::LoadProcessingConfiguration {
@@ -383,7 +385,7 @@ fn processing_start_waits_for_configuration_but_not_queued_refresh() {
             ..
         }]
     ));
-    assert_eq!(state.batch_next_action(), crate::BatchNextAction::None);
+    assert!(state.pipeline_run_armed());
     let (state, _) = reduce(
         state,
         Msg::EvaluatePreTriageRefresh {
@@ -391,33 +393,33 @@ fn processing_start_waits_for_configuration_but_not_queued_refresh() {
             triggered_by_job_done: false,
         },
     );
-    assert_eq!(state.batch_next_action(), crate::BatchNextAction::None);
-    // Queued refresh demand does not hold the start back; the held article is
-    // triaged now and the queued refresh is served afterwards.
+    assert!(state.pipeline_run_armed());
+    // The run's fresh load covers queued window demand before model work.
     let (state, effects) = config(state, &effects, 10_000);
-    assert_eq!(triage_requests(&effects), 1);
+    let request_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("Resume starts with a fresh window load");
     assert!(state.pipeline_activity().intake_refresh_pending);
-    let (state, request_id) = tick_until_dispatch(state);
-    let (state, _) = reduce(
+    let (state, effects) = reduce(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
             delta: TriageArticleDelta::full_window(vec![a, b.clone()], 10_000),
         },
     );
-    // The refreshed article joins as a later wave behind the one in flight.
+    assert_eq!(
+        triage_requests(&effects),
+        1,
+        "one request fits the default in-flight budget"
+    );
     assert_eq!(state.triage().total(), 2);
     assert_eq!(state.triage().pending_count(), 1);
+    assert_eq!(state.pipeline_waves().waves().len(), 1);
     assert!(state.triage().articles().iter().any(|t| t.url == b.url));
-    assert_eq!(
-        state
-            .pipeline_waves()
-            .waves()
-            .iter()
-            .filter(|w| w.stage == crate::PipelineStage::Triaging)
-            .count(),
-        2
-    );
 }
 
 fn triage_requests(effects: &[Effect]) -> usize {
@@ -435,61 +437,90 @@ fn triage_requests(effects: &[Effect]) -> usize {
         .count()
 }
 
-#[test]
-fn summaries_prepare_through_one_load_despite_queued_refresh() {
-    let state = with_summary_metadata(complete_triage_state_for_test(1));
-    let (state, _) = reduce(
+fn complete_triage_if_requested(state: AppState, effects: Vec<Effect>) -> Vec<Effect> {
+    let Some(request_id) = effects.iter().find_map(|effect| match effect {
+        Effect::RequestLlmCompletion {
+            request_id,
+            prompt_id: PromptId::ArticleTriage,
+            ..
+        } => Some(*request_id),
+        _ => None,
+    }) else {
+        return effects;
+    };
+    reduce(
         state,
-        Msg::EvaluatePreTriageRefresh {
-            ordered_urls: vec!["https://triage-complete.com/0".into()],
-            triggered_by_job_done: false,
+        Msg::LlmCompleted {
+            request_id,
+            result: crate::LlmResultKind::Success {
+                output_json: r#"{"category":"tech","priority":3,"tags":[],"rationale":"ok"}"#
+                    .into(),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 1,
+                resolved_model: "test-triage-model".into(),
+            },
+            metadata: None,
+        },
+    )
+    .1
+}
+
+#[test]
+fn resume_run_triages_and_summarizes_the_current_window() {
+    let url = "https://resume.example/article";
+    let base = with_summary_metadata(support::ready_pre_triage_state(&[url]));
+    let (state, effects) = reduce(
+        base,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
         },
     );
-    assert_eq!(state.batch_next_action(), crate::BatchNextAction::None);
-    let (state, effects) = reduce(state, Msg::PrepareSummariesClicked);
     assert!(matches!(
         effects.as_slice(),
         [Effect::LoadProcessingConfiguration {
-            require_triage_context: false,
+            require_triage_context: true,
             ..
         }]
     ));
-    // Queued refresh demand does not hold the start back. The changed budget is
-    // re-prepared through one load before any summary request is issued.
     let (state, effects) = config(state, &effects, 1_000);
-    let request_id = match effects.as_slice() {
-        [Effect::LoadArticlesForTriage {
-            request_id,
-            ordered_urls,
-            ..
-        }] => {
-            assert_eq!(ordered_urls, &["https://triage-complete.com/0".to_string()]);
-            *request_id
-        }
-        other => panic!("expected one preparation load, got {other:?}"),
-    };
-    assert!(state.pipeline_activity().intake_refresh_pending);
-    assert_eq!(state.batch_next_action(), crate::BatchNextAction::None);
-    let (_state, effects) = reduce(
+    let (request_id, ordered_urls) = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadArticlesForTriage {
+                request_id,
+                ordered_urls,
+                ..
+            } => Some((*request_id, ordered_urls)),
+            _ => None,
+        })
+        .expect("Resume refreshes the current article before model work");
+    assert_eq!(ordered_urls, &[url.to_string()]);
+    let (state, effects) = reduce(
         state,
         Msg::TriageArticlesLoaded {
             request_id,
             delta: TriageArticleDelta::full_window(
                 vec![LoadedArticle {
                     prepared_text: "within budget".into(),
-                    ..article("https://triage-complete.com/0", "hash-tc-0")
+                    ..article(url, &format!("hash-{url}"))
                 }],
                 1_000,
             ),
         },
     );
-    assert!(effects.iter().any(|e| matches!(
-        e,
-        Effect::RequestLlmCompletion {
-            prompt_id: PromptId::ArticleSummary,
-            ..
-        }
-    )));
+    let effects = complete_triage_if_requested(state, effects);
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            Effect::RequestLlmCompletion {
+                prompt_id: PromptId::ArticleSummary,
+                input_content,
+                ..
+            } if input_content == "within budget"
+        )),
+        "effects={effects:?}"
+    );
 }
 
 #[test]
@@ -501,7 +532,12 @@ fn failed_processing_start_keeps_completed_triage_available_for_archive() {
             10_000,
         ),
     );
-    let (state, effects) = reduce(state, Msg::TriageClicked);
+    let (state, effects) = reduce(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     let request_id = effects
         .iter()
         .find_map(|e| match e {

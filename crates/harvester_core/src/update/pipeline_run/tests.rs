@@ -106,6 +106,97 @@ fn add_metadata(state: AppState) -> AppState {
     .0
 }
 
+#[test]
+fn unarmed_full_run_settles_and_next_full_polls_again() {
+    let (state, _) = crate::update(
+        AppState::new(),
+        Msg::AiAvailabilityDetected {
+            availability: crate::AiAvailability::Unavailable {
+                reason: crate::AiUnavailableReason::MissingApiKey,
+            },
+        },
+    );
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert_eq!(effects, vec![Effect::PollAllSources]);
+    assert!(!state.pipeline_run_armed());
+    let (mut state, _) = crate::update(state, Msg::AllSourcesPollEnded);
+    for _ in 0..20 {
+        if state.run_progress().unwrap().terminal {
+            break;
+        }
+        state = crate::update(state, Msg::PipelineRunAdvance).0;
+    }
+    assert_eq!(state.batch_status(), BatchStatus::Settled);
+    assert!(state.run_progress().unwrap().terminal);
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert_eq!(effects, vec![Effect::PollAllSources]);
+    assert!(!state.run_progress().unwrap().terminal);
+}
+
+#[test]
+fn excluded_initial_window_does_not_disarm_later_waves() {
+    let state = add_metadata(AppState::new());
+    let mut excluded = loaded_article(100);
+    excluded.prepared_text = "short".into();
+    let (state, _) = crate::update(
+        state,
+        Msg::RestoreCompletedJobs(vec![crate::CompletedJobSnapshot {
+            url: excluded.url.clone(),
+            tokens: Some(1),
+            bytes: Some(5),
+            links: Vec::new(),
+            fetched_utc: excluded.fetched_utc.clone(),
+        }]),
+    );
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    let (state, effects) =
+        crate::fixture_support::complete_processing_configuration(state, effects, 100_000);
+    let first_load_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .unwrap();
+    let (mut state, _) = crate::update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: first_load_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(vec![excluded], 100_000),
+        },
+    );
+    assert!(state.pipeline_run_armed());
+    assert!(state.processing_start.is_none());
+
+    let valid = loaded_article(101);
+    let load_id = state.pre_triage_coordinator.begin_preparation_load();
+    state.set_triage_in_flight(load_id);
+    let (state, effects) = crate::update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(vec![valid], 100_000),
+        },
+    );
+    assert!(state.pipeline_run_armed());
+    assert!(request_id(&effects, PromptId::ArticleTriage).is_some());
+}
+
 fn triage_success(request_id: u64) -> Msg {
     Msg::LlmCompleted {
         request_id,
@@ -180,7 +271,8 @@ fn prepare_pipeline(
     download_failures: usize,
 ) -> (AppState, Vec<LoadedArticle>) {
     let total = download_successes + download_failures;
-    let state = tick(add_metadata(AppState::new()), 0);
+    let mut state = tick(add_metadata(AppState::new()), 0);
+    state.set_pipeline_wave_policy(crate::PipelineWavePolicy::AfterDownloadsSettle);
     let (state, effects) = crate::update::test_support::update(state, Msg::PollSourcesClicked);
     assert_eq!(effects, vec![Effect::PollAllSources]);
     let (state, _) = crate::update::test_support::update(state, Msg::PollStarted { total: 1 });
@@ -205,13 +297,13 @@ fn prepare_pipeline(
         })
         .collect::<Vec<_>>();
     assert_eq!(job_ids.len(), total);
-    state = crate::update::test_support::update(
+    let (next, _) = crate::update::test_support::update(
         state,
         Msg::PipelineRunRequested {
-            scope: crate::PipelineRunScope::Resume,
+            scope: crate::PipelineRunScope::Full,
         },
-    )
-    .0;
+    );
+    state = next;
     state = crate::update::test_support::update(state, Msg::AllSourcesPollEnded).0;
 
     for (index, job_id) in job_ids.into_iter().enumerate() {
@@ -248,37 +340,26 @@ fn prepare_pipeline(
         )
         .0;
     }
-
     let articles = (0..download_successes)
         .map(loaded_article)
         .collect::<Vec<_>>();
-    let ordered_urls = articles.iter().map(|article| article.url.clone()).collect();
-    state = crate::update::test_support::update(
+    let (next, _) = crate::update::test_support::update(
         state,
         Msg::EvaluatePreTriageRefresh {
-            ordered_urls,
+            ordered_urls: articles.iter().map(|article| article.url.clone()).collect(),
             triggered_by_job_done: true,
         },
-    )
-    .0;
-    let mut load_request_id = None;
-    for second in 1..=20 {
-        let (next, effects) = crate::update::test_support::update(
-            state,
-            Msg::Tick {
-                now: DateTime::from_timestamp(BASE_TIME + second, 0).expect("valid test timestamp"),
-            },
-        );
-        state = next;
-        load_request_id = effects.iter().find_map(|effect| match effect {
+    );
+    state = next;
+    let (next, effects) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
+    state = next;
+    let load_request_id = effects
+        .iter()
+        .find_map(|effect| match effect {
             Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
             _ => None,
-        });
-        if load_request_id.is_some() {
-            break;
-        }
-    }
-    let load_request_id = load_request_id.expect("pre-triage load dispatched");
+        })
+        .expect("settled intake releases the fresh run window");
     state = crate::update::test_support::update(
         state,
         Msg::TriageArticlesLoadProgress {
@@ -959,7 +1040,12 @@ fn gui_and_batch_paths_reach_the_same_terminal_pipeline_activity() {
             scope: crate::PipelineRunScope::Resume,
         },
     );
-    let (batch, batch_effects) = crate::update::test_support::update(prepared, Msg::TriageClicked);
+    let (batch, batch_effects) = crate::update::test_support::update(
+        prepared,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(request_id(&gui_effects, PromptId::ArticleTriage).is_some());
     assert!(request_id(&batch_effects, PromptId::ArticleTriage).is_some());
     let gui = run_to_completion(gui, &articles, &[true]);

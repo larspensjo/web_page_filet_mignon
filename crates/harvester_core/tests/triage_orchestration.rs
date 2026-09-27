@@ -170,10 +170,10 @@ fn assert_persist_triage_cache_effect(effects: &[Effect], state: &AppState) {
 }
 
 #[test]
-fn triage_clicked_emits_load_effect() {
+fn resume_run_triages_prepared_article() {
     init_logging();
     let (state, _) = ready_state_with_pretriage(&["https://one.example"]);
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = request_resume(state, sample_articles(&["https://one.example"]));
     assert!(effects
         .iter()
         .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
@@ -202,11 +202,16 @@ fn with_triage_metadata_ready(state: AppState) -> AppState {
 }
 
 #[test]
-fn triage_clicked_while_active_is_noop() {
+fn duplicate_resume_request_joins_active_run_without_duplicate_dispatch() {
     init_logging();
     let (state, _) = ready_state_with_pretriage(&["https://one.example"]);
-    let (state, _) = update(state, Msg::TriageClicked);
-    let (_state, effects) = update(state, Msg::TriageClicked);
+    let (state, _) = request_resume(state, sample_articles(&["https://one.example"]));
+    let (_state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
     assert!(effects.is_empty());
 }
 
@@ -216,7 +221,7 @@ fn triage_articles_loaded_dispatches_first_request() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = with_triage_metadata_ready(state);
     let state = simulate_triage_loaded(state, sample_articles(&["https://one.example"]));
-    let (_, effects) = update(state, Msg::TriageClicked);
+    let (_, effects) = request_resume(state, sample_articles(&["https://one.example"]));
     let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
     assert!(request_id > 0);
 }
@@ -244,7 +249,7 @@ fn triage_flow_with_two_articles() -> (AppState, Vec<LoadedArticle>) {
     let state = with_triage_metadata_ready(state);
     let articles = sample_articles(&["https://one.example", "https://two.example"]);
     let state = simulate_triage_loaded(state, articles.clone());
-    let (state, _) = update(state, Msg::TriageClicked);
+    let (state, _) = request_resume(state, articles.clone());
     (state, articles)
 }
 
@@ -254,10 +259,10 @@ fn triage_completion_advances_to_next_article() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = with_triage_metadata_ready(state);
     let articles = sample_articles(&["https://one.example", "https://two.example"]);
-    let state = simulate_triage_loaded(state, articles);
-    let (state, first_effects) = update(state, Msg::TriageClicked);
+    let state = simulate_triage_loaded(state, articles.clone());
+    let (state, first_effects) = request_resume(state, articles);
     let first_request = request_id_for_prompt(&first_effects, PromptId::ArticleTriage)
-        .expect("TriageClicked must dispatch the first LLM request");
+        .expect("PipelineRunRequested(Resume) must dispatch the first LLM request");
 
     let (_, second_effects) = update(
         state,
@@ -297,7 +302,7 @@ fn triage_all_completed_transitions_to_complete() {
     );
     assert_persist_triage_cache_effect(&effects, &state);
     let view = state.view();
-    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
     // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
     assert!(!view.triage_can_start);
 }
@@ -323,7 +328,7 @@ fn triage_all_failed_transitions_to_failed() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
     // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
     assert!(!state.view().triage_can_start);
     assert!(state.view().desktop_job_list.rows[0]
@@ -352,7 +357,7 @@ fn triage_partial_failure_still_completes() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
     // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
     assert!(!state.view().triage_can_start);
     assert!(state.view().desktop_job_list.rows[0]
@@ -373,7 +378,7 @@ fn triage_quota_exhaustion_fails_remaining() {
         },
     );
     assert_persist_triage_cache_effect(&effects, &state);
-    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
     // Idle so triage_can_start requires a new pre-triage cycle before re-triaging.
     assert!(!state.view().triage_can_start);
 }
@@ -385,9 +390,9 @@ fn triage_rerun_after_complete_reuses_cache_when_available() {
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
     let state = with_triage_metadata_ready(state);
     let articles = sample_articles(&["https://one.example", "https://two.example"]);
-    let state = simulate_triage_loaded(state, articles);
-    // First triage run: TriageClicked consumes pre-triage and starts triage.
-    let (state, _) = update(state, Msg::TriageClicked);
+    let state = simulate_triage_loaded(state, articles.clone());
+    // First triage run: PipelineRunRequested(Resume) consumes pre-triage and starts triage.
+    let (state, _) = request_resume(state, articles.clone());
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
@@ -404,7 +409,7 @@ fn triage_rerun_after_complete_reuses_cache_when_available() {
             metadata: None,
         },
     );
-    // Pre-triage was consumed when TriageClicked started the session; it is now
+    // Pre-triage was consumed when PipelineRunRequested(Resume) started the session; it is now
     // Idle. Trigger a fresh pre-triage evaluation so the coordinator dispatches
     // a new LoadArticlesForTriage, then load the same articles to verify cache reuse.
     let (state, _) = update(
@@ -415,12 +420,11 @@ fn triage_rerun_after_complete_reuses_cache_when_available() {
         },
     );
     let articles = sample_articles(&["https://one.example", "https://two.example"]);
-    let state = simulate_triage_loaded(state, articles);
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let state = simulate_triage_loaded(state, articles.clone());
+    let (_state, effects) = request_resume(state, articles);
     assert!(!effects
         .iter()
         .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
-    assert!(!state.view().triage_can_start);
 }
 
 #[test]
@@ -457,7 +461,10 @@ fn view_model_equal_priority_sorted_by_job_id() {
         state,
         sample_articles(&["https://first.example", "https://second.example"]),
     );
-    let (state, _) = update(state, Msg::TriageClicked);
+    let (state, _) = request_resume(
+        state,
+        sample_articles(&["https://first.example", "https://second.example"]),
+    );
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
@@ -488,7 +495,10 @@ fn view_model_stale_triage_url_ignored() {
         state,
         sample_articles(&["https://one.example", "https://stale.example"]),
     );
-    let (state, _) = update(state, Msg::TriageClicked);
+    let (state, _) = request_resume(
+        state,
+        sample_articles(&["https://one.example", "https://stale.example"]),
+    );
     let (state, _) = update(
         state,
         Msg::LlmCompleted {
@@ -510,15 +520,21 @@ fn view_model_stale_triage_url_ignored() {
 }
 
 #[test]
-fn triage_and_briefing_can_interleave() {
+fn resume_run_enters_the_pipeline_after_briefing_readiness_failure() {
     init_logging();
     let (state, _) = completed_state_with_jobs(&["https://one.example"]);
+    let state = with_triage_metadata_ready(state);
+    let state = simulate_triage_loaded(state, sample_articles(&["https://one.example"]));
     let (state, _) = update(state, Msg::GenerateBriefingClicked);
-    let (_state, effects) = update(state, Msg::TriageClicked);
-    assert!(
-        effects.is_empty(),
-        "manual triage must be blocked while briefing owns triage"
-    );
+    let (state, effects) = request_resume(state, sample_articles(&["https://one.example"]));
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::RequestLlmCompletion {
+            prompt_id: PromptId::ArticleTriage,
+            ..
+        }
+    )));
+    assert!(!state.view().triage_can_start);
 }
 
 #[test]
@@ -560,7 +576,7 @@ fn rerun_uses_triage_cache_when_metadata_and_corpus_unchanged() {
     let state = with_triage_metadata_ready(state);
     // First load: valid in-flight request ID set by JobDone.
     let state = simulate_triage_loaded(state, sample_articles(&["https://one.example"]));
-    let (state, first_effects) = update(state, Msg::TriageClicked);
+    let (state, first_effects) = request_resume(state, sample_articles(&["https://one.example"]));
     let first_request = request_id_for_prompt(&first_effects, PromptId::ArticleTriage)
         .expect("first run dispatches llm request");
 
@@ -585,7 +601,7 @@ fn rerun_uses_triage_cache_when_metadata_and_corpus_unchanged() {
             ),
         },
     );
-    let (_state, rerun_effects) = update(state, Msg::TriageClicked);
+    let (_state, rerun_effects) = request_resume(state, sample_articles(&["https://one.example"]));
 
     assert!(
         !rerun_effects
@@ -600,11 +616,34 @@ fn update(state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
     harvester_core::fixture_support::complete_processing_configuration(state, effects, 100_000)
 }
 
+/// Emulate the host's asynchronous fresh-window load after an explicit Resume.
+fn request_resume(state: AppState, articles: Vec<LoadedArticle>) -> (AppState, Vec<Effect>) {
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let Some(request_id) = effects.iter().find_map(|effect| match effect {
+        Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+        _ => None,
+    }) else {
+        return (state, effects);
+    };
+    update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    )
+}
+
 #[test]
-fn legacy_run_settles_and_resume_retries_failure_without_host_advances() {
+fn resume_run_retries_failed_work_in_a_new_run() {
     let urls = ["https://retry.example/article"];
     let (state, _) = ready_state_with_pretriage(&urls);
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = request_resume(state, sample_articles(&urls));
     assert!(state.pipeline_run_armed());
     let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
     let (state, _) = update(
@@ -665,7 +704,7 @@ fn legacy_run_settles_and_resume_retries_failure_without_host_advances() {
 fn current_triage_survives_resume_and_departed_members_leave_the_session() {
     let urls = ["https://retained.example/article"];
     let (state, _) = ready_state_with_pretriage(&urls);
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = request_resume(state, sample_articles(&urls));
     let request_id = request_id_for_prompt(&effects, PromptId::ArticleTriage).unwrap();
     let (state, _) = update(
         state,

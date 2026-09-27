@@ -111,72 +111,57 @@ pub(super) fn begin_run_if_needed(state: &mut AppState) {
     state.mark_dirty();
 }
 
-pub(super) fn arm_legacy(state: &mut AppState) {
-    if state.pipeline_run_armed() {
-        return;
-    }
-    begin_run_if_needed(state);
-    let previous = state
-        .pre_triage()
-        .window_articles()
-        .map(|(_, a)| (a.url.clone(), a.content_hash.clone()))
-        .collect();
-    let scope = if state.is_poll_in_progress() || state.batch_observation().jobs_in_flight > 0 {
-        crate::PipelineRunScope::Full
-    } else {
-        crate::PipelineRunScope::Resume
-    };
-    state.pipeline_admission = Some(crate::pipeline_waves::PipelineAdmission::new(
-        scope,
-        state.triage_ai_available(),
-        previous,
-    ));
-    state.pipeline_admission.as_mut().unwrap().fresh_load = false;
-    state.set_pipeline_run_phase(PipelineRunPhase::Requested);
-}
-
 pub(super) fn handle_pipeline_requested(
     state: &mut AppState,
     scope: crate::PipelineRunScope,
 ) -> Vec<Effect> {
-    if state.pipeline_run_armed() {
+    if state.run_progress_is_active() && state.pipeline_admission.is_some() {
         if scope == crate::PipelineRunScope::Full || state.is_poll_in_progress() {
-            state.pipeline_admission.as_mut().unwrap().scope = crate::PipelineRunScope::Full;
+            if let Some(run) = state.pipeline_admission.as_mut() {
+                run.scope = crate::PipelineRunScope::Full;
+            }
         }
         return Vec::new();
     }
-    arm_legacy(state);
+    if !state.run_progress_is_active() {
+        begin_run_if_needed(state);
+    }
     let polling = state.is_poll_in_progress() || state.batch_observation().jobs_in_flight > 0;
     let scope = if scope == crate::PipelineRunScope::Resume && polling {
         crate::PipelineRunScope::Full
     } else {
         scope
     };
-    let run = state.pipeline_admission.as_mut().unwrap();
-    run.scope = scope;
-    run.intake_open = scope != crate::PipelineRunScope::Continue;
-    run.fresh_load = scope != crate::PipelineRunScope::Continue;
-    run.awaiting_rearm = scope == crate::PipelineRunScope::Continue;
+    let previous = state
+        .pre_triage()
+        .window_articles()
+        .map(|(_, article)| (article.url.clone(), article.content_hash.clone()))
+        .collect();
+    state.pipeline_admission = Some(crate::pipeline_waves::PipelineAdmission::new(
+        scope,
+        state.triage_ai_available(),
+        previous,
+    ));
+    state.set_pipeline_run_phase(PipelineRunPhase::Requested);
     let mut effects = Vec::new();
     if scope == crate::PipelineRunScope::Full && !polling {
         effects.extend(super::polling::handle_poll_sources_clicked(state));
     }
     if state.pipeline_run_armed() {
-        effects.extend(super::processing::begin(
-            state,
-            super::processing::StartTarget::Triage,
-        ));
+        effects.extend(super::processing::begin(state));
     }
     effects
 }
 
 pub(super) fn handle_pipeline_advance(state: &mut AppState) -> Vec<Effect> {
-    // Every reducer step advances the lifecycle, including batch hosts which do
-    // not send desktop driver messages.
+    // Every reducer step advances the lifecycle; hosts may also request an
+    // explicit advance while waiting for effects to complete.
     if state.pipeline_run_phase() == PipelineRunPhase::Stopping {
         state.set_pipeline_run_phase(PipelineRunPhase::Idle);
+        Vec::new()
+    } else {
+        super::processing::resume(state)
     }
-    Vec::new()
 }
 
 pub(super) fn finish_if_settled(state: &mut AppState) {
@@ -190,7 +175,9 @@ pub(super) fn finish_if_settled(state: &mut AppState) {
         && activity.import_in_flight == 0;
     let mut can_finish = true;
     if let Some(run) = state.pipeline_admission.as_mut() {
-        can_finish = !run.awaiting_rearm && (!run.armed || run.configured);
+        can_finish = !run.awaiting_rearm
+            && (!run.fresh_load || !run.armed)
+            && (!run.armed || run.configured);
         if intake_done && can_finish {
             run.intake_open = false;
         }

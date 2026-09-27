@@ -481,7 +481,12 @@ fn triage_cache_hit_enqueues_signal_candidate_scoring() {
             delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
     assert!(effects.iter().any(|effect| matches!(
         effect,

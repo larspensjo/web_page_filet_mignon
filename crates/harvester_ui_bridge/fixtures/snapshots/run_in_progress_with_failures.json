@@ -23,7 +23,7 @@
           "bytes": 1024,
           "downloaded_link_count": 0,
           "fetched_utc": "2023-11-14T22:13:20Z",
-          "filter_status": "AutoIncluded",
+          "filter_status": null,
           "has_analysis": false,
           "has_summary": false,
           "is_since_checkpoint": true,
@@ -49,7 +49,7 @@
       "count": 0,
       "phase": "Ready"
     },
-    "is_pre_triage_reviewing": true,
+    "is_pre_triage_reviewing": false,
     "job_count": 1,
     "job_list_mode": "SinceCheckpoint",
     "last_paste_stats": null,

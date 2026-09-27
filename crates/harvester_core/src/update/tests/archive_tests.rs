@@ -435,7 +435,7 @@ fn consume_interactive_pre_triage_articles_for_triage_returns_articles_and_reset
 }
 
 #[test]
-fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
+fn resume_run_consumes_reviewing_pre_triage_into_triage_session() {
     init_logging();
     let review_content: String = std::iter::repeat_n("longword", 100)
         .collect::<Vec<_>>()
@@ -481,7 +481,12 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
     );
 
     let state = prime_llm_metadata(state);
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
     assert!(!effects.is_empty(), "triage should dispatch from Reviewing");
     assert!(
@@ -489,7 +494,7 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
             state.pre_triage().phase(),
             crate::pre_triage_filter::PreTriagePhase::Idle
         ),
-        "pre-triage must reset to Idle after TriageClicked"
+        "pre-triage must reset to Idle after a Resume run"
     );
     assert_eq!(
         state.triage().articles().len(),
@@ -508,7 +513,7 @@ fn triage_clicked_consumes_reviewing_pre_triage_into_triage_session() {
 }
 
 #[test]
-fn triage_clicked_consumes_ready_pre_triage_into_triage_session() {
+fn resume_run_consumes_ready_pre_triage_into_triage_session() {
     init_logging();
     let urls = &["https://handoff.com/1", "https://handoff.com/2"];
     let state = ready_pre_triage_state(urls);
@@ -519,14 +524,19 @@ fn triage_clicked_consumes_ready_pre_triage_into_triage_session() {
         crate::pre_triage_filter::PreTriagePhase::ReadyToTriage
     ));
 
-    let (state, _effects) = update(state, Msg::TriageClicked);
+    let (state, _effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
     assert!(
         matches!(
             state.pre_triage().phase(),
             crate::pre_triage_filter::PreTriagePhase::Idle
         ),
-        "pre-triage must reset to Idle after TriageClicked"
+        "pre-triage must reset to Idle after a Resume run"
     );
     assert!(
         state.pre_triage().resolved_included_urls().is_empty(),
@@ -553,7 +563,7 @@ fn triage_clicked_consumes_ready_pre_triage_into_triage_session() {
 }
 
 #[test]
-fn triage_clicked_sets_current_working_corpus_to_unavailable_until_triage_completes() {
+fn resume_run_sets_current_working_corpus_to_unavailable_until_triage_completes() {
     init_logging();
     let urls = &["https://corpus-src.com/1"];
     let state = ready_pre_triage_state(urls);
@@ -562,10 +572,15 @@ fn triage_clicked_sets_current_working_corpus_to_unavailable_until_triage_comple
     assert_eq!(
         state.current_working_corpus().source(),
         crate::working_corpus::CurrentWorkingCorpusSource::PreTriageReady,
-        "source must be PreTriageReady before TriageClicked"
+        "source must be PreTriageReady before a Resume run"
     );
 
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert_eq!(
         state.current_working_corpus().source(),
         crate::working_corpus::CurrentWorkingCorpusSource::Unavailable,
@@ -588,7 +603,12 @@ fn archive_clicked_after_triage_start_has_zero_pending_pre_triage_count() {
     let state = ready_pre_triage_state(urls);
     let state = prime_llm_metadata(state);
 
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     let state = complete_all_triage_llm_requests(state, effects);
 
     let (_, archive_effects) = update(state, Msg::ArchiveClicked);
@@ -620,13 +640,18 @@ fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating
     let state = ready_pre_triage_state(urls);
     let state = prime_llm_metadata(state);
 
-    let (state, _effects) = update(state, Msg::TriageClicked);
+    let (state, _effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(
         matches!(
             state.pre_triage().phase(),
             crate::pre_triage_filter::PreTriagePhase::Idle
         ),
-        "pre-triage must be Idle after TriageClicked"
+        "pre-triage must be Idle after a Resume run"
     );
 
     let triage_article_count_before = state.triage().articles().len();
@@ -1131,7 +1156,12 @@ fn compatible_triage_cache_hit_exports_the_stored_model_id() {
             ),
         },
     );
-    let (state, _) = update(state, Msg::TriageClicked);
+    let (state, _) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert_eq!(
         state.triage().triage_model_for_url("https://example.com/0"),
         Some("test-model")
@@ -2866,8 +2896,8 @@ fn cache_derived_startup_counts_do_not_enable_signal_candidate_export() {
 fn cache_derived_archive_counts_do_not_mutate_the_live_triage_session() {
     init_logging();
     // The cache-derived archive corpus is a display-only projection. It must not
-    // touch the load-bearing TriageSession, or batch orchestration would skip its
-    // triage dispatch (which also drives signal-candidate enqueue).
+    // touch the load-bearing TriageSession, so the explicit Resume run still has
+    // unfinished triage to admit after the display-only projection.
     let urls = &["https://startup.com/1", "https://startup.com/2"];
     let mut state = ready_pre_triage_state(urls);
     state = prime_llm_metadata(state);
@@ -2880,10 +2910,22 @@ fn cache_derived_archive_counts_do_not_mutate_the_live_triage_session() {
         matches!(state.triage().phase(), crate::triage::TriagePhase::Idle),
         "live triage session must remain Idle; the derived corpus is display-only"
     );
-    assert_eq!(
-        state.batch_next_action(),
-        crate::BatchNextAction::DispatchTriage,
-        "batch must still dispatch triage — the derived corpus must not pre-empt it"
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    assert_eq!(state.triage().completed_count(), 2);
+    assert!(
+        effects.iter().any(|effect| matches!(
+            effect,
+            crate::Effect::RequestLlmCompletion {
+                prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSummary,
+                ..
+            }
+        )),
+        "the Resume run releases cached triage to summaries"
     );
 }
 

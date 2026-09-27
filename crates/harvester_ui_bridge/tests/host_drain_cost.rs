@@ -152,7 +152,12 @@ fn production_scale_loaded_complete_view_cost() {
 fn production_scale_article_completion_reducer_stays_within_budget() {
     let _guard = serialize_timing_tests();
     let mut state = load_production_scale_window();
-    let (next, effects) = update(state, Msg::TriageClicked);
+    let (next, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
     state = next;
     let configuration_request = effects
         .iter()
@@ -172,6 +177,12 @@ fn production_scale_article_completion_reducer_stays_within_budget() {
             preparation_budget: 100_000,
         },
     );
+    let (state, load_effects) = respond_to_pipeline_window(state, effects);
+    let (state, advance_effects) = update(state, Msg::PipelineRunAdvance);
+    let effects = load_effects
+        .into_iter()
+        .chain(advance_effects)
+        .collect::<Vec<_>>();
     let request_id = effects
         .iter()
         .find_map(|effect| match effect {
@@ -590,7 +601,12 @@ fn load_production_scale_window() -> AppState {
 
 fn load_production_scale_triage_session() -> AppState {
     let state = load_production_scale_window();
-    let (state, effects) = update(state, Msg::TriageClicked);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
     let request_id = effects
         .iter()
         .find_map(|effect| match effect {
@@ -599,7 +615,7 @@ fn load_production_scale_triage_session() -> AppState {
         })
         .expect("triage configuration request");
     let (active_versions, effective_models) = production_metadata();
-    let (state, _effects) = update(
+    let (state, effects) = update(
         state,
         Msg::ProcessingConfigurationLoaded {
             request_id,
@@ -609,7 +625,27 @@ fn load_production_scale_triage_session() -> AppState {
             preparation_budget: 100_000,
         },
     );
-    state
+    let (state, _) = respond_to_pipeline_window(state, effects);
+    update(state, Msg::PipelineRunAdvance).0
+}
+
+fn respond_to_pipeline_window(state: AppState, effects: Vec<Effect>) -> (AppState, Vec<Effect>) {
+    let Some(request_id) = effects.iter().find_map(|effect| match effect {
+        Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+        _ => None,
+    }) else {
+        return (state, effects);
+    };
+    let articles = (0..PRODUCTION_SCALE_WINDOW_ARTICLES)
+        .map(production_loaded_article)
+        .collect();
+    update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+        },
+    )
 }
 
 fn load_production_scale_complete_session() -> AppState {

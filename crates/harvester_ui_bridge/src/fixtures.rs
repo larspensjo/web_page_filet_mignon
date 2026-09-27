@@ -130,11 +130,31 @@ fn idle_with_corpus(empty: &AppState) -> AppState {
         state,
         Msg::TriageArticlesLoaded {
             request_id: load_request_id,
-            delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+            delta: harvester_engine::TriageArticleDelta::full_window(articles.clone(), 100_000),
         },
     );
     let state = add_llm_metadata(state);
-    let (state, first_effects) = update(state, Msg::TriageClicked);
+    let (state, load_effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: harvester_core::PipelineRunScope::Resume,
+        },
+    );
+    let run_load_id = load_effects.iter().find_map(|effect| match effect {
+        Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+        _ => None,
+    });
+    let (state, first_effects) = if let Some(run_load_id) = run_load_id {
+        update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: run_load_id,
+                delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
+            },
+        )
+    } else {
+        (state, load_effects)
+    };
     let first_request_id = request_id(&first_effects, PromptId::ArticleTriage, "first triage");
     let (state, second_effects) = update(state, triage_success(first_request_id, 2));
     let second_request_id = request_id(&second_effects, PromptId::ArticleTriage, "second triage");
@@ -374,6 +394,24 @@ fn prepared_article_state_with_source_failure(
             ),
         },
     );
+    let run_load_id = effects.iter().find_map(|effect| match effect {
+        Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+        _ => None,
+    });
+    let (state, effects) = if let Some(run_load_id) = run_load_id {
+        update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: run_load_id,
+                delta: harvester_engine::TriageArticleDelta::full_window(
+                    vec![article.clone()],
+                    100_000,
+                ),
+            },
+        )
+    } else {
+        (state, effects)
+    };
     (state, article, job_id, effects)
 }
 

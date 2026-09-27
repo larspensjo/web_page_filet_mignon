@@ -4,10 +4,15 @@ use crate::LlmResultKind;
 use harvester_engine::llm::{OPENAI_MODEL_GPT_4O, OPENAI_MODEL_GPT_4O_MINI};
 
 #[test]
-fn triage_clicked_emits_load_effects() {
+fn resume_run_without_loaded_articles_emits_no_model_effects() {
     init_logging();
     let state = AppState::new();
-    let (_state, effects) = update(state, Msg::TriageClicked);
+    let (_state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(effects.is_empty());
 }
 
@@ -42,7 +47,12 @@ fn triage_click_blocked_when_briefing_owns_triage() {
     init_logging();
     let state = AppState::new();
     let (state, _) = update(state, Msg::GenerateBriefingClicked);
-    let (_state, effects) = update(state, Msg::TriageClicked);
+    let (_state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(effects.is_empty());
 }
 

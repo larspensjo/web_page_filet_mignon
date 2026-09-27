@@ -140,7 +140,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 extracted_links,
                 fetched_utc,
             );
-            state.request_pre_triage_refresh_evaluation(true);
+            if state.pipeline_wave_policy() != crate::PipelineWavePolicy::Disabled {
+                state.request_pre_triage_refresh_evaluation(true);
+            }
             Vec::new()
         }
         Msg::LinkToggleRequested {
@@ -227,7 +229,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             .collect(),
         Msg::RestoreCompletedJobs(entries) => {
             state.restore_completed_jobs(entries);
-            state.request_pre_triage_refresh_evaluation(false);
+            if state.pipeline_wave_policy() != crate::PipelineWavePolicy::Disabled {
+                state.request_pre_triage_refresh_evaluation(false);
+            }
             Vec::new()
         }
         Msg::EvaluatePreTriageRefresh {
@@ -300,7 +304,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         }
         Msg::GenerateBriefingClicked => briefing::handle_generate_clicked(&mut state),
         Msg::NextBriefingItemClicked => briefing::handle_next_item_clicked(&mut state),
-        Msg::PrepareSummariesClicked => briefing::handle_prepare_summaries_clicked(&mut state),
         Msg::BriefingHistoryLoaded { entries } => {
             briefing::handle_history_loaded(&mut state, entries)
         }
@@ -382,7 +385,6 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
         Msg::ArticlesLoadFailed { reason } => {
             briefing::handle_articles_load_failed(&mut state, reason)
         }
-        Msg::TriageClicked => triage::handle_triage_clicked(&mut state),
         Msg::TriageArticlesLoaded { request_id, delta } => {
             triage::handle_articles_loaded(&mut state, request_id, delta)
         }

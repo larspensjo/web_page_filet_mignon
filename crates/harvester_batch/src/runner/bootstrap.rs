@@ -3,7 +3,9 @@ use super::{batch_host_llm_defaults, BATCH_EMPTY_API_KEY_WARNING, BATCH_MISSING_
 use crate::cli::Args;
 use engine_logging::engine_info;
 use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
-use harvester_core::{AppState, Msg};
+use harvester_core::{
+    update, AiAvailability, AiUnavailableReason, AppState, Msg, PipelineWavePolicy,
+};
 use harvester_engine::llm::LlmQuotas;
 use harvester_io::{
     host_bootstrap::{build_effect_runner, hydrate_state_from_disk},
@@ -20,6 +22,14 @@ pub(crate) fn apply_model_budget(state: &mut AppState, args: &Args) {
             .unwrap_or(crate::batch_coordinator::MAX_BATCH_LINES);
         state.set_llm_deferred_allowance(session_limit);
     }
+    let wave_policy = if args.drain {
+        PipelineWavePolicy::Disabled
+    } else if args.batch_api_enabled() {
+        PipelineWavePolicy::AfterDownloadsSettle
+    } else {
+        PipelineWavePolicy::Overlap
+    };
+    state.set_pipeline_wave_policy(wave_policy);
 }
 
 pub(crate) fn apply_signal_candidate_selection_settings(state: &mut AppState, args: &Args) {
@@ -29,28 +39,27 @@ pub(crate) fn apply_signal_candidate_selection_settings(state: &mut AppState, ar
     );
 }
 
-pub(crate) fn is_ai_orchestration_enabled() -> bool {
-    std::env::var("OPENAI_API_KEY")
-        .map(|value| !value.trim().is_empty())
-        .unwrap_or(false)
+pub(crate) fn apply_llm_availability(state: AppState, has_runtime: bool) -> AppState {
+    if has_runtime {
+        state
+    } else {
+        update(
+            state,
+            Msg::AiAvailabilityDetected {
+                availability: AiAvailability::Unavailable {
+                    reason: AiUnavailableReason::MissingApiKey,
+                },
+            },
+        )
+        .0
+    }
 }
 
-/// Drain must never orchestrate. Restored completed jobs feed the pre-triage
-/// session, so orchestration would dispatch triage over the whole corpus and
-/// submit fresh batches — exactly the new work drain exists to avoid.
-pub(crate) fn should_enable_ai_orchestration_for_mode(
-    api_key_available: bool,
-    drain: bool,
-) -> bool {
-    api_key_available && !drain
-}
-
-#[allow(clippy::type_complexity)]
 pub(crate) fn prepare_runtime(
     paths: &RuntimePaths,
     args: &Args,
     msg_tx: mpsc::Sender<Msg>,
-) -> Result<(AppState, EffectRunner, Option<BatchRuntime>, bool), String> {
+) -> Result<(AppState, EffectRunner, Option<BatchRuntime>), String> {
     // Hydrate state
     engine_info!("[batch] Hydrating state from disk");
     let mut state = AppState::new();
@@ -62,8 +71,6 @@ pub(crate) fn prepare_runtime(
 
     // Build EffectRunner (with optional LLM support based on OPENAI_API_KEY)
     engine_info!("[batch] Building EffectRunner");
-    let enable_ai_orchestration =
-        should_enable_ai_orchestration_for_mode(is_ai_orchestration_enabled(), args.drain);
     let platform_handler = Box::new(NoOpPlatformHandler);
     let defaults = batch_host_llm_defaults();
     let (effect_runner, _, runtime) = build_effect_runner(
@@ -79,6 +86,7 @@ pub(crate) fn prepare_runtime(
         BATCH_MISSING_API_KEY_WARNING,
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
+    state = apply_llm_availability(state, runtime.is_some());
     let batch_runtime = if args.batch_api_enabled() {
         match runtime {
             Some(runtime) => Some(BatchRuntime::new(runtime.provider, runtime.config, paths)?),
@@ -91,21 +99,7 @@ pub(crate) fn prepare_runtime(
         effect_runner.enqueue(startup_effects);
     }
 
-    Ok((state, effect_runner, batch_runtime, enable_ai_orchestration))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn drain_never_orchestrates_so_no_new_batches_are_submitted() {
-        // Restored completed jobs feed pre-triage, so leaving orchestration on
-        // would let a drain dispatch triage and submit fresh batch work.
-        assert!(!should_enable_ai_orchestration_for_mode(true, true));
-        assert!(should_enable_ai_orchestration_for_mode(true, false));
-        assert!(!should_enable_ai_orchestration_for_mode(false, false));
-    }
+    Ok((state, effect_runner, batch_runtime))
 }
 
 #[cfg(test)]
@@ -118,6 +112,10 @@ mod model_budget_tests {
         let mut state = AppState::new();
         apply_model_budget(&mut state, &args);
         assert_eq!(state.llm_max_in_flight(), 2);
+        assert_eq!(
+            state.pipeline_wave_policy(),
+            PipelineWavePolicy::AfterDownloadsSettle
+        );
         assert_eq!(
             state.llm_deferred_allowance(),
             LlmQuotas::default()
@@ -136,5 +134,51 @@ mod model_budget_tests {
             harvester_engine::llm::MAX_LLM_CONCURRENT_REQUESTS
         );
         assert_eq!(state.llm_deferred_allowance(), None);
+        assert_eq!(state.pipeline_wave_policy(), PipelineWavePolicy::Overlap);
+    }
+
+    #[test]
+    fn drain_bootstrap_disables_unarmed_intake_refreshes() {
+        let args = Args::parse_from(&["harvester_batch", "--drain"]);
+        let mut state = AppState::new();
+        apply_model_budget(&mut state, &args);
+        assert_eq!(state.pipeline_wave_policy(), PipelineWavePolicy::Disabled);
+    }
+
+    #[test]
+    fn missing_key_disarms_full_and_resume_even_after_metadata() {
+        for scope in [
+            harvester_core::PipelineRunScope::Full,
+            harvester_core::PipelineRunScope::Resume,
+        ] {
+            let state = apply_llm_availability(AppState::new(), false);
+            let (state, _) = update(
+                state,
+                Msg::LlmMetadataLoaded {
+                    active_versions: [(harvester_engine::llm::PromptId::ArticleTriage, 1)]
+                        .into_iter()
+                        .collect(),
+                    effective_models: [(
+                        harvester_engine::llm::PromptId::ArticleTriage,
+                        "test-model".into(),
+                    )]
+                    .into_iter()
+                    .collect(),
+                },
+            );
+            assert_eq!(
+                state.ai_availability(),
+                &AiAvailability::Unavailable {
+                    reason: AiUnavailableReason::MissingApiKey
+                }
+            );
+            let (state, effects) = update(state, Msg::PipelineRunRequested { scope });
+            assert!(!state.pipeline_run_armed());
+            assert!(effects.iter().all(|effect| !matches!(
+                effect,
+                harvester_core::Effect::LoadProcessingConfiguration { .. }
+                    | harvester_core::Effect::RequestLlmCompletion { .. }
+            )));
+        }
     }
 }

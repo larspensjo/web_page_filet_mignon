@@ -61,6 +61,13 @@ impl ImportProgressReporter {
         self.painted_status = true;
     }
 
+    pub fn suspend_for_output<W: Write>(&mut self, stdout: &mut W) {
+        if self.enabled && self.painted_status {
+            let _ = writeln!(stdout);
+            self.painted_status = false;
+        }
+    }
+
     pub fn finish<W: Write>(&mut self, cost_display: &str, stdout: &mut W) {
         if !self.enabled {
             return;

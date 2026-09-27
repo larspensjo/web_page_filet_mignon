@@ -178,7 +178,12 @@ fn prepare_summaries_start_clears_provider_alert() {
     let mut state = with_summary_metadata(complete_triage_state_for_test(2));
     state.note_provider_out_of_credits("provider quota exhausted: billing".to_string());
 
-    let (state, _) = update(state, Msg::PrepareSummariesClicked);
+    let (state, _) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
 
     assert!(state.provider_alert().is_none());
     assert!(state.view().ai_warning_banner.is_none());

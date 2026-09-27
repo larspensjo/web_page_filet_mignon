@@ -5,10 +5,6 @@ use crate::{AppState, Effect};
 use engine_logging::{engine_info, engine_warn};
 use harvester_engine::llm::prompt::PromptId;
 
-fn briefing_ready_to_start(state: &AppState) -> bool {
-    state.briefing_ai_available() && state.briefing().can_start()
-}
-
 fn briefing_ready_to_generate(state: &AppState) -> bool {
     state.briefing_ai_available() && state.briefing().can_generate()
 }
@@ -31,35 +27,6 @@ fn briefing_stream_hydration_effects(state: &AppState) -> Vec<Effect> {
     effects
 }
 
-pub(super) fn start_summaries_from_triage(state: &mut AppState) -> Vec<Effect> {
-    let urls: std::collections::HashSet<_> = state
-        .archive_corpus()
-        .ordered_urls()
-        .iter()
-        .cloned()
-        .collect();
-    let articles = state
-        .triage()
-        .articles()
-        .iter()
-        .filter(|a| urls.contains(&a.url))
-        .map(|a| crate::LoadedArticle {
-            url: a.url.clone(),
-            source_title: a.source_title.clone(),
-            prepared_text: a.prepared_text.clone(),
-            content_hash: a.content_hash.clone(),
-            fetched_utc: a.fetched_utc.clone(),
-        })
-        .collect();
-    state.clear_provider_alert();
-    state.reset_provider_model_dispatch_halt();
-    state.request_summary_preparation();
-    state.start_summary_cache_run();
-    state.mark_briefing_metadata_ready();
-    snapshot_briefing_coverage_window(state);
-    super::waves::admit_summaries(state, articles);
-    Vec::new()
-}
 fn fail_generate(state: &mut AppState, reason: &str) -> Vec<Effect> {
     engine_warn!("[briefing-triage] generate blocked: {}", reason);
     state.briefing_mut().fail(reason.to_string());
@@ -208,22 +175,6 @@ pub(super) fn handle_next_item_clicked(state: &mut AppState) -> Vec<Effect> {
             ("briefing_time_window".to_string(), coverage),
         ],
     }]
-}
-
-pub(super) fn handle_prepare_summaries_clicked(state: &mut AppState) -> Vec<Effect> {
-    if !briefing_ready_to_start(state) {
-        return Vec::new();
-    }
-    if !state.summaries_can_start() {
-        engine_info!("[briefing-triage] summary-prep blocked: base corpus not ready");
-        return Vec::new();
-    }
-    let ordered_urls = state.archive_corpus().ordered_urls().to_vec();
-    engine_info!(
-        "[briefing-triage] summary-prep base-corpus count={}",
-        ordered_urls.len()
-    );
-    super::processing::begin(state, super::processing::StartTarget::Summaries)
 }
 
 pub(super) fn handle_history_loaded(
@@ -411,9 +362,4 @@ pub(super) fn settle_summaries(state: &mut AppState, effects: &mut Vec<Effect>) 
         ],
     });
     state.mark_dirty();
-}
-
-fn snapshot_briefing_coverage_window(state: &mut AppState) {
-    let label = crate::briefing::format_briefing_time_window_label(state.briefing_since_utc());
-    state.briefing_mut().set_coverage_window_label(label);
 }

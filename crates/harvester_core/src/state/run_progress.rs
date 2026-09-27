@@ -9,6 +9,14 @@ pub(crate) struct PollPipelineJobSnapshot {
 }
 
 impl AppState {
+    pub fn set_pipeline_wave_policy(&mut self, policy: crate::PipelineWavePolicy) {
+        self.pipeline_wave_policy = policy;
+    }
+
+    pub fn pipeline_wave_policy(&self) -> crate::PipelineWavePolicy {
+        self.pipeline_wave_policy
+    }
+
     pub fn pipeline_waves(&self) -> &crate::PipelineWaves {
         &self.pipeline_waves
     }
@@ -34,6 +42,13 @@ impl AppState {
 
     pub fn run_completion_notice(&self) -> Option<&RunCompletionNotice> {
         self.run_completion_notice.as_ref()
+    }
+
+    /// Notice recorded when the current run first admits its prior window.
+    pub fn reprocess_notice(&self) -> Option<(usize, u64)> {
+        self.pipeline_admission
+            .as_ref()
+            .and_then(|run| run.reprocess_notice)
     }
 
     pub fn pipeline_activity(&self) -> PipelineActivity {

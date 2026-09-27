@@ -8,6 +8,18 @@ pub enum PipelineRunScope {
     Continue,
 }
 
+/// Host-selected timing for releasing intake articles to triage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PipelineWavePolicy {
+    /// Release incremental windows while downloads are still running.
+    #[default]
+    Overlap,
+    /// Keep the intake window together until polling and downloads settle.
+    AfterDownloadsSettle,
+    /// Do not schedule intake work without an explicit run request.
+    Disabled,
+}
+
 pub(crate) type Identity = (String, String);
 
 #[derive(Debug, Clone, PartialEq, Eq)]

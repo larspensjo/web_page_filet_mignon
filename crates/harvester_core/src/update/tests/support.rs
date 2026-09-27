@@ -359,7 +359,12 @@ pub(super) fn start_triage_for_test(
             delta: harvester_engine::TriageArticleDelta::full_window(articles, 100_000),
         },
     );
-    update(state, Msg::TriageClicked)
+    update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    )
 }
 
 pub(super) fn prime_llm_metadata(state: AppState) -> AppState {

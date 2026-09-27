@@ -224,3 +224,19 @@ Refs: docs/ArchiveExportFormat.md,
 docs/plans/Plan.ArchiveExportContract.md (Phase 3, step 3a),
 crates/harvester_engine/src/export.rs,
 crates/harvester_core/src/update/archive.rs
+
+## 2026-09-27 - Pipeline stages overlap in waves under one request budget
+Decision: A run releases articles to the next stage in waves while earlier stages continue.
+All article model work shares one synchronous request budget, dispatched scoring, then
+summary, then triage. Batch API buffering has its own allowance. Completeness is judged per
+identity under current cache keys, and scoring requires current-key upstream results. Model
+requests are issued only inside a run.
+Context: The concurrency cap, not stage order, bounds throughput once stages overlap, and
+per-article streaming would dissolve the stage concept.
+Consequences: Settlement counts intake-refresh demand and admitted work only. Stage sessions
+and the wave ledger live for the process. Deferred results release downstream exactly once
+through replay waves. Configuration is frozen per run. `batch_next_action` no longer exists.
+Batch synchronous concurrency is capped at the worker's limit.
+Refs: docs/Architecture.md, crates/harvester_core/src/pipeline_waves.rs,
+crates/harvester_core/src/update/waves.rs, crates/harvester_batch/src/runner.rs,
+crates/harvester_batch/src/runner/batch_runtime.rs

@@ -289,14 +289,6 @@ pub enum BatchStatus {
     Settled,
 }
 
-/// The next automatic action that batch orchestration may dispatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BatchNextAction {
-    None,
-    DispatchTriage,
-    DispatchSummaries,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
     session: SessionState,
@@ -354,6 +346,7 @@ pub struct AppState {
     briefing_orchestration: BriefingOrchestration,
     llm_max_in_flight: usize,
     llm_deferred_allowance: Option<usize>,
+    pipeline_wave_policy: crate::PipelineWavePolicy,
     model_dispatch_halt_reason: Option<llm::ModelDispatchHalt>,
     /// Session-scoped per-model token usage. Only CacheStatus::Miss runs are counted.
     llm_usage_by_model: BTreeMap<String, (u64, u64)>,
@@ -471,6 +464,7 @@ impl Default for AppState {
             briefing_orchestration: BriefingOrchestration::default(),
             llm_max_in_flight: 1,
             llm_deferred_allowance: None,
+            pipeline_wave_policy: crate::PipelineWavePolicy::default(),
             model_dispatch_halt_reason: None,
             llm_usage_by_model: BTreeMap::new(),
             llm_quota: crate::LlmQuotaState::default(),

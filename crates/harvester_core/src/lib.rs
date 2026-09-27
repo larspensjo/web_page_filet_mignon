@@ -75,9 +75,9 @@ pub use signal_candidate_cache::{
 pub use source_state::{SourceInstanceState, SourcePollStat, SourceStateIndex};
 pub use state::{
     evaluate_reprocess_notice, normalize_url_for_dedupe, AiAvailability, AiUnavailableReason,
-    AppState, ArchiveTokenEstimates, BatchNextAction, BatchObservation, BatchStatus,
-    CompletedJobSnapshot, JobId, JobOrigin, JobResultKind, LinkDownloadState, LinkSnapshotRecord,
-    LlmRequestState, LlmResultIndex, PreTriageActionability, ProviderAlert, SessionState, Stage,
+    AppState, ArchiveTokenEstimates, BatchObservation, BatchStatus, CompletedJobSnapshot, JobId,
+    JobOrigin, JobResultKind, LinkDownloadState, LinkSnapshotRecord, LlmRequestState,
+    LlmResultIndex, PreTriageActionability, ProviderAlert, SessionState, Stage,
     UnfinishedStageVerdict, UnfinishedStageVerdicts, UnfinishedWork, UnfinishedWorkClass,
     UnfinishedWorkSummary, DEFAULT_REPROCESS_NOTICE_ARTICLE_THRESHOLD,
     DEFAULT_REPROCESS_NOTICE_QUOTA_PERCENT, MAX_EXTRACTED_LINKS,
@@ -111,4 +111,4 @@ pub use view_model::{
 pub use working_corpus::{CurrentWorkingCorpus, CurrentWorkingCorpusSource};
 
 mod pipeline_waves;
-pub use pipeline_waves::{PipelineRunScope, PipelineWave, PipelineWaves};
+pub use pipeline_waves::{PipelineRunScope, PipelineWave, PipelineWavePolicy, PipelineWaves};

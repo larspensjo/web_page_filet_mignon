@@ -1,6 +1,5 @@
 use super::{
-    AppState, ArchiveTokenEstimates, BatchNextAction, BatchObservation, BatchStatus, JobResultKind,
-    TriagePhase,
+    AppState, ArchiveTokenEstimates, BatchObservation, BatchStatus, JobResultKind, TriagePhase,
 };
 use crate::archive_display::{ArchiveDisplayCounts, CacheDerivedArchive};
 use crate::working_corpus::CurrentWorkingCorpus;
@@ -147,60 +146,6 @@ impl AppState {
             self.triage(),
             self.briefing_triage_policy(),
         )
-    }
-
-    pub fn batch_next_action(&self) -> BatchNextAction {
-        if self.processing_start.is_some() || self.pre_triage_coordinator.refresh_pending() {
-            return BatchNextAction::None;
-        }
-        let needs_admission = self
-            .pre_triage
-            .tentative_included_url_refs()
-            .filter_map(|url| {
-                self.pre_triage
-                    .article_content_hash(url)
-                    .map(|hash| (url, hash))
-            })
-            .any(|(url, hash)| {
-                let identity = (url.to_owned(), hash.to_owned());
-                if self.pipeline_run_armed()
-                    && self
-                        .pipeline_admission
-                        .as_ref()
-                        .is_some_and(|r| r.admitted[0].contains(&identity))
-                {
-                    return false;
-                }
-                if self.triage.index_for_identity(url, hash).is_none() {
-                    return true;
-                }
-                if let Some(class) = self.unfinished_classes.get(&identity) {
-                    return matches!(
-                        class,
-                        crate::UnfinishedWorkClass::NeedsTriage
-                            | crate::UnfinishedWorkClass::NeedsSummary
-                            | crate::UnfinishedWorkClass::NeedsScoring
-                    );
-                }
-                self.current_triage_cache_key(hash)
-                    .is_none_or(|k| self.triage_cache().lookup(&k).is_none())
-            });
-
-        if self.can_start_triage_from_pre_triage() && !self.triage.is_active() && needs_admission {
-            return BatchNextAction::DispatchTriage;
-        }
-
-        if !self.pipeline_run_armed()
-            && matches!(self.triage.phase(), TriagePhase::Complete)
-            && self.triage.completed_count() > 0
-            && self.briefing.can_start()
-            && !self.triage.is_active()
-            && self.briefing.articles().is_empty()
-        {
-            return BatchNextAction::DispatchSummaries;
-        }
-
-        BatchNextAction::None
     }
 
     pub fn batch_status(&self) -> BatchStatus {
@@ -856,7 +801,12 @@ mod tests {
         state.set_prompt_contexts(HashMap::new());
         state.mark_triage_metadata_ready();
 
-        let (state, _) = crate::update::test_support::update(state, Msg::TriageClicked);
+        let (state, _) = crate::update::test_support::update(
+            state,
+            Msg::PipelineRunRequested {
+                scope: crate::PipelineRunScope::Resume,
+            },
+        );
         assert_eq!(
             state
                 .triage()

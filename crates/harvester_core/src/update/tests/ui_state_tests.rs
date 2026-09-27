@@ -134,7 +134,7 @@ fn jobs_search_query_persists_when_jobs_mutate() {
 }
 
 #[test]
-fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigation() {
+fn duplicate_resume_request_keeps_desktop_workspace_stable_during_run() {
     init_logging();
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
     let (state, request_id) = tick_until_dispatch(state);
@@ -164,7 +164,12 @@ fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigat
         },
     );
 
-    let (state, duplicate_effects) = update(state, Msg::TriageClicked);
+    let (state, duplicate_effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(duplicate_effects.is_empty());
 
     assert!(effects.iter().any(|effect| matches!(
@@ -178,7 +183,7 @@ fn triage_clicked_during_run_keeps_desktop_workspace_stable_after_legacy_navigat
 }
 
 #[test]
-fn job_selected_during_run_keeps_desktop_workspace_stable_after_legacy_navigation() {
+fn job_selection_during_run_preserves_the_current_workspace() {
     init_logging();
     let state = add_completed_job_for_test(AppState::new(), "https://example.com/1");
     let job_id = state
@@ -349,7 +354,12 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
     );
 
     let pre_triage_before = state.pre_triage().resolved_included_urls().to_vec();
-    let (state, triage_effects) = update(state, Msg::TriageClicked);
+    let (state, triage_effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(
         triage_effects.is_empty(),
         "blocked triage must dispatch nothing"
@@ -365,7 +375,12 @@ fn missing_api_key_blocks_triage_and_briefing_actions() {
         "blocked briefing must dispatch nothing"
     );
 
-    let (_state, summary_effects) = update(state, Msg::PrepareSummariesClicked);
+    let (_state, summary_effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
     assert!(
         summary_effects.is_empty(),
         "blocked summary preparation must dispatch nothing"

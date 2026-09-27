@@ -33,6 +33,7 @@ pub(super) fn run_dry_run(
     let (msg_tx, msg_rx) = mpsc::channel();
     let mut state = AppState::new();
     state.set_llm_max_in_flight(args.llm_concurrency);
+    state.set_pipeline_wave_policy(harvester_core::PipelineWavePolicy::Disabled);
     apply_signal_candidate_selection_settings(&mut state, args);
 
     // Restore completed jobs
@@ -65,8 +66,6 @@ pub(super) fn run_dry_run(
         &effect_runner,
         shutdown_flag,
         DispatchLoopOptions {
-            enable_ai_orchestration: false,
-            require_new_jobs_since: None,
             tick_interval: Duration::from_millis(75),
         },
     )?;

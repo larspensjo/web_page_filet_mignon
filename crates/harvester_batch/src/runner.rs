@@ -44,12 +44,13 @@ pub(crate) fn batch_host_llm_defaults() -> HostLlmDefaults {
     }
 }
 
+use dispatch_loop::prepare_startup_window;
 #[cfg(test)]
 use dispatch_loop::run_dispatch_loop;
 use dispatch_loop::run_dispatch_loop_with_tick_interval;
 pub(crate) use dispatch_loop::{
-    maybe_dispatch_batch_ai_orchestration, should_log_batch_msg, summarize_batch_msg, CycleOutcome,
-    DispatchLoopOptions, MAX_DISPATCH_INBOX_BATCH,
+    should_log_batch_msg, summarize_batch_msg, CycleOutcome, DispatchLoopOptions,
+    MAX_DISPATCH_INBOX_BATCH,
 };
 use dry_run::run_dry_run;
 
@@ -57,9 +58,7 @@ use batch_runtime::collect_and_rearm_batch_cycle;
 #[cfg(test)]
 pub(crate) use batch_runtime::persist_batch_replay_records;
 use batch_runtime::remove_collected_with_persisted_cache_confirmation;
-pub(crate) use bootstrap::{
-    apply_signal_candidate_selection_settings, is_ai_orchestration_enabled,
-};
+pub(crate) use bootstrap::{apply_llm_availability, apply_signal_candidate_selection_settings};
 #[cfg(test)]
 use drain_control::{
     batch_drain_made_progress, decide_batch_wait, should_exit_batch_drain_after_no_progress,
@@ -68,11 +67,11 @@ use drain_control::{
 use drain_control::{evaluate_batch_drain, DrainControl, DrainControlState};
 
 use live_progress::LiveBatchProgress;
-pub(crate) use reporting::microdollars_to_display;
 use reporting::{
     format_awaiting_batch_line, format_drain_summary, format_optional_cycle_diagnostics,
     format_startup_notice, print_final_summary, print_poll_stats, CycleCounts,
 };
+pub(crate) use reporting::{microdollars_to_display, CycleStartWorkReporter};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct CycleCounterBaseline {
@@ -140,14 +139,6 @@ fn is_collect_only_cycle(batch_api_enabled: bool, drain: bool, cycle_count: usiz
 
 fn should_request_continue(collect_only_cycle: bool, drain: bool) -> bool {
     collect_only_cycle && !drain
-}
-
-fn require_new_jobs_since(
-    single_shot: bool,
-    batch_api: bool,
-    cycle_jobs_total_baseline: usize,
-) -> Option<usize> {
-    (single_shot && !batch_api).then_some(cycle_jobs_total_baseline)
 }
 
 pub(crate) fn exit_code_with_shutdown(default_exit_code: i32, shutdown_requested: bool) -> i32 {
@@ -293,8 +284,9 @@ pub fn run(args: Args) -> Result<i32, String> {
         );
     }
 
-    let (mut state, effect_runner, mut batch_runtime, enable_ai_orchestration) =
+    let (mut state, effect_runner, mut batch_runtime) =
         bootstrap::prepare_runtime(&paths, &args, msg_tx.clone())?;
+    prepare_startup_window(&mut state, &msg_rx, &effect_runner)?;
 
     let run_baseline = BatchRunBaseline::from_observation(&state.batch_observation());
     let run_started_at = Instant::now();
@@ -332,7 +324,6 @@ pub fn run(args: Args) -> Result<i32, String> {
         } else {
             engine_info!("[batch] === Starting cycle {} ===", cycle_count);
         }
-        let cycle_jobs_total_baseline = state.batch_observation().jobs_total;
 
         if let Some(batch) = batch_runtime.as_mut() {
             state = collect_and_rearm_batch_cycle(
@@ -355,10 +346,12 @@ pub fn run(args: Args) -> Result<i32, String> {
                     .map_or(0, |batch| batch.realized_cost_microdollars),
                 true,
             );
-            engine_info!("[batch] Dispatching poll sources");
+            engine_info!("[batch] Requesting full pipeline run");
             msg_tx
-                .send(Msg::PollSourcesClicked)
-                .map_err(|e| format!("Failed to dispatch poll: {}", e))?;
+                .send(Msg::PipelineRunRequested {
+                    scope: harvester_core::PipelineRunScope::Full,
+                })
+                .map_err(|e| format!("Failed to request full pipeline run: {}", e))?;
         }
 
         // Run dispatch loop until settled
@@ -369,12 +362,6 @@ pub fn run(args: Args) -> Result<i32, String> {
             &effect_runner,
             &shutdown_flag,
             DispatchLoopOptions {
-                enable_ai_orchestration,
-                require_new_jobs_since: require_new_jobs_since(
-                    args.single_shot,
-                    args.batch_api_enabled(),
-                    cycle_jobs_total_baseline,
-                ),
                 tick_interval: Duration::from_millis(75),
             },
             Some(&mut progress),

@@ -23,20 +23,6 @@ pub(super) fn handle_evaluate_pre_triage_refresh(
     schedule_pre_triage_refresh(state, reason, ordered_urls)
 }
 
-pub(super) fn handle_triage_clicked(state: &mut AppState) -> Vec<Effect> {
-    if !state.triage_ai_available() {
-        state.mark_dirty();
-        return Vec::new();
-    }
-    if !state.triage().can_start() {
-        return Vec::new();
-    }
-    if !state.can_start_triage_from_pre_triage() {
-        return Vec::new();
-    }
-    super::processing::begin(state, super::processing::StartTarget::Triage)
-}
-
 pub(super) fn handle_articles_loaded(
     state: &mut AppState,
     request_id: u64,
@@ -64,15 +50,6 @@ pub(super) fn handle_articles_loaded(
         })
         .collect();
     state.backfill_jobs_fetched_utc(&url_to_fetched);
-    if state
-        .processing_start
-        .as_ref()
-        .is_some_and(|p| p.target == super::processing::StartTarget::Summaries)
-    {
-        state
-            .triage_mut()
-            .refresh_preparation(&delta.articles, delta.preparation_budget);
-    }
     let members = delta
         .members
         .iter()
@@ -138,7 +115,7 @@ fn schedule_pre_triage_refresh(
     let tick = state.current_tick();
     state
         .pre_triage_coordinator
-        .set_overlap(state.pipeline_run_armed());
+        .set_run_wave_policy(state.pipeline_run_armed(), state.pipeline_wave_policy());
     let result = state
         .pre_triage_coordinator
         .schedule_refresh(ordered_urls, reason, tick);
@@ -172,7 +149,9 @@ pub(super) fn dispatch_pre_triage_if_due(
         return Vec::new();
     }
     let armed = state.pipeline_run_armed();
-    state.pre_triage_coordinator.set_overlap(armed);
+    state
+        .pre_triage_coordinator
+        .set_run_wave_policy(armed, state.pipeline_wave_policy());
     let Some(dispatch) = state
         .pre_triage_coordinator
         .maybe_dispatch(tick, has_in_flight_engine_jobs)

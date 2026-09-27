@@ -600,28 +600,11 @@ fn three_download_bursts_release_overlapping_waves_and_monotonic_totals() {
     let (state, effects) = crate::update(
         state,
         Msg::PipelineRunRequested {
-            scope: PipelineRunScope::Resume,
+            scope: PipelineRunScope::Full,
         },
     );
-    let (state, effects) =
+    let (mut state, _effects) =
         crate::fixture_support::complete_processing_configuration(state, effects, 100_000);
-    let id = effects
-        .iter()
-        .find_map(|e| {
-            if let Effect::LoadArticlesForTriage { request_id, .. } = e {
-                Some(*request_id)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-    let (mut state, _) = crate::update(
-        state,
-        Msg::TriageArticlesLoaded {
-            request_id: id,
-            delta: harvester_engine::TriageArticleDelta::full_window(vec![], 100_000),
-        },
-    );
     let mut progress = progress_snapshot(&state);
     for burst in 0..3 {
         let (next, _) = crate::update(
@@ -646,27 +629,41 @@ fn three_download_bursts_release_overlapping_waves_and_monotonic_totals() {
         state = next;
         assert!(state.pipeline_activity().intake_refresh_pending);
         let mut load = None;
-        for tick_index in 1..=crate::pre_triage_coordinator::QUIET_TICKS_AFTER_POLL {
-            let (next, effects) = crate::update(
-                state,
-                Msg::tick_at(
-                    DateTime::from_timestamp(BASE_TIME + 100 * burst as i64 + tick_index as i64, 0)
-                        .unwrap(),
-                ),
-            );
+        if burst == 0 {
+            let (next, effects) = crate::update(state, Msg::PipelineRunAdvance);
             state = next;
-            load = effects.iter().find_map(|e| {
-                if let Effect::LoadArticlesForTriage { request_id, .. } = e {
-                    Some(*request_id)
-                } else {
-                    None
-                }
+            load = effects.iter().find_map(|effect| match effect {
+                Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+                _ => None,
             });
-            assert!(effects
-                .iter()
-                .all(|e| !matches!(e, Effect::LoadProcessingConfiguration { .. })));
-            if load.is_some() {
-                break;
+        } else {
+            for tick_index in 1..=crate::pre_triage_coordinator::QUIET_TICKS_AFTER_POLL {
+                let (next, effects) = crate::update(
+                    state,
+                    Msg::tick_at(
+                        DateTime::from_timestamp(
+                            BASE_TIME + 100 * burst as i64 + tick_index as i64,
+                            0,
+                        )
+                        .unwrap(),
+                    ),
+                );
+                let (next, advance_effects) = crate::update(next, Msg::PipelineRunAdvance);
+                state = next;
+                load = effects
+                    .iter()
+                    .chain(&advance_effects)
+                    .find_map(|effect| match effect {
+                        Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+                        _ => None,
+                    });
+                assert!(effects
+                    .iter()
+                    .chain(&advance_effects)
+                    .all(|e| !matches!(e, Effect::LoadProcessingConfiguration { .. })));
+                if load.is_some() {
+                    break;
+                }
             }
         }
         let id = load.expect("quiet window releases a load while downloads remain");

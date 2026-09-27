@@ -4,9 +4,9 @@ use super::*;
 mod app_state_tests {
     use super::*;
     use crate::{
-        update, BatchNextAction, BatchStatus, JobListMode, ManualDecision, Msg,
-        PreTriageActionability, PreTriagePolicy, PreTriageSession, SelectedJobVisibility,
-        SignalCandidateOutcome, SignalCandidateRow, DESKTOP_JOB_LIST_MAX_ROWS,
+        update, BatchStatus, JobListMode, ManualDecision, Msg, PreTriageActionability,
+        PreTriagePolicy, PreTriageSession, SelectedJobVisibility, SignalCandidateOutcome,
+        SignalCandidateRow, DESKTOP_JOB_LIST_MAX_ROWS,
     };
     use harvester_engine::{ExtractedLink, LinkKind};
 
@@ -166,7 +166,7 @@ mod app_state_tests {
     }
 
     #[test]
-    fn batch_next_action_dispatches_triage_from_reviewing() {
+    fn unrequested_review_work_does_not_enter_a_stage_queue() {
         let mut state = AppState::new();
         let mut pre_triage = PreTriageSession::load_articles(
             vec![
@@ -185,7 +185,6 @@ mod app_state_tests {
             .expect("interactive reviewing should accept manual decisions");
         state.set_pre_triage(pre_triage);
 
-        assert_eq!(state.batch_next_action(), BatchNextAction::DispatchTriage);
         assert_eq!(state.batch_status(), BatchStatus::Settled);
     }
 

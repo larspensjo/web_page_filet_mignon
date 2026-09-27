@@ -1,6 +1,6 @@
 use super::drain_control::BatchDrainSnapshot;
 use super::CycleOutcome;
-use harvester_core::{BatchObservation, LlmModelUsageView};
+use harvester_core::{BatchObservation, LlmModelUsageView, UnfinishedWork};
 use std::io::Write;
 use std::time::Duration;
 
@@ -15,6 +15,48 @@ pub(super) struct CycleCounts {
     pub(super) summary_failed: usize,
     pub(super) imports_completed: usize,
     pub(super) imports_failed: usize,
+}
+
+#[derive(Default)]
+pub(crate) struct CycleStartWorkReporter {
+    count_printed: bool,
+    notice_printed: bool,
+}
+
+impl CycleStartWorkReporter {
+    pub(crate) fn pending_count_line(
+        &mut self,
+        state: &harvester_core::AppState,
+    ) -> Option<String> {
+        if self.count_printed {
+            return None;
+        }
+        let UnfinishedWork::Known(work) = state.unfinished_work() else {
+            return None;
+        };
+        self.count_printed = true;
+        Some(format!(
+            "[batch] cycle-start unfinished_articles={} estimated_calls={}",
+            work.articles_with_work, work.estimated_calls
+        ))
+    }
+
+    pub(crate) fn pending_lines(&mut self, state: &harvester_core::AppState) -> Vec<String> {
+        let mut lines = Vec::new();
+        if let Some(line) = self.pending_count_line(state) {
+            lines.push(line);
+        }
+        if !self.notice_printed {
+            if let Some((articles, calls)) = state.reprocess_notice() {
+                lines.push(format!(
+                    "[batch] reprocess notice: {} unfinished articles; up to {} model calls",
+                    articles, calls
+                ));
+                self.notice_printed = true;
+            }
+        }
+        lines
+    }
 }
 
 /// Summarizes a finished drain for stdout. Batches that are still running
@@ -291,8 +333,103 @@ pub(crate) fn microdollars_to_display(microdollars: u64) -> String {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-    use harvester_core::{SessionState, SourcePollStat};
-    use harvester_engine::{SourceId, SourceKind};
+    use harvester_core::{CompletedJobSnapshot, SessionState, SourcePollStat};
+    use harvester_engine::{llm::PromptId, SourceId, SourceKind};
+    use std::collections::HashMap;
+
+    fn state_with_unfinished_article_and_limited_quota() -> harvester_core::AppState {
+        let url = "https://cycle-start.example/article";
+        let article = harvester_core::LoadedArticle {
+            url: url.into(),
+            source_title: Some("Cycle-start article".into()),
+            prepared_text: "articleword ".repeat(220),
+            content_hash: "cycle-start-content".into(),
+            fetched_utc: Some("2026-09-27T00:00:00Z".into()),
+        };
+        let state = harvester_core::AppState::new();
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::LlmMetadataLoaded {
+                active_versions: HashMap::from([
+                    (PromptId::ArticleTriage, 1),
+                    (PromptId::ArticleSummary, 1),
+                    (PromptId::ArticleSignalCandidate, 1),
+                ]),
+                effective_models: HashMap::from([
+                    (PromptId::ArticleTriage, "triage-test-model".into()),
+                    (PromptId::ArticleSummary, "summary-test-model".into()),
+                    (PromptId::ArticleSignalCandidate, "signal-test-model".into()),
+                ]),
+            },
+        );
+        let (state, _) =
+            harvester_core::update(state, harvester_core::Msg::PromptTemplateFilesLoaded);
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::PromptContextsLoaded {
+                contexts: HashMap::new(),
+            },
+        );
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::RestoreCompletedJobs(vec![CompletedJobSnapshot {
+                url: url.into(),
+                tokens: Some(100),
+                bytes: Some(4_000),
+                links: Vec::new(),
+                fetched_utc: article.fetched_utc.clone(),
+            }]),
+        );
+        let (mut state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::EvaluatePreTriageRefresh {
+                ordered_urls: vec![url.into()],
+                triggered_by_job_done: false,
+            },
+        );
+        let mut load_request_id = None;
+        for tick in 1..=20 {
+            let (next, effects) = harvester_core::update(
+                state,
+                harvester_core::Msg::tick_at(
+                    chrono::DateTime::from_timestamp(1_790_000_000 + tick, 0)
+                        .expect("valid fixture time"),
+                ),
+            );
+            state = next;
+            load_request_id = load_request_id.or_else(|| {
+                effects.iter().find_map(|effect| match effect {
+                    harvester_core::Effect::LoadArticlesForTriage { request_id, .. } => {
+                        Some(*request_id)
+                    }
+                    _ => None,
+                })
+            });
+            if load_request_id.is_some() {
+                break;
+            }
+        }
+        let load_request_id = load_request_id.expect("pre-triage load request");
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::TriageArticlesLoaded {
+                request_id: load_request_id,
+                delta: harvester_engine::TriageArticleDelta::full_window(vec![article], 100_000),
+            },
+        );
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::LlmQuotaConfigured {
+                limits: harvester_core::LlmQuotaLimits {
+                    max_calls_per_session: Some(1),
+                    max_input_tokens_per_session: None,
+                    max_output_tokens_per_session: None,
+                    max_cost_microdollars_per_session: None,
+                },
+            },
+        );
+        state
+    }
 
     fn observation_with_totals(
         jobs_total: usize,
@@ -353,6 +490,60 @@ mod tests {
             format_startup_notice("batch-api"),
             "Harvester batch · starting (batch-api) · loading state and caches"
         );
+    }
+
+    #[test]
+    fn cycle_start_reports_unfinished_count_and_reprocess_notice() {
+        let state = state_with_unfinished_article_and_limited_quota();
+        let mut reporter = CycleStartWorkReporter::default();
+        let lines = reporter.pending_lines(&state);
+        assert!(lines[0].starts_with("[batch] cycle-start unfinished_articles=1 estimated_calls="));
+        assert_eq!(
+            lines.len(),
+            1,
+            "the host must not infer a notice from quota"
+        );
+        assert!(reporter.pending_lines(&state).is_empty());
+
+        let (state, effects) = harvester_core::update(
+            state,
+            harvester_core::Msg::PipelineRunRequested {
+                scope: harvester_core::PipelineRunScope::Resume,
+            },
+        );
+        let (state, effects) = harvester_core::fixture_support::complete_processing_configuration(
+            state, effects, 100_000,
+        );
+        let request_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                harvester_core::Effect::LoadArticlesForTriage { request_id, .. } => {
+                    Some(*request_id)
+                }
+                _ => None,
+            })
+            .expect("run loads its previous window");
+        let (state, _) = harvester_core::update(
+            state,
+            harvester_core::Msg::TriageArticlesLoaded {
+                request_id,
+                delta: harvester_engine::TriageArticleDelta::full_window(
+                    vec![harvester_core::LoadedArticle {
+                        url: "https://cycle-start.example/article".into(),
+                        source_title: Some("Cycle-start article".into()),
+                        prepared_text: "articleword ".repeat(220),
+                        content_hash: "cycle-start-content".into(),
+                        fetched_utc: Some("2026-09-27T00:00:00Z".into()),
+                    }],
+                    100_000,
+                ),
+            },
+        );
+        assert!(reporter
+            .pending_lines(&state)
+            .iter()
+            .any(|line| line.starts_with("[batch] reprocess notice:")));
+        assert!(reporter.pending_lines(&state).is_empty());
     }
 
     #[test]

@@ -438,6 +438,7 @@ pub fn classify_display_phase(
     if let Some(phase) = phase_override {
         return phase;
     }
+    // Intake intentionally wins first-match classification while later stages overlap it.
     if observation.poll_in_progress
         || (observation.jobs_total > 0
             && observation
@@ -667,6 +668,27 @@ mod tests {
         assert_eq!(
             snapshot(&mut progress, &observation, &[], &clock).phase,
             BatchDisplayPhase::Signals
+        );
+    }
+
+    #[test]
+    fn intake_remains_the_first_display_phase_during_stage_overlap() {
+        let mut observation = import_obs_idle();
+        observation.poll_in_progress = true;
+        observation.triage_pending = 1;
+        observation.summary_pending = 1;
+        observation.signal_pending_or_in_flight = 1;
+        assert_eq!(
+            classify_display_phase(&observation, &ProviderProgress::default(), None),
+            BatchDisplayPhase::Intake
+        );
+
+        observation.poll_in_progress = false;
+        observation.jobs_total = 2;
+        observation.jobs_done = 1;
+        assert_eq!(
+            classify_display_phase(&observation, &ProviderProgress::default(), None),
+            BatchDisplayPhase::Intake
         );
     }
 

@@ -89,9 +89,9 @@ pub enum Msg {
     JobsSearchRevealRequested,
     /// Open desktop Trends and request its index.
     TrendsViewOpened,
-    /// Desktop request to run the merged triage + summary pipeline.
+    /// Host request to run the merged triage + summary pipeline.
     PipelineRunRequested { scope: crate::PipelineRunScope },
-    /// Reducer-owned orchestration pulse, sent by the desktop host while active.
+    /// Reducer-owned orchestration pulse, sent by either host while a run is active.
     PipelineRunAdvance,
     /// Dismiss the desktop completion notice.
     RunFinishedNoticeDismissed,
@@ -192,10 +192,6 @@ pub enum Msg {
     GenerateBriefingClicked,
     /// User requested the next item in the active briefing stream.
     NextBriefingItemClicked,
-    /// Headless batch flow: run triage + per-article summaries but skip aggregate briefing.
-    PrepareSummariesClicked,
-    /// User requested triage.
-    TriageClicked,
     /// User requested polling all configured sources.
     PollSourcesClicked,
     /// User requested polling the indirect-link pool.

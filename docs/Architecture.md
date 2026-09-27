@@ -22,13 +22,16 @@ Each identity is admitted at most once per stage per run; a later run can retry 
 `PipelineRunRequested` carries Full (intake and processing), Resume (the current
 window) or Continue (already admitted batch work). Resume upgrades an active poll run
 to Full. Compatible requests join the active run. A run arms model dispatch only when
-AI is available; Full otherwise performs intake only. Legacy stage actions arm Resume.
-Configuration loads once before the run's first preparation read and model dispatch,
-then stays fixed. Hydration discovers unfinished work without admitting scoring.
+AI is available; Full otherwise performs intake only. Configuration loads once before
+the run's first preparation read and model dispatch, then stays fixed. Hydration
+discovers unfinished work without admitting scoring. Import completion uses Resume
+to process the current window without starting another source poll.
 
-Armed Full and Resume intake can release triage after the quiet interval or maximum
-wait while downloads remain in flight. A Batch API intake cycle remains unarmed and
-keeps the poll-burst barrier, producing one hand-off after downloads settle.
+The host selects an intake wave policy in state. The desktop and recurring batch hosts
+use overlap: triage can start after the quiet interval while later downloads continue.
+Batch API uses `AfterDownloadsSettle`: its Full run waits for source polling and
+downloads, then loads and releases one intake wave. Drain uses `Disabled` and requests
+no run, so it does not admit startup scoring.
 Admissions split in window order at four times
 the synchronous request budget; deferred batch allowance keeps a buffered admission in
 one wave. A triage wave releases completed, summary-eligible members in the same reducer
@@ -42,10 +45,14 @@ tracking keep completion work bounded without rebuilding the full ledger per dis
 `AppState::pipeline_activity()` is the single settlement query for both hosts. It
 counts admitted pending and in-flight work plus intake refresh demand, loads and
 processing preparation; deferred work is non-blocking. A run becomes Terminal exactly
-once after intake closes and activity settles, including when the host sends no advance
-messages. Rearming outside an armed run records replay members while leaving session
-entries Deferred, so it cannot strand undispatchable Pending work. A pure collect-only
-batch cycle requests Continue before rearming; intake cycles and `--drain` request no run.
+once after intake closes and activity settles. Hosts pump `PipelineRunAdvance` while
+their dispatch loops run. Rearming outside an armed run records replay members while
+leaving session entries Deferred, so it cannot strand undispatchable Pending work. A
+pure collect-only batch cycle requests Continue before rearming; an intake cycle
+requests Full. A Full or Resume run arms model work only when AI is available;
+an unarmed Full run still polls and becomes Terminal after intake settles.
+Batch and import hosts mark a missing or empty API key unavailable before requesting
+a run. `--drain` requests no run.
 An accepted Stop withdraws never-dispatched Pending entries from all three stages,
 keeps in-flight results, and releases no downstream work from those completions.
 Withdrawn identities remain unfinished under their current keys.
@@ -226,7 +233,9 @@ The pure reprocess-notice evaluator uses named defaults: more than 150 previousl
 in-window articles needing work, or an estimate strictly greater than 50 percent of
 the remaining session call quota. Equality at either threshold does not trigger the
 notice. Recording the result at initial admission, logging it, and displaying it are
-owned by the run surface and host lifecycle.
+owned by the run surface and host lifecycle. Batch startup reduces metadata and the
+restored article window before its first intake cycle, then prints the stored
+unfinished count. A host prints the reducer-recorded notice after initial admission.
 
 ## Determinism and robustness
 - Stable ordering, identifiers, and output formats keep behavior reproducible.
@@ -244,8 +253,8 @@ owned by the run surface and host lifecycle.
 - **Preview flow:** deliver extracted content through the message pipeline for in-session inspection, with a fallback to on-demand loading after restart.
 - **Executive briefing:** a multi-step, message-driven workflow that loads completed content, summarizes it, and produces an aggregate briefing with partial-failure tolerance; its domain state remains tested, but the desktop UI no longer exposes an entry point.
 - **Automation path:** future input sources (such as feeds) and scheduled runs remain subject to the same unidirectional flow and security boundaries.
-- **Batch API automation path:** `harvester_batch --batch-api` diverts only cache-keyed article triage, summary, and signal-candidate requests after the reducer emits them. The runner freezes the cache identity and rendered messages, durably reserves `.batch_manifest.ron` before creating provider work, and drains that work in-process through status peeks and collect-only cycles with source polling suppressed after intake. `DeferredToBatch` settles the current cycle; the runner's next-cycle re-arm message enables ordinary cache-hit replay. Collected output remains untrusted until the reducer validates it, and collection writes caches only—normal replay performs article completion and downstream effects.
-- **Batch API drain path:** `harvester_batch --drain` implies the Batch API runtime and reconnects to work an earlier run already submitted. It never polls sources, so its first cycle is already collect-only, and it exits after one collection pass rather than waiting for batches that are still running. Because deferred state is reducer-owned and in-memory, a fresh drain has no deferred counters to settle: `.batch_manifest.ron` is the durable record that decides what remains outstanding. Batches that end cancelled, expired, or failed are downloaded before their entries are released, so output the provider already produced and billed is salvaged; requests the provider never returned become line errors and are released for a later attempt.
+- **Batch API automation path:** `harvester_batch --batch-api` requests a Full run for its single intake cycle and sets the reducer's `AfterDownloadsSettle` wave policy. The intake window reaches triage once after source polling and downloads settle. The runner diverts only cache-keyed article triage, summary, and signal-candidate requests after the reducer emits them, freezes each cache identity and rendered message, and durably reserves `.batch_manifest.ron` before creating provider work. Later cycles request Continue before rearming, collect completed output, and replay it through normal cache-aware dispatch. Collected results can release only the downstream members made ready by that replay; repeated manifest lines do not release a summary twice. `DeferredToBatch` settles a cycle while provider work remains outstanding. Batch buffering has its own allowance, separate from the synchronous request budget. Collected output remains untrusted until the reducer validates it, and collection writes caches only—normal replay performs article completion and downstream effects.
+- **Batch API drain path:** `harvester_batch --drain` implies the Batch API runtime, sets the reducer's wave policy to `Disabled`, requests no run, and reconnects to work an earlier run already submitted. It never polls sources; restored jobs and startup-eligible scoring remain unadmitted, so drain issues no model request of its own and exits after its collection pass rather than waiting for batches that are still running. Because deferred state is reducer-owned and in-memory, a fresh drain has no deferred counters to settle: `.batch_manifest.ron` is the durable record that decides what remains outstanding. Batches that end cancelled, expired, or failed are downloaded before their entries are released, so output the provider already produced and billed is salvaged; requests the provider never returned become line errors and are released for a later attempt.
 
 ## Crates and purposes
 - **harvester_batch:** command-line and scheduled batch host orchestration.

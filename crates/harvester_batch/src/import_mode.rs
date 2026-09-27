@@ -1,9 +1,9 @@
 use crate::cli::Args;
 use crate::runner::{
     apply_signal_candidate_selection_settings, batch_host_llm_defaults, exit_code_with_shutdown,
-    is_ai_orchestration_enabled, maybe_dispatch_batch_ai_orchestration, should_log_batch_msg,
-    summarize_batch_msg, CycleOutcome, DispatchLoopOptions, BATCH_EMPTY_API_KEY_WARNING,
-    BATCH_MISSING_API_KEY_WARNING, MAX_DISPATCH_INBOX_BATCH,
+    should_log_batch_msg, summarize_batch_msg, CycleOutcome, CycleStartWorkReporter,
+    DispatchLoopOptions, BATCH_EMPTY_API_KEY_WARNING, BATCH_MISSING_API_KEY_WARNING,
+    MAX_DISPATCH_INBOX_BATCH,
 };
 use chrono::Utc;
 use engine_logging::{engine_debug, engine_info, engine_warn};
@@ -20,24 +20,6 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Determines if an import-mode cycle should settle.
-/// Import mode ignores poll/triage/job state; only waits for the import and its
-/// downstream work (summaries or briefing) to complete.
-fn should_settle_import_cycle(obs: &BatchObservation) -> bool {
-    !obs.import_in_flight
-        && !matches!(obs.import_phase, ImportPhase::Importing)
-        && !matches!(
-            obs.pre_triage_phase,
-            harvester_core::PreTriagePhase::LoadingArticles
-                | harvester_core::PreTriagePhase::Reviewing
-                | harvester_core::PreTriagePhase::ReadyToTriage
-        )
-        && obs.triage_in_flight == 0
-        && obs.triage_pending == 0
-        && obs.summary_in_flight == 0
-        && obs.summary_pending == 0
-}
-
 /// Classifies the outcome of a completed import-mode cycle.
 fn classify_import_cycle_outcome(obs: &BatchObservation) -> CycleOutcome {
     let has_import_success = obs.imports_completed > 0;
@@ -51,6 +33,14 @@ fn classify_import_cycle_outcome(obs: &BatchObservation) -> CycleOutcome {
         // Idle means nothing was even attempted — treat as total failure.
         (false, false) => CycleOutcome::TotalFailure,
     }
+}
+
+fn import_is_terminal(obs: &BatchObservation) -> bool {
+    !obs.import_in_flight
+        && matches!(
+            obs.import_phase,
+            ImportPhase::Complete | ImportPhase::Failed
+        )
 }
 
 /// Runs the import-mode workflow for browser-saved webpage imports.
@@ -71,10 +61,9 @@ pub(crate) fn run_import_mode(
     state.set_llm_max_in_flight(args.llm_concurrency);
     apply_signal_candidate_selection_settings(&mut state, args);
 
-    let enable_ai_orchestration = is_ai_orchestration_enabled();
     let platform_handler = Box::new(NoOpPlatformHandler);
     let defaults = batch_host_llm_defaults();
-    let (effect_runner, _, _) = build_effect_runner(
+    let (effect_runner, _, runtime) = build_effect_runner(
         paths,
         msg_tx.clone(),
         args.llm_concurrency,
@@ -87,6 +76,7 @@ pub(crate) fn run_import_mode(
         BATCH_MISSING_API_KEY_WARNING,
         Some(BATCH_EMPTY_API_KEY_WARNING),
     )?;
+    state = crate::runner::apply_llm_availability(state, runtime.is_some());
 
     // Hydrate prompt/template metadata needed for downstream work.
     effect_runner.enqueue(vec![harvester_core::Effect::LoadPromptTemplateFiles]);
@@ -164,13 +154,10 @@ pub(crate) fn run_import_mode(
     // Run the import dispatch loop until settled.
     let outcome = run_import_dispatch_loop(
         &mut state,
-        &msg_tx,
         &msg_rx,
         &effect_runner,
         &shutdown_flag,
         DispatchLoopOptions {
-            enable_ai_orchestration,
-            require_new_jobs_since: None,
             tick_interval: Duration::from_millis(75),
         },
         Some(&mut progress),
@@ -224,11 +211,10 @@ fn merge_completed_jobs_for_import(
     merged
 }
 
-/// Inner dispatch loop for import mode. Uses `should_settle_import_cycle` instead of
-/// `should_settle_cycle`, and `classify_import_cycle_outcome` for the final result.
+/// Inner dispatch loop for import mode. It starts a reducer-owned Resume run
+/// once import is terminal and uses the shared pipeline settlement query.
 fn run_import_dispatch_loop(
     state: &mut AppState,
-    msg_tx: &mpsc::Sender<Msg>,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_runner: &EffectRunner,
     shutdown_flag: &Arc<AtomicBool>,
@@ -239,6 +225,8 @@ fn run_import_dispatch_loop(
     let mut iterations = 0;
     let mut last_tick = Instant::now();
     let mut last_progress_render = Instant::now();
+    let mut resume_requested = false;
+    let mut cycle_start_work = CycleStartWorkReporter::default();
     const MAX_ITERATIONS: usize = 10_000;
 
     loop {
@@ -298,7 +286,30 @@ fn run_import_dispatch_loop(
             }
         }
 
-        if options.enable_ai_orchestration && last_tick.elapsed() >= options.tick_interval {
+        if state.pipeline_run_phase() != harvester_core::PipelineRunPhase::Idle {
+            let (new_state, effects) = update(std::mem::take(state), Msg::PipelineRunAdvance);
+            *state = new_state;
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+        }
+
+        if resume_requested {
+            let lines = cycle_start_work.pending_lines(state);
+            if !lines.is_empty() {
+                if let Some(p) = progress.as_deref_mut() {
+                    p.suspend_for_output(&mut std::io::stdout());
+                }
+                for line in lines {
+                    println!("{line}");
+                }
+            }
+        }
+
+        if (state.pipeline_run_phase() != harvester_core::PipelineRunPhase::Idle
+            || state.pipeline_activity().intake_refresh_pending)
+            && last_tick.elapsed() >= options.tick_interval
+        {
             let (new_state, tick_effects) = update(state.clone(), Msg::tick_at(Utc::now()));
             *state = new_state;
             if !tick_effects.is_empty() {
@@ -307,14 +318,36 @@ fn run_import_dispatch_loop(
             last_tick = Instant::now();
         }
 
-        let mut orchestrated = false;
-        if options.enable_ai_orchestration {
-            if let Some(next_msg) = maybe_dispatch_batch_ai_orchestration(state) {
-                msg_tx.send(next_msg).map_err(|e| {
-                    format!("Failed to dispatch import orchestration message: {}", e)
-                })?;
-                orchestrated = true;
+        let obs = state.batch_observation();
+        if !resume_requested
+            && import_is_terminal(&obs)
+            && !state.pipeline_activity().intake_refresh_pending
+        {
+            if let Some(p) = progress.as_deref_mut() {
+                p.suspend_for_output(&mut std::io::stdout());
             }
+            if let Some(line) = cycle_start_work.pending_count_line(state) {
+                println!("{line}");
+            }
+            if let Some(p) = progress.as_deref_mut() {
+                p.update_from_obs(&obs, &mut std::io::stdout(), &mut std::io::stderr());
+            }
+            engine_info!(
+                "[import] Requesting resume pipeline run imported={} failed={}",
+                obs.imports_completed,
+                obs.imports_failed
+            );
+            let (new_state, effects) = update(
+                std::mem::take(state),
+                Msg::PipelineRunRequested {
+                    scope: harvester_core::PipelineRunScope::Resume,
+                },
+            );
+            *state = new_state;
+            if !effects.is_empty() {
+                effect_runner.enqueue(effects);
+            }
+            resume_requested = true;
         }
 
         let obs = state.batch_observation();
@@ -323,7 +356,7 @@ fn run_import_dispatch_loop(
             last_progress_render = Instant::now();
         }
 
-        if !orchestrated && should_settle_import_cycle(&obs) {
+        if resume_requested && harvester_core::BatchStatus::Settled == state.batch_status() {
             engine_info!("[import] Cycle settled after {} iterations", iterations);
             return Ok(classify_import_cycle_outcome(&obs));
         }
@@ -333,6 +366,10 @@ fn run_import_dispatch_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use harvester_core::{Effect, PipelineRunScope};
+    use harvester_engine::llm::PromptId;
+    use harvester_engine::{ImportReport, ImportedArchiveRef};
+    use std::path::PathBuf;
 
     #[allow(clippy::too_many_arguments)]
     fn observation_with_import(
@@ -395,39 +432,25 @@ mod tests {
     }
 
     #[test]
-    fn import_cycle_does_not_settle_while_triage_in_flight() {
-        let mut obs = observation_with_import(0, 0, 0, 0, 0, 0, 0, 1, 0);
-        obs.import_phase = harvester_core::ImportPhase::Idle;
-        obs.import_in_flight = false;
-        obs.triage_in_flight = 2;
-        obs.triage_pending = 0;
-        obs.summary_in_flight = 0;
-        obs.summary_pending = 0;
-        assert!(!should_settle_import_cycle(&obs));
-    }
+    fn import_resume_waits_for_import_terminal_without_owning_stage_settlement() {
+        let mut obs = idle_import_obs();
+        assert!(!import_is_terminal(&obs));
 
-    #[test]
-    fn import_cycle_does_not_settle_while_triage_pending() {
-        let mut obs = observation_with_import(0, 0, 0, 0, 0, 0, 0, 1, 0);
-        obs.import_phase = harvester_core::ImportPhase::Idle;
-        obs.import_in_flight = false;
-        obs.triage_in_flight = 0;
-        obs.triage_pending = 3;
-        obs.summary_in_flight = 0;
-        obs.summary_pending = 0;
-        assert!(!should_settle_import_cycle(&obs));
-    }
+        obs.import_phase = ImportPhase::Importing;
+        assert!(!import_is_terminal(&obs));
 
-    #[test]
-    fn import_cycle_settles_when_all_phases_drained() {
-        let mut obs = observation_with_import(0, 0, 0, 0, 0, 0, 0, 1, 0);
-        obs.import_phase = harvester_core::ImportPhase::Idle;
+        obs.import_phase = ImportPhase::Complete;
+        obs.import_in_flight = true;
+        assert!(!import_is_terminal(&obs));
+
         obs.import_in_flight = false;
-        obs.triage_in_flight = 0;
-        obs.triage_pending = 0;
-        obs.summary_in_flight = 0;
-        obs.summary_pending = 0;
-        assert!(should_settle_import_cycle(&obs));
+        obs.triage_pending = 1;
+        // Import completion starts Resume; reducer-owned pipeline activity then
+        // determines when the shared host loop settles.
+        assert!(import_is_terminal(&obs));
+
+        obs.import_phase = ImportPhase::Failed;
+        assert!(import_is_terminal(&obs));
     }
 
     #[test]
@@ -494,63 +517,6 @@ mod tests {
     }
 
     #[test]
-    fn should_settle_import_cycle_when_idle() {
-        let obs = idle_import_obs();
-        assert!(should_settle_import_cycle(&obs));
-    }
-
-    #[test]
-    fn should_not_settle_import_cycle_when_in_flight() {
-        let mut obs = idle_import_obs();
-        obs.import_in_flight = true;
-        obs.import_phase = harvester_core::ImportPhase::Importing;
-        assert!(!should_settle_import_cycle(&obs));
-    }
-
-    #[test]
-    fn should_not_settle_import_cycle_when_summaries_pending() {
-        let mut obs = idle_import_obs();
-        obs.import_phase = harvester_core::ImportPhase::Complete;
-        obs.summary_pending = 3;
-        assert!(!should_settle_import_cycle(&obs));
-    }
-
-    #[test]
-    fn should_settle_import_cycle_when_complete_and_no_pending() {
-        let mut obs = idle_import_obs();
-        obs.import_phase = harvester_core::ImportPhase::Complete;
-        obs.imports_completed = 2;
-        assert!(should_settle_import_cycle(&obs));
-    }
-
-    #[test]
-    fn should_not_settle_import_cycle_when_pre_triage_loading() {
-        let mut obs = idle_import_obs();
-        obs.import_phase = harvester_core::ImportPhase::Complete;
-        obs.imports_completed = 2;
-        obs.pre_triage_phase = harvester_core::PreTriagePhase::LoadingArticles;
-        assert!(!should_settle_import_cycle(&obs));
-    }
-
-    #[test]
-    fn should_not_settle_import_cycle_when_pre_triage_reviewing() {
-        let mut obs = idle_import_obs();
-        obs.import_phase = harvester_core::ImportPhase::Complete;
-        obs.imports_completed = 2;
-        obs.pre_triage_phase = harvester_core::PreTriagePhase::Reviewing;
-        assert!(!should_settle_import_cycle(&obs));
-    }
-
-    #[test]
-    fn should_not_settle_import_cycle_when_pre_triage_ready_to_triage() {
-        let mut obs = idle_import_obs();
-        obs.import_phase = harvester_core::ImportPhase::Complete;
-        obs.imports_completed = 2;
-        obs.pre_triage_phase = harvester_core::PreTriagePhase::ReadyToTriage;
-        assert!(!should_settle_import_cycle(&obs));
-    }
-
-    #[test]
     fn classify_import_cycle_success_when_all_imported() {
         let mut obs = idle_import_obs();
         obs.import_phase = harvester_core::ImportPhase::Complete;
@@ -579,5 +545,136 @@ mod tests {
             classify_import_cycle_outcome(&obs),
             CycleOutcome::TotalFailure
         );
+    }
+
+    #[test]
+    fn imported_articles_enter_resume_run_and_reach_summaries() {
+        let article = harvester_engine::LoadedArticle {
+            url: "https://import.example/article".into(),
+            source_title: Some("Imported article".into()),
+            prepared_text: std::iter::repeat_n("importedword", 220)
+                .collect::<Vec<_>>()
+                .join(" "),
+            content_hash: "imported-hash".into(),
+            fetched_utc: Some("2026-09-27T00:00:00Z".into()),
+        };
+        let (state, _) = update(
+            AppState::new(),
+            Msg::LlmMetadataLoaded {
+                active_versions: [
+                    (PromptId::ArticleTriage, 1),
+                    (PromptId::ArticleSummary, 1),
+                    (PromptId::ArticleSignalCandidate, 1),
+                ]
+                .into_iter()
+                .collect(),
+                effective_models: [
+                    (PromptId::ArticleTriage, "test-triage-model".into()),
+                    (PromptId::ArticleSummary, "test-summary-model".into()),
+                    (PromptId::ArticleSignalCandidate, "test-signal-model".into()),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        );
+        let (state, _) = update(state, Msg::PromptTemplateFilesLoaded);
+        let (state, _) = update(
+            state,
+            Msg::PromptContextsLoaded {
+                contexts: Default::default(),
+            },
+        );
+        let (state, effects) = update(
+            state,
+            Msg::ImportSavedWebpagesRequested {
+                dir: PathBuf::from("/saved-pages"),
+            },
+        );
+        let request_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::ImportSavedWebpages { request_id, .. } => Some(*request_id),
+                _ => None,
+            })
+            .unwrap();
+        let (state, _) = update(
+            state,
+            Msg::ImportSavedWebpagesCompleted {
+                request_id,
+                report: ImportReport {
+                    scanned_count: 1,
+                    imported_entries: vec![ImportedArchiveRef {
+                        persisted_path: PathBuf::from("/archive/imported.md"),
+                        canonical_url: article.url.clone(),
+                        content_hash: article.content_hash.clone(),
+                        fetched_utc: article.fetched_utc.clone().unwrap(),
+                    }],
+                    warnings: Vec::new(),
+                    failures: Vec::new(),
+                    duplicate_url_count: 0,
+                    duplicate_content_count: 0,
+                },
+            },
+        );
+        let (state, effects) = update(
+            state,
+            Msg::PipelineRunRequested {
+                scope: PipelineRunScope::Resume,
+            },
+        );
+        let (state, effects) = harvester_core::fixture_support::complete_processing_configuration(
+            state, effects, 100_000,
+        );
+        let load_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::LoadArticlesForTriage { request_id, .. } => Some(*request_id),
+                _ => None,
+            })
+            .expect("the import Resume run loads its completed archive window");
+        let (state, effects) = update(
+            state,
+            Msg::TriageArticlesLoaded {
+                request_id: load_id,
+                delta: harvester_engine::TriageArticleDelta::full_window(
+                    vec![article.clone()],
+                    100_000,
+                ),
+            },
+        );
+        let triage_id = effects
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::RequestLlmCompletion {
+                    request_id,
+                    prompt_id: PromptId::ArticleTriage,
+                    ..
+                } => Some(*request_id),
+                _ => None,
+            })
+            .expect("the imported article is triaged");
+        let (state, effects) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: triage_id,
+                result: harvester_core::LlmResultKind::Success {
+                    output_json: r#"{"category":"news","priority":3,"tags":["import"],"rationale":"imported article"}"#.into(),
+                    input_tokens: 20,
+                    output_tokens: 8,
+                    prompt_version: 1,
+                    resolved_model: "test-triage-model".into(),
+                },
+                metadata: None,
+            },
+        );
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            Effect::RequestLlmCompletion {
+                prompt_id: PromptId::ArticleSummary,
+                ..
+            }
+        )));
+        assert_eq!(state.batch_observation().imports_completed, 1);
+        assert_eq!(state.batch_observation().summary_total, 1);
     }
 }

@@ -56,8 +56,7 @@ pub(super) fn handle(
                 handle_executive_summary_completion(state, &result);
             }
             Some(PromptId::AggregateBriefing) | None => {
-                // Retained for the legacy single-shot aggregate path used by summary-prep
-                // orchestration and batch-adjacent tests. The live Generate flow now routes
+                // Retained for compatibility and reducer tests. The live Generate flow routes
                 // through BriefingExecutiveSummary + BriefingNextItem.
                 handle_aggregate_briefing_completion(state, &result, &mut effects);
             }
