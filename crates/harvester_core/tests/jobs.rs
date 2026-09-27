@@ -296,6 +296,37 @@ fn link_toggle_unchecked_emits_delete_effect_when_downloaded() {
 }
 
 #[test]
+fn link_toggle_unchecked_can_delete_during_stop_drain() {
+    init_logging();
+    let (state, _) = update(
+        state_with_single_link(),
+        Msg::LinkDownloadCompleted {
+            job_id: 1,
+            link_index: 0,
+            path: PathBuf::from("linked/example.md"),
+        },
+    );
+    let (state, _) = submit_urls(state, "https://pending.example/article\n");
+    let (state, _) = update(state, Msg::StopFinishClicked);
+    let (_, effects) = update(
+        state,
+        Msg::LinkToggleRequested {
+            job_id: 1,
+            link_index: 0,
+            checked: false,
+        },
+    );
+    assert_eq!(
+        effects,
+        vec![Effect::DeleteLinkedPage {
+            job_id: 1,
+            link_index: 0,
+            path: PathBuf::from("linked/example.md"),
+        }]
+    );
+}
+
+#[test]
 fn link_toggle_unchecked_without_download_generates_no_effect() {
     init_logging();
     let (state, effects) = update(

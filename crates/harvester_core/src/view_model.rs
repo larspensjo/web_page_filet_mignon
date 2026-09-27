@@ -4,7 +4,9 @@ use crate::preview::PreviewContentKind;
 use crate::state::{JobOrigin, LinkDownloadState};
 use crate::tabs::{JobListMode, TrendCategory};
 use crate::trends::{CategoryTrend, EntityTrendData};
-use crate::{JobId, JobResultKind, RunCompletionNotice, RunProgressView, SessionState, Stage};
+use crate::{
+    JobId, JobResultKind, RunCompletionNotice, RunProgressView, RunState, SessionState, Stage,
+};
 use chrono::{DateTime, Utc};
 use harvester_engine::llm::dto::SourceTier;
 use harvester_engine::LinkKind;
@@ -297,6 +299,8 @@ pub struct AppViewModel {
     pub briefing_blocked_reason: Option<String>,
     /// Reducer-owned cumulative timeline for the desktop pipeline experience.
     pub run_progress: RunProgressView,
+    pub archive_enabled: bool,
+    pub run_state: RunState,
     pub run_completion_notice: Option<RunCompletionNotice>,
     pub poll_sources_enabled: bool,
     pub poll_indirect_links_enabled: bool,
@@ -351,6 +355,8 @@ impl Default for AppViewModel {
             triage_blocked_reason: None,
             briefing_blocked_reason: None,
             run_progress: RunProgressView::default(),
+            archive_enabled: true,
+            run_state: RunState::Idle,
             run_completion_notice: None,
             poll_sources_enabled: false,
             poll_indirect_links_enabled: false,

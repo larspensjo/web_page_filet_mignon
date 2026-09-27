@@ -192,6 +192,11 @@ impl RunProgress {
         }
         self.terminal = true;
     }
+    pub(crate) fn begin_stopping(&mut self) {
+        for stage in PipelineStage::ALL {
+            self.stage_mut(stage).total_is_final = true;
+        }
+    }
     pub(crate) fn settle(&mut self, now: Option<DateTime<Utc>>) {
         self.stop(now);
         for record in &mut self.stages {
@@ -273,6 +278,14 @@ pub enum PipelineRunPhase {
     Requested,
     AwaitingSettle,
     Stopping,
+}
+
+/// Export-facing lifecycle state for the current pipeline run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RunState {
+    Idle,
+    Active,
+    Stopping { in_flight: usize },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

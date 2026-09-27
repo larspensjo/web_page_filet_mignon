@@ -115,6 +115,15 @@ pub(super) fn handle_pipeline_requested(
     state: &mut AppState,
     scope: crate::PipelineRunScope,
 ) -> Vec<Effect> {
+    if state.pipeline_run_phase() == PipelineRunPhase::Stopping
+        || state.session() == crate::SessionState::Finishing
+    {
+        engine_logging::engine_info!(
+            "[run-request] run_id={} scope={scope:?} ignored=stopping",
+            state.run_progress().map_or(0, |run| run.run_id)
+        );
+        return Vec::new();
+    }
     if state.run_progress_is_active() && state.pipeline_admission.is_some() {
         if scope == crate::PipelineRunScope::Full || state.is_poll_in_progress() {
             if let Some(run) = state.pipeline_admission.as_mut() {
@@ -157,7 +166,6 @@ pub(super) fn handle_pipeline_advance(state: &mut AppState) -> Vec<Effect> {
     // Every reducer step advances the lifecycle; hosts may also request an
     // explicit advance while waiting for effects to complete.
     if state.pipeline_run_phase() == PipelineRunPhase::Stopping {
-        state.set_pipeline_run_phase(PipelineRunPhase::Idle);
         Vec::new()
     } else {
         super::processing::resume(state)
@@ -165,7 +173,18 @@ pub(super) fn handle_pipeline_advance(state: &mut AppState) -> Vec<Effect> {
 }
 
 pub(super) fn finish_if_settled(state: &mut AppState) {
+    if state.pipeline_run_phase() == PipelineRunPhase::Stopping {
+        if state.pipeline_activity().is_settled() {
+            settle_stopped_run(state);
+        }
+        return;
+    }
     if !state.run_progress_is_active() {
+        if state.session() == crate::SessionState::Finishing
+            && state.pipeline_activity().is_settled()
+        {
+            state.reset_session_to_idle();
+        }
         return;
     }
     let activity = state.pipeline_activity();
@@ -195,6 +214,7 @@ fn settle_run(state: &mut AppState) {
     let Some(run) = state.run_progress_mut() else {
         return;
     };
+    let run_id = run.run_id;
     let new_result_count = completed_count.saturating_sub(run.signal_completed_at_reset);
     run.settle(now);
     if let Some(admission) = state.pipeline_admission.as_mut() {
@@ -206,17 +226,46 @@ fn settle_run(state: &mut AppState) {
         completed_at_utc,
     });
     state.set_pipeline_run_phase(PipelineRunPhase::Idle);
+    clear_export_unavailable_status(state);
+    engine_logging::engine_info!("[run-terminal] run_id={run_id} outcome=completed");
+    state.mark_dirty();
+}
+
+fn settle_stopped_run(state: &mut AppState) {
+    let now = state.last_observed_utc();
+    let run_id = state.run_progress().map(|run| run.run_id);
+    if let Some(run) = state.run_progress_mut() {
+        if !run.terminal {
+            run.settle(now);
+        }
+    }
+    if let Some(admission) = state.pipeline_admission.as_mut() {
+        admission.armed = false;
+        admission.intake_open = false;
+    }
+    state.finalize_summary_cache_run();
+    state.reset_session_to_idle();
+    state.set_pipeline_run_phase(PipelineRunPhase::Idle);
+    clear_export_unavailable_status(state);
+    if let Some(run_id) = run_id {
+        engine_logging::engine_info!("[run-terminal] run_id={run_id} outcome=stopped");
+    }
     state.mark_dirty();
 }
 
 pub(super) fn handle_stop_for_pipeline(state: &mut AppState) {
-    if !matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle) {
+    if state.run_progress_is_active() {
         state.set_pipeline_run_phase(PipelineRunPhase::Stopping);
+        if let Some(run) = state.run_progress_mut() {
+            run.begin_stopping();
+        }
     }
-    let now = state.last_observed_utc();
-    if let Some(run) = state.run_progress_mut() {
-        run.stop(now);
-    }
+    let in_flight_llm = state.article_model_requests_in_flight();
+    let in_flight_download = state.run_progress().map_or(0, |run| {
+        run.download_started_job_ids
+            .difference(&run.download_finished_job_ids)
+            .count()
+    });
     let triage = state.triage_mut().withdraw_pending();
     let summary = state.briefing_mut().withdraw_pending();
     let scoring = state.signal_candidate_mut().withdraw_pending();
@@ -226,22 +275,35 @@ pub(super) fn handle_stop_for_pipeline(state: &mut AppState) {
     for queue in &mut state.pipeline_waves.pending {
         queue.clear();
     }
+    state.processing_start = None;
+    state.pre_triage_coordinator.close_intake();
+    let _ = state.take_pre_triage_refresh_evaluation_request();
     if let Some(run) = state.pipeline_admission.as_mut() {
         run.armed = false;
         run.intake_open = false;
     }
     engine_logging::engine_info!(
-        "[run-stop] run_id={} withdrawn_triage={} withdrawn_summary={} withdrawn_scoring={}",
+        "[run-stop] run_id={} withdrawn_triage={} withdrawn_summary={} withdrawn_scoring={} in_flight_llm={} in_flight_download={}",
         run_id_for_stop(state),
         triage,
         summary,
-        scoring.len()
+        scoring.len(),
+        in_flight_llm,
+        in_flight_download
     );
     state.mark_dirty();
 }
 
 fn run_id_for_stop(state: &AppState) -> u64 {
     state.run_progress().map_or(0, |run| run.run_id)
+}
+
+fn clear_export_unavailable_status(state: &mut AppState) {
+    if state.briefing_checkpoint_status_message()
+        == Some(crate::state::EXPORT_UNAVAILABLE_STATUS_MESSAGE)
+    {
+        state.set_briefing_checkpoint_status_message(None);
+    }
 }
 
 pub(super) fn dismiss_run_notice(state: &mut AppState) {

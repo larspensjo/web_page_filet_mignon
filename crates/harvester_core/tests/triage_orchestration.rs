@@ -424,7 +424,7 @@ fn triage_rerun_after_complete_reuses_cache_when_available() {
     let (_state, effects) = request_resume(state, articles);
     assert!(!effects
         .iter()
-        .any(|e| matches!(e, Effect::RequestLlmCompletion { .. })));
+        .any(|effect| matches!(effect, Effect::RequestLlmCompletion { .. })));
 }
 
 #[test]

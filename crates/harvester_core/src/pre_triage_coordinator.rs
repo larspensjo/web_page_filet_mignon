@@ -96,6 +96,14 @@ impl PreTriageRefreshCoordinator {
         self.dirty || self.in_flight_request_id.is_some()
     }
 
+    /// Drop queued refresh demand while allowing an already running load to drain.
+    pub(crate) fn close_intake(&mut self) {
+        self.dirty = false;
+        self.pending_ordered_urls.clear();
+        self.demand_started_tick = None;
+        self.run_wave_policy = None;
+    }
+
     pub(crate) fn allocate_request_id(&mut self) -> u64 {
         let id = self.next_request_id;
         self.next_request_id += 1;

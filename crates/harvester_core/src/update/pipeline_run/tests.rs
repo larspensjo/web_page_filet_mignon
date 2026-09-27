@@ -660,23 +660,35 @@ fn deferred_signal_rearm_starts_a_new_continue_run() {
 }
 
 #[test]
-fn accepted_stop_while_scoring_is_active_leaves_no_stage_active() {
+fn accepted_stop_drains_an_in_flight_score_before_terminalizing_the_run() {
     let (state, _) = prepare_pipeline(1, 0);
     let id = triage_request(&state).unwrap();
     let (state, effects) = crate::update(state, triage_success(id));
     let id = request_id(&effects, PromptId::ArticleSummary).unwrap();
     let (state, effects) = crate::update(state, summary_result(id, true));
-    assert!(request_id(&effects, PromptId::ArticleSignalCandidate).is_some());
-    let (state, _) = crate::update(
-        state,
-        Msg::InputChanged("https://progress.invalid/still-downloading".into()),
-    );
-    let (state, _) = crate::update(state, Msg::UrlsSubmitted);
+    let score_id = request_id(&effects, PromptId::ArticleSignalCandidate).unwrap();
     let (state, effects) = crate::update(state, Msg::StopFinishClicked);
     assert!(effects
         .iter()
         .any(|e| matches!(e, Effect::StopFinish { .. })));
+    assert!(!state.run_progress().unwrap().terminal);
+    assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Stopping);
+    assert_eq!(
+        state.run_state(),
+        crate::RunState::Stopping { in_flight: 1 }
+    );
+    assert_eq!(
+        state.run_progress().unwrap().stages[PipelineStage::ScoringSignals.index()].status,
+        StageStatus::Active
+    );
+    let (state, effects) = crate::update(state, signal_success(score_id));
+    assert!(effects
+        .iter()
+        .all(|e| !matches!(e, Effect::RequestLlmCompletion { .. })));
     assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Idle);
+    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(state.run_state(), crate::RunState::Idle);
     assert!(state
         .run_progress()
         .unwrap()
@@ -775,10 +787,25 @@ fn poll_only_run_becomes_terminal_when_source_poll_settles() {
 }
 
 #[test]
-fn accepted_stop_freezes_poll_run_while_pipeline_driver_is_idle() {
+fn accepted_stop_during_poll_drains_the_poll_without_ingesting_its_urls() {
     let state = tick(AppState::new(), 0);
     let state = crate::update::test_support::update(state, Msg::PollSourcesClicked).0;
     let state = crate::update::test_support::update(state, Msg::PollStarted { total: 1 }).0;
+    assert!(state.stop_finish_button_state().is_enabled());
+
+    let (state, effects) = crate::update::test_support::update(state, Msg::StopFinishClicked);
+
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    let progress = state.run_progress().expect("stopped poll run");
+    assert!(!progress.terminal);
+    assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Stopping);
+    assert_eq!(
+        state.view().run_state,
+        crate::RunState::Stopping { in_flight: 1 }
+    );
+
     let (state, effects) = crate::update::test_support::update(
         state,
         Msg::SourcePollCompleted {
@@ -791,16 +818,9 @@ fn accepted_stop_freezes_poll_run_while_pipeline_driver_is_idle() {
     );
     assert!(effects
         .iter()
-        .any(|effect| matches!(effect, Effect::EnqueueUrl { .. })));
-    assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
-    assert!(state.stop_finish_button_state().is_enabled());
-
-    let (state, effects) = crate::update::test_support::update(state, Msg::StopFinishClicked);
-
-    assert!(effects
-        .iter()
-        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
-    let progress = state.run_progress().expect("stopped poll run");
+        .all(|effect| !matches!(effect, Effect::EnqueueUrl { .. })));
+    let state = crate::update::test_support::update(state, Msg::AllSourcesPollEnded).0;
+    let progress = state.run_progress().expect("terminal stopped poll run");
     assert!(progress.terminal);
     assert!(progress
         .stages
@@ -808,6 +828,68 @@ fn accepted_stop_freezes_poll_run_while_pipeline_driver_is_idle() {
         .all(|stage| stage.status != StageStatus::Active));
     assert!(!state.view().run_progress.run_active);
     assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
+    assert_eq!(state.view().session, crate::SessionState::Idle);
+}
+
+#[test]
+fn full_run_after_stop_polls_again_and_enqueues_the_returned_url() {
+    let state = tick(add_metadata(AppState::new()), 0);
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PollAllSources)));
+    let (state, _) = crate::update(state, Msg::PollStarted { total: 1 });
+    let (state, effects) = crate::update(state, Msg::StopFinishClicked);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+
+    let (state, effects) = crate::update(
+        state,
+        Msg::SourcePollCompleted {
+            source_id: SourceId::new("stop-first-poll").expect("valid source id"),
+            urls: vec!["https://progress.invalid/returned-after-stop".into()],
+            kind: SourceKind::Rss,
+            parsed: 1,
+            dedup_filtered: 0,
+        },
+    );
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::EnqueueUrl { .. })));
+    let state = crate::update(state, Msg::AllSourcesPollEnded).0;
+    assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(state.view().session, crate::SessionState::Idle);
+
+    let (state, effects) = crate::update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::PollAllSources)));
+    let (state, _) = crate::update(state, Msg::PollStarted { total: 1 });
+    let (_, effects) = crate::update(
+        state,
+        Msg::SourcePollCompleted {
+            source_id: SourceId::new("stop-second-poll").expect("valid source id"),
+            urls: vec!["https://progress.invalid/returned-after-stop".into()],
+            kind: SourceKind::Rss,
+            parsed: 1,
+            dedup_filtered: 0,
+        },
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::EnqueueUrl { url, .. } if url == "https://progress.invalid/returned-after-stop"
+    )));
 }
 
 #[test]
@@ -835,7 +917,7 @@ fn skipped_download_stage_stays_pending() {
 }
 
 #[test]
-fn accepted_stop_during_triage_leaves_skipped_stages_pending_and_never_dispatches_summaries() {
+fn accepted_stop_during_triage_drains_before_terminalizing_skipped_stages() {
     let (state, _) = prepare_pipeline(1, 0);
     assert_eq!(
         state.run_progress().expect("run").stages[PipelineStage::Triaging.index()].status,
@@ -843,15 +925,26 @@ fn accepted_stop_during_triage_leaves_skipped_stages_pending_and_never_dispatche
     );
     let frozen_counts =
         state.run_progress().expect("run").stages[PipelineStage::Triaging.index()].clone();
+    let request_id = state
+        .triage()
+        .articles()
+        .iter()
+        .find_map(|article| match article.triage_state {
+            crate::triage::ArticleTriageState::InProgress { request_id } => Some(request_id),
+            _ => None,
+        })
+        .expect("triage request is in flight");
     let (state, effects) = crate::update::test_support::update(state, Msg::StopFinishClicked);
     assert!(effects
         .iter()
         .any(|effect| matches!(effect, Effect::StopFinish { .. })));
     let progress = state.run_progress().expect("run");
-    assert!(progress
-        .stages
-        .iter()
-        .all(|stage| stage.status != StageStatus::Active));
+    assert!(!progress.terminal);
+    assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Stopping);
+    assert_eq!(
+        progress.stages[PipelineStage::Triaging.index()].status,
+        StageStatus::Active
+    );
     assert_eq!(
         progress.stages[PipelineStage::Summarizing.index()].status,
         StageStatus::Pending
@@ -870,7 +963,34 @@ fn accepted_stop_during_triage_leaves_skipped_stages_pending_and_never_dispatche
     );
     let (state, effects) = crate::update::test_support::update(state, Msg::PipelineRunAdvance);
     assert!(effects.is_empty());
-    assert!(matches!(state.pipeline_run_phase(), PipelineRunPhase::Idle));
+    assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Stopping);
+    let (state, effects) = crate::update(
+        state,
+        Msg::LlmCompleted {
+            request_id,
+            result: LlmResultKind::Success {
+                output_json: r#"{"category":"news","priority":3,"tags":["tag"],"rationale":"ok"}"#
+                    .into(),
+                input_tokens: 10,
+                output_tokens: 5,
+                prompt_version: 1,
+                resolved_model: "test-triage-model".into(),
+            },
+            metadata: None,
+        },
+    );
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
+    assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(state.pipeline_run_phase(), PipelineRunPhase::Idle);
+    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert!(state
+        .run_progress()
+        .unwrap()
+        .stages
+        .iter()
+        .all(|stage| matches!(stage.status, StageStatus::Done | StageStatus::Failed)));
 }
 
 #[test]

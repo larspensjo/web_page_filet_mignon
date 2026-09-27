@@ -9,6 +9,12 @@ pub(super) fn handle_evaluate_pre_triage_refresh(
     triggered_by_job_done: bool,
 ) -> Vec<Effect> {
     state.take_pre_triage_refresh_evaluation_request();
+    let stopping = state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
+        || state.session() == crate::SessionState::Finishing;
+    let stopped_download_drain = triggered_by_job_done && stopping;
+    if stopping && !stopped_download_drain {
+        return Vec::new();
+    }
     // INTENTIONAL EXCEPTION: pre-triage refresh is the mechanism that BUILDS
     // the candidate corpus — it runs before the shared working-corpus selector
     // has anything to select from. It reads from completed jobs (upstream of
@@ -112,6 +118,12 @@ fn schedule_pre_triage_refresh(
     reason: crate::pre_triage_coordinator::PreTriageRefreshReason,
     ordered_urls: Vec<String>,
 ) -> Vec<Effect> {
+    if (state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
+        || state.session() == crate::SessionState::Finishing)
+        && reason != crate::pre_triage_coordinator::PreTriageRefreshReason::JobDone
+    {
+        return Vec::new();
+    }
     let tick = state.current_tick();
     state
         .pre_triage_coordinator

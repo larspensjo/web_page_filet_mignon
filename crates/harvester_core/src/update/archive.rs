@@ -3,6 +3,15 @@ use engine_logging::{engine_info, engine_warn};
 use harvester_engine::{archive_url_key, ArchiveDocAnnotations};
 
 pub(super) fn handle_archive_clicked(state: &mut AppState) -> Vec<Effect> {
+    if !state.export_available() {
+        engine_warn!(
+            "[archive-gate] action=open run_id={} run_state={:?}",
+            state.run_progress().map_or(0, |run| run.run_id),
+            state.run_state()
+        );
+        return Vec::new();
+    }
+    clear_export_unavailable_status(state);
     let request_id = state.allocate_next_archive_request_id();
     let corpus = state.archive_corpus(); // triage-only; pre-triage excluded
     let article_count = corpus.count();
@@ -99,9 +108,22 @@ pub(super) fn handle_dialog_submitted(
     use_summaries: bool,
     use_signal_candidates: bool,
 ) -> Vec<Effect> {
+    if !state.export_available() {
+        engine_warn!(
+            "[archive-gate] action=submit request_id={} run_id={} run_state={:?}",
+            request_id,
+            state.run_progress().map_or(0, |run| run.run_id),
+            state.run_state()
+        );
+        state.set_briefing_checkpoint_status_message(Some(
+            crate::state::EXPORT_UNAVAILABLE_STATUS_MESSAGE.to_string(),
+        ));
+        return Vec::new();
+    }
     if request_id != state.archive_request_id() {
         return Vec::new();
     }
+    clear_export_unavailable_status(state);
     if !is_safe_archive_basename(&basename) {
         engine_warn!(
             "[archive-dialog] rejecting invalid basename request_id={} basename={}",
@@ -194,6 +216,14 @@ pub(super) fn handle_dialog_submitted(
         state.mark_dirty();
     }
     effects
+}
+
+fn clear_export_unavailable_status(state: &mut AppState) {
+    if state.briefing_checkpoint_status_message()
+        == Some(crate::state::EXPORT_UNAVAILABLE_STATUS_MESSAGE)
+    {
+        state.set_briefing_checkpoint_status_message(None);
+    }
 }
 
 fn build_priority_snapshot(state: &AppState) -> std::collections::HashMap<String, u8> {

@@ -1,5 +1,5 @@
 use super::AppState;
-use crate::{PipelineActivity, PipelineRunPhase, RunCompletionNotice, RunProgress};
+use crate::{PipelineActivity, PipelineRunPhase, RunCompletionNotice, RunProgress, RunState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PollPipelineJobSnapshot {
@@ -34,6 +34,41 @@ impl AppState {
     }
     pub fn pipeline_run_phase(&self) -> PipelineRunPhase {
         self.pipeline_run_phase
+    }
+
+    pub fn run_state(&self) -> RunState {
+        if self.pipeline_run_phase == PipelineRunPhase::Stopping
+            || self.session == crate::SessionState::Finishing
+        {
+            return RunState::Stopping {
+                in_flight: self.stopping_in_flight_count(),
+            };
+        }
+        if self.run_progress_is_active() {
+            RunState::Active
+        } else {
+            RunState::Idle
+        }
+    }
+
+    /// Export depends only on whether a pipeline run is working or draining.
+    pub fn export_available(&self) -> bool {
+        matches!(self.run_state(), RunState::Idle)
+    }
+
+    fn stopping_in_flight_count(&self) -> usize {
+        let batch = self.batch_observation();
+        let started_downloads = self.run_progress.as_ref().map_or(0, |run| {
+            run.download_started_job_ids
+                .difference(&run.download_finished_job_ids)
+                .count()
+        });
+        started_downloads
+            + self.article_model_requests_in_flight()
+            + usize::from(batch.poll_in_progress)
+            + usize::from(self.pipeline_activity().intake_refresh_pending)
+            + usize::from(self.briefing.next_item_in_flight())
+            + usize::from(batch.import_in_flight)
     }
 
     pub fn run_progress(&self) -> Option<&RunProgress> {
@@ -93,6 +128,19 @@ impl AppState {
 
     pub(crate) fn set_pipeline_run_phase(&mut self, phase: PipelineRunPhase) {
         self.pipeline_run_phase = phase;
+    }
+
+    pub(crate) fn pipeline_intake_open(&self) -> bool {
+        self.pipeline_run_phase != PipelineRunPhase::Stopping
+            && !matches!(
+                self.session,
+                crate::SessionState::Finishing | crate::SessionState::Finished
+            )
+            && (!self.run_progress_is_active()
+                || self
+                    .pipeline_admission
+                    .as_ref()
+                    .is_none_or(|run| run.intake_open))
     }
 
     pub(crate) fn set_run_completion_notice(&mut self, notice: RunCompletionNotice) {

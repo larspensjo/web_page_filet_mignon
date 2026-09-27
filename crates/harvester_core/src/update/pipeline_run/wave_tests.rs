@@ -387,6 +387,16 @@ fn stop_withdraws_pending_triage_and_keeps_the_in_flight_result() {
         .any(|e| matches!(e, Effect::StopFinish { .. })));
     assert_eq!(state.triage().pending_count(), 0);
     assert_eq!(state.triage().in_progress_count(), 1);
+    assert_eq!(
+        state.pipeline_run_phase(),
+        crate::PipelineRunPhase::Stopping
+    );
+    assert_eq!(
+        state.run_state(),
+        crate::RunState::Stopping { in_flight: 1 }
+    );
+    assert!(!state.run_progress().unwrap().terminal);
+    assert!(!state.view().archive_enabled);
     let (state, effects) = crate::update(state, triage_success(id));
     assert!(effects
         .iter()
@@ -400,6 +410,12 @@ fn stop_withdraws_pending_triage_and_keeps_the_in_flight_result() {
         state.triage().in_progress_count()
     );
     assert_eq!(state.triage().phase(), &crate::TriagePhase::Complete);
+    assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(state.pipeline_run_phase(), crate::PipelineRunPhase::Idle);
+    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(state.run_state(), crate::RunState::Idle);
+    assert!(state.view().archive_enabled);
+    assert_eq!(state.triage_cache().len(), 1);
     assert!(state.triage().can_start());
     assert!(
         matches!(state.unfinished_work(), crate::UnfinishedWork::Known(work)
@@ -414,6 +430,81 @@ fn stop_withdraws_pending_triage_and_keeps_the_in_flight_result() {
     assert!(effects
         .iter()
         .any(|e| matches!(e, Effect::LoadProcessingConfiguration { .. })));
+}
+
+#[test]
+fn stop_drains_overlapping_triage_and_summary_without_downstream_dispatch() {
+    let first = loaded_article(0);
+    let mut state = add_metadata(AppState::new());
+    state.set_llm_max_in_flight(2);
+    let (state, effects) = start_resume(state, vec![first.clone()]);
+    let triage_id = request_id(&effects, PromptId::ArticleTriage).expect("first triage");
+    let (mut state, effects) = crate::update(state, triage_success(triage_id));
+    let summary_id = request_id(&effects, PromptId::ArticleSummary).expect("summary starts");
+
+    let later: Vec<_> = (1..=5).map(loaded_article).collect();
+    let all_articles = std::iter::once(first)
+        .chain(later.iter().cloned())
+        .collect::<Vec<_>>();
+    let load_id = state.pre_triage_coordinator.begin_preparation_load();
+    state.set_triage_in_flight(load_id);
+    let (state, effects) = crate::update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: load_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(all_articles, 100_000),
+        },
+    );
+    let triage_drain_id = request_id(&effects, PromptId::ArticleTriage)
+        .expect("a later triage wave overlaps the summary request");
+    assert_eq!(state.triage().pending_count(), 4);
+    assert_eq!(state.article_model_requests_in_flight(), 2);
+
+    let (state, effects) = crate::update(state, Msg::StopFinishClicked);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    assert_eq!(state.triage().pending_count(), 0);
+    assert_eq!(state.triage().failed_count(), 0);
+    assert_eq!(
+        state.pipeline_run_phase(),
+        crate::PipelineRunPhase::Stopping
+    );
+    assert_eq!(
+        state.run_state(),
+        crate::RunState::Stopping { in_flight: 2 }
+    );
+    assert!(!state.run_progress().unwrap().terminal);
+
+    let (state, effects) = crate::update(state, summary_result(summary_id, true));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
+    assert_eq!(state.summary_cache().len(), 1);
+    assert_eq!(
+        state.pipeline_run_phase(),
+        crate::PipelineRunPhase::Stopping
+    );
+    assert_eq!(
+        state.run_state(),
+        crate::RunState::Stopping { in_flight: 1 }
+    );
+    assert!(!state.run_progress().unwrap().terminal);
+
+    let (state, effects) = crate::update(state, triage_success(triage_drain_id));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
+    assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(state.pipeline_run_phase(), crate::PipelineRunPhase::Idle);
+    assert_eq!(state.view().session, crate::SessionState::Idle);
+    assert_eq!(state.run_state(), crate::RunState::Idle);
+    assert!(state.view().archive_enabled);
+    assert_eq!(state.triage_cache().len(), 2);
+    assert!(
+        matches!(state.unfinished_work(), crate::UnfinishedWork::Known(work)
+        if work.needs_triage == 4 && work.needs_summary == 1)
+    );
 }
 
 #[test]

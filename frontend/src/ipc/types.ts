@@ -166,6 +166,8 @@ export type RunProgressView = {
 	activity: ActivityEntry[];
 };
 
+export type RunState = "Idle" | "Active" | { Stopping: { in_flight: number } };
+
 export type RunCompletionNotice = {
 	new_result_count: number;
 	completed_at_utc: string;
@@ -256,6 +258,8 @@ export type SnapshotEnvelope = {
 		desktop_job_list: DesktopJobListView;
 		signal_candidate_rows: SignalCandidateRow[];
 		run_progress: RunProgressView;
+		archive_enabled: boolean;
+		run_state: RunState;
 		run_completion_notice: RunCompletionNotice | null;
 		poll_sources_enabled: boolean;
 		triage_can_start: boolean;

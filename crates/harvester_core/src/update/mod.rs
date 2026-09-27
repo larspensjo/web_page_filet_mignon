@@ -133,6 +133,9 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             extracted_links,
             fetched_utc,
         } => {
+            let successful = matches!(result, crate::JobResultKind::Success);
+            let stopped_drain = state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
+                || state.session() == SessionState::Finishing;
             state.apply_done(
                 job_id,
                 result,
@@ -140,7 +143,10 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
                 extracted_links,
                 fetched_utc,
             );
-            if state.pipeline_wave_policy() != crate::PipelineWavePolicy::Disabled {
+            if (!stopped_drain
+                && state.pipeline_wave_policy() != crate::PipelineWavePolicy::Disabled)
+                || (stopped_drain && successful)
+            {
                 state.request_pre_triage_refresh_evaluation(true);
             }
             Vec::new()
@@ -151,20 +157,25 @@ pub fn update(mut state: AppState, msg: Msg) -> (AppState, Vec<Effect>) {
             checked,
         } => {
             let mut effects = Vec::new();
-            if let Some((url, downloaded_path)) = state.link_metadata(job_id, link_index) {
-                if checked && state.mark_link_download_requested(job_id, link_index) {
-                    effects.push(Effect::DownloadLinkedPage {
-                        job_id,
-                        link_index,
-                        url,
-                    });
-                } else if !checked && state.mark_link_deleted(job_id, link_index) {
-                    if let Some(path) = downloaded_path {
-                        effects.push(Effect::DeleteLinkedPage {
+            if !checked
+                || (state.pipeline_run_phase() != crate::PipelineRunPhase::Stopping
+                    && state.session() != SessionState::Finishing)
+            {
+                if let Some((url, downloaded_path)) = state.link_metadata(job_id, link_index) {
+                    if checked && state.mark_link_download_requested(job_id, link_index) {
+                        effects.push(Effect::DownloadLinkedPage {
                             job_id,
                             link_index,
-                            path,
+                            url,
                         });
+                    } else if !checked && state.mark_link_deleted(job_id, link_index) {
+                        if let Some(path) = downloaded_path {
+                            effects.push(Effect::DeleteLinkedPage {
+                                job_id,
+                                link_index,
+                                path,
+                            });
+                        }
                     }
                 }
             }

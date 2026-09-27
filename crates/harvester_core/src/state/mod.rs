@@ -74,6 +74,8 @@ pub type JobId = u64;
 /// Maximum extracted links retained for one job.
 pub const MAX_EXTRACTED_LINKS: usize = 5_000;
 const CHECKPOINT_SAVING_STATUS_MESSAGE: &str = "Checkpoint saving...";
+pub(crate) const EXPORT_UNAVAILABLE_STATUS_MESSAGE: &str =
+    "Export is unavailable while a run is in progress";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingBriefingCheckpointSave {

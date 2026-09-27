@@ -53,9 +53,25 @@ requests Full. A Full or Resume run arms model work only when AI is available;
 an unarmed Full run still polls and becomes Terminal after intake settles.
 Batch and import hosts mark a missing or empty API key unavailable before requesting
 a run. `--drain` requests no run.
-An accepted Stop withdraws never-dispatched Pending entries from all three stages,
-keeps in-flight results, and releases no downstream work from those completions.
-Withdrawn identities remain unfinished under their current keys.
+An accepted Stop moves the run to Stopping, disarms model dispatch, closes intake,
+and withdraws never-dispatched Pending entries from triage, summary, and scoring
+without failing them. The engine cancels queued downloads while the in-flight
+download completes; in-flight model results are applied, cached, and persisted.
+No downstream work is released during the drain. Completion counters continue to
+advance, and the run remains Stopping until downloads, model work, and intake
+refreshes have settled. It then becomes Terminal and the session returns to Idle.
+The download engine keeps its in-flight fetch alive for Finish and rejects any
+enqueue after Stop until `StartSession` dispatches an explicit Resume command.
+Resume creates a fresh cancellation token before the new run's first enqueue, so
+another Full run can poll and download without restarting. Withdrawn and never-started identities remain
+unfinished under their current keys.
+
+Archive availability is owned by core and depends only on run state: it is disabled
+while a run is Active or Stopping, and enabled after Terminal regardless of failed
+or unfinished articles. Both opening the archive dialog and submitting an export
+are gated by this state; a rejected submit reports that export is unavailable while
+a run is in progress. Desktop snapshots expose `archive_enabled` and `run_state`
+(`Idle`, `Active`, or `Stopping { in_flight }`) as IPC fields.
 
 `RunProgress` accumulates this run's admitted totals, including triage and summary
 cache hits. Scoring already completed under the same digest is not readmitted. Multiple

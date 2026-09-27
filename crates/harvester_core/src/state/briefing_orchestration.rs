@@ -178,6 +178,13 @@ impl AppState {
         self.briefing_checkpoint_status_message.as_deref()
     }
 
+    pub(crate) fn set_briefing_checkpoint_status_message(&mut self, message: Option<String>) {
+        if self.briefing_checkpoint_status_message != message {
+            self.briefing_checkpoint_status_message = message;
+            self.mark_dirty();
+        }
+    }
+
     /// Backfills `fetched_utc` on jobs that have it as `None`, keyed by URL.
     /// Used to recover timestamps for jobs restored from pre-feature persisted state.
     pub(crate) fn backfill_jobs_fetched_utc(

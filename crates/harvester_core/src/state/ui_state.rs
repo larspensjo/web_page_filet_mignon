@@ -171,6 +171,11 @@ impl AppState {
         let has_active_work = batch.jobs_in_flight > 0
             || batch.poll_in_progress
             || batch.import_in_flight
+            || self
+                .signal_candidate()
+                .observation_counts()
+                .pending_or_in_flight
+                > 0
             || matches!(
                 batch.triage_phase,
                 crate::TriagePhase::LoadingArticles | crate::TriagePhase::Triaging
@@ -183,7 +188,17 @@ impl AppState {
             )
             || self.briefing.next_item_in_flight();
 
-        if matches!(self.session, SessionState::Running) && has_active_work {
+        let pipeline_active = self.run_progress_is_active();
+        let already_stopping = self.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
+            || matches!(
+                self.session,
+                SessionState::Finishing | SessionState::Finished
+            );
+
+        if (matches!(self.session, SessionState::Running) || pipeline_active)
+            && has_active_work
+            && !already_stopping
+        {
             crate::StopFinishButtonState::Enabled {
                 policy: crate::StopPolicy::Finish,
             }
@@ -236,6 +251,13 @@ impl AppState {
     pub(crate) fn finish_session(&mut self) {
         self.session = SessionState::Finishing;
         self.dirty = true;
+    }
+
+    pub(crate) fn reset_session_to_idle(&mut self) {
+        if self.session != SessionState::Idle {
+            self.session = SessionState::Idle;
+            self.dirty = true;
+        }
     }
 
     pub(crate) fn set_last_paste_stats(&mut self, enqueued: usize, skipped: usize) {

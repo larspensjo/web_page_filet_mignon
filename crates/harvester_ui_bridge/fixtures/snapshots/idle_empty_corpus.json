@@ -1,9 +1,10 @@
 {
   "generation": 1,
-  "schema_version": 10,
+  "schema_version": 11,
   "view": {
     "ai_unavailable_message": null,
     "ai_warning_banner": null,
+    "archive_enabled": true,
     "archive_filtered_count": 0,
     "archive_partial_coverage": null,
     "archive_token_estimate": 0,
@@ -66,6 +67,7 @@
       "run_active": false,
       "stages": []
     },
+    "run_state": "Idle",
     "selected_job_id": null,
     "selected_url": null,
     "session": "Idle",

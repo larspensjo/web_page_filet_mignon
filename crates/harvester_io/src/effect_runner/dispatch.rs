@@ -47,7 +47,7 @@ impl EffectRunner {
                 self.engine.enqueue(job_id, url);
             }
             Effect::StartSession => {
-                // no-op; engine starts on first enqueue
+                self.engine.resume();
             }
             Effect::StopFinish { policy } => {
                 let immediate = matches!(policy, StopPolicy::Immediate);

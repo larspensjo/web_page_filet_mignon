@@ -240,3 +240,15 @@ Batch synchronous concurrency is capped at the worker's limit.
 Refs: docs/Architecture.md, crates/harvester_core/src/pipeline_waves.rs,
 crates/harvester_core/src/update/waves.rs, crates/harvester_batch/src/runner.rs,
 crates/harvester_batch/src/runner/batch_runtime.rs
+
+## 2026-09-27 - Stop halts new work and drains; export waits only for the run
+Decision: Stop cancels queued downloads and issues no new model request. The in-flight
+download and in-flight model requests finish and are kept. Never-started work becomes
+unfinished. The next run may start without a restart. Export is unavailable while a run is
+working or draining, and never because articles are unfinished or failed.
+Context: An unattended run must be stoppable without losing paid results, and a checkpoint
+moved mid-run would split the window. Completion-time checkpoints were rejected because they
+would change the public corpus format.
+Consequences: Failed articles are retried on the next run, with no retry cap for now.
+Refs: docs/Architecture.md, crates/harvester_core/src/update/pipeline_run.rs,
+crates/harvester_engine/src/engine.rs

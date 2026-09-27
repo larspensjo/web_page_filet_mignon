@@ -59,8 +59,8 @@ pub use pre_triage_filter::{
 pub use preview::PreviewContentKind;
 pub use run_progress::{
     ActivityEntry, ActivityOutcome, PipelineActivity, PipelineRunPhase, PipelineStage,
-    RunCompletionNotice, RunProgress, RunProgressView, StageProgress, StageRecord, StageStatus,
-    ACTIVITY_FEED_CAPACITY,
+    RunCompletionNotice, RunProgress, RunProgressView, RunState, StageProgress, StageRecord,
+    StageStatus, ACTIVITY_FEED_CAPACITY,
 };
 pub use signal_candidate::{
     compute_dialog_default, ArchiveFinalSelection, ArchiveSelectionSource, OverrideKey,

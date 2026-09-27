@@ -19,7 +19,11 @@ pub(super) fn handle_poll_sources_clicked(state: &mut AppState) -> Vec<Effect> {
 }
 
 pub(super) fn handle_poll_indirect_links(state: &mut AppState) -> Vec<Effect> {
-    if !state.has_indirect_links() || state.indirect_poll_in_progress() {
+    if state.pipeline_run_phase() == crate::PipelineRunPhase::Stopping
+        || state.session() == SessionState::Finishing
+        || !state.has_indirect_links()
+        || state.indirect_poll_in_progress()
+    {
         Vec::new()
     } else {
         state.set_indirect_poll_in_progress(true);
@@ -45,16 +49,23 @@ pub(super) fn handle_source_poll_completed(
 ) -> Vec<Effect> {
     engine_info!("[source-poll] {} returned {} urls", source_id, urls.len());
     state.record_source_poll(&source_id, urls.len());
-    let ingest = state.ingest_urls(urls, chrono::Utc::now());
+    let (effects, job_ids, emitted) = if state.pipeline_intake_open() {
+        let ingest = state.ingest_urls(urls, chrono::Utc::now());
+        (ingest.effects, ingest.enqueued_job_ids, ingest.enqueued)
+    } else {
+        // A poll already in flight may finish after Stop. Record its source
+        // result, but leave its URLs for the next Full run to collect.
+        (Vec::new(), Vec::new(), 0)
+    };
     state.record_poll_stat(crate::SourcePollStat {
         source_id: source_id.clone(),
         kind,
         parsed,
         dedup_filtered,
-        emitted: ingest.enqueued,
+        emitted,
     });
-    state.record_poll_pipeline_jobs(&ingest.enqueued_job_ids);
-    ingest.effects
+    state.record_poll_pipeline_jobs(&job_ids);
+    effects
 }
 
 pub(super) fn handle_source_poll_failed(

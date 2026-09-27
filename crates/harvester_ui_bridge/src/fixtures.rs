@@ -44,12 +44,13 @@ pub fn named_snapshots() -> Vec<(&'static str, SnapshotEnvelope)> {
 /// Channel-2 payloads the frontend renders without a snapshot: the archive dialog
 /// rides `UiCommand::ShowArchiveDialog`, never the envelope.
 pub fn named_ui_commands() -> Vec<(&'static str, UiCommand)> {
-    let empty = reduce(AppState::new(), Msg::tick_at(time(0)));
-    vec![("show_archive_dialog", show_archive_dialog(&empty))]
+    vec![("show_archive_dialog", show_archive_dialog())]
 }
 
-fn show_archive_dialog(empty: &AppState) -> UiCommand {
-    let state = idle_with_corpus(empty);
+fn show_archive_dialog() -> UiCommand {
+    let empty = reduce(AppState::new(), Msg::tick_at(time(0)));
+    let state = idle_with_corpus(&empty);
+    assert!(state.export_available());
     let (state, effects) = update(state, Msg::ArchiveClicked);
     let ready = effects
         .into_iter()
@@ -158,7 +159,14 @@ fn idle_with_corpus(empty: &AppState) -> AppState {
     let first_request_id = request_id(&first_effects, PromptId::ArticleTriage, "first triage");
     let (state, second_effects) = update(state, triage_success(first_request_id, 2));
     let second_request_id = request_id(&second_effects, PromptId::ArticleTriage, "second triage");
-    let state = reduce(state, triage_success(second_request_id, 5));
+    let (state, stop_effects) = update(state, Msg::StopFinishClicked);
+    assert!(stop_effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    let (state, drain_effects) = update(state, triage_success(second_request_id, 5));
+    assert!(drain_effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::RequestLlmCompletion { .. })));
 
     let view = state.view();
     assert_eq!(
@@ -168,6 +176,12 @@ fn idle_with_corpus(empty: &AppState) -> AppState {
             .map(|row| row.job_id)
             .collect::<Vec<_>>(),
         vec![2, 1]
+    );
+    assert!(
+        state.export_available(),
+        "run={:?} activity={:?}",
+        state.run_state(),
+        state.pipeline_activity()
     );
     state
 }

@@ -51,6 +51,196 @@ fn archive_clicked_emits_open_dialog_with_request_id_and_article_count() {
     }
 }
 
+fn archive_submit_message(request_id: u64) -> Msg {
+    Msg::ArchiveDialogSubmitted {
+        request_id,
+        basename: "archive.md".into(),
+        set_checkpoint: false,
+        submitted_at: chrono::Utc::now(),
+        use_summaries: false,
+        use_signal_candidates: false,
+    }
+}
+
+fn archive_request_id(effects: &[Effect]) -> u64 {
+    effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog { request_id, .. } => Some(*request_id),
+            _ => None,
+        })
+        .expect("ArchiveClicked opens a dialog")
+}
+
+#[test]
+fn archive_submit_and_open_are_gated_while_run_is_active() {
+    init_logging();
+    let state = complete_triage_state_for_test(1);
+    let (state, open_effects) = update(state, Msg::ArchiveClicked);
+    let request_id = archive_request_id(&open_effects);
+    let (state, _) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    assert_eq!(state.run_state(), crate::RunState::Active);
+    assert!(!state.export_available());
+
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    assert!(effects.is_empty());
+    assert_eq!(state.archive_request_id(), request_id);
+
+    let (state, effects) = update(state, archive_submit_message(request_id));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::ArchiveRequested { .. })));
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Export is unavailable while a run is in progress")
+    );
+}
+
+#[test]
+fn archive_submit_is_gated_until_a_stopping_run_finishes_draining() {
+    init_logging();
+    let state = complete_triage_state_for_test(1);
+    let (state, open_effects) = update(state, Msg::ArchiveClicked);
+    let request_id = archive_request_id(&open_effects);
+    let (state, _) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Full,
+        },
+    );
+    let (state, _) = update(state, Msg::PollStarted { total: 1 });
+    let (state, effects) = update(state, Msg::StopFinishClicked);
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::StopFinish { .. })));
+    assert_eq!(
+        state.run_state(),
+        crate::RunState::Stopping { in_flight: 1 }
+    );
+    assert!(!state.export_available());
+
+    let (state, effects) = update(state, archive_submit_message(request_id));
+    assert!(effects
+        .iter()
+        .all(|effect| !matches!(effect, Effect::ArchiveRequested { .. })));
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Export is unavailable while a run is in progress")
+    );
+    let (state, _) = update(state, Msg::AllSourcesPollEnded);
+    assert_eq!(state.run_state(), crate::RunState::Idle);
+    assert_eq!(state.briefing_checkpoint_status_message(), None);
+}
+
+#[test]
+fn archive_actions_preserve_pending_checkpoint_save_status() {
+    init_logging();
+    let (state, _) = update(
+        AppState::new(),
+        Msg::BriefingCheckpointSet(Some("2026-03-22T00:00:00Z".into())),
+    );
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Checkpoint saving...")
+    );
+    let (state, open_effects) = update(state, Msg::ArchiveClicked);
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Checkpoint saving...")
+    );
+    let request_id = archive_request_id(&open_effects);
+    let (state, _) = update(state, archive_submit_message(request_id));
+    assert_eq!(
+        state.briefing_checkpoint_status_message(),
+        Some("Checkpoint saving...")
+    );
+}
+
+#[test]
+fn archive_succeeds_after_terminal_with_failed_summary_and_unfinished_work() {
+    init_logging();
+    let article = loaded_pre_triage_articles(&["https://archive-gate.invalid/article"]).remove(0);
+    let mut state = with_signal_candidate_metadata(ready_pre_triage_state(&[&article.url]));
+    state.set_llm_max_in_flight(1);
+    let (state, effects) = update(
+        state,
+        Msg::PipelineRunRequested {
+            scope: crate::PipelineRunScope::Resume,
+        },
+    );
+    let (state, effects) =
+        crate::fixture_support::complete_processing_start(state, effects, 100_000);
+    let triage_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: harvester_engine::llm::prompt::PromptId::ArticleTriage,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+        .expect("triage starts");
+    let (state, effects) = update(state, triage_success(triage_id));
+    let summary_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::RequestLlmCompletion {
+                request_id,
+                prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSummary,
+                ..
+            } => Some(*request_id),
+            _ => None,
+        })
+        .expect("summary starts");
+    let (state, _) = update(
+        state,
+        Msg::LlmCompleted {
+            request_id: summary_id,
+            result: LlmResultKind::Failed {
+                reason: "summary fixture failure".into(),
+            },
+            metadata: None,
+        },
+    );
+    let (state, _) = update(
+        state,
+        Msg::EvaluatePreTriageRefresh {
+            ordered_urls: vec![article.url.clone()],
+            triggered_by_job_done: false,
+        },
+    );
+    let (state, refresh_id) = tick_until_dispatch(state);
+    let (state, _) = update(
+        state,
+        Msg::TriageArticlesLoaded {
+            request_id: refresh_id,
+            delta: harvester_engine::TriageArticleDelta::full_window(vec![article], 100_000),
+        },
+    );
+    assert!(state.run_progress().unwrap().terminal);
+    assert_eq!(state.briefing().failed_summary_count(), 1);
+    let unfinished = state.unfinished_work();
+    assert!(
+        matches!(unfinished, crate::UnfinishedWork::Known(work) if work.articles_with_work > 0),
+        "failed summary should leave nonzero unfinished work, got {unfinished:?}"
+    );
+    assert!(state.view().archive_enabled);
+
+    let (state, effects) = update(state, Msg::ArchiveClicked);
+    let request_id = archive_request_id(&effects);
+    let (state, effects) = update(state, archive_submit_message(request_id));
+    assert!(effects
+        .iter()
+        .any(|effect| matches!(effect, Effect::ArchiveRequested { .. })));
+    assert!(state.export_available());
+}
+
 #[test]
 fn archive_clicked_with_triage_complete_and_pre_triage_ready_sets_pending_count() {
     init_logging();
@@ -597,7 +787,7 @@ fn resume_run_sets_current_working_corpus_to_unavailable_until_triage_completes(
 }
 
 #[test]
-fn archive_clicked_after_triage_start_has_zero_pending_pre_triage_count() {
+fn archive_clicked_after_triage_start_is_gated_while_run_active() {
     init_logging();
     let urls = &["https://archive-handoff.com/1"];
     let state = ready_pre_triage_state(urls);
@@ -611,26 +801,45 @@ fn archive_clicked_after_triage_start_has_zero_pending_pre_triage_count() {
     );
     let state = complete_all_triage_llm_requests(state, effects);
 
+    assert_eq!(state.run_state(), crate::RunState::Active);
+    let (state, archive_effects) = update(state, Msg::ArchiveClicked);
+    assert!(archive_effects.is_empty());
+    assert!(!state.view().archive_enabled);
+    let (mut state, _) = update(state, Msg::StopFinishClicked);
+    let in_flight = state
+        .briefing()
+        .articles()
+        .iter()
+        .filter_map(|article| match article.summary_state {
+            crate::briefing::ArticleSummaryState::InProgress { request_id } => Some(request_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for request_id in in_flight {
+        (state, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id,
+                result: crate::LlmResultKind::Failed {
+                    reason: "summary fixture drain".into(),
+                },
+                metadata: None,
+            },
+        );
+    }
+    assert_eq!(state.run_state(), crate::RunState::Idle);
     let (_, archive_effects) = update(state, Msg::ArchiveClicked);
     let pending_count = archive_effects
         .iter()
-        .find_map(|e| {
-            if let Effect::OpenArchiveDialog {
+        .find_map(|effect| match effect {
+            Effect::OpenArchiveDialog {
                 pending_pre_triage_count,
                 ..
-            } = e
-            {
-                Some(*pending_pre_triage_count)
-            } else {
-                None
-            }
+            } => Some(*pending_pre_triage_count),
+            _ => None,
         })
-        .expect("expected OpenArchiveDialog effect");
-
-    assert_eq!(
-        pending_count, 0,
-        "pending_pre_triage_count must be 0 after reducer handoff path"
-    );
+        .expect("expected OpenArchiveDialog after run settled");
+    assert_eq!(pending_count, 0);
 }
 
 #[test]
@@ -659,7 +868,9 @@ fn pre_triage_refresh_after_triage_start_repopulates_pre_triage_without_mutating
 
     let new_url = "https://repopulate.com/new-article";
     let state = add_completed_job_for_test(state, new_url);
+    assert_eq!(state.triage().articles().len(), triage_article_count_before);
     let (state, request_id) = tick_until_dispatch(state);
+    assert_eq!(state.triage().articles().len(), triage_article_count_before);
     let new_articles = loaded_pre_triage_articles(&[new_url]);
     let (state, _) = update(
         state,
@@ -1156,12 +1367,35 @@ fn compatible_triage_cache_hit_exports_the_stored_model_id() {
             ),
         },
     );
-    let (state, _) = update(
+    let (state, effects) = update(
         state,
         Msg::PipelineRunRequested {
             scope: crate::PipelineRunScope::Resume,
         },
     );
+    let (mut state, effects) =
+        crate::fixture_support::complete_processing_start(state, effects, 100_000);
+    if let Some(summary_id) = effects.iter().find_map(|effect| match effect {
+        Effect::RequestLlmCompletion {
+            request_id,
+            prompt_id: harvester_engine::llm::prompt::PromptId::ArticleSummary,
+            ..
+        } => Some(*request_id),
+        _ => None,
+    }) {
+        let (next, _) = update(
+            state,
+            Msg::LlmCompleted {
+                request_id: summary_id,
+                result: LlmResultKind::Failed {
+                    reason: "summary fixture failure".into(),
+                },
+                metadata: None,
+            },
+        );
+        state = next;
+    }
+    assert!(state.run_progress().unwrap().terminal);
     assert_eq!(
         state.triage().triage_model_for_url("https://example.com/0"),
         Some("test-model")

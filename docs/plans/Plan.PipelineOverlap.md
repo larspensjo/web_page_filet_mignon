@@ -6,8 +6,9 @@ answers to the first draft's twelve open questions, which are now stated as deci
 Status: Phase 1 landed (incremental corpus hand-off). Phase 2 landed (one model-request budget,
 furthest-along first, current-key scoring). Phase 3 landed (identity-based completeness).
 Phase 4 landed (waves, admission, run scopes and progress). Phase 5 landed (batch host and import
-mode on reducer-owned runs). Phases 6–8 remain outstanding,
-except the explicitly approved Continue-before-rearm batch collection step brought forward.
+mode on reducer-owned runs). Phase 6 landed (Stop drains, the engine resumes, and export waits
+only for the run). Phases 7–8 remain outstanding, except the explicitly approved
+Continue-before-rearm batch collection step brought forward.
 
 Follow-up before Phase 4 (user decision 2026-09-25), done: building the desktop view at
 production scale took 90–700 ms against the 40 ms host-drain budget, depending on whether jobs

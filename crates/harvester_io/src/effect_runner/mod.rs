@@ -422,7 +422,7 @@ impl EffectRunner {
 impl Drop for EffectRunner {
     fn drop(&mut self) {
         engine_info!("[effect] EffectRunner dropped, stopping engine");
-        self.engine.stop(false);
+        self.engine.stop(true);
         // `entity_index_worker_tx` is dropped here, closing the channel.
         // The worker thread sees RecvError and exits cleanly.
     }

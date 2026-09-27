@@ -203,6 +203,8 @@ impl AppState {
                 .run_progress
                 .as_ref()
                 .map_or_else(Default::default, crate::RunProgress::view),
+            archive_enabled: self.export_available(),
+            run_state: self.run_state(),
             run_completion_notice: self.run_completion_notice.clone(),
             poll_sources_enabled: matches!(
                 self.session,
