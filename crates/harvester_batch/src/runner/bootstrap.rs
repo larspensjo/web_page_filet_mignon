@@ -4,7 +4,7 @@ use crate::cli::Args;
 use engine_logging::engine_info;
 use harvester_core::signal_candidate::DEFAULT_SELECTION_THRESHOLD;
 use harvester_core::{
-    update, AiAvailability, AiUnavailableReason, AppState, Msg, PipelineWavePolicy,
+    update, AiAvailability, AiUnavailableReason, AppState, Effect, Msg, PipelineWavePolicy,
 };
 use harvester_engine::llm::LlmQuotas;
 use harvester_io::{
@@ -62,12 +62,7 @@ pub(crate) fn prepare_runtime(
 ) -> Result<(AppState, EffectRunner, Option<BatchRuntime>), String> {
     // Hydrate state
     engine_info!("[batch] Hydrating state from disk");
-    let mut state = AppState::new();
-    apply_model_budget(&mut state, args);
-    apply_signal_candidate_selection_settings(&mut state, args);
-
-    let (hydrated_state, startup_effects) = hydrate_state_from_disk(state, paths);
-    state = hydrated_state;
+    let (mut state, startup_effects) = hydrate_batch_state(paths, args);
 
     // Build EffectRunner (with optional LLM support based on OPENAI_API_KEY)
     engine_info!("[batch] Building EffectRunner");
@@ -100,6 +95,13 @@ pub(crate) fn prepare_runtime(
     }
 
     Ok((state, effect_runner, batch_runtime))
+}
+
+pub(crate) fn hydrate_batch_state(paths: &RuntimePaths, args: &Args) -> (AppState, Vec<Effect>) {
+    let mut state = AppState::new();
+    apply_model_budget(&mut state, args);
+    apply_signal_candidate_selection_settings(&mut state, args);
+    hydrate_state_from_disk(state, paths)
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{mpsc, Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use engine_logging::engine_error;
@@ -48,6 +48,20 @@ pub enum SnapshotSignal {
 pub enum DriverTermination {
     Clean,
     Fatal,
+}
+
+/// Wall time spent in one pass through the desktop driver loop. Effect hand-off
+/// includes any work performed synchronously by the supplied effect sink.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DriverIterationTiming {
+    pub wall: Duration,
+    pub reduce: Duration,
+    pub pre_triage_pump: Duration,
+    pub effect_hand_off: Duration,
+    pub view_build: Duration,
+    pub view_compare: Duration,
+    pub snapshot: Duration,
+    pub idle_recv: Duration,
 }
 
 pub fn partition_effects(effects: Vec<Effect>) -> (Vec<Effect>, Vec<UiCommand>) {
@@ -174,14 +188,14 @@ impl SnapshotCoalescer {
 
 #[allow(clippy::too_many_arguments)]
 pub fn run_driver<R, ES, CS, SS, N>(
-    mut state: AppState,
+    state: AppState,
     receiver: mpsc::Receiver<Msg>,
     reducer: R,
-    mut effect_sink: ES,
-    mut command_sink: CS,
-    mut snapshot_sink: SS,
+    effect_sink: ES,
+    command_sink: CS,
+    snapshot_sink: SS,
     bodies: Arc<RwLock<BodyTable>>,
-    mut now: N,
+    now: N,
 ) -> DriverTermination
 where
     R: Fn(AppState, Msg) -> (AppState, Vec<Effect>),
@@ -190,57 +204,163 @@ where
     SS: FnMut(SnapshotSignal),
     N: FnMut() -> Duration,
 {
+    run_driver_with_observers(
+        state,
+        receiver,
+        reducer,
+        effect_sink,
+        command_sink,
+        snapshot_sink,
+        bodies,
+        now,
+        |_, _| {},
+        |_| {},
+        None::<fn(DriverIterationTiming)>,
+        |_| false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_driver_with_observers<R, ES, CS, SS, N, RO, VO, IO, STOP>(
+    mut state: AppState,
+    receiver: mpsc::Receiver<Msg>,
+    reducer: R,
+    mut effect_sink: ES,
+    mut command_sink: CS,
+    mut snapshot_sink: SS,
+    bodies: Arc<RwLock<BodyTable>>,
+    mut now: N,
+    mut reducer_observer: RO,
+    mut view_observer: VO,
+    mut iteration_observer: Option<IO>,
+    mut should_terminate: STOP,
+) -> DriverTermination
+where
+    R: Fn(AppState, Msg) -> (AppState, Vec<Effect>),
+    ES: FnMut(Vec<Effect>),
+    CS: FnMut(UiCommand),
+    SS: FnMut(SnapshotSignal),
+    N: FnMut() -> Duration,
+    RO: FnMut(&str, Duration),
+    VO: FnMut(Duration),
+    IO: FnMut(DriverIterationTiming),
+    STOP: FnMut(&AppState) -> bool,
+{
+    // The production caller supplies None, so phase clocks are never read there.
+    macro_rules! measure_phase {
+        ($timing:ident, $field:ident, $work:expr) => {{
+            let started = iteration_observer.as_ref().map(|_| Instant::now());
+            let result = $work;
+            if let Some(started) = started {
+                $timing.$field += started.elapsed();
+            }
+            result
+        }};
+    }
     let mut last_message_kind = "startup".to_string();
     let body = AssertUnwindSafe(|| {
         let mut coalescer = SnapshotCoalescer::default();
         let mut last_view: Option<Arc<AppViewModel>> = None;
         loop {
-            let first = if coalescer.has_pending() {
-                match receiver.recv_timeout(coalescer.remaining_until_due(now())) {
-                    Ok(message) => message,
-                    Err(mpsc::RecvTimeoutError::Timeout) => {
+            let iteration_started = iteration_observer.as_ref().map(|_| Instant::now());
+            let mut timing = DriverIterationTiming::default();
+            let received = measure_phase!(
+                timing,
+                idle_recv,
+                if coalescer.has_pending() {
+                    receiver.recv_timeout(coalescer.remaining_until_due(now()))
+                } else {
+                    receiver
+                        .recv()
+                        .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
+                }
+            );
+            let first = match received {
+                Ok(message) => message,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    measure_phase!(timing, snapshot, {
                         if let Some((snapshot, table)) = coalescer.flush_due(now()) {
                             *bodies.write().expect("body table lock") = table;
                             snapshot_sink(SnapshotSignal::Snapshot(snapshot));
                         }
-                        continue;
+                    });
+                    if let Some(started) = iteration_started {
+                        timing.wall = started.elapsed();
+                        iteration_observer.as_mut().expect("iteration observer")(timing);
                     }
-                    Err(mpsc::RecvTimeoutError::Disconnected) => return Err(()),
+                    continue;
                 }
-            } else {
-                receiver.recv().map_err(|_| ())?
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(()),
             };
             let mut messages = vec![first];
             messages.extend(receiver.try_iter());
             for message in messages {
-                last_message_kind = message_kind(&message);
-                let (next, effects) = reducer(state, message);
+                last_message_kind = message.kind().to_owned();
+                let reducer_started = Instant::now();
+                let (next, effects) = measure_phase!(timing, reduce, reducer(state, message));
+                reducer_observer(&last_message_kind, reducer_started.elapsed());
                 state = next;
-                dispatch_effects(effects, &mut effect_sink, &mut command_sink);
+                measure_phase!(
+                    timing,
+                    effect_hand_off,
+                    dispatch_effects(effects, &mut effect_sink, &mut command_sink)
+                );
             }
-            let (next, effects, _) = pump_pre_triage_refresh(state);
+            let refresh_started = Instant::now();
+            let (next, effects, refresh_triggered) =
+                measure_phase!(timing, pre_triage_pump, pump_pre_triage_refresh(state));
+            if refresh_triggered {
+                reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed());
+            }
             state = next;
-            dispatch_effects(effects, &mut effect_sink, &mut command_sink);
+            measure_phase!(
+                timing,
+                effect_hand_off,
+                dispatch_effects(effects, &mut effect_sink, &mut command_sink)
+            );
             if !matches!(
                 state.pipeline_run_phase(),
                 harvester_core::PipelineRunPhase::Idle
             ) {
                 last_message_kind = "PipelineRunAdvance".to_string();
-                let (next, effects) = reducer(state, Msg::PipelineRunAdvance);
+                let reducer_started = Instant::now();
+                let (next, effects) =
+                    measure_phase!(timing, reduce, reducer(state, Msg::PipelineRunAdvance));
+                reducer_observer(&last_message_kind, reducer_started.elapsed());
                 state = next;
-                dispatch_effects(effects, &mut effect_sink, &mut command_sink);
+                measure_phase!(
+                    timing,
+                    effect_hand_off,
+                    dispatch_effects(effects, &mut effect_sink, &mut command_sink)
+                );
             }
-            let view = Arc::new(state.view());
-            if last_view.as_deref() != Some(view.as_ref()) {
-                if let Some((snapshot, table)) = coalescer.push(Arc::clone(&view), now()) {
+            let view_started = Instant::now();
+            let view = measure_phase!(timing, view_build, Arc::new(state.view()));
+            view_observer(view_started.elapsed());
+            let changed = measure_phase!(
+                timing,
+                view_compare,
+                last_view.as_deref() != Some(view.as_ref())
+            );
+            measure_phase!(timing, snapshot, {
+                if changed {
+                    if let Some((snapshot, table)) = coalescer.push(Arc::clone(&view), now()) {
+                        *bodies.write().expect("body table lock") = table;
+                        snapshot_sink(SnapshotSignal::Snapshot(snapshot));
+                    }
+                    last_view = Some(view);
+                }
+                if let Some((snapshot, table)) = coalescer.flush_due(now()) {
                     *bodies.write().expect("body table lock") = table;
                     snapshot_sink(SnapshotSignal::Snapshot(snapshot));
                 }
-                last_view = Some(view);
+            });
+            if let Some(started) = iteration_started {
+                timing.wall = started.elapsed();
+                iteration_observer.as_mut().expect("iteration observer")(timing);
             }
-            if let Some((snapshot, table)) = coalescer.flush_due(now()) {
-                *bodies.write().expect("body table lock") = table;
-                snapshot_sink(SnapshotSignal::Snapshot(snapshot));
+            if should_terminate(&state) {
+                return Ok(());
             }
         }
     });
@@ -280,14 +400,6 @@ where
     engine_error!("[ui-bridge] fatal core-thread termination last_message={last_message_kind} reason={reason}");
     sink(SnapshotSignal::Fatal { message: format!("Harvester stopped responding — see engine.log ({reason}; last message: {last_message_kind})") });
     DriverTermination::Fatal
-}
-
-fn message_kind(message: &Msg) -> String {
-    let debug = format!("{message:?}");
-    let end = debug
-        .find(|character: char| character == '{' || character == '(' || character.is_whitespace())
-        .unwrap_or(debug.len());
-    debug[..end].to_string()
 }
 
 #[cfg(test)]

@@ -492,9 +492,12 @@ impl EffectRunner {
             Effect::PersistSummaryCache { cache } => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.summary_cache_path.clone();
+                let observer = self.file_write_observer.clone();
                 thread::spawn(move || {
+                    let started = Instant::now();
                     match crate::persist_summary_cache(&cache, &path) {
                         Ok(_) => {
+                            super::observe_file_write(&observer, &path, started.elapsed());
                             engine_info!("[summary-cache] Persisted cache to {:?}", path);
                         }
                         Err(err) => {
@@ -512,9 +515,12 @@ impl EffectRunner {
             Effect::PersistSignalCandidateCache { cache } => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.output_dir.join(".signal_candidate_cache.ron");
+                let observer = self.file_write_observer.clone();
                 thread::spawn(move || {
+                    let started = Instant::now();
                     match crate::signal_candidate_cache_store::save(&path, &cache) {
                         Ok(_) => {
+                            super::observe_file_write(&observer, &path, started.elapsed());
                             engine_info!("[signal-cache] Persisted cache to {:?}", path);
                         }
                         Err(err) => {
@@ -534,9 +540,12 @@ impl EffectRunner {
                     .paths
                     .output_dir
                     .join(".signal_candidate_overrides.ron");
+                let observer = self.file_write_observer.clone();
                 thread::spawn(move || {
+                    let started = Instant::now();
                     match crate::signal_candidate_overrides_store::save(&path, &overrides) {
                         Ok(_) => {
+                            super::observe_file_write(&observer, &path, started.elapsed());
                             engine_info!("[signal-overrides] Persisted overrides to {:?}", path);
                         }
                         Err(err) => {
@@ -553,9 +562,12 @@ impl EffectRunner {
             Effect::PersistTriageCache { cache } => {
                 let msg_tx = self.msg_tx.clone();
                 let path = self.paths.triage_cache_path.clone();
+                let observer = self.file_write_observer.clone();
                 thread::spawn(move || {
+                    let started = Instant::now();
                     match crate::persist_triage_cache(&cache, &path) {
                         Ok(_) => {
+                            super::observe_file_write(&observer, &path, started.elapsed());
                             engine_info!("[triage-cache] Persisted cache to {:?}", path);
                         }
                         Err(err) => {

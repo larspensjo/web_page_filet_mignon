@@ -1714,6 +1714,7 @@ dependencies = [
  "harvester_core",
  "harvester_engine",
  "harvester_io",
+ "harvester_ui_bridge",
  "log",
  "openai_provider_kit",
  "ron",

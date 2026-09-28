@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{mpsc, Arc, Mutex, RwLock},
     thread,
     time::{Duration, Instant},
@@ -26,8 +26,11 @@ use crate::llm::{
         validate_summary, validate_triage, ValidationError,
     },
 };
+use crate::persist::PersistError;
 
 /// Configuration for the LLM worker + handle.
+pub type ReplayWriteObserver = Arc<dyn Fn(&Path, u64, Duration) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct LlmConfig {
     pub provider: Arc<dyn crate::llm::provider::LlmProvider>,
@@ -48,6 +51,7 @@ pub struct LlmConfig {
     pub timestamp_utc: Arc<dyn Fn() -> String + Send + Sync>,
     pub session_id: String,
     pub replay_cache: Option<Arc<RwLock<ReplayProvider>>>,
+    pub replay_write_observer: Option<ReplayWriteObserver>,
     /// Maximum number of concurrent LLM requests. Defaults to 1 (serial). Max enforced at 10.
     pub max_concurrent_requests: usize,
 }
@@ -66,6 +70,20 @@ impl LlmConfig {
             self.max_input_chars
         }
     }
+}
+
+fn persist_record_with_observer(
+    config: &LlmConfig,
+    record: &ReplayRecord,
+) -> Result<(), PersistError> {
+    let started = Instant::now();
+    let path = persist_replay_record(&config.replay_output_dir(), record)?;
+    if let Some(observer) = &config.replay_write_observer {
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            observer(&path, metadata.len(), started.elapsed());
+        }
+    }
+    Ok(())
 }
 
 /// Handle allowing effect runners to submit requests to the worker.
@@ -707,7 +725,7 @@ async fn handle_completion_concurrent(
                 ..record
             };
 
-            if let Err(err) = persist_replay_record(&config.replay_output_dir(), &success_record) {
+            if let Err(err) = persist_record_with_observer(config, &success_record) {
                 engine_error!(
                     "[llm-replay] request_id={} persist failed: {}",
                     request_id,
@@ -781,7 +799,7 @@ async fn handle_completion_concurrent(
                 ..record
             };
 
-            if let Err(err) = persist_replay_record(&config.replay_output_dir(), &failure_record) {
+            if let Err(err) = persist_record_with_observer(config, &failure_record) {
                 engine_error!(
                     "[llm-replay] request_id={} persist failed: {}",
                     request_id,
@@ -1219,6 +1237,7 @@ mod tests {
                 timestamp_utc: Arc::new(|| "2026-01-01T00:00:00Z".to_string()),
                 session_id: "test-session".to_string(),
                 replay_cache: None,
+                replay_write_observer: None,
                 max_concurrent_requests: 1,
             }
         }

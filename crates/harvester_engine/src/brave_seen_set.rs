@@ -37,6 +37,18 @@ impl BraveSeenSet {
         self.lookup.contains(normalized_url)
     }
 
+    pub fn entries(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(String::as_str)
+    }
+
+    /// Forget a replayed URL in a private benchmark copy.
+    pub fn forget_url(&mut self, url: &str) {
+        let normalized = normalize_url_for_dedupe(url);
+        if self.lookup.remove(&normalized) {
+            self.entries.retain(|existing| existing != &normalized);
+        }
+    }
+
     /// Mark a normalized URL as seen. Returns `true` if the URL was new.
     pub fn mark_seen(&mut self, normalized_url: &str) -> bool {
         if self.lookup.contains(normalized_url) {

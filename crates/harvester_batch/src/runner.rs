@@ -5,7 +5,7 @@ use crate::progress::{BatchDisplayPhase, BatchRunBaseline};
 use chrono::Utc;
 use crossterm::{cursor::Show, QueueableCommand};
 use engine_logging::{engine_info, engine_warn};
-use harvester_core::{BatchObservation, Msg};
+use harvester_core::{AppState, BatchObservation, Msg};
 use harvester_engine::llm::{ModelId, ProviderKind, OPENAI_MODEL_GPT_4O_MINI};
 use harvester_io::{
     acquire_lock, host_bootstrap::HostLlmDefaults, load_briefing_checkpoint, load_sources,
@@ -47,6 +47,7 @@ pub(crate) fn batch_host_llm_defaults() -> HostLlmDefaults {
 use dispatch_loop::prepare_startup_window;
 #[cfg(test)]
 use dispatch_loop::run_dispatch_loop;
+#[cfg(test)]
 use dispatch_loop::run_dispatch_loop_with_tick_interval;
 pub(crate) use dispatch_loop::{
     should_log_batch_msg, summarize_batch_msg, CycleOutcome, DispatchLoopOptions,
@@ -172,6 +173,20 @@ fn determine_exit_code(total_failure_cycles: usize) -> i32 {
 /// - Handles SIGINT/SIGTERM gracefully
 /// - Dry-run mode: single poll, read-only, no persistence
 pub fn run(args: Args) -> Result<i32, String> {
+    engine_info!("[batch] Starting harvester_batch");
+    engine_info!("[batch] output_dir: {:?}", args.output_dir);
+    engine_info!("[batch] sources: {:?}", args.sources_path());
+    engine_info!("[batch] dry_run: {}", args.dry_run);
+    engine_info!("[batch] single_shot: {}", args.single_shot);
+    engine_info!("[batch] batch_api: {}", args.batch_api);
+    engine_info!(
+        "[batch] refresh_stale_summaries_limit: {:?}",
+        args.refresh_stale_summaries_limit
+    );
+    engine_info!(
+        "[batch] signal_candidate_threshold: {:?}",
+        args.signal_candidate_threshold
+    );
     engine_info!("[batch] Initializing runtime paths");
 
     let sources_path = args.sources_path();
@@ -347,74 +362,58 @@ pub fn run(args: Args) -> Result<i32, String> {
                 true,
             );
             engine_info!("[batch] Requesting full pipeline run");
-            msg_tx
-                .send(Msg::PipelineRunRequested {
-                    scope: harvester_core::PipelineRunScope::Full,
-                })
-                .map_err(|e| format!("Failed to request full pipeline run: {}", e))?;
         }
 
-        // Run dispatch loop until settled
-        let outcome = run_dispatch_loop_with_tick_interval(
+        // Run one cycle through the same dispatch, reporting and persistence
+        // boundary used by the keyless replay host.
+        let mut effect_sink = |effects| effect_runner.enqueue(effects);
+        let mut reducer_observer = |_: &str, _: Duration| {};
+        let current_cost = execute_cycle_with_sink(
             &mut state,
+            &paths,
             &msg_tx,
             &msg_rx,
-            &effect_runner,
+            &mut effect_sink,
+            &mut reducer_observer,
             &shutdown_flag,
-            DispatchLoopOptions {
-                tick_interval: Duration::from_millis(75),
-            },
-            Some(&mut progress),
-            batch_runtime.as_mut(),
-        )?;
-
-        // Track outcome statistics
-        match outcome {
-            CycleOutcome::Success => {}
-            CycleOutcome::PartialFailure => {}
-            CycleOutcome::TotalFailure => total_failure_cycles += 1,
-        }
-
-        // Print cycle summary
-        let obs = state.batch_observation();
-        let cycle_counts = cycle_baseline.measure_cycle_and_advance(&obs);
-        total_new_articles += cycle_counts.new_jobs;
-        total_triaged += cycle_counts.triage_completed;
-        total_summarized += cycle_counts.summary_completed;
-        let current_cost = batch_runtime
-            .as_ref()
-            .map_or(0, |batch| batch.realized_cost_microdollars);
-        let diagnostics = format_optional_cycle_diagnostics(
-            args.verbose_progress,
-            cycle_count == 1,
             !collect_only_cycle,
-            cycle_count,
-            &outcome,
-            &cycle_counts,
-            current_cost,
-            &obs,
-            &state.llm_usage_rows(),
-            progress.last_provider_check_local,
-        );
-        if !diagnostics.is_empty() {
-            progress.suspend_for_output();
-            for line in diagnostics {
-                println!("{line}");
-            }
-            progress.resume(&state, current_cost);
-        }
-
-        // The reducer loop is the sole state owner. This cycle checkpoint may
-        // briefly race the runner's debounced writer, so the shutdown path must
-        // drop the runner before writing the authoritative final snapshot.
-        engine_info!("[batch] Persisting state");
-        progress.set_phase(BatchDisplayPhase::Persisting);
-        progress.paint(&state, current_cost, true);
-        let completed_jobs = state.completed_jobs_snapshot();
-        persist_completed_jobs(&paths.state_path, &completed_jobs);
-        if let Err(err) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
-            engine_warn!("[batch] failed to save blacklist: {}", err);
-        }
+            &mut progress,
+            batch_runtime.as_mut(),
+            |outcome, state, progress, batch_runtime| {
+                if outcome == CycleOutcome::TotalFailure {
+                    total_failure_cycles += 1;
+                }
+                let obs = state.batch_observation();
+                let cycle_counts = cycle_baseline.measure_cycle_and_advance(&obs);
+                total_new_articles += cycle_counts.new_jobs;
+                total_triaged += cycle_counts.triage_completed;
+                total_summarized += cycle_counts.summary_completed;
+                let current_cost =
+                    batch_runtime.map_or(0, |batch| batch.realized_cost_microdollars);
+                let diagnostics = format_optional_cycle_diagnostics(
+                    args.verbose_progress,
+                    cycle_count == 1,
+                    !collect_only_cycle,
+                    cycle_count,
+                    &outcome,
+                    &cycle_counts,
+                    current_cost,
+                    &obs,
+                    &state.llm_usage_rows(),
+                    progress.last_provider_check_local,
+                );
+                if !diagnostics.is_empty() {
+                    progress.suspend_for_output();
+                    for line in diagnostics {
+                        println!("{line}");
+                    }
+                    progress.resume(state, current_cost);
+                }
+                current_cost
+            },
+            None,
+        )?;
+        let obs = state.batch_observation();
 
         let shutdown_requested = shutdown_flag.load(Ordering::Relaxed);
 
@@ -492,11 +491,7 @@ pub fn run(args: Args) -> Result<i32, String> {
     drop(effect_runner);
     drop(msg_rx);
 
-    let completed_jobs = state.completed_jobs_snapshot();
-    persist_completed_jobs(&paths.state_path, &completed_jobs);
-    if let Err(err) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
-        engine_warn!("[batch] failed to save blacklist on shutdown: {}", err);
-    }
+    persist_final_cycle_state(&paths, &state, None);
 
     let final_cost = batch_runtime
         .as_ref()
@@ -540,6 +535,204 @@ pub fn run(args: Args) -> Result<i32, String> {
         determine_exit_code(total_failure_cycles),
         shutdown_flag.load(Ordering::Relaxed),
     ))
+}
+
+/// Prepare the same hydrated batch state and startup window for a host that
+/// supplies its own effect sink. The sink runs on the host/effect boundary;
+/// reducer policy remains in `harvester_core`.
+pub fn prepare_cycle_state_with_effect_sink(
+    paths: &RuntimePaths,
+    args: &Args,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+) -> Result<AppState, String> {
+    let (hydrated_state, startup_effects) = bootstrap::hydrate_batch_state(paths, args);
+    let mut state = bootstrap::apply_llm_availability(hydrated_state, true);
+    if !startup_effects.is_empty() {
+        effect_sink(startup_effects);
+    }
+    dispatch_loop::prepare_startup_window_with_sink(
+        &mut state,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+    )?;
+    Ok(state)
+}
+
+/// Request and run one normal Full batch cycle through the production reducer
+/// dispatch loop, using the host-provided effect sink.
+#[allow(clippy::too_many_arguments)]
+pub fn run_single_cycle_with_effect_sink(
+    state: &mut AppState,
+    args: &Args,
+    paths: &RuntimePaths,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+    file_write_observer: &harvester_io::FileWriteObserver,
+) -> Result<(), String> {
+    if !args.single_shot {
+        return Err("benchmark cycle requires --single-shot".to_owned());
+    }
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    let baseline = BatchRunBaseline::from_observation(&state.batch_observation());
+    let started = Instant::now();
+    let mut progress = LiveBatchProgress::new(baseline, false, false);
+    println!("[batch] started mode=single-shot");
+    progress.record_pass(false);
+    progress.paint(state, 0, true);
+    execute_cycle_with_sink(
+        state,
+        paths,
+        msg_tx,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+        &shutdown_flag,
+        true,
+        &mut progress,
+        None,
+        |_, _, _, _| 0,
+        Some(file_write_observer),
+    )?;
+    progress.set_phase(BatchDisplayPhase::Complete);
+    progress.paint(state, 0, true);
+    progress.suspend_for_output();
+    let obs = state.batch_observation();
+    print_final_summary(
+        false,
+        1,
+        &obs,
+        obs.jobs_total,
+        obs.triage_completed,
+        obs.summary_completed,
+        started.elapsed(),
+        0,
+    );
+    print_poll_stats(&obs.source_poll_stats);
+    progress.finish();
+    Ok(())
+}
+
+pub fn persist_final_cycle_state(
+    paths: &RuntimePaths,
+    state: &AppState,
+    observer: Option<&harvester_io::FileWriteObserver>,
+) {
+    persist_cycle_state(paths, state, observer);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_cycle_with_sink<F>(
+    state: &mut AppState,
+    paths: &RuntimePaths,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+    shutdown_flag: &Arc<AtomicBool>,
+    request_full_run: bool,
+    progress: &mut live_progress::LiveSystemBatchProgress,
+    mut batch_runtime: Option<&mut batch_runtime::BatchRuntime>,
+    after_dispatch: F,
+    file_write_observer: Option<&harvester_io::FileWriteObserver>,
+) -> Result<u64, String>
+where
+    F: FnOnce(
+        CycleOutcome,
+        &AppState,
+        &mut live_progress::LiveSystemBatchProgress,
+        Option<&batch_runtime::BatchRuntime>,
+    ) -> u64,
+{
+    let outcome = dispatch_cycle_with_sink(
+        state,
+        msg_tx,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+        shutdown_flag,
+        request_full_run,
+        Some(progress),
+        batch_runtime.as_deref_mut(),
+    )?;
+    let current_cost = after_dispatch(outcome, state, progress, batch_runtime.as_deref());
+    // The reducer loop is the sole state owner. This checkpoint can race the
+    // debounced writer; final shutdown writes again after the runner stops.
+    engine_info!("[batch] Persisting state");
+    progress.set_phase(BatchDisplayPhase::Persisting);
+    progress.paint(state, current_cost, true);
+    persist_cycle_state(paths, state, file_write_observer);
+    Ok(current_cost)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn dispatch_cycle_with_sink(
+    state: &mut AppState,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+    shutdown_flag: &Arc<AtomicBool>,
+    request_full_run: bool,
+    progress: Option<&mut live_progress::LiveSystemBatchProgress>,
+    batch_runtime: Option<&mut batch_runtime::BatchRuntime>,
+) -> Result<CycleOutcome, String> {
+    if request_full_run {
+        msg_tx
+            .send(Msg::PipelineRunRequested {
+                scope: harvester_core::PipelineRunScope::Full,
+            })
+            .map_err(|error| format!("Failed to request full pipeline run: {error}"))?;
+    }
+    dispatch_loop::run_dispatch_loop_with_sink(
+        state,
+        msg_tx,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+        shutdown_flag,
+        DispatchLoopOptions {
+            tick_interval: Duration::from_millis(75),
+        },
+        progress,
+        batch_runtime,
+    )
+}
+
+fn persist_cycle_state(
+    paths: &RuntimePaths,
+    state: &AppState,
+    observer: Option<&harvester_io::FileWriteObserver>,
+) {
+    let started = Instant::now();
+    if let Some(observer) = observer {
+        if let Err(error) = harvester_io::try_persist_runtime_state(
+            &paths.state_path,
+            &state.completed_jobs_snapshot(),
+        ) {
+            engine_warn!(
+                "[batch] failed to save runtime state {}: {}",
+                paths.state_path.display(),
+                error
+            );
+        } else if let Ok(metadata) = std::fs::metadata(&paths.state_path) {
+            observer(&paths.state_path, metadata.len(), started.elapsed());
+        }
+    } else {
+        persist_completed_jobs(&paths.state_path, &state.completed_jobs_snapshot());
+    }
+    let started = Instant::now();
+    if let Err(error) = save_blacklist(&paths.blacklist_path, state.blacklist()) {
+        engine_warn!("[batch] failed to save blacklist: {}", error);
+    } else if let (Some(observer), Ok(metadata)) =
+        (observer, std::fs::metadata(&paths.blacklist_path))
+    {
+        observer(&paths.blacklist_path, metadata.len(), started.elapsed());
+    }
 }
 
 /// Writes or clears the briefing checkpoint file.

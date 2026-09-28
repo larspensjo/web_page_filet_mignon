@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::{atomic::AtomicBool, mpsc, Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
@@ -16,7 +17,9 @@ mod configuration;
 mod dispatch;
 mod poll;
 mod worker;
-use worker::{run_entity_index_worker, EntityIndexWorkerMsg};
+#[cfg(test)]
+use worker::run_entity_index_worker;
+use worker::{run_entity_index_worker_with_observer, EntityIndexWorkerMsg};
 
 use crate::effect_helpers::{map_llm_event, map_stage};
 use crate::RuntimePaths;
@@ -65,6 +68,9 @@ pub trait RuntimePersistenceSink: Send + Sync {
     fn enqueue(&self, snapshot: PersistenceSnapshot);
 }
 
+/// Optional measurement callback for actual entity-index file rewrites.
+pub type FileWriteObserver = Arc<dyn Fn(&Path, u64, Duration) + Send + Sync>;
+
 impl RuntimePersistenceSink for crate::PersistenceWorker {
     fn enqueue(&self, snapshot: PersistenceSnapshot) {
         crate::PersistenceWorker::enqueue(self, snapshot);
@@ -101,6 +107,7 @@ pub struct EffectRunner {
     entity_index_worker_tx: mpsc::Sender<EntityIndexWorkerMsg>,
     /// Host-selected sink for reducer-emitted runtime persistence snapshots.
     persistence_sink: Box<dyn RuntimePersistenceSink>,
+    file_write_observer: Option<FileWriteObserver>,
 }
 
 impl EffectRunner {
@@ -120,6 +127,7 @@ impl EffectRunner {
             HashMap::new(),
             platform_handler,
             persistence_sink,
+            None,
         )
     }
 
@@ -143,6 +151,32 @@ impl EffectRunner {
             llm_metadata_models,
             platform_handler,
             persistence_sink,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_llm_and_file_write_observer(
+        paths: RuntimePaths,
+        msg_tx: mpsc::Sender<Msg>,
+        llm_handle: LlmHandle,
+        llm_max_input_bytes: usize,
+        prompt_registry: Arc<RwLock<PromptRegistry>>,
+        llm_metadata_models: HashMap<PromptId, String>,
+        platform_handler: Box<dyn PlatformEffectHandler>,
+        persistence_sink: Box<dyn RuntimePersistenceSink>,
+        file_write_observer: FileWriteObserver,
+    ) -> Self {
+        Self::with_optional_llm(
+            paths,
+            msg_tx,
+            Some(llm_handle),
+            Some(llm_max_input_bytes),
+            prompt_registry,
+            llm_metadata_models,
+            platform_handler,
+            persistence_sink,
+            Some(file_write_observer),
         )
     }
 
@@ -156,6 +190,7 @@ impl EffectRunner {
         llm_metadata_models: HashMap<PromptId, String>,
         platform_handler: Box<dyn PlatformEffectHandler>,
         persistence_sink: Box<dyn RuntimePersistenceSink>,
+        file_write_observer: Option<FileWriteObserver>,
     ) -> Self {
         let mut config = EngineConfig::default_with_output(paths.output_dir.clone());
         config.fetched_utc = Arc::new(|| Utc::now().to_rfc3339());
@@ -170,8 +205,13 @@ impl EffectRunner {
         // unbounded so the host thread that executes effects never waits on disk writes.
         let entity_index_path = paths.entity_index_path.clone();
         let (worker_tx, worker_rx) = mpsc::channel::<EntityIndexWorkerMsg>();
+        let worker_file_write_observer = file_write_observer.clone();
         thread::spawn(move || {
-            run_entity_index_worker(worker_rx, entity_index_path);
+            run_entity_index_worker_with_observer(
+                worker_rx,
+                entity_index_path,
+                worker_file_write_observer,
+            );
         });
 
         let runner = Self {
@@ -189,6 +229,7 @@ impl EffectRunner {
             platform_handler,
             entity_index_worker_tx: worker_tx,
             persistence_sink,
+            file_write_observer,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -230,6 +271,7 @@ impl EffectRunner {
             platform_handler,
             entity_index_worker_tx: worker_tx,
             persistence_sink,
+            file_write_observer: None,
         };
         runner.spawn_event_loop(msg_tx);
         runner
@@ -416,6 +458,19 @@ impl EffectRunner {
                 // For other effects, log the rejection without sending a message
             }
         }
+    }
+}
+
+pub(super) fn observe_file_write(
+    observer: &Option<FileWriteObserver>,
+    path: &Path,
+    elapsed: Duration,
+) {
+    if let Some(observer) = observer {
+        let bytes = std::fs::metadata(path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        observer(path, bytes, elapsed);
     }
 }
 

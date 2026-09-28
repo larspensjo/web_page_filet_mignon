@@ -26,6 +26,25 @@ impl RssSeenSet {
             .unwrap_or(false)
     }
 
+    /// Enumerate persisted GUIDs for a canned poll through the normal filter.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.map.iter().flat_map(|(source, guids)| {
+            guids
+                .guids
+                .iter()
+                .map(move |guid| (source.as_str(), guid.as_str()))
+        })
+    }
+
+    /// Forget a replayed URL across feeds in a private benchmark copy.
+    pub fn forget_guid_everywhere(&mut self, guid: &str) {
+        for guids in self.map.values_mut() {
+            if guids.lookup.remove(guid) {
+                guids.guids.retain(|existing| existing != guid);
+            }
+        }
+    }
+
     /// Marks a GUID as seen for `source_id`. Returns true when the GUID was new.
     pub fn mark_seen(&mut self, source_id: &str, guid: &str) -> bool {
         self.map

@@ -155,7 +155,12 @@ named phase verifies it first.
   by `corrupt_file_returns_empty_and_warns` (`triage_cache_store.rs:227`). The signal store's
   `load` returns an error (`signal_candidate_cache_store.rs:70-86`); `host_bootstrap.rs:259-268`
   logs it and continues without hydrating, so the next full-clone save replaces the file. An
-  unknown signal-cache version is also discarded as empty (`:77-84`).
+  unknown signal-cache version is also discarded as empty (`:77-84`). Found by the Phase 1
+  benchmark: each persist-cache effect writes its full clone on its own freshly spawned thread
+  (`crates/harvester_io/src/effect_runner/dispatch.rs`, `PersistSignalCandidateCache` and
+  siblings), with nothing ordering the writes. The baseline run issued 36 concurrent rewrites of
+  the 9.5 MB signal store, so an older clone can finish last and briefly replace newer paid
+  results until the next save. Phase 2's single ordered result sink removes this path.
 - Bug 5 (two lock files): verified. `.harvester_gui.lock`
   (`crates/harvester_io/src/run_lock.rs:18-23`) and `.harvester_batch.lock`
   (`crates/harvester_batch/src/runner.rs:28-33`).
@@ -1279,10 +1284,39 @@ Filled in as phases land (debug build, copy of `output/`, 40 held-back articles)
 
 | Phase | Host | LLM latency | Wall time | Reducer time total | Slowest message kind (p95) | Bytes written per download | Prod lines | Test lines | Tests |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 (baseline) | batch | 0 ms | | | | | | | |
-| 1 (baseline) | batch | 1500 ms | | | | | | | |
-| 1 (baseline) | desktop | 0 ms | | | | | | | |
-| 1 (baseline) | desktop | 1500 ms | | | | | | | |
+| 1 (baseline) | batch | 0 ms | 327 s | 8.7 s + 158.5 s state clones | TriageArticlesLoaded 201 ms | 27.3 MB | 90,667 (all Rust) | n/a | 1,509 passing (1,511 attributes) |
+| 1 (baseline) | batch | 1500 ms | 339 s | 17.7 s + 158.1 s state clones | TriageArticlesLoaded 232 ms | 26.7 MB | | | |
+| 1 (baseline) | desktop | 0 ms | 36 s | 10.8 s | JobDone 149 ms | 16.0 MB | | | |
+| 1 (baseline) | desktop | 1500 ms | 46 s | 24.5 s | JobDone 135 ms | 16.4 MB | | | |
+
+Phase 1 notes (2026-09-28, 40 held-back articles, synchronous model-call path, not `--batch-api`):
+
+- The batch host copies the whole state 1,270 times per cycle at about 125 ms each; that is
+  about half the wall time. The runtime state (`.harvester_state.ron`, 79 MB) is written 5
+  times per cycle at about 10 s each, which confirms the known cost. Other large writers per
+  cycle: `.entity_index.ron` (about 38 s of write time) and `.signal_candidate_cache.ron`
+  (about 34 full rewrites, about 37 s).
+- Desktop: "wall time" runs from startup to run completion. The driver loop accounts for
+  14.2 s (0 ms latency) and 34.3 s (1500 ms); the rest is desktop startup and hydration. At
+  0 ms latency the loop ran only 17 iterations, because each iteration reduces a large queued
+  batch (p95 6 s), so the 75 ms ticks coalesce. At 1500 ms: 139 iterations, view builds
+  6.4 s in total.
+- `scripts/project-stats.ps1` reports total Rust lines only, so production and test lines are
+  not split here; later phases compare the same total.
+- Model-call counts vary between runs (summary and scoring: 30 to 33 of 38 triaged) although
+  canned priorities are deterministic. Later phases should compare wall time per model call as
+  well as totals, and Phase 10's per-article table should make this deterministic.
+- The canned poll skipped 1 persisted RSS source (39 seen entries) beyond the five RSS-like
+  slots. Reports are in `.local/bench/reports/`. IPC probe baseline:
+  `.local/probe/ipc-report.simplification-phase1-baseline.json` (all gates passed). Pester: 26
+  passed.
+
+Pre-flight results (2026-09-28, read-only): the Batch API manifest holds one `Collected`
+signal-candidate batch with 33 successful collected records, none outstanding at the provider,
+and all 33 full keys already present in `.signal_candidate_cache.ron`. The Phase 4
+reconciliation should therefore confirm 33 and append 0. The 22 hidden jobs are all from
+February 2026: 9 have an article file whose frontmatter carries `fetched_utc` (recoverable in
+Phase 7), and 13 have no article file (they stay hidden, per the owner's answer).
 
 ## Open questions
 

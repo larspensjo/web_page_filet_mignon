@@ -32,3 +32,5 @@ unicode-width = "0.2"
 [dev-dependencies]
 tempfile = "3"
 harvester_core = { path = "../harvester_core", features = ["host-drain-fixture"] }
+harvester_ui_bridge = { path = "../harvester_ui_bridge" }
+tokio = { version = "1", features = ["time"] }

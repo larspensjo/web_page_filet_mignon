@@ -206,6 +206,7 @@ fn test_batch_runtime(temp_dir: &TempDir) -> BatchRuntime {
         timestamp_utc: Arc::new(|| "2026-07-19T00:00:00Z".to_string()),
         session_id: "test-batch".to_string(),
         replay_cache: None,
+        replay_write_observer: None,
         max_concurrent_requests: 1,
     };
     BatchRuntime::new(
@@ -304,6 +305,7 @@ fn fake_full_cycle_runner(
         timestamp_utc: Arc::new(|| "2026-09-27T00:00:00Z".into()),
         session_id: "fake-full-cycle".into(),
         replay_cache: None,
+        replay_write_observer: None,
         max_concurrent_requests: 1,
     };
     let (msg_tx, msg_rx) = mpsc::channel();

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 use engine_logging::{engine_info, engine_warn};
 use harvester_core::PersistenceSnapshot;
 
-use crate::{persist_runtime_state, save_blacklist};
+use crate::save_blacklist;
+use crate::FileWriteObserver;
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(350);
 const MAX_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
@@ -34,10 +35,26 @@ pub struct PersistenceWorker {
 
 impl PersistenceWorker {
     pub fn new(state_path: PathBuf, blacklist_path: PathBuf) -> Self {
+        Self::with_file_write_observer(state_path, blacklist_path, None)
+    }
+
+    pub fn new_with_file_write_observer(
+        state_path: PathBuf,
+        blacklist_path: PathBuf,
+        observer: FileWriteObserver,
+    ) -> Self {
+        Self::with_file_write_observer(state_path, blacklist_path, Some(observer))
+    }
+
+    fn with_file_write_observer(
+        state_path: PathBuf,
+        blacklist_path: PathBuf,
+        observer: Option<FileWriteObserver>,
+    ) -> Self {
         let shared = Arc::new((Mutex::new(WorkerState::default()), Condvar::new()));
         let worker_shared = Arc::clone(&shared);
         let join_handle =
-            thread::spawn(move || run_worker(worker_shared, state_path, blacklist_path));
+            thread::spawn(move || run_worker(worker_shared, state_path, blacklist_path, observer));
         Self {
             shared,
             join_handle: Some(join_handle),
@@ -101,6 +118,7 @@ fn run_worker(
     shared: Arc<(Mutex<WorkerState>, Condvar)>,
     state_path: PathBuf,
     blacklist_path: PathBuf,
+    observer: Option<FileWriteObserver>,
 ) {
     let mut last_flush_at = Instant::now();
     loop {
@@ -140,11 +158,29 @@ fn run_worker(
         let Some(pending) = pending else {
             continue;
         };
-        let flush_started = Instant::now();
-        persist_runtime_state(&state_path, &pending.snapshot.completed);
+        let state_write_started = Instant::now();
+        if let Err(error) =
+            crate::try_persist_runtime_state(&state_path, &pending.snapshot.completed)
+        {
+            engine_warn!(
+                "[persist] failed to save runtime state {}: {}",
+                state_path.display(),
+                error
+            );
+        } else {
+            observe_write(&observer, &state_path, state_write_started.elapsed());
+        }
+        let blacklist_write_started = Instant::now();
         if let Err(err) = save_blacklist(&blacklist_path, &pending.snapshot.blacklist) {
             engine_warn!("[persist] failed to save blacklist: {}", err);
+        } else {
+            observe_write(
+                &observer,
+                &blacklist_path,
+                blacklist_write_started.elapsed(),
+            );
         }
+        let flush_started = state_write_started;
         let flush_latency_ms = flush_started.elapsed().as_millis();
         engine_info!(
             "[persist] flushed seq={} queue_delay_ms={} flush_latency_ms={} overwritten_count={}",
@@ -163,6 +199,15 @@ fn run_worker(
             );
         }
         last_flush_at = Instant::now();
+    }
+}
+
+fn observe_write(observer: &Option<FileWriteObserver>, path: &Path, elapsed: Duration) {
+    if let Some(observer) = observer {
+        let bytes = std::fs::metadata(path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        observer(path, bytes, elapsed);
     }
 }
 

@@ -184,6 +184,7 @@ fn build_summary_refresh_runtime(
             Utc::now().format("%Y%m%d-%H%M%S")
         ),
         replay_cache: None,
+        replay_write_observer: None,
         max_concurrent_requests: llm_concurrency,
     };
     let summary_model = config

@@ -1,15 +1,7 @@
-//! Harvester batch runner - headless CLI for scheduled execution
+//! Thin command-line entry point for the batch library.
 
-mod batch_coordinator;
-mod batch_manifest;
-mod cli;
-mod import_mode;
-mod progress;
-mod runner;
-mod summary_refresh;
-
-use cli::Args;
 use engine_logging::{engine_error, engine_info};
+use harvester_batch::Args;
 use std::fs::File;
 use std::process;
 
@@ -22,21 +14,7 @@ fn main() {
     // Batch mode is file-only to keep stderr/stdout clean during scheduled runs.
     engine_logging::initialize_file_only();
 
-    engine_info!("[batch] Starting harvester_batch");
-    engine_info!("[batch] output_dir: {:?}", args.output_dir);
-    engine_info!("[batch] sources: {:?}", args.sources_path());
-    engine_info!("[batch] dry_run: {}", args.dry_run);
-    engine_info!("[batch] single_shot: {}", args.single_shot);
-    engine_info!("[batch] batch_api: {}", args.batch_api);
-    engine_info!(
-        "[batch] refresh_stale_summaries_limit: {:?}",
-        args.refresh_stale_summaries_limit
-    );
-    engine_info!(
-        "[batch] signal_candidate_threshold: {:?}",
-        args.signal_candidate_threshold
-    );
-    let exit_code = match runner::run(args) {
+    let exit_code = match harvester_batch::run(args) {
         Ok(code) => code,
         Err(err) => {
             engine_error!("[batch] Fatal error: {}", err);

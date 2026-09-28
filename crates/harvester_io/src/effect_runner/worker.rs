@@ -10,6 +10,7 @@ use harvester_core::Msg;
 use harvester_engine::llm::PromptRegistry;
 use harvester_engine::ArticleScanProgress;
 
+use crate::effect_runner::FileWriteObserver;
 use crate::entity_index_store::EntityIndexPatch;
 
 /// Messages for the serialized entity-index worker.
@@ -31,9 +32,18 @@ pub(super) enum EntityIndexWorkerMsg {
 ///
 /// Exits when the sender (`entity_index_worker_tx`) is dropped (channel closed)
 /// and returns the number of index writes it performed.
+#[cfg(test)]
 pub(super) fn run_entity_index_worker(
     rx: mpsc::Receiver<EntityIndexWorkerMsg>,
     path: PathBuf,
+) -> usize {
+    run_entity_index_worker_with_observer(rx, path, None)
+}
+
+pub(super) fn run_entity_index_worker_with_observer(
+    rx: mpsc::Receiver<EntityIndexWorkerMsg>,
+    path: PathBuf,
+    file_write_observer: Option<FileWriteObserver>,
 ) -> usize {
     engine_info!("[entity-index] worker started");
     let mut writes = 0;
@@ -46,21 +56,26 @@ pub(super) fn run_entity_index_worker(
                 #[cfg(test)]
                 EntityIndexWorkerMsg::Flush { done } => {
                     // Everything queued before the flush is written before it is acknowledged.
-                    writes += write_entity_index_batch(&path, std::mem::take(&mut batch));
+                    writes += write_entity_index_batch_observed(
+                        &path,
+                        std::mem::take(&mut batch),
+                        file_write_observer.as_ref(),
+                    );
                     let _ = done.send(());
                 }
             }
             next = rx.try_recv().ok();
         }
-        writes += write_entity_index_batch(&path, batch);
+        writes += write_entity_index_batch_observed(&path, batch, file_write_observer.as_ref());
     }
     engine_info!("[entity-index] worker exited cleanly writes={writes}");
     writes
 }
 
-fn write_entity_index_batch(
+fn write_entity_index_batch_observed(
     path: &std::path::Path,
     batch: Vec<(String, EntityIndexPatch)>,
+    file_write_observer: Option<&FileWriteObserver>,
 ) -> usize {
     if batch.is_empty() {
         return 0;
@@ -72,11 +87,20 @@ fn write_entity_index_batch(
         crate::entity_index_store::upsert_entry(&mut index, &url, patch);
     }
     match crate::entity_index_store::save_entity_index(path, &index) {
-        Ok(_) => engine_debug!(
-            "[entity-index] upserted entries={} elapsed_ms={}",
-            entries,
-            started.elapsed().as_millis()
-        ),
+        Ok(_) => {
+            let elapsed = started.elapsed();
+            engine_debug!(
+                "[entity-index] upserted entries={} elapsed_ms={}",
+                entries,
+                elapsed.as_millis()
+            );
+            if let Some(observer) = file_write_observer {
+                let bytes = std::fs::metadata(path)
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0);
+                observer(path, bytes, elapsed);
+            }
+        }
         Err(e) => engine_error!(
             "[entity-index] worker failed to save after upserting entries={}: {}",
             entries,

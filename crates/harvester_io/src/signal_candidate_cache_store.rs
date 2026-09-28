@@ -86,37 +86,54 @@ pub fn load(path: &Path) -> io::Result<SignalCandidateCache> {
 }
 
 fn to_persisted(cache: &SignalCandidateCache) -> PersistedFile {
+    let mut entries: Vec<_> = cache
+        .entries
+        .iter()
+        .map(|(key, entry)| {
+            (
+                PersistedKey {
+                    signal_input_hash: key.signal_input_hash.clone(),
+                    prompt_id: key.prompt_id.to_string(),
+                    prompt_version: key.prompt_version,
+                    model_id: key.model_id.clone(),
+                    context_hash: key.context_hash.clone(),
+                },
+                PersistedEntry {
+                    result: PersistedResult {
+                        signal_score: entry.result.signal_score,
+                        signal_key: entry.result.signal_key.clone(),
+                        themes: entry.result.themes.clone(),
+                        draft_gist: entry.result.draft_gist.clone(),
+                        source_tier: source_tier_str(entry.result.source_tier).to_string(),
+                        confidence: confidence_str(entry.result.confidence).to_string(),
+                        reasoning: entry.result.reasoning.clone(),
+                        input_tokens: entry.result.input_tokens,
+                        output_tokens: entry.result.output_tokens,
+                    },
+                    created_at_utc: entry.created_at_utc.clone(),
+                },
+            )
+        })
+        .collect();
+    entries.sort_by(|(left, _), (right, _)| {
+        (
+            &left.signal_input_hash,
+            &left.prompt_id,
+            left.prompt_version,
+            &left.model_id,
+            &left.context_hash,
+        )
+            .cmp(&(
+                &right.signal_input_hash,
+                &right.prompt_id,
+                right.prompt_version,
+                &right.model_id,
+                &right.context_hash,
+            ))
+    });
     PersistedFile {
         version: CURRENT_FORMAT_VERSION,
-        entries: cache
-            .entries
-            .iter()
-            .map(|(key, entry)| {
-                (
-                    PersistedKey {
-                        signal_input_hash: key.signal_input_hash.clone(),
-                        prompt_id: key.prompt_id.to_string(),
-                        prompt_version: key.prompt_version,
-                        model_id: key.model_id.clone(),
-                        context_hash: key.context_hash.clone(),
-                    },
-                    PersistedEntry {
-                        result: PersistedResult {
-                            signal_score: entry.result.signal_score,
-                            signal_key: entry.result.signal_key.clone(),
-                            themes: entry.result.themes.clone(),
-                            draft_gist: entry.result.draft_gist.clone(),
-                            source_tier: source_tier_str(entry.result.source_tier).to_string(),
-                            confidence: confidence_str(entry.result.confidence).to_string(),
-                            reasoning: entry.result.reasoning.clone(),
-                            input_tokens: entry.result.input_tokens,
-                            output_tokens: entry.result.output_tokens,
-                        },
-                        created_at_utc: entry.created_at_utc.clone(),
-                    },
-                )
-            })
-            .collect(),
+        entries,
     }
 }
 

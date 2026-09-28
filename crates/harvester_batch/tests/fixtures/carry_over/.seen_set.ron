@@ -1,0 +1,8 @@
+(
+    map: {
+        "carry-over-rss": [
+            "https://carry-over.synthetic/article-0",
+            "https://carry-over.synthetic/rss-only",
+        ],
+    },
+)

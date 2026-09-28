@@ -33,6 +33,7 @@ fn make_config(
         timestamp_utc: Arc::new(|| "2026-02-08T00:00:00Z".to_string()),
         session_id: "test-session".to_string(),
         replay_cache: None,
+        replay_write_observer: None,
         max_concurrent_requests: 1,
     }
 }

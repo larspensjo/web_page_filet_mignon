@@ -134,6 +134,17 @@ pub(super) fn prepare_startup_window(
     msg_rx: &mpsc::Receiver<Msg>,
     effect_runner: &EffectRunner,
 ) -> Result<(), String> {
+    let mut effect_sink = |effects| effect_runner.enqueue(effects);
+    let mut reducer_observer = |_: &str, _: Duration| {};
+    prepare_startup_window_with_sink(state, msg_rx, &mut effect_sink, &mut reducer_observer)
+}
+
+pub(super) fn prepare_startup_window_with_sink(
+    state: &mut AppState,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+) -> Result<(), String> {
     let mut templates_loaded = false;
     let mut metadata_loaded = false;
     let mut contexts_loaded = false;
@@ -146,15 +157,21 @@ pub(super) fn prepare_startup_window(
                     msg,
                     Msg::PromptContextsLoaded { .. } | Msg::PromptContextsLoadFailed { .. }
                 );
-                let (next, effects) = update(std::mem::take(state), msg);
+                let (next, effects) =
+                    reduce_timed_owned(std::mem::take(state), msg, reducer_observer);
                 *state = next;
                 if !effects.is_empty() {
-                    effect_runner.enqueue(effects);
+                    effect_sink(effects);
                 }
-                let (next, effects, _) = pump_pre_triage_refresh(std::mem::take(state));
+                let refresh_started = Instant::now();
+                let (next, effects, refresh_triggered) =
+                    pump_pre_triage_refresh(std::mem::take(state));
+                if refresh_triggered {
+                    reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed());
+                }
                 *state = next;
                 if !effects.is_empty() {
-                    effect_runner.enqueue(effects);
+                    effect_sink(effects);
                 }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -162,10 +179,14 @@ pub(super) fn prepare_startup_window(
                 return Err("Startup message channel disconnected unexpectedly".into());
             }
         }
-        let (next, effects) = update(std::mem::take(state), Msg::tick_at(Utc::now()));
+        let (next, effects) = reduce_timed_owned(
+            std::mem::take(state),
+            Msg::tick_at(Utc::now()),
+            reducer_observer,
+        );
         *state = next;
         if !effects.is_empty() {
-            effect_runner.enqueue(effects);
+            effect_sink(effects);
         }
         if templates_loaded
             && metadata_loaded
@@ -206,6 +227,58 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
     msg_tx: &mpsc::Sender<Msg>,
     msg_rx: &mpsc::Receiver<Msg>,
     effect_runner: &EffectRunner,
+    shutdown_flag: &Arc<AtomicBool>,
+    options: DispatchLoopOptions,
+    progress: Option<&mut LiveSystemBatchProgress>,
+    batch_runtime: Option<&mut BatchRuntime>,
+) -> Result<CycleOutcome, String> {
+    let mut effect_sink = |effects| effect_runner.enqueue(effects);
+    let mut reducer_observer = |_: &str, _: Duration| {};
+    run_dispatch_loop_with_sink(
+        state,
+        msg_tx,
+        msg_rx,
+        &mut effect_sink,
+        &mut reducer_observer,
+        shutdown_flag,
+        options,
+        progress,
+        batch_runtime,
+    )
+}
+
+#[allow(clippy::too_many_arguments)] // Keeps sink and reducer timing at the host boundary.
+pub(super) fn run_dispatch_loop_with_sink(
+    state: &mut AppState,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
+    shutdown_flag: &Arc<AtomicBool>,
+    options: DispatchLoopOptions,
+    progress: Option<&mut LiveSystemBatchProgress>,
+    batch_runtime: Option<&mut BatchRuntime>,
+) -> Result<CycleOutcome, String> {
+    run_dispatch_loop_with_sink_inner(
+        state,
+        msg_tx,
+        msg_rx,
+        effect_sink,
+        reducer_observer,
+        shutdown_flag,
+        options,
+        progress,
+        batch_runtime,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_dispatch_loop_with_sink_inner(
+    state: &mut AppState,
+    msg_tx: &mpsc::Sender<Msg>,
+    msg_rx: &mpsc::Receiver<Msg>,
+    effect_sink: &mut dyn FnMut(Vec<harvester_core::Effect>),
+    reducer_observer: &mut dyn FnMut(&str, Duration),
     shutdown_flag: &Arc<AtomicBool>,
     options: DispatchLoopOptions,
     mut progress: Option<&mut LiveSystemBatchProgress>,
@@ -266,7 +339,7 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
                     if should_log_batch_msg(&msg) {
                         engine_debug!("[batch] Processing message: {}", summarize_batch_msg(&msg));
                     }
-                    let (new_state, effects) = update(state.clone(), msg);
+                    let (new_state, effects) = reduce_timed(state, msg, reducer_observer);
                     *state = new_state;
                     queued_effects.extend(effects);
                     if let Some(p) = progress.as_deref_mut() {
@@ -278,8 +351,13 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
                     }
                 }
 
+                let refresh_started = Instant::now();
                 let current_state = std::mem::take(state);
-                let (next_state, effects, _) = pump_pre_triage_refresh(current_state);
+                let (next_state, effects, refresh_triggered) =
+                    pump_pre_triage_refresh(current_state);
+                if refresh_triggered {
+                    reducer_observer("EvaluatePreTriageRefresh", refresh_started.elapsed());
+                }
                 *state = next_state;
                 queued_effects.extend(effects);
             }
@@ -292,8 +370,11 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
         }
 
         if state.pipeline_run_phase() != harvester_core::PipelineRunPhase::Idle {
-            let (new_state, advance_effects) =
-                update(std::mem::take(state), Msg::PipelineRunAdvance);
+            let (new_state, advance_effects) = reduce_timed_owned(
+                std::mem::take(state),
+                Msg::PipelineRunAdvance,
+                reducer_observer,
+            );
             *state = new_state;
             queued_effects.extend(advance_effects);
         }
@@ -301,7 +382,8 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
         if state.pipeline_wave_policy() != harvester_core::PipelineWavePolicy::Disabled
             && last_tick.elapsed() >= options.tick_interval
         {
-            let (new_state, tick_effects) = update(state.clone(), Msg::tick_at(Utc::now()));
+            let tick_msg = Msg::tick_at(Utc::now());
+            let (new_state, tick_effects) = reduce_timed(state, tick_msg, reducer_observer);
             *state = new_state;
             queued_effects.extend(tick_effects);
             last_tick = Instant::now();
@@ -316,7 +398,7 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
             };
             if !queued_effects.is_empty() {
                 enqueued_effects = true;
-                effect_runner.enqueue(queued_effects);
+                effect_sink(queued_effects);
             }
         }
 
@@ -378,4 +460,27 @@ pub(super) fn run_dispatch_loop_with_tick_interval(
             return Ok(classify_cycle_outcome(&obs));
         }
     }
+}
+
+fn reduce_timed(
+    state: &mut AppState,
+    message: Msg,
+    observer: &mut dyn FnMut(&str, Duration),
+) -> (AppState, Vec<harvester_core::Effect>) {
+    let clone_started = Instant::now();
+    let owned = state.clone();
+    observer("AppStateClone", clone_started.elapsed());
+    reduce_timed_owned(owned, message, observer)
+}
+
+fn reduce_timed_owned(
+    state: AppState,
+    message: Msg,
+    observer: &mut dyn FnMut(&str, Duration),
+) -> (AppState, Vec<harvester_core::Effect>) {
+    let kind = message.kind();
+    let started = Instant::now();
+    let (next_state, effects) = update(state, message);
+    observer(kind, started.elapsed());
+    (next_state, effects)
 }

@@ -215,11 +215,22 @@ pub fn persist_completed_jobs(state_path: &Path, completed: &[CompletedJobSnapsh
 }
 
 pub fn persist_runtime_state(state_path: &Path, completed: &[CompletedJobSnapshot]) {
-    let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
-    if let Err(err) = ensure_output_dir(output_dir) {
-        engine_error!("Failed to ensure output dir {:?}: {}", output_dir, err);
-        return;
+    if let Err(err) = try_persist_runtime_state(state_path, completed) {
+        engine_error!(
+            "Failed to persist runtime state to {:?}: {}",
+            state_path,
+            err
+        );
     }
+}
+
+/// Persist a runtime snapshot while reporting failure to observing hosts.
+pub fn try_persist_runtime_state(
+    state_path: &Path,
+    completed: &[CompletedJobSnapshot],
+) -> Result<(), String> {
+    let output_dir = state_path.parent().unwrap_or_else(|| Path::new("."));
+    ensure_output_dir(output_dir).map_err(|err| format!("ensure output dir: {err}"))?;
 
     // Carry forward both hosts' window sizes from existing state to avoid clobbering.
     let existing: PersistedState = fs::read_to_string(state_path)
@@ -252,26 +263,18 @@ pub fn persist_runtime_state(state_path: &Path, completed: &[CompletedJobSnapsho
     };
 
     let pretty = ron::ser::PrettyConfig::new();
-    let content = match ron::ser::to_string_pretty(&state, pretty) {
-        Ok(text) => text,
-        Err(err) => {
-            engine_error!("Failed to serialize persisted state: {}", err);
-            return;
-        }
-    };
+    let content = ron::ser::to_string_pretty(&state, pretty)
+        .map_err(|err| format!("serialize persisted state: {err}"))?;
 
     let writer = AtomicFileWriter::new(PathBuf::from(output_dir));
     let filename = state_path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or(".harvester_state.ron");
-    if let Err(err) = writer.write(filename, &content) {
-        engine_error!(
-            "Failed to write persisted state to {:?}: {}",
-            state_path,
-            err
-        );
-    }
+    writer
+        .write(filename, &content)
+        .map_err(|err| format!("write persisted state: {err}"))?;
+    Ok(())
 }
 
 // ──────────────────────────────────────────────────────────────────────────

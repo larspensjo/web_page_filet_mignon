@@ -157,49 +157,21 @@ pub fn build_effect_runner(
         let host_provider = OpenAiProvider::new(api_key);
         let provider: Arc<dyn harvester_engine::llm::provider::LlmProvider> =
             Arc::new(host_provider.clone());
-        let mut registry = PromptRegistry::new();
-        register_defaults(&mut registry);
-        let registry = Arc::new(RwLock::new(registry));
-        let quotas = LlmQuotas::default();
-        let quota_limits = llm_quota_limits_from_engine(&quotas);
-        let config = LlmConfig {
+        let (runner, config) = build_effect_runner_with_provider(
+            paths,
+            msg_tx,
+            llm_concurrency,
+            defaults,
             provider,
-            default_model: defaults.default_model.clone(),
-            triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
-            summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
-            signal_candidate_model: None,
-            briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
-            registry: Arc::clone(&registry),
-            quotas,
-            output_dir: paths.output_dir.clone(),
-            pricing: PricingRegistry::with_defaults(),
-            max_input_bytes: 100_000,
-            #[allow(deprecated)]
-            max_input_chars: 0,
-            timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
-            session_id: format!(
-                "{}{}",
-                defaults.session_id_prefix,
-                Utc::now().format("%Y%m%d-%H%M%S")
-            ),
-            replay_cache: None,
-            max_concurrent_requests: llm_concurrency,
-        };
-        let model_map = effective_model_map(&config);
+            platform_handler,
+            persistence_sink,
+            None,
+        );
+        let quota_limits = llm_quota_limits_from_engine(&config.quotas);
         let runtime = HostLlmRuntime {
             provider: host_provider,
             config: config.clone(),
         };
-        let runner = EffectRunner::new_with_llm(
-            paths.clone(),
-            msg_tx,
-            LlmHandle::new(config),
-            100_000,
-            registry,
-            model_map,
-            platform_handler,
-            persistence_sink,
-        );
         Ok((runner, Some(quota_limits), Some(runtime)))
     } else {
         engine_warn!("{}", missing_api_key_warning);
@@ -209,6 +181,87 @@ pub fn build_effect_runner(
             None,
         ))
     }
+}
+
+/// Build the real effect runner while substituting only the model provider.
+#[allow(clippy::too_many_arguments)]
+pub fn build_effect_runner_with_provider(
+    paths: &RuntimePaths,
+    msg_tx: mpsc::Sender<Msg>,
+    llm_concurrency: usize,
+    defaults: &HostLlmDefaults,
+    provider: Arc<dyn harvester_engine::llm::provider::LlmProvider>,
+    platform_handler: Box<dyn PlatformEffectHandler>,
+    persistence_sink: Box<dyn RuntimePersistenceSink>,
+    file_write_observer: Option<crate::FileWriteObserver>,
+) -> (EffectRunner, LlmConfig) {
+    let (mut config, registry) =
+        llm_config_with_provider(paths, llm_concurrency, defaults, provider);
+    config.replay_write_observer = file_write_observer.clone();
+    let model_map = effective_model_map(&config);
+    let handle = LlmHandle::new(config.clone());
+    let runner = if let Some(observer) = file_write_observer {
+        EffectRunner::new_with_llm_and_file_write_observer(
+            paths.clone(),
+            msg_tx,
+            handle,
+            config.max_input_bytes,
+            registry,
+            model_map,
+            platform_handler,
+            persistence_sink,
+            observer,
+        )
+    } else {
+        EffectRunner::new_with_llm(
+            paths.clone(),
+            msg_tx,
+            handle,
+            config.max_input_bytes,
+            registry,
+            model_map,
+            platform_handler,
+            persistence_sink,
+        )
+    };
+    (runner, config)
+}
+
+/// Keep the model and quota configuration shared between real and canned providers.
+pub fn llm_config_with_provider(
+    paths: &RuntimePaths,
+    llm_concurrency: usize,
+    defaults: &HostLlmDefaults,
+    provider: Arc<dyn harvester_engine::llm::provider::LlmProvider>,
+) -> (LlmConfig, Arc<RwLock<PromptRegistry>>) {
+    let mut registry = PromptRegistry::new();
+    register_defaults(&mut registry);
+    let registry = Arc::new(RwLock::new(registry));
+    let config = LlmConfig {
+        provider,
+        default_model: defaults.default_model.clone(),
+        triage_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_TRIAGE_MODEL)),
+        summary_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_SUMMARY_MODEL)),
+        signal_candidate_model: None,
+        briefing_model: Some(ModelId::new(ProviderKind::OpenAi, DEFAULT_BRIEFING_MODEL)),
+        registry: Arc::clone(&registry),
+        quotas: LlmQuotas::default(),
+        output_dir: paths.output_dir.clone(),
+        pricing: PricingRegistry::with_defaults(),
+        max_input_bytes: 100_000,
+        #[allow(deprecated)]
+        max_input_chars: 0,
+        timestamp_utc: Arc::new(|| Utc::now().to_rfc3339()),
+        session_id: format!(
+            "{}{}",
+            defaults.session_id_prefix,
+            Utc::now().format("%Y%m%d-%H%M%S")
+        ),
+        replay_cache: None,
+        replay_write_observer: None,
+        max_concurrent_requests: llm_concurrency,
+    };
+    (config, registry)
 }
 
 /// Hydrates startup state shared by executable hosts. Manual pre-triage

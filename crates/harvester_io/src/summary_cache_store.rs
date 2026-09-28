@@ -154,7 +154,7 @@ pub fn persist_summary_cache(
     }
 
     // Convert cache to persisted format
-    let entries: Vec<(PersistedCacheKey, PersistedCacheEntry)> = cache
+    let mut entries: Vec<(PersistedCacheKey, PersistedCacheEntry)> = cache
         .iter()
         .map(|(key, entry)| {
             let persisted_key = PersistedCacheKey {
@@ -184,6 +184,22 @@ pub fn persist_summary_cache(
             (persisted_key, persisted_entry)
         })
         .collect();
+    entries.sort_by(|(left, _), (right, _)| {
+        (
+            &left.content_hash,
+            &left.prompt_id,
+            left.prompt_version,
+            &left.model_id,
+            &left.context_hash,
+        )
+            .cmp(&(
+                &right.content_hash,
+                &right.prompt_id,
+                right.prompt_version,
+                &right.model_id,
+                &right.context_hash,
+            ))
+    });
 
     let persisted = PersistedCache {
         version: 1,

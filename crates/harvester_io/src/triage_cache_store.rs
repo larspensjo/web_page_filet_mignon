@@ -130,7 +130,7 @@ pub fn persist_triage_cache(cache: &TriageCache, path: &Path) -> Result<(), Pers
         ensure_output_dir(parent)?;
     }
 
-    let entries: Vec<(PersistedTriageCacheKey, PersistedTriageEntry)> = cache
+    let mut entries: Vec<(PersistedTriageCacheKey, PersistedTriageEntry)> = cache
         .iter()
         .map(|(key, entry)| {
             (
@@ -155,6 +155,22 @@ pub fn persist_triage_cache(cache: &TriageCache, path: &Path) -> Result<(), Pers
             )
         })
         .collect();
+    entries.sort_by(|(left, _), (right, _)| {
+        (
+            &left.content_hash,
+            &left.prompt_id,
+            left.prompt_version,
+            &left.model_id,
+            &left.context_hash,
+        )
+            .cmp(&(
+                &right.content_hash,
+                &right.prompt_id,
+                right.prompt_version,
+                &right.model_id,
+                &right.context_hash,
+            ))
+    });
 
     let persisted = PersistedTriageCache {
         version: 1,
